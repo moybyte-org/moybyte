@@ -3265,7 +3265,8 @@ def test_micropython_offline_diag_wiring():
     # measure-first data for band size / pump period / third-slot tuning.
     compositor = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
     assert "def bounce_stats(self):" in compositor
-    assert 'diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"' in device_diag
+    assert ('diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f '
+            'bands=%d fold=%d"' in device_diag)   # fold= is the #190 liveness proof
     assert "_diag_pump(diag, comp)" in runtime
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),

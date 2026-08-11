@@ -535,6 +535,21 @@ class Compositor:
         self._bnc_src = None
         self._in_pump = False
         self._pump_timer = None
+        # --- flush-bounce SCALE FOLD (#190): a small-canvas game frame skips
+        # the root-fb composite entirely -- blit_game snapshots the (cropped)
+        # game frame into a flush-private scratch and ARMS the fold, and pump()
+        # then SYNTHESIZES each bounce band (memset black + one dest-clipped
+        # blit565_scale from the scratch) instead of memcpy'ing a root band the
+        # composite would have had to write first. Deletes the ~7ms PSRAM
+        # bezel+scale composite AND shrinks the bounce's PSRAM reads (the 128px
+        # scratch is a quarter of the root). `_fold` = the armed frame's
+        # (src, vw, vh, ox, oy, scale) or None; `_bnc_fold` = the copy latched
+        # for the flush in flight. disarm_scale_fold() is the overlay escape
+        # hatch: it performs the composite it skipped, into the current BACK
+        # buffer, so a toast/notice frame degrades to exactly today's path.
+        self._fold = None
+        self._bnc_fold = None
+        self.fold_count = 0            # folded flushes since boot (diag proof)
         # pump-time accounting (#66 HITCH v3): total us spent inside pump() for
         # the LAST frame (band memcpys + queues, wherever they ran -- timer
         # fires included), so a hitch can be attributed to/absolved of pumping.
@@ -702,6 +717,59 @@ class Compositor:
 
     # -- flush ---------------------------------------------------------------
 
+    # -- flush-bounce scale fold (#190) --------------------------------------
+
+    @property
+    def fold_supported(self):
+        """True when arm_scale_fold can actually fold: the SRAM-bounce banded
+        flush is live (its pump is the synthesis point) and moy_gfx is present
+        (fill + blit565_scale build the bands)."""
+        return (self.bounce_flush and self._async and self.double_buffer
+                and self._gfx is not None)
+
+    def arm_scale_fold(self, src, vw, vh, ox, oy, scale):
+        """Arm THIS frame's flush to synthesize its bounce bands from `src`
+        (a flush-private vw x vh RGB565 snapshot of the game frame) placed at
+        (ox, oy) x scale over black -- instead of copying root-fb bands the
+        caller would first have had to composite. One-shot: consumed by the
+        next flush, replaced by the next arm, cancelled by disarm."""
+        self._fold = (src, vw, vh, ox, oy, scale)
+
+    def disarm_scale_fold(self):
+        """Cancel an armed fold and PERFORM the composite it skipped, into the
+        current back buffer -- the escape hatch for anything that draws on the
+        root AFTER the game composite (toast/notice/cursor frames). Costs
+        exactly what the composite always cost, only on those frames. No-op
+        when nothing is armed (also the host/P4 shape: never armed)."""
+        f = self._fold
+        if f is None:
+            return
+        self._fold = None
+        gfx = self._gfx
+        src, vw, vh, ox, oy, scale = f
+        w = self._w
+        h = self._h
+        rw = vw * scale
+        rh = vh * scale
+        # The four bezel bands + the scaled game rect: blit_game's normal path.
+        if oy > 0:
+            gfx.fill_rect(self._back, w, 0, 0, w, oy, 0)
+        if oy + rh < h:
+            gfx.fill_rect(self._back, w, 0, oy + rh, w, h - (oy + rh), 0)
+        if ox > 0:
+            gfx.fill_rect(self._back, w, 0, oy, ox, rh, 0)
+        if ox + rw < w:
+            gfx.fill_rect(self._back, w, ox + rw, oy, w - (ox + rw), rh, 0)
+        gfx.blit565_scale(self._back, w, h, ox, oy, src, vw, vh, scale)
+
+    def fold_fence(self):
+        """Block until the in-flight flush has FED every band (not completed --
+        just read its source), so the caller may rewrite the fold scratch. The
+        feed normally finishes early in the next frame's _update, making this a
+        two-compare no-op; the loop below only runs after a DMA stall."""
+        while self._bnc_next < self._bnc_total:
+            self.pump()
+
     def flush(self):
         """Flush the whole screen from the dedicated PSRAM frame buffer in row-bands.
 
@@ -728,11 +796,16 @@ class Compositor:
         # stale region, but no SPI transfer happens (the ~20ms flush is the whole point of
         # going headless). Any DMA already in flight from the last real frame just completes.
         if self.skip_flush:
-            self._dirty.clear()
+            self._fold = None          # #190: stale geometry must never leak
+            self._dirty.clear()        # into a later (different) frame's flush
             return
         if self.double_buffer:
             self._flush_double()
             return
+        if self._fold is not None:
+            # #190 safety: a fold armed but the flush is taking a path that
+            # reads the root buffer (bounce off) -- perform the composite now.
+            self.disarm_scale_fold()
         if FLUSH_INSTRUMENT:
             self._flush_n += 1
             if self._flush_n >= FLUSH_SAMPLE_EVERY:
@@ -771,6 +844,7 @@ class Compositor:
         FLUSHBRK still samples here (1-in-N), timing the DRAIN as `tx` (the residual
         flush the overlap didn't hide) + the KICK as `setup`, so the overlap is
         measurable: a well-hidden flush shows tx -> ~0."""
+        self._fold_safety()
         instrument = False
         if FLUSH_INSTRUMENT:
             self._flush_n += 1
@@ -807,6 +881,12 @@ class Compositor:
             self._swap_buffers()
             self._kick_front()
         self._dirty.clear()
+
+    def _fold_safety(self):
+        # #190: a fold armed while the kick would read the ROOT (bounce not
+        # live) -- composite into the back buffer before it swaps to front.
+        if self._fold is not None and not (self._async and self.bounce_flush):
+            self.disarm_scale_fold()
 
     def _swap_buffers(self):
         """Make the just-rendered `_back` the FRONT, and the (now drained) old front
@@ -873,6 +953,13 @@ class Compositor:
                 self._bnc_kick_us = self._pump_tus()
             self._bnc_src = (self._bnc_src_a if self._front is self._fb
                              else self._bnc_src_b)
+            # #190: latch the armed fold for THIS flush's bands (pump reads
+            # it); one-shot, so an un-rearmed next frame copies root bands
+            # exactly as before.
+            self._bnc_fold = self._fold
+            self._fold = None
+            if self._bnc_fold is not None:
+                self.fold_count += 1
             self._bnc_next = 0
             self._bnc_total = self._bnc_bands
             self.pump()
@@ -980,7 +1067,19 @@ class Compositor:
                 s = src[k]
                 mv = self._bnc_mv[k % slots]
                 n = len(s)
-                if gfx is not None:
+                fold = self._bnc_fold
+                if fold is not None:
+                    # #190 scale fold: SYNTHESIZE the band -- black, then the
+                    # dest-clipped slice of the scaled game snapshot (negative
+                    # dy rows are skipped by the kernel, so each band reads
+                    # only its own source rows). The root fb is never touched.
+                    slot = self._bnc_bufs[k % slots]
+                    gfx.fill(slot, n // 2, 0)
+                    gfx.blit565_scale(slot, self._w, n // rb,
+                                      fold[3], fold[4] - k * rows,
+                                      fold[0], fold[1], fold[2], fold[5])
+                    buf = mv if n == len(mv) else mv[:n]
+                elif gfx is not None:
                     # C memcpy PSRAM -> internal SRAM (~0.15ms/band); the
                     # memoryview slice-assign below measured ~1ms+ per band.
                     gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)

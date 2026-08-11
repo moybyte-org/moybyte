@@ -4909,6 +4909,14 @@ class Workstation:
         # decides whether it applies; a no-view cart pays one getattr.
         _lb = getattr(self.wm, "letterbox_inplace", None) if _vp is None else None
         _lb_done = False
+        # #190: while a flush-bounce scale fold is armed (the device composite
+        # SKIPPED writing the root fb -- the flush will synthesize it), any
+        # layer that would paint the root ON TOP must first disarm, which makes
+        # the comp perform the skipped composite. The cursor layer is always
+        # stacked but only paints when the pointer is visible, so it disarms
+        # only then. One compare per post-composite layer; None everywhere the
+        # comp has no fold (host/P4/web).
+        _fold_live = False
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
@@ -4916,8 +4924,16 @@ class Workstation:
                     _game_open = False
                 _tc = _ticks_ms() if _deep else 0
                 self._composite_game()
+                _fold_live = True
                 if _deep:
                     _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
+            if _fold_live and (layer is not self._cursor_layer
+                               or (self.pointer is not None
+                                   and self.pointer.visible)):
+                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                if _dsf is not None:
+                    _dsf()
+                _fold_live = False
             if (_lskip is not None and _sksurf is not None
                     and layer.domain == "system" and _lskip(layer.id)):
                 _sksurf(layer.id, layer.domain)     # z-slot survives, draw doesn't
@@ -4963,6 +4979,11 @@ class Workstation:
             # iteration paints its LOADING toast on top of everything; the
             # flush below presents it, and the frame TAIL then runs the
             # transition. The panel retains this frame for the whole stall.
+            if _fold_live:                          # #190: toast paints the root
+                _dsf = getattr(self.comp, "disarm_scale_fold", None)
+                if _dsf is not None:
+                    _dsf()
+                _fold_live = False
             self._draw_loading_toast()
         # #63: nothing should be left in an auto-batch by the time we present. The cart
         # sprites were flushed at _reset_canvas_state; the console's own chrome draws

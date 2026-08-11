@@ -1033,6 +1033,30 @@ class DeviceCanvas:
         scale = int(scale)
         rw = vw * scale
         rh = vh * scale
+        # #190 flush-bounce scale fold: on the SRAM-bounce tier, skip this
+        # whole root-fb composite -- snapshot the (cropped) game frame into the
+        # flush-private scratch and let the bounce pump synthesize each band
+        # from it (black + one dest-clipped blit565_scale). Anything that draws
+        # on the root AFTER us (toast/notice/cursor) disarms, and the comp then
+        # performs this composite itself -- so the fold is presentation-
+        # invisible, purely a data-path change. The fence blocks (normally a
+        # no-op) until the PREVIOUS flush has read the scratch we're about to
+        # overwrite -- its bands feed early in the frame we just spent.
+        comp = self._comp
+        fold = getattr(comp, "fold_supported", False)
+        src_buf = gc._buf
+        if fold:
+            comp.fold_fence()
+        if fold or sx or sy or vw != gw or vh != gh:
+            scr = self._view_scratch
+            if scr is None or scr.size() != (vw, vh):
+                scr = self._view_scratch = _LayerComp(vw, vh, g)
+            g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
+                      src_buf, gw, gh, -1)
+            src_buf = scr.framebuffer()
+        if fold:
+            comp.arm_scale_fold(src_buf, vw, vh, ox, oy, scale)
+            return
         # Bezel: only the four strips outside the viewport (raw 565 black).
         if oy > 0:
             self._fill(0, 0, self.w, oy, 0)
@@ -1042,14 +1066,6 @@ class DeviceCanvas:
             self._fill(0, oy, ox, rh, 0)
         if ox + rw < self.w:
             self._fill(ox + rw, oy, self.w - (ox + rw), rh, 0)
-        src_buf = gc._buf
-        if sx or sy or vw != gw or vh != gh:
-            scr = self._view_scratch
-            if scr is None or scr.size() != (vw, vh):
-                scr = self._view_scratch = _LayerComp(vw, vh, g)
-            g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
-                      src_buf, gw, gh, -1)
-            src_buf = scr.framebuffer()
         g.blit565_scale(self._buf, self.w, self.h, ox, oy,
                         src_buf, vw, vh, scale)
         if self._pump is not None:

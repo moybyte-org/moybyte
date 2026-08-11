@@ -430,9 +430,14 @@ def _diag_pump(diag, comp):
         if not getattr(comp, "bounce_flush", False):
             return
         st = comp.bounce_stats()
-        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d"
+        # #190: folded flushes since boot -- nonzero proves the scale fold is
+        # live (a small-canvas game frame's bands were SYNTHESIZED, the root
+        # composite skipped). Steadily climbing during play = every quiet
+        # frame folds; frozen = something disarms each frame.
+        fold = getattr(comp, "fold_count", 0)
+        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d fold=%d"
                  % (st[0] / 1000.0, st[1] / 1000.0, st[2],
-                    st[3] / 1000.0, st[4]))
+                    st[3] / 1000.0, st[4], fold))
     except Exception:
         pass
 
