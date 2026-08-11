@@ -455,15 +455,25 @@ to whoever called it.
   boards): one VM per run with the cart's whole Lua heap OUTSIDE the MP gc heap
   (freed wholesale at close), the hot `spr` appending `_batch_arr` int16 quads
   in C via the exact spr_gate protocol (token `0x7A11`, `begin_batch` upcall on
-  run breaks), every other verb trampolining to the SAME Python `make_api`
-  closures (tuple returns fan out to Lua multivalues, so `touch()` needs no
-  wrapper), and layers/images kept Python-side behind int-handle glue
+  run breaks), **the whole solid draw family libmoy-DIRECT since #189
+  (2026-08-11)** — `bind_draw(ctx)` swaps pix/rect/rectb/line/circ/circb/tri/
+  trib/print for lua_CFunctions over moy_gfx's exported C API
+  (`moy_gfx_capi.h`, the sibling-staged `__has_include` probe — absent on the
+  wasm runner by layout), byte-parity pinned by `tests/test_lua_draw_direct.py`
+  on the unix build; every OTHER verb still trampolines to the SAME Python
+  `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
+  needs no wrapper), and layers/images stay Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
-  wiring). Three hardware-learned constraints live in the module: the vendored
+  wiring). Related S3 lever, same date: the **#190 flush-bounce scale fold** —
+  a small-canvas game frame's composite is synthesized inside the bounce bands
+  (root fb untouched on quiet frames; overlays disarm and pay the old cost;
+  PUMP diag `fold=N` is the on-glass proof). Three hardware-learned constraints
+  live in the module: the vendored
   lua sources carry **in-source `-O2` pragmas** (historically a guard against
   `-Os` halving the VM; today's builds resolve usermods to `-O2` globally, so
-  the pragmas PIN that — and `-O3` on the VM hot files is a measured ~2–5%
-  REGRESSION on the P4, #159, so O2 is the affirmed setting, not a leftover),
+  the pragmas PIN that — and `-O3` on the VM is a measured ~2–5% REGRESSION on
+  the P4 (#159) and a measured NULL on the S3 (#190 A/B, 2026-08-11), so O2 is
+  the affirmed setting on BOTH boards, not a leftover),
   the `lua_Alloc` is
   **internal-SRAM-first with a 48KB headroom floor + PSRAM fallback** (the
   all-PSRAM version measured ~2× slower on the S3's 120MHz-OCT bus), and
