@@ -355,15 +355,22 @@ Staleness note on the 4.5ms: it was measured 2026-08-09 on the zoomed cart
 in the pre-fold ~30ms-render regime, and the shim's local-capture pass
 cheapened the same loop afterward — the live prize is ≤4.5ms, and only the
 re-measure prices it. P4-verified: conformance 10/10, celeste at the 62
-cap, 0 upcall-falls. (c) Re-read the number on the S3. **TWO M0 steps
-remain pending, both S3 work** (the T-Deck was not connected the night the
-levers landed): the (a) attribution — which is also §4.1's kill gate — and
-this (c) re-read. "A solid 30" means, concretely: p50 ≥ 30fps AND
-worst-sample ≥ 28 over a ≥60s uncapped gameplay window with PERF DIAG on.
-If celeste clears that, moycore graduates as an architecture/wasm project
-and is prioritized on that axis. Be honest about what the gates can kill:
-no S3 number kills the *project* (both outcomes re-queue it); what a number
-kills is the FPS CASE, and with it stage 2's priority.
+cap, 0 upcall-falls. (c) **The S3 re-read LANDED (2026-08-12 night, owner
+play, 57.5s / 20 samples): p50 = 30, worst = 27, steady 27–32** — against
+the gate ("a solid 30" = p50 ≥ 30 AND worst ≥ 28 over ≥60s uncapped, PERF
+DIAG on), p50 sits exactly ON the bar and the floor fails by ONE sample,
+which contains a 192ms GC collect. The levers bought ~+2fps over the 25–31
+baseline (consistent with the ≤4.5ms staleness note); LUABATCH read clean
+(upfall=0 every window). **Verdict: the fps case NARROWS instead of
+resolving** — steady-state render now rides the 30fps cadence and the thing
+breaking the floor is the GC spike class, which is stage 2's qualitative
+target. So stage 2's fps case and its qualitative case are now the same
+case: delete the collects from play, keep ~30 solid. The (a) attribution —
+also §4.1's kill gate, and now doubling as the spike-ownership question —
+is the ONE remaining M0 step. Numbers live in #66, as always. Be honest
+about what the gates can kill: no S3 number kills the *project* (both
+outcomes re-queue it); what a number kills is a CLAIM — and this one
+sharpened the claim rather than killing it.
 
 **Stage 0 — host-embedded audio. SHIPPED (`ff69071`, 2026-08-11).** §3.1:
 bind vendored libmoy on the host, delete the synth twin. As built:

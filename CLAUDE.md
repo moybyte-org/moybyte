@@ -280,8 +280,11 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   forever" is WRONG, trust zepto8 for p8 semantics). `ports/celeste.moy` is
   gitignored on BOTH repos (CC BY-NC-SA — never commit or ship it); regenerate
   with the moy-spec CLI: `moy port <cart.p8.png> ports/celeste.moy --title
-  "Celeste Classic"` (the port tool lives ONLY there now — one converter, no
-  drift).
+  "Celeste Classic" --zoom` (the port tool lives ONLY there now — one
+  converter, no drift). **Do not drop `--zoom`**: it is what bakes the
+  `view(128, 120)` hint, and without it the T-Deck letterboxes the 128px
+  square at 1× instead of compositing the centered 128×120 at 2× — a
+  regeneration on 2026-08-11 lost it and shipped a tiny celeste to the glass.
 
 ### Host == device: the shared console (important)
 
