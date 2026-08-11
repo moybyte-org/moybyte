@@ -1373,9 +1373,19 @@ typedef struct _moy_gfx_draw_ctx_obj_t {
     uint16_t *pal;
     size_t npal;
     int16_t *batch;          // sprite queue, or NULL
+    size_t batch_len;        // queue capacity in int16 slots (clamps q[0])
     const uint8_t *font;
     mp_int_t nglyphs;
     mp_int_t first;
+    // #67 stage-1 (moycore): the C-side batch source -- the cart's INDEXED
+    // sheet + palt, registered by the Lua glue (set_batch_src) so a run break
+    // or the #63 order-rule flush never upcalls (moy_gfx_capi_flush_batch).
+    // Objects held so the gc keeps the buffers alive; set_batch_src(None)
+    // clears. bpalt may be NULL (all-opaque), like blit_batch's None.
+    mp_obj_t bsrc_obj;
+    mp_obj_t bpalt_obj;
+    const uint8_t *bsrc;
+    const uint8_t *bpalt;
 } moy_gfx_draw_ctx_obj_t;
 
 // #163 door 1: how many gated ops run between two bounce-pump upcalls on a
@@ -1478,9 +1488,57 @@ static mp_obj_t moy_gfx_draw_ctx_fill_rects(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_fill_rects_obj,
                                            6, 6, moy_gfx_draw_ctx_fill_rects);
 
+// set_batch_src(sheet_pix, sheetw, sheeth, palt) / set_batch_src(None):
+// register (or clear) the C-side sprite-batch source (#67 stage-1). The sheet
+// must be moy-shaped (the same is_moy_sheet gate blit_batch applies -- a
+// refusal raises so the caller can fall back to the upcall protocol); `palt`
+// is the canvas's 64-byte transparency table or None. The registered OBJECTS
+// are held on the ctx, so live in-place edits (a paint stroke mid-run) are
+// seen by the very next flush -- the buffers are read fresh each time.
+static mp_obj_t moy_gfx_draw_ctx_set_batch_src(size_t n_args, const mp_obj_t *a) {
+    moy_gfx_draw_ctx_obj_t *c = MP_OBJ_TO_PTR(a[0]);
+    if (n_args == 2 && a[1] == mp_const_none) {
+        c->bsrc_obj = mp_const_none;
+        c->bpalt_obj = mp_const_none;
+        c->bsrc = NULL;
+        c->bpalt = NULL;
+        return mp_const_none;
+    }
+    if (n_args != 5) {
+        mp_raise_TypeError(MP_ERROR_TEXT("set_batch_src(pix, w, h, palt)"));
+    }
+    mp_buffer_info_t sb;
+    mp_get_buffer_raise(a[1], &sb, MP_BUFFER_READ);
+    mp_int_t w = mp_obj_get_int(a[2]);
+    mp_int_t h = mp_obj_get_int(a[3]);
+    if (!moy_gfx_is_moy_sheet(w, h, sb.len)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("set_batch_src: not a moy sheet"));
+    }
+    const uint8_t *palt = NULL;
+    mp_obj_t palt_obj = mp_const_none;
+    if (a[4] != mp_const_none) {
+        mp_buffer_info_t pb;
+        mp_get_buffer_raise(a[4], &pb, MP_BUFFER_READ);
+        if (pb.len < 64) {
+            mp_raise_ValueError(MP_ERROR_TEXT("set_batch_src: palt too small"));
+        }
+        palt = (const uint8_t *)pb.buf;
+        palt_obj = a[4];
+    }
+    c->bsrc_obj = a[1];
+    c->bpalt_obj = palt_obj;
+    c->bsrc = (const uint8_t *)sb.buf;
+    c->bpalt = palt;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_draw_ctx_set_batch_src_obj,
+                                           2, 5, moy_gfx_draw_ctx_set_batch_src);
+
 static const mp_rom_map_elem_t moy_gfx_draw_ctx_locals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_buf), MP_ROM_PTR(&moy_gfx_draw_ctx_set_buf_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_pump), MP_ROM_PTR(&moy_gfx_draw_ctx_set_pump_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_batch_src),
+      MP_ROM_PTR(&moy_gfx_draw_ctx_set_batch_src_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill_rects),
       MP_ROM_PTR(&moy_gfx_draw_ctx_fill_rects_obj) },
 };
@@ -1665,12 +1723,18 @@ static mp_obj_t moy_gfx_make_draw_ctx(size_t n_args, const mp_obj_t *a) {
     c->pal = (uint16_t *)pbi.buf;
     c->npal = pbi.len / 2u;
     c->batch = NULL;
+    c->batch_len = 0;
     if (a[3] != mp_const_none) {
         mp_buffer_info_t bbi;
         if (mp_get_buffer(a[3], &bbi, MP_BUFFER_RW) && bbi.len >= 2 * 4) {
             c->batch = (int16_t *)bbi.buf;
+            c->batch_len = bbi.len / 2u;
         }
     }
+    c->bsrc_obj = mp_const_none;
+    c->bpalt_obj = mp_const_none;
+    c->bsrc = NULL;
+    c->bpalt = NULL;
     c->font = (const uint8_t *)fbi.buf;
     c->nglyphs = (mp_int_t)(fbi.len / 8u);
     c->first = mp_obj_get_int(a[5]);
@@ -1817,6 +1881,56 @@ void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
                      st[ST_CAM_X], st[ST_CAM_Y],
                      st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
     c->st[ST_N_TEXT]++;
+}
+
+bool moy_gfx_capi_batch_src(const moy_gfx_draw_ctx_t *c) {
+    return c->bsrc != NULL;
+}
+
+// The pending run, flushed in pure C (#67 stage-1): the SAME array-mode walk
+// blit_batch performs -- header reset FIRST (flush_batch's re-entrancy rule),
+// then libmoy's moy_spr per quad against the registered sheet, colour via the
+// ctx's pal-resolved table, camera/clip from the state array. Token-guarded:
+// a run stamped by another writer flushes against canvas._batch_sheet, which
+// only the Python flush knows -- return false and let the caller upcall.
+bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token) {
+    int16_t *q = c->batch;
+    if (q == NULL) {
+        return true;                   // no queue: nothing to own
+    }
+    mp_int_t next = q[0];
+    if (next <= 4) {
+        return true;                   // empty: done trivially
+    }
+    if (c->bsrc == NULL || c->px == NULL || q[3] != (int16_t)token) {
+        return false;                  // caller must upcall canvas.flush_batch
+    }
+    mp_int_t dw = c->st[ST_W];
+    if (dw <= 0) {
+        return false;
+    }
+    if ((size_t)next > c->batch_len) {
+        next = (mp_int_t)c->batch_len;
+    }
+    mp_int_t key = q[1];
+    mp_int_t scale = q[2];
+    if (scale < 1) {
+        scale = 1;
+    }
+    mp_int_t cx0 = c->st[ST_CX0], cy0 = c->st[ST_CY0];
+    mp_int_t cx1 = c->st[ST_CX1], cy1 = c->st[ST_CY1];
+    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    q[0] = 4;                          // reset FIRST -- mirror flush_batch
+    moy_canvas cv;
+    moy_sheet sh;
+    moy_gfx_canvas(&cv, c->px, dw, c->cap, c->pal, c->bpalt,
+                   c->st[ST_CAM_X], c->st[ST_CAM_Y], cx0, cy0, cx1, cy1);
+    moy_sheet_init(&sh, (uint8_t *)c->bsrc);
+    for (mp_int_t i = 4; i + 4 <= next; i += 4) {
+        moy_spr(&cv, &sh, (int)q[i], (int)q[i + 1], (int)q[i + 2],
+                (int)key, (int)scale, (int)(q[i + 3] & 3));
+    }
+    return true;
 }
 
 // decode_runs(dst, npix, packed) -> pixels written, or -1 on a corrupt stream.

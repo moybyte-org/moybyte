@@ -125,7 +125,27 @@ class LuaCartRun:
                 ctx = getattr(canvas, "_gate_ctx", None)
                 bd = getattr(moy_lua, "bind_draw", None)
                 if ctx is not None and bd is not None:
-                    bd(ctx)
+                    bound = bd(ctx)
+                    # #67 stage-1 (moycore): register the cart's indexed sheet
+                    # + palt with the ctx so the sprite-batch protocol (run
+                    # breaks + the #63 order-rule flush) runs entirely in C --
+                    # the begin_batch/flush_batch upcalls die for this run.
+                    # _lua_batch_sheet is the Python flush's fallback for a
+                    # C-stamped run (see DeviceCanvas.flush_batch). A refusal
+                    # (odd sheet shape, older moy_gfx) leaves the upcall
+                    # protocol standing -- correct, just slower.
+                    sbs = getattr(ctx, "set_batch_src", None)
+                    if bound and direct and sbs is not None:
+                        if getattr(canvas, "_palt", None) is None:
+                            canvas.reset_state()
+                        try:
+                            sbs(sheet.pix, sheet.w, sheet.h,
+                                getattr(canvas, "_palt", None))
+                            canvas._lua_batch_sheet = sheet
+                            canvas._lua_batch_token = _LUA_TOKEN
+                            self._canvas = canvas
+                        except (ValueError, TypeError):
+                            pass
             self._install_handles(ns)
             moy_lua.exec(_LUA_PRELUDE, "prelude")
             # "@cart" so error positions render `cart:12:` -- the chunkname
@@ -139,7 +159,10 @@ class LuaCartRun:
             self.draw = ((lambda: moy_lua.call("_draw"))
                          if moy_lua.has("_draw") else None)
         except Exception:
-            moy_lua.close()               # a broken load never strands a VM
+            try:
+                self.close()              # un-register the batch source AND
+            except Exception:             # close: a broken load never strands
+                moy_lua.close()           # a VM or the canvas registration
             raise
 
     def _install_handles(self, ns):
@@ -192,6 +215,21 @@ class LuaCartRun:
         self.draw = None
         self._layers = None
         self._images = None
+        cv = getattr(self, "_canvas", None)
+        if cv is not None:
+            # Un-register the C batch source (#67 stage-1): the next run
+            # re-registers its own sheet; a stale pending run's quads drop
+            # defensively, exactly as a lost _batch_sheet always has.
+            cv._lua_batch_sheet = None
+            cv._lua_batch_token = -1
+            ctx = getattr(cv, "_gate_ctx", None)
+            sbs = getattr(ctx, "set_batch_src", None) if ctx is not None else None
+            if sbs is not None:
+                try:
+                    sbs(None)
+                except Exception:  # noqa: BLE001 -- close must never block an exit
+                    pass
+            self._canvas = None
         try:
             self._moy_lua.close()
         except Exception:  # noqa: BLE001 -- close must never block an exit

@@ -65,11 +65,15 @@ class MockCanvas:
     def __init__(self):
         self._batch_arr = array("h", bytearray(2 * (4 + 4 * 64)))
         self._batch_arr[0] = 4
+        self.upcalls = []              # stage-1: the batch upcalls that DIDN'T die
 
     def flush_batch(self):
+        self.upcalls.append(("flush",))
         self._batch_arr[0] = 4
 
     def begin_batch(self, sheet, ck, sc, token):
+        self.upcalls.append(("begin", ck, sc, token))
+        self._batch_arr[0] = 4         # mock flush: pending foreign quads drop
         self._batch_arr[1] = ck
         self._batch_arr[2] = sc
         self._batch_arr[3] = token
@@ -186,6 +190,124 @@ for name, lua_src, py_fn in CASES:
 with_state()
 
 assert not never, never                    # no gate ever fell back
+
+# --- stage-1 (#67): the C-side sprite-batch protocol ------------------------
+# Side A drives Lua spr() against a ctx with a registered batch source: run
+# breaks stamp the header in C and flushes go through moy_gfx_capi_flush_batch
+# -- ZERO begin_batch/flush_batch upcalls, asserted on the mock. Side B is the
+# exact call DeviceCanvas.flush_batch makes for a run: blit_batch in array
+# mode with the same header/camera/clip/pal/palt. Byte-equality per scene.
+
+SW, SH = 128, 256                      # MOY_SHEET_W x MOY_SHEET_H (SPEC 3.2)
+sheet_px = bytearray(SW * SH)
+for sy in range(SH):
+    for sx in range(SW):
+        sheet_px[sy * SW + sx] = (sx * 7 + sy * 3 + (sx // 8)) & 63
+palt_a = bytearray(64)
+palt_b = bytearray(64)
+ctx_a.set_batch_src(sheet_px, SW, SH, palt_a)
+
+arr_b = canvas_b._batch_arr
+
+
+def b_batch(items, ck=-1, scale=1):
+    # Side B: the flush_batch lane -- chunked at the queue's 64-quad capacity
+    # exactly where side A's full-queue break lands.
+    for i in range(0, len(items), 64):
+        chunk = items[i:i + 64]
+        k = 4
+        for (t, x, y, fl) in chunk:
+            arr_b[k] = t
+            arr_b[k + 1] = x
+            arr_b[k + 2] = y
+            arr_b[k + 3] = fl
+            k += 4
+        arr_b[0] = k
+        moy_gfx.blit_batch(buf_b, W, H, arr_b, sheet_px, SW, SH,
+                           pal_b, palt_b, ck, scale,
+                           st_b[ST_CAM_X], st_b[ST_CAM_Y],
+                           st_b[ST_CX0], st_b[ST_CY0],
+                           st_b[ST_CX1], st_b[ST_CY1])
+        arr_b[0] = 4
+
+
+def lua_sprs(items, ck=None, scale=None):
+    calls = []
+    for (t, x, y, fl) in items:
+        if ck is None:
+            calls.append("spr(%d, %d, %d)" % (t, x, y))
+        elif scale is None:
+            calls.append("spr(%d, %d, %d, %d)" % (t, x, y, ck))
+        else:
+            calls.append("spr(%d, %d, %d, %d, %d, %d)" % (t, x, y, ck, scale, fl))
+    calls.append("rect(0, 0, 0, 0, 0)")   # zero-size: order-rule flush, no pixels
+    return " ".join(calls)
+
+
+RUN_A = [(1, 5, 5, 0), (2, 14, 5, 0), (3, 23, 5, 0), (17, 5, 40, 0)]
+RUN_FLIPS = [(4, 40, 8, 0), (4, 50, 8, 1), (4, 60, 8, 2), (4, 70, 8, 3)]
+RUN_BIG = [((i * 5) & 127, (i * 9) % (W + 16) - 8, (i * 7) % (H + 16) - 8, i & 3)
+           for i in range(100)]
+
+BATCH_SCENES = [
+    ("batch_run", lambda: b_batch(RUN_A),
+     lua_sprs(RUN_A)),
+    ("batch_colorkey", lambda: b_batch(RUN_A, ck=9),
+     lua_sprs([i[:3] + (0,) for i in RUN_A], ck=9)),
+    ("batch_scale_flip", lambda: b_batch(RUN_FLIPS, ck=3, scale=2),
+     lua_sprs(RUN_FLIPS, ck=3, scale=2)),
+    ("batch_lone", lambda: b_batch([(9, 33, 33, 0)]),
+     lua_sprs([(9, 33, 33, 0)])),
+    ("batch_full_queue", lambda: b_batch(RUN_BIG, ck=1, scale=1),
+     lua_sprs(RUN_BIG, ck=1, scale=1)),
+    ("batch_ck_break", lambda: (b_batch(RUN_A[:2], ck=2), b_batch(RUN_A[2:], ck=5)),
+     lua_sprs([i[:3] + (0,) for i in RUN_A[:2]], ck=2) + " " +
+     lua_sprs([i[:3] + (0,) for i in RUN_A[2:]], ck=5)),
+]
+
+for name, py_fn, lua_src in BATCH_SCENES:
+    moy_lua.exec(lua_src)
+    py_fn()
+    print(name, bytes(buf_a).hex(), bytes(buf_b).hex())
+
+# ...and the same under a camera offset + tight clip (sprites clip/offset too).
+with_state(cam=(9, -4), clip=(12, 10, 80, 52))
+for name, py_fn, lua_src in BATCH_SCENES:
+    moy_lua.exec(lua_src)
+    py_fn()
+    print("camclip_" + name, bytes(buf_a).hex(), bytes(buf_b).hex())
+with_state()
+
+# palt: index 20 transparent -- registered buffers are read LIVE, no re-bind.
+palt_a[20] = 1
+palt_b[20] = 1
+moy_lua.exec(lua_sprs(RUN_A))
+b_batch(RUN_A)
+print("batch_palt", bytes(buf_a).hex(), bytes(buf_b).hex())
+palt_a[20] = 0
+palt_b[20] = 0
+
+# The whole batch section ran with ZERO begin_batch/flush_batch upcalls.
+assert canvas_a.upcalls == [], canvas_a.upcalls
+bstats = moy_lua.batch_stats()
+assert bstats[0] > 0 and bstats[1] > 0 and bstats[3] == 0, bstats
+
+# A FOREIGN pending run (a Python writer's token) must take the upcall lane:
+# preload a token-0 run, then a Lua spr -- begin_batch upcall, bup counted.
+arr_a = canvas_a._batch_arr
+arr_a[1] = -1
+arr_a[2] = 1
+arr_a[3] = 0
+arr_a[4] = 7
+arr_a[5] = 90
+arr_a[6] = 55
+arr_a[7] = 0
+arr_a[0] = 8
+moy_lua.exec("spr(9, 80, 55, -1, 1, 0) rect(0, 0, 0, 0, 0)")
+b_batch([(9, 80, 55, 0)])
+print("batch_foreign", bytes(buf_a).hex(), bytes(buf_b).hex())
+assert canvas_a.upcalls == [("begin", -1, 1, 0x7A11)], canvas_a.upcalls
+assert moy_lua.batch_stats()[3] >= 1, moy_lua.batch_stats()
 
 # Non-parity semantics, asserted directly:
 # print of a non-UTF-8 byte draws glyph 0 and advances one cell (SPEC.md 6's

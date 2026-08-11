@@ -42,6 +42,25 @@ bool moy_gfx_capi_ready(const moy_gfx_draw_ctx_t *c);
 // exception longjmp through Lua frames).
 bool moy_gfx_capi_batch_pending(const moy_gfx_draw_ctx_t *c);
 
+// #67 stage-1 (moycore): the C-side sprite-batch protocol. A canvas may
+// register the cart's INDEXED sheet + palt with its ctx (DrawCtx.set_batch_src
+// -- the Lua glue does, at bind time), after which a consumer that owns a
+// batch token can flush the pending run without ever entering Python:
+// the same array-mode walk blit_batch performs (libmoy moy_spr per quad,
+// colour via the ctx's pal-resolved table, camera/clip from the state array).
+//
+// batch_src: a source is registered (callers gate their fast path on this).
+bool moy_gfx_capi_batch_src(const moy_gfx_draw_ctx_t *c);
+
+// flush_batch: flush the pending run in C. Returns true when the queue is
+// handled (flushed, or nothing pending); false when the caller MUST fall back
+// to the canvas.flush_batch upcall -- no registered source, no destination,
+// or the pending run belongs to ANOTHER writer (its sheet is whatever
+// canvas._batch_sheet says, which only the Python flush knows). Pure C: no
+// upcalls, no allocation, never raises. The caller owns the pump feed and any
+// profiling counters, exactly as with the draw verbs above.
+bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token);
+
 // The canvas object the ctx was made for (the flush_batch upcall target).
 mp_obj_t moy_gfx_capi_canvas(const moy_gfx_draw_ctx_t *c);
 

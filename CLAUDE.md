@@ -454,8 +454,15 @@ to whoever called it.
   `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/`, staged to BOTH
   boards): one VM per run with the cart's whole Lua heap OUTSIDE the MP gc heap
   (freed wholesale at close), the hot `spr` appending `_batch_arr` int16 quads
-  in C via the exact spr_gate protocol (token `0x7A11`, `begin_batch` upcall on
-  run breaks), **the whole solid draw family libmoy-DIRECT since #189
+  in C via the exact spr_gate protocol (token `0x7A11`; since moycore stage 1a,
+  2026-08-11, run breaks stamp the header AND flush IN C — the glue registers
+  the cart's indexed sheet via `DrawCtx.set_batch_src`, `moy_gfx_capi_flush_batch`
+  runs blit_batch's array-mode walk, and the `begin_batch`/`flush_batch` upcalls
+  survive only for foreign-token runs; a C-stamped run that reaches the PYTHON
+  flush (frame-end `reset_state`) resolves its sheet through
+  `DeviceCanvas._lua_batch_sheet`, and `moy_lua.batch_stats()` is the liveness
+  proof — P4-verified, celeste 374 C-flushes/12s with 0 upcall-falls and the
+  Python batch counters flat), **the whole solid draw family libmoy-DIRECT since #189
   (2026-08-11)** — `bind_draw(ctx)` swaps pix/rect/rectb/line/circ/circb/tri/
   trib/print for lua_CFunctions over moy_gfx's exported C API
   (`moy_gfx_capi.h`, the sibling-staged `__has_include` probe — absent on the

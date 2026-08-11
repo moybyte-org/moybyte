@@ -423,6 +423,12 @@ class DeviceCanvas:
         self._nocache = False
         # Initialised BEFORE reset_state so its flush no-ops.
         self._batch_sheet = None
+        # #67 stage-1 (moycore): the C-stamp fallback. moy_lua's run breaks
+        # stamp the batch header in C without setting _batch_sheet; the glue
+        # registers the cart sheet + its token here for the run's lifetime so
+        # a Python flush of a C-stamped run still knows the sheet.
+        self._lua_batch_sheet = None
+        self._lua_batch_token = -1
         self._batch_arr = array("h", bytearray(2 * (4 + 4 * 512)))
         self._batch_arr[0] = 4
         # Auto-batch profiling counters (#63, perf_capture): per frame, run count / total
@@ -1783,7 +1789,13 @@ class DeviceCanvas:
         if n > self._batch_maxrun:
             self._batch_maxrun = n
         if sheet is None:
-            return                     # defensive: state lost -> drop the quads
+            # #67 stage-1: a run stamped by moy_lua's C break path never set
+            # _batch_sheet -- the registered cart sheet resolves it (token
+            # match), so a mid-frame Python flush of a C-stamped run works.
+            if a[3] == self._lua_batch_token:
+                sheet = self._lua_batch_sheet
+            if sheet is None:
+                return                 # defensive: state lost -> drop the quads
         if n == 1:
             tile, x, y, flip = a[4], a[5], a[6], a[7]
             img = sheet.tile_image(tile, colorkey)

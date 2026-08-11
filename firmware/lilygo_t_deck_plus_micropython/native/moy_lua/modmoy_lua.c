@@ -101,6 +101,20 @@ static moy_gfx_draw_ctx_t *g_ctx = NULL;
 static uint32_t g_dn[3];
 static uint32_t g_dus[3];
 static uint32_t g_dfb = 0;
+// #67 stage-1 (moycore): the C-side batch protocol -- run breaks stamped and
+// pending runs flushed without entering Python (moy_gfx_capi_flush_batch,
+// gated on the glue having registered the sheet via ctx.set_batch_src).
+// g_bf/g_bs mirror the canvas's _batch_flushes/_batch_sprites for the C lane
+// (the Python counters go quiet for a Lua cart -- DRAW2's `batch` reads 0
+// there; batch_stats() is where the C lane reports). g_bus is ST_PROF-gated
+// like g_dus. g_bup counts the upcall FALLBACKS (foreign-token runs) -- the
+// on-glass proof the upcall protocol is actually gone is g_bf>0 with g_bup==0.
+static uint32_t g_bf = 0;
+static uint32_t g_bs = 0;
+static uint32_t g_bus = 0;
+static uint32_t g_bup = 0;
+// Defined with the #189 draw verbs below; l_spr's run break calls it too.
+static bool lua_batch_flush_c(lua_State *L);
 #endif
 
 #ifdef MOY_LUA_PSRAM
@@ -408,26 +422,50 @@ static int l_spr(lua_State *L) {
     if (k == 4 || (size_t)(k + 4) > g_qlen
         || q[3] != (int16_t)g_token
         || q[1] != (int16_t)v[3] || q[2] != (int16_t)v[4]) {
-        // run break (first item / state change / foreign writer / full queue):
-        // canvas.begin_batch flushes any pending run and stamps this one --
-        // the same upcall moy_gfx's spr_gate makes, nlr-protected here.
-        nlr_buf_t nlr;
-        if (nlr_push(&nlr) == 0) {
-            mp_obj_t root = MP_STATE_VM(moy_lua_root);
-            mp_obj_t canvas = mp_obj_subscr(root, MP_OBJ_NEW_SMALL_INT(ROOT_CANVAS),
-                                            MP_OBJ_SENTINEL);
-            mp_obj_t sheet = mp_obj_subscr(root, MP_OBJ_NEW_SMALL_INT(ROOT_SHEET),
-                                           MP_OBJ_SENTINEL);
-            mp_obj_t dest[2 + 4];
-            mp_load_method(canvas, MP_QSTR_begin_batch, dest);
-            dest[2] = sheet;
-            dest[3] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[3]);
-            dest[4] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[4]);
-            dest[5] = MP_OBJ_NEW_SMALL_INT(g_token);
-            mp_call_method_n_kw(4, 0, dest);
-            nlr_pop();
+        // run break (first item / state change / foreign writer / full queue).
+        bool stamped = false;
+#ifdef MOY_LUA_DRAW_DIRECT
+        // #67 stage-1 (moycore): with the sheet registered on the bound ctx,
+        // the break never enters Python -- OUR pending run flushes through
+        // the capi and the header is stamped right here. A FOREIGN run
+        // (Python writer's token: its sheet is whatever canvas._batch_sheet
+        // says) keeps the upcall below. canvas._batch_sheet is deliberately
+        // NOT touched: DeviceCanvas.flush_batch resolves a C-stamped run
+        // through its _lua_batch_sheet fallback, so a mid-frame Python flush
+        // (a trampolined pal()/camera(), a Python-lane primitive) still
+        // emits these quads.
+        if (k <= 4 || q[3] == (int16_t)g_token) {
+            if (lua_batch_flush_c(L)) {
+                q[1] = (int16_t)v[3];
+                q[2] = (int16_t)v[4];
+                q[3] = (int16_t)g_token;
+                stamped = true;
+            }
         } else {
-            return luaL_error(L, "spr: begin_batch failed");
+            g_bup++;                   // foreign-token break: the upcall lane
+        }
+#endif
+        if (!stamped) {
+            // canvas.begin_batch flushes any pending run and stamps this one --
+            // the same upcall moy_gfx's spr_gate makes, nlr-protected here.
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                mp_obj_t root = MP_STATE_VM(moy_lua_root);
+                mp_obj_t canvas = mp_obj_subscr(root, MP_OBJ_NEW_SMALL_INT(ROOT_CANVAS),
+                                                MP_OBJ_SENTINEL);
+                mp_obj_t sheet = mp_obj_subscr(root, MP_OBJ_NEW_SMALL_INT(ROOT_SHEET),
+                                               MP_OBJ_SENTINEL);
+                mp_obj_t dest[2 + 4];
+                mp_load_method(canvas, MP_QSTR_begin_batch, dest);
+                dest[2] = sheet;
+                dest[3] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[3]);
+                dest[4] = MP_OBJ_NEW_SMALL_INT((mp_int_t)v[4]);
+                dest[5] = MP_OBJ_NEW_SMALL_INT(g_token);
+                mp_call_method_n_kw(4, 0, dest);
+                nlr_pop();
+            } else {
+                return luaL_error(L, "spr: begin_batch failed");
+            }
         }
         k = q[0];
         if (k < 4 || (size_t)(k + 4) > g_qlen) {
@@ -470,6 +508,40 @@ enum {
     DV_PIX = 0, DV_RECT, DV_RECTB, DV_LINE,
     DV_CIRC, DV_CIRCB, DV_TRI, DV_TRIB, DV_PRINT
 };
+
+// Flush the pending run C-side when the ctx owns a source and the run is OURS
+// (#67 stage-1); feeds the bounce pump like flush_batch does. Returns false
+// when the caller must fall back to the canvas upcall (no ctx/source, or a
+// foreign-token run). Lua-raises (never returns) only if the pump upcall
+// itself failed.
+static bool lua_batch_flush_c(lua_State *L) {
+    moy_gfx_draw_ctx_t *c = g_ctx;
+    if (c == NULL || !moy_gfx_capi_batch_src(c)) {
+        return false;
+    }
+    int16_t *q = g_q;
+    uint32_t pend = (q != NULL && q[0] > 4) ? (uint32_t)((q[0] - 4) >> 2) : 0;
+    bool prof = pend != 0 && moy_gfx_capi_prof(c);
+    uint32_t t0 = prof ? (uint32_t)mp_hal_ticks_us() : 0;
+    if (!moy_gfx_capi_flush_batch(c, g_token)) {
+        return false;
+    }
+    if (pend != 0) {
+        g_bf++;
+        g_bs += pend;
+        if (prof) {
+            g_bus += (uint32_t)mp_hal_ticks_us() - t0;
+        }
+        mp_obj_t pump = moy_gfx_capi_pump_due(c, 1);
+        if (pump != MP_OBJ_NULL) {
+            mp_obj_t ret;
+            if (!call_py(pump, 0, NULL, &ret)) {
+                luaL_error(L, "%s", g_pyerr);   // no return
+            }
+        }
+    }
+    return true;
+}
 
 // A coordinate/colour arg: number only; floats truncate toward zero, exactly
 // like the draw gates' gate_num (and Python int()).
@@ -536,9 +608,11 @@ static int l_draw(lua_State *L) {
         }
     }
     // #63 order rule: queued sprites were drawn under the current state and
-    // must land BEFORE this primitive. Same upcall the gates make -- but
+    // must land BEFORE this primitive. Stage-1: OUR pending run flushes in C
+    // (lua_batch_flush_c); a foreign run keeps the upcall the gates make --
     // nlr-protected, because an MP exception must never longjmp through Lua.
-    if (moy_gfx_capi_batch_pending(c)) {
+    if (moy_gfx_capi_batch_pending(c) && !lua_batch_flush_c(L)) {
+        g_bup++;
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
             mp_obj_t dest[2];
@@ -652,6 +726,7 @@ static mp_obj_t moy_lua_bind_draw(mp_obj_t ctx_in) {
     g_dfb = 0;
     memset(g_dn, 0, sizeof(g_dn));
     memset(g_dus, 0, sizeof(g_dus));
+    g_bf = g_bs = g_bus = g_bup = 0;
     return mp_const_true;
 #endif
 }
@@ -681,11 +756,34 @@ static mp_obj_t moy_lua_draw_stats_reset(void) {
     g_dfb = 0;
     memset(g_dn, 0, sizeof(g_dn));
     memset(g_dus, 0, sizeof(g_dus));
+    g_bf = g_bs = g_bus = g_bup = 0;
 #endif
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_draw_stats_reset_obj,
                                  moy_lua_draw_stats_reset);
+
+// batch_stats() -> (n_flushes, n_sprites, us, n_upcall_falls) for the C-side
+// batch lane (#67 stage-1) since the last bind/reset -- us only under perf
+// capture, like draw_stats. The liveness proof is n_flushes>0 with
+// n_upcall_falls==0 (the begin_batch/flush_batch upcalls are gone); a foreign
+// -token interleave (Python chrome writing the same canvas mid-run) shows in
+// n_upcall_falls and is correct, just slower. None on builds without the
+// direct path.
+static mp_obj_t moy_lua_batch_stats(void) {
+#ifdef MOY_LUA_DRAW_DIRECT
+    mp_obj_t items[4] = {
+        mp_obj_new_int((mp_int_t)g_bf),
+        mp_obj_new_int((mp_int_t)g_bs),
+        mp_obj_new_int((mp_int_t)g_bus),
+        mp_obj_new_int((mp_int_t)g_bup),
+    };
+    return mp_obj_new_tuple(4, items);
+#else
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lua_batch_stats_obj, moy_lua_batch_stats);
 
 // ---------------------------------------------------------------------------
 // module functions
@@ -894,6 +992,7 @@ static const mp_rom_map_elem_t moy_lua_module_globals_table[] = {
     {MP_ROM_QSTR(MP_QSTR_draw_stats), MP_ROM_PTR(&moy_lua_draw_stats_obj)},
     {MP_ROM_QSTR(MP_QSTR_draw_stats_reset),
      MP_ROM_PTR(&moy_lua_draw_stats_reset_obj)},
+    {MP_ROM_QSTR(MP_QSTR_batch_stats), MP_ROM_PTR(&moy_lua_batch_stats_obj)},
     {MP_ROM_QSTR(MP_QSTR_exec), MP_ROM_PTR(&moy_lua_exec_obj)},
     {MP_ROM_QSTR(MP_QSTR_has), MP_ROM_PTR(&moy_lua_has_obj)},
     {MP_ROM_QSTR(MP_QSTR_call), MP_ROM_PTR(&moy_lua_call_obj)},
