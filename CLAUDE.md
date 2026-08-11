@@ -164,14 +164,24 @@ only safe because the conformance goldens pin every pixel; §8.3 deliberately
 exempts audio from pixel conformance, so there is no golden to catch a drifting
 twin.
 
-`runtime/audio.py` remains a hand-maintained Python twin because the host sim is
-CPython and linking C would put a compiler in `make setup`. It is pinned
-**bit-for-bit** by `tests/test_audio_parity.py`, which compiles the vendored
-source (at CPython's float width) and diffs every sample; it also drives the
-NATIVE module under a desktop MicroPython build when one exists. Run
-`.venv/bin/python experiments/audio_parity/audio_parity.py -v` for the report.
-The data model (`SFX`/`MusicTrack`/`AudioBank`, `sounds.json`, the Music editor)
-is still ordinary shared Python and is not affected by any of this.
+**The Python twin synth is DEAD (moycore stage 0, 2026-08-11).** The host sim
+now binds the vendored C itself: `runtime/audio_binding.py` compiles the
+DOUBLE-WIDENED source (the parity harness's own recipe — the strict suite had
+proven the twin bit-identical to exactly that program, so the swap moved no
+sample) plus a small shim (`runtime/moyhost_audio.c`) into a hash-cached `.so`
+under `.build/host_audio/`; `make setup` pre-builds it, first use builds
+lazily. `AudioEngine` keeps its name/shape everywhere as the bank/MODEL
+holder (the device constructs it too); **no compiler / no native module means
+SILENCE, not a fallback synth** (owner call, KISS — `DeviceAudio`'s
+Python-engine lane is deleted). `tests/test_audio_parity.py` still gates: the
+strict pass now pins the BINDING bit-exactly against an independently-driven
+reference render (any difference is marshalling, never the synth), the
+device-precision pass still measures the double-vs-float gap, and it still
+drives the NATIVE module under a desktop MicroPython build when one exists.
+Run `.venv/bin/python experiments/audio_parity/audio_parity.py -v` for the
+report. The data model (`SFX`/`MusicTrack`/`AudioBank`, `sounds.json`, the
+Music editor) is still ordinary shared Python and is not affected by any of
+this.
 
 ## Common commands
 
@@ -471,8 +481,20 @@ to whoever called it.
   night — capi exports over the registered sheet + `set_map_src` tilemap,
   documented arities direct, odd forms/unregistered sources fall back;
   P4 conformance 10/10 with the provisional scenes at 3,388/15,000 direct
-  shape-draws and 0 fallbacks; `map()` deliberately NOT crossed — it owns the
-  Fold-2 cache); every OTHER verb still trampolines to the SAME Python
+  shape-draws and 0 fallbacks; the console's `map()` deliberately NOT
+  crossed — it owns the Fold-2 cache — but the **p8 SHIM's flag-masked map
+  went C the same night** (#66 M0, `87164a5`): `__moy_map_masked` +
+  `__moy_map_flags` in moy_lua walk the ctx-registered map cells and append
+  through the same batch protocol l_spr stamps (shared `batch_append_quad`),
+  the moy-spec shim probes them and keeps its Lua cell loop — 4.5ms of
+  celeste's S3 render, measured by difference — as the lupa/wasm fallback;
+  `rnd`/`flr` are pure-Lua prelude functions now, `time()` deliberately still
+  a trampoline. **The moycore stage-1 semantic PIN is
+  `tests/test_semantic_traces.py`**: one scripted trace (input edges + twin
+  carts) down both device cart paths under the unix dual-usermod build,
+  comparing canvas hashes + btn/btnp/pmem logs + audio order + pmem image —
+  run it (and `test_lua_draw_direct.py`) before crossing ANY further verb;
+  `docs/moycore_plan_2026-08.md` is the direction doc); every OTHER verb still trampolines to the SAME Python
   `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
   needs no wrapper), and layers/images stay Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
