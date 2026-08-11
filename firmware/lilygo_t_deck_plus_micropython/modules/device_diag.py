@@ -192,8 +192,15 @@ def _diag_luadraw(diag, ws):
     fallback count. This board's USB-CDC RX is dead under the desktop, so the
     serial TX diag is the ONLY on-glass proof the direct lane is live here;
     all-zero buckets while a Lua cart draws shapes means bind_draw declined
-    (or the cart is pure spr, like sakura's twin -- check DRAW2 batch first).
-    us accumulate only under perf capture (ST_PROF), same as the gates."""
+    (or the cart is pure spr, like sakura's twin -- check LUABATCH first).
+    us accumulate only under perf capture (ST_PROF), same as the gates.
+
+    LUABATCH is its C-batch-lane twin (#191 stage 1a): cflush/spr say the run
+    breaks + flushes happen in C (moy_gfx_capi_flush_batch, the P4's
+    batch_stats() liveness proof, now readable here too), upfall counts the
+    begin_batch upcall falls -- a foreign-token interleave, correct but slow.
+    A pure-spr cart fires LUABATCH with LUADRAW silent; both share one reset
+    (draw_stats_reset clears the batch counters too), so print before it."""
     if diag is None:
         return
     try:
@@ -201,11 +208,19 @@ def _diag_luadraw(diag, ws):
         st = moy_lua.draw_stats()
         if st is None:                     # build without the direct path
             return
+        bs = moy_lua.batch_stats()
+        fired = False
         if st[0] or st[1] or st[2] or st[6]:
             diag.log("LUADRAW", "fill=%d/%.2fms shape=%d/%.2fms "
                                 "text=%d/%.2fms fb=%d"
                      % (st[0], st[3] / 1000.0, st[1], st[4] / 1000.0,
                         st[2], st[5] / 1000.0, st[6]))
+            fired = True
+        if bs is not None and (bs[0] or bs[1] or bs[3]):
+            diag.log("LUABATCH", "cflush=%d spr=%d %.2fms upfall=%d"
+                     % (bs[0], bs[1], bs[2] / 1000.0, bs[3]))
+            fired = True
+        if fired:
             moy_lua.draw_stats_reset()
     except Exception:
         pass
