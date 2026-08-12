@@ -280,29 +280,50 @@ with hover state). Field-lift hover survives only as *preview-select*
 (§3.1), which repaints via Tier 0 because it IS a state change. §7 makes
 the constraint a design principle rather than a caveat.
 
-**MEASURED baseline (2026-08-04, wasm hover build, node harness on the dev
-machine — `hoverperf.mjs`; console half = `step_frame_json` incl. JSON,
-page half = the real replayer slice; the browser's `putImageData` floor,
-~1-2ms, is on top of both columns):**
+**MEASURED baseline — SUPERSEDED 2026-08-12, both columns.** The original
+(2026-08-04) measured the wasm RECORDING tier: a console half that
+serialized draw commands to JSON and a page half that replayed them. Moycore
+stage 4 deleted both — the wasm rasterizes and the page blits a framebuffer —
+so those numbers describe a machine that no longer exists and are struck
+rather than edited. They are kept here because the *argument* they support
+(what a hover flip costs, and therefore whether an overlay is worth it) is
+unchanged; only its arithmetic moved.
 
-| frame class | console | page replay | bytes/frame |
-|---|---|---|---|
-| desk, quiet | 0.09ms (gate closed) | — | 0 |
-| desk, painted (retained elision working) | 1.92ms | 1.01ms | **380 B** |
-| editor code tab, hover-flip class (full re-record) | 5.29ms | 2.66ms | 15.1 KB |
-| editor sprites, same | 3.58ms | 2.60ms | 9.9 KB |
-| editor map, same | 14.55ms (p95 22.0) | 3.18ms | **67.4 KB** |
+~~2026-08-04, recording tier: desk quiet 0.09ms / desk painted 1.92ms +
+1.01ms replay / 380 B; code tab 5.29ms + 2.66ms / 15.1 KB; sprites 3.58ms +
+2.66ms / 9.9 KB; map 14.55ms (p95 22.0) + 3.18ms / 67.4 KB.~~
 
-The map tab's console half splits ~6.4ms JSON serialization + ~8ms
-draw/record dispatch (MEASURED separately). The desk row is the overlay's
-existence proof: when retained elision holds, a painted frame costs ~2ms
-and ships hundreds of bytes. **PREDICTED, with the W1 gate:** a hover flip
-over the map tab under the overlay ≈ overlay record (~0.3ms) + the frozen
-walk (~2ms) + page replay (~3.2ms) ≈ **5–6ms end-to-end vs 18–25ms today**;
-the gate is a measured ≤8ms p95 on the map tab in the same harness, and a
-pixel-equality oracle (below). Falsified if the frozen-walk assumption
-breaks (e.g. hover moves force content re-records anyway) — then the
-overlay is wrong and hover ships Tier-0-only on the cheap surfaces.
+**MEASURED (2026-08-12, raster tier, same `hoverperf.mjs` on the same
+machine; console half = `step_frame_json`, i.e. the shell drawing the frame.
+The present is now a FIXED cost — one heap copy + one 565→RGBA pass, ~1.5ms
+at 1024×600 — independent of what changed, so there is no per-surface page
+column and no bytes/frame at all):**
+
+| frame class | console |
+|---|---|
+| desk, quiet | gate closed, no paint |
+| desk, forced-dirty (hover-flip class) | **0.37ms** mean (p50 0.25, p95 0.36) |
+| editor code tab, hover-flip class | **2.61ms** mean (p95 2.92) |
+| editor sprites, same | **1.00ms** mean (p95 0.94) |
+| editor map, same | **2.63ms** mean (p95 3.01) |
+
+The shape of the problem changed with the numbers: the map tab was the
+alarming row at 14.55ms with a p95 of 22.0 and 67.4 KB/frame, and it is now
+2.63ms with a p95 of 3.01 and no wire at all. What that row was mostly
+measuring was JSON serialization and command dispatch, not drawing.
+
+*(The old paragraph here attributed the map tab's 14.55ms to ~6.4ms of JSON
+serialization plus ~8ms of draw/record dispatch, and predicted that an
+overlay would take a map-tab hover flip from 18–25ms to 5–6ms end-to-end.
+Stage 4 collected most of that win by deleting the serialization outright:
+the same flip now measures 2.63ms with a p95 of 3.01.)*
+
+**The W1 gate is therefore RE-SCOPED, not met.** The overlay was justified
+by a cost that has largely evaporated on the wasm tier, so what remains to
+be shown is whether hover-flip repaint is expensive on the tiers that still
+pay for it — the S3 especially, where a full editor repaint is a real frame
+budget and no JSON was ever involved. Re-measure there before building the
+overlay; on the web the numbers no longer make the case.
 
 **The correctness oracle (A-B3).** Every overlay pilot ships with the
 un-hover equivalence test: hover a widget, un-hover it, assert the frame is
