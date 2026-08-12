@@ -1,6 +1,9 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v8 (2026-08-12 night) — RUNG 1 IS DONE: stage 4 SHIPPED and the
+**Status: v9 (2026-08-12 night) — the ladder RE-SEQUENCES on a finding
+(§6.0): libmoy already implements every remaining stage-1 verb in C, plus
+the loop entry points, so those crossings are ABSORBED into stage 2 rather
+than written twice. v8: RUNG 1 IS DONE — stage 4 SHIPPED and the
 3.2 streaming sunset is COMPLETE. The wasm head rasterizes with the boards'
 own kernel (`moy_gfx` + libmoy compiled in as a usermod, the system canvas
 IS `device_canvas.DeviceCanvas`), the page blits a framebuffer, and the
@@ -287,9 +290,9 @@ order, each rung deleting a parallel implementation:
 
 1. ~~**Stage 4** (wasm head re-rasters; gate closed) — deletes the recording
    stack, completes the §3.2 sunset.~~ **DONE 2026-08-12 (§6).**
-2. **Stage 1 completion** (cls, moy-cart map(), the camera/clip/pal
-   ownership flip, audio queue, odd-shape decision — each behind its trace
-   vocabulary extension) — deletes the trampolines and the state mirrors.
+2. **Stage 1 completion — RE-SCOPED (§6.0):** the verb crossings are
+   absorbed into stage 2 (libmoy already implements them); what remains is
+   the trace-vocabulary extension and the superset decision.
 3. **Stages 2–3** (`moycore.tick`, P4 then S3) — deletes `LuaCartRun`'s
    registry and the per-frame Python engine surface.
 4. **Host embeds moycore's VM** (§3.1's second half) — lupa dies, the
@@ -500,8 +503,67 @@ re-expressed through an `active_channels()` mask or retired to the parity
 scenarios. The CPython-embedding pattern the sim's moycore story needs is
 proven.
 
-**Stage 1 — C-only cart ABI.** Extend #189 until a celeste frame makes ONE
-Python round trip (the tick). The work, sized by the seam map: move the
+### 6.0 The re-sequencing (2026-08-12 night) — stage 1's remainder is stage 2
+
+**The finding.** `moy-spec/libmoy/src/moy_lua.c` (550 lines) is a complete
+Lua binding of the spec verb table: it registers **all 38 verbs** as C
+functions — including every one stage 1 has left (`cls`, `map`, `camera`,
+`clip`, `pal`, `palt`, `btn`, `btnp`, `pmem`, `time`, `sfx`, `music`,
+`mget`/`mset`, `touch`, `key`/`keyp`, `textmode`, `quit`, `cfg`, `rnd`,
+`flr`) — with the same argument shapes moybyte uses, because SPEC.md is
+where both got them (`l_map(mx,my,w,h,sx,sy,colorkey,scale)`,
+`l_spr(n,x,y,colorkey,scale,flip)`). Beside it, `moy.h` exports the loop:
+
+    int moy_lua_open  (lua_State *L, moy_console *con);
+    int moy_lua_init  (lua_State *L, char *err, size_t errlen);
+    int moy_lua_update(lua_State *L, float dt, char *err, size_t errlen);
+    int moy_lua_draw  (lua_State *L, char *err, size_t errlen);
+
+That is `moycore.tick`, already written, with the error text crossing as a
+buffer exactly as stage 2 wants it for crash-to-code. And it is host-agnostic
+by construction: `moy_console` is `{canvas, sheet, map, host, rng}`, the
+canvas's `pix` is **caller-owned** ("YOURS, never allocated here") with a
+`MOY_PIXEL_RGB565` mode and a `wire[]` table, so a `DeviceCanvas`'s existing
+framebuffer can BE the canvas with no copy; and `moy_host` is a callback
+table (`btn`/`btnp`/`time_ms`/`pmem_get`/`pmem_set`/`sfx`/`music`/`touch`/
+`key`/`textmode`/`quit`/`cfg`) whose NULL entries are defined as conforming
+no-ops. libmoy deliberately does not embed a VM — you hand it a `lua_State`,
+and moybyte already vendors Lua 5.4 under `native/moy_lua/lua/`.
+
+**Therefore the remaining stage-1 items are re-scoped, not dropped.**
+Crossing `cls`, `map`, the camera/clip/pal ownership flip, the input
+snapshot and the audio queue into moybyte's own `moy_lua` module would be
+writing a **second C implementation of code that already exists upstream**,
+and then deleting it at stage 2 — the exact duplication §3.5 exists to end,
+committed twice over. So they are absorbed: stage 2 acquires them by
+vendoring `moy_lua.c`, and stage 1 closes with what does NOT duplicate
+anything.
+
+**What stage 1 still owes, because stage 2 needs it either way:**
+1. **The trace-vocabulary extension** (§4.2's rule). The harness gates only
+   what its traces exercise, and stage 2 moves EVERY verb at once — so the
+   vocabulary has to cover cls/map/state/input/audio *before* the switch,
+   including the non-draw-lane liveness guards, or the biggest crossing in
+   the plan lands against the thinnest pin.
+2. **The odd-shape decision**, which the finding sharpens into its real
+   question: not "what about odd arities" but **what happens to moybyte's
+   SUPERSET** — `make_layer`/`draw_layer`/`image`, scenes/tables/texts,
+   `view()`, wifi, achievements. libmoy binds the spec; those are moybyte's.
+   They can be registered as extra C functions beside libmoy's table, or
+   left trampolining into Python for the rare ones. That is §9's
+   layers/images question, now load-bearing, and it decides at stage 2 with
+   a real cart census rather than in the abstract.
+
+**What this does NOT change:** the crossings already SHIPPED (1a's batch,
+1b's sspr/tline, #189's solid draw family) stay exactly as they are until
+stage 2 replaces the whole path — they are working, pinned and measured, and
+ripping them out early would buy nothing but risk. The `moy_gfx` C API they
+ride is also what the compositor uses, so it survives regardless.
+
+**Stage 1 — C-only cart ABI. RE-SCOPED by §6.0 above** (its remaining verb
+crossings are absorbed into stage 2; what it still owes is the trace
+vocabulary and the superset decision). Original scope, kept for the record:
+extend #189 until a celeste frame makes ONE Python round trip (the tick). The work, sized by the seam map: move the
 batch flush + sheet/atlas access C-side (the big one); export
 `blit_batch`/`blit_map`/`sspr`/`tline`/`cls` through `moy_gfx_capi` (kernels
 exist, Python-bound only); flip camera/clip/pal ownership; the input
