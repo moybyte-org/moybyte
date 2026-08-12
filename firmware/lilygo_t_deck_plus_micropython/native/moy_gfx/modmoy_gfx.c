@@ -747,15 +747,6 @@ static inline void moy_gfx_canvas_solid(moy_canvas *c, uint16_t *dst, mp_int_t d
     moy_gfx_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
 }
 
-static inline void moy_gfx_put(uint16_t *dst, mp_int_t dw, mp_int_t x, mp_int_t y,
-                              uint16_t col, mp_int_t cam_x, mp_int_t cam_y,
-                              mp_int_t cx0, mp_int_t cy0, mp_int_t cx1, mp_int_t cy1) {
-    x -= cam_x;
-    y -= cam_y;
-    if (x < cx0 || x >= cx1 || y < cy0 || y >= cy1) return;
-    dst[(size_t)y * (size_t)dw + (size_t)x] = col;
-}
-
 // fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
 // -- the #163 span batch WITHOUT a DrawCtx (#167).
 //

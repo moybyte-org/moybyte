@@ -224,12 +224,9 @@ fi
 #   moy_image.py  -- the moyimg codec + cover-thumb sidecars
 #   moy_journal.py -- the per-project undo/redo journal (#7 Stage 7)
 #   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
-#   web_view.py   -- shared web-view core (recorder + payloads + serve + constants);
-#                    moy_webserver imports it as a frozen top-level `web_view` (#41/#22)
-#   web_view_ws.py   -- the WS transport primitives (RFC 6455 handshake + framing),
-#                    extracted from web_view.py; web_view re-imports + re-exports them
-#   web_view_page.py -- the browser page (PAGE_HTML: <canvas> + JS replayer), extracted
-#                    from web_view.py; web_view re-imports + re-exports it
+#   web_view_ws.py -- the WS transport primitives (RFC 6455 handshake + framing)
+#                    moy_webserver's transport core rides; the rest of the old
+#                    web-view staging died in the 2026-08 streaming sunset
 #   moy_font.py   -- petme128 glyph blob (runtime/font.py) for the native
 #                    moy_gfx.text kernel (#62), so device text rasterizes from the
 #                    SAME bytes the host does (pixel parity)

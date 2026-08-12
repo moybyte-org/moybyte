@@ -12,24 +12,41 @@
 // ready (the push model the WebSocket transport uses). The page keeps only the most
 // recent frame, so a slow main thread drops stale frames instead of queueing them.
 //
+// SINCE MOYCORE STAGE 4 the worker ships PIXELS, not draw commands: the wasm
+// rasterizes into an RGB565 framebuffer (moy_gfx, the boards' own kernel) and
+// this loop hands the finished bytes to the page, which blits them. The page's
+// JS replayer, the wire protocol and the per-surface delta are gone.
+//
 // Protocol -- main -> worker:
 //   {t:"init", search}   boot the console; `search` is location.search (tier + cart)
 //   {t:"input", json}    an {"events":[...]} batch, applied before the next step
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"run"}            start stepping (the page's play-button gesture)
+//   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
 //   {t:"reload"}         dev hot-reload: re-read carts.json and restart the cart
 // worker -> main:
 //   {t:"status", s}      boot progress text
-//   {t:"assets", json}   the /assets payload (also re-sent after a reload)
-//   {t:"frame", s}       one frame_payload JSON string
+//   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
+//   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
 //   {t:"error", s}       fatal: the page shows it and stops
 import { loadMicroPython } from "./micropython.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
-let reseed = null;        // web_boot.request_keyframe -- the dropped-frame recovery
+let fbAddr = null, fbLen = null;
 let running = false, ahead = -1, inbox = [];
+// Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
+// plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
+// posts the buffer back once it has blitted, and we reuse it. Allocating a
+// fresh 1.2MB buffer 60 times a second instead would hand V8 a major GC to do
+// during play, which is exactly the class of hitch this build spent months
+// removing on the Python side.
+//
+// SharedArrayBuffer would avoid the copy entirely and is deliberately NOT used:
+// it requires COOP/COEP response headers, and dist/ must stay a folder of
+// static files anyone can host (GitHub Pages included).
+let fbPool = [];
 const FRAME_MS = 1000 / 60;
 // GC scheduling (the surface-model gate-0 finding): web_boot raises the GC
 // trigger from the port's 16KB (which made EVERY painted frame pay a full
@@ -128,16 +145,42 @@ async function init(search) {
         + (!desktop && names.length === 1 && cart
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
-        + "reload_cart, idle_collect, request_keyframe");
+        + "reload_cart, idle_collect, fb_addr, fb_len");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
     reload = mp.globals.get("reload_cart");
     idleCollect = mp.globals.get("idle_collect");
-    reseed = mp.globals.get("request_keyframe");
+    fbAddr = mp.globals.get("fb_addr");
+    fbLen = mp.globals.get("fb_len");
     self.postMessage({ t: "assets", json: assets() });
     wantAssets = false;      // the boot payload answers any pre-boot request
     say("live");
+}
+
+// Copy the finished framebuffer out of the wasm heap and transfer it to the
+// page. HEAPU8 is read FRESH every time on purpose: the port builds with
+// ALLOW_MEMORY_GROWTH, and a grown heap replaces the view, detaching any cached
+// one. A frame that only carries audio (the redraw was skipped) ships without
+// pixels and the page keeps what it has.
+function shipFrame(s) {
+    let fb = null;
+    try {
+        if (s.indexOf('"paint": 1') >= 0 || s.indexOf('"paint":1') >= 0) {
+            const heap = mp._module.HEAPU8;
+            const addr = fbAddr(), n = fbLen();
+            let out = fbPool.pop();
+            if (!out || out.byteLength !== n) out = new ArrayBuffer(n);
+            new Uint8Array(out).set(heap.subarray(addr, addr + n));
+            fb = out;
+        }
+    } catch (e) {
+        self.postMessage({ t: "error", s: "framebuffer export failed: " + e });
+        running = false;
+        return;
+    }
+    if (fb) self.postMessage({ t: "frame", s: s, fb: fb }, [fb]);
+    else self.postMessage({ t: "frame", s: s });
 }
 
 // Self-driven frame loop. setTimeout (not rAF -- workers have none) against a
@@ -193,7 +236,7 @@ function loop() {
         WP.n++; WP.sum += _d; if (_d > WP.max) { WP.max = _d; WP.maxB = s ? s.length : 0; }
         if (_d > 20) WP.slow++;
         if (s) { WP.painted++; WP.bytes += s.length; }
-        if (s) self.postMessage({ t: "frame", s: s });
+        if (s) shipFrame(s);
         // GC scheduling (see the constants above). A painted frame re-arms the
         // idle collect; the periodic guard fires regardless of quiet.
         framesSinceCollect++;
@@ -251,12 +294,11 @@ self.onmessage = async (ev) => {
             // alone (a wrong dt changes game SPEED, not frame rate).
             self.postMessage({ t: "clock", sim: simTime,
                 wall: wallFrom ? (performance.now() - wallFrom) / 1000 : 0 });
-        } else if (m.t === "resync") {
-            // The page dropped a frame (see page_tail's rAF loop). The #76 delta
-            // assumes lossless in-order delivery -- a lost frame strands every
-            // surface it carried, since later frames just say {"same":1}. Re-seed
-            // the client: one full frame, then delta-encoding resumes.
-            if (reseed) reseed();
+        } else if (m.t === "fbret") {
+            // The page finished with a framebuffer: keep it for reuse. Two is
+            // plenty (one in flight, one being filled); a deeper pool would just
+            // hold megabytes hostage.
+            if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
             const carts = await fetch("carts.json").then((r) => r.json());
             writeCarts(carts);

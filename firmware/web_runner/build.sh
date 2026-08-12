@@ -98,6 +98,29 @@ if [ "${STAGE_ONLY}" = "0" ]; then
   if ! grep -q '^JSFLAGS += -Os$' "${MK}"; then
     sed -i 's|^JSFLAGS += -s EXPORTED_FUNCTIONS="\\$|JSFLAGS += -Os\nJSFLAGS += -s EXPORTED_FUNCTIONS="\\|' "${MK}"
   fi
+  # A usermod cannot silence -Wunknown-pragmas by itself: py.mk folds
+  # CFLAGS_USERMOD into CFLAGS at its include (line ~32) and the port appends
+  # its own -Wall AFTER that (line ~48), which re-enables the warning -- and
+  # -Werror makes it fatal. moy_gfx's vendored kernels carry in-source
+  # `#pragma GCC optimize("O3")` pins that clang parses and ignores, so the
+  # suppression has to land here, after the -Wall. (moy_lua's own O2 pragmas
+  # survive only because -Wignored-pragma-optimize is on by DEFAULT rather than
+  # via -Wall, so its usermod-level -Wno- is not re-enabled.)
+  if ! grep -q 'moybyte usermod pragma suppressions' "${MK}"; then
+    sed -i 's|^CFLAGS += -Os -DNDEBUG$|# moybyte usermod pragma suppressions (see web_runner/build.sh)\nCFLAGS += -Wno-unknown-pragmas\n&|' "${MK}"
+  fi
+  # HEAPU8: how the finished FRAMEBUFFER leaves the VM (moycore stage 4). The
+  # worker reads the canvas buffer straight out of the wasm heap by address, so
+  # a painted frame costs one memcpy and no Python-side serialisation.
+  #
+  # It has to be PATCHED IN rather than passed as EXPORTED_RUNTIME_METHODS_EXTRA
+  # on the make command line: the port sets that variable itself with `+=`, and
+  # a command-line assignment overrides the makefile's entirely -- which silently
+  # unexported getValue/setValue/UTF8ToString and broke the VM's own JS wrapper
+  # at boot ("Module.getValue is not a function").
+  if ! grep -q 'HEAPU8' "${MK}"; then
+    sed -i 's|^EXPORTED_RUNTIME_METHODS_EXTRA += ,\\$|&\n\tHEAPU8,\\|' "${MK}"
+  fi
   "${PY}" - "${PORT_DIR}/library.js" <<'PYEOF'
 import sys
 p = sys.argv[1]
@@ -130,6 +153,21 @@ PYEOF
   cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_audio" \
         "${USERMODS_DIR}/moy_audio"
 
+  # moy_gfx usermod (moycore stage 4): the RASTER. The browser stopped being the
+  # GPU here -- the wasm draws its own pixels with the SAME kernel the boards
+  # run (modmoy_gfx.c + vendored libmoy at MOY_PIXEL_RGB565), and the page just
+  # blits the finished framebuffer. Its ESP-IDF halves (async memcpy, membench)
+  # are __has_include-guarded and simply compile out here, which is why this
+  # needs no wasm fork of the module -- the same source builds for three
+  # architectures plus the unix test build.
+  #
+  # Its stock micropython.mk (the unix twin of micropython.cmake) is used
+  # as-is -- no runner-specific fragment, unlike moy_lua. The one clang
+  # accommodation it needs is a warning suppression that has to outrank the
+  # port's -Wall, so it lives in the Makefile patch above, not here.
+  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_gfx" \
+        "${USERMODS_DIR}/moy_gfx"
+
 fi
 
 # ---------------------------------------------------------------------------
@@ -153,11 +191,18 @@ done
 # font.py stages as moy_font.py (the boards' name for it -- canvas.py's staged-tree
 # import path expects it).
 cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
-# The shared moy_lua cart-runtime glue (#67), staged from the T-Deck modules
-# tree like the P4 does -- canvas-agnostic, works over the CommandCanvas.
-cp "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/modules/moy_lua_glue.py" \
-   "${STAGE_DIR}/modules/moy_lua_glue.py"
+# Modules staged from the T-Deck tree (the single source both boards use):
+#   moy_lua_glue -- the shared Lua cart-runtime glue (#67), canvas-agnostic
+#   device_canvas -- THE RASTER (moycore stage 4). The browser runs the boards'
+#     own canvas class over web_canvas.WebCompositor; see web_canvas.py for why
+#     that works and what stays board-only.
+#   device_util   -- ticks helpers device_canvas imports
+for f in moy_lua_glue.py device_canvas.py device_util.py; do
+  cp "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/modules/${f}" \
+     "${STAGE_DIR}/modules/${f}"
+done
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
+cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
 
 
 # palette.py: runtime/palette.py builds its HSV ramp with CPython's colorsys, so
@@ -242,19 +287,14 @@ print("  %d modules, %.1f KB" % (len(mods), sum(len(v) for v in mods.values()) /
 PYEOF
 
 # ---------------------------------------------------------------------------
-# 4. The driver page: the shared replayer core (runtime/web_view_page.PAGE_CORE)
-#    + the wasm transport tail (page_tail.js) + the module-script loader.
+# 4. The driver page: page_core.html (present + input + audio) + page_tail.js
+#    (the worker transport + the module-script loader). Both are plain files in
+#    this directory now -- the page used to be generated from a Python string in
+#    runtime/, back when three transports shared it (moycore stage 4 note in
+#    page_core.html).
 # ---------------------------------------------------------------------------
 echo "== generating index.html"
-REPO_ROOT="${REPO_ROOT}" "${PY}" - "${SCRIPT_DIR}/page_tail.js" "${STAGE_DIR}/index.html" <<'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["REPO_ROOT"])
-from runtime.web_view_page import PAGE_CORE
-core = PAGE_CORE
-tail = open(sys.argv[1], encoding="utf-8").read()
-open(sys.argv[2], "w", encoding="utf-8").write(
-    core + tail + "\n</script></body></html>")
-PYEOF
+cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" > "${STAGE_DIR}/index.html"
 
 # ---------------------------------------------------------------------------
 # 5. The FROZEN build (skipped with --stage-only): freeze the staged console
@@ -266,7 +306,7 @@ if [ "${STAGE_ONLY}" = "0" ]; then
 # GENERATED by web_runner/build.sh -- freezes the staged console (see stage/).
 freeze("${STAGE_DIR}/modules", opt=3)
 EOF
-  echo "== building MicroPython webassembly (moybyte variant + moy_lua, frozen console)"
+  echo "== building MicroPython webassembly (moybyte variant + moy_lua/moy_audio/moy_gfx, frozen console)"
   # shellcheck disable=SC1091
   source "${EMSDK_DIR}/emsdk_env.sh" >/dev/null 2>&1
   make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)" >/dev/null

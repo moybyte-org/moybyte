@@ -117,9 +117,16 @@ static volatile uint32_t s_frames_out = 0;
 // whose output never reaches the DMA -- audibly fast playback that every
 // per-side counter calls correct.
 static volatile uint32_t s_frames_rendered = 0;   // by the core-1 task
-static volatile uint32_t s_frames_pyrender = 0;   // by mod_render (Python)
 
 #endif
+
+// The Python-side half of that seam, and it lives OUTSIDE the IDF guard because
+// mod_render is what the host, the unix test build and the wasm runner call --
+// they have no core-1 task, so this is the only frame counter they have. It was
+// declared inside the guard when the tempo hunt added it (2026-08-10), which
+// left every non-IDF build referencing an undeclared symbol: a compile error
+// nobody saw until the web runner was next rebuilt (moycore stage 4).
+static volatile uint32_t s_frames_pyrender = 0;   // by mod_render (Python)
 
 // The lock is a no-op until the core-1 task exists; in the fallback and host
 // builds the MP thread is the only accessor.

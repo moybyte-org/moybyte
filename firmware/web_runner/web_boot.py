@@ -1,27 +1,37 @@
-"""Moybyte web runner boot (#151): the SHARED console under MicroPython-WASM,
-browser-as-GPU.
+"""Moybyte web runner boot (#151): the SHARED console under MicroPython-WASM.
 
-This is the third console backend, and the thinnest one: the system canvas IS a
-`web_view.CommandCanvas` (the recording canvas the host web console swaps in),
-so the console never rasterizes a pixel -- each frame's draw-command list is
-handed straight to the page's JS replayer by a local call (no WebSocket, no
-72KB/s ceiling; the "Zero / browser is the GPU" thesis realized as a WASM
-target). The cart API is the shared pure-Python `host_api.make_api` -- the same
-backend the PC sim runs -- and input replays through the shared
-`web_view.apply_events` decode, so host == device == browser stays one code
-path.
+The wasm RASTERIZES (moycore stage 4). This used to be the thinnest backend --
+the system canvas was a `web_view.CommandCanvas` that recorded draw commands for
+a JS replayer in the page, so the console never touched a pixel ("the browser is
+the GPU"). That thesis is retired: the same `moy_gfx` + libmoy kernel the boards
+run is compiled into this build, the canvas is literally `device_canvas.
+DeviceCanvas` over `web_canvas.WebCompositor`, and the page's only job is to
+blit the finished RGB565 framebuffer. See web_canvas.py for why the boards'
+class runs unmodified in a browser.
 
-Scope: the FULL console, both presentation tiers (owner call, superseding #151's
-player-only runner) -- `can_manage=True`, so the Make tile and the editors are
-reachable in the browser. pmem/journal writes land in the browser's MEMFS, so
-they are ephemeral: a reload resets the machine.
+What that deleted, beyond the recorder itself: the whole /assets pixel payload.
+The page needed the palette, the font, the cart's sheet/tilemap/images and every
+shelf cover in order to replay commands -- shipped incrementally, memoised, and
+re-requested through an `imgWant` latch, all of which was the runner's most
+delicate machinery. None of those bytes cross any more; `assets_json` is now
+metadata (size, title, audio rate, input hint) and nothing else.
 
-JS contract (see the driver page / harness):
-    boot(carts_root, cart=None)   -> build the Workstation over the VFS store
-    assets_json()                 -> the /assets payload as a JSON string
-    step_frame_json(dt)           -> tick one frame; "" when the redraw was
-                                     skipped (#44 dirty gate), else the
-                                     frame_payload JSON string
+The cart API is the shared pure-Python `host_api.make_api` -- the same backend
+the PC sim runs -- and input replays through the shared `web_input.apply_events`
+decode, so host == device == browser stays one code path.
+
+Scope: the FULL console, both presentation tiers -- `can_manage=True`, so the
+Make tile and the editors are reachable in the browser. pmem/journal writes land
+in the browser's MEMFS, so they are ephemeral: a reload resets the machine.
+
+JS contract (see worker.js):
+    boot(carts_root, cart=None, ...) -> build the Workstation
+    assets_json()                 -> the page's metadata payload (JSON string)
+    step_frame_json(dt, ahead)    -> tick one frame; "" when the redraw was
+                                     skipped (#44 dirty gate), else a small
+                                     JSON string; the PIXELS travel separately
+    fb_addr() / fb_len()          -> the framebuffer's wasm-heap address and
+                                     byte length, read by the worker
     apply_events_json(text)       -> feed an {"events":[...]} JSON text batch
     open_cart(name)               -> select+run a cart by folder name or title
 """
@@ -31,15 +41,12 @@ import json
 import console
 import host_api
 import moy_carts
-import palette
-import web_view
+import web_canvas
+import web_input
 from input import InputState
 
-_S = {}          # the runner singletons: ws / canvas / driver / served / sink
+_S = {}          # the runner singletons: ws / canvas / driver / sink
 _AUDIO_RATE = [0]
-# [cache key, serialised payload, image names the page holds, full-payload key]
-# -- see assets_json() (the incremental-image path).
-_ASSETS = [None, None, None, None]
 
 
 # The page keeps ~this many seconds of PCM scheduled ahead of the audio clock.
@@ -181,9 +188,8 @@ def _make_audio(engine):
 
 class _PointerSink:
     """Adapts the ConsoleDriver's DEFERRED touch state to the Pointer-shaped
-    interface web_view.apply_events expects -- the same adapter the host web
-    console (_DriverPointerSink) and the device webview present, so all three
-    transports drive the ONE shared event-decode path."""
+    interface web_input.apply_events expects, so the browser drives the same
+    event-decode path every other transport does."""
 
     def __init__(self, driver):
         self._d = driver
@@ -211,27 +217,22 @@ class _PointerSink:
 
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
          windowed=False, font_scale=0, hud=True):
-    """Build the shared Workstation over the recording canvas + the VFS store.
+    """Build the shared Workstation over the RGB565 canvas + the VFS store.
     The page/harness wrote the cart bundle into `carts_root` before calling.
 
     `hud=False` suppresses the perf HUD -- see the note at the ws.show_fps
     assignment below for why a bundle would want that.
 
-    Two presentation TIERS out of one wasm binary (the page picks per tab):
-      windowed=False -- the HANDHELD tier. One recording canvas: the system
-        canvas IS the game canvas (the 320x240 degradation path the T-Deck
-        runs), so the wasm rasterizes nothing at all.
-      windowed=True  -- the DESKTOP tier (#73/#105). A distinct BIG system
-        canvas records the desk and its app windows as commands, while a real
-        320x240 rasterizer stays behind ws.canvas, because composite_game
-        reads that canvas's PIXELS for a cart running inside a desk window.
-        Boots onto the desk with project management on (Make tile + editors).
+    Two presentation TIERS out of one wasm binary (the page picks per tab), and
+    both are now the SAME arrangement their hardware twin uses:
+      windowed=False -- the HANDHELD tier, i.e. the T-Deck's: ONE canvas, the
+        system canvas IS the game canvas at 320x240, so composite_game is a
+        no-op and the cart owns every pixel.
+      windowed=True  -- the DESKTOP tier (#73/#105), i.e. the P4's: a big system
+        canvas for the desk and its app windows, plus a separate 320x240 game
+        canvas that `blit_game` composites into a window (integer-scaled through
+        the same C kernel). Boots onto the desk with project management on.
     """
-    # Layers record ONLY -- no rasterizing (see RecordingLayer.RECORD_ONLY). This
-    # target has no panel, so the tee's raster half painted pixels nothing ever
-    # read: ~90% of a windowed picker drag. Set BEFORE the Workstation is built,
-    # because _bind captures the mode when each layer is constructed.
-    web_view.RecordingLayer.RECORD_ONLY = True
     # GC POLICY (surface model Phase B, the gate-0 finding): the port hardcodes
     # gc_alloc_threshold to 16KB, so EVERY painted frame schedules a FULL
     # collect at the next JS->Python boundary -- measured on the desktop tier:
@@ -259,7 +260,6 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         # same way, for the same reason).
         width = max(320, int(width))
         height = max(240, int(height))
-    rec = web_view.CommandCanvas(width, height, palette=palette.MOY64)
     inp = InputState()
     if not font_scale:
         # 1x on BOTH tiers (owner call): at 1024x600 the 2x system font ate the
@@ -267,19 +267,31 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         # still pass an explicit scale.
         font_scale = 1
     if windowed:
-        # The game canvas RECORDS (web_view.ViewCanvas -> the same recorder as the
-        # system canvas) rather than rasterizing: the cart's commands ship and the
-        # WM places them with a ["view", ...] bracket (#175). A pure-Python
-        # rasterizer here cost ~85 ms/f and ~102 KB/f for one 320x240 frame.
-        ws = console.Workstation(
-            host_api._NullComp(), web_view.ViewCanvas(rec, 320, 240),
-            inp, carts, sys_canvas=rec, font_scale=font_scale)
+        # The P4's arrangement exactly: a big system canvas, a real 320x240 game
+        # canvas beside it, and blit_game compositing one into the other through
+        # the C kernel. The old recording tier could not do this -- it had no
+        # pixels to composite, so a cart's commands shipped with a ["view", ...]
+        # placement bracket (#175) for the page to honour, and a genuine
+        # rasterizer here was unaffordable at ~85ms/frame interpreted.
+        sysc = web_canvas.make_canvas(width, height, font_scale=font_scale)
+        game = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(320, 240))
+        ws = console.Workstation(host_api._NullComp(), game, inp, carts,
+                                 sys_canvas=sysc, font_scale=font_scale)
     else:
-        ws = console.Workstation(host_api._NullComp(), rec, inp, carts)
+        sysc = game = web_canvas.make_canvas(320, 240, font_scale=font_scale)
+        ws = console.Workstation(host_api._NullComp(), game, inp, carts)
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster (celeste's view(128, 120)) plays on its own off-screen canvas and
+    # blit_game upscales it, same as both boards.
+    ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
+        web_canvas.WebCompositor(int(w), int(h)))
     # Lua carts (#67): the SAME moy_lua native module + moy_lua_glue the boards
-    # run, third architecture. The CommandCanvas has no _batch_arr, so
-    # LuaCartRun's no-batch fallback registers the Python spr closure -- every
-    # sprite reaches the recorder (the deliberate slow lane, still correct).
+    # run, third architecture -- and since stage 4 the same FAST lane too. The
+    # old CommandCanvas had no `_batch_arr`, so LuaCartRun fell back to
+    # registering the Python spr closure and every sprite crossed into the
+    # recorder one call at a time; this canvas carries the batch array and the
+    # draw gates, so a Lua cart's sprites stamp in C and the whole libmoy-direct
+    # draw family (#189/#191) is live in the browser.
     # Guarded like the boards: a build without the usermod still boots (a lua
     # cart opens the runtime-missing panel).
     lua_runtime = None
@@ -296,7 +308,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws, moy_carts, carts_root, host_api.make_api,
         host_api.make_wifi(moy_carts, carts_root),
         make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
-        pointer=console.Pointer(rec.w, rec.h), inp=inp)
+        pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
     # and the editors are the point. Nothing persists across a reload (the VFS is
@@ -321,9 +333,8 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     ws.pointer.visible = False
     if windowed and ws._sys_canvas is not None:
         # Installed LAST so it anchors its root context -- and its per-window
-        # buffers, via root.new_layer -> RecordingLayer -- to the RECORDING
-        # canvas, exactly as tools/web_console.py --windowed does over the same
-        # CommandCanvas. Two worlds (#105): boot onto the desk.
+        # content buffers, via root.new_layer -- to the system canvas. Two
+        # worlds (#105): boot onto the desk.
         from wm_windowed import WindowedWM
         ws.wm = WindowedWM(ws)
         ws.open_desk()
@@ -347,13 +358,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
-    _S["canvas"] = rec
+    # The canvas the PAGE presents: the system canvas on the desktop tier, the
+    # one shared canvas on the handheld tier. Its buffer is what fb_addr()
+    # publishes, so this is the single place the two tiers differ downstream.
+    _S["canvas"] = sysc
     _S["driver"] = driver
-    _S["served"] = web_view.ServedState(rec._rec)
-    # Stage 9 per-surface slicing + the #76 delta. The runner has exactly ONE
-    # "client" (this page), so one WsClientState mirrors its SURF cache.
-    rec._rec.surfaces_on = True
-    _S["client"] = web_view.WsClientState()
     _S["sink"] = _PointerSink(driver)
     _S["root"] = carts_root
     _S["exit"] = ws._exit_to_caller     # the real exit (reload_cart uses it)
@@ -426,179 +435,107 @@ def _audio_rate():
 
 
 def assets_json():
-    """The static render assets (palette + font + the open cart's sheet/
-    tilemap/images + shelf covers), mirroring the host web console's assets().
-    Also arms the dirty gate so the next step records one full keyframe for the
-    (re)loaded page."""
+    """The page's METADATA -- no pixels.
+
+    This used to be the runner's heaviest and most delicate call: the page
+    replayed draw commands, so it needed the palette, the petme128 blob, the
+    open cart's sheet and tilemap, every paint image and every shelf cover,
+    base64'd into one payload. Serialising it cost 360-560ms (json.dumps over
+    ~644KB), which meant a memo keyed on a cover generation, an incremental
+    "ship only what this client lacks" diff, a re-request latch in the page for
+    images a draw referenced but the client did not hold, and a documented trap
+    where returning the previous payload on a memo miss shipped a stale input
+    hint. All of it existed to move pixels the wasm can now draw itself, and all
+    of it is deleted with the replayer.
+
+    What the page still cannot derive: how big the surface is, what the cart is
+    called, the audio rate its worklet resamples to, which on-screen controls to
+    show, and how this build orders the bytes of a 565 pixel (below).
+    """
     ws = _S["ws"]
-    _S["served"].reset()
-    ws._dirty = True
-    sheet = getattr(ws, "sheet", None)
-    tilemap = getattr(ws, "tilemap", None)
-    decoded = {}
-    raw = dict(getattr(ws, "images", None) or {})
-    # The WALLPAPER cart's images too (its draws ship as commands on this tier,
-    # so their imgrefs need the pictures). Open-cart names win on a collision:
-    # the running cart is what the kid is looking at.
-    _wc = getattr(ws.wallpaper, "cart_images", None)
-    if _wc is not None:
-        for _n, _b in (_wc() or {}).items():
-            raw.setdefault(_n, _b)
-    if raw:
-        for name in raw:
-            dec = host_api._decode_moyimg(raw[name])
-            if dec is not None:
-                decoded[name] = dec
-    pb = getattr(ws, "prebuild_covers", None)
-    if pb is not None:
-        pb()
-    decoded.update(ws.cover_assets())
-    kinds = web_view.effective_input_kinds(ws)
-    # MEMOISE THE SERIALISED PAYLOAD. Measured: cover_assets() 0ms (already cached),
-    # assets_payload() 7ms, json.dumps() 514ms -- serialising 644KB is the whole
-    # cost. The page re-requests assets whenever a draw references an image it
-    # lacks (imgWant), which is EVERY frame while a cover is still missing, so
-    # rebuilding each time froze the console for half a second at a time.
-    # `_cover_gen` is the console's own cover-change counter, so a genuinely new
-    # cover still rebuilds exactly once.
-    sheet_gen = getattr(sheet, "gen", 0)
-    tm_gen = getattr(tilemap, "gen", 0)
-    key = (getattr(ws, "_cover_gen", 0), _cart_title(), _S["canvas"].w,
-           _S["canvas"].h, len(decoded), id(sheet), sheet_gen,
-           id(tilemap), tm_gen, tuple(kinds or ()))
-    if _ASSETS[0] == key:
-        return _ASSETS[1]
-    # INCREMENTAL IMAGES. Covers are built LAZILY, so `decoded` grows one entry
-    # at a time and the memo key above misses once per new cover -- and each miss
-    # re-serialised the WHOLE image set. Measured in the worker: 360-560ms per
-    # rebuild (json.dumps over ~644KB is the entire cost; the payload build is
-    # ~7ms), which blocked the frame loop hard enough to drop the browser to
-    # recv 1-7fps while the page still rendered at 60 (owner console log,
-    # 2026-07-31). Only ship images this client does NOT have: the page MERGES a
-    # payload tagged "partial" and replaces on a full one.
-    #
-    # The shipped set survives a CART CHANGE (2026-07-31, second pass). Keying it
-    # on cart identity meant launching a game re-serialised every shelf cover as
-    # well as the new cart's art -- measured in the worker at 3.3s and 5.2s,
-    # which IS the owner's "games take a second or two to load and look frozen".
-    # Covers do not change when the cart does, so there is nothing to re-send.
-    # `_ASSETS[2]` therefore maps name -> (w, h, len(bytes)): a name re-used by a
-    # different cart (two carts both shipping "bg") differs in that stamp and is
-    # re-sent, so the page can never keep a stale picture under a live name.
-    shipped = _ASSETS[2]
-    partial = shipped is not None
-    if partial:
-        ship = {}
-        for name in decoded:
-            w_, h_, px_ = decoded[name]
-            if shipped.get(name) != (w_, h_, len(px_)):
-                ship[name] = decoded[name]
-        # NB: no early return when `ship` is empty. "No new images" is not "no
-        # change" -- we only get here on a memo MISS, so something in the key
-        # moved: the cart title, the palette, the sheet/tilemap, or the input
-        # hint. Returning the previous payload shipped those stale, and the input
-        # hint is user-visible: on a phone, playing a buttons-only cart, every
-        # asset re-fetch answered with the LAUNCHER's payload (input=null), which
-        # shows the ⌨ button; the next frame's hint hid it again -- a button
-        # blinking every couple of seconds (owner, 2026-07-31). Rebuilding with
-        # zero images is cheap: the images ARE the bytes (the 360-560ms this
-        # incremental path exists to avoid), the rest is a few KB.
-    else:
-        ship = decoded
-    payload = web_view.assets_payload(
-        _S["canvas"].w, _S["canvas"].h,
-        # the LIVE table, not the constant: a cart-supplied palette (spec 2.2)
-        # swapped in by Player.start must reach the page's index->RGB blit
-        getattr(_S["canvas"], "palette", None) or palette.MOY64, sheet, tilemap,
-        _cart_title(), _audio_rate(), ship or None, kinds)
-    if partial:
-        payload["partial"] = 1
-    out = json.dumps(payload)
-    _ASSETS[0] = key
-    _ASSETS[1] = out
-    # Stamp every image the page now holds -- the ones just sent PLUS the ones it
-    # already had (a partial payload does not un-send them).
-    stamped = dict(shipped or {})
-    for name in decoded:
-        w_, h_, px_ = decoded[name]
-        stamped[name] = (w_, h_, len(px_))
-    _ASSETS[2] = stamped
-    return out
+    ws._dirty = True                 # the reloaded page wants a full frame
+    cv = _S["canvas"]
+    return json.dumps({
+        "v": 3,
+        "w": cv.w, "h": cv.h,
+        "cart": _cart_title(),
+        "audio_rate": _audio_rate(),
+        "input": web_input.effective_input_kinds(ws),
+        # BYTE ORDER of the RGB565 framebuffer, reported rather than assumed.
+        # device_canvas picks its palette table from the PANEL it is talking to:
+        # canonical little-endian for the P4's DSI scan-out, byte-swapped for the
+        # T-Deck's SPI panel (which folds the swap into the LUT so the driver can
+        # skip a ~17ms/frame CPU pass). A browser has no panel, and this build
+        # takes whichever branch the probe lands on -- so the page builds its
+        # 565->RGBA table from this flag instead of guessing, and stays correct
+        # if the probe ever changes.
+        "swap": 0 if _wire_is_canonical() else 1,
+    })
+
+
+def _wire_is_canonical():
+    """True when the framebuffer holds little-endian RGB565."""
+    try:
+        import device_canvas
+        return device_canvas.PAL565_WIRE is device_canvas.PAL565
+    except Exception:  # noqa: BLE001 -- unknown -> assume canonical
+        return True
+
+
+def fb_addr():
+    """The presented framebuffer's address in the wasm heap.
+
+    The worker reads the finished frame straight out of `Module.HEAPU8` at this
+    offset, so a painted frame costs one memcpy on the JS side and nothing at
+    all on the Python side. Re-read every frame rather than cached: a resize
+    builds a new canvas, and MicroPython's own heap can move under us in ways
+    this module has no business tracking.
+    """
+    import uctypes
+    return uctypes.addressof(_S["canvas"]._buf)
+
+
+def fb_len():
+    """The framebuffer's length in BYTES (w * h * 2)."""
+    return len(_S["canvas"]._buf)
 
 
 def step_frame_json(dt, audio_ahead=-1.0):
-    """Advance the console one frame; return the frame_payload JSON, or ""
-    when the console skipped the redraw (#44 dirty gate: static screen) -- the
-    page then just retains its last frame. `audio_ahead` is the page's
-    scheduled-ahead audio depth in seconds (-1 = not reported): _RunnerAudio
-    tops the cushion back up to target each frame (the crackle fix, #170).
-"""
-    canvas = _S["canvas"]
-    canvas.take_commands()               # drop anything stale (defensive)
-    au = getattr(_S["ws"], "audio", None)
+    """Advance the console one frame.
+
+    Returns "" when the console skipped the redraw (#44 dirty gate: nothing
+    moved) and there is no audio to ship -- the page then simply keeps the
+    pixels it already has. Otherwise a small JSON string carrying what does not
+    live in the framebuffer: whether it painted, the cart title, the input hint,
+    and this frame's finished PCM. `audio_ahead` is the page's scheduled-ahead
+    audio depth in seconds (-1 = not reported): _RunnerAudio tops the cushion
+    back up to target each frame (the crackle fix, #170).
+
+    The PIXELS are not in here. The worker reads them from fb_addr()/fb_len()
+    when `paint` is set.
+    """
+    ws = _S["ws"]
+    au = getattr(ws, "audio", None)
     if au is not None and hasattr(au, "ahead"):
         au.ahead = float(audio_ahead)
+    painted_before = ws._frames_drawn
     _S["driver"].frame(dt)
-    flat = canvas.take_commands()
-    cart = _cart_title()
+    painted = ws._frames_drawn != painted_before
     # Drain the engine's FINISHED PCM (rendered by _RunnerAudio.tick during the
-    # frame) -- the page plays it via playPCM, like the host web console.
-    au = getattr(_S["ws"], "audio", None)
+    # frame) -- the page plays it through its AudioWorklet ring.
     pcm = au.take_pcm() if (au is not None and hasattr(au, "take_pcm")) else b""
     audio_b64 = ""
     if pcm and any(pcm):
         import binascii
         audio_b64 = binascii.b2a_base64(pcm).decode().strip()
-    if not flat:
-        if not audio_b64:
-            return ""
-        # Redraw skipped but sound still playing: ship an empty-cmds frame so
-        # the audio tail is never dropped on a static screen.
-        return json.dumps(web_view.frame_payload(
-            [], cart, canvas._rec.atlas_gen, audio=audio_b64,
-            input_kinds=web_view.effective_input_kinds(_S["ws"])))
-    gen = canvas._rec.atlas_gen
-    kinds = web_view.effective_input_kinds(_S["ws"])
-    # PER-WM-SURFACE + DELTA (Stage 9 / #76), the same path the host web console
-    # serves: slice the frame into one stream per WM surface and ship UNCHANGED
-    # ones as ~30-byte {"same":1} stubs the page replays from its SURF cache.
-    # This runner shipped flat frames -- every surface, every frame -- so a desk
-    # whose wallpaper and window chrome had not moved still re-encoded them.
-    # Two wins from one change: fewer bytes (what #76 needs for the device's
-    # ~72KB/s wire) and less garbage per frame, which is what actually drives the
-    # wasm's GC cost -- collections here are threshold-driven, so allocating less
-    # means sweeping less often. Bounded, unlike raising the threshold.
-    surfaces = canvas.take_surfaces()
-    if surfaces is not None:
-        _, surfs = _S["served"].served_surfaces(flat, surfaces)
-        delta = _S["client"].delta
-        enc = delta.encode(surfs, gen=gen)
-        if delta.need_keyframe:
-            # A skip stub had nothing client-side to replay (fresh cache, an
-            # atlas wipe): force the next frame to draw EVERY surface in full
-            # (§5.4 keyframe production) and keep the redraw gate open for it.
-            delta.need_keyframe = False
-            _S["ws"].mark_dirty()
-            _akf = getattr(_S["ws"].wm, "arm_surface_keyframe", None)
-            if _akf is not None:
-                _akf()
-        # Surface metadata (§6, protocol v2): placement + gens per entry, from
-        # the WM's surface registry. Additive -- a page that ignores them
-        # composites exactly as before (streams are still root-space).
-        ss = getattr(_S["ws"].wm, "surfaces", None)
-        if ss is not None:
-            for e in enc:
-                s = ss.surfaces.get(e.get("id"))
-                if s is not None:
-                    e["place"] = s.place()
-                    e["gen"] = ss.content_gen(s.sid)
-                    e["pgen"] = s.place_gen
-        return json.dumps(web_view.frame_payload(
-            [], cart, gen, audio=audio_b64, surfaces=enc,
-            input_kinds=kinds))
-    return json.dumps(web_view.frame_payload(
-        _S["served"].served_frame(flat), cart, gen, audio=audio_b64,
-        input_kinds=kinds))
+    if not painted and not audio_b64:
+        return ""
+    return json.dumps({
+        "paint": 1 if painted else 0,
+        "cart": _cart_title(),
+        "audio": audio_b64,
+        "input": web_input.effective_input_kinds(ws),
+    })
 
 
 def _apply(events):
@@ -612,36 +549,10 @@ def _apply(events):
                 _S["ws"]._exit_to_caller()
         else:
             rest.append(e)
-    web_view.apply_events(
+    web_input.apply_events(
         rest, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
-
-
-def request_keyframe():
-    """Re-seed this client from scratch: forget what it was told it has, and
-    draw the next frame in full (§5.4 keyframe production).
-
-    Called when the PAGE reports it dropped a frame. The #76 delta ships
-    {"same":1} for a surface the client already holds, which assumes every frame
-    reaches the page IN ORDER -- and the runner's transport does not guarantee
-    that: page_tail's rAF loop keeps only the newest frame, so a main thread that
-    misses a beat silently discards one. Lose the frame that carried a surface in
-    full and the page replays its stale cache for that id forever after, because
-    every later frame says "same" (owner report 2026-07-31: PLAY appeared to do
-    nothing, then a drag brought the Library up with the desktop still showing
-    around it -- the wallpaper surface was the one that never landed).
-
-    Cheap and idempotent: one full frame, then delta-encoding resumes."""
-    client = _S.get("client")
-    if client is None:
-        return ""
-    client.delta.reset()             # forget every cached stream (need_keyframe)
-    _S["ws"].mark_dirty()            # ... and keep the redraw gate open for it
-    _akf = getattr(_S["ws"].wm, "arm_surface_keyframe", None)
-    if _akf is not None:
-        _akf()                       # ... drawn in full, no skip-draw
-    return ""
 
 
 def idle_collect():
@@ -658,4 +569,4 @@ def idle_collect():
 def apply_events_json(text):
     """Feed a browser {"events":[...]} JSON text batch through the ONE shared
     decode path (the same wire format the WS transports speak)."""
-    web_view.apply_ws_text(text, _apply)
+    web_input.apply_ws_text(text, _apply)
