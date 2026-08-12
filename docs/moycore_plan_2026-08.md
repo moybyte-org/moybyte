@@ -1,9 +1,13 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v6 (2026-08-12) — the 3.2 die-now sunset wave SHIPPED, the stage-4
-wasm-raster spike REPORTED (gate closed: moy_gfx-in-wasm), and M0's verdicts
-stand. v5 (2026-08-11 night) was the graduation: stage 0 + the stage-1 pin
-shipped, the M0 cheap levers built, the design-doc treatment run.**
+**Status: v7 (2026-08-12 late) — the OWNER DIRECTIVE lands (§3.5): zero
+duplication, everything that can be moycore is moycore; stage 2 is GO on
+§4.2 grounds, the host raster joins the ladder, and §3.3's blocks call
+closes (Python carts stay — the one deliberate duplication). v6 (same day):
+the 3.2 die-now sunset wave SHIPPED, the stage-4 wasm-raster spike REPORTED
+(gate closed: moy_gfx-in-wasm), M0 fully closed on glass. v5 (2026-08-11
+night) was the graduation: stage 0 + the stage-1 pin shipped, the M0 cheap
+levers built, the design-doc treatment run.**
 v1 was the parking place for the 2026-08-11 discussion; v2 folded that
 discussion's grounded review (the issue-mirror check, the seam map of
 `moy_lua`/`moy_gfx_capi`/the glue) and the **owner decisions of 2026-08-11**
@@ -45,9 +49,13 @@ The end-state stack, across every head:
 - **Dead at end state:** `runtime/audio.py`'s synth twin, lupa, the entire
   draw-command recording/streaming stack (§3.2), the Lua trampoline/batch
   upcall/state-mirror seams, and the `LUA_32BITS` host-parity hole.
-- **Alive, deliberately:** `runtime/canvas.py` — the host shell rasterizes
-  through it, so it survives as the golden-gated shell/Python-cart raster.
-  Two raster implementations, both gated, is the end state — not one.
+- **Alive, deliberately:** the Python cart/shell verb surface (`make_api` +
+  the DeviceCanvas/compositor glue) — the ONE accepted duplication (§3.5),
+  pinned by the semantic traces. `runtime/canvas.py` survives only as the
+  compositor/extension layer: v6 and earlier said "two raster
+  implementations is the end state — not one"; the §3.5 directive REVERSED
+  that, and the host raster binds vendored libmoy (the stage-0 ctypes
+  pattern) with the conformance goldens re-pointed at the binding.
 
 ## 2. Document map (what this absorbs, supersedes, defers to)
 
@@ -195,12 +203,13 @@ because it IS the shell). For Lua carts, the per-frame Python surface
 converges to: poll input → `moycore.tick(dt)` → present.
 
 The permanent asymmetry this creates is named in §5 (the one discipline lane
-that remains, and its required pin). The hidden product call it surfaces:
-**blocks graduate to Python today** (the MakeCode model, #111). If the kid
-ladder ever re-targets blocks→Lua, Python-as-cart-language could sunset
-entirely and MicroPython becomes purely the GUI toolkit. That is a decision
-about what language kids meet at graduation — recorded here as an **explicit
-open product call, not a plan**; nothing in moycore depends on it either way.
+that remains, and its required pin). The product call this surfaced is
+**CLOSED (owner, 2026-08-12, with §3.5): blocks keep graduating to Python**
+(the MakeCode model, #111), so Python-as-cart-language stays and `make_api`
+is accepted as the ONE deliberate duplication in the zero-duplication end
+state — kept honest by the semantic-trace harness, not by discipline. (The
+blocks→Lua re-target remains describable if the graduation ladder is ever
+redesigned, but it is a declined option now, not an open call.)
 
 ### 3.4 Docked mode's session model is buried; the wasm head gets automated, commit-shaped sync
 
@@ -258,6 +267,40 @@ sequences including drop-and-reattach and a deliberate two-sided collision —
 asserting both stores converge and both journals stay replayable. It lands
 WITH the RPC, not after it. The sync track is independent of moycore's
 stages (§6) and proceeds on its own schedule.
+
+### 3.5 The zero-duplication directive (owner, 2026-08-12 late)
+
+"I don't want any duplication in moybyte — everything that can be moycore
+should be moycore." This resolves the queue question M0 left open: **stage
+2 is GO on §4.2 grounds alone** (the fps case is measured nil and that is
+fine — de-duplication is the point), and the ladder runs in this execution
+order, each rung deleting a parallel implementation:
+
+1. **Stage 4** (wasm head re-rasters; gate closed) — deletes the recording
+   stack, completes the §3.2 sunset.
+2. **Stage 1 completion** (cls, moy-cart map(), the camera/clip/pal
+   ownership flip, audio queue, odd-shape decision — each behind its trace
+   vocabulary extension) — deletes the trampolines and the state mirrors.
+3. **Stages 2–3** (`moycore.tick`, P4 then S3) — deletes `LuaCartRun`'s
+   registry and the per-frame Python engine surface.
+4. **Host embeds moycore's VM** (§3.1's second half) — lupa dies, the
+   `LUA_32BITS` parity hole closes.
+5. **Host raster binds libmoy** (NEW scope this directive adds; reverses
+   v6's "two rasters is the end state") — `runtime/canvas.py` shrinks to
+   the compositor/extension layer, conformance goldens re-point at the
+   binding.
+
+What remains after rung 5 is exactly one duplication, accepted by the same
+decision: Python carts' `make_api` verb surface (§3.3, blocks call closed).
+
+**Perf guardrails, so the directive can't quietly cost fps:** the boards
+build libmoy `MOY_PIXEL_RGB565` (the indexed-vs-565 A/B is settled and
+moycore does NOT reopen it — libmoy compiles per pixel format); the
+presentation layer (fold, PPA async overlap, bounce pump, per-board
+composite strategies) stays per-board and outside moycore (§7); the
+`lua_Alloc` SRAM-first policy and the -O2 pins carry over. Every crossing
+to date measured fps-null on the S3 and held the P4 cap; any rung that
+measures a regression stops the ladder at that rung until explained.
 
 ## 4. Why (two arguments, both audited)
 
@@ -426,8 +469,9 @@ wrapper slivers** — stage 1's remaining fps case is effectively nil, and
 gates can kill: no S3 number kills the *project* (both outcomes re-queue
 it); what a number kills is a CLAIM — (c) sharpened the fps claim, (a) then
 shrank it to its floor: **the whole engine-side prize is ~+2–3fps steady
-(low-30s) plus spikes 3–6× rarer but not gone.** Stage 2's go/no-go is now
-an owner call weighing that against §4.2's maintainability case.
+(low-30s) plus spikes 3–6× rarer but not gone.** ~~Stage 2's go/no-go is
+now an owner call~~ — the call was MADE the next evening (§3.5): GO, on
+§4.2 grounds alone, with the fps case honestly written off.
 
 **Stage 0 — host-embedded audio. SHIPPED (`ff69071`, 2026-08-11).** §3.1:
 bind vendored libmoy on the host, delete the synth twin. As built:
@@ -606,8 +650,9 @@ net, textmode/quit/view. That is exactly audio's shipped shape (thin
 - **Whether stage 1 alone captures most of the S3 win** — M0's attribution
   plus stage 1's measurement settle this before stage 2 is built (v1's
   question, now with the instrument named).
-- **Blocks→Lua someday** (§3.3): the recorded product call, no engine
-  dependency, no deadline.
+- ~~Blocks→Lua someday~~ **closed with §3.5** (§3.3): blocks keep
+  graduating to Python; Python carts stay as the one deliberate
+  duplication.
 
 ## 10. What would kill it
 
@@ -619,9 +664,9 @@ CLAIMS, and a killed claim reorders the queue.)
   straddled the gate (p50 exactly 30, floor broken by a GC collect) — the
   fps case narrowed to spike deletion. (a): the deletable share measured
   ~2–4ms against the predicted 4–8 — the fps case shrank to its floor
-  (~+2–3fps steady). Moycore's queue position is now an owner call: the
-  engine-side prize is small and precisely known, and §4.2 carries the
-  rest of the case.
+  (~+2–3fps steady). The queue call was made the next evening (§3.5):
+  moycore proceeds as the zero-duplication project, §4.2 carrying the
+  whole case.
 - **Stage 1 measured:** a zero-upcall celeste frame spending its ms in the
   same places → the MP engine slice was mis-attributed; same collapse.
 - **Stage 2 measured:** the (a) churn split already fired half of this
