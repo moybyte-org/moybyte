@@ -33,6 +33,23 @@ Python's double BY DESIGN -- that recorded gap must not fail the pin.
 
 Skipped unless the dual-usermod unix build exists (same build, same two
 commands as tests/test_lua_draw_direct.py's docstring).
+
+EXTENDED 2026-08-12 (before stage 2, per the plan's rule that a crossing
+extends the vocabulary FIRST): the twins now also exercise `cls()`'s default
+form, `map` with colorkey AND scale, `clip` clamped from both directions,
+`camera`'s RETURN value read back so the value SET is observed and not merely
+the value returned, `pal` with indices past 63 (masked) and a repeat of an
+earlier tint (which must reuse its palgen id rather than mint one), `palt`
+un-setting, and the 2-arg `pix` READ -- the one verb that observes canvas state
+as a value, and an odd form that falls back to the trampoline.
+
+Each was mutation-tested, and two of them failed that test first, which is the
+reason they are worth reading: a `camera(6,4)` -> `camera(6,5)` slip was
+invisible until something was drawn under the new camera and the value read
+back, and a `pix(5,5)` -> `pix(6,5)` slip was invisible until the sample
+straddled a drawn edge instead of sitting inside a flat region. A trace that
+observes a value which does not depend on the thing being tested passes for
+the wrong reason.
 """
 
 import shutil
@@ -135,6 +152,32 @@ def _draw():
     tline(0, 60, 95, 60, 0, 131072, 65536, 0)
     pix(f % W, 3, 7)
     print("f" + str(f), 2, 50, 7)
+    # --- forms the first vocabulary missed (moycore stage 2 moves ALL of these
+    # at once, so each one needs a trace before the switch, not after) --------
+    px, py = camera(6, 4)                  # the RETURN value: a tuple here,
+    rect(0, 0, 6, 6, 6)                    # two values in Lua. Drawn UNDER the
+    qx, qy = camera()                      # new camera, and read BACK, so the
+    trace(f, "cam", px, py, qx, qy)        # value set is observed, not just
+                                           # the value returned
+    clip(-8, -4, 200, 200)                 # the clamps, both directions
+    rect(0, 0, 12, 12, 6)
+    clip()
+    pal(70, 66)                            # > 63: masked, not out of range
+    rect(70, 40, 8, 8, 6)
+    pal(9, 3)                              # a tint seen before -> the palgen
+    rect(78, 40, 8, 8, 9)                  # id must be REUSED, not minted
+    pal()
+    palt(4, True)
+    palt(4, False)                         # un-setting, not just setting
+    spr(6, 2, 20, 4)
+    map(1, 1, 5, 4, 20, 30, 0, 2)          # colorkey AND scale
+    # The 2-arg READ: an odd form (it falls back to the trampoline) AND the
+    # only verb that observes canvas state as a value. Sampled ACROSS the edge
+    # of the rect drawn above -- reading two points of the same colour makes a
+    # coordinate slip invisible, which is exactly what a first draft did.
+    trace(f, "read", pix(11, 5), pix(12, 5), pix(5, 5))
+    if f == 3:
+        cls()                              # the default-argument form
 """
 
 LUA_CART = """\
@@ -206,6 +249,27 @@ function _draw()
   tline(0, 60, 95, 60, 0, 131072, 65536, 0)
   pix(f % W, 3, 7)
   print("f" .. f, 2, 50, 7)
+  -- forms the first vocabulary missed; see the Python twin
+  local px, py = camera(6, 4)
+  rect(0, 0, 6, 6, 6)
+  local qx, qy = camera()
+  trace(f, "cam", px, py, qx, qy)
+  clip(-8, -4, 200, 200)
+  rect(0, 0, 12, 12, 6)
+  clip()
+  pal(70, 66)
+  rect(70, 40, 8, 8, 6)
+  pal(9, 3)
+  rect(78, 40, 8, 8, 9)
+  pal()
+  palt(4, true)
+  palt(4, false)
+  spr(6, 2, 20, 4)
+  map(1, 1, 5, 4, 20, 30, 0, 2)
+  trace(f, "read", pix(11, 5), pix(12, 5), pix(5, 5))
+  if f == 3 then
+    cls()
+  end
 end
 """
 
