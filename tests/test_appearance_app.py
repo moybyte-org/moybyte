@@ -221,21 +221,6 @@ def test_small_tier_stays_narrow_with_compact_theme_mock(tmp_path):
     assert th["edge"] in row or th.get("desktop", th["panel"]) in row
 
 
-def test_preview_records_on_a_bufferless_canvas(tmp_path):
-    """The web fullscreen tier draws through a record-only canvas (no .buf).
-    The monitor screen must land there as ONE self-contained img/spr command --
-    the blank-screen-on-the-phone regression: the old path needed a readable
-    framebuffer, which CommandCanvas doesn't have."""
-    from runtime import web_view
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws.select_wallpaper("moy_night", persist=False)
-    rec = web_view.CommandCanvas(320, 240)
-    ws.wallpaper.draw_preview(rec, (10, 10, 152, 114), 1 / 30)
-    cmds = rec.take_commands()
-    imgs = [c for c in cmds if c and c[0] in ("img", "imgref", "spr")]
-    assert imgs, "the cart frame must record as an image command"
-
-
 def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
     """The preview compiles the cart onto an OFFSCREEN canvas -- a running
     game's frame on ws.canvas must survive a monitor redraw untouched."""

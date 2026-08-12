@@ -287,9 +287,10 @@ cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
 cp "${REPO_ROOT}/runtime/op_history.py" "${SCRIPT_DIR}/modules/op_history.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
 # web_view_ws.py only: the RFC 6455 framing moy_webserver's transport core
-# rides. web_view.py + web_view_page.py (the recording/replayer stack) stopped
-# being staged in the 2026-08 streaming sunset -- they are wasm-head substrate
-# now (moycore plan 3.2), and freezing them here was dead flash.
+# rides. It is all that is left of the old web-view staging -- the recorder and
+# the page went to the wasm head in the 2026-08 streaming sunset and were
+# DELETED outright at moycore stage 4, when that head started rasterizing and
+# stopped needing a replayer to ship pixels to.
 cp "${REPO_ROOT}/runtime/web_view_ws.py" "${SCRIPT_DIR}/modules/web_view_ws.py"
 cp "${REPO_ROOT}/runtime/font.py" "${SCRIPT_DIR}/modules/moy_font.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of

@@ -1,13 +1,20 @@
-"""The 2026-08 streaming sunset's absence pins (moycore plan 3.2, 5).
+"""The 2026-08 streaming sunset's absence pins (moycore plan 3.2, 5, 6).
 
-The die-now wave deleted the device web view (TeeCanvas + the frame push +
-device_webview.py), the host web console (tools/web_console.py), the Settings
-WEB VIEW surface, and the decline-the-Tee guards. The plan's lane ledger pins
-each deletion with a grep-test so a revert or cargo-cult reintroduction fails
-loudly instead of resurrecting a seam the architecture buried. What SURVIVES
-by decision: moy_webserver's transport core (the 3.4 sync RPC rides it), and
-the recording stack (CommandCanvas/DrawRecorder/RecordingLayer/SurfaceDelta/
-WsClientState/the page) as the WASM HEAD's substrate until stage 4.
+Both waves are now in. The DIE-NOW wave deleted the device web view (TeeCanvas
++ the frame push + device_webview.py), the host web console
+(tools/web_console.py), the Settings WEB VIEW surface, and the decline-the-Tee
+guards. STAGE 4 finished the job: the wasm head rasterizes with the boards' own
+kernel, so the recording stack it had been keeping alive -- CommandCanvas,
+DrawRecorder, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the
+wire protocol and the page's JS replayer -- is deleted outright, along with
+runtime/web_view.py and runtime/web_view_page.py themselves.
+
+The plan's lane ledger pins each deletion with a grep-test so a revert or
+cargo-cult reintroduction fails loudly instead of resurrecting a seam the
+architecture buried. What SURVIVES by decision: moy_webserver's transport core
+and the web_view_ws framing leaf (the 3.4 sync RPC rides both), and
+runtime/web_input.py -- the browser event decode, which is transport-shaped
+rather than raster-shaped and which that same RPC speaks.
 """
 
 import os
@@ -21,15 +28,47 @@ def _read(*rel):
         return f.read()
 
 
-def test_tee_canvas_is_gone_from_the_shared_module():
-    src = _read("runtime", "web_view.py")
-    assert "class TeeCanvas" not in src
-    # ...while the wasm head's substrate survives until stage 4.
-    assert "class CommandCanvas" in src
-    assert "class DrawRecorder" in src
-    assert "class RecordingLayer" in src
-    assert "class SurfaceDelta" in src
-    assert "class WsClientState" in src
+def test_the_recording_stack_is_gone_with_its_modules():
+    """Stage 4: the wasm head re-rasters, so the last consumer of the recorder
+    died and both modules went with it."""
+    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view.py"))
+    assert not os.path.exists(os.path.join(ROOT, "runtime", "web_view_page.py"))
+    assert not os.path.exists(os.path.join(ROOT, "tests", "webharness.py"))
+    # The classes must not reappear anywhere in the shared console either.
+    names = ("class TeeCanvas", "class CommandCanvas", "class DrawRecorder",
+             "class RecordingLayer", "class ServedState", "class SurfaceDelta",
+             "class WsClientState")
+    rt = os.path.join(ROOT, "runtime")
+    for fn in sorted(os.listdir(rt)):
+        if not fn.endswith(".py"):
+            continue
+        src = _read("runtime", fn)
+        for n in names:
+            assert n not in src, "%s reappeared in runtime/%s" % (n, fn)
+
+
+def test_the_input_decode_survives_on_its_own():
+    """The one piece of the old web_view that is NOT raster: browser events ->
+    console input, which the 3.4 sync RPC speaks too."""
+    src = _read("runtime", "web_input.py")
+    assert "def apply_events" in src
+    assert "def apply_ws_text" in src
+    assert "def effective_input_kinds" in src
+    assert "BUTTON_NAMES" in src
+
+
+def test_the_wasm_head_rasterizes_with_the_boards_kernel():
+    """Stage 4's positive claim: the browser draws its own pixels, with the
+    same module and the same canvas class the device runs -- not a third
+    raster written for the web."""
+    build = _read("firmware", "web_runner", "build.sh")
+    assert "native/moy_gfx" in build           # the kernel is compiled in
+    assert "device_canvas.py" in build         # ...and the boards' canvas staged
+    canvas = _read("firmware", "web_runner", "web_canvas.py")
+    assert "from device_canvas import DeviceCanvas" in canvas
+    boot = _read("firmware", "web_runner", "web_boot.py")
+    assert "web_canvas.make_canvas" in boot
+    assert "def fb_addr" in boot               # pixels leave by address, not JSON
 
 
 def test_host_web_console_is_gone():

@@ -180,26 +180,14 @@ def test_console_settings_has_firmware_update_screen():
 
 
 def test_web_stack_split_after_the_streaming_sunset():
-    # The 2026-08 streaming sunset (moycore plan 3.2): the SHARED web_view keeps
-    # the wasm head's recording substrate (until stage 4); the DEVICE transport
-    # is a bare socket/HTTP/WS core with no recorder coupling (the 3.4 sync RPC
-    # rides it). Absence pins live in test_streaming_sunset.py; this greps the
-    # PRESENCE side. Executable behaviour: test_moy_webserver.py (transport) +
-    # test_web_recording.py (recording stack).
-    wv = (Path("runtime") / "web_view.py").read_text(encoding="utf-8")
+    # The 2026-08 streaming sunset (moycore plan 3.2) and its completion at
+    # stage 4: the recording stack is GONE (absence pins in
+    # test_streaming_sunset.py); what survives on the device side is a bare
+    # socket/HTTP/WS transport core with no recorder coupling, which the 3.4
+    # sync RPC rides. This greps the PRESENCE side. Executable behaviour:
+    # test_moy_webserver.py.
     wv_ws = (Path("runtime") / "web_view_ws.py").read_text(encoding="utf-8")
     web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
-
-    # -- the SHARED core (web_view): the wasm head's substrate --
-    assert "class DrawRecorder" in wv           # per-frame draw-command recorder
-    assert "class CommandCanvas" in wv          # the record-only system canvas
-    assert "class ServedState" in wv            # serve-time ship-once bookkeeping
-    assert "class RecordingLayer" in wv         # the recorded off-screen layer
-    assert "class SurfaceDelta" in wv           # #76 per-surface delta (web_boot)
-    assert "class WsClientState" in wv          # per-session keyframe latch
-    assert "def assets_payload" in wv and "def frame_payload" in wv
-    assert "def apply_events" in wv             # browser events -> InputState/Pointer
-    assert "from web_view_ws import" in wv      # re-imports the ws primitives
 
     # -- the WS primitives leaf (web_view_ws): what the transport rides --
     assert "def ws_accept_key" in wv_ws and "def ws_handshake_response" in wv_ws

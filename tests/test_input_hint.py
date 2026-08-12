@@ -8,11 +8,11 @@ Two concrete deliverables, per the issue's Thread 3 (docs/issues/open/0042-...):
       absent/invalid -> None, and every consumer treats None as "show
       everything" -- zero regression for a cart that never declares it.
       Threaded end-to-end: manifest.json -> moy_carts.load()/seed_builtins() ->
-      tools/gen_device_carts.py (the device seed generator) -> the shared
-      web_view.assets_payload() -> the browser page's applyInputHint().
+      tools/gen_device_carts.py (the device seed generator) ->
+      web_input.effective_input_kinds() -> the runner page's applyInputHint().
 
   (b) ONE shared source<->cart-API mapping every input consumer reads
-      (runtime.web_view.BUTTON_NAMES + apply_events). The two streaming
+      (runtime.web_input.BUTTON_NAMES + apply_events). The two streaming
       transports that used to consult it (tools/web_console.py + the device
       web view) died in the 2026-08 streaming sunset; the surviving consumer
       is the wasm head's worker input pump (web_boot), and the table/decoder
@@ -23,7 +23,7 @@ import json
 import os
 
 from runtime import moy_carts
-from runtime import web_view
+from runtime import web_input
 
 
 SYSTEM_CARTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -120,27 +120,17 @@ def test_seed_system_carts_have_a_bumped_version_and_declared_kinds_match_their_
 
 
 # ---------------------------------------------------------------------------
-# (a) end-to-end: the shared assets_payload carries the hint to both surfaces
-# ---------------------------------------------------------------------------
-
-
-def test_assets_payload_input_field_defaults_to_none_and_round_trips():
-    a = web_view.assets_payload(320, 240, [[0, 0, 0]] * 64, None, None, None)
-    assert a["input"] is None
-    b = web_view.assets_payload(320, 240, [[0, 0, 0]] * 64, None, None, "T",
-                                input_kinds=("touch",))
-    assert b["input"] == ["touch"]
-    import json as _json
-    _json.dumps(b)                              # must stay wire-serializable
-
-
-# ---------------------------------------------------------------------------
 # (a) the browser page gates its virtual controls on the hint
 # ---------------------------------------------------------------------------
 
 
 def test_page_gates_virtual_gamepad_and_soft_keyboard_on_the_input_hint():
-    text = web_view.PAGE_HTML
+    # The page is a plain file in the build that ships it since moycore stage 4
+    # (it was generated from a Python string back when three transports shared
+    # it, and the last two of those are gone).
+    text = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "firmware", "web_runner", "page_core.html"),
+                encoding="utf-8").read()
     assert "INPUT=a.input||null" in text
     assert "function applyInputHint()" in text
     assert 'INPUT.indexOf("buttons")>=0' in text
@@ -170,16 +160,16 @@ def test_apply_events_gates_unknown_button_names():
         pass
 
     inp, ptr = Input(), Pointer()
-    web_view.apply_events([{"type": "hold", "name": "nonsense", "down": True}],
+    web_input.apply_events([{"type": "hold", "name": "nonsense", "down": True}],
                           inp, ptr)
     assert "nonsense" not in held
-    web_view.apply_events([{"type": "hold", "name": "left", "down": True}],
+    web_input.apply_events([{"type": "hold", "name": "left", "down": True}],
                           inp, ptr)
     assert held.get("left") is True
 
 
 def test_button_names_pinned_to_the_shared_table():
-    """Pin the ONE table every input consumer reads (runtime.web_view
+    """Pin the ONE table every input consumer reads (runtime.web_input
     .BUTTON_NAMES) -- the launcher-nav + gameplay logical names."""
-    assert set(web_view.BUTTON_NAMES) == {"left", "right", "up", "down", "a", "b",
+    assert set(web_input.BUTTON_NAMES) == {"left", "right", "up", "down", "a", "b",
                                           "run", "home"}

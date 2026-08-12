@@ -273,44 +273,37 @@ def test_build_workstation_clamps_too_small_size(tmp_path):
     assert ws.sys_canvas.w >= 320 and ws.sys_canvas.h >= 240
 
 
-def test_web_console_font_scale_change_does_not_crash(tmp_path):
-    """Changing the font size on the web console (whose system canvas is a recording
-    CommandCanvas) must not raise -- the recorder honours set_font_scale and records
-    scaled text as rect blocks the replayer already understands."""
-    from tests.webharness import WebHarness as WebConsole
-    from runtime.web_view import replay_to_canvas
-    from runtime.canvas import Canvas
-    wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
-    wc.ws.open_settings()
-    wc.ws.cycle_font_scale(1)                              # 1x -> 2x (was the crash)
-    assert wc.ws.font_scale == 2
-    assert wc.canvas.font_scale == 2
-    cmds, _, _ = wc.step_frame()
-    cv = Canvas(640, 480)
-    replay_to_canvas(cmds, cv)                             # scaled text replays cleanly
-    assert len(set(cv.buf)) > 4
+def test_font_scale_change_on_a_big_system_canvas_does_not_crash(tmp_path):
+    """Changing the system font size on a large system canvas must not raise.
+
+    This began as a web-console test (its recording canvas was the only way to
+    get a 640x480 system surface in a test) and was rewritten onto the raster
+    path at moycore stage 4, when that transport was deleted -- the crash it
+    pins is in the shell's relayout, not in any transport."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
+    ws.open_settings()
+    ws.cycle_font_scale(1)                                 # 1x -> 2x (was the crash)
+    assert ws.font_scale == 2
+    assert ws.sys_canvas.font_scale == 2
+    ws.frame(1 / 60.0)                                     # and it still draws
+    assert len(set(ws.sys_canvas.buf)) > 4
 
 
-def test_web_console_larger_canvas_streams_and_replays(tmp_path):
-    """The web console (#22) honours a larger SYSTEM canvas (#39): /assets reports
-    the bigger size, the launcher command stream replays to valid pixels, and a
-    running cart composites into the stream as a single spr viewport command."""
-    from tests.webharness import WebHarness as WebConsole
-    from runtime.web_view import replay_to_canvas
-    from runtime.canvas import Canvas
-    wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
-    assert wc.assets()["w"] == 640 and wc.assets()["h"] == 480
-    cmds, _, _ = wc.step_frame()                       # the launcher (reflowed)
-    cv = Canvas(640, 480)
-    replay_to_canvas(cmds, cv)
-    assert len(set(cv.buf)) > 4                      # the desktop replayed
-    wc.ws.launcher.sel = 0
-    wc.ws.open()
-    cmds, _, _ = wc.step_frame()                       # a running cart
-    assert "spr" in [c[0] for c in cmds]            # the game viewport blit command
-    cv2 = Canvas(640, 480)
-    replay_to_canvas(cmds, cv2)
-    assert len(set(cv2.buf)) > 4
+def test_a_larger_system_canvas_draws_and_composites_a_cart(tmp_path):
+    """A bigger SYSTEM canvas (#39) reflows the shell and still composites the
+    fixed 320x240 game canvas into itself."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
+    assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
+    ws.frame(1 / 60.0)
+    assert len(set(ws.sys_canvas.buf)) > 4                 # the shell drew
+    ws.launcher.sel = 0
+    ws.open()
+    for _ in range(3):
+        ws.frame(1 / 60.0)
+    assert (ws.canvas.w, ws.canvas.h) == (320, 240)        # the cart's own surface
+    assert len(set(ws.sys_canvas.buf)) > 4                 # composited in
 
 
 def test_carts_api_unchanged_game_canvas_stays_320x240(tmp_path):

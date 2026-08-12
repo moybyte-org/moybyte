@@ -18,11 +18,13 @@ SHARED="$HERE/../lilygo_t_deck_plus_micropython/modules"
 REPO="$(cd "$HERE/../.." && pwd)"
 MPREMOTE="${MPREMOTE:-$REPO/.venv/bin/python -m mpremote}"
 
-# Shared, pure-Python modules (byte-identical to what the T-Deck freezes). moy_runtime imports
-# cleanly on stock MicroPython -- its native moy_gfx/compositor use is lazy + fallback-guarded,
-# never reached on the headless Zero. blocks.py is required (console imports it).
-SHARED_MODS="web_view.py moy_webserver.py console.py editors.py blocks.py moy_carts.py audio.py carts_data.py moy_runtime.py"
-ZERO_MODS="zero_net.py moy_zero.py main.py"
+# STALE SINCE THE RE-BASING (2026-08-12, see README): this staged the streaming
+# backend, whose recorder was deleted in the 2026-08 sunset and whose remaining
+# modules went with the wasm head at moycore stage 4. moy_zero.py is gone; what
+# this script pushes is rebuilt when the Zero returns as the sync-store +
+# GPIO companion the owner call re-scoped it to (plan 3.4).
+SHARED_MODS="moy_webserver.py console.py editors.py blocks.py moy_carts.py audio.py carts_data.py moy_runtime.py"
+ZERO_MODS="zero_net.py main.py"
 
 echo "staging MoyByte Zero -> $PORT"
 args=()
