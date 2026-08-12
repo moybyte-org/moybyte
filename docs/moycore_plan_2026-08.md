@@ -1,6 +1,9 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v11 (2026-08-13) — THE LADDER IS WALKED, ALL FIVE RUNGS. Stage
+**Status: v12 (2026-08-13) — THE LADDER IS WALKED, ALL FIVE RUNGS, AND
+§9'S LAST OPEN QUESTION IS CLOSED** (layers/images stay Python-side, on a
+cart census: one cart, one blit per frame, against the cost of a second
+console in C). Stage
 3's code landed too: the S3 stages moycore, injects the same per-cart
 chooser, and links `usermod_moycore` into a full flash image, with the
 allocator moved to internal-SRAM-first because the all-PSRAM version is a
@@ -886,12 +889,51 @@ net, textmode/quit/view. That is exactly audio's shipped shape (thin
 - **`docs/ui_damage_model_v1.md` / `visual_identity_v1.md` / `shell_ux_v1.md`:**
   untouched; the why-not-LVGL record and the UX spec are not in play.
 
-## 9. Open questions (pruned — v1 had five, three are now decided)
+## 9. Open questions (pruned — v1 had five; the LADDER's are all closed)
 
-- **Layers/images from Lua carts** (`make_layer`/`draw_layer`/`image` via the
-  handle glue): C layers inside moycore (they are index buffers +
-  window-copy — libmoy-shaped) vs a compat shim that keeps them Python-side
-  with per-layer crossings. Decide at stage 1 with the trace harness in hand.
+*Scope note, 2026-08-13: nothing below gates the §3.5 ladder any more. The
+layers/images call was its last one and is decided just below. What survives
+belongs to the **§3.4 sync RPC**, which this plan already scopes as its own
+track, independent of the moycore stages — plus one measurement that wants S3
+glass and is therefore waiting on the same flash stage 3 is.*
+
+- ~~**Layers/images from Lua carts**~~ **DECIDED 2026-08-13: the compat
+  shim. They stay Python-side.** The plan asked for this call to be made
+  "with the trace harness in hand", and the evidence is a census rather
+  than a preference:
+
+  * **Pressure is one cart.** Across every Lua cart in the tree
+    (`bench_lua`, `brick_siege_lua`, `ray_lua`, `sakura_lua`, celeste),
+    exactly ONE calls `make_layer`/`draw_layer`/`image` — `sakura_lua`,
+    which exists as the line-faithful A/B twin of the Python cart. The
+    other superset users are `view()` (a flag, two carts) and
+    `background()`.
+  * **The shape is per-FRAME, not per-sprite.** A layer costs one
+    allocation at `_init` and one window-copy per frame. The crossings
+    moycore deletes are the per-sprite and per-primitive ones, hundreds
+    per frame; a `draw_layer` upcall is one. So the thing C layers would
+    buy is the smallest crossing on the board.
+  * **The cost is a second console.** moybyte's layers are not just index
+    buffers: each is a full canvas with the whole verb table bound to it
+    (`_Layer._VERBS`). Implementing them inside moycore means a second
+    console in C — which trades the duplication this project deletes for
+    a smaller one, in service of one cart.
+
+  **So: a cart using the superset runs on the trampoline registry, and the
+  split is a source gate** (`moycore_glue.supports()` on the boards,
+  `lua_host.moycore_supports()` on the host — hand scans, deliberately,
+  after a regex version raised on MicroPython and made moycore unreachable
+  on glass while looking healthy).
+
+  **Consequences, stated so they are not read as loose ends:** lupa stays
+  in `[dev,sim]` as the host's superset runtime, and `spr(Image)` stays on
+  the Python raster for the same reason. Both are now deliberate, not
+  pending.
+
+  **What would reopen it** (the falsifiable form): a Lua cart that makes
+  layers per-frame-HOT — `draw_layer` inside a sprite loop, or many layers
+  composited per frame — would move this from one upcall to many, and the
+  measurement, not the design, should decide it then.
 - **The screenshot verb** on the sync RPC (§3.2's partial mirror
   successor): worth its ~page of code, or does the capture job just die?
 - **Sync mechanics** (§3.4): the browser-local store substrate (OPFS vs
