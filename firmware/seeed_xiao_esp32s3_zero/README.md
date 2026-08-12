@@ -1,12 +1,15 @@
 # MoyByte Zero — Seeed XIAO ESP32-S3 port
 
-> **ORPHANED (2026-08-12).** The streaming web view this port stands on —
-> `TeeCanvas` + the `moy_webserver` frame push, staged from the T-Deck tree —
-> was deleted in the 2026-08 streaming sunset (`docs/moycore_plan_2026-08.md`
-> §3.2). This tree is untouched but its build no longer has that machinery;
-> whether the Zero dies with the stream or gets rethought on the §3.4 sync
-> model is an open owner call (flagged in the plan). Text below predates the
-> sunset.
+> **RE-BASED (2026-08-12, owner call).** The streaming web view this port
+> originally stood on was deleted in the 2026-08 sunset
+> (`docs/moycore_plan_2026-08.md` §3.2) — and the model inverted rather than
+> died: the browser now runs the WHOLE console (the wasm head,
+> `firmware/web_runner`), and the Zero contributes what a browser can't —
+> the kid's cart store in a pocket (the §3.4 sync RPC's natural first host,
+> riding the surviving `moy_webserver` transport core), physical pins for
+> cart GPIO/motor verbs (#9), and plausibly serving the wasm bundle itself
+> over its SoftAP. #41 carries the direction. The text below describes the
+> pre-sunset streaming model and is historical until the rebuild lands.
 
 The **Zero** tier: a headless ESP32-S3 with no
 screen/keyboard/SD. Its entire UI is **streamed to a browser** over WiFi — the device

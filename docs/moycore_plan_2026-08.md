@@ -133,14 +133,25 @@ re-rasters, and deleting them earlier deletes the head. The browser's job
 moves to the **wasm head**: same frozen runtime in the browser, synced to
 the device per §3.4.
 
-**Casualty not weighed by the decision, flagged for the owner:** the XIAO
-ESP32-S3 Zero side port (`firmware/seeed_xiao_esp32s3_zero/`) had the
-streaming web view as its ONLY output path ("browser is the GPU":
-`TeeCanvas` + the `moy_webserver` frame push, staged from the T-Deck tree).
-This wave orphans it — its tree is untouched but its build no longer has the
-machinery it stages. Either the Zero dies with the stream (the wasm head
-makes a display-less console board largely moot) or it gets rethought on the
-§3.4 sync model; that is an owner call this plan does not make.
+**The Zero owner call — MADE (2026-08-12): it survives, re-based on the
+wasm head.** The XIAO ESP32-S3 Zero side port
+(`firmware/seeed_xiao_esp32s3_zero/`) had the streaming web view as its ONLY
+output path ("browser is the GPU": `TeeCanvas` + the `moy_webserver` frame
+push, staged from the T-Deck tree), so this wave orphaned it. The owner's
+re-framing: the wasm head does everything the Zero's stream did, better —
+so the Zero stops being a console that borrows a screen and becomes **a
+pocketable miniature computer the browser console pairs with**, contributing
+exactly what a browser cannot: (a) the natural FIRST host of the §3.4 sync
+RPC — the kid's cart store on its flash, behind the surviving
+`moy_webserver` transport core, pulled/pushed by any browser running the
+wasm head; (b) physical I/O — GPIO/motor verbs for carts, which is the
+parked #9 pull arriving (its consumer now exists); (c) plausibly serving
+the wasm bundle itself over its SoftAP (the M0 SoftAP already works;
+`dist/` is ~1.2MB — a one-time ~10s load at measured S3 WiFi rates, then
+browser-cached), making the Zero a self-contained console-in-your-pocket
+with no infrastructure. Nothing is rebuilt yet: the port's streaming code
+is dead with the stream, and the rebuild rides the §3.4 track on its own
+schedule (#41 carries the direction, #9 the pins).
 
 What survives from that neighborhood: `moy_webserver`'s socket/HTTP core (the
 §3.4 sync RPC rides it) and the page's input surfaces (they become the
