@@ -412,12 +412,17 @@ moycore's input snapshot region buys nothing at cart rates), wrapper
 slivers ≤1ms. And the churn split answers the spike-ownership question:
 the FLOOR cart — zero per-frame upcalls — still collects (~115ms every
 ~33s), so 15–30% of celeste's churn is the shell's own and stage 2
-stretches the collect cadence ~3–6× rather than deleting collects. M0 is
-CLOSED but for one cell: the floor's absolute presentation slice was
-measured at 1× (the variants lacked the `view` hint — deltas are
-presentation-invariant and stand; the absolute is PREDICTED from celeste's
-own composite/flush lines until a 2× floor run lands; the patched carts
-are staged). Numbers live in #66, as always. Be honest about what the
+stretches the collect cadence ~3–6× rather than deleting collects. **M0 is
+now FULLY CLOSED (2026-08-12 evening):** the 2× floor run landed (56fps /
+18.9ms — the whole 1×→2× present premium is ~1–2ms, the #190 fold's doing),
+and the state-verb slice was CUT IN PLACE the same day rather than waiting
+for a crossing — the pal() gate-table fix (`a791c33`,
+`experiments/state_verb_cost/`: the trampoline crossing is 0.07µs, ~1% — 
+the cost was always the Python body) collapsed yesterday's +3.3ms
+state-vs-input delta into the noise floor on glass. Consequence for the
+ledger above: the deletable-by-moycore share shrinks again, to **≲1ms +
+wrapper slivers** — stage 1's remaining fps case is effectively nil, and
+§4.2 carries the whole case alone. Numbers live in #66, as always. Be honest about what the
 gates can kill: no S3 number kills the *project* (both outcomes re-queue
 it); what a number kills is a CLAIM — (c) sharpened the fps claim, (a) then
 shrank it to its floor: **the whole engine-side prize is ~+2–3fps steady
