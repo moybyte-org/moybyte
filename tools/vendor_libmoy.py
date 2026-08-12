@@ -63,6 +63,21 @@ VENDOR = {
         "moy_data.c": "libmoy/src/moy_data.c",
         "LICENSE": "LICENSE",
     },
+    # SPEC.md 4's Lua binding and the cart loop it drives (moycore stage 2).
+    # This is the whole reason stage 1's remaining verb crossings were absorbed
+    # rather than written: moy_lua.c registers all 38 spec verbs as C functions
+    # against a moy_console, and moy.h exports moy_lua_open/init/update/draw.
+    #
+    # ONLY the binding comes here. The raster it calls is moy_gfx's copy, which
+    # this module's include path points at -- because the two are linked into
+    # the SAME binary, and a second compilation of moy_canvas.c would be a
+    # duplicate-symbol error rather than a tidier vendoring. Sibling include
+    # paths between native modules are already how moy_lua reaches moy_gfx's C
+    # API, so this is the established shape and not a new one.
+    os.path.join(NATIVE, "moycore", "libmoy"): {
+        "moy_lua.c": "libmoy/src/moy_lua.c",
+        "LICENSE": "LICENSE",
+    },
 }
 
 
