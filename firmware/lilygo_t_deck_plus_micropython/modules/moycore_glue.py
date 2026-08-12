@@ -54,14 +54,18 @@ def supports(src):
     """False when `src` uses a verb libmoy does not bind (see SUPERSET).
 
     A source scan, not a runtime probe, because the alternative is discovering
-    it when the cart is already on screen. It errs toward FALSE: a cart that
-    merely mentions the word in a comment takes the old path, which is correct
-    but slower, and never the reverse.
+    it when the cart is already on screen. It looks for a CALL -- the name at a
+    word boundary followed by "(" -- because a plain substring search sounded
+    conservative and was in fact a gate that never opened: `table.insert`, a
+    variable named `col`, or the letters "net" inside any identifier
+    disqualified every cart in the tree. Erring toward the old path is right;
+    erring so far that the new path is unreachable is a silent no-op.
     """
     if _moycore is None:
         return False
+    import re
     for name in SUPERSET:
-        if name in src:
+        if re.search(r"(?<![\w.:])%s\s*\(" % name, src):
             return False
     return True
 

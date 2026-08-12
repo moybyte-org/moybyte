@@ -269,16 +269,40 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     # #67 dual-runtime seam: the lupa-backed Lua cart runtime, injected only when
     # lupa is importable (an optional dev dependency) -- without it a "lua" cart
     # opens the Player's runtime-missing panel, same as today's device builds.
+    # Rung 4: a cart that stays inside the SPEC verb table runs on the boards'
+    # own Lua (runtime/lua_binding -- libmoy's binding over the same vendored
+    # 5.4, LUA_32BITS and all), so the host stops being a different program
+    # from the device for it. A cart using moybyte's superset keeps lupa, which
+    # supplies the whole namespace; that split is the same one moycore_glue
+    # makes on device.
     lua_runtime = None
+    _lupa_make = None
     try:
         import lupa  # noqa: F401 -- availability probe only
         try:
-            from lua_host import make_lua_runtime
+            from lua_host import make_lua_runtime as _lupa_make
         except ImportError:  # pragma: no cover - package-relative fallback
-            from runtime.lua_host import make_lua_runtime
-        lua_runtime = make_lua_runtime
+            from runtime.lua_host import make_lua_runtime as _lupa_make
     except ImportError:
         pass
+    try:
+        from runtime.lua_host import MoycoreHostRun, moycore_supports
+    except ImportError:  # pragma: no cover
+        from lua_host import MoycoreHostRun, moycore_supports
+
+    def _make_lua(ns, src, _ws=ws):
+        if moycore_supports(src):
+            try:
+                return MoycoreHostRun(_ws, ns, src)
+            except RuntimeError:
+                if _lupa_make is None:
+                    raise
+        if _lupa_make is None:
+            raise RuntimeError("needs the Lua runtime (not in this build)")
+        return _lupa_make(ns, src)
+
+    if _lupa_make is not None or moycore_supports(""):
+        lua_runtime = _make_lua
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards). WiFi (#38) is the fake host service over the
     # same moy_carts wifi.json store the device uses; the pointer ranges over the

@@ -144,3 +144,134 @@ class LuaCartRun:
 def make_lua_runtime(ns, src):
     """The ws.lua_runtime factory shape Player._start_lua expects."""
     return LuaCartRun(ns, src)
+
+
+# ---------------------------------------------------------------------------
+# The moycore lane (plan rung 4): the boards' OWN Lua, not lupa's.
+#
+# lupa is a second embedding with second semantics -- 64-bit doubles where both
+# boards build LUA_32BITS -- so a float-heavy cart can agree with the goldens
+# here and disagree on glass, and an integer that wraps at 2^31 there does not
+# wrap here. `runtime/lua_binding.py` is the same C the boards run; this routes
+# a cart to it when it can.
+#
+# WHEN IT CAN: libmoy binds the SPEC verb table, and moybyte's cart API is a
+# superset (layers/images, scenes, tables, texts, view). A cart using one of
+# those keeps lupa, which supplies the whole namespace through the trampoline
+# -- correct, and the slower of two correct paths. The same split moycore_glue
+# makes on the device, for the same reason and by the same source scan.
+# ---------------------------------------------------------------------------
+
+def _moycore_available():
+    try:
+        from runtime.lua_binding import HostLuaRun
+    except ImportError:                     # pragma: no cover
+        try:
+            from lua_binding import HostLuaRun
+        except ImportError:
+            return None
+    return HostLuaRun if HostLuaRun.available() else None
+
+
+class MoycoreHostRun:
+    """A cart run under the boards' Lua. Same shape lupa's run exposes."""
+
+    def __init__(self, ws, ns, src):
+        HostLuaRun = _moycore_available()
+        if HostLuaRun is None:
+            raise RuntimeError("no host lua binding")
+        canvas = ws.canvas
+        project = getattr(ws, "project", None)
+        self._run = HostLuaRun(canvas.buf, canvas.w, canvas.h,
+                               getattr(project, "sheet", None),
+                               getattr(project, "tilemap", None))
+        err = self._run.load(src, "@cart")
+        if err:
+            self._run.close()
+            raise RuntimeError(err)
+        self._ns = ns
+        self._ws = ws
+        self.init = None                    # load() already ran it
+        self.update = self._update
+        self.draw = None                    # tick drew; see _update
+
+    def _update(self, dt):
+        s = self._run.snap
+        inp = self._ws.input
+        held = pressed = 0
+        from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, AQ_SFX, AQ_MUSIC,
+                                         AQ_BEEP, AQ_MUSIC_STOP,
+                                         AQ_SOUND_STOP, AQ_VOLUME)
+        for i, name in enumerate(("left", "right", "up", "down",
+                                  "a", "b", "run", "home")):
+            try:
+                if inp.held(name):
+                    held |= 1 << i
+                if inp.pressed(name):
+                    pressed |= 1 << i
+            except Exception:  # noqa: BLE001
+                pass
+        s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
+        err = self._run.tick(dt)
+        # Audio drains through the SAME api closures a Python cart uses, so the
+        # engine's behaviour lives in one place; only the per-call trip is gone.
+        for op, a, b, _c in self._run.audio():
+            try:
+                if op == AQ_SFX:
+                    self._ns["sfx"](a, None if b < 0 else b)
+                elif op == AQ_MUSIC:
+                    self._ns["music"](a, bool(b))
+                elif op == AQ_BEEP:
+                    self._ns["beep"](a, b / 1000.0)
+                elif op == AQ_MUSIC_STOP:
+                    self._ns["music_stop"]()
+                elif op == AQ_SOUND_STOP:
+                    self._ns["sound_stop"](None if a < 0 else a)
+                elif op == AQ_VOLUME:
+                    self._ns["volume"](a)
+            except Exception:  # noqa: BLE001 -- one bad command is not the frame
+                pass
+        if err:
+            raise RuntimeError(err)
+
+    def close(self):
+        self._run.close()
+
+
+# The verbs libmoy does not bind; a cart naming one keeps lupa. Kept beside the
+# device list (moycore_glue.SUPERSET) rather than imported from it: this file
+# is host-only and that one is staged into firmware trees.
+SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
+            "actors", "touching", "move_actor", "move_actor_to",
+            "remove_actor", "draw_scene", "table", "text", "view",
+            "spr_batch", "rect_batch", "spans", "mouse", "background",
+            "col", "on_net", "wifi", "net")
+
+
+
+# A verb is a CALL, so that is what this looks for: the name at a word
+# boundary followed by "(". The first cut of this was a plain substring
+# search, which sounded conservative and was in fact a gate that never
+# opened -- `table.insert`, a variable named `col`, or the letters "net"
+# inside any identifier disqualified every cart in the tree. Erring toward
+# the old path is right; erring so far that the new one is unreachable is
+# a silent no-op, which is worse than either.
+_CALL = None
+
+
+def _uses(src, names):
+    global _CALL
+    if _CALL is None:
+        import re
+        _CALL = re
+    for name in names:
+        if _CALL.search(r"(?<![\w.:])%s\s*\(" % name, src):
+            return name
+    return None
+
+
+def moycore_supports(src):
+    """True when this cart stays inside the spec verb table."""
+    if _moycore_available() is None:
+        return False
+    return _uses(src, SUPERSET) is None

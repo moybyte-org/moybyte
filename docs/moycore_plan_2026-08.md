@@ -304,9 +304,16 @@ order, each rung deleting a parallel implementation:
    input edge arriving as `sfx(3)` then `sfx(5, 2)`, pmem at 41+4 dirty,
    an error returning `cart:1: boom` (text with its line, which is what
    crash-to-code needs), and the SPEC.md 4.1 sandbox verified as a
-   ceiling by probing each excluded stdlib. What remains is the swap:
-   `host_app` handing `Player` this instead of `runtime/lua_host.py`,
-   and lupa leaving `[dev,sim]`.
+   ceiling by probing each excluded stdlib. **The SWAP is in (same night):** `build_workstation` routes a
+   spec-only Lua cart to the binding and keeps lupa only for carts using
+   moybyte's superset, pinned end-to-end by
+   `tests/test_host_moycore_route.py`. lupa cannot leave `[dev,sim]`
+   until the superset carts have a path -- which is §9's layers/images
+   question, the same one gating the device. Recorded because the gate's
+   FIRST version was a silent no-op: a plain substring scan for the
+   superset names disqualified every cart in the tree, so the new path
+   existed and was never taken. It matches calls now, and the test
+   asserts both directions.
 5. **Host raster binds libmoy** (NEW scope this directive adds; reverses
    v6's "two rasters is the end state") — `runtime/canvas.py` shrinks to
    the compositor/extension layer, conformance goldens re-point at the
