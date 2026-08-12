@@ -3314,16 +3314,20 @@ def test_moy_lua_phase1_wired():
     api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
     assert "from moy_lua_glue import" in api_src      # the boards' re-export seam
     runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "lua_runtime = make_lua_runtime(ws)" in runtime_src
+    # Both boards now CHOOSE per cart: moycore for a source inside the SPEC
+    # verb table, the trampoline registry (still constructed, below) for one
+    # using moybyte's superset.
+    assert "_legacy = make_lua_runtime(ws)" in runtime_src
+    assert "from moycore_glue import make_moycore_runtime" in runtime_src
+    assert "lua_runtime = _make_lua" in runtime_src
     assert "except ImportError" in runtime_src
     p4 = Path("firmware/esp32_p4_wifi6_touch_lcd_7b")
     p4_runtime = (p4 / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    # The P4 took moycore's wiring (stage 2, verified on glass): the legacy
-    # registry is still CONSTRUCTED -- it is the fallback for carts using
-    # moybyte's superset -- but the injected factory is the chooser. The S3
-    # deliberately still has the plain line above; its swap is stage 3 and
-    # wants the owner at the bench (no BOOT button, dead CDC RX under the
-    # desktop).
+    # The P4 has the same wiring (stage 2, verified on glass -- moycore.active()
+    # reads True under a running cart there). The S3's is stage 3: identical
+    # code, built and linked for Xtensa, but its on-GLASS verification is
+    # owner-gated -- that board has no BOOT button (the trackball is GPIO0, held
+    # while powering on) so it cannot be flashed unattended.
     assert "_legacy = make_lua_runtime(ws)" in p4_runtime
     assert "from moycore_glue import make_moycore_runtime" in p4_runtime
     assert "lua_runtime = _make_lua" in p4_runtime

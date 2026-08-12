@@ -58,6 +58,21 @@
 
 #include "moy.h"
 
+// The board allocator, probed the way moy_lua probes it: present on an ESP-IDF
+// build, absent on the host/unix/wasm ones, which then use plain realloc.
+#if defined(__has_include)
+#if __has_include("esp_heap_caps.h")
+#include "esp_heap_caps.h"
+#define MOYCORE_PSRAM 1
+#endif
+#endif
+
+// Internal-SRAM headroom the VM must leave for the WiFi/DMA pools. Same floor
+// moy_lua ships (48KB), for the same reason and measured on the same board.
+#ifndef MOYCORE_SRAM_FLOOR
+#define MOYCORE_SRAM_FLOOR (48 * 1024)
+#endif
+
 // The snapshot the host refreshes before every tick. Plain int32 slots in a
 // buffer Python owns, so a cart's btn()/time()/touch() are array reads on this
 // side of the wall and one array write on the other.
@@ -255,20 +270,37 @@ static void *buf_r(mp_obj_t o, size_t *len)
     return bi.buf;
 }
 
-// The VM's allocator. Lua's interface is realloc-shaped, so this is the system
-// heap -- NOT the MicroPython gc heap, which is the point: a cart's whole Lua
-// world stays outside the heap MP sweeps, exactly as moy_lua's allocator
-// arranged, so cart churn cannot lengthen a shell collect.
+// The VM's allocator: the system heap, NOT MicroPython's gc heap. That is the
+// point -- a cart's whole Lua world stays outside what MP sweeps, so cart churn
+// cannot lengthen a shell collect.
 //
-// It is not yet moy_lua's SRAM-first policy (that module measured the
-// all-PSRAM version ~2x slower on the S3's 120MHz OCT bus). When moycore runs
-// on the S3 it should adopt the same floor; on the host and the P4 this is the
-// right allocator already.
+// INTERNAL SRAM FIRST on the boards, which is not a preference but a measured
+// requirement: moy_lua found the all-PSRAM version made the S3's whole _update
+// about twice as slow, because the VM's hot working set (the Lua stack, the
+// cart's TValue arrays) is latency-bound and the S3's PSRAM is a 120MHz OCT
+// bus. Same 48KB headroom floor so the WiFi/DMA pools cannot be starved, and
+// the same PSRAM fallback so a big cart still loads, just slower. Off-board
+// (host, unix pin, wasm) this compiles down to plain realloc.
 static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 {
     (void)ud; (void)osize;
-    if (nsize == 0) { free(ptr); return NULL; }
+    if (nsize == 0) {
+        free(ptr);
+        return NULL;
+    }
+#ifdef MOYCORE_PSRAM
+    void *np = NULL;
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+            >= nsize + MOYCORE_SRAM_FLOOR) {
+        np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (np == NULL) {
+        np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    return np;                       // NULL: Lua runs an emergency GC and retries
+#else
     return realloc(ptr, nsize);
+#endif
 }
 
 // -- the module surface ------------------------------------------------------

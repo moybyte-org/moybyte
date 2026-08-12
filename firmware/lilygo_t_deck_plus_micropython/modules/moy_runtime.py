@@ -448,7 +448,33 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     try:
         import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
         from device_api import make_lua_runtime
-        lua_runtime = make_lua_runtime(ws)
+        _legacy = make_lua_runtime(ws)
+        # moycore (stage 3): a cart inside the SPEC verb table runs its WHOLE
+        # frame in C -- one upcall per frame instead of hundreds. A cart using
+        # moybyte's superset keeps the trampoline registry. Same split, same
+        # source scan, as the P4 (stage 2, verified on glass first).
+        #
+        # The S3's presentation is unchanged by this: moycore renders the cart
+        # canvas and the #190 flush-bounce fold synthesizes its bands from that
+        # buffer exactly as before, because the buffer is the same one.
+        _moycore = None
+        try:
+            from moycore_glue import make_moycore_runtime, supports as _mc_ok
+            _moycore = make_moycore_runtime(ws)
+        except ImportError:
+            _mc_ok = None
+
+        def _make_lua(ns, src, _mc=_moycore, _ok=_mc_ok, _old=_legacy):
+            if _mc is not None and _ok is not None and _ok(src):
+                try:
+                    run = _mc(ns, src)
+                    print("Moybyte: cart on MOYCORE")
+                    return run
+                except Exception as exc:  # noqa: BLE001 -- fall back, say why
+                    print("Moybyte: moycore declined ->", exc)
+            return _old(ns, src)
+
+        lua_runtime = _make_lua
         _diag_note("carts", "lua runtime ON")
     except ImportError:
         pass

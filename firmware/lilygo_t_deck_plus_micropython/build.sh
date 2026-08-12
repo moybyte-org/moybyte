@@ -176,6 +176,23 @@ elif [ -d "${MOY_LUA_SRC}" ]; then
   fi
 fi
 
+# Stage moycore (plan stage 3: the cart's whole frame in C) beside it. It needs
+# BOTH moy_gfx and moy_lua staged -- it compiles neither a raster nor a VM and
+# reaches theirs by sibling include path -- so it is staged last and skipped
+# entirely on the MOYBYTE_NO_LUA A/B build, where there is no VM to bind.
+MOYCORE_SRC="${SCRIPT_DIR}/native/moycore"
+MOYCORE_DST="${UPSTREAM_DIR}/ext_mod/moycore"
+if [ "${MOYBYTE_NO_LUA:-0}" = "1" ] || [ ! -d "${MOYCORE_SRC}" ]; then
+  rm -rf "${MOYCORE_DST}"
+  sed -i '/moycore\/micropython.cmake/d' "${EXT_MOD_CMAKE}" 2>/dev/null || true
+else
+  rm -rf "${MOYCORE_DST}"
+  cp -r "${MOYCORE_SRC}" "${MOYCORE_DST}"
+  if ! grep -q 'moycore/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/moy_lua\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/moycore/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 # Stage the shared host/device modules into the frozen modules tree. Canonical
 # sources live in runtime/ (imported by the host as runtime.*); the device freezes
 # these copies as top-level modules, so both consoles run literally the same code:
