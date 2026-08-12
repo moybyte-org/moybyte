@@ -742,6 +742,75 @@ entry (latent since the tempo hunt — it breaks every non-IDF build); dead
 in the webassembly port's Makefile. CLAUDE.md's web-runner section carries the
 operational detail, since that is where somebody hits them again.
 
+### 6.9 The three remaining swaps, with the seams already surveyed
+
+Rungs 1, 2 and 4 are complete. Rungs 3 and 5 have their cores built and
+pinned and their PRODUCTION SWAPS outstanding. Each is now mechanical rather
+than exploratory, and what follows is what a session needs so it does not
+re-derive it. Execute in this order; the reasons are dependency, not taste.
+
+**(a) `Player` -> moycore on the P4.** The board is REPL-alive and the
+harness is proven (`tools/p4_autotest.py`, `tests/test_p4_on_glass.py`), so
+this one needs no owner at the bench. Stage `native/moycore` into the P4
+build beside `moy_gfx`/`moy_lua` (it requires both siblings -- it compiles
+neither a raster nor a VM), inject `moycore_glue.make_moycore_runtime(ws)`
+as `ws.lua_runtime` with `LuaCartRun` kept for carts `supports()` rejects,
+and measure `brick_siege_lua` and celeste against #66's numbers. The claim
+to test is stage 2's, not a speed one: collects during a 60s play window go
+to ~0 cadence, and the residual spike ledger names its owner.
+
+**(b) `Player` -> moycore on the S3.** Same change, but the T-Deck cannot be
+flashed unattended (no BOOT button -- the trackball IS GPIO0, held at power
+on) and its USB-CDC RX is dead under the desktop, so it wants the owner
+present. Do it after (a) so only the presentation differs (the #190 fold
+keeps working: moycore renders the cart canvas, the bounce pump synthesizes
+bands from it exactly as today).
+
+**(c) `canvas.py`'s verbs delegate to `raster_binding`.** The pixel oracle
+is already passing (10/10 conformance scenes), so what remains is the seam,
+and the seam is NOT uniform -- surveyed 2026-08-12:
+
+  * **Shapes that already line up**, and therefore the place to start:
+    `cls`, `pix` (write), `line`, `rect`, `rectb`, `circ`, `circb`, `tri`,
+    `trib`, `sspr`, `tline`, `map`, `spr_tile`. For the sheet/tilemap-taking
+    three, libmoy's console HOLDS its assets where canvas.py takes them per
+    call -- so register them on the binding when they change rather than
+    per verb.
+  * **`spr(img, ...)` does NOT line up**: canvas.py's takes an `Image`
+    (moybyte's paint images and layers), libmoy's takes a sheet tile index.
+    Leave it Python-side until the superset question below is answered.
+  * **`SystemCanvas.print` at `font_scale > 1`** draws each glyph pixel as
+    an `fs x fs` rect block; libmoy's `moy_print` is scale-1. Delegate the
+    1x path only.
+  * **State stays PYTHON-authoritative and pushes downstream.** 28 sites
+    outside the verbs read `_cam_x`/`_clip_*`/`_pal_map` -- layers,
+    `blit_strip`, `scroll_rect`, `fill_rects`, the sprite variant caches.
+    Push camera/clip/pal/palt into the C canvas from their setters (and
+    from `set_viewport`, whose offset rides them). One authority with a
+    downstream copy is the device's shipped `_gate_state` shape; TWO
+    authorities is the disease.
+  * The batch (`spr_tile` queues) exists to cut PYTHON dispatch. With the
+    body in C its case weakens, but it also fixes draw ORDER -- so delete it
+    only with the order rule re-pinned, not as a side effect.
+
+**And the one question that gates all three, which is a product call rather
+than an implementation detail (§9):** libmoy binds the SPEC table; moybyte's
+cart API is a superset (`make_layer`/`draw_layer`/`image`, scenes, tables,
+texts, `view`). Today every path routes superset carts to the old runtime by
+source scan -- `moycore_glue.supports()` on device, `lua_host.moycore_supports()`
+on host. That works and it is why lupa cannot leave `[dev,sim]` yet. The
+options are C layers inside moycore, a handle shim, or accepting the split
+permanently. The cart census says the pressure is low (one Lua cart uses
+layers, at one blit per frame), so this can be decided on design grounds
+rather than under a perf deadline.
+
+**A warning worth carrying into all three, learned the hard way tonight:**
+the host gate's first version was a plain substring scan and disqualified
+EVERY cart in the tree, so the new path existed, the suite was green, and
+nothing took it. Whatever routes work to moycore, assert that something
+actually arrives -- per cart, by name. An untaken path is the failure mode
+these swaps are most likely to have.
+
 ## 7. Architecture sketch (what changed from v1)
 
 Enter/exit as v1: `Player.start` (lua branch) calls `moycore.run_begin(...)`
