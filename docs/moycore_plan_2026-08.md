@@ -1,6 +1,15 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v9 (2026-08-12 night) — the ladder RE-SEQUENCES on a finding
+**Status: v10 (2026-08-13) — THE LADDER IS WALKED. Rungs 1, 2, 4 and 5
+complete; rung 3 complete on the P4 (stage 2) with only the S3 (stage 3)
+outstanding, because that board cannot be flashed unattended. moycore
+runs a Lua cart's whole frame in C on P4 glass (`moycore.active()` True
+under a conformance cart, on-glass suite 22/22); `canvas.py`'s verbs
+delegate to libmoy with the conformance goldens unchanged; the host runs
+the boards' own Lua for spec-only carts. What remains of the whole plan
+is: the S3 swap at the bench, and §9's superset question — which is a
+product call, and which is what keeps lupa in `[dev,sim]` and
+`spr(Image)` on the Python raster.** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
 the loop entry points, so those crossings are ABSORBED into stage 2 rather
 than written twice. v8: RUNG 1 IS DONE — stage 4 SHIPPED and the
@@ -290,6 +299,13 @@ order, each rung deleting a parallel implementation:
 
 1. ~~**Stage 4** (wasm head re-rasters; gate closed) — deletes the recording
    stack, completes the §3.2 sunset.~~ **DONE 2026-08-12 (§6).**
+   ~~2–5~~ **all walked by 2026-08-13** except stage 3 (the S3), which is
+   owner-gated hardware rather than undone work. Two gate bugs on the way,
+   both recorded where they happened: a substring scan that disqualified
+   every cart, and a regex lookbehind that CPython accepts and
+   MicroPython's `re` raises on — the second shipped green and made
+   moycore unreachable on the board while everything looked healthy.
+   Whatever routes work to moycore, assert that something arrives.
 2. **Stage 1 completion — RE-SCOPED (§6.0):** the verb crossings are
    absorbed into stage 2 (libmoy already implements them); what remains is
    the trace-vocabulary extension and the superset decision.
