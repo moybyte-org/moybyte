@@ -179,109 +179,41 @@ def test_console_settings_has_firmware_update_screen():
     assert "def _activate_settings_action" in settings_layer
 
 
-def test_device_web_view_module_present_and_protocol_shaped():
-    # Device web view (#41/#22): the recorder + payloads + serve logic + page + constants now
-    # live in the SHARED web_view module (canonical runtime/web_view.py; staged into modules/ +
-    # frozen), and moy_webserver is a thin TRANSPORT that imports it. We grep the source
-    # (firmware tests don't execute MicroPython); executable behaviour is in test_moy_webserver.py.
+def test_web_stack_split_after_the_streaming_sunset():
+    # The 2026-08 streaming sunset (moycore plan 3.2): the SHARED web_view keeps
+    # the wasm head's recording substrate (until stage 4); the DEVICE transport
+    # is a bare socket/HTTP/WS core with no recorder coupling (the 3.4 sync RPC
+    # rides it). Absence pins live in test_streaming_sunset.py; this greps the
+    # PRESENCE side. Executable behaviour: test_moy_webserver.py (transport) +
+    # test_web_recording.py (recording stack).
     wv = (Path("runtime") / "web_view.py").read_text(encoding="utf-8")
     wv_ws = (Path("runtime") / "web_view_ws.py").read_text(encoding="utf-8")
     web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
 
-    # -- the SHARED core (web_view) --
+    # -- the SHARED core (web_view): the wasm head's substrate --
     assert "class DrawRecorder" in wv           # per-frame draw-command recorder
-    assert "class TeeCanvas" in wv              # forwards to the panel canvas + records
-    assert "class CommandCanvas" in wv          # the host record-only canvas (reconciled in)
-    assert "class ServedState" in wv            # serve-time defspr/deflayer ship-once
+    assert "class CommandCanvas" in wv          # the record-only system canvas
+    assert "class ServedState" in wv            # serve-time ship-once bookkeeping
+    assert "class RecordingLayer" in wv         # the recorded off-screen layer
+    assert "class SurfaceDelta" in wv           # #76 per-surface delta (web_boot)
+    assert "class WsClientState" in wv          # per-session keyframe latch
     assert "def assets_payload" in wv and "def frame_payload" in wv
     assert "def apply_events" in wv             # browser events -> InputState/Pointer
-    # SERVE-TIME defspr (#41 BUG-1 fix): the bitmap is delivered when the browser RECEIVES a
-    # frame referencing it (drop-robust). served_frame reconstructs it (defspr_cmd) + prepends,
-    # tracking a `served` set that resets on a dropped atlas (atlas_gen).
-    assert "def defspr_cmd" in wv and "def served_frame" in wv
-    assert "atlas_gen" in wv
-    # STREAM MODE (#41): the Tee record-only path + a web frame cap (raised 30 -> 60).
-    assert "record_only" in wv
-    assert "WEB_FPS_CAP = 60" in wv
-    # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): ONE recorded-layer mechanism.
-    assert "class RecordingLayer" in wv         # the recorded off-screen layer
-    assert "class _LayerRecorder" in wv         # its indexed command stream
-    assert "def deflayer_cmd" in wv             # ship the layer's stream once (serve-time)
-    assert '"deflayer"' in wv and '"blit_layer"' in wv   # define-once + reference-per-frame
-    assert "def new_layer" in wv and "def blit_window_from" in wv  # the Tee tees layers now
-    assert "_served_layers" in wv               # served-once tracking, gen lock-step
+    assert "from web_view_ws import" in wv      # re-imports the ws primitives
 
-    # -- the DEVICE transport (moy_webserver) imports the shared core + adds the socket layer --
-    assert "import web_view" in web             # the transport imports the frozen shared module
-    assert "class WebServer" in web             # non-blocking, one request per poll()
-    assert "self.recorder.enabled" in web       # the gate -> zero cost when no browser
-    assert "setblocking(False)" in web          # NON-blocking listening socket
-    assert "def stream_mode" in web             # headless-while-watched gate (WebServer)
-    assert "def served_frame" in web and "def reset_served" in web  # delegate to ServedState
-    # The draw-command protocol routes: only the page + /assets load over HTTP; the LIVE channel
-    # is the WebSocket. The legacy /frame & /input HTTP poll endpoints were REMOVED (WS-only now,
-    # matching the host web console) -- so the transport no longer names them.
-    assert '"/assets"' in web
-    assert '"/frame"' not in web and '"/input"' not in web
-    # WEBSOCKET TRANSPORT (#41 swap): the persistent live channel is the ONLY transport. The RFC
-    # 6455 handshake + byte framing live in the SHARED web_view_ws leaf (extracted from web_view;
-    # web_view re-imports + re-exports them). moy_webserver RE-EXPORTS them onto its _WSConn +
-    # upgrade path (relocation + re-export, no local copy).
+    # -- the WS primitives leaf (web_view_ws): what the transport rides --
     assert "def ws_accept_key" in wv_ws and "def ws_handshake_response" in wv_ws
     assert "def ws_encode" in wv_ws and "def ws_decode" in wv_ws
-    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv_ws  # the RFC 6455 magic GUID (web_view_ws)
-    assert "Switching Protocols" in wv_ws                   # the 101 upgrade response (web_view_ws)
-    assert "from web_view_ws import" in wv                  # web_view re-imports the ws primitives
-    assert "ws_encode = _wv.ws_encode" in web and "ws_decode = _wv.ws_decode" in web  # re-exports
-    assert "class _WSConn" in web               # the persistent, non-blocking WS connection stays
-    assert "/ws" in web                         # the WebSocket route the page connects to
+    assert "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" in wv_ws
+    assert "Switching Protocols" in wv_ws
 
-
-def test_device_web_view_wired_into_run_desktop_cooperatively():
-    # The web view is serviced from run_desktop's single-threaded loop: a TeeCanvas
-    # swapped in as ws.canvas (panel still renders), begin/commit around the frame, and
-    # ONE poll() BETWEEN frames (never mid-flush). The Settings WEB VIEW row toggles it.
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    # WebView + _PointerSink + _WebProvider now live in device_webview.py
-    # (extracted from moy_runtime.py); run_desktop still CALLS the controller.
-    device_webview = (ROOT / "modules" / "device_webview.py").read_text(encoding="utf-8")
-    assert "import moy_webserver" in device_webview
-    assert "class WebView" in device_webview
-    assert "web = WebView(" in runtime
-    assert "ws.web_hook = web" in runtime
-    assert "web.begin_frame()" in runtime       # start a recording before the frame
-    assert "web.commit_frame()" in runtime      # publish the frame's commands
-    assert "web.poll()" in runtime              # service one request between frames
-    # The recorder must record draw commands, never stream the raw framebuffer.
-    assert "DrawRecorder" in device_webview
-    # STREAM MODE (#41 30fps lever): the WebView drives the panel headless while a browser
-    # plays -- skip the flush via the compositor (skip_flush) + a one-time enter notice.
-    assert "_apply_stream_mode" in device_webview
-    # Regression (extraction stage 13): assets() + _start() reference symbols that
-    # were moy_runtime globals -- the move must carry them or they NameError at CALL
-    # time (off the host-test path: class bodies exec fine, method bodies do not run).
-    assert "from device_wifi import autoconnect_wifi" in device_webview
-    assert "from device_audio import AUDIO_RATE" in device_webview
-    assert "from device_canvas import _decode_moyimg, PAL565" in device_webview
-    assert "skip_flush" in device_webview
-    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
-    assert "self.skip_flush" in comp            # flush() is a no-op while streaming
-
-
-def test_console_settings_has_web_view_toggle():
-    # Host == device: the shared console grows a Settings WEB VIEW ON/OFF row (with the
-    # served URL) ONLY when a web_hook is injected -- the device does, the host doesn't
-    # (it has tools/web_console.py), so the row never appears on the host.
-    console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
-    assert "self.web_hook = None" in console
-    assert '"WEB VIEW"' in settings_layer
-    assert "def _toggle_web_view" in console
-    assert 'kind == "web"' in settings_layer   # the row's draw/handling moved with Settings
+    # -- the DEVICE transport core (moy_webserver): sockets only, no recorder --
+    assert "import web_view_ws" in web          # framing from the leaf, not web_view
+    assert "class WebServer" in web
+    assert "class _WSConn" in web
+    assert "setblocking(False)" in web          # NON-blocking listening socket
+    assert "def handle_http" in web             # the 3.4 sync RPC's endpoint seam
+    assert "def send_text" in web               # ...and its push verb
 
 
 def test_ota_online_download_streams_to_sd_with_checksum():
@@ -2308,7 +2240,7 @@ def _load_moy_runtime():
     # glue moved out of device_api into its own module it must be registered
     # BEFORE it, or every test through this loader dies on the import.)
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_webview", "device_audio", "device_canvas",
+                  "device_audio", "device_canvas",
                   "moy_lua_glue", "device_api"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
@@ -3434,12 +3366,13 @@ def test_moy_lua_hardware_learned_constraints_pinned():
     # 5) the token init masks to int16-positive so the header compare in l_spr
     #    can never alias the Python writer (0) or a gate token.
     assert "0x7FFF" in mod
-    # 6) the shared glue declines the C fast path on any recording canvas (the
-    #    TeeCanvas's __getattr__ would hand the C spr a bypass around the
-    #    recorder; the #151 web runner's CommandCanvas simply has no batch
-    #    array). Lives in moy_lua_glue.py since the web-runner extraction.
+    # 6) the shared glue declines the C fast path on a canvas without a batch
+    #    array (the #151 web runner's recording CommandCanvas). The old
+    #    `_r`-sniff for the device TeeCanvas died with that class in the
+    #    2026-08 streaming sunset -- no surviving canvas both records and
+    #    forwards _batch_arr, so the plain getattr IS the guard now.
     glue_src = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
-    assert 'getattr(canvas, "_r", None)' in glue_src
+    assert 'arr = getattr(canvas, "_batch_arr", None)' in glue_src
     assert "0x7A11" in glue_src                        # the documented Lua token
     # 7) LUA_32BITS is ON (#67 owner decision 2026-07-18): both boards' FPUs are
     #    single-precision, so doubles are soft-float; 32-bit floats/ints use the

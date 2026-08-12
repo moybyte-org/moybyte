@@ -852,13 +852,12 @@ class LauncherHomeLayer:
                 or ws.launcher.dragging or ws.launcher.flinging
                 or ws._animating(dt)):
             return False
-        # A RECORDING canvas (web console root / the device web-view tee, which
-        # can swap in at runtime) can't replay a framebuffer capture -- its
-        # stream would blit a layer no command ever defined. Two probes: the
-        # recording marker (begin_surface, same probe frame() uses) and the
-        # retention contract (web_view.TeeCanvas declares RETAINED_FRAMES = 0
-        # for exactly this reason; a canvas that retains nothing can't be
-        # captured from either).
+        # A RECORDING canvas (the wasm head's CommandCanvas root) can't replay
+        # a framebuffer capture -- its stream would blit a layer no command
+        # ever defined. Two probes: the recording marker (begin_surface, same
+        # probe frame() uses) and the retention contract (recording canvases
+        # declare RETAINED_FRAMES = 0 for exactly this reason; a canvas that
+        # retains nothing can't be captured from either).
         if (getattr(cv, "begin_surface", None) is not None
                 or getattr(cv, "RETAINED_FRAMES", 0) < 1):
             return False

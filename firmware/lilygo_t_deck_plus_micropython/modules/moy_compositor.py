@@ -457,12 +457,6 @@ class Compositor:
         self._front = self._fb
         self._dma_front = None
         self._dma_pending = None
-        # STREAM MODE (#41 web view): when True, flush() is a NO-OP -- the device goes
-        # headless while a browser is playing (the cart still runs logic + the TeeCanvas
-        # records draw commands, but neither rasterizes the panel nor pushes the SPI DMA),
-        # lifting the web frame rate above the panel's render+flush ceiling. run_desktop's
-        # WebView sets/clears this around ws.frame(); default False == today's behaviour.
-        self.skip_flush = False
         # --- async DMA completion (real overlap, #43; see the ASYNC_FLUSH block) ---
         # `_dma_done_n` is bumped from the SPI completion ISR (GC locked) so it MUST
         # already exist as an attr slot here -- the ISR only STOREs into it, never
@@ -791,14 +785,6 @@ class Compositor:
         swap, then kick the just-rendered buffer's DMA and RETURN so the CPU can
         render the next frame while it transfers (frame = max(render, flush)). When
         OFF, the proven single-buffer banded path below runs byte-for-byte."""
-        # STREAM MODE (#41): headless while a browser plays -- skip the panel rasterize +
-        # DMA entirely. The dirty box is cleared so the next REAL flush isn't fooled into a
-        # stale region, but no SPI transfer happens (the ~20ms flush is the whole point of
-        # going headless). Any DMA already in flight from the last real frame just completes.
-        if self.skip_flush:
-            self._fold = None          # #190: stale geometry must never leak
-            self._dirty.clear()        # into a later (different) frame's flush
-            return
         if self.double_buffer:
             self._flush_double()
             return

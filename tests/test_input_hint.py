@@ -11,21 +11,12 @@ Two concrete deliverables, per the issue's Thread 3 (docs/issues/open/0042-...):
       tools/gen_device_carts.py (the device seed generator) -> the shared
       web_view.assets_payload() -> the browser page's applyInputHint().
 
-  (b) ONE shared source<->cart-API mapping the host web console and the device
-      web view both consult (runtime.web_view.BUTTON_NAMES + apply_events)
-      instead of two hand-rolled tables -- tools/web_console.py used to carry
-      its own duplicate BUTTON_NAMES + a second hand-written event decoder;
-      it now calls the SAME runtime.web_view.apply_events the device's
-      moy_webserver re-exports.
-
-Also locks in the mirrored device-side fix for the browser-typed-key collapse
-device_webview.feed_input had (last_key = _key_queue[-1] then wipe the whole
-queue -- dropped every character but the last in a multi-char WS batch), which
-the issue calls out as a known follow-up to the host ConsoleDriver.type_char
-fix. Device-side is source-grepped, not executed (test_micropython_spike.py's
-pattern): device_webview.py imports device-only modules (console/device_util/
-device_wifi) not importable on the host, and NEEDS AN ON-GLASS VERIFICATION
-PASS -- see the module's comment.
+  (b) ONE shared source<->cart-API mapping every input consumer reads
+      (runtime.web_view.BUTTON_NAMES + apply_events). The two streaming
+      transports that used to consult it (tools/web_console.py + the device
+      web view) died in the 2026-08 streaming sunset; the surviving consumer
+      is the wasm head's worker input pump (web_boot), and the table/decoder
+      pins below keep it honest.
 """
 
 import json
@@ -33,13 +24,10 @@ import os
 
 from runtime import moy_carts
 from runtime import web_view
-from tools import web_console
 
 
 SYSTEM_CARTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "system_carts")
-FW_MODULES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "firmware", "lilygo_t_deck_plus_micropython", "modules")
 
 
 # ---------------------------------------------------------------------------
@@ -146,50 +134,6 @@ def test_assets_payload_input_field_defaults_to_none_and_round_trips():
     _json.dumps(b)                              # must stay wire-serializable
 
 
-def _open_by_title(console, title):
-    for i, c in enumerate(console.ws.launcher.items):
-        if c["title"] == title:
-            console.ws.launcher.sel = i
-            break
-    console.ws.open()
-    assert console.ws.screen == "desktop" and console.ws.cart_error is None, title
-
-
-def test_web_console_assets_carries_the_open_carts_input_hint(tmp_path):
-    """The HOST /assets path (tools/web_console.py): the launcher (no cart open)
-    ships input=None; opening a cart that declares a hint ships that hint over
-    the wire, so the browser can gate its virtual controls per cart."""
-    launcher_console = web_console.WebConsole(str(tmp_path / "carts_launcher"), fps=30)
-    assert launcher_console.assets()["input"] is None    # launcher: no open cart
-
-    touch_console = web_console.WebConsole(str(tmp_path / "carts_touch"), fps=30)
-    _open_by_title(touch_console, "Tap Only Red")
-    assert touch_console.assets()["input"] == ["touch"]
-
-    buttons_console = web_console.WebConsole(str(tmp_path / "carts_buttons"), fps=30)
-    _open_by_title(buttons_console, "Brick Siege")
-    assert buttons_console.assets()["input"] == ["buttons"]
-
-    keyboard_console = web_console.WebConsole(str(tmp_path / "carts_keyboard"), fps=30)
-    _open_by_title(keyboard_console, "Letter Blitz")
-    assert keyboard_console.assets()["input"] == ["keyboard", "touch"]
-
-
-def test_device_webview_assets_passes_the_input_hint_source_wired():
-    """Device-side wiring is source-grepped (device_webview.py imports device-only
-    modules): assets() AND the per-frame push must forward the EFFECTIVE hint
-    (web_view.effective_input_kinds -- the manifest hint only while the cart owns
-    the keyboard, so the Editor keeps the phone's soft-keyboard summon) through
-    the SAME shared builders the host uses."""
-    text = open(os.path.join(FW_MODULES, "device_webview.py"), encoding="utf-8").read()
-    assert "input_kinds = self._web.effective_input_kinds(ws)" in text
-    assert "decoded or None, input_kinds)" in text
-    assert "self._web.effective_input_kinds(self._ws))" in text   # frame() triple
-    server = open(os.path.join(FW_MODULES, "moy_webserver.py"), encoding="utf-8").read()
-    assert "cmds, cart, input_kinds = self.provider.frame()" in server
-    assert server.count("input_kinds=input_kinds") == 2           # both push shapes
-
-
 # ---------------------------------------------------------------------------
 # (a) the browser page gates its virtual controls on the hint
 # ---------------------------------------------------------------------------
@@ -212,46 +156,30 @@ def test_page_gates_virtual_gamepad_and_soft_keyboard_on_the_input_hint():
 # ---------------------------------------------------------------------------
 
 
-def test_host_web_console_no_longer_hand_rolls_its_own_button_table():
-    """tools/web_console.py used to define its own BUTTON_NAMES frozenset +
-    per-event decode loop, duplicating runtime/web_view.py's BUTTON_NAMES +
-    apply_events (which the device's moy_webserver re-exports and drives).
-    That duplicate must be gone; the host now calls the shared function."""
-    assert not hasattr(web_console, "BUTTON_NAMES")
-    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "tools", "web_console.py"), encoding="utf-8").read()
-    assert "web_view.apply_events(" in src
+def test_apply_events_gates_unknown_button_names():
+    """BUTTON_NAMES membership is enforced in the ONE shared decoder
+    (web_view.apply_events -- the wasm head's input path), so a stray/unknown
+    name can't wedge a held button forever."""
+    held = {}
+
+    class Input:
+        def set_button(self, name, down):
+            held[name] = down
+
+    class Pointer:
+        pass
+
+    inp, ptr = Input(), Pointer()
+    web_view.apply_events([{"type": "hold", "name": "nonsense", "down": True}],
+                          inp, ptr)
+    assert "nonsense" not in held
+    web_view.apply_events([{"type": "hold", "name": "left", "down": True}],
+                          inp, ptr)
+    assert held.get("left") is True
 
 
-def test_web_console_apply_events_still_gates_unknown_button_names(tmp_path):
-    """Behaviour parity after the refactor: BUTTON_NAMES membership is still
-    enforced (via the shared table), so a stray/unknown name can't wedge a held
-    button forever."""
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30)
-    console.apply_events([{"type": "hold", "name": "nonsense", "down": True}])
-    assert console.ws.input.held("nonsense") is False
-    console.apply_events([{"type": "hold", "name": "left", "down": True}])
-    assert console.ws.input.held("left") is True
-    console.apply_events([{"type": "hold", "name": "left", "down": False}])
-
-
-def test_web_console_button_names_identical_to_shared_table():
-    """Pin the ONE table both transports read (runtime.web_view.BUTTON_NAMES) --
-    the launcher-nav + gameplay logical names."""
+def test_button_names_pinned_to_the_shared_table():
+    """Pin the ONE table every input consumer reads (runtime.web_view
+    .BUTTON_NAMES) -- the launcher-nav + gameplay logical names."""
     assert set(web_view.BUTTON_NAMES) == {"left", "right", "up", "down", "a", "b",
                                           "run", "home"}
-
-
-# ---------------------------------------------------------------------------
-# The device-side input-collapse fix (mirrors the host ConsoleDriver.type_char
-# queue fix): device_webview.feed_input must pop ONE key per frame, not take
-# last_key = _key_queue[-1] then wipe the whole queue.
-# ---------------------------------------------------------------------------
-
-
-def test_device_webview_key_queue_pops_one_per_frame_not_last_wins():
-    text = open(os.path.join(FW_MODULES, "device_webview.py"), encoding="utf-8").read()
-    assert "self._inp.last_key = self._key_queue.pop(0)" in text
-    # The old collapse pattern (take the last char, then wipe the queue) must be gone.
-    assert "self._key_queue[-1]" not in text
-    assert "NEEDS AN ON-GLASS" in text            # the fix is flagged as unverified on hardware

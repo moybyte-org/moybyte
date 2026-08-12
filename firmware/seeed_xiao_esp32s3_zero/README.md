@@ -1,5 +1,13 @@
 # MoyByte Zero — Seeed XIAO ESP32-S3 port
 
+> **ORPHANED (2026-08-12).** The streaming web view this port stands on —
+> `TeeCanvas` + the `moy_webserver` frame push, staged from the T-Deck tree —
+> was deleted in the 2026-08 streaming sunset (`docs/moycore_plan_2026-08.md`
+> §3.2). This tree is untouched but its build no longer has that machinery;
+> whether the Zero dies with the stream or gets rethought on the §3.4 sync
+> model is an open owner call (flagged in the plan). Text below predates the
+> sunset.
+
 The **Zero** tier: a headless ESP32-S3 with no
 screen/keyboard/SD. Its entire UI is **streamed to a browser** over WiFi — the device
 runs cart *logic* and ships draw-commands; the browser rasterizes ("the browser is the

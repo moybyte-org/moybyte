@@ -337,33 +337,17 @@ def test_surface_delta_never_collapses_a_scr_stream():
     assert d.encode(plain)[0].get("same") == 1
 
 
-def test_tee_canvas_pins_retention_off_and_records_the_shift():
-    """The device web-view Tee: the console's blit gate must read 0 (the panel
-    ping-pong and the browser's retained buffer disagree on retention), and a
-    direct scroll_rect call must be recorded AND forwarded (an __getattr__
-    fallthrough would leave the browser stream torn)."""
+def test_recording_canvases_pin_retention_off():
+    """The retention contract the recording tier lives by: the browser's
+    retained buffer holds the last SHIPPED frame, not the console's paint
+    history, so the console's blit-scroll gate must read 0 on every recording
+    canvas -- a class attr, so no instance state can un-pin it. (The device
+    web-view Tee carried the same pin until the 2026-08 streaming sunset
+    deleted it; CommandCanvas and RecordingLayer are the survivors.)"""
     from runtime import web_view
 
-    class _Real:
-        w, h = 320, 240
-        RETAINED_FRAMES = 2
-
-        def __init__(self):
-            self.calls = []
-
-        def scroll_rect(self, *a):
-            self.calls.append(a)
-
-    real = _Real()
-    rec = web_view.DrawRecorder(320, 240)
-    rec.enabled = True
-    tee = web_view.TeeCanvas(real, rec)
-    assert tee.RETAINED_FRAMES == 0            # class attr beats __getattr__
-    rec.begin()
-    tee.scroll_rect(1, 2, 30, 20, -3, 0)
-    rec.commit()
-    assert ["scr", 1, 2, 30, 20, -3, 0] in rec.frame()
-    assert real.calls == [(1, 2, 30, 20, -3, 0)]
+    assert web_view.CommandCanvas.RETAINED_FRAMES == 0
+    assert web_view.RecordingLayer.RETAINED_FRAMES == 0
 
 
 def test_web_stream_blit_frames_replay_to_the_raster_truth(tmp_path):
@@ -375,7 +359,7 @@ def test_web_stream_blit_frames_replay_to_the_raster_truth(tmp_path):
 
     from runtime import host_app, web_view
     from runtime.canvas import Canvas
-    from tools.web_console import WebConsole
+    from tests.webharness import WebHarness as WebConsole
 
     ws = _ws_with_carts(tmp_path / "raster", 14)         # truth console
     drv = host_app.ConsoleDriver(ws)

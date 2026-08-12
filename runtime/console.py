@@ -214,7 +214,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing move to SettingsLayer, which owns NO config -- it
-# reads ws state (system/wallpaper_id/font_scale/diag_live/web_hook) and dispatches every
+# reads ws state (system/wallpaper_id/font_scale/diag_live) and dispatches every
 # mutation to ws setters; the wallpaper cluster stays single-sourced on ws (the launcher
 # shares that backdrop). settings_layer.py is the single source of the _SET_* geometry
 # constants (also used by console's Layout), imported back here for Layout + tests.
@@ -1223,11 +1223,6 @@ class Workstation:
         # Reboot hook: the device injects a callable (machine.reset via the OTA
         # updater); None on the host -> the Reboot row is a safe no-op (go_home).
         self.reboot_hook = None
-        # Web view (#41/#22): the device injects a small controller exposing
-        # .enabled (bool), .toggle(), and .url() so Settings can grow a "WEB VIEW"
-        # ON/OFF row that serves the running console to a browser over WiFi. None on
-        # the host (the host already has tools/web_console.py) -> the row is hidden.
-        self.web_hook = None
         # Redraw-on-change (#44 step 1): a static UI screen costs ~0 -- frame() only
         # redraws + flushes when something visible changed. `_dirty` is the "redraw
         # this frame" flag; it starts True so the very first frame always paints, and
@@ -2534,19 +2529,6 @@ class Workstation:
         ax = bx + bw - pw
         self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
         self.sysmenu.toggle(self.menu_ui._sysmenu_items())
-
-    def _toggle_web_view(self):
-        """Flip the device web view on/off via the injected controller (#41). Guarded
-        so a backend hiccup (e.g. WiFi not up yet -> can't bind) can never crash
-        Settings; the row just stays OFF and the controller may surface a reason."""
-        hook = self.web_hook
-        if hook is None:
-            return
-        self._dirty = True
-        try:
-            hook.toggle()
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte web view toggle failed:", exc)
 
     # -- firmware update screen (#53) -----------------------------------------
     #

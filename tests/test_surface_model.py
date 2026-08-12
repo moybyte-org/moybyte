@@ -18,7 +18,7 @@ what the browser transports serve.
 import os
 
 from runtime.surface import Surface, SurfaceSet
-from tools import web_console
+from tests import webharness as web_console
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -124,7 +124,7 @@ def _account(console, tracker, flat, surfaces):
 
 
 def test_windowed_session_l8_accounting(tmp_path):
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -161,7 +161,7 @@ def test_windowed_session_l8_accounting(tmp_path):
 
 
 def test_window_surfaces_mirror_slots(tmp_path):
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -184,7 +184,7 @@ def test_per_window_sids_partition_the_frame(tmp_path):
     """The §2 re-partition: with a window open, the frame's surface list
     carries a per-window sid (registry key, never content kind) and the
     residual chips span under its OWN sid (SurfaceDelta is sid-keyed)."""
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -207,7 +207,7 @@ def test_drag_frames_skip_clean_surfaces(tmp_path):
     frame-class the 70ms->3ms wasm win rides on (gate-0's finding: drag
     allocations must stay small so GC collects retreat to idle)."""
     from runtime.web_view import SurfaceDelta
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -308,7 +308,7 @@ def test_p4_build_stages_the_leaf():
 # ---------------------------------------------------------------------------
 
 def test_picker_hides_claimed_system_apps(tmp_path):
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -332,7 +332,7 @@ def test_desk_still_offers_system_apps(tmp_path):
     tier apps leave the shelf by design -- "apps are windows, games are
     fullscreen" -- so the desk is their access path), and the filter must not
     cost a kid access to Files or Paint."""
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws
@@ -377,7 +377,7 @@ def test_hover_event_places_without_pressing():
 def test_hover_repaints_the_shell(tmp_path):
     """A moving pointer must reach the glass: skip-draw may not swallow the
     frame hover feedback needs (the desk icon highlight reads pointer x/y)."""
-    console = web_console.WebConsole(str(tmp_path / "carts"), fps=30,
+    console = web_console.WebHarness(str(tmp_path / "carts"), fps=30,
                                      sys_size=(1024, 600), font_scale=1,
                                      windowed=True)
     ws = console.ws

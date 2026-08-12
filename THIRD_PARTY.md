@@ -274,8 +274,8 @@ published format, protocol or behaviour; none contains third-party code.
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
 - **WebSocket, RFC 6455** (`runtime/web_view_ws.py`,
-  `firmware/lilygo_t_deck_plus_micropython/modules/moy_webserver.py`,
-  `tools/web_console.py`) — handshake and framing written from the RFC.
+  `firmware/lilygo_t_deck_plus_micropython/modules/moy_webserver.py`) —
+  handshake and framing written from the RFC.
   `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
   standard library.
 - **SHA-256** (`moy_ota.py`, `tools/gen_ota_manifest.py`) — `hashlib`.

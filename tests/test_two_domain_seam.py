@@ -277,7 +277,7 @@ def test_web_console_font_scale_change_does_not_crash(tmp_path):
     """Changing the font size on the web console (whose system canvas is a recording
     CommandCanvas) must not raise -- the recorder honours set_font_scale and records
     scaled text as rect blocks the replayer already understands."""
-    from tools.web_console import WebConsole
+    from tests.webharness import WebHarness as WebConsole
     from runtime.web_view import replay_to_canvas
     from runtime.canvas import Canvas
     wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
@@ -295,7 +295,7 @@ def test_web_console_larger_canvas_streams_and_replays(tmp_path):
     """The web console (#22) honours a larger SYSTEM canvas (#39): /assets reports
     the bigger size, the launcher command stream replays to valid pixels, and a
     running cart composites into the stream as a single spr viewport command."""
-    from tools.web_console import WebConsole
+    from tests.webharness import WebHarness as WebConsole
     from runtime.web_view import replay_to_canvas
     from runtime.canvas import Canvas
     wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))

@@ -1,7 +1,9 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v5 (2026-08-11 night) — GRADUATED: stage 0 and the stage-1 pin are
-SHIPPED, the M0 cheap levers are built, and the design-doc treatment ran.**
+**Status: v6 (2026-08-12) — the 3.2 die-now sunset wave SHIPPED, the stage-4
+wasm-raster spike REPORTED (gate closed: moy_gfx-in-wasm), and M0's verdicts
+stand. v5 (2026-08-11 night) was the graduation: stage 0 + the stage-1 pin
+shipped, the M0 cheap levers built, the design-doc treatment run.**
 v1 was the parking place for the 2026-08-11 discussion; v2 folded that
 discussion's grounded review (the issue-mirror check, the seam map of
 `moy_lua`/`moy_gfx_capi`/the glue) and the **owner decisions of 2026-08-11**
@@ -107,15 +109,38 @@ becomes device-identical by construction.
 ### 3.2 The streaming webview is sunset (supersedes docked mode's frozen-scope mirror)
 
 The whole draw-command recording/streaming stack goes — in two waves, split
-by who still stands on it (v5 correction; the v4 text bundled them). NOW:
-`TeeCanvas`, the defspr/spr wire protocol as a device transport,
-`SurfaceDelta`, `WsClientState`, the device webserver's frame push,
-`tools/web_console.py`, and every decline-the-Tee guard in
-`moy_lua_glue`/`make_spr_gate`. AT STAGE 4: `DrawRecorder`,
-`RecordingLayer`, `CommandCanvas` and the page replayer — they are the wasm
-head's own rendering substrate until it re-rasters, and deleting them
-earlier deletes the head. The browser's job moves to the **wasm head**: same
-frozen runtime in the browser, synced to the device per §3.4.
+by who still stands on it (v5 correction; the v4 text bundled them).
+**The die-now wave SHIPPED 2026-08-12**: `TeeCanvas`, the device webserver's
+frame push (+ `device_webview.py` and the Settings WEB VIEW surface —
+`moy_webserver.py` survives stripped to the socket/HTTP/WS transport core the
+§3.4 RPC rides, with `handle_http`/`on_text`/`send_text` seams),
+`tools/web_console.py` (+ its VM deploy recipe), and every decline-the-Tee
+guard in `moy_lua_glue`/`make_spr_gate`; both boards also stopped freezing
+`web_view.py`/`web_view_page.py` (flash back). Pinned by
+`tests/test_streaming_sunset.py` (absence greps) and the salvaged behavior
+suites (`test_web_recording.py`, the transport-core `test_moy_webserver.py`,
+`tests/webharness.py` for the console-over-recording-canvas suites).
+Two corrections the deletion surfaced, recorded here because the v5 text was
+wrong about them: **`SurfaceDelta` and `WsClientState` are NOT in the die-now
+wave** — web_boot constructs both (the wasm head's push path), so they move
+to the stage-4 wave with the rest of the substrate; and the **atlas/defspr
+ship-once lane + the diet `["map"]`/`["settiles"]` wire ops lost their only
+PRODUCER** (the Tee) — they are orphaned code inside `web_view.py` that dies
+with the stack at stage 4 rather than being worth a targeted excision now.
+AT STAGE 4: `DrawRecorder`, `RecordingLayer`, `CommandCanvas` and the page
+replayer — they are the wasm head's own rendering substrate until it
+re-rasters, and deleting them earlier deletes the head. The browser's job
+moves to the **wasm head**: same frozen runtime in the browser, synced to
+the device per §3.4.
+
+**Casualty not weighed by the decision, flagged for the owner:** the XIAO
+ESP32-S3 Zero side port (`firmware/seeed_xiao_esp32s3_zero/`) had the
+streaming web view as its ONLY output path ("browser is the GPU":
+`TeeCanvas` + the `moy_webserver` frame push, staged from the T-Deck tree).
+This wave orphans it — its tree is untouched but its build no longer has the
+machinery it stages. Either the Zero dies with the stream (the wasm head
+makes a display-less console board largely moot) or it gets rethought on the
+§3.4 sync model; that is an owner call this plan does not make.
 
 What survives from that neighborhood: `moy_webserver`'s socket/HTTP core (the
 §3.4 sync RPC rides it) and the page's input surfaces (they become the
@@ -474,12 +499,27 @@ synthesizes bands from it exactly as today.
 requires: price the wasm shell raster (`runtime/canvas.py` at desktop sizes
 vs moy_gfx-in-wasm) with real frame numbers — the cart canvas is
 moycore-covered, the SHELL is the unpriced half, and no sunset date exists
-until this spike reports. Then: the runner adopts moycore (raster compiled
-in, page blits the framebuffer); the recording stack's last consumer dies,
+until this spike reports. **The spike REPORTED (2026-08-12,
+`experiments/wasm_shell_raster/` — MEASURED, real dist wasm VM + emcc-built
+vendored libmoy, node, 1024×600):** option (a), `runtime/canvas.py`
+interpreted in the shipped wasm MicroPython, prices MARGINAL — desk repaint
+37ms median / editor repaint 49ms (vs 6.5/8.4ms under CPython), playable
+only if the shell's whole partial-repaint discipline holds, with no headroom
+for slower client machines; option (b), the vendored libmoy kernels compiled
+to wasm, prices TRIVIAL — 0.04–0.1ms per full repaint + 0.42ms indexed→RGBA
+present, ~500–1,000× (a), so a 10× slower client still holds 60fps. The §10
+gate ("both options unplayable → no completion path") is CLOSED in the
+sunset's favor; stage 4's raster is **moy_gfx-in-wasm** (a usermod of the
+same vendored sources — the honest cost note: the shell's ~100–150 verb
+calls/frame make DISPATCH, not pixels, the binding's real budget, like the
+P4). Then: the runner adopts moycore (raster compiled in, page blits the
+framebuffer); the recording stack's last consumer dies,
 which *completes* the §3.2 sunset. Requires the `surface_model_v1.md` §5.4
-amendment (§8). *Deletes:* `CommandCanvas`, the replayer, the wire protocol,
-`DrawRecorder`/`RecordingLayer`. *Pins:* the spec player's conformance
-already covers the core; the head's shell pixels ride the host goldens.
+amendment (§8; an amendment NOTE naming the two dead transports landed with
+the die-now wave). *Deletes:* `CommandCanvas`, the replayer, the wire
+protocol, `DrawRecorder`/`RecordingLayer`. *Pins:* the spec player's
+conformance already covers the core; the head's shell pixels ride the host
+goldens.
 
 ## 7. Architecture sketch (what changed from v1)
 
@@ -574,8 +614,10 @@ CLAIMS, and a killed claim reorders the queue.)
   cadence ~3–6× longer with the ~190ms cost per collect surviving. What
   remains falsifiable at stage 2: the cadence stretch itself, and whether
   a run-start collect keeps a 60s window clean.
-- **Stage 4's spike:** both wasm shell-raster options price out unplayable →
-  the §3.2 sunset has no completion path and the streaming substrate stays.
+- **Stage 4's spike — RESOLVED (2026-08-12), gate closed in the sunset's
+  favor:** interpreted canvas.py priced marginal, moy_gfx-in-wasm priced
+  trivially playable (numbers in §6 stage 4); the sunset has a completion
+  path and its raster choice is made.
 - **The pin surface not getting built:** if the §4.2 semantic trace harness
   lags the C implementations — or a crossing lands outside its vocabulary —
   moycore *recreates* the parallel-implementation disease at the semantic

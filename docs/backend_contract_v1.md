@@ -98,7 +98,9 @@ T-Deck web view from 2026-07-21 to 2026-08-01 and presented to the owner as
 
 The fullscreen composite test runs against the **host** canvas — the one backend
 with `.buf`. (v1.0 said "three of four backends had no coverage"; that
-overstated it — `tests/test_web_console.py` covers the recording fallback. The
+overstated it — the web-console suite covered the recording fallback until the
+2026-08 streaming sunset retired that transport; the recording fallback's pins
+now live in `tests/test_web_recording.py` + the wasm harnesses. The
 uncovered ones are the two **device** pairs.)
 
 ---
@@ -142,8 +144,9 @@ removing a capability probe is out of scope.
 - **L6. Wiring facts stay runtime tests.** `sc is gc` is checked at the call
   site, not baked into a subclass. *(Revised: v1.0 proposed "the T-Deck subclass
   returns early because `sys is game`". That hardcodes as a class property what
-  `console.py:685` decides at runtime — and `tools/web_console.py` already flips
-  that wiring live. It is `b0c442a`'s category error rewritten.)*
+  `console.py:685` decides at runtime — and the web console transport (deleted
+  2026-08, streaming sunset) used to flip that wiring live. It is `b0c442a`'s
+  category error rewritten.)*
 - **L7. Composed backends declare, never inherit.** `TeeCanvas.__getattr__`
   forwards unknown names to the wrapped canvas, so a Tee's capability set is the
   **union** of what it shadows and what it wraps — on a P4 with the web view on,

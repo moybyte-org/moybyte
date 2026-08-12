@@ -39,9 +39,6 @@ from device_diag import (
     _diag_luamem,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
-# The device WEB VIEW controller (#41/#22, extracted to device_webview.py).
-# run_desktop constructs WebView(...) and services it between frames.
-from device_webview import WebView
 # The device AUDIO backend (#16, extracted to device_audio.py). run_desktop wires
 # ws.make_audio = make_audio; DeviceAudio is the injected I2S backend.
 from device_audio import DeviceAudio, make_audio
@@ -138,10 +135,10 @@ def _load_carts(session=None, progress=None):
     return [dict(c) for c in CARTS], None
 
 
-# --- the device WEB VIEW controller now lives in device_webview.py (WebView +
-# _PointerSink + _WebProvider), imported at the top of this module. run_desktop
-# constructs WebView(...) and services it between frames (begin_frame/commit_frame/
-# poll); Settings -> WEB VIEW swaps its TeeCanvas in.
+# --- the device WEB VIEW (the streaming browser mirror) was DELETED in the
+# 2026-08 streaming sunset (docs/moycore_plan_2026-08.md 3.2): device_webview.py,
+# moy_webserver's frame push and the TeeCanvas lane are gone. moy_webserver.py
+# survives as the bare socket/HTTP/WS transport core for the 3.4 sync RPC.
 
 
 # Kid-side bench source (#63 run_perf_bench): sakura's exact _update/_draw shape,
@@ -541,17 +538,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:
         print("Moybyte: reboot hook unavailable:", exc)
-    # Web view (#41/#22): serve the running console to a browser on the same WiFi via a
-    # draw-command stream (NOT raw pixels -- WiFi is ~72KB/s, 153KB/frame is unplayable).
-    # It starts OFF: ws.canvas stays the RAW DeviceCanvas so there is ZERO per-draw cost
-    # in the normal (no-browser) path. Only when Settings -> WEB VIEW turns it ON does the
-    # WebView swap a recording TeeCanvas in as ws.canvas (and even then it records only
-    # while a browser is actively polling /frame). web is None on a build without
-    # moy_webserver -> the Settings row is hidden.
-    web = WebView(ws, canvas, inp, pointer, ws.wifi)
-    if web.available():
-        canvas = web.install()        # boot no-op; keeps sync_back() on the real canvas
-        ws.web_hook = web
     # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
     # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio
@@ -698,11 +684,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # polls (I2C keyboard/touch), the one loop stage that wasn't timed. Time
         # kbd / (ball+touch) / ws.frame separately so a HITCH line names it.
         _t_kbd = _ticks_diff(_ticks_ms(), now)
-        # Web view (#41): start this frame's recording (no-op unless a browser is live)
-        # and inject any queued browser button/pan input BEFORE begin_frame, so a
-        # browser press registers a clean one-frame edge like the keyboard's.
-        web.begin_frame()
-        web.feed_input(now)
         _t0 = _ticks_ms()
         inp.begin_frame()                       # keyboard edges (still a fallback)
         counts, click = ball.poll()             # trackball
@@ -727,10 +708,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             pointer.place(tp[0], tp[1])
             if tp[2]:                           # press edge = tap = click
                 click = True
-        # Web view (#41): merge a browser finger/tap AFTER the physical touch read (so
-        # it isn't clobbered); a real finger on the device wins over the browser.
-        if web.feed_pointer(tp is not None):
-            click = True
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
         _t_inp = _ticks_diff(_ticks_ms(), _t0)  # trackball + touch + pointer (HITCH v2)
@@ -771,11 +748,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if _sd_traced[0] and getattr(ws, "_frames_drawn", 0) != _frames_before:
             _sd_traced[0] = False
             print("SD = panel ok")
-        # Web view (#41): publish this frame's recorded draw commands to the browser --
-        # but ONLY if the frame actually drew (the redraw-on-change gate #44 may skip a
-        # static screen, which would record nothing; keep serving the last full frame).
-        if getattr(ws, "_frames_drawn", 0) != _frames_before:
-            web.commit_frame()
         # DMA double-buffer (#40): finish the displayed frame when the UI goes IDLE.
         # flush() holds back the final band (the busy-wait completion point) for the
         # NEXT flush's drain so render overlaps the DMA -- but the redraw-on-change gate
@@ -930,19 +902,14 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                 and _ticks_diff(_tnow, _diag_flush_at) >= 0):
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t_sd = _diag_flush(diag, ws)
-        # Web view (#41): service the server BETWEEN frames, fully non-blocking -- accept
-        # new connections + drain the persistent WebSocket's queued input and push the
-        # latest committed frame down it (WiFi STA is a separate peripheral from the display
-        # SPI, so this never touches the SD/panel bus -- it only competes for CPU here).
-        # No-op when the server is off; a slow client is dropped, never waited on.
-        _t0 = _ticks_ms()
-        web.poll()
-        _t_web = _ticks_diff(_ticks_ms(), _t0)
+        # The web bucket stays in the diag/LOOP format (parsers key on it) but
+        # reads 0 since the streaming web view died (2026-08 sunset).
+        _t_web = 0
         elapsed = _ticks_diff(_ticks_ms(), now)
         # Hitch logger (#66): any frame past HITCH_MS gets a HITCH line naming the
         # measured stages -- kbd (I2C keyboard poll), inp (trackball+touch+pointer),
         # ws (input handlers + frame: logic/render/chrome/flush), the 3s diag
-        # sample, the diag->SD write, web.poll -- the tool for catching the
+        # sample, the diag->SD write -- the tool for catching the
         # "micro-stutter every couple of seconds" class of bug. A spike with all
         # the named parts small = the pause was between stages (e.g. an implicit
         # GC collect inside an alloc), which is itself the answer.

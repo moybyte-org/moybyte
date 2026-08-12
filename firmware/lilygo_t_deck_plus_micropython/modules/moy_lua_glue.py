@@ -92,18 +92,17 @@ class LuaCartRun:
         self._moy_lua = moy_lua
         canvas = ws.canvas
         sheet = ws.project.sheet if ws.project is not None else None
-        # The web-view TeeCanvas __getattr__-forwards _batch_arr to the REAL
-        # canvas, so a plain getattr would hand the C spr a bypass around the
-        # recorder (the exact bug TeeCanvas.make_spr_gate shadows against --
-        # sprites the browser never sees). Its `_r` recorder attr marks it:
-        # decline the fast path there, like the gate does.
-        is_tee = getattr(canvas, "_r", None) is not None
-        arr = None if is_tee else getattr(canvas, "_batch_arr", None)
+        # A canvas without a writable batch array (the wasm head's recording
+        # CommandCanvas, or no open sheet) declines the C fast path. (The old
+        # `_r`-sniff that declined the device web view's TeeCanvas died with
+        # that class in the 2026-08 streaming sunset -- no surviving canvas
+        # both records and forwards _batch_arr.)
+        arr = getattr(canvas, "_batch_arr", None)
         direct = arr is not None and sheet is not None
         if not direct:
-            # No writable batch array (web-view Tee / no sheet): bind a dummy
-            # so init() succeeds, then the Python spr closure replaces the C
-            # fast path below -- the deliberate slow lane, still correct.
+            # Bind a dummy so init() succeeds, then the Python spr closure
+            # replaces the C fast path below -- the deliberate slow lane,
+            # still correct.
             from array import array
             arr = array("h", bytearray(2 * 8))
         moy_lua.init(canvas, sheet, arr, _LUA_TOKEN)
@@ -127,47 +126,46 @@ class LuaCartRun:
             # VM so pix/rect/.../print become lua_CFunctions that never enter
             # Python. MUST run after the register loop (each verb's trampoline
             # becomes the odd-shape fallback) and before exec(src) (the p8
-            # shim captures the globals into locals at load). Declined on the
-            # Tee for the same reason as the batch above -- a C draw would
-            # bypass the recorder -- and a no-op (returns False) on builds
-            # without moy_gfx (wasm) or canvases without gates.
-            if not is_tee:
-                ctx = getattr(canvas, "_gate_ctx", None)
-                bd = getattr(moy_lua, "bind_draw", None)
-                if ctx is not None and bd is not None:
-                    bound = bd(ctx)
-                    # #67 stage-1 (moycore): register the cart's indexed sheet
-                    # + palt with the ctx so the sprite-batch protocol (run
-                    # breaks + the #63 order-rule flush) runs entirely in C --
-                    # the begin_batch/flush_batch upcalls die for this run.
-                    # _lua_batch_sheet is the Python flush's fallback for a
-                    # C-stamped run (see DeviceCanvas.flush_batch). A refusal
-                    # (odd sheet shape, older moy_gfx) leaves the upcall
-                    # protocol standing -- correct, just slower.
-                    sbs = getattr(ctx, "set_batch_src", None)
-                    if bound and direct and sbs is not None:
-                        if getattr(canvas, "_palt", None) is None:
-                            canvas.reset_state()
-                        try:
-                            sbs(sheet.pix, sheet.w, sheet.h,
-                                getattr(canvas, "_palt", None))
-                            canvas._lua_batch_sheet = sheet
-                            canvas._lua_batch_token = _LUA_TOKEN
-                            self._canvas = canvas
-                            # stage-1b: the tilemap too, so tline goes direct.
-                            # Registered only under a live batch source (the
-                            # direct sspr/tline gate on both); a refusal keeps
-                            # those verbs on their trampolines.
-                            sms = getattr(ctx, "set_map_src", None)
-                            tilemap = (ws.project.tilemap
-                                       if ws.project is not None else None)
-                            if sms is not None and tilemap is not None:
-                                try:
-                                    sms(tilemap.cells, tilemap.w, tilemap.h)
-                                except (ValueError, TypeError):
-                                    pass
-                        except (ValueError, TypeError):
-                            pass
+            # shim captures the globals into locals at load). A no-op (returns
+            # False) on builds without moy_gfx (wasm) or canvases without
+            # gates -- the wasm head's recording CommandCanvas has no
+            # _gate_ctx, so it stays on the trampolines by construction.
+            ctx = getattr(canvas, "_gate_ctx", None)
+            bd = getattr(moy_lua, "bind_draw", None)
+            if ctx is not None and bd is not None:
+                bound = bd(ctx)
+                # #67 stage-1 (moycore): register the cart's indexed sheet
+                # + palt with the ctx so the sprite-batch protocol (run
+                # breaks + the #63 order-rule flush) runs entirely in C --
+                # the begin_batch/flush_batch upcalls die for this run.
+                # _lua_batch_sheet is the Python flush's fallback for a
+                # C-stamped run (see DeviceCanvas.flush_batch). A refusal
+                # (odd sheet shape, older moy_gfx) leaves the upcall
+                # protocol standing -- correct, just slower.
+                sbs = getattr(ctx, "set_batch_src", None)
+                if bound and direct and sbs is not None:
+                    if getattr(canvas, "_palt", None) is None:
+                        canvas.reset_state()
+                    try:
+                        sbs(sheet.pix, sheet.w, sheet.h,
+                            getattr(canvas, "_palt", None))
+                        canvas._lua_batch_sheet = sheet
+                        canvas._lua_batch_token = _LUA_TOKEN
+                        self._canvas = canvas
+                        # stage-1b: the tilemap too, so tline goes direct.
+                        # Registered only under a live batch source (the
+                        # direct sspr/tline gate on both); a refusal keeps
+                        # those verbs on their trampolines.
+                        sms = getattr(ctx, "set_map_src", None)
+                        tilemap = (ws.project.tilemap
+                                   if ws.project is not None else None)
+                        if sms is not None and tilemap is not None:
+                            try:
+                                sms(tilemap.cells, tilemap.w, tilemap.h)
+                            except (ValueError, TypeError):
+                                pass
+                    except (ValueError, TypeError):
+                        pass
             self._install_handles(ns)
             moy_lua.exec(_LUA_PRELUDE, "prelude")
             # "@cart" so error positions render `cart:12:` -- the chunkname

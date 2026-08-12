@@ -9,9 +9,9 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json dict), ws.font_scale, ws.diag_live, ws.web_hook, the
+system.json dict), ws.font_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-cycle_font_scale / set_diag_live / _cycle_channel / _toggle_web_view / _persist_system).
+cycle_font_scale / set_diag_live / _cycle_channel / _persist_system).
 Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
 appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
@@ -134,7 +134,6 @@ class SettingsLayer:
         # per call, and this is called ~15x per frame).
         self._rows_cache = None
         self._rows_bt = False
-        self._rows_web = False
         self._rows_upd = False
         self._rows_onl = False
 
@@ -650,12 +649,10 @@ class SettingsLayer:
         cache exists to remove."""
         ws = self.ws
         bt = self._bt_service() is not None
-        web = ws.web_hook is not None
         upd = ws._update_available()
         onl = ws._online_update_available()
         if (self._rows_cache is not None and bt == self._rows_bt
-                and web == self._rows_web and upd == self._rows_upd
-                and onl == self._rows_onl):
+                and upd == self._rows_upd and onl == self._rows_onl):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -663,15 +660,12 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
-        if web:                               # device web view (#41): a WiFi browser feed
-            rows = rows + (("web", "WEB VIEW", "web"),)
         if upd:
             rows = rows + (("update", "UPDATE FW", "action"),)
         if onl:
             rows = rows + (("ota_channel", "CHANNEL", "channel"),)
             rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
         self._rows_bt = bt
-        self._rows_web = web
         self._rows_upd = upd
         self._rows_onl = onl
         self._rows_cache = rows
@@ -720,9 +714,6 @@ class SettingsLayer:
             return
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
-            return
-        if key == "web":                        # device web view ON <-> OFF (#41)
-            ws._toggle_web_view()
             return
         if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
             self._toggle_diag_row(key)
@@ -851,8 +842,6 @@ class SettingsLayer:
                 self.open_bluetooth()
             elif row[2] == "action":
                 self._activate_settings_action(row[0])
-            elif row[2] == "web":               # A/run also toggles the web view (#41)
-                ws._toggle_web_view()
             elif row[2] == "diag":              # ... and the ON/OFF gates (#68/#77)
                 self._toggle_diag_row(row[0])
         if i.pressed("b"):
@@ -927,9 +916,6 @@ class SettingsLayer:
                     return True
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
-                    return True
-                if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
-                    ws._toggle_web_view()
                     return True
                 if rows[i][2] == "diag":           # ON/OFF gates: any tap flips (#68/#77)
                     self._toggle_diag_row(rows[i][0])
@@ -1102,25 +1088,12 @@ class SettingsLayer:
             beta = ws._ota_channel() == "unstable"
             cv.print("BETA" if beta else "STABLE", vx, y + 5,
                      NAMES["orange"] if beta else NAMES["green"], 1)
-        elif kind == "web":                # device web view (#41): ON/OFF + the URL
-            on = False
-            url = ""
-            try:
-                on = bool(ws.web_hook.enabled)
-                url = str(ws.web_hook.url() or "")
-            except Exception:  # noqa: BLE001 -- a backend hiccup just reads OFF
-                pass
-            cv.print("ON" if on else "OFF", vx, y + 5,
-                     NAMES["green"] if on else NAMES["dark_grey"], 1)
-            if on and url:
-                # The URL to open in a phone/desktop browser, under the row label.
-                cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
         elif kind == "diag":               # #68 diag gates: ON/OFF (key-driven)
             on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
         # Mark not-yet-functional rows clearly (wifi + font + channel +
-        # web + diag + actions work).
+        # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "web", "diag"):
+                        "diag"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)

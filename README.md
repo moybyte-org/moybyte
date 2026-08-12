@@ -170,8 +170,8 @@ VM (`runtime/lua_host.py`) — drop it and Python carts still run, but a
 # ...and run YOUR cart in place, editing it between runs (see below)
 .venv/bin/python tools/simulate_desktop.py --cart ~/.moybyte/projects/mine.moy
 
-# the whole system streamed to a browser as draw commands (no wasm build)
-.venv/bin/python tools/web_console.py --size 1024x600 --windowed
+# the whole console in a browser: the wasm build (firmware/web_runner)
+cd firmware/web_runner && python moy.py run
 
 # headless tour -> animated GIF (this is how the GIFs above are made)
 .venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
@@ -302,7 +302,7 @@ cost a debugging session.
 | `firmware/lilygo_t_deck_plus_micropython/` | the ESP32-S3 port + the native C modules (`moy_gfx`, `moy_lua`, `moy_audio`, `moy_sd`) |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
 | `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
-| `tools/` | simulator, web console, GIF recorder, p8 importers, on-glass test drivers |
+| `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |
 | `docs/` | cart API, shell UX, visual identity, architecture and design docs |
 | **`CLAUDE.md`** | **the best single map of this repo.** Written for AI tools, but it is the orientation doc humans should read first. |
 

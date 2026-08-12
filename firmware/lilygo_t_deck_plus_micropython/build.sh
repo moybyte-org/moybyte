@@ -289,9 +289,11 @@ cp "${REPO_ROOT}/runtime/palette.py" "${SCRIPT_DIR}/modules/palette.py"
 cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
 cp "${REPO_ROOT}/runtime/op_history.py" "${SCRIPT_DIR}/modules/op_history.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
+# web_view_ws.py only: the RFC 6455 framing moy_webserver's transport core
+# rides. web_view.py + web_view_page.py (the recording/replayer stack) stopped
+# being staged in the 2026-08 streaming sunset -- they are wasm-head substrate
+# now (moycore plan 3.2), and freezing them here was dead flash.
 cp "${REPO_ROOT}/runtime/web_view_ws.py" "${SCRIPT_DIR}/modules/web_view_ws.py"
-cp "${REPO_ROOT}/runtime/web_view_page.py" "${SCRIPT_DIR}/modules/web_view_page.py"
-cp "${REPO_ROOT}/runtime/web_view.py" "${SCRIPT_DIR}/modules/web_view.py"
 cp "${REPO_ROOT}/runtime/font.py" "${SCRIPT_DIR}/modules/moy_font.py"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of
 # embedded carts moy_runtime used to hand-duplicate) so the device's seed /

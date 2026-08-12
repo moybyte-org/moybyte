@@ -300,7 +300,7 @@ to whoever called it.
 - `runtime/console.py` — the shell **kernel**: `Workstation`, shrunk by the 2026-07
   refactor to a compositor/router — the Layer-stack frame/input/pointer loop, the
   shared draw toolkit (`_glyph`/`_icon`/`_btn`), store/service attach points
-  (`carts_store`/`wifi`/`updater`/`web_hook`) and the spawn/exit verbs; everything
+  (`carts_store`/`wifi`/`updater`) and the spawn/exit verbs; everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
 - `runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` — the 2026-07 shell
@@ -374,9 +374,10 @@ to whoever called it.
   so it works while a game runs — the bar's wifi icon deep-links there in
   windowed mode (fullscreen tiers keep launching the wifi.moy tool). The default
   wallpaper is **`moy_night.moy`** (static brand-colorway scene — a static
-  wallpaper keeps the idle desktop free under the redraw gate AND ~0 KB/s on the
-  web view). Works over the WEB transport too
-  (`tools/web_console.py --windowed`): window buffers become `RecordingLayer`s
+  wallpaper keeps the idle desktop free under the redraw gate AND ~0 KB/s on a
+  recording tier). Works over the RECORDING transport too (the wasm head;
+  the host streaming console died in the 2026-08 sunset — `tests/webharness.py`
+  is the test-side construction): window buffers become `RecordingLayer`s
   (retained windows blit by reference, the #54/#43 deflayer mechanism), the
   game/wallpaper composites ship as one self-contained spr, scaled system text
   records as rect blocks (incl. inside layers), and the bar renders direct
@@ -522,9 +523,10 @@ to whoever called it.
   bit-identical over 600 host frames — `tests/test_lua_sakura_parity.py` +
   `experiments/lua_bridge/host_parity.py`); the measured cross-board verdict
   lives in #67 (S3: parity with auto-native Python; P4: logic 3–4ms flat vs
-  Python's 6–7ms with 19–24ms GC spikes). The web-view TeeCanvas declines the
-  C fast path (its `__getattr__` would bypass the recorder — same trap
-  `make_spr_gate` shadows against). The Phase 4 protocol tests + Phase 5 UX tail
+  Python's 6–7ms with 19–24ms GC spikes). A canvas without a `_batch_arr`
+  (the wasm head's recording CommandCanvas) declines the C fast path — the
+  Tee-specific decline guards died with the 2026-08 streaming sunset. The
+  Phase 4 protocol tests + Phase 5 UX tail
   (crash-line mapping via `player._lua_cart_line`, the per-language symbol
   palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`).
   **`LUA_32BITS` is DECIDED AND ON** (`6ddaf7c`, `luaconf.h`): both boards' FPUs
@@ -556,7 +558,7 @@ to whoever called it.
 - `moy_compositor.py` — native RGB565 framebuffer + DMA flush.
 - `tdeck_display.py` — display/LVGL + SPI bus bootstrap.
 - `moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `moy_webserver.py` — device WEB VIEW (#41/#22): serves the **running console** to a browser on the same WiFi via the **same draw-command protocol** (`defspr`/`spr`-by-index/`map`/`settiles`/primitives, serve-time defspr, atlas `gen` lock-step), so the device page renders device frames. The **live channel is a persistent WebSocket** (`GET /ws`, RFC 6455 handshake): frames PUSH down as text messages, input pushes up as `{"events":[...]}` text — one socket, **no per-frame HTTP handshake** (the #41 transport swap; the old transport opened a new TCP conn per `/frame`, capping ~20-25fps). The page + assets still load over plain HTTP (`GET /`, `GET /assets`); the legacy `GET/POST /frame` + `POST /input` poll transport was **removed** — the page is WebSocket-only. Records the cart's per-frame draw calls (a `DrawRecorder` fed by a `TeeCanvas` that forwards to the real `DeviceCanvas`, the same format `runtime/web_view.py` records for the host) — **never** the raw framebuffer (WiFi ~72KB/s, 153KB/frame is unplayable). Non-blocking listening socket + a non-blocking persistent `_WSConn` (cross-iteration read buffer for split frames; blocking-budget sends, stalled client dropped); `moy_runtime.run_desktop`'s single-threaded loop services it **BETWEEN frames** via the `WebView` controller (`begin_frame`/`commit_frame`/`poll`). **Liveness/stream-mode now key on a connected WebSocket** (not a recent `/frame` poll). Per-WS-connection serve state is the **shared `web_view.WsClientState`** (2026-07-23, both tiers: this server AND `tools/web_console.py`): the #76 SurfaceDelta + the **first-frame keyframe latch** — the loop re-arms the console's dirty gate every push tick until the connection has been served one full frame, closing the black-until-tap reload race (one-shot kicks — the `/assets` arm, the recording-wanted edge — all had holes). **Off by default → `ws.canvas` stays the raw `DeviceCanvas` (zero per-draw cost); Settings → WEB VIEW swaps the Tee in** (and rebinds wallpaper/cart). WiFi STA ≠ display SPI, so it doesn't touch the SD/panel bus. **Owner-verified on the T-Deck 2026-08-01** (#182): the page loads, the WS channel comes up and the console streams — slow but working, so WiFi↔LCD-DMA coexistence (#38/#40) and the socket/WebSocket layer now have one on-glass data point each rather than none. It was dead from 2026-07-21 to 2026-08-01 on a missing re-export (`effective_input_kinds`), which presented as "T-Deck WiFi is broken" — a zero-byte close is indistinguishable from a dead radio in a browser. WS removes the per-frame handshake (smoother, lower-latency input) but **not** the ~72KB/s ceiling: light screens ~30-40fps, the heavy launcher ~18fps. **Per-WM-surface streams (v0.5 shell Stage 9):** the shared recorder can slice each frame into one command stream per WM surface (`web_view.surfaces_on` — bar / app content / player viewport, a view over the same flat stream); the **host** web console renders them, the **device keeps the flag off** (flat frames) — wiring the device transport to per-surface render is a standing gate.
+- `moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC is the recorded open question). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only web_view file the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. `runtime/web_view.py` (recorder/CommandCanvas/ServedState/SurfaceDelta/WsClientState/the page) is now **wasm-head substrate only** — it dies wholesale at stage 4; note the atlas/defspr lane and the diet `map`/`settiles` ops inside it are already producer-less (the Tee was their only writer). The XIAO Zero port stood entirely on the deleted stream and is orphaned pending an owner call (flagged in the plan §3.2).
 
 ### Hard device constraints (learned the painful way — respect these)
 

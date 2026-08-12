@@ -1,10 +1,13 @@
-# Moybyte web view -- the SHARED, transport-agnostic core of the console web view
-# (#41/#22). ONE source of truth for the draw-command recorder, the payload builders,
-# the serve-time defspr/deflayer logic, the browser replayer JS, and the protocol
-# constants -- used by BOTH the HOST web console (tools/web_console.py, an http.server
-# transport) and the DEVICE web view (firmware/.../modules/moy_webserver.py, a
-# MicroPython socket + WebSocket transport). The two transports are thin adapters over
-# this module; everything below the socket lives here so the two can't drift.
+# Moybyte web view -- the draw-command recording core of the browser console
+# (#41/#22): the recorder, the payload builders, the serve-time defspr/deflayer
+# logic, the browser replayer JS, and the protocol constants. Since the 2026-08
+# STREAMING SUNSET (moycore plan 3.2) its one consumer is the WASM HEAD
+# (firmware/web_runner): CommandCanvas is that build's system canvas and the
+# page replays its commands. The two STREAMING transports this module used to
+# serve -- tools/web_console.py (host http.server) and the device web view
+# (moy_webserver's frame push + TeeCanvas) -- are DELETED; this whole recording
+# stack dies with them at stage 4, when the wasm head re-rasters
+# (docs/moycore_plan_2026-08.md 3.2 owns the schedule and the reasoning).
 #
 # PORTABLE SUBSET (imports cleanly on CPython AND MicroPython): this module uses ONLY
 # `json` (with a ujson fallback) + plain Python. NO sockets, NO http.server, NO
@@ -305,16 +308,15 @@ def _slice_surfaces(cmds, marks):
 class DrawRecorder:
     """Records draw calls into a per-frame, JSON-serializable command list.
 
-    Two consumers:
-      * DEVICE: a TeeCanvas forwards every draw call here (in addition to the real
-        DeviceCanvas) ONLY while `enabled` is True, so a no-browser frame costs nothing.
-        `spr` records a tiny atlas index; the pixels ship once as a defspr at SERVE time
-        (ServedState). `map` records ONE op the browser replays from its cached tilemap.
-      * HOST: the record-only CommandCanvas draws straight into a recorder with
-        `self_contained = True`, so `spr` embeds the pixels inline (the host rebuilds tile
-        Images every frame -- unstable id -- and composites the whole game frame as a fresh
-        bitmap, neither of which the id-keyed atlas can dedup). CommandCanvas keeps its own
-        map()/spr_batch() expansion; this recorder just holds the shared command format.
+    One consumer since the 2026-08 streaming sunset (moycore plan 3.2 -- the
+    device TeeCanvas and the host web console died with their transports): the
+    record-only CommandCanvas, the WASM HEAD's system canvas until stage 4
+    re-rasters. It draws straight into a recorder with `self_contained = True`,
+    so `spr` embeds the pixels inline (the host rebuilds tile Images every
+    frame -- unstable id -- and composites the whole game frame as a fresh
+    bitmap, neither of which the id-keyed atlas can dedup). CommandCanvas keeps
+    its own map()/spr_batch() expansion; this recorder just holds the shared
+    command format.
 
     The sprite atlas {id(img): index} is keyed by id(img) -- the device's make_api reuses one
     Image per (tile, colorkey), so id is a STABLE key for a unique bitmap; the recorder also
@@ -326,9 +328,9 @@ class DrawRecorder:
         self.w = w
         self.h = h
         self.enabled = False
-        # STREAM MODE (#41): when True the TeeCanvas RECORDS commands but does NOT forward
-        # draws to the real DeviceCanvas (no rasterization), so the cart can outrun the
-        # panel's render+flush ceiling. Ignored when disabled (no browser -> no streaming).
+        # RECORD-ONLY (#41, historical name STREAM MODE): when True a recording
+        # canvas records commands without rasterizing anywhere. The wasm head
+        # runs record-only by construction (CommandCanvas has no framebuffer).
         self.record_only = False
         # SELF-CONTAINED spr (HOST): when True `spr` embeds the pixels inline instead of
         # using the id-keyed atlas + serve-time defspr. False = the device atlas path.
@@ -350,15 +352,14 @@ class DrawRecorder:
         self._batch_imgs = {}
         self._batch_gen = None
         # OFF-SCREEN LAYERS (#54 scroll + #43 cached top bar): RecordingLayers minted via the
-        # Tee/CommandCanvas, indexed by their dense id. Dropped on reset_atlas (cart change),
+        # CommandCanvas, indexed by their dense id. Dropped on reset_atlas (cart change),
         # in lock-step with the atlas_gen the serve logic keys off.
         self._layers = []
         # WM-SURFACE PARTITION (Stage 9): when surfaces_on, the console marks each WM-stack
         # surface (begin_surface) and commit() slices the flat frame into one stream per
         # surface (bar / app-content / player-viewport). OFF by default -> begin_surface is a
         # no-op and frame_surfaces() is None, so the flat frame + every path over it are
-        # byte-identical (zero cost when the web view is off). Only the host web console turns
-        # it on; the DEVICE keeps it off (per-surface browser render is a hardware gate).
+        # byte-identical (zero cost when off). The wasm head (web_boot) turns it on.
         self.surfaces_on = False
         self._surf_marks = []          # [(start_index, sid, domain), ...] for this frame
         self._frame_surfaces = None    # the last committed frame's [[sid, domain, cmds], ...]
@@ -1114,8 +1115,8 @@ class RecordingLayer:
     #
     # OPT-IN, not the default: only a consumer that never reads a layer's PIXELS
     # may set it. The web recording path qualifies -- blit_window_from/blit_strip
-    # record a layer REFERENCE (blit_layer_*) rather than copying -- but the device
-    # web view's Tee wraps a real DeviceCanvas whose panel still needs the pixels.
+    # record a layer REFERENCE (blit_layer_*) rather than copying. (The device
+    # web view's Tee, which needed real pixels too, died in the 2026-08 sunset.)
     RECORD_ONLY = False
 
     def _bind(self, name):
@@ -1196,270 +1197,6 @@ class RecordingLayer:
 
 
 # ---------------------------------------------------------------------------
-# TeeCanvas (DEVICE): forward every draw call to the real DeviceCanvas (the panel still
-# renders) AND, while recording is enabled, to the DrawRecorder. run_desktop swaps this in
-# as ws.canvas transparently.
-# ---------------------------------------------------------------------------
-
-
-class TeeCanvas:
-    """Wraps the device's real Canvas (DeviceCanvas) so the panel renders exactly as before,
-    and ALSO records draw calls for the web view -- but only while `recorder.enabled` is True.
-    When disabled, each method is a single extra branch over a direct delegate call (no list
-    ops, no allocation), so the normal no-browser path is effectively free.
-
-    STREAM MODE (#41): when `recorder.record_only` is True the pixel-PRODUCING ops RECORD but
-    do NOT forward to the real canvas (the device skips rasterizing the panel; run_desktop
-    skips the flush). The cheap state ops STILL forward. record_only only matters while
-    enabled is True.
-
-    Reads (`pix` with two args, attribute reads like `.buf`) pass through. new_layer() mints a
-    RecordingLayer; blit_window_from/blit_strip record a tiny ["blit_layer", ...] reference
-    (the layer's stream ships ONCE as a deflayer at serve time)."""
-
-    # #113: the blit-scroll partial path stays OFF while the device web view's
-    # Tee is bound. Forwarding the real canvas's RETAINED_FRAMES (2, the panel
-    # ping-pong) would be WRONG for the browser's retained buffer (which holds
-    # the LAST shipped frame, not two back), and in stream mode the panel isn't
-    # painted at all -- there is no single retention answer for both consumers,
-    # so the gate reads 0 here and drag frames keep the full band repaint.
-    # (Class attr: __getattr__ only fires for MISSING names, so this pins it.)
-    RETAINED_FRAMES = 0
-
-    def __init__(self, canvas, recorder):
-        self._c = canvas
-        self._r = recorder
-        self.w = canvas.w
-        self.h = canvas.h
-
-    def __getattr__(self, name):
-        # Only reached for attrs not set on the Tee (e.g. buf, _comp, sync_back).
-        return getattr(self._c, name)
-
-    def scroll_rect(self, rx, ry, rw, rh, dx, dy):
-        # #113: record + forward explicitly. Without this, __getattr__ would
-        # forward to DeviceCanvas.scroll_rect UNRECORDED -- the browser would
-        # miss the shift and render torn scroll frames. (RETAINED_FRAMES = 0
-        # above keeps the console's blit gate off while the Tee is bound, so
-        # this is defensive completeness for any direct caller.)
-        if self._r.enabled:
-            self._r.scroll_rect(rx, ry, rw, rh, dx, dy)
-            if self._r.record_only:
-                return
-        self._c.scroll_rect(rx, ry, rw, rh, dx, dy)
-
-    def make_spr_gate(self, sheet, fallback):
-        # #63 spr_gate: explicitly DECLINE the native fast path. Without this,
-        # __getattr__ would forward to the real DeviceCanvas's make_spr_gate and
-        # the C gate would append quads straight to the panel batch -- pixels the
-        # recorder never sees, so the browser would render a cart with NO sprites
-        # (and stream mode would rasterize what it's meant to skip). Returning
-        # None keeps make_api on the Python spr closure -> every call crosses
-        # Tee.spr_tile -> recorded. The web path is the deliberate slow lane.
-        return None
-
-    def begin_surface(self, sid, domain="system"):
-        # Stage 9 WM-surface mark (host == device API parity): forward to the recorder, which
-        # only slices while surfaces_on. The DEVICE keeps surfaces_on False -- per-surface render
-        # in the browser + the WiFi<->LCD-DMA coexistence are a STANDING HARDWARE GATE (#38/#40)
-        # this stage does not close -- so this is a NO-OP there and the device stream stays a
-        # byte-identical flat frame. Only the host web console turns surfaces on.
-        self._r.begin_surface(sid, domain)
-
-    # -- off-screen layers ---------------------------------------------------
-    def new_layer(self, w, h):
-        real = self._c.new_layer(w, h)
-        return RecordingLayer(real, self._r)
-
-    def blit_window_from(self, layer, cam_x=0, cam_y=0):
-        # A layer passed here is normally a RecordingLayer. But a layer built on the RAW
-        # DeviceCanvas BEFORE the web view bound this Tee (the console's cached bar strip
-        # carried across the swap) is a plain canvas -- tolerate it (blit + skip recording)
-        # instead of crashing the frame.
-        cam_x = int(cam_x)
-        cam_y = int(cam_y)
-        rl = isinstance(layer, RecordingLayer)
-        if rl:
-            layer._end_batch()
-        if not self._r.record_only:
-            self._c.blit_window_from(layer._c if rl else layer, cam_x, cam_y)
-        if self._r.enabled and rl:
-            self._r.blit_layer_window(layer, cam_x, cam_y)
-
-    def blit_strip(self, layer, dst_x=0, dst_y=0):
-        rl = isinstance(layer, RecordingLayer)
-        if rl:
-            layer._end_batch()
-        if not self._r.record_only:
-            self._c.blit_strip(layer._c if rl else layer, dst_x, dst_y)
-        if self._r.enabled and rl:
-            self._r.blit_layer_full(layer, dst_x, dst_y)
-
-    # -- draw state ----------------------------------------------------------
-    def reset_state(self):
-        self._c.reset_state()
-        if self._r.enabled:
-            self._r.reset_state()
-
-    def camera(self, x=0, y=0):
-        if self._r.enabled:
-            self._r.camera(x, y)
-        return self._c.camera(x, y)
-
-    def clip(self, x=None, y=None, w=None, h=None):
-        self._c.clip(x, y, w, h)
-        if self._r.enabled:
-            self._r.clip(x, y, w, h)
-
-    def pal(self, c0=None, c1=None):
-        self._c.pal(c0, c1)
-        if self._r.enabled:
-            self._r.pal(c0, c1)
-
-    def palt(self, c=None, on=None):
-        self._c.palt(c, on)
-        if self._r.enabled:
-            self._r.palt(c, on)
-
-    # -- primitives ----------------------------------------------------------
-    def cls(self, c=0):
-        if not self._r.record_only:
-            self._c.cls(c)
-        if self._r.enabled:
-            self._r.cls(c)
-
-    def pix(self, x, y, c=None):
-        if c is None:
-            return self._c.pix(x, y)           # a read -> the real framebuffer
-        if not self._r.record_only:
-            self._c.pix(x, y, c)
-        if self._r.enabled:
-            self._r.pix(x, y, c)
-
-    def line(self, x0, y0, x1, y1, c):
-        if not self._r.record_only:
-            self._c.line(x0, y0, x1, y1, c)
-        if self._r.enabled:
-            self._r.line(x0, y0, x1, y1, c)
-
-    def rect(self, x, y, w, h, c):
-        if not self._r.record_only:
-            self._c.rect(x, y, w, h, c)
-        if self._r.enabled:
-            self._r.rect(x, y, w, h, c)
-
-    def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
-        # #163: explicit shadow -- __getattr__ would forward straight to the
-        # real canvas's native lane and the recorder would never see the quads.
-        if n is None or n < 0:
-            n = len(arr) // 5
-        for i in range(0, n * 5, 5):
-            self.rect(arr[i] + ox, arr[i + 1] + oy, arr[i + 2], arr[i + 3],
-                      c if c >= 0 else arr[i + 4])
-
-    def rectb(self, x, y, w, h, c):
-        if not self._r.record_only:
-            self._c.rectb(x, y, w, h, c)
-        if self._r.enabled:
-            self._r.rectb(x, y, w, h, c)
-
-    def circ(self, cx, cy, r, c):
-        if not self._r.record_only:
-            self._c.circ(cx, cy, r, c)
-        if self._r.enabled:
-            self._r.circ(cx, cy, r, c)
-
-    def circb(self, cx, cy, r, c):
-        if not self._r.record_only:
-            self._c.circb(cx, cy, r, c)
-        if self._r.enabled:
-            self._r.circb(cx, cy, r, c)
-
-    def tri(self, x1, y1, x2, y2, x3, y3, c):
-        if not self._r.record_only:
-            self._c.tri(x1, y1, x2, y2, x3, y3, c)
-        if self._r.enabled:
-            self._r.tri(x1, y1, x2, y2, x3, y3, c)
-
-    def trib(self, x1, y1, x2, y2, x3, y3, c):
-        if not self._r.record_only:
-            self._c.trib(x1, y1, x2, y2, x3, y3, c)
-        if self._r.enabled:
-            self._r.trib(x1, y1, x2, y2, x3, y3, c)
-
-    def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
-             colorkey=-1, flip=0):
-        if not self._r.record_only:
-            self._c.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
-        if self._r.enabled:
-            self._r.sspr(sheet, sx, sy, sw, sh, dx, dy, dw, dh, colorkey, flip)
-
-    def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
-        if not self._r.record_only:
-            self._c.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
-        if self._r.enabled:
-            self._r.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
-
-    def spr(self, img, x, y, scale=1, flip=0):
-        if not self._r.record_only:
-            self._c.spr(img, x, y, scale, flip)
-        if self._r.enabled:
-            self._r.spr(img, x, y, scale, flip)
-
-    def spr_tile(self, sheet, tile, x, y, colorkey=-1, scale=1, flip=0):
-        # Fold-1 auto-batch (#63): the real DeviceCanvas queues it (coalesced into one
-        # native blit_batch); the browser stream stays PER-SPR, so resolve the tile via
-        # the recorder's STABLE tile-image cache and record one self-contained spr --
-        # exactly like spr_batch's per-item path (wire format unchanged).
-        if not self._r.record_only:
-            self._c.spr_tile(sheet, tile, x, y, colorkey, scale, flip)
-        if self._r.enabled:
-            img = self._r.batch_tile_image(sheet, int(tile), colorkey)
-            if img is not None:
-                self._r.spr(img, x, y, scale, flip)
-
-    def spr_batch(self, sheet, items, colorkey=-1, scale=1):
-        if not self._r.record_only:
-            self._c.spr_batch(sheet, items, colorkey, scale)
-        if self._r.enabled:
-            # Expand to per-tile spr commands (the browser has no batch op). Resolve each tile
-            # through the recorder's STABLE tile-image cache so a repeated tile maps to the
-            # SAME Image across frames -> the atlas dedups its bitmap to ONE defspr per session.
-            for it in items:
-                tid = int(it[0])
-                if tid < 0:
-                    continue
-                flip = it[3] if len(it) > 3 else 0
-                img = self._r.batch_tile_image(sheet, tid, colorkey)
-                if img is None:
-                    continue
-                self._r.spr(img, it[1], it[2], scale, flip)
-
-    def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
-            sx=0, sy=0, colorkey=-1, scale=1):
-        if not self._r.record_only:
-            self._c.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
-        if self._r.enabled:
-            # PAYLOAD DIET (#41): record ONE map op. Sync the browser's tilemap if the cart
-            # mutated it (mset), then emit the map op with the resolved (default-None) region.
-            mx = int(mx)
-            my = int(my)
-            scale = int(scale) if int(scale) >= 1 else 1
-            if w is None:
-                w = tilemap.w - mx
-            if h is None:
-                h = tilemap.h - my
-            self._r.settiles(tilemap)
-            self._r.map(mx, my, int(w), int(h), int(sx), int(sy), scale, int(colorkey))
-
-    def print(self, s, x, y, c, scale=2):
-        if not self._r.record_only:
-            self._c.print(s, x, y, c, scale)
-        if self._r.enabled:
-            self._r.print(s, x, y, c)
-
-
-# ---------------------------------------------------------------------------
 # CommandCanvas (HOST): a drop-in RECORD-ONLY canvas the host web console swaps in as the
 # console's SYSTEM canvas. Same public API as runtime.canvas.Canvas, so it's a drop-in
 # ws.canvas with no change to the shared console. It records SELF-CONTAINED sprs (via a
@@ -1490,8 +1227,8 @@ class CommandCanvas:
     #
     # 0 makes every frame SELF-CONTAINED: scrolling repaints the full band instead
     # of shipping a ["scr", ...] shift. That costs bytes on a drag, which the #76
-    # per-surface delta already absorbs, and it is the same trade -- for the same
-    # reason -- that the device web view's Tee makes above.
+    # per-surface delta already absorbs -- the browser's retained buffer holds
+    # the LAST shipped frame, so no other retention answer is correct here.
     RETAINED_FRAMES = 0
 
     def __init__(self, width=320, height=240, palette=None, font_scale=1):
@@ -1521,7 +1258,7 @@ class CommandCanvas:
     def begin_surface(self, sid, domain="system"):
         """Stage 9: forward the console's per-WM-surface mark to the recorder so the frame is
         sliced per surface (the browser composites them). A no-op unless the recorder's
-        surfaces_on is set (web_console turns it on). See DrawRecorder.begin_surface."""
+        surfaces_on is set (the wasm head turns it on). See DrawRecorder.begin_surface."""
         self._rec.begin_surface(sid, domain)
 
     def skip_surface(self, sid, domain="system"):
@@ -1592,7 +1329,8 @@ class CommandCanvas:
         self._rec.rect(x, y, w, h, c)
 
     def fill_rects(self, arr, n=-1, ox=0, oy=0, c=-1):
-        # #163: record each quad as a plain rect op (see TeeCanvas note).
+        # #163: record each quad as a plain rect op (the wire has no batch op,
+        # and an explicit shadow keeps the native lane from bypassing the recorder).
         if n is None or n < 0:
             n = len(arr) // 5
         for i in range(0, n * 5, 5):
@@ -1848,9 +1586,9 @@ def frame_payload(cmds, cart_title, gen=0, perf=None, audio="", surfaces=None,
 
 def apply_ws_text(payload, apply):
     """Decode one inbound WS text payload ({"events":[...]}) and feed the event list
-    to `apply` -- the ONE input-decode path both transports share (the device's
-    moy_webserver and the host web console), so the wire format can't drift between
-    them. A malformed message just yields no input (never raises)."""
+    to `apply` -- the ONE input-decode path every WS consumer shares (the wasm
+    head's worker pump today; the 3.4 controller role rides the same format), so
+    the wire can't drift. A malformed message just yields no input (never raises)."""
     try:
         data = payload.decode("utf-8") if isinstance(payload, (bytes, bytearray)) else payload
         obj = json.loads(data)
@@ -2067,10 +1805,10 @@ class ServedState:
 
 
 class WsClientState:
-    """Per-WS-connection serve state, shared by BOTH web servers (the host
-    tools/web_console.py per-connection thread loop and the device
-    moy_webserver.py single-client poll loop) so the connection-lifecycle
-    POLICY has one home instead of three hand-rolled copies:
+    """Per-connection serve state. Written for the two streaming web servers
+    (both deleted in the 2026-08 sunset); its surviving consumer is the wasm
+    head's page session (web_boot), and it dies with the recording stack at
+    stage 4. The connection-lifecycle POLICY it holds:
 
       * `delta`  -- the #76 per-surface SurfaceDelta (mirrors THIS browser's
         SURF cache; a fresh connection starts full).

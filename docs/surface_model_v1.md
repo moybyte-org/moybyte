@@ -299,8 +299,14 @@ placement-only-frame zero-ship assertion).
 
 ### 5.4 Web — one page protocol, three transports
 
+*(Amendment note, 2026-08-12: the 2026-08 streaming sunset — moycore plan
+§3.2 — deleted two of the three transports named here: the device webserver's
+frame push and the host web console tool. The wasm runner is the sole
+surviving transport; this annex's full retirement lands as the versioned
+stage-4 amendment that plan commits to. Text below kept as written.)*
+
 The device webserver (`moy_webserver.py`, WS push), the host web console
-(`tools/web_console.py`), and the wasm runner (`firmware/web_runner/`,
+(the deleted `web_console` tool), and the wasm runner (`firmware/web_runner/`,
 worker-owned VM per #176) serve the same page protocol
 (`runtime/web_view_page.py` + `page_tail.js`).
 
