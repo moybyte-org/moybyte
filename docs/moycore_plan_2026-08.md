@@ -365,12 +365,28 @@ baseline (consistent with the ≤4.5ms staleness note); LUABATCH read clean
 resolving** — steady-state render now rides the 30fps cadence and the thing
 breaking the floor is the GC spike class, which is stage 2's qualitative
 target. So stage 2's fps case and its qualitative case are now the same
-case: delete the collects from play, keep ~30 solid. The (a) attribution —
-also §4.1's kill gate, and now doubling as the spike-ownership question —
-is the ONE remaining M0 step. Numbers live in #66, as always. Be honest
-about what the gates can kill: no S3 number kills the *project* (both
-outcomes re-queue it); what a number kills is a CLAIM — and this one
-sharpened the claim rather than killing it.
+case: delete the collects from play, keep ~30 solid. (a) **The attribution
+LANDED the same day** (variant carts by difference — floor / +input /
++state; the full table lives in #66): the deletable-by-moycore share is
+**~2–4ms, not the predicted 4–8** — gate (a) FIRES at the review's low-end
+prior. What it is made of: state-verb trampolines ~1.5–3ms (measured price;
+the pal() reset pair dominates), input-verb crossings **~0.0 measured**
+(twelve upcalls per frame are invisible — #107 already paid that bill, and
+moycore's input snapshot region buys nothing at cart rates), wrapper
+slivers ≤1ms. And the churn split answers the spike-ownership question:
+the FLOOR cart — zero per-frame upcalls — still collects (~115ms every
+~33s), so 15–30% of celeste's churn is the shell's own and stage 2
+stretches the collect cadence ~3–6× rather than deleting collects. M0 is
+CLOSED but for one cell: the floor's absolute presentation slice was
+measured at 1× (the variants lacked the `view` hint — deltas are
+presentation-invariant and stand; the absolute is PREDICTED from celeste's
+own composite/flush lines until a 2× floor run lands; the patched carts
+are staged). Numbers live in #66, as always. Be honest about what the
+gates can kill: no S3 number kills the *project* (both outcomes re-queue
+it); what a number kills is a CLAIM — (c) sharpened the fps claim, (a) then
+shrank it to its floor: **the whole engine-side prize is ~+2–3fps steady
+(low-30s) plus spikes 3–6× rarer but not gone.** Stage 2's go/no-go is now
+an owner call weighing that against §4.2's maintainability case.
 
 **Stage 0 — host-embedded audio. SHIPPED (`ff69071`, 2026-08-11).** §3.1:
 bind vendored libmoy on the host, delete the synth twin. As built:
@@ -543,18 +559,21 @@ net, textmode/quit/view. That is exactly audio's shipped shape (thin
 number kills the PROJECT — both M0 outcomes re-queue it. These gates kill
 CLAIMS, and a killed claim reorders the queue.)
 
-- **M0:** celeste clears "a solid 30" as §6 defines it (p50 ≥ 30, worst ≥ 28,
-  ≥60s uncapped) from the cheap levers alone → the fps case collapses to
-  §4.2 alone; moycore re-prioritizes as an architecture/wasm project. The
-  attribution (a) can kill the fps case even earlier: a deletable share
-  measured near the ~2ms the confirmed crossings suggest, instead of the
-  predicted 4–8ms, ends it before stage 1 grows.
+- **M0 — RESOLVED (2026-08-12), both halves fired partway.** (c): celeste
+  straddled the gate (p50 exactly 30, floor broken by a GC collect) — the
+  fps case narrowed to spike deletion. (a): the deletable share measured
+  ~2–4ms against the predicted 4–8 — the fps case shrank to its floor
+  (~+2–3fps steady). Moycore's queue position is now an owner call: the
+  engine-side prize is small and precisely known, and §4.2 carries the
+  rest of the case.
 - **Stage 1 measured:** a zero-upcall celeste frame spending its ms in the
   same places → the MP engine slice was mis-attributed; same collapse.
-- **Stage 2 measured:** collects during a 60s play window under
-  `moycore.tick` do NOT go to ~0, or the residual spikes trace to
-  shell-owned churn moycore cannot delete → the qualitative prize was
-  mis-attributed too, and stage 2 stands only on §4.2.
+- **Stage 2 measured:** the (a) churn split already fired half of this
+  gate: shell-owned churn (~15–30%, measured on the zero-upcall floor
+  cart) means collects do NOT go to ~0 — the honest stage-2 claim is
+  cadence ~3–6× longer with the ~190ms cost per collect surviving. What
+  remains falsifiable at stage 2: the cadence stretch itself, and whether
+  a run-start collect keeps a 60s window clean.
 - **Stage 4's spike:** both wasm shell-raster options price out unplayable →
   the §3.2 sunset has no completion path and the streaming substrate stays.
 - **The pin surface not getting built:** if the §4.2 semantic trace harness
