@@ -591,7 +591,9 @@ class DeviceCanvas:
             self._palt_delta = 0
             self._pal_single = -1
             self._palt_single = -1
-            self._sync_gate_pal()
+            gp = self._gate_pal           # gate table mirrors _pal_map: identity now
+            if gp is not None:
+                gp[:] = _PAL565_WIRE_BUF  # C memcpy, not the 64-iteration rebuild
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
@@ -658,12 +660,23 @@ class DeviceCanvas:
         return i
 
     def pal(self, c0=None, c1=None):
+        # The gate's RGB565 table is maintained INCREMENTALLY here (one poke per
+        # remap, one slice-copy per real reset) instead of the 64-iteration
+        # rebuild _sync_gate_pal does: the celeste shim calls pal() reset every
+        # frame and pal-sandwiches around tinted draws, and the rebuild was ~80%
+        # of a 5us pal() body (unix-MP attribution, experiments/state_verb_cost;
+        # the trampoline crossing itself measured 0.07us -- the cost was always
+        # this body). Invariant: _gate_pal mirrors _pal_map after every mutation;
+        # tests/test_gate_pal_sync.py pins it against the full rebuild.
         self.flush_batch()             # queued sprites belong to the OLD pal map (#63)
         pm = self._pal_map
+        gp = self._gate_pal
         if c0 is None:
             if self._pal_delta:
                 pm[:] = _PAL_IDENTITY
                 self._pal_delta = 0
+                if gp is not None:
+                    gp[:] = _PAL565_WIRE_BUF
             self._pal_single = -1
         else:
             c = int(c0) & 63
@@ -671,6 +684,8 @@ class DeviceCanvas:
             old = pm[c]
             if old != v:
                 pm[c] = v
+                if gp is not None:
+                    gp[c] = PAL565_WIRE[v]
                 was = old != c
                 now = v != c
                 if was != now:                # identity-membership flipped at c
@@ -684,7 +699,6 @@ class DeviceCanvas:
                 # delta/single unchanged, the id below keys on the new value.
         self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
-        self._sync_gate_pal()
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
@@ -823,6 +837,9 @@ class DeviceCanvas:
             st[_ST_CY1] = self._clip_y1
 
     def _sync_gate_pal(self):
+        # Cold full rebuild, correct from ANY state -- gate seeding only
+        # (_install_draw_gates). The hot paths (pal()/reset_state) maintain the
+        # table incrementally; see the invariant note on pal().
         pal = self._gate_pal
         if pal is None:
             return
