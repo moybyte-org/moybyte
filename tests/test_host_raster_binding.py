@@ -106,3 +106,68 @@ def test_the_binding_draws_into_the_buffer_python_owns():
         assert n.pix(2, 1) == 9, "the 2-arg read must see the same buffer"
     finally:
         n.close()
+
+
+@pytest.mark.skipif(not raster_binding.NativeRaster.available(),
+                    reason="no C compiler for the host raster binding")
+def test_canvas_actually_takes_the_native_lane():
+    """The swap must be TAKEN, not merely present.
+
+    This suite's sibling lesson: a routing gate shipped green while sending
+    every cart down the old path, so the new one existed and never ran. Assert
+    per verb that the call reaches C, and that the pixels are still right --
+    a delegation that silently no-ops would otherwise look exactly like
+    success.
+    """
+    from runtime import canvas as canvas_mod
+    assert canvas_mod._native_raster is not None, \
+        "canvas.py did not pick up the binding"
+    c = canvas_mod.Canvas(64, 32)
+    assert c._nr is not None, "the Canvas has no native raster"
+
+    seen = []
+    for verb in ("rect", "rectb", "line", "circ", "circb", "tri", "trib",
+                 "print"):
+        real = getattr(c._nr, verb)
+
+        def spy(*a, _v=verb, _r=real):
+            seen.append(_v)
+            return _r(*a)
+        setattr(c._nr, verb, spy)
+
+    c.rect(1, 1, 4, 4, 9)
+    # Checked HERE, before the later draws: the line below legitimately crosses
+    # (1,1), and asserting after it tested the drawing order instead of the
+    # delegation.
+    assert c.buf[1 * 64 + 1] == 9, "the C wrote somewhere other than the buffer"
+    c.rectb(0, 0, 8, 8, 7)
+    c.line(0, 0, 10, 6, 5)
+    c.circ(20, 16, 5, 3)
+    c.circb(40, 16, 5, 2)
+    c.tri(2, 20, 10, 20, 6, 28, 4)
+    c.trib(30, 2, 40, 2, 35, 10, 6)
+    c.print("hi", 2, 2, 7)
+    assert seen == ["rect", "rectb", "line", "circ", "circb", "tri", "trib",
+                    "print"], seen
+
+
+@pytest.mark.skipif(not raster_binding.NativeRaster.available(),
+                    reason="no C compiler for the host raster binding")
+def test_state_reaches_the_c_canvas():
+    """Python stays authoritative for camera/clip/pal/palt and pushes them
+    downstream; a verb that ignored the push would draw in the wrong place,
+    which the goldens catch only where a scene happens to use it."""
+    from runtime import canvas as canvas_mod
+    c = canvas_mod.Canvas(32, 16)
+    c.cls(0)
+    c.camera(4, 2)
+    c.rect(4, 2, 2, 2, 9)          # world (4,2) -> screen (0,0) under the camera
+    assert c.buf[0] == 9, "camera did not reach the C canvas"
+    c.camera()
+    c.clip(0, 0, 4, 4)
+    c.rect(10, 10, 4, 4, 5)        # entirely outside the clip
+    assert 5 not in c.buf, "clip did not reach the C canvas"
+    c.clip()
+    c.pal(3, 9)
+    c.rect(20, 10, 2, 2, 3)        # 3 remapped to 9
+    assert c.buf[10 * 32 + 20] == 9, "pal did not reach the C canvas"

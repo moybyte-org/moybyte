@@ -108,6 +108,17 @@ class Image:
         return cls(w, h, pix, transparent=t_index)
 
 
+try:
+    from runtime import raster_binding as _native_raster
+except ImportError:                     # pragma: no cover - package-relative
+    try:
+        import raster_binding as _native_raster
+    except ImportError:                 # a tree without it (device staging)
+        _native_raster = None
+if _native_raster is not None and not _native_raster.NativeRaster.available():
+    _native_raster = None               # no compiler: the Python raster stays
+
+
 class Canvas:
     # The game canvas always renders petme128 text at the native 8px cell (the
     # device can't scale text). The SYSTEM canvas (SystemCanvas) overrides this to
@@ -176,8 +187,76 @@ class Canvas:
         # must raster DIRECTLY -- never build a nested cache (which would double the layer's
         # RAM and add a redundant composite). The main canvas keeps it False and caches.
         self._nocache = False
+        # RUNG 5: libmoy's own raster, over THIS buffer.
+        #
+        # The verbs below were a Python transcription of the C that moy-spec
+        # publishes and both boards compile, kept in agreement by the spec's
+        # conformance goldens -- a pin over two implementations, which is the
+        # shape the zero-duplication directive exists to end. When the binding
+        # is available (a C compiler; see runtime/raster_binding.py) the pixel
+        # work is that C instead, drawing straight into `self.buf`: an indexed
+        # libmoy pixel IS a palette index, so there is no conversion and every
+        # reader of `.buf` is untouched.
+        #
+        # PYTHON STAYS AUTHORITATIVE for draw state. camera/clip/pal/palt live
+        # here, in the fields ~28 sites outside the verbs read (layers,
+        # blit_strip, scroll_rect, fill_rects, the sprite caches), and are
+        # PUSHED downstream on change. One authority with a downstream copy is
+        # the device's shipped _gate_state shape; two authorities is the disease.
+        self._nr = None
+        self._nr_sheet = None
+        self._nr_map = None
+        if _native_raster is not None:
+            try:
+                self._nr = _native_raster.NativeRaster(
+                    self._stride, len(self.buf) // self._stride if self._stride else 0,
+                    buf=self.buf)
+            except Exception:  # noqa: BLE001 -- no binding: the Python raster stays
+                self._nr = None
         # Draw state (TIC-80 cluster 2). reset_state() initialises camera/clip/pal/palt.
         self.reset_state()
+
+    # -- the native lane ----------------------------------------------------
+
+    def _nr_sync(self):
+        """Push this canvas's draw state into the C canvas.
+
+        Called from every setter rather than from every verb: state changes a
+        few times a frame where verbs run hundreds of times, and the fields are
+        already in BUFFER space here (`_cam_x` is the effective offset, the clip
+        includes the viewport origin), which is exactly the space libmoy's
+        canvas works in. So this is four calls and a palette walk, not a
+        translation layer."""
+        nr = self._nr
+        if nr is None:
+            return
+        nr.camera(self._cam_x, self._cam_y)
+        nr.clip(self._clip_x0, self._clip_y0,
+                self._clip_x1 - self._clip_x0, self._clip_y1 - self._clip_y0)
+        nr.pal()
+        pm = self._pal_map
+        for i in range(64):
+            if pm[i] != i:
+                nr.pal(i, pm[i])
+        nr.palt()
+        pt = self._palt
+        for i in range(64):
+            if pt[i]:
+                nr.palt(i, True)
+
+    def _nr_assets(self, sheet=None, tilemap=None):
+        """Register the sheet/tilemap a verb is about to draw from. libmoy's
+        console HOLDS its assets where these verbs take them per call, so this
+        is the join -- keyed by identity, because re-registering the same
+        buffer every call would be the per-verb cost this lane exists to
+        avoid."""
+        nr = self._nr
+        if sheet is not None and sheet is not self._nr_sheet:
+            nr.set_sheet(sheet)
+            self._nr_sheet = sheet
+        if tilemap is not None and tilemap is not self._nr_map:
+            nr.set_map(tilemap)
+            self._nr_map = tilemap
 
     # -- draw state (camera / clip / pal / palt, #11) ------------------------
 
@@ -256,6 +335,8 @@ class Canvas:
             self._palt_delta = 0
             self._pal_single = -1
             self._palt_single = -1
+        if getattr(self, "_nr", None) is not None:
+            self._nr_sync()
 
     def camera(self, x=0, y=0):
         """TIC-80 camera(x, y): subtract (x, y) from all subsequent draw coords so a
@@ -267,6 +348,8 @@ class Canvas:
         self._user_cam_y = int(y)
         self._cam_x = self._user_cam_x - self._ox
         self._cam_y = self._user_cam_y - self._oy
+        if self._nr is not None:
+            self._nr.camera(self._cam_x, self._cam_y)
         return prev
 
     def clip(self, x=None, y=None, w=None, h=None):
@@ -279,6 +362,8 @@ class Canvas:
             self._clip_y0 = self._oy
             self._clip_x1 = self._ox + self.w
             self._clip_y1 = self._oy + self.h
+            if self._nr is not None:
+                self._nr.clip(self._clip_x0, self._clip_y0, self.w, self.h)
             return
         x = int(x)
         y = int(y)
@@ -289,6 +374,10 @@ class Canvas:
         self._clip_y0 = self._oy + max(0, y)
         self._clip_x1 = self._ox + min(self.w, x + w)
         self._clip_y1 = self._oy + min(self.h, y + h)
+        if self._nr is not None:
+            self._nr.clip(self._clip_x0, self._clip_y0,
+                          self._clip_x1 - self._clip_x0,
+                          self._clip_y1 - self._clip_y0)
 
     def _pal_state_id(self):
         # The stable id of the CURRENT (pal map, palt) content (mirrors
@@ -349,7 +438,9 @@ class Canvas:
                     else:
                         self._pal_delta -= 1
                         self._pal_single = -2 if self._pal_delta else -1
-        self._palgen = self._pal_state_id()   # #63: content id gates the map cache
+        self._palgen = self._pal_state_id()
+        if self._nr is not None:
+            self._nr_sync()   # #63: content id gates the map cache
 
     def palt(self, c=None, on=None):
         """TIC-80 palt(c, on): mark index c transparent (on=True) or opaque for spr().
@@ -374,7 +465,9 @@ class Canvas:
                 else:
                     self._palt_delta -= 1
                     self._palt_single = -2 if self._palt_delta else -1
-        self._palgen = self._pal_state_id()   # #63: content id gates the map cache
+        self._palgen = self._pal_state_id()
+        if self._nr is not None:
+            self._nr_sync()   # #63: content id gates the map cache
 
     # -- primitives ----------------------------------------------------------
 
@@ -385,6 +478,11 @@ class Canvas:
         # layer that clears itself must not wipe the desktop it is drawing on.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         ci = self._pal_map[c & 63]
+        # NB: cls is NOT delegated. libmoy's clears the whole canvas; here a
+        # "surface" is the VIEWPORT (#155), so a windowed layer clearing itself
+        # must not wipe the desktop under it. The Python fill is already one
+        # slice-assign per row and the difference is not worth a second meaning
+        # for the verb.
         if self._ox == 0 and self._oy == 0 and self.w == self._stride:
             self.buf[:] = bytes((ci,)) * (self.w * self.h)
             return
@@ -423,6 +521,10 @@ class Canvas:
         self.buf[y * stride + x] = self._pal_map[c & 63]
 
     def line(self, x0, y0, x1, y1, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.line(int(x0), int(y0), int(x1), int(y1), c & 63)
+            return
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x0 = int(x0)
         y0 = int(y0)
@@ -450,6 +552,9 @@ class Canvas:
         # TIC-80 rect = FILLED rectangle (the old rectfill). Camera-offset the corner,
         # then intersect the span with the clip rect so out-of-clip pixels are dropped.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._nr is not None:
+            self._nr.rect(int(x), int(y), int(w), int(h), c & 63)
+            return
         x = int(x) - self._cam_x
         y = int(y) - self._cam_y
         x0 = max(self._clip_x0, x)
@@ -480,6 +585,10 @@ class Canvas:
                  c if c >= 0 else arr[i + 4])
 
     def rectb(self, x, y, w, h, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.rectb(int(x), int(y), int(w), int(h), c & 63)
+            return
         # TIC-80 rectb = rectangle border/outline (the old rect).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         x = int(x)
@@ -492,6 +601,10 @@ class Canvas:
         self.rect(x + w - 1, y, 1, h, c)
 
     def circ(self, cx, cy, r, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.circ(int(cx), int(cy), int(r), c & 63)
+            return
         # TIC-80 circ = FILLED circle (the old circfill). Each scanline is a rect(),
         # so camera/clip/pal apply through rect().
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
@@ -513,6 +626,10 @@ class Canvas:
             self.rect(cx - span, cy + dy, 2 * span + 1, 1, c)
 
     def circb(self, cx, cy, r, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.circb(int(cx), int(cy), int(r), c & 63)
+            return
         # TIC-80 circb = circle border/outline (the old circ).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         cx = int(cx)
@@ -533,6 +650,11 @@ class Canvas:
                 err -= 2 * x + 1
 
     def tri(self, x1, y1, x2, y2, x3, y3, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.tri(int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
+                         c & 63)
+            return
         # TIC-80 tri = FILLED triangle (#167). Rasterized to horizontal spans and
         # emitted as ONE fill_rects (#163) instead of a rect() per scanline -- on
         # device that is a single MP->C crossing per triangle, which is what makes
@@ -543,6 +665,11 @@ class Canvas:
             self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
 
     def trib(self, x1, y1, x2, y2, x3, y3, c):
+        if self._nr is not None:
+            self.flush_batch()
+            self._nr.trib(int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
+                          c & 63)
+            return
         # TIC-80 trib = triangle outline (three lines, like rectb's four fills).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self.line(x1, y1, x2, y2, c)
@@ -559,6 +686,13 @@ class Canvas:
         # this Python path is the host lane + the no-moy_gfx fallback; the device
         # wants a native kernel before a cart leans on it in a frame loop.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        if self._nr is not None and sheet is not None:
+            self._nr_assets(sheet=sheet)
+            self._nr.sspr(int(sx), int(sy), int(sw), int(sh), int(dx), int(dy),
+                          None if dw is None else int(dw),
+                          None if dh is None else int(dh),
+                          int(colorkey), int(flip))
+            return
         sx = int(sx); sy = int(sy); sw = int(sw); sh = int(sh)
         dx = int(dx); dy = int(dy)
         dw = sw if dw is None else int(dw)
@@ -588,6 +722,12 @@ class Canvas:
                 put(dx + i, ty, p)
 
     def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
+        if self._nr is not None and sheet is not None and tilemap is not None:
+            self.flush_batch()
+            self._nr_assets(sheet=sheet, tilemap=tilemap)
+            self._nr.tline(int(x0), int(y0), int(x1), int(y1),
+                           int(u), int(v), int(du), int(dv), int(colorkey))
+            return
         # SPEC.md 6.1 tline (#167): exactly line()'s Bresenham pixels, sampling
         # the MAP as a virtual texture in 16.16 fixed point -- the Mode 7 verb.
         # u/v/du/dv are ints (the cart multiplies its floats by 65536). Before
@@ -861,6 +1001,11 @@ class Canvas:
         # to the device's framebuf.text. Fixed 8px like the device -- `scale` is
         # accepted for call-compatibility but ignored (the device can't scale text).
         self.flush_batch()             # #63: print() is a non-spr primitive -> break batch
+        if self._nr is not None:
+            # Scale-1 only: SystemCanvas.print at font_scale > 1 draws each glyph
+            # pixel as a block of rects, which libmoy's print has no notion of.
+            self._nr.print(s, int(x), int(y), c & 63)
+            return
         ci = c & 63
         put = self._put
 
