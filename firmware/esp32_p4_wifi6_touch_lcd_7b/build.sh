@@ -139,6 +139,10 @@ cp -r "${TDECK_DIR}/native/moy_alloc" "${STAGED_NATIVE}/moy_alloc"
 # + py/ API), compiles unchanged on RISC-V; the PSRAM lua_Alloc uses the same
 # heap_caps the S3 does. The glue rides device_api.py (staged below).
 cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
+# moycore (stage 2): libmoy's own Lua binding + the C frame loop. Requires the
+# two above -- it compiles neither a raster nor a VM, and reaches theirs by
+# sibling include path.
+cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
 
 # 2d) Stage the shared PYTHON modules (#58 console staging).
 #     From runtime/ (canonical, same list the T-Deck build stages) -- the whole
@@ -166,7 +170,8 @@ cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
 #     the board it was written for, but board-agnostic -- its staging directory
 #     is a constructor argument (this board has no SD; run_desktop passes a path
 #     on the internal VFS) and its board identity is stamped into _ota_build.
-for f in device_util.py device_canvas.py device_api.py moy_lua_glue.py device_wifi.py \
+for f in device_util.py device_canvas.py device_api.py moy_lua_glue.py \
+         moycore_glue.py device_wifi.py \
          moy_ota.py; do
   cp "${TDECK_DIR}/modules/${f}" "${MODULES_DIR}/${f}"
 done

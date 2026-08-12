@@ -256,17 +256,27 @@ SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
 # inside any identifier disqualified every cart in the tree. Erring toward
 # the old path is right; erring so far that the new one is unreachable is
 # a silent no-op, which is worse than either.
-_CALL = None
-
-
 def _uses(src, names):
-    global _CALL
-    if _CALL is None:
-        import re
-        _CALL = re
+    """The first superset verb `src` CALLS, or None.
+
+    Scans by hand rather than by regex: MicroPython's `re` has no lookbehind,
+    and this predicate has a device twin (moycore_glue._calls) that must agree
+    with it -- a host gate that opens where the board's does not is worse than
+    either being strict. The version before this one was a plain substring
+    test, which disqualified every cart in the tree.
+    """
     for name in names:
-        if _CALL.search(r"(?<![\w.:])%s\s*\(" % name, src):
-            return name
+        n = len(name)
+        i = src.find(name)
+        while i >= 0:
+            before = src[i - 1] if i else " "
+            j = i + n
+            while j < len(src) and src[j] == " ":
+                j += 1
+            if (j < len(src) and src[j] == "("
+                    and not (before.isalnum() or before in "_.:")):
+                return name
+            i = src.find(name, i + 1)
     return None
 
 

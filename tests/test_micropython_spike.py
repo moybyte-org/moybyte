@@ -3318,7 +3318,15 @@ def test_moy_lua_phase1_wired():
     assert "except ImportError" in runtime_src
     p4 = Path("firmware/esp32_p4_wifi6_touch_lcd_7b")
     p4_runtime = (p4 / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "lua_runtime = make_lua_runtime(ws)" in p4_runtime
+    # The P4 took moycore's wiring (stage 2, verified on glass): the legacy
+    # registry is still CONSTRUCTED -- it is the fallback for carts using
+    # moybyte's superset -- but the injected factory is the chooser. The S3
+    # deliberately still has the plain line above; its swap is stage 3 and
+    # wants the owner at the bench (no BOOT button, dead CDC RX under the
+    # desktop).
+    assert "_legacy = make_lua_runtime(ws)" in p4_runtime
+    assert "from moycore_glue import make_moycore_runtime" in p4_runtime
+    assert "lua_runtime = _make_lua" in p4_runtime
     assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
     assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")
     assert "moy_lua_glue.py" in (p4 / "build.sh").read_text(encoding="utf-8")

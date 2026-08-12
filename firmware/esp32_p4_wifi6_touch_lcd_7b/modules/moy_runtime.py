@@ -699,8 +699,32 @@ def run_desktop(fps_cap=60):
     try:
         import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
         from device_api import make_lua_runtime
-        lua_runtime = make_lua_runtime(ws)
-        print("Moybyte P4: lua runtime ON")
+        _legacy = make_lua_runtime(ws)
+        # moycore (stage 2): a cart that stays inside the SPEC verb table runs
+        # its WHOLE frame in C -- one upcall per frame instead of hundreds.
+        # A cart using moybyte's superset (layers/images, scenes, view) keeps
+        # the trampoline registry, which supplies the whole namespace. The
+        # split is a source scan; see moycore_glue.supports().
+        _moycore = None
+        try:
+            from moycore_glue import make_moycore_runtime, supports as _mc_ok
+            _moycore = make_moycore_runtime(ws)
+        except ImportError:
+            _mc_ok = None
+
+        def _make_lua(ns, src, _mc=_moycore, _ok=_mc_ok, _old=_legacy):
+            if _mc is not None and _ok is not None and _ok(src):
+                try:
+                    run = _mc(ns, src)
+                    print("Moybyte P4: cart on MOYCORE")
+                    return run
+                except Exception as exc:  # noqa: BLE001 -- fall back, say why
+                    print("Moybyte P4: moycore declined ->", exc)
+            return _old(ns, src)
+
+        lua_runtime = _make_lua
+        print("Moybyte P4: lua runtime ON (moycore %s)"
+              % ("available" if _moycore is not None else "absent"))
     except ImportError:
         pass
     # The shared service wiring (console.wire_workstation_core -- one canonical

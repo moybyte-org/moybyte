@@ -50,22 +50,45 @@ SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
 BUTTONS = ("left", "right", "up", "down", "a", "b", "run", "home")
 
 
+def _calls(src, name):
+    """True when `src` CALLS `name` -- the bare word followed by "(".
+
+    A hand scan, not a regex, for two reasons. MicroPython's `re` has no
+    lookbehind, so the obvious pattern raises on the device -- which it did:
+    the gate worked on the host, threw on the board, and every cart fell back
+    to the old runtime without a word. And a plain substring test (the version
+    before that) matched `table.insert`, a variable named `col` and the letters
+    "net" inside identifiers, disqualifying every cart in the tree. Both
+    failures look identical from outside: the new path exists and nothing takes
+    it.
+    """
+    n = len(name)
+    i = src.find(name)
+    while i >= 0:
+        before = src[i - 1] if i else " "
+        j = i + n
+        while j < len(src) and src[j] == " ":
+            j += 1
+        if (j < len(src) and src[j] == "("
+                and not (before.isalpha() or before.isdigit()
+                         or before in "_.:")):
+            return True
+        i = src.find(name, i + 1)
+    return False
+
+
 def supports(src):
     """False when `src` uses a verb libmoy does not bind (see SUPERSET).
 
     A source scan, not a runtime probe, because the alternative is discovering
-    it when the cart is already on screen. It looks for a CALL -- the name at a
-    word boundary followed by "(" -- because a plain substring search sounded
-    conservative and was in fact a gate that never opened: `table.insert`, a
-    variable named `col`, or the letters "net" inside any identifier
-    disqualified every cart in the tree. Erring toward the old path is right;
-    erring so far that the new path is unreachable is a silent no-op.
+    it when the cart is already on screen. Erring toward the old path is right;
+    erring so far that the new path is unreachable is a silent no-op, which is
+    what both earlier versions of this did -- see _calls().
     """
     if _moycore is None:
         return False
-    import re
     for name in SUPERSET:
-        if re.search(r"(?<![\w.:])%s\s*\(" % name, src):
+        if _calls(src, name):
             return False
     return True
 
