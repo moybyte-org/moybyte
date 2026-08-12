@@ -279,7 +279,7 @@ published format, protocol or behaviour; none contains third-party code.
   `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
   standard library.
 - **SHA-256** (`moy_ota.py`, `tools/gen_ota_manifest.py`) — `hashlib`.
-- **No third-party JavaScript.** `runtime/web_view_page.py`,
+- **No third-party JavaScript.** `firmware/web_runner/page_core.html`,
   `firmware/web_runner/page_tail.js` and `firmware/web_runner/harness.mjs`
   contain only hand-written code, with no CDN references and no bundled
   libraries.

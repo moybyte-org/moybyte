@@ -220,35 +220,53 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
 
 ### Third target: the web runner + the moy-spec repo (#151/#170)
 
-- `firmware/web_runner/` — the **MicroPython-WASM** build of the same console
-  ("browser-as-GPU": the system canvas IS `web_view.CommandCanvas`, so the wasm
-  never rasterizes a pixel — the page's JS replayer draws). `build.sh` clones +
-  patches the webassembly port (custom `moybyte` variant: GC_SPLIT_HEAP_AUTO,
-  no asyncify), freezes the shared `runtime/` console, and compiles the SAME
-  `moy_lua` **and** `moy_audio` native modules in as usermods (`moy_audio` ships
-  its own `micropython.mk`, so unlike `moy_lua` the runner supplies no fragment
-  of its own), so Lua carts and libmoy's synth run in the browser too. Dev loop:
-  `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
-  `node harness.mjs` / the scratchpad probes drive it headless. **To see what the
-  BROWSER shows, use `node pageshot.mjs <scenario.json> [outdir]`** (2026-07-31):
-  it runs BOTH halves in node — the real wasm console from `dist/` producing
-  frames, and the REAL page replayer (sliced out of `runtime/web_view_page.py`,
-  never a reimplementation, so it stays in sync) replaying them into the same
-  retained index buffer the browser keeps — and writes PNGs. Scenario steps are
-  `frames`/`shot`/`tap`/`hover`/`drag`/`key`/`py`/`note`; `MOY_ASSET_DELAY=N`
-  emulates the browser's ASYNC `getA()` (the window where ATL/LAY/SURF are wiped
-  but the new assets have not landed). Reach for this FIRST on any "it looks
-  wrong / it doesn't show up" report: the protocol probes show bytes and surface
-  ids, which is exactly the wrong evidence for a placement or retention bug —
-  the misplaced FPS chip (#178 tail) was invisible in a frame dump and obvious in
-  a screenshot. When a bug survives that (browser-only plumbing: the worker pump,
-  the async `getA()`, rAF), **`node browsershot.mjs <scenario.json>` drives the
-  shipped page in real headless Chrome over CDP** (no puppeteer — it serves
-  `dist/` and screenshots the canvas itself); its `js` step evaluates in the page,
-  which is how you hook `df()` to see what the page actually receives.
-  Both harnesses beat reasoning: the dropped-frame desync (a tablet-only bug the
-  desktop's moving mouse hid) was found by hooking `df` in Chrome and then
-  reproduced deterministically in `pageshot`'s `{"drop":N}` step. **This build
+- `firmware/web_runner/` — the **MicroPython-WASM** build of the same console.
+  **The browser is no longer the GPU (moycore stage 4, 2026-08-12): the wasm
+  RASTERIZES** — the narrative is `docs/moycore_plan_2026-08.md` §6; what a coder
+  needs here is the shape. `build.sh` compiles `moy_gfx` + vendored libmoy in as a
+  usermod; the shell draws on `DeviceCanvas` itself (staged from the T-Deck tree)
+  wrapped by `web_canvas.py` — `WebCompositor` supplies a buffer and no flush,
+  `WebSystemCanvas` adds font-scale text, font-scale layers and `blit_cover`. The
+  page's only pixel work is a 64K-entry 565→RGBA table plus `putImageData`. No
+  board lever is reimplemented: bounce pump, DPI ping-pong, GDMA, PPA and PSRAM
+  pooling are all probe-guarded and simply absent here.
+  The handheld tier is the T-Deck's arrangement (one canvas, system IS game), the
+  desktop tier is the P4's (big system canvas + a real 320×240 game canvas +
+  `blit_game`). **`blit_cover` is not optional on a 565 system canvas** —
+  `wallpaper._backdrop_blit` probes for it and otherwise expands a palette-INDEX
+  buffer that does not exist there, drawing nothing: a black desk with correct
+  chrome on top, which is exactly what the first build did.
+  Numbers live in the plan; the operational summary is that the console half of a
+  frame is now a fraction of a millisecond and the PRESENT (heap copy + RGBA
+  expansion) is the expensive half, so optimize there first. Real headless Chrome
+  holds 60fps locked. A Lua cart's sprites take the native batch path here now,
+  which the old recording canvas could not do. `build.sh` also clones + patches the webassembly port (custom
+  `moybyte` variant: GC_SPLIT_HEAP_AUTO, no asyncify) and compiles `moy_lua` +
+  `moy_audio`; two of its Makefile patches are load-bearing and non-obvious.
+  (1) `-Wno-unknown-pragmas` has to be appended to the PORT's CFLAGS, not to
+  `CFLAGS_USERMOD`: py.mk folds the usermod flags in at its include and the port
+  adds `-Wall` afterwards, which re-enables the warning that `-Werror` then makes
+  fatal. (2) `HEAPU8` is patched INTO the port's own
+  `EXPORTED_RUNTIME_METHODS_EXTRA` list; that variable is set with `+=`, so a
+  command-line assignment REPLACES it — which drops `getValue`/`setValue` and the
+  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop: `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
+  `node harness.mjs` drives it headless. **To see what the BROWSER shows, use
+  `node pageshot.mjs <scenario.json> [outdir]`**: it boots the real wasm console
+  from `dist/` and decodes the same framebuffer the browser blits, into PNGs.
+  (It used to have to slice the page's replayer out of the page source and replay
+  commands into a matching index buffer; there is no replayer now, so the harness
+  is a decoder.) Scenario steps are
+  `frames`/`shot`/`tap`/`hover`/`drag`/`key`/`py`/`note`/`stain`/`unpainted`.
+  Reach for it FIRST on any "it looks wrong / it doesn't show up" report — a
+  screenshot is the right evidence for a placement or retention bug, and the
+  misplaced FPS chip (#178 tail) was invisible in a frame dump and obvious in a
+  PNG. When a bug survives that (browser-only plumbing: the worker pump, the
+  transferable framebuffer ping-pong, rAF), **`node browsershot.mjs
+  <scenario.json>` drives the shipped page in real headless Chrome over CDP** (no
+  puppeteer — it serves `dist/` and screenshots the canvas itself); its `js` step
+  evaluates in the page. Note the page waits behind a play-button splash unless
+  the scenario passes `"query": "?dev=1"`, so a scenario that forgets it
+  screenshots a blank canvas and looks like a raster bug. **This build
   is Moybyte's own browser console and nothing else's** — the `--spec` slim
   player (24 shell modules AST-stubbed to absorbing `_Stub`s, de-branded,
   vendored into the spec's `runner/` and published by a `web-player` workflow)
@@ -374,14 +392,12 @@ to whoever called it.
   so it works while a game runs — the bar's wifi icon deep-links there in
   windowed mode (fullscreen tiers keep launching the wifi.moy tool). The default
   wallpaper is **`moy_night.moy`** (static brand-colorway scene — a static
-  wallpaper keeps the idle desktop free under the redraw gate AND ~0 KB/s on a
-  recording tier). Works over the RECORDING transport too (the wasm head;
-  the host streaming console died in the 2026-08 sunset — `tests/webharness.py`
-  is the test-side construction): window buffers become `RecordingLayer`s
-  (retained windows blit by reference, the #54/#43 deflayer mechanism), the
-  game/wallpaper composites ship as one self-contained spr, scaled system text
-  records as rect blocks (incl. inside layers), and the bar renders direct
-  (uncached) on recording layers. Try it:
+  wallpaper keeps the idle desktop free under the redraw gate). The wasm head
+  runs this WM as an ordinary raster tier since moycore stage 4 — window buffers
+  are real layers, the game and wallpaper composite through `blit_game`/
+  `blit_cover`, and the recording transport that used to need special cases here
+  (RecordingLayer window buffers, composites shipped as one self-contained spr,
+  scaled text recorded as rect blocks, the bar drawn uncached) is deleted. Try it:
   `python tools/simulate_desktop.py --size 1024x600 --windowed`.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
   **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
@@ -558,7 +574,7 @@ to whoever called it.
 - `moy_compositor.py` — native RGB565 framebuffer + DMA flush.
 - `tdeck_display.py` — display/LVGL + SPI bus bootstrap.
 - `moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC is the recorded open question). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only web_view file the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. `runtime/web_view.py` (recorder/CommandCanvas/ServedState/SurfaceDelta/WsClientState/the page) is now **wasm-head substrate only** — it dies wholesale at stage 4; note the atlas/defspr lane and the diet `map`/`settiles` ops inside it are already producer-less (the Tee was their only writer). The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
+- `moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC is the recorded open question). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only file of that lineage the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. Two pieces of that module were never about rasterizing and survive on their own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks) and `web_view_ws.py`. `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
 
 ### Hard device constraints (learned the painful way — respect these)
 

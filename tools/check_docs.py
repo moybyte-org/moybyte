@@ -99,9 +99,14 @@ NOT_OURS = (
     # The .moyproj SDK, deleted 2026-07-31. Several documents name its files on
     # purpose, to say they are gone; git history has them.
     "moybyte/", "moybyte_cli/", "moybyte_sim/", "moybyte_blocks/",
-    # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset).
-    # The plan + READMEs name the dead files on purpose, to say they are gone.
+    # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
+    # the recording stack that outlived it by a day (stage 4: the wasm head
+    # rasterizes, so the recorder + the page's JS replayer went too). The plan,
+    # CLAUDE.md and several READMEs name the dead files on purpose, to say they
+    # are gone -- git history has them.
     "tools/web_console.py", "modules/device_webview.py", "device_webview.py",
+    "runtime/web_view.py", "runtime/web_view_page.py", "tests/webharness.py",
+    "tests/test_web_recording.py",
 )
 
 

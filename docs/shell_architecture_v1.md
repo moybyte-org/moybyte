@@ -197,9 +197,15 @@ mutated `DeviceCanvas`.
 
 ### 3.2 Why this matters for the web view
 
-`moy_webserver.py`/`runtime/web_view.py` today mirrors the **single physical screen** —
-whatever `DeviceCanvas` currently shows, recorded as a draw-command stream and replayed
-in the browser. That's a remote *mirror*, not a window manager: there is exactly one
+*(Superseded 2026-08-12: the device mirror described here was deleted in the
+2026-08 streaming sunset, and the browser now runs the whole console itself as
+the wasm head — see `docs/moycore_plan_2026-08.md` §3.2. The motivation below is
+kept because the windowing argument it makes is what `wm_windowed` went on to
+implement.)*
+
+`moy_webserver.py` plus the shared recording stack mirrored the **single physical
+screen** — whatever `DeviceCanvas` currently shows, recorded as a draw-command
+stream and replayed in the browser. That was a remote *mirror*, not a window manager: there is exactly one
 thing to look at, matching exactly what the device's own panel shows. A layered
 compositor changes what there is to mirror: if the shell composites N layers instead of
 one merged bitmap, the web view has the option of shipping **multiple layers/windows**

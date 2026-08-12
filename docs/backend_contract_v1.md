@@ -99,9 +99,10 @@ T-Deck web view from 2026-07-21 to 2026-08-01 and presented to the owner as
 The fullscreen composite test runs against the **host** canvas — the one backend
 with `.buf`. (v1.0 said "three of four backends had no coverage"; that
 overstated it — the web-console suite covered the recording fallback until the
-2026-08 streaming sunset retired that transport; the recording fallback's pins
-now live in `tests/test_web_recording.py` + the wasm harnesses. The
-uncovered ones are the two **device** pairs.)
+2026-08 streaming sunset retired that transport, and at moycore stage 4 the
+**recording fallback itself was deleted**: the wasm head rasterizes with the
+boards' own kernel, so every remaining backend has a `.buf`. The uncovered ones
+are the two **device** pairs.)
 
 ---
 
