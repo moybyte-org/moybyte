@@ -300,7 +300,18 @@ order, each rung deleting a parallel implementation:
 5. **Host raster binds libmoy** (NEW scope this directive adds; reverses
    v6's "two rasters is the end state") — `runtime/canvas.py` shrinks to
    the compositor/extension layer, conformance goldens re-point at the
-   binding.
+   binding. **The BINDING is built and PROVEN (2026-08-12 night):**
+   `runtime/raster_binding.py` compiles the vendored canvas/sprite/data
+   sources INDEXED — so a libmoy pixel is one byte holding a palette
+   index, byte-for-byte what `Canvas.buf` already is, and the C draws
+   into the bytearray Python owns with no conversion — and
+   `tests/test_host_raster_binding.py` replays the spec's own traces
+   through it: **all 10 conformance scenes pixel-identical to the same
+   goldens the Python raster matches**, provisional 3D included. What
+   remains is the swap itself: canvas.py's verbs delegating to it while
+   its viewport/layers/batching/blit_strip/scroll_rect half stays
+   Python. The risk of that swap is now bounded by a passing oracle
+   rather than by review.
 
 What remains after rung 5 is exactly one duplication, accepted by the same
 decision: Python carts' `make_api` verb surface (§3.3, blocks call closed).
