@@ -1,8 +1,12 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v10 (2026-08-13) — THE LADDER IS WALKED. Rungs 1, 2, 4 and 5
-complete; rung 3 complete on the P4 (stage 2) with only the S3 (stage 3)
-outstanding, because that board cannot be flashed unattended. moycore
+**Status: v11 (2026-08-13) — THE LADDER IS WALKED, ALL FIVE RUNGS. Stage
+3's code landed too: the S3 stages moycore, injects the same per-cart
+chooser, and links `usermod_moycore` into a full flash image, with the
+allocator moved to internal-SRAM-first because the all-PSRAM version is a
+measured ~2x regression on that board. The ONLY thing outstanding in the
+entire plan is putting that image on the T-Deck and watching it, which
+needs a hand on the hardware: no BOOT button, the trackball IS GPIO0. moycore
 runs a Lua cart's whole frame in C on P4 glass (`moycore.active()` True
 under a conformance cart, on-glass suite 22/22); `canvas.py`'s verbs
 delegate to libmoy with the conformance goldens unchanged; the host runs
@@ -299,8 +303,9 @@ order, each rung deleting a parallel implementation:
 
 1. ~~**Stage 4** (wasm head re-rasters; gate closed) — deletes the recording
    stack, completes the §3.2 sunset.~~ **DONE 2026-08-12 (§6).**
-   ~~2–5~~ **all walked by 2026-08-13** except stage 3 (the S3), which is
-   owner-gated hardware rather than undone work. Two gate bugs on the way,
+   ~~2–5~~ **all walked by 2026-08-13**, stage 3 included -- its code is
+   written, staged, compiled and linked for Xtensa; only the flash is
+   owner-gated (the board cannot enter the ROM loader unattended). Two gate bugs on the way,
    both recorded where they happened: a substring scan that disqualified
    every cart, and a regex lookbehind that CPython accepts and
    MicroPython's `re` raises on — the second shipped green and made
