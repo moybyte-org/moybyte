@@ -296,7 +296,17 @@ order, each rung deleting a parallel implementation:
 3. **Stages 2–3** (`moycore.tick`, P4 then S3) — deletes `LuaCartRun`'s
    registry and the per-frame Python engine surface.
 4. **Host embeds moycore's VM** (§3.1's second half) — lupa dies, the
-   `LUA_32BITS` parity hole closes.
+   `LUA_32BITS` parity hole closes. **The BINDING is built and PROVEN
+   (2026-08-12 night):** `runtime/lua_binding.py` compiles libmoy's
+   binding over the SAME vendored Lua 5.4 the boards use, `LUA_32BITS`
+   and all, and `tests/test_host_lua_binding.py` runs a cart through it
+   — load + `_init`, frames whose canvas tracks cart state, a snapshot
+   input edge arriving as `sfx(3)` then `sfx(5, 2)`, pmem at 41+4 dirty,
+   an error returning `cart:1: boom` (text with its line, which is what
+   crash-to-code needs), and the SPEC.md 4.1 sandbox verified as a
+   ceiling by probing each excluded stdlib. What remains is the swap:
+   `host_app` handing `Player` this instead of `runtime/lua_host.py`,
+   and lupa leaving `[dev,sim]`.
 5. **Host raster binds libmoy** (NEW scope this directive adds; reverses
    v6's "two rasters is the end state") — `runtime/canvas.py` shrinks to
    the compositor/extension layer, conformance goldens re-point at the
