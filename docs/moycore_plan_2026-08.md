@@ -614,9 +614,23 @@ cache lives in `runtime/canvas.py`, which survives regardless); state-verb
 ownership; input snapshot; audio queue; the odd-shape decision — which
 ships WITH a real odd-form A/B, since today's matrix covers hot shapes only.
 
-**Stage 2 — the core loop, P4 first.** `moycore.tick` owning
-`_update`/`_draw` end-to-end on the REPL-alive board (testable without the
-owner, #156 harness). Exit/crash returns a status the Player maps to
+**Stage 2 — the core loop, P4 first. THE CORE IS BUILT AND VERIFIED
+(2026-08-12 night); the wiring is not.** `native/moycore` exists: libmoy's
+Lua binding vendored, `modmoycore.c` supplying the host half (a canvas over
+the DeviceCanvas framebuffer with no copy, an input SNAPSHOT array, an audio
+command QUEUE, C-side pmem with a dirty flag), built into the unix
+dual-usermod binary. `tests/test_moycore_loop.py` pins it: a cart loads,
+`_init` runs, four frames tick clean, the canvas changes with cart state
+(122→176→226→276 non-zero bytes), a `btnp` edge written into the snapshot
+comes back as `sfx(3)` in the queue and a held button as `sfx(5, 2)`, pmem
+lands at 41+4 dirty, and a raising `_update` returns `bad:1: boom` — text
+with the line number, which is what crash-to-code needs.
+`modules/moycore_glue.py` is the Python half (snapshot refresh, queue drain
+through the SAME `make_api` closures so sfx semantics stay in one place,
+pmem write-back, a `supports()` source scan that routes superset carts to
+`LuaCartRun`). **What is NOT done: nothing calls it.** `Player` still takes
+the `LuaCartRun` path on every board, and no glass has run a moycore frame.
+Original scope, still owed: Exit/crash returns a status the Player maps to
 crash-to-code (`cart:LINE:` chunknames carry the line; the error text crosses
 in the status — the Player's `self.ns` error-panel dependency ends).
 *Deletes:* `LuaCartRun`'s registry for the moycore path. *Pins:* the trace
