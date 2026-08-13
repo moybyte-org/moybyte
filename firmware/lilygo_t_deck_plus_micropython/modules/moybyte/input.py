@@ -44,18 +44,31 @@ class InputState:
         else:
             self._held.discard(name)
 
-    # name -> bit, in BUTTONS order. Twin of runtime/input.py's -- see the
-    # note there. THESE TWO CLASSES SHOULD BE ONE; today they are not, and
-    # adding a method to only one of them is what dropped a cart into the
-    # code editor with `no attribute button_masks`.
-    _BIT = {n: 1 << i for i, n in enumerate(BUTTONS)}
+    _mask_order = None      # the tuple _mask_bit was built from (identity key)
+    _mask_bit = None
 
-    def button_masks(self):
-        """(held, pressed) as bitmasks over BUTTONS order, in ONE call --
-        moycore's per-frame snapshot needs exactly these two integers and was
-        building them with sixteen held/pressed calls (~6.35us each here)."""
+    def button_masks(self, order):
+        """(held, pressed) as bitmasks over `order`, in ONE call -- moycore's
+        per-frame snapshot needs exactly these two integers and was building
+        them with sixteen held/pressed calls (~6.35us each here).
+
+        Twin of runtime/input.py's, and the reason `order` is an ARGUMENT is
+        this file: these two classes are not one, and their BUTTONS tuples are
+        not the same tuple. The host's starts left/right/up/down (libmoy's own
+        order, by luck); this one starts up/down/left/right and carries fifteen
+        names. When this method packed bits in BUTTONS order, the same call
+        meant two different things on the two tiers, and moycore -- which reads
+        the mask against libmoy's moy_button enum -- gave every Lua cart on
+        both boards a d-pad rotated a quarter turn, with `run` on a bit libmoy
+        never looks at. Nothing failed: no crash, no test, no frame hash.
+
+        So the ORDER belongs to the protocol, not to whoever is holding the
+        buttons. Callers pass lua_ext.MOY_BUTTONS. See the note there."""
+        if self._mask_order is not order:
+            self._mask_order = order
+            self._mask_bit = {n: 1 << i for i, n in enumerate(order)}
         h = p = 0
-        bit = self._BIT
+        bit = self._mask_bit
         for n in self._held:
             h |= bit.get(n, 0)
         for n in self._pressed:

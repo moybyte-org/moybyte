@@ -278,8 +278,13 @@ end
 # test (plain .replace -- the driver body is full of literal % operators).
 DRIVER = r'''
 import sys
-sys.path.insert(0, @STAGE@)
+# MODULES first, then STAGE on top of it -- so the files this test stages fresh
+# from runtime/ WIN over whatever a previous build left in modules/. The other
+# order shipped, and it meant the suite silently ran yesterday's staged copy of
+# lua_ext/input/moy_font: a change to runtime/ could be green here and different
+# on a board, which is the one thing this file exists to rule out.
 sys.path.insert(0, @MODULES@)
+sys.path.insert(0, @STAGE@)
 import hashlib
 
 import moy_gfx, moycore                    # both usermods, or die loudly

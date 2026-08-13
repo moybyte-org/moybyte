@@ -127,11 +127,16 @@ def test_button_masks_agree_with_the_per_name_walk():
     asks `button_masks()` for both in one call now, and the failure mode of
     that swap is not a crash but SUBTLY WRONG INPUT, which would present as a
     cart that mostly works. So: every combination, both ways, must agree.
+
+    Note what this test could NOT catch, since it is the reason
+    tests/test_moy_button_order.py exists: it checks the fast path against the
+    slow one IN THE SAME ORDER, so when the order itself became wrong on the
+    boards both sides moved together and this stayed green.
     """
     from runtime.input import InputState
+    from runtime.lua_ext import MOY_BUTTONS as names
 
-    names = InputState.BUTTONS
-    for combo in range(1 << len(names)):          # all 256 held-sets
+    for combo in range(1 << len(names)):          # all 128 held-sets
         inp = InputState()
         inp.begin_frame()                          # frame 1: nothing held
         for i, n in enumerate(names):
@@ -144,18 +149,20 @@ def test_button_masks_agree_with_the_per_name_walk():
                 want_h |= 1 << i
             if inp.pressed(n):
                 want_p |= 1 << i
-        assert inp.button_masks() == (want_h, want_p), combo
+        assert inp.button_masks(names) == (want_h, want_p), combo
         inp.begin_frame()                          # frame 3: held, not pressed
         want_h2 = 0
         for i, n in enumerate(names):
             if inp.held(n):
                 want_h2 |= 1 << i
-        assert inp.button_masks() == (want_h2, 0), combo
+        assert inp.button_masks(names) == (want_h2, 0), combo
 
-    # A name outside BUTTONS must not corrupt the mask (the set can hold keys
-    # the button table has never heard of).
+    # A name outside the order must not corrupt the mask (the held set can hold
+    # keys the button table has never heard of -- "home" is one of them).
     inp = InputState()
     inp.set_held("zorp", True)
+    inp.set_held("home", True)
     inp.set_held("a", True)
     inp.begin_frame()
-    assert inp.button_masks() == (1 << names.index("a"), 1 << names.index("a"))
+    bit_a = 1 << names.index("a")
+    assert inp.button_masks(names) == (bit_a, bit_a)

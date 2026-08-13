@@ -18,6 +18,26 @@ and the web runner stage it by name. Pure source and closures: it imports
 nothing, so it costs a frozen module and no runtime dependency.
 """
 
+# libmoy's `moy_button` order (moy.h, SPEC.md 7.3). This is an ABI, not a
+# preference: the snapshot hands moycore ONE integer per player and its h_btn
+# does `(mask >> b) & 1` with `b` the enum value, so bit i means button i of
+# THIS tuple and nothing else.
+#
+# It lives here, beside the rest of the runtime glue, because on 2026-08-13 it
+# was "de-duplicated" into InputState.BUTTONS -- and there are two InputState
+# classes whose BUTTONS differ in ORDER as well as in length. The host's happens
+# to start with libmoy's seven; the boards' starts up/down/left/right. So every
+# Lua cart on both boards ran with its d-pad rotated a quarter turn and `run`
+# wired to nothing, for a day, silently: no crash, no failing test, and a
+# controller permutation is not something a frame hash or an fps number can see.
+#
+# The lesson in the shape of the fix: a bit order is a property of the PROTOCOL,
+# so it cannot be derived from whatever list a particular input class happens to
+# keep its names in. InputState.button_masks() takes this tuple as an argument
+# and has no opinion about ordering; tests/test_moy_button_order.py parses the
+# enum out of moy.h and asserts the two still agree.
+MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
+
 # The prelude in three chunks, because moycore takes only two of them.
 #
 # Under moy_lua every verb is a registered Python trampoline, so all three

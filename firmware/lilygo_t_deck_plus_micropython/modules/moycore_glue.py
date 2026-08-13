@@ -46,9 +46,10 @@ split it justified.
 from array import array
 
 try:
-    from lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+    from lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+                         install_handles)
 except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES,
+    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
                                  install_handles)
 
 try:
@@ -122,10 +123,11 @@ NOT_REGISTRABLE = frozenset((
     "table",                               # goes in as moy_table_verb (#164)
 ))
 
-# The moy_button bit order lives in ONE place now -- InputState._BIT, built
-# from InputState.BUTTONS -- and reaches the snapshot through button_masks().
-# This module used to carry its own copy of the tuple, which is two orders that
-# had to agree and no test that they did.
+# The moy_button bit order is MOY_BUTTONS, imported above from lua_ext -- the
+# module every runtime already shares. It briefly lived in InputState.BUTTONS
+# instead, which looked like the same de-duplication and was not: read the note
+# in lua_ext.py before touching this, because that swap rotated the d-pad of
+# every Lua cart on both boards and nothing in the tree noticed.
 
 
 class MoycoreRun:
@@ -251,14 +253,6 @@ class MoycoreRun:
         on the module object a dozen times a frame."""
         s = self.snap
         inp = self.ws.input
-        # No fallback path here, deliberately. Every tier builds a real
-        # InputState (host_app, web_boot, both boards' run_desktop) and the
-        # multiplayer PlayerRouter is ATTACHED to it rather than replacing it,
-        # so `button_masks` is always there. A getattr-guarded slow path would
-        # exist only to be taken by test stubs -- i.e. the suite would exercise
-        # a path production never runs, which is the failure mode this plan
-        # keeps getting bitten by. A stub that wants to drive moycore
-        # implements the method.
         masks = getattr(inp, "button_masks", None)
         if masks is None:
             # The guard is BACK, and the reason is worth keeping: it was removed
@@ -268,15 +262,19 @@ class MoycoreRun:
             # removing this dropped a Lua cart into the crash-to-code editor
             # with `no attribute button_masks`. A per-frame getattr is cheap
             # insurance against an input object this file has never heard of.
+            #
+            # The fallback walks MOY_BUTTONS too. It used to carry its own copy
+            # of the order, which made it the fourth in the tree and -- because
+            # it was the copy that happened to be RIGHT -- meant the slow path
+            # and the fast path disagreed about which button the kid pressed.
             held = pressed = 0
-            for i, name in enumerate(("left", "right", "up", "down",
-                                      "a", "b", "run", "home")):
+            for i, name in enumerate(MOY_BUTTONS):
                 if inp.held(name):
                     held |= 1 << i
                 if inp.pressed(name):
                     pressed |= 1 << i
         else:
-            held, pressed = masks()
+            held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
         if _ticks_ms is not None:

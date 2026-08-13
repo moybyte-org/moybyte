@@ -31,7 +31,8 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # lupa needs none of it -- it hands Python objects to Lua directly, which is
 # what the PRELUDE below adapts -- but MoycoreHostRun does, because the ctypes
 # dispatch marshals ints and one string.
-from runtime.lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+                             install_handles)
 
 PRELUDE = """
 do
@@ -234,19 +235,26 @@ class MoycoreHostRun:
     def _update(self, dt):
         s = self._run.snap
         inp = self._ws.input
-        held = pressed = 0
         from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, AQ_SFX, AQ_MUSIC,
                                          AQ_BEEP, AQ_MUSIC_STOP,
                                          AQ_SOUND_STOP, AQ_VOLUME)
-        for i, name in enumerate(("left", "right", "up", "down",
-                                  "a", "b", "run", "home")):
-            try:
-                if inp.held(name):
-                    held |= 1 << i
-                if inp.pressed(name):
-                    pressed |= 1 << i
-            except Exception:  # noqa: BLE001
-                pass
+        # MOY_BUTTONS, not a fourth hand-written copy of the order. This loop
+        # carried its own and was CORRECT, which is exactly what made the
+        # boards' divergence invisible: the host played fine, so nothing here
+        # ever pointed at the tier where it did not.
+        masks = getattr(inp, "button_masks", None)
+        if masks is not None:
+            held, pressed = masks(MOY_BUTTONS)
+        else:
+            held = pressed = 0
+            for i, name in enumerate(MOY_BUTTONS):
+                try:
+                    if inp.held(name):
+                        held |= 1 << i
+                    if inp.pressed(name):
+                        pressed |= 1 << i
+                except Exception:  # noqa: BLE001
+                    pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
         err = self._run.tick(dt)
         self._sync_view()
