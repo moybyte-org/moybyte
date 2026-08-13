@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 3,
+  "version": 4,
   "title": "Brick Siege Lua",
   "type": "game",
   "runtime": "lua",

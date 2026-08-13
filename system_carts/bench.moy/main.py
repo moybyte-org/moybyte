@@ -81,8 +81,11 @@ def _verbs():
     def v_spr(i):
         spr(i & 7, (i * 37) % 310, (i * 53) % 230)
 
-    def v_sprb(i):
-        spr_batch(state["sprb_items"])
+    # There was a "sprb" scene here (one spr_batch of 64 prebuilt tiles) until
+    # 2026-08-14. The verb is gone (plan 6.10) and so is the asymmetry it created:
+    # the Lua twin never had this scene, because a trampoline cannot marshal a
+    # list, so the two Bench carts disagreed by one row and every table taken from
+    # them had a hole in it. The "spr" scene above measures the same lane.
 
     def v_map(i):
         map(0, 0, 15, 8, (i * 7) % 40, (i * 11) % 40)
@@ -99,7 +102,7 @@ def _verbs():
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
-            ("tri", v_tri, 50), ("spr", v_spr, 500), ("sprb", v_sprb, 8),
+            ("tri", v_tri, 50), ("spr", v_spr, 500),
             ("map", v_map, 8), ("sspr", v_sspr, 50),
             ("tline", v_tline, 50)]
 
@@ -113,14 +116,6 @@ def _init():
             mset(x, y, (x + y) & 7)
             x += 1
         y += 1
-    # sprb's prebuilt items (64 tiles, LCG positions) -- built ONCE so the
-    # measure times the CALL, not per-frame list construction
-    items = []
-    i = 0
-    while i < 64:
-        items.append((i & 7, (i * 37) % 310, (i * 53) % 230))
-        i += 1
-    state["sprb_items"] = items
     state["phase"] = PHASE_MICRO
     state["verbs"] = _verbs()
     state["vi"] = 0            # which verb

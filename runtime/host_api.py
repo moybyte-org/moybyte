@@ -274,8 +274,8 @@ class _Layer:
     OWN canvas, plus W/H. Built by the api's make_layer(w, h). Mirrors moy_runtime."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "tri", "trib", "rect_batch", "sspr", "tline",
-              "spr", "spr_batch", "map", "mget", "mset", "print",
+              "tri", "trib", "sspr", "tline",
+              "spr", "map", "mget", "mset", "print",
               "camera", "clip", "pal", "palt")
 
     def __init__(self, canvas, ns):
@@ -362,38 +362,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return
         canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
 
-    def spr_batch(items, colorkey=-1, scale=1):
-        # spr_batch(items[, colorkey, scale]): draw MANY sheet tiles in one call (#43)
-        # -- the sprite analogue of map(). `items` is a sequence of (tile, x, y) or
-        # (tile, x, y, flip) tuples (flip 0=none/1=h/2=v/3=both, like spr()); colorkey +
-        # scale apply uniformly to the whole batch. Coords are world space (camera +
-        # clip apply), tiles come from the cart's sheet. On the device this is ONE
-        # native blit_batch call for N sprites (the draw-call count is its FPS
-        # bottleneck); here it's the readable per-item reference. SHEET TILES ONLY,
-        # 1x1 tiles -- Image sprites and multi-tile (w/h>1) sprites still use spr().
-        if sheet is None:
-            return
-        canvas.spr_batch(sheet, items, colorkey, scale)
-
-    def spans(n):
-        # spans(n) -> a reusable int16 span buffer for rect_batch (#167), n*5 slots
-        # laid out [x, y, w, h, c] per span. Allocate it ONCE in _init and refill it
-        # by index every frame: the device's native fill_rects takes a BUFFER (not a
-        # list), and a per-frame allocation of a few-hundred-span pack is exactly the
-        # churn that costs a collect. Carts have no imports, so this is the only way
-        # for one to hold a buffer.
-        from array import array as _array
-        return _array("h", bytearray(2 * 5 * int(n)))
-
-    def rect_batch(items, n=-1, ox=0, oy=0, c=-1):
-        # rect_batch(items[, n, ox, oy, c]): draw MANY filled rects in one call
-        # (#167) -- the rect analogue of spr_batch, riding the #163 span-batch lane
-        # so N spans cost ONE native call on device. `items` is FLAT: x, y, w, h, c
-        # repeated (not a list of tuples -- a flat sequence is one allocation
-        # instead of N, which is what makes a few-hundred-span software-3D frame
-        # affordable). `n` limits how many quints are read (-1 = all), ox/oy shift
-        # every rect, and c >= 0 overrides every rect's colour slot.
-        canvas.fill_rects(items, n, ox, oy, c)
+    # spr_batch / spans / rect_batch were cart verbs here until 2026-08-14. They are
+    # DELETED, not moved: the Bench twins measured the draw paths of the two languages
+    # indistinguishable at 300 calls/frame on the S3 (plan 6.10), so the batch verbs
+    # bought <=1ms at realistic call counts while costing every kid two vocabularies
+    # -- Lua could not call them at all (a trampoline cannot marshal a list or a span
+    # buffer), which is why every Lua twin already drew the same frame with a plain
+    # loop. A `for ...: spr(...)` run still leaves as ONE native blit_batch: the
+    # canvas's auto-batch gate (#63, Canvas.spr_tile -> Canvas.spr_batch) coalesces
+    # it. That method survives BECAUSE it is the gate's flush, not a verb.
 
     def sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0):
         # sspr(sx, sy, sw, sh, dx, dy[, dw, dh, colorkey, flip]): stretch a sw x sh
@@ -659,8 +636,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": spr,
         "tri": canvas.tri, "trib": canvas.trib,
-        "rect_batch": rect_batch, "spans": spans, "sspr": sspr, "tline": tline,
-        "spr_batch": spr_batch,
+        "sspr": sspr, "tline": tline,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,

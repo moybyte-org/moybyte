@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 8,
+  "version": 9,
   "title": "Ray Test",
   "type": "game",
   "runtime": "python",

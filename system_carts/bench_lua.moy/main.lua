@@ -51,9 +51,11 @@ local VERBS = {
       print("BENCH", (i * 47) % 260, (i * 23) % 230, 7)
     end },
   -- 2026-08-04 (#163): the rest of the verb set, same workloads as the
-  -- Python twin. NO sprb: the Lua bridge marshals only scalars (lua_to_mp
-  -- errors on a table), and the per-call spr below IS the batched lane --
-  -- moy_lua's spr appends quads in C (the spr_gate protocol).
+  -- Python twin -- and as of 2026-08-14 that is literally true, with no
+  -- exceptions to remember. The twin used to carry an extra "sprb" scene this
+  -- cart could not have (a trampoline cannot marshal a list), so the pair
+  -- disagreed by one row; spr_batch is deleted (plan 6.10) and the scene with
+  -- it. The per-call spr below is the batched lane either way.
   { name = "rectb", k0 = 100, fn = function(i)
       rectb((i * 37) % 280, (i * 53) % 215, 30, 18, 2 + (i & 15))
     end },

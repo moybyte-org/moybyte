@@ -30,7 +30,6 @@
 --     a cls() fired at that same point in the frame.
 --   * print()'s 5th scale argument -> dropped. SPEC.md §6's print signature has
 --     no scale; the console accepted-and-ignored it.
--- spr_batch is likewise absent, though for an unrelated reason (see below).
 --
 -- Port conventions (the canonical .lua cart shapes; see also sakura_lua.moy):
 --   * same call names + args as Python (map/mget/mset/spr/rect/print/btn/btnp/sfx/
@@ -46,12 +45,11 @@
 --     `auto ~= 0` (the autoplay flag), `ddx ~= 0 or ddy ~= 0` (was `if ddx or ddy`),
 --     and `bm[4] ~= 0` (the explosion's big flag, stored 1/0 like the Python cart).
 --   * Python's `continue` is `goto continue` + a trailing `::continue::` label.
---   * NO spr_batch: the Lua bridge marshals only nil/bool/number/string (lua_to_mp
---     errors on a TABLE -- see ray_lua.moy), so a Lua cart cannot hand spr_batch an
---     items list. The plain per-sprite spr() loop replaces it, in the SAME order --
---     and costs the same, because the bridge's hot spr() appends the very same int16
---     batch quads in C (#67 Phase 1), so the run still leaves as ONE native
---     blit_batch. Pixels and z-order are unchanged.
+--   * the per-sprite spr() loop is now what BOTH carts write. It used to be a Lua
+--     workaround (a trampoline cannot marshal an items list) against a Python twin
+--     that called spr_batch; that verb was deleted 2026-08-14 (plan 6.10) and the
+--     Python cart took this shape. It always cost the same: a contiguous run of
+--     1x1 spr()s leaves as ONE native blit_batch through the auto-batch gate.
 --
 -- MULTIPLAYER HOOK (#7, NOT wired): player state lives in the `players` list, which
 -- holds ONE player (P1) today. The update/draw/fire/collision code already loops over
@@ -677,11 +675,9 @@ function _draw()
     map(0, 0, MW, MH, sx, sy, 0, 2)
 
     -- Every moving sprite (eagle + enemies + players + bullets + explosions) is one
-    -- spr() at colorkey 0, scale 2, in the Python cart's exact batch order -- and the
-    -- Lua bridge appends them into the SAME native int16 quad array the Python cart's
-    -- spr_batch fills (#67 Phase 1), so this contiguous run still leaves as ONE
-    -- blit_batch. (It has to be a loop here: the bridge can't marshal a table, so
-    -- spr_batch is unreachable from Lua -- see the header.)
+    -- spr() at colorkey 0, scale 2, in the Python cart's exact order. The contiguous
+    -- run leaves as ONE native blit_batch: both languages feed the same int16 quad
+    -- array through the auto-batch gate (#67 Phase 1 / #63).
     -- the eagle base (or its rubble) at the fortress center
     local bx = BASE_CX * TS + sx
     local by = BASE_CY * TS + sy

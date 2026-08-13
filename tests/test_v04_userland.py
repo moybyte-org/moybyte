@@ -204,11 +204,12 @@ def test_make_layer_and_draw_layer_via_make_api():
     assert set(cv.buf) == {8}
 
 
-def test_spr_batch_matches_individual_spr_calls():
-    # spr_batch (#43) must draw the SAME pixels as the equivalent sequence of spr()
-    # calls (the device collapses it to one C call; the host is the per-item reference,
-    # and the two paths must agree pixel-for-pixel). Build two canvases, draw a few
-    # tiles (one flipped) via each path, and assert the buffers are identical.
+def test_the_auto_batch_gate_matches_individual_spr_calls():
+    # Canvas.spr_batch is no longer a cart verb (deleted 2026-08-14, plan 6.10) but it
+    # is still the FLUSH the auto-batch gate calls when a run of plain spr()s ends, so
+    # its pixels still have to equal the per-item reference -- that equality is the
+    # whole promise of "just write the loop". Build two canvases, draw a few tiles (one
+    # flipped) through each path, and assert the buffers are identical.
     sheet = SpriteSheet()
     sheet.tset(1, 0, 0, 8)                    # tile 1: red at (0,0)
     sheet.tset(1, 7, 0, 9)                    # ... and green at (7,0) (asymmetric -> flip shows)
@@ -230,11 +231,21 @@ def test_spr_batch_matches_individual_spr_calls():
     assert len(set(cv_batch.buf)) > 1        # sanity: it actually drew something
 
 
-def test_spr_batch_no_op_when_sheet_is_none():
-    # make_api.spr_batch is a no-op (no crash) for a cart with no sheet.
+def test_the_batch_verbs_are_gone_from_the_cart_namespace():
+    """spr_batch / rect_batch / spans must not be reachable from a cart.
+
+    Deleted 2026-08-14 (plan 6.10): they bought <=1ms at realistic call counts and
+    cost a split vocabulary, because a Lua trampoline cannot marshal a list or a
+    span buffer -- so the same game in the two languages needed two draw loops.
+
+    This is a pin, not a formality. The verbs were closures inside make_api and the
+    namespace is a dict literal, so a re-add is one line in a 700-line function and
+    would read as a helpful restoration. The reason it must not come back is a
+    product decision, not a performance one, and nothing else in the suite states
+    it.
+    """
     from runtime import host_app
     cv = Canvas(20, 20)
-    cv.cls(0)
 
     class _Input:
         def held(self, n):
@@ -244,8 +255,9 @@ def test_spr_batch_no_op_when_sheet_is_none():
             return False
 
     api = host_app.make_api(cv, _Input(), {}, sheet=None)
-    api["spr_batch"]([(0, 0, 0)], 0, 2)      # must not raise
-    assert set(cv.buf) == {0}                 # nothing drawn
+    for gone in ("spr_batch", "rect_batch", "spans"):
+        assert gone not in api, gone
+    assert "spr" in api and "rect" in api      # the survivors, so this can't pass empty
 
 
 # -- code editor core ------------------------------------------------------

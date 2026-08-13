@@ -186,7 +186,6 @@ editor). Tiles are referenced by integer id.
 | call | does |
 |---|---|
 | `spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1)` | draw sheet tile `n` at `x,y`. `colorkey` = transparent index (`-1` = opaque). `scale` enlarges. `flip`: `0` none, `1` horizontal, `2` vertical, `3` both. `w,h>1` draws a multi-tile sprite (e.g. `w=2,h=2` = 16×16). `n` may also be an `Image` |
-| `spr_batch(items, colorkey=-1, scale=1)` | draw MANY 1×1 sheet tiles in one call. `items` = sequence of `(tile, x, y)` or `(tile, x, y, flip)`. The sprite analogue of `map()` — on device it's **one** native call for N sprites (draw-call count is the FPS bottleneck, so batch hot sprites) |
 | `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy` |
 | `mget(x, y)` / `mset(x, y, tile)` | read / write a tilemap cell (tile id; `mget` = `-1` if none) |
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
@@ -208,18 +207,26 @@ truth that drifts.
 still move, and §11's conformance suite does not yet count them. A cart using them is fine
 — the seed carts do — but they are the one corner of this API that could change under you.
 
-### `rect_batch` / `spans` — present, but you should not need them
+### The batch verbs are gone (`spr_batch`, `rect_batch`, `spans`)
 
-Moybyte also has `spans(n)` (a reusable flat `x, y, w, h, c` buffer) and
-`rect_batch(items, n=-1, ox=0, oy=0, c=-1)`, which draws many filled rects in one call.
+Moybyte used to have three verbs for handing the console a pre-packed list of sprites or
+rects. **They were deleted on 2026-08-14** and there is nothing to replace them with:
+write the plain loop.
 
-**Reach for a plain `rect` loop first.** These were built for software 3D and then
-measured out of a job: once the console gated its root canvas through C-side appends, an
-ordinary `rect` call costs ~26 µs on the slower board, and the raycaster that motivated the
-batch ships without it. moy core declined both verbs for that reason — *batching is the
-host's duty, and a cart is never asked to pre-pack its geometry* ([SPEC.md
-§6.1](https://github.com/moybyte-org/moy-spec)). They stay here because carts use them, not
-because they are the way to draw.
+```python
+for e in enemies:            # this IS the fast path
+    spr(e.tile, e.x, e.y, 0, 2)
+```
+
+Two reasons, and the second is the one that decided it. First, they bought almost nothing:
+the console coalesces a contiguous run of `spr()` calls into one native batch by itself,
+and an ordinary `rect` call is a few microseconds of dispatch, so a 160-wall raycaster
+frame spends under a millisecond on call overhead. Second, **Lua carts could never call
+them at all** — the bridge marshals numbers, not lists — so the same game written in the
+two languages needed two different draw loops. A verb that only half the carts can use is
+a split vocabulary, and moy core had already declined all three for the same reason:
+*batching is the host's duty, and a cart is never asked to pre-pack its geometry*
+([SPEC.md §6.1](https://github.com/moybyte-org/moy-spec)).
 
 ## Scroll layers (`#54`)
 
@@ -368,9 +375,8 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
    (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
    `_build_world`.)
 4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
-   `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
-   when you already build a list. Likewise one `map()` call always beats drawing tiles
-   one by one.
+   `spr()` calls into one native batch automatically — there is no manual form and you
+   do not need one. Likewise one `map()` call always beats drawing tiles one by one.
 5. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
    engine caches each image pre-baked at one scale under the current palette; a
    `pal()` call invalidates that cache, so a `pal(...)`/`spr(...)`/`pal()` sandwich

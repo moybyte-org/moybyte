@@ -109,42 +109,12 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return
         canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
 
-    def spr_batch(items, colorkey=-1, scale=1):
-        # spr_batch(items[, colorkey, scale]): draw MANY sheet tiles in ONE native
-        # call (#43) -- the sprite analogue of map(). `items` is a sequence of
-        # (tile, x, y) or (tile, x, y, flip) tuples (flip 0=none/1=h/2=v/3=both,
-        # like spr()); `colorkey` + `scale` apply uniformly to the whole batch. Coords
-        # are world space (the camera offsets each; the clip rect is honoured) and the
-        # tiles come from the cart's sheet -- the SAME RGB565 atlas map() uses, so the
-        # cost is one C walk over the items instead of N per-sprite MP->C blits. This
-        # is the lever for explosion-heavy frames (the per-sprite draw-call count is
-        # the device's FPS bottleneck). SHEET TILES ONLY, 1x1 tiles: Image sprites and
-        # multi-tile (w/h>1) sprites still use spr(). No-op when the cart has no sheet.
-        if sheet is None:
-            return
-        # No tile-cache refresh needed (unlike spr()): the atlas is keyed on sheet.gen,
-        # so _sheet_atlas rebakes itself after a live paint edit.
-        canvas.spr_batch(sheet, items, colorkey, scale)
-
-    def spans(n):
-        # spans(n) -> a reusable int16 span buffer for rect_batch (#167), n*5 slots
-        # laid out [x, y, w, h, c] per span. Allocate it ONCE in _init and refill it
-        # by index every frame: the native fill_rects gate takes a BUFFER (it calls
-        # mp_get_buffer_raise, so a plain list raises), and a per-frame allocation of
-        # a few-hundred-span pack is exactly the churn that costs a collect. Carts
-        # have no imports, so this is the only way for one to hold a buffer.
-        from array import array as _array
-        return _array("h", bytearray(2 * 5 * int(n)))
-
-    def rect_batch(items, n=-1, ox=0, oy=0, c=-1):
-        # rect_batch(items[, n, ox, oy, c]): draw MANY filled rects in ONE call
-        # (#167) -- the rect analogue of spr_batch, riding the #163 span-batch gate
-        # so N spans are one MP->C crossing instead of N. `items` is FLAT: x, y, w,
-        # h, c repeated (a flat sequence is ONE allocation instead of N tuples,
-        # which is what makes a few-hundred-span software-3D frame affordable).
-        # `n` limits how many quints are read (-1 = all), ox/oy shift every rect,
-        # c >= 0 overrides every colour slot. Host twin: host_app.rect_batch.
-        canvas.fill_rects(items, n, ox, oy, c)
+    # spr_batch / spans / rect_batch were cart verbs here until 2026-08-14. They are
+    # DELETED, not moved -- see the same note in runtime/host_api.py. The short of
+    # it: on THIS board the Bench twins measured the two languages' draw paths
+    # indistinguishable at 300 calls/frame (plan 6.10), and a verb Lua cannot call
+    # is a verb that splits the cart vocabulary for <=1ms. A plain `for ...: spr(...)`
+    # run still leaves as ONE native blit_batch through the auto-batch gate (#63).
 
     def sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0):
         # sspr(sx, sy, sw, sh, dx, dy[, dw, dh, colorkey, flip]): stretch a sw x sh
@@ -414,8 +384,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "tri": canvas.tri, "trib": canvas.trib,
-        "rect_batch": rect_batch, "spans": spans, "sspr": sspr, "tline": tline,
-        "spr_batch": spr_batch,
+        "sspr": sspr, "tline": tline,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,

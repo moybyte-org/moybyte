@@ -1624,7 +1624,7 @@ _KEYWORDS = {
 _RESERVED_NAMES = {
     # cart API verbs (host_app.make_api / moy_runtime -- keep in sync if that grows)
     "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr",
-    "spr_batch", "background", "make_layer", "draw_layer", "map", "mget", "mset",
+    "background", "make_layer", "draw_layer", "map", "mget", "mset",
     "print", "touch", "mouse", "clip", "camera", "pal", "palt", "btn", "btnp",
     "key", "keyp", "time", "pmem", "textmode", "quit", "cfg", "col", "sfx", "beep",
     "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",

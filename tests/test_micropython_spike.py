@@ -1902,8 +1902,13 @@ def test_native_spr_batch_wired_for_sprites():
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
     assert "def spr_batch(self, sheet, items" in device_canvas  # DeviceCanvas.spr_batch
     assert "self._gfx.blit_batch(self._buf" in device_canvas    # native one-call blit
-    assert "def spr_batch(items" in runtime               # make_api spr_batch
-    assert '"spr_batch": spr_batch,' in runtime           # exposed in the cart namespace
+    # ...and the ONLY thing that reaches it is the auto-batch gate. The cart verb of
+    # the same name was deleted on 2026-08-14 (plan 6.10), so a cart gets the native
+    # one-call blit by writing a plain spr() loop and by no other route.
+    assert "def spr_tile(self, sheet" in device_canvas     # the gate's queue entry
+    assert "def spr_batch(items" not in runtime            # no cart verb
+    assert '"spr_batch"' not in runtime                    # not in the cart namespace
+    assert '"rect_batch"' not in runtime and '"spans"' not in runtime
 
 
 def test_native_blit_indices_wired_for_paint_images():
@@ -1927,10 +1932,13 @@ def test_native_blit_indices_wired_for_paint_images():
     # run, so the #43 dispatch win is untouched and only the inner loop moved (#97).
     assert "moy_spr(&c, &sh, (int)tid" in c
     assert "self._wire_pal(), self._palt" in device_canvas
-    # Brick Siege adopts it: the moving sprites go out in one batch (#43).
+    # Brick Siege adopts it: the moving sprites go out in one batch (#43) -- as a
+    # plain contiguous spr() run the gate coalesces, which is also exactly what its
+    # Lua twin does, so the pair is comparable by construction (plan 6.10).
     battle = (Path("system_carts") / "brick_siege.moy"
               / "main.py").read_text(encoding="utf-8")
-    assert "spr_batch(" in battle
+    assert "spr(EAGLE if base_alive else BROKEN" in battle
+    assert "spr_batch(" not in battle
 
 
 def test_paint_image_assets_wired_device_and_carts():

@@ -16,9 +16,9 @@ EMIT = [(2, 143), (6, 113), (16, 102), (24, 97), (25, 80), (26, 73), (26, 106), 
 # blit_indices call (was ~32k rect() replays, seconds of load). draw_layer then copies
 # the finished layer to the screen each frame as a flat blit -- no per-frame background
 # work. The N petals are drawn with the naive per-petal spr() loop, which the engine
-# AUTO-BATCHES into ONE native blit_batch (Fold 1, #63) -- so the kid-obvious loop is as
-# fast as a hand-rolled spr_batch, and the draw-call count (the device's FPS ceiling)
-# collapses to one for the whole flurry. The sway reads a 256-entry sine table built
+# AUTO-BATCHES into ONE native blit_batch (Fold 1, #63) -- so the kid-obvious loop is
+# the fast one, and the draw-call count (the device's FPS ceiling) collapses to one for
+# the whole flurry. The sway reads a 256-entry sine table built
 # once, so the per-frame loop never calls math.*.
 
 import math
@@ -140,8 +140,8 @@ def _draw():
     # Background: one flat blit. Petals: the naive per-petal spr() loop -- one call per
     # petal at (x, y), colorkey 0 (index 0 is transparent in the tile art). This
     # contiguous run of 1x1 sheet-tile spr()s is AUTO-BATCHED by the engine into ONE
-    # native blit_batch (Fold 1, #63), so it costs the same as a hand-rolled spr_batch
-    # and is pixel-identical -- the kid never has to know spr_batch exists. Each petal's
+    # native blit_batch (Fold 1, #63) -- there is no faster way to write it, and no
+    # manual batch verb to reach for (the API has none). Each petal's
     # tile is `base` (the run's blossom column) + its depth shade p[5]; the tile art
     # bakes the depth colour + the near-petal white glint.
     draw_layer(lay, 0, 0)

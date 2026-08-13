@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 11,
+  "version": 12,
   "title": "Brick Siege",
   "type": "game",
   "runtime": "python",

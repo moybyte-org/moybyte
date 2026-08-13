@@ -5,12 +5,11 @@
 -- place its pixels cost ~0.03ms and its DDA costs ~45ms. So the ONLY question
 -- this cart asks is how fast the same arithmetic runs in the Lua VM.
 --
--- IMPORTANT (why this draws per column instead of batching): the Lua bridge
--- marshals only nil/bool/number/string -- lua_to_mp errors on a table -- so a
--- Lua cart cannot hand rect_batch a span buffer today. Every wall is therefore
--- its own rect() upcall, which is the dispatch cost the batch exists to delete.
--- Read this cart's number as "Lua DDA + 160 upcalls", i.e. a CEILING on the
--- frame time a batched Lua cart would reach, not the best case.
+-- This drew per column while the Python twin batched, which made the pair two
+-- different programs and its number a ceiling rather than a measurement. Since
+-- 2026-08-14 ray_test.moy is this cart line for line: the batch verbs are gone
+-- (plan 6.10 -- 160 rect() upcalls measured under a millisecond, and Lua could
+-- never call them anyway), so the pair now differs only in language.
 
 local MAP = {
   "1111111111111111",

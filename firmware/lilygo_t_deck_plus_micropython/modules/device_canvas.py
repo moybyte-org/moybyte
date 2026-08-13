@@ -2367,9 +2367,8 @@ class _Layer:
     OWN canvas, plus W/H. Built by the api's make_layer(w, h)."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              
-              "tri", "trib", "rect_batch", "sspr",
-              "spr", "spr_batch", "map", "mget", "mset", "print",
+              "tri", "trib", "sspr",
+              "spr", "map", "mget", "mset", "print",
               "camera", "clip", "pal", "palt")
 
     def __init__(self, canvas, ns):

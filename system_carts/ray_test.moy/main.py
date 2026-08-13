@@ -1,10 +1,14 @@
 # Ray Test -- a flat-shaded raycaster that measures the #167 3D verbs.
 #
 # The point of this cart is a RATIO: the ray march runs here in Python, one
-# iteration per screen column, but every wall pixel is filled by ONE rect_batch
-# call per frame (the #163 span-batch lane -> a single MP->C crossing). If
-# software 3D is affordable on this hardware, it is affordable because of that
-# split -- "geometry in the script, pixels in C".
+# iteration per screen column, and each wall is one rect(). It used to pack the
+# whole frame's walls into a span buffer and issue ONE rect_batch, on the belief
+# that the MP->C crossing was what made software 3D affordable. Measured on glass
+# 2026-08-14 (plan 6.10): it is not. A rect() call is ~3us of dispatch, so 160 of
+# them are ~0.5ms of a 20ms frame, and the batch verbs were deleted -- they cost
+# every kid a second vocabulary (Lua could not call them at all) to buy that.
+# ray_lua.moy is now this cart line for line, which is what makes the pair a
+# language measurement instead of two different programs.
 #
 # The ceiling and floor are TWO BIG RECTS, not per-column spans. Painting each
 # pixel exactly once (a ceiling/wall/floor span per column) sounds better and
@@ -56,7 +60,7 @@ TS = 0.06994
 
 def _init():
     global px, py, dx, dy, plx, ply
-    global buf, cols, step, mode, frames, t_mark, fps, rc, rs
+    global cols, step, mode, frames, t_mark, fps, rc, rs
     global VW, VH, VX, VY, bench
 
     px, py = 8.5, 11.5           # start in the open corridor, facing north
@@ -87,7 +91,6 @@ def _init():
     if step < 1:
         step = 1
     cols = (VW + step - 1) // step
-    buf = spans(cols)            # one wall span per column; allocated ONCE
 
     mode = 0
     rc = 1.0                     # the turntable's cos/sin, advanced one fixed
@@ -139,14 +142,16 @@ def _update(dt):
 
 
 def _cast():
-    """Fill `buf` with one wall span per column; return how many spans there are.
+    """March one ray per column and draw its wall slice.
 
     Textbook DDA: step whole map cells along the ray until one is solid, then
     take the PERPENDICULAR distance (not the ray length) so the walls come out
     flat instead of fish-eyed.
+
+    The rect() is inside this loop, not collected and issued afterwards, so
+    `bench == 1` (geometry only) is exactly this function with the draw skipped --
+    the same arrangement ray_lua.moy uses.
     """
-    n = 0
-    k = 0
     half = VH >> 1
     for i in range(cols):
         cam = 2.0 * i / cols - 1.0
@@ -203,20 +208,12 @@ def _cast():
         if y1 > VH:
             y1 = VH
 
-        if y1 <= y0:
-            continue
-        wide = VW - i * step     # the last column may be narrower than `step`
-        if wide > step:
-            wide = step
-        lit, dim = WALL[cell]
-        buf[k] = VX + i * step
-        buf[k + 1] = VY + y0
-        buf[k + 2] = wide
-        buf[k + 3] = y1 - y0
-        buf[k + 4] = dim if side else lit
-        k = k + 5
-        n = n + 1
-    return n
+        if y1 > y0 and bench == 0:
+            wide = VW - i * step   # the last column may be narrower than `step`
+            if wide > step:
+                wide = step
+            lit, dim = WALL[cell]
+            rect(VX + i * step, VY + y0, wide, y1 - y0, dim if side else lit)
 
 
 # -- the tri() half: a spinning flat-shaded tetrahedron ---------------------
@@ -262,7 +259,7 @@ def _draw():
         rect(VX, VY, VW, VH, 0)
         _draw_tetra()
     elif bench == 1:
-        _cast()                  # geometry only: no fills, no batch, no walls
+        _cast()                  # geometry only: _cast skips its own rect()
     elif bench == 2:
         half = VH >> 1           # background only: the two wide rects
         rect(VX, VY, VW, half, CEIL)
@@ -275,9 +272,7 @@ def _draw():
         half = VH >> 1
         rect(VX, VY, VW, half, CEIL)          # two WIDE sequential fills beat
         rect(VX, VY + half, VW, VH - half, FLOOR)   # per-column strips (see top)
-        n = _cast()
-        if n:
-            rect_batch(buf, n)   # every wall in ONE call
+        _cast()                  # each wall is one rect(), drawn as it is found
 
     frames = frames + 1
     now = time()
