@@ -1154,13 +1154,14 @@ class Workstation:
         # CHROMEBRK sub-split of _chrome_ms (#66 lever 5, instrument-before-cutting):
         # what the ~4-6ms of cart-path chrome actually buys -- the top status bar
         # (_draw_status_strip), the game->system viewport composite (a no-op when the
-        # canvases are one object, i.e. today's 320x240 device), the cursor, and the
-        # unmeasured remainder (textmode sync + state reset + overlays + batch guard).
+        # canvases are one object, i.e. today's 320x240 device), the cursor, the rest
+        # of the WM stack walk (_stk_ms, 2026-08-14), and the router remainder.
         # Only measured on the running-cart path with perf capture on; surfaced via
         # perf_chrome() -> the device CHROMEBRK diag line.
         self._bar_ms = 0.0
         self._cmp_ms = 0.0
         self._cur_ms = 0.0
+        self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
         self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
         # Live diagnostics gate (#68 "kid mode"): False (the kid default) means the
@@ -1245,11 +1246,14 @@ class Workstation:
         # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
         # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
         # the split without threading it back through the loop. Zeroed each frame().
+        # MICROSECONDS since 2026-08-14 -- ms truncation was piling into CHROMEBRK's
+        # `other`, which is a residual and so inherited every term's rounding.
         self._pf_upd = 0
         self._pf_cart = 0
         self._pf_audio = 0
         self._pf_bar = 0
         self._pf_bg = 0     # #172: the declared-backdrop share of _pf_cart
+        self._pf_stack = 0  # total us of the last painted frame's layer walk
         # #172: the frame's unmeasured EDGES, us -- pre = entry..draw span open
         # (journal tick, splash, frameskip branch, redraw gate), post = the tail
         # after the flush (dirty clear, covers/fling re-arm, pointer snapshot).
@@ -2864,10 +2868,10 @@ class Workstation:
         via this thin helper so player.py never reaches the bar surface directly (the
         Stage-2 isolation guarantee)."""
         _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_ms() if _perf else 0
+        _tb = _ticks_us() if _perf else 0
         self.bar_layer._draw_status_strip("desktop")   # unified top bar (tool switcher)
         if _perf:
-            self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
+            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _cart_bar_tap(self, px, py):
         """Route a CRASH-frame tap to the top-bar tool switcher (bar-owned), returning
@@ -2927,10 +2931,10 @@ class Workstation:
         draw + _pf_bar accounting as _draw_cart_bar; the Player asks for it via this thin
         helper so player.py never reaches the bar surface directly (Stage-2 isolation)."""
         _perf = self.perf_hud or self.perf_capture
-        _tb = _ticks_ms() if _perf else 0
+        _tb = _ticks_us() if _perf else 0
         self.bar_layer._draw_status_strip("tool")   # minimal bar: title + status + X
         if _perf:
-            self._pf_bar = _ticks_diff(_ticks_ms(), _tb)   # CHROMEBRK: the bar's share
+            self._pf_bar = _ticks_diff(_ticks_us(), _tb)   # CHROMEBRK: the bar's share (us)
 
     def _tool_bar_tap(self, px, py):
         """Route a running-TOOL tap (px, py in GAME coords) to the minimal bar: the
@@ -4809,13 +4813,16 @@ class Workstation:
         # fires when perf_capture is set (device diag sampling) -- not just the HUD.
         _perf = self.perf_hud or self.perf_capture
         _deep = self.perf_capture
-        _frame_t0 = _ticks_ms() if _perf else 0
+        # MICROSECONDS (2026-08-14). Everything in the DRAWBRK/CHROMEBRK family
+        # runs on this clock now; see _frame_perf_end for why the ms one was
+        # manufacturing the remainder it was being read to explain.
+        _frame_t0 = _ticks_us() if _perf else 0
         if _deep:
             # Everything from frame() entry to here: journal idle tick, splash
             # expiry, the frameskip branch, and the redraw gate itself.
             self._pf_pre = _ticks_diff(_ticks_us(), _fe0)
-        _cmp = 0            # CHROMEBRK: _composite_game ms
-        _cur = 0            # CHROMEBRK: _draw_cursor ms
+        _cmp = 0            # CHROMEBRK: _composite_game us
+        _cur = 0            # CHROMEBRK: _draw_cursor us
         if _deep:
             _bc = getattr(self.canvas, "batch_reset", None)
             if _bc is not None:
@@ -4920,11 +4927,11 @@ class Workstation:
                 if _game_open:                      # close the placement span
                     _view()
                     _game_open = False
-                _tc = _ticks_ms() if _deep else 0
+                _tc = _ticks_us() if _deep else 0
                 self._composite_game()
                 _fold_live = True
                 if _deep:
-                    _cmp = _ticks_diff(_ticks_ms(), _tc)   # CHROMEBRK: viewport composite
+                    _cmp = _ticks_diff(_ticks_us(), _tc)   # CHROMEBRK: viewport composite
             if _fold_live and (layer is not self._cursor_layer
                                or (self.pointer is not None
                                    and self.pointer.visible)):
@@ -4962,7 +4969,7 @@ class Workstation:
                 # last -- exactly the case where the number has to be a total.
                 _lay[layer.id] = _lay.get(layer.id, 0) + _lus
                 if layer.id == "cursor":
-                    _cur = _lus / 1000.0            # CHROMEBRK: cursor
+                    _cur = _lus                     # CHROMEBRK: cursor (us)
             else:
                 layer.draw(dt)
             _prev_domain = layer.domain
@@ -4970,6 +4977,13 @@ class Workstation:
             # Last PAINTED frame's split (the skip/quiet gates return above), so
             # it keeps the same "sample whenever you like" contract as DRAW2.
             self._pf_layers = _lay
+            # ...and its TOTAL, which is what turns CHROMEBRK's `other` from a
+            # residual into a partition: the walk is one measured bucket, and
+            # what remains after it is the router machinery alone.
+            _st = 0
+            for _v in _lay.values():
+                _st += _v
+            self._pf_stack = _st
         if _game_open:                              # game was the TOP layer
             _view()
         if self._deferred:
@@ -5028,27 +5042,43 @@ class Workstation:
             # bracket (the DEFER diag line names its cost instead).
             self._run_deferred()
 
-    def _frame_perf_end(self, frame_t0, cmp_ms, cur_ms):
+    def _frame_perf_end(self, frame_t0, cmp_us, cur_us):
         """The #43/#44 perf-capture frame tail (extracted from frame() so the hot
         router stays readable): time the panel DMA flush in isolation, back out
         the draw span, and EMA the DRAWBRK/CHROMEBRK splits. Only called when
         perf_hud/perf_capture is on -- the kid-mode path flushes directly, so the
         render path itself is unchanged. The timing fields stay on the
         Workstation (the device diag contract -- perf_sample/perf_breakdown/
-        perf_chrome read them)."""
-        _upd = self._pf_upd
-        _cart = self._pf_cart
-        _audio = self._pf_audio
-        _bar = self._pf_bar
-        _flush_t0 = _ticks_ms()
+        perf_chrome read them).
+
+        EVERY BRACKET IN HERE IS MICROSECONDS (2026-08-14), converted to ms once,
+        at the EMA. It used to be ticks_ms, and that quietly broke the one number
+        the shell's frame budget was being argued from. `chrome` is a residual
+        (draw - upd - cart - audio) and `other` was a residual OF a residual
+        (chrome - bar - cmp - cur): six integer-ms differences, each truncating
+        toward zero, all of their loss landing in the last term. That is up to
+        ~6ms of manufactured cost in a bucket that read ~7.6ms on the S3 and was
+        the largest unexplained item in an 18ms frame -- i.e. the instrument was
+        a plausible whole explanation for what it was being used to investigate.
+
+        `other` is also no longer the last term. The stack walk is measured
+        (self._pf_stack, us) and subtracted as `stk`, so what remains is the
+        ROUTER itself -- the draw_stack walk, the surface/fold probes,
+        _flush_batches, and this function's own bookkeeping -- and it is a
+        partition, not a leftover."""
+        _upd = self._pf_upd                     # us
+        _cart = self._pf_cart                   # us
+        _audio = self._pf_audio                 # us
+        _bar = self._pf_bar                     # us
+        _flush_t0 = _ticks_us()
         self.comp.flush()
-        _flush = _ticks_diff(_ticks_ms(), _flush_t0)
-        _total = _ticks_diff(_ticks_ms(), frame_t0)
+        _flush = _ticks_diff(_ticks_us(), _flush_t0)
+        _total = _ticks_diff(_ticks_us(), frame_t0)
         _draw = _total - _flush
         if _draw < 0:
             _draw = 0
-        self._flush_ms = _ema(self._flush_ms, _flush)
-        self._draw_ms = _ema(self._draw_ms, _draw)
+        self._flush_ms = _ema(self._flush_ms, _flush / 1000.0)
+        self._draw_ms = _ema(self._draw_ms, _draw / 1000.0)
         # Everything below is the DEEP tail (DRAWBRK/CHROMEBRK splits + the
         # HITCH logger's raw copies): diag-session data, and 6 boxed floats +
         # ~12 EMA calls of churn per frame -- perf_hud alone stops here (the
@@ -5060,27 +5090,40 @@ class Workstation:
         _chrome = _draw - _upd - _cart - _audio
         if _chrome < 0:
             _chrome = 0
-        # raw per-frame copies for the hitch logger (#66 HITCH v3)
-        self._raw_upd = float(_upd)
-        self._raw_cart = float(_cart)
-        self._raw_audio = float(_audio)
-        self._raw_chrome = float(_chrome)
-        self._raw_flush = float(_flush)
-        self._raw_draw = float(_draw)
-        self._upd_ms = _ema(self._upd_ms, _upd)
-        self._cart_ms = _ema(self._cart_ms, _cart)
-        self._audio_ms = _ema(self._audio_ms, _audio)
-        self._chrome_ms = _ema(self._chrome_ms, _chrome)
-        # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor EMAs, so
-        # a chrome trim targets the real cost instead of guessing.
-        self._bar_ms = _ema(self._bar_ms, _bar)
-        self._cmp_ms = _ema(self._cmp_ms, cmp_ms)
-        self._cur_ms = _ema(self._cur_ms, cur_ms)
+        # raw per-frame copies for the hitch logger (#66 HITCH v3), in ms
+        self._raw_upd = _upd / 1000.0
+        self._raw_cart = _cart / 1000.0
+        self._raw_audio = _audio / 1000.0
+        self._raw_chrome = _chrome / 1000.0
+        self._raw_flush = _flush / 1000.0
+        self._raw_draw = _draw / 1000.0
+        self._upd_ms = _ema(self._upd_ms, self._raw_upd)
+        self._cart_ms = _ema(self._cart_ms, self._raw_cart)
+        self._audio_ms = _ema(self._audio_ms, self._raw_audio)
+        self._chrome_ms = _ema(self._chrome_ms, self._raw_chrome)
+        # CHROMEBRK sub-split (#66 lever 5): bar / composite / cursor / stack-walk
+        # EMAs, so a chrome trim targets the real cost instead of guessing.
+        #
+        # `stk` is the layer walk MINUS the pieces already named: upd/cart/audio
+        # and the bar all run inside layer.draw() (the cart's content layer, then
+        # the shell bar the Player asks for), and the cursor is its own row. What
+        # is left is every OTHER layer's draw plus the content layer's non-cart
+        # tail. Double-counting here would push `other` negative and clamp it to
+        # zero, which reads as "all accounted for" -- the failure mode this whole
+        # change exists to remove -- so the subtraction is deliberate and the
+        # clamp below is a floor, not a fit.
+        _stk = self._pf_stack - _upd - _cart - _audio - _bar - cur_us
+        if _stk < 0:
+            _stk = 0
+        self._bar_ms = _ema(self._bar_ms, _bar / 1000.0)
+        self._cmp_ms = _ema(self._cmp_ms, cmp_us / 1000.0)
+        self._cur_ms = _ema(self._cur_ms, cur_us / 1000.0)
+        self._stk_ms = _ema(self._stk_ms, _stk / 1000.0)
         # #172: the declared-backdrop restore. NOT a fourth peer of the split --
         # it is already inside _cart_ms (Player.tick charges it to render, where
         # the cart's own cls would have landed). Tracked separately only so
         # DRAWBRK can say how much of render is the backdrop.
-        self._bg_ms = _ema(self._bg_ms, self._pf_bg)
+        self._bg_ms = _ema(self._bg_ms, self._pf_bg / 1000.0)
 
     # -- boot logo ------------------------------------------------------------
 
@@ -5149,17 +5192,32 @@ class Workstation:
                 self._raw_chrome, self._raw_flush, self._raw_draw)
 
     def perf_chrome(self):
-        """(bar_ms, composite_ms, cursor_ms, other_ms): the EMA sub-split of the
-        DRAWBRK chrome remainder (#66 lever 5) -- the top status bar, the game->
-        system viewport composite (~0 when the canvases are one object, i.e. the
-        320x240 device), the cursor, and whatever chrome remains unmeasured
-        (textmode sync, canvas-state reset, overlays, the final batch guard).
+        """(bar_ms, composite_ms, cursor_ms, stack_ms, other_ms): the EMA sub-split
+        of the DRAWBRK chrome remainder (#66 lever 5).
+
+        bar   the top status bar (_draw_status_strip)
+        cmp   the game->system viewport composite (~0 when the canvases are one
+              object, i.e. the 320x240 device)
+        cur   the cursor layer
+        stk   every OTHER layer's draw in the WM stack walk, plus the content
+              layer's non-cart tail (2026-08-14)
+        other what is left: the router itself -- the draw_stack walk, the
+              surface/scale-fold probes, _flush_batches, the perf bookkeeping
+
+        `stk` was added because `other` had become the answer to every question:
+        it was a residual of a residual computed from six millisecond-quantized
+        terms, so it collected both the real unnamed cost AND up to ~6ms of
+        rounding, and on the S3 it read ~7.6ms with every named bucket at ~0.00.
+        Both halves of that are fixed -- the brackets are microseconds now, and
+        the biggest unnamed component is measured rather than inferred.
+
         Only meaningful while a cart runs with perf_capture/perf_hud on; feeds
         the device CHROMEBRK diag line so a chrome trim cuts the real cost."""
-        other = self._chrome_ms - self._bar_ms - self._cmp_ms - self._cur_ms
+        other = (self._chrome_ms - self._bar_ms - self._cmp_ms - self._cur_ms
+                 - self._stk_ms)
         if other < 0:
             other = 0.0
-        return (self._bar_ms, self._cmp_ms, self._cur_ms, other)
+        return (self._bar_ms, self._cmp_ms, self._cur_ms, self._stk_ms, other)
 
     def perf_backdrop(self):
         """The EMA ms of the declared-backdrop restore (#172) -- `background()`'s

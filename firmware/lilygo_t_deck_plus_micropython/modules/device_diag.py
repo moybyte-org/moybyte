@@ -292,7 +292,17 @@ def _diag_chromebrk(diag, ws):
     """Log a CHROMEBRK line (#66 lever 5, instrument-before-cutting): the sub-split
     of DRAWBRK's chrome remainder -- bar (_draw_status_strip), cmp (the game->system
     viewport composite; ~0 on the 320x240 device where the canvases are one object),
-    cur (_draw_cursor), other (textmode sync + state reset + overlays + batch guard).
+    cur (the cursor layer), stk (every other layer's draw in the WM stack walk),
+    other (the router: the walk itself, the surface/fold probes, _flush_batches).
+
+    Read `other` as a real quantity now. Until 2026-08-14 it was a residual of a
+    residual over six millisecond-quantized brackets, so it absorbed every term's
+    rounding on top of whatever was genuinely unnamed -- on the S3 it read ~7.6ms
+    with bar/cmp/cur all ~0.00, which is an instrument saying "somewhere else" as
+    loudly as it can. The brackets are microseconds now and the stack walk is
+    measured, so a large `other` means the ROUTER, and a large `stk` means a
+    layer -- which LAYERBRK will then name.
+
     Says which chrome cost a trim should target. Guarded; cart-running only."""
     if diag is None:
         return
@@ -303,8 +313,12 @@ def _diag_chromebrk(diag, ws):
         if pc is None:
             return
         c = pc()
-        diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
-                 % (c[0], c[1], c[2], c[3]))
+        if len(c) < 5:                      # a console older than the stk bucket
+            diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"
+                     % (c[0], c[1], c[2], c[3]))
+            return
+        diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f stk=%.2f other=%.2f"
+                 % (c[0], c[1], c[2], c[3], c[4]))
     except Exception:
         pass
 

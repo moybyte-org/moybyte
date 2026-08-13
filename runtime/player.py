@@ -123,6 +123,15 @@ def _ticks_ms():
         return int(time.time() * 1000)
 
 
+def _ticks_us():
+    """Microseconds. The DRAWBRK/CHROMEBRK phase brackets run on THIS clock, not
+    ticks_ms -- see the note in Player.tick's perf block."""
+    try:
+        return time.ticks_us()
+    except AttributeError:
+        return int(time.time() * 1000000)
+
+
 def _ticks_diff(a, b):
     try:
         return time.ticks_diff(a, b)
@@ -527,7 +536,12 @@ class Player:
         except Exception:  # noqa: BLE001 -- diagnostics must never affect play
             pass
 
-    def _maybe_diag_slow_logic(self, upd_ms, render_ms, audio_ms):
+    def _maybe_diag_slow_logic(self, upd_us, render_us, audio_us):
+        # Microseconds since 2026-08-14 (see the note at the call site); the gate
+        # and the printed line stay in ms so SLOWLOGIC reads as it always has.
+        upd_ms = upd_us // 1000
+        render_ms = render_us // 1000
+        audio_ms = audio_us // 1000
         if upd_ms < 10 or not self._diag_enabled():
             return
         now = _ticks_ms()
@@ -901,24 +915,33 @@ class Player:
                 # Python twin's 6.58ms, for identical pixels. Counting it here
                 # makes the two languages' splits comparable, which is the whole
                 # point of the bucket.
-                _tb = _ticks_ms() if _perf else 0
+                _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:
                     rb()
-                bg = _ticks_diff(_ticks_ms(), _tb) if _perf else 0
+                bg = _ticks_diff(_ticks_us(), _tb) if _perf else 0
                 # Multiplayer (#65): deliver any inbound net.* messages to the cart's
                 # on_net handler BEFORE its _update runs (incoming shared state applied
                 # first -- the lockstep-friendly order). Every logic tick, incl. a
                 # frameskip logic-only frame. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
-                _ts = _ticks_ms() if _perf else 0
+                # MICROSECONDS, not ms (2026-08-14). These three brackets and the
+                # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
+                # is what is left after subtracting them from the frame -- so on a
+                # ms clock every one of them truncated toward zero and the
+                # remainder collected the whole error. Six quantized terms, each
+                # losing up to 1ms, is up to 6ms of PURE ARTEFACT in a bucket that
+                # read ~7.6ms and was being treated as a real cost to hunt.
+                # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
+                # at the EMA, so every public number stays in ms.
+                _ts = _ticks_us() if _perf else 0
                 if self._update:
                     self._update(dt)
-                _tm = _ticks_ms() if _perf else 0
+                _tm = _ticks_us() if _perf else 0
                 if render and self._draw:
                     self._draw()
-                _td = _ticks_ms() if _perf else 0
+                _td = _ticks_us() if _perf else 0
                 if ws.audio is not None:
                     ws.audio.tick(dt)      # advance/feed playback (#16)
                 if _perf:
@@ -934,8 +957,11 @@ class Player:
                     if _fs is not None:
                         _sp = _fs()
                         if _sp is not None:
-                            upd, cart = _sp[0], _sp[1] + bg
-                    aud = _ticks_diff(_ticks_ms(), _td)   # audio.tick (mixer feed)
+                            # frame_split keeps its ms contract (lua_host twins it);
+                            # this side is us, so convert rather than widening it.
+                            upd = int(_sp[0] * 1000.0)
+                            cart = int(_sp[1] * 1000.0) + bg
+                    aud = _ticks_diff(_ticks_us(), _td)   # audio.tick (mixer feed)
                     ws._pf_upd = upd
                     ws._pf_cart = cart
                     ws._pf_audio = aud
