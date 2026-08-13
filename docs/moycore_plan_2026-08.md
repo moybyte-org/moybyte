@@ -896,7 +896,37 @@ nothing took it. Whatever routes work to moycore, assert that something
 actually arrives -- per cart, by name. An untaken path is the failure mode
 these swaps are most likely to have.
 
-### 6.10 The batching rung — MEASURED AND MOSTLY DEAD (2026-08-13, same night)
+### 6.10 The batching rung — ANSWERED ON GLASS (2026-08-14): the verbs can go
+
+**Settled by the Bench twins' new phase split, on the S3.** Python vs Lua,
+line-faithful twins, PERF DIAG on:
+
+    phase                  Python    Lua
+    FLOOR (console frame)    18.0    19.0    within the 1ms clock
+    LOGIC (+3000 iters)     +11.0    +5.0    Lua 2.2x FASTER
+    DRAW  (+300 rects)       +0.0    +1.0    equal within the clock
+
+**The draw paths are indistinguishable at 300 calls/frame**, so the per-call
+overhead difference is <=3us/call and the batch verbs buy <=1ms at realistic
+call counts. **`spr_batch`/`rect_batch`/`spans` can be deleted from the cart
+API** — same verbs in both languages, which is what makes a kid's cart
+spec-portable, and nothing measurable is lost. The x86 kernel A/B below DID
+transfer, contrary to the (correct, and worth having had) worry that unix
+microbenches usually do not.
+
+Also settled: **Lua's arithmetic is 2.2x faster than Python's on this board**,
+which explains ray_lua's ~2x (a DDA march is almost pure arithmetic) and
+retires "Lua logic is slower on the S3" — that reading came from brick_siege vs
+brick_siege_lua, which is not a twin. Numbers and the one open check (whether
+the Python bench cart actually got auto-native) are in #66.
+
+**What is left of this rung is a deletion, not a build:** remove the three verbs
+from `make_api` on both boards and the host, from `docs/moy_cart_api.md`, and
+from the carts that use them (`ray_test`, `brick_siege`) — which also makes
+those pairs comparable by construction. No libmoy change, no new kernel, no
+gate work.
+
+### 6.10a The kernel A/B that got there (2026-08-13, superseded conclusion kept)
 
 **The premise below was falsified within the hour, by the measurement it asked
 for.** Kept in full rather than rewritten, because the reasoning was sound and
