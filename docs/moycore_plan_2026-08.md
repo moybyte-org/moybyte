@@ -47,10 +47,14 @@ under a conformance cart, on-glass suite 22/22); `canvas.py`'s verbs
 delegate to libmoy with the conformance goldens unchanged; the host runs
 the boards' own Lua for every cart.
 
-**What remains: BOTH BOARDS need flashing**, and neither has run the fixes
-above — the P4's last image predates them and the T-Deck has never had one,
-which needs a hand on the hardware (no BOOT button; the trackball IS GPIO0).
-Until then the per-cart evidence stands only for the host and the browser.
+**The P4 is FLASHED and verified (2026-08-13, the deletion build):** on-glass
+suite 22/22, spec conformance 10/10 against the board, every Lua cart a
+`MoycoreRun`, and the stage-2 GC claim finally measured — **a 60.1s celeste
+window with ZERO hitches** where the case was built on 160–200ms collects every
+~6s. Numbers in #66. **The T-Deck is not**, and it is the board the GC claim was
+originally written about, so treat that result as one board and the friendly
+one; flashing it needs a hand on the hardware (no BOOT button; the trackball IS
+GPIO0).
 Then §9's superset question, which is a product call and is what keeps lupa
 in `[dev,sim]` and `spr(Image)` on the Python raster; and the retirement of
 `LuaCartRun` itself, which stays deliberately — a fallback that fired for
