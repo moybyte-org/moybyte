@@ -16,24 +16,17 @@ import pytest
 from runtime import lua_host
 
 
-def test_the_gate_discriminates_and_names_why():
-    """A gate that never opens, and a gate that always opens, are both bugs."""
-    spec_only = "function _draw() cls(1) rect(0,0,4,4,7) spr(2, 8, 8) end"
-    assert lua_host._uses(spec_only, lua_host.SUPERSET) is None
+def test_a_superset_cart_is_not_routed_away_any_more():
+    """The correction: ONE runtime.
 
-    # Superset CALLS are caught...
-    assert lua_host._uses("function _draw() draw_layer(l, 0, 0) end",
-                          lua_host.SUPERSET) == "draw_layer"
-    assert lua_host._uses("if view ~= nil then view(128, 120) end",
-                          lua_host.SUPERSET) == "view"
-    # ...while the words that made the first version useless are not.
-    for benign in ("local t = {} table.insert(t, 1)",
-                   "local col = 7 rect(0,0,1,1,col)",
-                   "local network_ok = true",
-                   "-- draws the text of the image",
-                   "obj:image()",
-                   "moy.table(1)"):
-        assert lua_host._uses(benign, lua_host.SUPERSET) is None, benign
+    A cart calling make_layer used to be sent to lupa, which meant two Lua
+    engines coexisted, both implementing the spec verbs. The superset rides
+    moycore now as registered trampolines, so every cart qualifies and the
+    old source gate is gone."""
+    for src in ("function _draw() cls(1) spr(2, 8, 8) end",
+                "function _draw() draw_layer(l, 0, 0) end",
+                "if view ~= nil then view(128, 120) end"):
+        assert lua_host.moycore_supports(src) is True, src
 
 
 @pytest.mark.skipif(not lua_host._moycore_available(),
@@ -52,7 +45,7 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     run = ws.lua_runtime(ns, src)
     try:
         assert isinstance(run, lua_host.MoycoreHostRun), \
-            "a spec-only cart still went to lupa"
+            "the cart did not run on the boards' Lua"
         before = sum(1 for b in ws.canvas.buf if b)
         run.update(1 / 30.0)
         run.update(1 / 30.0)

@@ -132,6 +132,17 @@ def _lib():
             d.hl_pmem_image.argtypes = [_P, _P, _I]
             d.hl_pmem_image.restype = _I
             d.hl_pmem_load.argtypes = [_P, _P, _I]
+            # NB: argtypes are set EXPLICITLY here, not from _SIGS -- and a
+            # function left without them takes the default int conversion,
+            # which truncates a 64-bit pointer and hands the C a garbage
+            # host_lua*. That is a segfault, not a TypeError, so it presents as
+            # "the process died" with no Python traceback.
+            d.hl_get_global_len.argtypes = [_P, _C]
+            d.hl_get_global_len.restype = _I
+            d.hl_get_global_num.argtypes = [_P, _C, ctypes.POINTER(ctypes.c_double)]
+            d.hl_get_global_num.restype = _I
+            d.hl_register.argtypes = [_P, _C, _I]
+            d.hl_set_dispatch.argtypes = [_P, _P]
             d.hl_free.argtypes = [_P]
             _LIB[0] = d
     return _LIB[0] or None
@@ -185,6 +196,40 @@ class HostLuaRun:
             d.hl_set_map(self._r, ctypes.cast(self._map_ref, _P),
                          int(tilemap.w), int(tilemap.h))
 
+    # The dispatch callback's C signature; kept alive on the instance because
+    # ctypes will collect a CFUNCTYPE object the C side is still holding.
+    _DISPATCH = ctypes.CFUNCTYPE(_I, _I, _I, ctypes.POINTER(_I), _C,
+                                 ctypes.POINTER(_I))
+
+    def register(self, name, fn):
+        """Add a verb libmoy does not bind. After __init__, before load()."""
+        if not hasattr(self, "_ext"):
+            self._ext = []
+            self._cb = self._DISPATCH(self._dispatch)
+            self._d.hl_set_dispatch(self._r, ctypes.cast(self._cb, _P))
+        idx = len(self._ext)
+        self._ext.append(fn)
+        self._d.hl_register(self._r, name.encode(), idx)
+
+    def _dispatch(self, idx, argc, iargs, sarg, out):
+        """C -> Python. Returns 1 when it produced a value, 0 for nil."""
+        try:
+            fn = self._ext[idx]
+            args = []
+            if sarg:
+                args.append(sarg.decode("utf-8", "replace"))
+            args.extend(int(iargs[i]) for i in range(argc))
+            r = fn(*args)
+        except Exception:  # noqa: BLE001 -- a raising verb reads as nil, and
+            return 0       # the console's own error path reports it
+        if r is None or r is False:
+            return 0
+        try:
+            out[0] = int(r)
+        except (TypeError, ValueError):
+            return 0
+        return 1
+
     def load(self, src, name="@cart"):
         """Run the chunk and `_init`. Returns None, or the error text."""
         err = ctypes.create_string_buffer(256)
@@ -217,6 +262,19 @@ class HostLuaRun:
         img = (ctypes.c_int32 * 256)()
         dirty = self._d.hl_pmem_image(self._r, ctypes.cast(img, _P), 256)
         return bool(dirty), list(img)
+
+    def get_global(self, name):
+        """A cart global as a number, or None."""
+        v = ctypes.c_double(0.0)
+        if self._d.hl_get_global_num(self._r, name.encode(), ctypes.byref(v)):
+            f = v.value
+            return int(f) if f == int(f) else f
+        return None
+
+    def get_global_len(self, name):
+        """The length of a table global (Lua's #t), or None."""
+        n = self._d.hl_get_global_len(self._r, name.encode())
+        return None if n < 0 else n
 
     def close(self):
         if getattr(self, "_r", None):

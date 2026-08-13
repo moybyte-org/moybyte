@@ -98,6 +98,58 @@ static void h_quit(void *u)
 { (void)u; if (CUR && CUR->snap) CUR->snap[SNAP_QUIT] = 1; }
 static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL; }
 
+/* -- extension verbs -------------------------------------------------------
+ *
+ * The superset (make_layer/draw_layer/image/view/background) is not libmoy's,
+ * and is not reimplemented here either: it is registered on top of libmoy's
+ * table as a trampoline back into Python. Same correction as the device glue
+ * -- a cart needing a Python-backed verb needs one engine that can hold one,
+ * not a second engine.
+ *
+ * The contract is deliberately narrow, because it is exactly what those verbs
+ * take and return: up to four integer arguments plus at most one string
+ * (image("bg") is the only string-taking verb), and an integer result or
+ * nothing. Objects have never crossed this boundary -- layers and images
+ * travel as int handles, which is what the prelude's wrappers speak. */
+#define HL_MAX_IARGS 4
+
+typedef int (*hl_dispatch_fn)(int idx, int argc, const int *iargs,
+                              const char *sarg, int *out);
+
+static hl_dispatch_fn CUR_DISPATCH;
+
+static int hl_tramp(lua_State *L)
+{
+    int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
+    int n = lua_gettop(L);
+    int iargs[HL_MAX_IARGS];
+    const char *sarg = NULL;
+    int ic = 0;
+    for (int i = 1; i <= n; i++) {
+        if (lua_type(L, i) == LUA_TSTRING) {
+            if (sarg == NULL) sarg = lua_tostring(L, i);
+        } else if (ic < HL_MAX_IARGS) {
+            iargs[ic++] = (int)lua_tointeger(L, i);
+        }
+    }
+    if (CUR_DISPATCH == NULL) return 0;
+    int out = 0;
+    int has = CUR_DISPATCH(idx, ic, iargs, sarg, &out);
+    if (has) { lua_pushinteger(L, out); return 1; }
+    return 0;
+}
+
+void hl_set_dispatch(host_lua *r, hl_dispatch_fn fn) { (void)r; CUR_DISPATCH = fn; }
+
+/* Register `name` as a Lua global calling back with `idx`. After hl_new and
+ * BEFORE hl_load: a cart captures its globals into locals as it executes. */
+void hl_register(host_lua *r, const char *name, int idx)
+{
+    lua_pushinteger(r->L, idx);
+    lua_pushcclosure(r->L, hl_tramp, 1);
+    lua_setglobal(r->L, name);
+}
+
 host_lua *hl_new(uint8_t *pix, int w, int h, int32_t *snap,
                  int32_t *aq, int aq_cap)
 {
@@ -171,6 +223,30 @@ void hl_pmem_load(host_lua *r, const int32_t *in, int n)
 {
     if (n > 256) n = 256;
     memcpy(r->pmem, in, (size_t)n * sizeof(int32_t));
+}
+
+/* Read a cart global as a double; returns 0 when absent or not a number, 1
+ * otherwise. Numbers only: the parity suites compare counters and positions,
+ * and a richer marshalling here would be a second contract to keep. */
+int hl_get_global_num(host_lua *r, const char *name, double *out)
+{
+    lua_getglobal(r->L, name);
+    int ok = 0;
+    if (lua_type(r->L, -1) == LUA_TNUMBER) { *out = (double)lua_tonumber(r->L, -1); ok = 1; }
+    lua_pop(r->L, 1);
+    return ok;
+}
+
+/* The length of a table global (Lua's #t), or -1 when it is not a table. The
+ * parity suites assert on cart-world SIZES -- 120 petals, one player -- which
+ * is the cheapest true thing to ask about a table without marshalling it. */
+int hl_get_global_len(host_lua *r, const char *name)
+{
+    lua_getglobal(r->L, name);
+    int n = -1;
+    if (lua_type(r->L, -1) == LUA_TTABLE) n = (int)lua_rawlen(r->L, -1);
+    lua_pop(r->L, 1);
+    return n;
 }
 
 void hl_free(host_lua *r)

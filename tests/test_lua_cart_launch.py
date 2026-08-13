@@ -83,8 +83,10 @@ def test_lua_cart_runs_under_the_player(tmp_path):
         ws.frame(1 / 30)
     assert ws.player.cart_error is None
     # the cart world lives in the LUA state: 120 petals falling
-    petals = ws.player._lua._lua.globals().petals
-    assert len(petals) == 120
+    # Read through the run's own accessor, not lupa's internals: the host runs
+    # the boards' Lua now, and a test that reaches into one embedding's guts
+    # only ever tested that embedding.
+    assert ws.player._lua.get_global_len("petals") == 120
 
 
 def test_lua_cart_exit_closes_the_state(tmp_path):

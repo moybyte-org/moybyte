@@ -707,13 +707,16 @@ def run_desktop(fps_cap=60):
         # split is a source scan; see moycore_glue.supports().
         _moycore = None
         try:
-            from moycore_glue import make_moycore_runtime, supports as _mc_ok
+            from moycore_glue import make_moycore_runtime
             _moycore = make_moycore_runtime(ws)
         except ImportError:
-            _mc_ok = None
+            pass
 
-        def _make_lua(ns, src, _mc=_moycore, _ok=_mc_ok, _old=_legacy):
-            if _mc is not None and _ok is not None and _ok(src):
+        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
+            # EVERY lua cart goes to moycore; the superset verbs ride it as
+            # registered trampolines. _legacy survives only as the graceful
+            # floor for a build or a cart moycore cannot take.
+            if _mc is not None:
                 try:
                     run = _mc(ns, src)
                     print("Moybyte P4: cart on MOYCORE")

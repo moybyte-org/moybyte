@@ -185,6 +185,15 @@ class MoycoreHostRun:
         self._run = HostLuaRun(canvas.buf, canvas.w, canvas.h,
                                getattr(project, "sheet", None),
                                getattr(project, "tilemap", None))
+        # The superset, registered on top of libmoy's table before the cart
+        # runs -- see the device glue for why this is registration and not a
+        # second runtime.
+        reg = getattr(self._run, "register", None)
+        if reg is not None:
+            for name in SUPERSET:
+                fn = ns.get(name)
+                if callable(fn):
+                    reg(name, fn)
         err = self._run.load(src, "@cart")
         if err:
             self._run.close()
@@ -193,7 +202,11 @@ class MoycoreHostRun:
         self._ws = ws
         self.init = None                    # load() already ran it
         self.update = self._update
-        self.draw = None                    # tick drew; see _update
+        # The C loop runs _update and _draw back to back inside the tick, so
+        # there is nothing left to do here -- but the hook must EXIST. The
+        # Player calls update() then draw(), and a None draw would silently
+        # change the shape every other runtime presents.
+        self.draw = self._draw_noop
 
     def _update(self, dt):
         s = self._run.snap
@@ -234,7 +247,22 @@ class MoycoreHostRun:
         if err:
             raise RuntimeError(err)
 
+    def get_global(self, name):
+        """A cart global as a number, or None -- what the parity suites read."""
+        return self._run.get_global(name)
+
+    def get_global_len(self, name):
+        """The length of a table global (Lua's #t), or None."""
+        return self._run.get_global_len(name)
+
+    def _draw_noop(self):
+        return None
+
     def close(self):
+        # Tear the hooks down with the state, as lupa's run does: the Player
+        # and its tests read `update is None` as "this run is over".
+        self.update = None
+        self.draw = None
         self._run.close()
 
 
@@ -281,7 +309,14 @@ def _uses(src, names):
 
 
 def moycore_supports(src):
-    """True when this cart stays inside the spec verb table."""
-    if _moycore_available() is None:
-        return False
-    return _uses(src, SUPERSET) is None
+    """True when the boards' Lua can take this cart -- which is now every cart
+    the binding is present for.
+
+    It used to answer "does this cart avoid moybyte's superset", and the answer
+    routed superset carts to lupa. That left TWO Lua runtimes, both
+    implementing the spec verbs, which is the duplication this project exists
+    to end. The superset rides moycore as registered trampolines now, so the
+    only question left is whether the binding built at all.
+    """
+    del src                     # every cart qualifies; the arg stays for callers
+    return _moycore_available() is not None

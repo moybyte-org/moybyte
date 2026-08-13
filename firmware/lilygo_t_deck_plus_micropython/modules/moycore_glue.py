@@ -21,12 +21,19 @@ this class does the three things that cannot live in C --
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
 has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
 
-WHAT THIS DOES NOT DO, and how you can tell: moybyte's superset verbs
-(make_layer/draw_layer/image, scenes, tables, texts, view) are not in libmoy's
-table, so a cart calling one gets a Lua error rather than silently drawing
-nothing. `supports()` reports that up front by scanning the source, so the
-caller can fall back to `LuaCartRun` for those carts instead of failing at
-frame one. The cart census behind that decision is in the plan (6.0).
+EVERY Lua cart runs here. moybyte's superset verbs (make_layer/draw_layer/
+image, scenes, tables, texts, view) are not in libmoy's table, so they are
+REGISTERED on top of it as trampolines back to the same `make_api` closures
+they always had -- `moycore.register()` between `run_begin` and `load`, which
+is the window a cart needs because it captures its globals into locals as it
+executes.
+
+That is a correction, and worth stating plainly: the first version read "layers
+stay Python-side" as "carts using layers keep the old runtime", which left TWO
+Lua cart runtimes on the device, both implementing the spec verbs. A cart
+needing a Python-backed make_layer does not need a second engine -- it needs
+one engine that can hold a Python-backed verb. So `supports()` is gone with the
+split it justified.
 """
 
 from array import array
@@ -36,61 +43,21 @@ try:
 except ImportError:                      # a build without the module
     _moycore = None
 
-# The verbs libmoy's binding does NOT install. A cart using any of them runs on
-# the old path; see the module docstring.
+# The verbs libmoy's binding does NOT install, and which are therefore
+# registered on top of it from the cart's own api namespace. `Image` is
+# excluded for the same reason it always was: it is a constructor returning an
+# object, and objects do not cross this boundary -- layers and images travel as
+# int handles (the prelude's wrappers).
 SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
             "actors", "touching", "move_actor", "move_actor_to",
             "remove_actor", "draw_scene", "table", "text", "view",
             "spr_batch", "rect_batch", "spans", "mouse", "background",
-            "col", "on_net", "wifi", "net")
+            "col", "on_net", "fget", "fset", "mouse_wheel")
 
 # moy_button bit positions, SPEC.md 7.1 order. The snapshot packs them into one
 # int; this is the only place the two orders meet, so it is a table rather than
 # an assumption spread across the file.
 BUTTONS = ("left", "right", "up", "down", "a", "b", "run", "home")
-
-
-def _calls(src, name):
-    """True when `src` CALLS `name` -- the bare word followed by "(".
-
-    A hand scan, not a regex, for two reasons. MicroPython's `re` has no
-    lookbehind, so the obvious pattern raises on the device -- which it did:
-    the gate worked on the host, threw on the board, and every cart fell back
-    to the old runtime without a word. And a plain substring test (the version
-    before that) matched `table.insert`, a variable named `col` and the letters
-    "net" inside identifiers, disqualifying every cart in the tree. Both
-    failures look identical from outside: the new path exists and nothing takes
-    it.
-    """
-    n = len(name)
-    i = src.find(name)
-    while i >= 0:
-        before = src[i - 1] if i else " "
-        j = i + n
-        while j < len(src) and src[j] == " ":
-            j += 1
-        if (j < len(src) and src[j] == "("
-                and not (before.isalpha() or before.isdigit()
-                         or before in "_.:")):
-            return True
-        i = src.find(name, i + 1)
-    return False
-
-
-def supports(src):
-    """False when `src` uses a verb libmoy does not bind (see SUPERSET).
-
-    A source scan, not a runtime probe, because the alternative is discovering
-    it when the cart is already on screen. Erring toward the old path is right;
-    erring so far that the new path is unreachable is a silent no-op, which is
-    what both earlier versions of this did -- see _calls().
-    """
-    if _moycore is None:
-        return False
-    for name in SUPERSET:
-        if _calls(src, name):
-            return False
-    return True
 
 
 class MoycoreRun:
@@ -135,12 +102,26 @@ class MoycoreRun:
             wire = None
 
         cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
-        err = _moycore.run_begin(
+        _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg, src, "@cart")
+            self.snap, self.aq, self.pmem_img, cfg)
+        # The superset, on top of libmoy's table and BEFORE the cart runs.
+        # Anything callable in the namespace that libmoy did not already
+        # install: registering a name libmoy owns would shadow the C verb with
+        # a trampoline, which is the opposite of the point.
+        try:
+            for name in ns:
+                if name in SUPERSET and callable(ns[name]):
+                    _moycore.register(name, ns[name])
+        except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
+            _moycore.close()
+            raise
+        # "@cart" so a runtime error renders `cart:12:` -- what
+        # player._lua_cart_line parses for the crash-to-code panel (#24).
+        err = _moycore.load(src, "@cart")
         if err:
             try:
                 _moycore.close()
@@ -152,7 +133,10 @@ class MoycoreRun:
         # Player's `lua.init()` step has nothing left to do.
         self.init = None
         self.update = self._update
-        self.draw = None                 # tick() drew; see _update
+        # Present but empty: tick() already drew. A None draw would change the
+        # shape every other runtime presents, which the Player and its tests
+        # both read.
+        self.draw = self._draw_noop
 
     # -- the frame ----------------------------------------------------------
 
@@ -217,6 +201,9 @@ class MoycoreRun:
                     ns["volume"](a)
             except Exception:  # noqa: BLE001 -- one bad command is not the frame
                 pass
+
+    def _draw_noop(self):
+        return None
 
     def _update(self, dt):
         """The whole cart frame. `draw` is None because this already drew: the

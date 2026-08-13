@@ -20,6 +20,9 @@ nothing would pass a naive smoke test:
     defers it to (#66).
   * an error in cart code comes back as TEXT rather than as an exception or a
     dead VM -- the Player maps it to crash-to-code.
+  * a verb libmoy does not bind can be REGISTERED on top of its table, which
+    is what lets moybyte's superset (layers, view) ride one runtime instead of
+    needing a second.
 
 Needs the unix dual-usermod build with moycore in it; skipped otherwise, like
 every other pin in this suite:
@@ -69,8 +72,8 @@ function _draw()
 end
 """
 
-print("START", moycore.run_begin(fb, W, H, None, sheet, None, 0, 0,
-                                 snap, aq, pm, {"k": "v"}, SRC, "@cart"))
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"})
+print("START", moycore.load(SRC, "@cart"))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
     snap[moycore.SNAP_BTNP] = (1 << 0) if f == 1 else 0     # MOY_BTN_LEFT
@@ -86,10 +89,24 @@ print("PMEM", moycore.pmem_image(pm), pm[0])
 moycore.close()
 print("CLOSED", moycore.active())
 
+# The superset rides the same runtime: register a Python-backed verb, then a
+# cart that calls it.
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+seen = []
+moycore.register("make_layer", lambda w, h: (seen.append((w, h)), 7)[1])
+moycore.register("draw_layer", lambda h, x, y: seen.append((h, x, y)))
+print("EXT", moycore.load(
+    "function _init() L = make_layer(9, 5) end\n"
+    "function _update(dt) end\n"
+    "function _draw() cls(0) draw_layer(L, 1, 2) end\n", "@ext"))
+moycore.tick(0.03125)
+print("EXTCALLS", seen, moycore.get_global("L"))
+moycore.close()
+
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
-print("START2", moycore.run_begin(fb, W, H, None, None, None, 0, 0,
-                                  snap, aq, None, None, BAD, "@bad"))
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+print("START2", moycore.load(BAD, "@bad"))
 print("ERR", moycore.tick(0.03125))
 moycore.close()
 '''
@@ -133,6 +150,11 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # pmem: 41 from _init plus one per frame, and the dirty flag armed.
     assert by["PMEM"][1] == "True" and by["PMEM"][2] == "45", out
     assert by["CLOSED"][1] == "False", out
+
+    # The superset registers onto the SAME runtime and the cart calls it.
+    assert by["EXT"][1] == "None", out
+    assert "EXTCALLS [(9, 5), (7, 1, 2)] 7" in out, \
+        "a registered verb did not reach Python (or its return did not reach Lua): %s" % out
 
     # A cart error is text, not an exception, and the module recovers.
     assert by["START2"][1] == "None", out

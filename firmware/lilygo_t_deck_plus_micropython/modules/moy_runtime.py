@@ -459,13 +459,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # buffer exactly as before, because the buffer is the same one.
         _moycore = None
         try:
-            from moycore_glue import make_moycore_runtime, supports as _mc_ok
+            from moycore_glue import make_moycore_runtime
             _moycore = make_moycore_runtime(ws)
         except ImportError:
-            _mc_ok = None
+            pass
 
-        def _make_lua(ns, src, _mc=_moycore, _ok=_mc_ok, _old=_legacy):
-            if _mc is not None and _ok is not None and _ok(src):
+        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
+            # EVERY lua cart goes to moycore; the superset verbs ride it as
+            # registered trampolines. _legacy survives only as the graceful
+            # floor for a build or a cart moycore cannot take.
+            if _mc is not None:
                 try:
                     run = _mc(ns, src)
                     print("Moybyte: cart on MOYCORE")
@@ -475,7 +478,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             return _old(ns, src)
 
         lua_runtime = _make_lua
-        _diag_note("carts", "lua runtime ON")
+        # Say whether moycore is actually in this image. The S3's USB-CDC RX is
+        # dead under the desktop, so serial is READ-only here -- a status that
+        # is not printed cannot be asked for, and "the cart took the old path"
+        # and "moycore is missing" look identical without it.
+        _diag_note("carts", "lua runtime ON (moycore %s)"
+                   % ("available" if _moycore is not None else "ABSENT"))
     except ImportError:
         pass
 

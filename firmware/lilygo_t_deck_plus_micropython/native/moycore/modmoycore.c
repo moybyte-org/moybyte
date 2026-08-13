@@ -38,12 +38,23 @@
 //     already deferred it to (#66): RAM during play, persisted at boundaries.
 //
 // Verbs moybyte adds ON TOP of the spec -- layers/images, scenes, tables,
-// texts, view() -- are NOT bound here. The cart census that decided this is in
-// the plan: exactly one Lua cart in the tree uses layers (its Python twin, for
-// A/B), and its cost is one blit per frame rather than one per sprite, so
-// implementing a second console in C to serve it would trade the duplication
-// this module deletes for a smaller one. They stay Python-side; a cart that
-// uses them makes a second upcall per frame and the status says so.
+// texts, view() -- are not IMPLEMENTED here, and they do not need to be: they
+// are REGISTERED here, as Lua globals backed by the same Python closures they
+// always had (register() below).
+//
+// That distinction is the whole design, and getting it wrong cost a rewrite.
+// The first cut treated "layers stay Python-side" as "carts using layers keep
+// the old runtime", which quietly left TWO Lua cart runtimes on the device --
+// moycore for spec-only carts, the trampoline registry for the rest -- both
+// implementing the spec verbs. That is the parallel-implementation disease
+// this project exists to end, reintroduced by the project itself. A cart
+// needing a Python-backed make_layer does not need a second engine; it needs
+// one engine that can hold a Python-backed verb.
+//
+// So: EVERY Lua cart runs here. libmoy's table is installed first, then any
+// extra verbs the host registers land on top as trampolines. A cart that draws
+// through layers pays a couple of upcalls per frame for its blits, exactly as
+// it did before -- and nothing else in the frame crosses at all.
 
 #include <stdlib.h>
 #include <string.h>
@@ -52,6 +63,8 @@
 #include "py/objarray.h"
 #include "py/runtime.h"
 #include "py/mphal.h"
+#include "py/objlist.h"
+#include "py/objstr.h"
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -303,10 +316,162 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 #endif
 }
 
+// -- the extension trampoline ------------------------------------------------
+//
+// Deliberately the SHAPE moy_lua already proved rather than a new idea: a
+// Python callables list held against the gc, an upvalue carrying the index,
+// and an nlr-protected call so a raising Python verb becomes a Lua error
+// instead of unwinding through the VM. The marshalling is narrow on purpose --
+// numbers, strings, booleans, nil, and tuples fanned out to multiple returns
+// (touch() needs that) -- because objects have never crossed this boundary and
+// the handle glue is how layers travel.
+
+#define MOYCORE_MAX_ARGS 10
+
+static char g_pyerr[192];
+
+static bool call_py(mp_obj_t fn, size_t n, const mp_obj_t *args, mp_obj_t *ret)
+{
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        *ret = mp_call_function_n_kw(fn, n, 0, args);
+        nlr_pop();
+        return true;
+    }
+    strcpy(g_pyerr, "console api error");
+    nlr_buf_t nlr2;
+    if (nlr_push(&nlr2) == 0) {
+        vstr_t vstr;
+        mp_print_t print;
+        vstr_init_print(&vstr, 64, &print);
+        mp_obj_print_helper(&print, MP_OBJ_FROM_PTR(nlr.ret_val), PRINT_EXC);
+        size_t len = vstr.len < sizeof(g_pyerr) - 1 ? vstr.len : sizeof(g_pyerr) - 1;
+        memcpy(g_pyerr, vstr.buf, len);
+        g_pyerr[len] = 0;
+        nlr_pop();
+    }
+    return false;
+}
+
+static mp_obj_t lua_to_mp(lua_State *L, int i)
+{
+    switch (lua_type(L, i)) {
+    case LUA_TNIL:
+        return mp_const_none;
+    case LUA_TBOOLEAN:
+        return lua_toboolean(L, i) ? mp_const_true : mp_const_false;
+    case LUA_TNUMBER: {
+        if (lua_isinteger(L, i)) {
+            lua_Integer v = lua_tointeger(L, i);
+            if ((lua_Integer)(mp_int_t)v == v) {
+                return mp_obj_new_int((mp_int_t)v);   // #107: no heap box
+            }
+            return mp_obj_new_int_from_ll(v);
+        }
+        return mp_obj_new_float((mp_float_t)lua_tonumber(L, i));
+    }
+    case LUA_TSTRING: {
+        size_t len = 0;
+        const char *sp = lua_tolstring(L, i, &len);
+        return mp_obj_new_str(sp, len);
+    }
+    default:
+        luaL_error(L, "cannot pass a %s to the console api",
+                   lua_typename(L, lua_type(L, i)));
+        return mp_const_none;                          // unreachable
+    }
+}
+
+static int push_mp_to_lua(lua_State *L, mp_obj_t v)
+{
+    if (v == mp_const_none) {
+        return 0;
+    }
+    if (v == mp_const_true || v == mp_const_false) {
+        lua_pushboolean(L, v == mp_const_true);
+        return 1;
+    }
+    if (mp_obj_is_int(v)) {
+        lua_pushinteger(L, (lua_Integer)mp_obj_get_int(v));
+        return 1;
+    }
+    if (mp_obj_is_float(v)) {
+        lua_pushnumber(L, (lua_Number)mp_obj_get_float(v));
+        return 1;
+    }
+    if (mp_obj_is_str(v)) {
+        size_t len = 0;
+        const char *sp = mp_obj_str_get_data(v, &len);
+        lua_pushlstring(L, sp, len);
+        return 1;
+    }
+    if (mp_obj_is_type(v, &mp_type_tuple)) {           // touch()/mouse() fan out
+        size_t n = 0;
+        mp_obj_t *items = NULL;
+        mp_obj_tuple_get(v, &n, &items);
+        if (n > MOYCORE_MAX_ARGS) n = MOYCORE_MAX_ARGS;
+        for (size_t k = 0; k < n; k++) {
+            push_mp_to_lua(L, items[k]);
+        }
+        return (int)n;
+    }
+    return luaL_error(L, "console api returned an unsupported value "
+                         "(objects stay python-side; use the glue handles)");
+}
+
+static int l_tramp(lua_State *L)
+{
+    int n = lua_gettop(L);
+    if (n > MOYCORE_MAX_ARGS) {
+        return luaL_error(L, "console api: too many arguments");
+    }
+    int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
+    mp_obj_t args[MOYCORE_MAX_ARGS];
+    for (int i = 0; i < n; i++) {
+        args[i] = lua_to_mp(L, i + 1);
+    }
+    mp_obj_t fn = mp_obj_subscr(MP_STATE_VM(moycore_calls),
+                                MP_OBJ_NEW_SMALL_INT(idx), MP_OBJ_SENTINEL);
+    mp_obj_t ret = mp_const_none;
+    if (!call_py(fn, (size_t)n, args, &ret)) {
+        return luaL_error(L, "%s", g_pyerr);
+    }
+    return push_mp_to_lua(L, ret);
+}
+
+// register(name, callable) -- add a verb libmoy does not bind. Must be called
+// AFTER run_begin (the VM and the spec table exist by then) and BEFORE the
+// cart executes, because a cart captures its globals into locals at load.
+static mp_obj_t mod_register(mp_obj_t name_obj, mp_obj_t fn)
+{
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    mp_obj_t calls = MP_STATE_VM(moycore_calls);
+    if (calls == MP_OBJ_NULL) {
+        calls = mp_obj_new_list(0, NULL);
+        MP_STATE_VM(moycore_calls) = calls;
+    }
+    size_t n = 0;
+    mp_obj_t *items = NULL;
+    mp_obj_list_get(calls, &n, &items);
+    mp_obj_list_append(calls, fn);
+    lua_pushinteger(RUN.L, (lua_Integer)n);
+    lua_pushcclosure(RUN.L, l_tramp, 1);
+    lua_setglobal(RUN.L, mp_obj_str_get_str(name_obj));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
+
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
-//           snap, audio_q, pmem_bytes, cfg, source, chunkname)
+//           snap, audio_q, pmem_bytes, cfg)
+//
+// Builds the console and opens the VM with libmoy's verb table -- and STOPS.
+// The cart is loaded by load() afterwards, because between the two the host
+// registers its extension verbs, and a cart captures its globals into locals
+// as it executes. Doing both here left no window for that, which is how the
+// first version ended up needing a second runtime for carts using layers.
 //
 // Everything is a buffer the console already owns: the framebuffer the
 // compositor presents, the sheet and tilemap the project holds, the snapshot
@@ -314,7 +479,7 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 // here except the VM.
 static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 {
-    if (n_args != 14) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 14 args"));
+    if (n_args != 12) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 12 args"));
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
@@ -395,23 +560,32 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: sandbox failed"));
     }
 
-    size_t srclen = 0;
-    const char *src = mp_obj_str_get_data(a[12], &srclen);
-    const char *name = mp_obj_str_get_str(a[13]);
     RUN.open = 1;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 12, 12, mod_run_begin);
+
+// load(src, chunkname) -> None, or the error text. Runs the cart chunk and its
+// _init. Call AFTER any register()s.
+static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
+{
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    size_t srclen = 0;
+    const char *src = mp_obj_str_get_data(src_obj, &srclen);
+    const char *name = mp_obj_str_get_str(name_obj);
     if (luaL_loadbuffer(RUN.L, src, srclen, name) != LUA_OK
         || lua_pcall(RUN.L, 0, 0, 0) != LUA_OK) {
         const char *msg = lua_tostring(RUN.L, -1);
-        mp_obj_t err = mp_obj_new_str(msg ? msg : "load failed",
-                                      strlen(msg ? msg : "load failed"));
-        return err;                                // the caller reports it
+        return mp_obj_new_str(msg ? msg : "load failed",
+                              strlen(msg ? msg : "load failed"));
     }
     char err[192];
     if (moy_lua_init(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
-    return mp_const_none;                          // started clean
+    return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 14, 14, mod_run_begin);
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_load_obj, mod_load);
 
 // tick(dt) -> None on a clean frame, else the error text.
 //
@@ -471,9 +645,42 @@ static mp_obj_t mod_close(void)
     RUN.snap = NULL;
     RUN.aq = NULL;
     RUN.cfg = MP_OBJ_NULL;
+    MP_STATE_VM(moycore_calls) = MP_OBJ_NULL;   // un-root: the gc may reclaim
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_close_obj, mod_close);
+
+// get_global(name) -- read a cart global. The parity suites compare a Lua
+// cart's state against its Python twin's, which needs a way in; libmoy's
+// binding owns the VM but not the host's curiosity about it.
+static mp_obj_t mod_get_global(mp_obj_t name_obj)
+{
+    if (!RUN.open) return mp_const_none;
+    lua_getglobal(RUN.L, mp_obj_str_get_str(name_obj));
+    mp_obj_t out = mp_const_none;
+    switch (lua_type(RUN.L, -1)) {
+    case LUA_TBOOLEAN:
+        out = lua_toboolean(RUN.L, -1) ? mp_const_true : mp_const_false;
+        break;
+    case LUA_TNUMBER:
+        if (lua_isinteger(RUN.L, -1))
+            out = mp_obj_new_int((mp_int_t)lua_tointeger(RUN.L, -1));
+        else
+            out = mp_obj_new_float((mp_float_t)lua_tonumber(RUN.L, -1));
+        break;
+    case LUA_TSTRING: {
+        size_t len = 0;
+        const char *sp = lua_tolstring(RUN.L, -1, &len);
+        out = mp_obj_new_str(sp, len);
+        break;
+    }
+    default:
+        break;                       // tables/functions stay Lua-side
+    }
+    lua_pop(RUN.L, 1);
+    return out;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 
 static mp_obj_t mod_active(void) { return mp_obj_new_bool(RUN.open); }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
@@ -481,11 +688,14 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
+    { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
     // The snapshot layout, exported so the Python side cannot drift from it.
     { MP_ROM_QSTR(MP_QSTR_SNAP_LEN),    MP_ROM_INT(SNAP_LEN) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_BTN),    MP_ROM_INT(SNAP_BTN) },
@@ -520,3 +730,8 @@ const mp_obj_module_t moycore_user_cmodule = {
 };
 
 MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
+
+// The registered Python callables, held against the gc for the run's lifetime:
+// the Lua closures reference them only by INDEX, which the collector cannot
+// see. Cleared at close().
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
