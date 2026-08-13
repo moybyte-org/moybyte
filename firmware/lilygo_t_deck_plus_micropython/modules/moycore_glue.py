@@ -85,11 +85,33 @@ except ImportError:                      # a build without the module
 # GLOBAL `table`, clobbering Lua's library, and celeste's p8 shim needs
 # table.remove. It goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto
 # the library as a metatable __call, exactly as under moy_lua.
-SUPERSET = ("scene", "load_scene",
-            "actors", "touching", "move_actor", "move_actor_to",
-            "remove_actor", "draw_scene", "text",
-            "spr_batch", "rect_batch", "spans", "mouse",
-            "col", "on_net", "fget", "fset", "mouse_wheel")
+#
+# So this is a DENY list, not an allow list, and the inversion is deliberate:
+# what is stable and enumerable is the set of names libmoy OWNS (SPEC.md's verb
+# table, which is versioned and changes by spec revision). moybyte's own side is
+# open -- a new cart verb, a test harness's `trace`, an app-specific hook -- and
+# an allow list silently drops whatever nobody remembered to add to it. Erring
+# toward registering is also the safe direction: an extra global a cart never
+# calls costs one closure, where a missing one is a nil-call crash.
+LIBMOY_VERBS = frozenset((
+    # SPEC.md 6 draw + state
+    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
+    "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
+    "spr", "map", "mget", "mset",
+    # 7 input, 8 audio, 9 misc
+    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
+    "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
+    "touch", "key", "keyp", "textmode",
+    # core since the layers promotion
+    "view", "background",
+))
+
+# Names moybyte owns that still must NOT be registered, each for its own reason.
+NOT_REGISTRABLE = frozenset((
+    "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
+    "Image",                               # a constructor, likewise
+    "table",                               # goes in as moy_table_verb (#164)
+))
 
 # moy_button bit positions, SPEC.md 7.1 order. The snapshot packs them into one
 # int; this is the only place the two orders meet, so it is a table rather than
@@ -151,7 +173,8 @@ class MoycoreRun:
         # a trampoline, which is the opposite of the point.
         try:
             for name in ns:
-                if name in SUPERSET and callable(ns[name]):
+                if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
+                        and callable(ns[name])):
                     _moycore.register(name, ns[name])
             tv = ns.get("table") if hasattr(ns, "get") else None
             if callable(tv):

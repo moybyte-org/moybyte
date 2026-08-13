@@ -285,44 +285,13 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # blit_game upscales it, same as both boards.
     ws.make_game_canvas = lambda w, h: web_canvas.WebSystemCanvas(
         web_canvas.WebCompositor(int(w), int(h)))
-    # Lua carts (#67): the SAME moy_lua native module + moy_lua_glue the boards
-    # run, third architecture -- and since stage 4 the same FAST lane too. The
-    # old CommandCanvas had no `_batch_arr`, so LuaCartRun fell back to
-    # registering the Python spr closure and every sprite crossed into the
-    # recorder one call at a time; this canvas carries the batch array and the
-    # draw gates, so a Lua cart's sprites stamp in C and the whole libmoy-direct
-    # draw family (#189/#191) is live in the browser.
-    # Guarded like the boards: a build without the usermod still boots (a lua
-    # cart opens the runtime-missing panel).
-    #
-    # And since moycore reached the browser, the chooser is the boards' chooser
-    # verbatim: EVERY Lua cart runs its whole frame inside libmoy, with
-    # moybyte's superset verbs registered on top as trampolines, and the old
-    # per-verb registry surviving only as the floor for a build or a cart
-    # moycore cannot take. Wiring it here is what makes "one Lua runtime" true
-    # across all three tiers rather than two -- this was the last head still
-    # running a second engine against the same spec.
+    # Lua carts: moycore, the SAME native module and glue both boards run --
+    # third architecture, one engine. A build without the usermod still boots
+    # (a lua cart opens the Player's runtime-missing panel).
     lua_runtime = None
     try:
-        import moy_lua  # noqa: F401 -- availability probe only
-        from moy_lua_glue import make_lua_runtime
-        _legacy = make_lua_runtime(ws)
-        _moycore = None
-        try:
-            from moycore_glue import make_moycore_runtime
-            _moycore = make_moycore_runtime(ws)
-        except ImportError:
-            pass
-
-        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
-            if _mc is not None:
-                try:
-                    return _mc(ns, src)
-                except Exception as exc:  # noqa: BLE001 -- fall back, say why
-                    print("Moybyte: moycore declined ->", exc)
-            return _old(ns, src)
-
-        lua_runtime = _make_lua
+        from moycore_glue import make_moycore_runtime
+        lua_runtime = make_moycore_runtime(ws)
     except ImportError:
         pass
     # The board-agnostic service wiring, in the one canonical order (host + both

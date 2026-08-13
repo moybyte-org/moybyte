@@ -485,7 +485,7 @@ where pixel conformance sees nothing. That trade is accepted — the
 mechanical seams are per-frame-hot, the semantic surface changes rarely —
 but only under the staging rule: **each stage ships with deletions AND
 pins** (§6). The pin is BUILT (`tests/test_semantic_traces.py`, 2026-08-11):
-the unix-port dual-usermod build that `tests/test_lua_draw_direct.py` uses
+the unix-port dual-usermod build that `tests/test_moycore_loop.py` uses
 drives the REAL C against the REAL Python path — scripted input +
 state-verb traces replayed down both cart paths, hash- and log-compared,
 mutation-tested. Honesty about the order: stages 1a/1b crossed BEFORE it
@@ -512,7 +512,7 @@ lane (the maintainability case is THIS table, kept honest):
 |---|---|---|
 | upstream libmoy (moy-spec) | **the one engine** — where the core grows | spec conformance suite |
 | `moy_gfx` kernels (9 verbs = libmoy calls; compositor kernels own) | **absorbed into moycore's device port** | goldens + on-glass conformance (`p4_conformance`) |
-| `l_draw` direct-C hot shapes (#189) | **becomes moycore's native surface** | `test_lua_draw_direct` byte-parity |
+| `l_draw` direct-C hot shapes (#189) | **DELETED 2026-08-13** — libmoy's own binding draws these, so the hand-written direct family had no job left; its byte-parity suite went with it | the semantic traces (identical canvas hashes, twin carts) |
 | `__moy_map_masked` + flags (the p8 shim's C map walk, #66 M0) | **already moycore-shaped** — folds into the native surface | the 12 masked-map A/B scenes (byte-exact) |
 | prelude `rnd`/`flr` (pure Lua, M0) | **stays** — VM-local by design | flr: add to the trace vocabulary; rnd: unpinnable on purpose (random), the recorded exception |
 | trampoline → Python closure (per-verb) | **dead for Lua on all three tiers** (the wasm tier joined 2026-08-13, later than stage 4 planned — see the status header); what survives is the SUPERSET registry, which is the point, plus the object-verb handles that never were registry entries | the §4.2 semantic traces, verb by verb as each crosses |
@@ -538,7 +538,7 @@ moy_lua (a masked walk over the ctx's registered map cells appending through
 the SAME batch protocol l_spr stamps; the `__gff__` flags cross once as hex;
 the moy-spec shim probes it and keeps its Lua loop as the lupa/wasm
 fallback — deliberately NOT the console's `map()`, which keeps its Python
-lane), pinned byte-exact by 12 A/B scenes in `test_lua_draw_direct`; and
+lane), pinned byte-exact at the time by 12 A/B scenes (that suite is gone with the lane — see the ledger); and
 `rnd`/`flr` went into the glue prelude as pure Lua (`time()` stayed a
 trampoline for M0 — it reads live input state in MP's ticks domain and no
 cart calls it hot; it crosses at stage 2 with the loop, not before).

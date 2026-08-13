@@ -484,55 +484,59 @@ to whoever called it.
   build without the runtime opens the normal cart-error panel. Host runner:
   `runtime/lua_host.py` (lupa, Lua 5.4 pinned, stdlib sandboxed to
   base/math/string/table, lupa's `python` bridge removed; injected by
-  `build_workstation` when lupa imports — an optional dev dep). Device runtime:
-  the **`moy_lua` native module** (vendored Lua 5.4 under
-  `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/`, staged to BOTH
-  boards): one VM per run with the cart's whole Lua heap OUTSIDE the MP gc heap
-  (freed wholesale at close), the hot `spr` appending `_batch_arr` int16 quads
-  in C via the exact spr_gate protocol (token `0x7A11`; since moycore stage 1a,
-  2026-08-11, run breaks stamp the header AND flush IN C — the glue registers
-  the cart's indexed sheet via `DrawCtx.set_batch_src`, `moy_gfx_capi_flush_batch`
-  runs blit_batch's array-mode walk, and the `begin_batch`/`flush_batch` upcalls
-  survive only for foreign-token runs; a C-stamped run that reaches the PYTHON
-  flush (frame-end `reset_state`) resolves its sheet through
-  `DeviceCanvas._lua_batch_sheet`, and `moy_lua.batch_stats()` is the liveness
-  proof — P4-verified, celeste 374 C-flushes/12s with 0 upcall-falls and the
-  Python batch counters flat), **the whole solid draw family libmoy-DIRECT since #189
-  (2026-08-11)** — `bind_draw(ctx)` swaps pix/rect/rectb/line/circ/circb/tri/
-  trib/print for lua_CFunctions over moy_gfx's exported C API
-  (`moy_gfx_capi.h`, the sibling-staged `__has_include` probe — absent on the
-  wasm runner by layout), byte-parity pinned by `tests/test_lua_draw_direct.py`
-  on the unix build; **sspr/tline joined the direct family in stage 1b** (same
-  night — capi exports over the registered sheet + `set_map_src` tilemap,
-  documented arities direct, odd forms/unregistered sources fall back;
-  P4 conformance 10/10 with the provisional scenes at 3,388/15,000 direct
-  shape-draws and 0 fallbacks; the console's `map()` deliberately NOT
-  crossed — it owns the Fold-2 cache — but the **p8 SHIM's flag-masked map
-  went C the same night** (#66 M0, `87164a5`): `__moy_map_masked` +
-  `__moy_map_flags` in moy_lua walk the ctx-registered map cells and append
-  through the same batch protocol l_spr stamps (shared `batch_append_quad`),
-  the moy-spec shim probes them and keeps its Lua cell loop — 4.5ms of
-  celeste's S3 render, measured by difference — as the lupa/wasm fallback;
-  `rnd`/`flr` are pure-Lua prelude functions now, `time()` deliberately still
-  a trampoline. **The moycore stage-1 semantic PIN is
-  `tests/test_semantic_traces.py`** — twin Python/Lua carts fed scripted
-  input, replayed through the real glue on the unix build with both native
-  modules, hash- and log-compared; run it (and `test_lua_draw_direct.py`)
-  before crossing ANY further verb, and extend its trace vocabulary FIRST —
-  `docs/moycore_plan_2026-08.md` (tracker #192) is the direction doc); every OTHER verb still trampolines to the SAME Python
-  `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
-  needs no wrapper), and layers/images stay Python-side behind int-handle glue
-  (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
-  wiring). **That glue is `runtime/lua_ext.py` now** (staged like any shared
-  console module) and EVERY Lua runtime imports it — `moy_lua_glue`, `moycore_glue`
-  and the host's ctypes binding. It is one file because it was two: object-valued
-  verbs (`make_layer`/`draw_layer`/`image`) can never be registry entries — a
-  trampoline marshals scalars, and a Layer comes back nil — so a runtime without
-  the handles+prelude silently loses every cart that calls them. That is what
-  happened: until 2026-08-13 all five Lua seeds fell back off moycore on every
-  tier (device printed a decline, the host was silent, the gate test asked the
-  gate and the gate was right). **If you add a runtime, import that module; if
-  you add an object-valued verb, it goes there, not in a SUPERSET list.**
+  `build_workstation` when lupa imports — an optional dev dep). Device +
+  browser runtime: **`moycore`** (`native/moycore/`, staged to both boards and
+  the wasm head), which binds the vendored Lua 5.4 through **libmoy's own
+  binding** (`libmoy/moy_lua.c`, vendored from moy-spec): all 38 SPEC verbs are
+  C functions and `moycore.tick(dt)` runs `_update` and `_draw` back to back
+  without re-entering Python — ONE upcall per frame instead of hundreds. One VM
+  per run, the cart's whole Lua heap OUTSIDE the MP gc heap (freed wholesale at
+  close), input arriving as an `array("i")` snapshot refreshed before the tick,
+  audio leaving as a queue drained through the same `make_api` closures a
+  Python cart uses, pmem C-side with a dirty flag persisted at the #66
+  boundaries.
+  **There is exactly one Lua runtime and no chooser** (2026-08-13). The old one
+  — `LuaCartRun`, ~40 registered Python trampolines, the `bind_draw` direct-draw
+  family, the `spr_gate` batch protocol (token `0x7A11`), `moy_lua_glue.py` and
+  `modmoy_lua.c` entire — is DELETED; `native/moy_lua/` is now the vendored VM
+  and nothing else, and `import moy_lua` is meant to fail. Read the deletion
+  commit before proposing to bring any of it back: it was kept as a fallback
+  long after it should have been, and while it was there it silently ran every
+  layer cart.
+  What moycore registers ON TOP of libmoy's table is a **deny list, not an allow
+  list** (`moycore_glue.LIBMOY_VERBS` + `NOT_REGISTRABLE`, twinned in
+  `runtime/lua_host.py`): what is stable and enumerable is what libmoy OWNS, and
+  an allow list silently drops any moybyte verb nobody remembered to add — which
+  it did. Object-valued verbs (`make_layer`/`draw_layer`/`image`) are never
+  registry entries at all: a trampoline marshals scalars and a Layer comes back
+  nil, so they ride int handles plus a Lua prelude, and **that glue is
+  `runtime/lua_ext.py`** — ONE definition every runtime imports, including the
+  host's ctypes binding. It is one file because it was two: the copy the host
+  did not have is why layer carts crashed there and merely fell back on device.
+  **If you add a runtime, import that module; if you add an object-valued verb,
+  it goes there, not in a verb list.**
+  Three things moycore was missing when it shipped, each of which would have read
+  as "moycore made the cart slower" with nothing pointing at a cause, all fixed
+  2026-08-13 and pinned in `tests/test_moycore_loop.py`: the **p8 shim's masked
+  map walk** (`__moy_map_masked`/`__moy_map_flags`, #66 M0 — 4.5ms of celeste's
+  S3 render, and the shim nil-guards the names so losing them is silent), the
+  **SRAM-floor knob** (`run_desktop` drops the Lua allocator's internal headroom
+  48→24KB at boot and moycore had no such name, leaving a cart at ~97% PSRAM —
+  the measured-2× regime), and a **seeded `rnd`** (libmoy's xorshift32 treats
+  `con->rng == 0` as a fixed constant, so every run of every cart drew the same
+  sequence; the old prelude had shadowed `rnd` with Lua's per-state
+  `math.random`, which is why nobody saw it).
+  **The semantic PIN is `tests/test_semantic_traces.py`** — twin Python/Lua
+  carts fed scripted input, replayed through the real glue on the unix
+  dual-usermod build, hash- and log- and audio-order- and pmem-compared. It
+  drives moycore now, and the first time it did it caught a real divergence:
+  libmoy's `camera` returned nothing where moybyte's (and TIC-80's, and
+  PICO-8's) returns the PREVIOUS offset, so `local px, py = camera(x, y)` read
+  nil. Fixed upstream in both the binding and SPEC.md §6's table. Run it before
+  crossing anything further, and extend its trace vocabulary FIRST —
+  `docs/moycore_plan_2026-08.md` (tracker #192) is the direction doc.
+  Every non-spec verb still trampolines to the SAME Python `make_api` closures
+  (tuple returns fan out to Lua multivalues, so `touch()` needs no wrapper).
   Related trap in the same family, fixed upstream: `moy_console` holds its sheet
   and map by POINTER and a brand-new project has neither, so `spr(0,0,0)` in an
   empty cart used to segfault libmoy's binding — a board reset with no message. Related S3 lever, same date: the **#190 flush-bounce scale fold** —

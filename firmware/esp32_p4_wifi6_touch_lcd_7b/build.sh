@@ -170,7 +170,7 @@ cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
 #     the board it was written for, but board-agnostic -- its staging directory
 #     is a constructor argument (this board has no SD; run_desktop passes a path
 #     on the internal VFS) and its board identity is stamped into _ota_build.
-for f in device_util.py device_canvas.py device_api.py moy_lua_glue.py \
+for f in device_util.py device_canvas.py device_api.py \
          moycore_glue.py device_wifi.py \
          moy_ota.py; do
   cp "${TDECK_DIR}/modules/${f}" "${MODULES_DIR}/${f}"

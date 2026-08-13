@@ -197,10 +197,10 @@ class MoycoreHostRun:
         reg = getattr(self._run, "register", None)
         self._layers = self._images = None
         if reg is not None:
-            for name in SUPERSET:
-                fn = ns.get(name)
-                if callable(fn):
-                    reg(name, fn)
+            for name in ns:
+                if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
+                        and callable(ns[name])):
+                    reg(name, ns[name])
             tv = ns.get("table")
             if callable(tv):
                 reg("moy_table_verb", tv)
@@ -302,23 +302,31 @@ class MoycoreHostRun:
         self._run.close()
 
 
-# The verbs libmoy does not bind, registered on top of its table. Kept beside
-# the device list (moycore_glue.SUPERSET) rather than imported from it: this
-# file is host-only and that one is staged into firmware trees.
+# What to register on top of libmoy's table: everything in the cart namespace
+# that libmoy does not already own. A DENY list, kept in step with the device's
+# (moycore_glue.LIBMOY_VERBS) rather than imported from it -- this file is
+# host-only and that one is staged into firmware trees.
 #
-# What is deliberately NOT here, and each for a different reason:
-#   view/background -- SPEC.md 6 core since the layers promotion, so libmoy
-#     installs them; registering ours would shadow C with a trampoline and, for
-#     view, hide the declaration hl_get_view is meant to read back.
-#   make_layer/draw_layer/image -- object-valued; they ride install_handles +
-#     PRELUDE_HANDLES instead (see __init__).
-#   table -- registering that name sets the GLOBAL `table` and clobbers Lua's
-#     library (#164); it goes in as moy_table_verb and PRELUDE_TABLE grafts it.
-SUPERSET = ("scene", "load_scene",
-            "actors", "touching", "move_actor", "move_actor_to",
-            "remove_actor", "draw_scene", "text",
-            "spr_batch", "rect_batch", "spans", "mouse",
-            "col", "on_net", "wifi", "net")
+# It was an allow list until an extra verb went missing from it. What is stable
+# and enumerable is what libmoy OWNS (SPEC.md's table, versioned by spec
+# revision); moybyte's own side is open-ended, and an allow list silently drops
+# whatever nobody thought to add.
+LIBMOY_VERBS = frozenset((
+    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
+    "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
+    "spr", "map", "mget", "mset",
+    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
+    "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
+    "touch", "key", "keyp", "textmode",
+    "view", "background",
+))
+
+# Ours, and still not registrable -- each for its own reason.
+NOT_REGISTRABLE = frozenset((
+    "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
+    "Image",                               # a constructor, likewise
+    "table",                               # goes in as moy_table_verb (#164)
+))
 
 
 

@@ -209,7 +209,6 @@ done
 # import path expects it).
 cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
 # Modules staged from the T-Deck tree (the single source both boards use):
-#   moy_lua_glue -- the shared Lua cart-runtime glue (#67), canvas-agnostic
 #   moycore_glue  -- the host half of moycore: snapshot in, audio queue out,
 #     pmem at boundaries. Board-agnostic by construction (it talks to ws and to
 #     the module, never to a panel), which is why the browser needs no twin.
@@ -217,7 +216,7 @@ cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
 #     own canvas class over web_canvas.WebCompositor; see web_canvas.py for why
 #     that works and what stays board-only.
 #   device_util   -- ticks helpers device_canvas imports
-for f in moy_lua_glue.py moycore_glue.py device_canvas.py device_util.py; do
+for f in moycore_glue.py device_canvas.py device_util.py; do
   cp "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/modules/${f}" \
      "${STAGE_DIR}/modules/${f}"
 done

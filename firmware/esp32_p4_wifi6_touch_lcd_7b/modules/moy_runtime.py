@@ -692,44 +692,19 @@ def run_desktop(fps_cap=60):
     # like any game composite (a 128x120 view fills the 600px height at 5x).
     ws.make_game_canvas = lambda w, h: DeviceCanvas(
         _LayerComp(int(w), int(h), gfx))
-    # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
-    # only when the moy_lua native module is in this build; without it a
-    # "runtime": "lua" cart opens the Player's runtime-missing panel.
+    # ONE Lua runtime (#67 -> moycore). The cart's whole frame runs inside
+    # libmoy; moybyte's superset verbs ride it as registered trampolines and
+    # the object-valued ones (layers, images) on the shared int-handle glue.
+    # No chooser and no second engine: a build without the module opens the
+    # Player's runtime-missing panel.
     lua_runtime = None
     try:
-        import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
-        from device_api import make_lua_runtime
-        _legacy = make_lua_runtime(ws)
-        # moycore (stage 2): a cart that stays inside the SPEC verb table runs
-        # its WHOLE frame in C -- one upcall per frame instead of hundreds.
-        # A cart using moybyte's superset (layers/images, scenes, view) keeps
-        # the trampoline registry, which supplies the whole namespace. The
-        # split is a source scan; see moycore_glue.supports().
-        _moycore = None
-        try:
-            from moycore_glue import make_moycore_runtime
-            _moycore = make_moycore_runtime(ws)
-        except ImportError:
-            pass
-
-        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
-            # EVERY lua cart goes to moycore; the superset verbs ride it as
-            # registered trampolines. _legacy survives only as the graceful
-            # floor for a build or a cart moycore cannot take.
-            if _mc is not None:
-                try:
-                    run = _mc(ns, src)
-                    print("Moybyte P4: cart on MOYCORE")
-                    return run
-                except Exception as exc:  # noqa: BLE001 -- fall back, say why
-                    print("Moybyte P4: moycore declined ->", exc)
-            return _old(ns, src)
-
-        lua_runtime = _make_lua
-        print("Moybyte P4: lua runtime ON (moycore %s)"
-              % ("available" if _moycore is not None else "absent"))
+        from moycore_glue import make_moycore_runtime
+        lua_runtime = make_moycore_runtime(ws)
     except ImportError:
         pass
+    print("Moybyte P4: lua runtime %s"
+          % ("ON (moycore)" if lua_runtime is not None else "ABSENT"))
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards; this used to be a hand-kept "same order as
     # host build_workstation" copy). P4 notes: can_manage's carts_root default is

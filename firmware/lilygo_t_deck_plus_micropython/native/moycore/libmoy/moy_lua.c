@@ -132,12 +132,22 @@ static int l_print(lua_State *L)
     return 0;
 }
 
+/* Returns the PREVIOUS offset, which is what both consoles this verb is
+ * modelled on do (TIC-80 and PICO-8 alike) and what the save/restore idiom
+ * needs: `local px, py = camera(x, y)` ... `camera(px, py)`. The table in
+ * SPEC.md 6 documented the effect and not the return, so a cart written
+ * against a real console -- or ported from one -- read nil here and parked its
+ * camera at the origin. Two values rather than a table: no per-call garbage,
+ * the same reason touch() fans out. */
 static int l_camera(lua_State *L)
 {
     moy_canvas *c = con_of(L)->canvas;
+    int px = c->cam_x, py = c->cam_y;
     if (lua_gettop(L) == 0) moy_camera_reset(c);
     else moy_camera(c, argi(L, 1, 0), argi(L, 2, 0));
-    return 0;
+    lua_pushinteger(L, px);
+    lua_pushinteger(L, py);
+    return 2;
 }
 
 static int l_clip(lua_State *L)

@@ -2224,12 +2224,8 @@ def _load_moy_runtime():
     # import ...` -- device-only modules authored directly in modules/ (NOT staged
     # from runtime/). Register them from modules/ so the device module execs under
     # CPython (device_util first: device_wifi imports it).
-    # (moy_lua_glue is device-only too and device_api imports it -- since the #67
-    # glue moved out of device_api into its own module it must be registered
-    # BEFORE it, or every test through this loader dies on the import.)
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
-                  "device_audio", "device_canvas",
-                  "moy_lua_glue", "device_api"):
+                  "device_audio", "device_canvas", "device_api"):
         ds = importlib.util.spec_from_file_location(
             dname, ROOT / "modules" / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
@@ -3292,133 +3288,106 @@ def test_player_isolation_no_forbidden_names():
             "layouts (Stage 2 isolation, plan Section 2)" % forbidden)
 
 
-def test_moy_lua_phase1_wired():
-    """#67 Phase 1: the moy_lua native module exists, is staged by the build,
-    and moy_runtime injects the Lua cart runtime when it imports."""
-    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
-    assert "MP_REGISTER_MODULE(MP_QSTR_moy_lua" in mod
-    assert "MP_REGISTER_ROOT_POINTER" in mod          # gc-rooted canvas/sheet/callables
-    assert "begin_batch" in mod                       # the spr_gate run-break upcall
-    assert "luaopen_base" in mod and "luaopen_io" not in mod   # safe stdlib only
-    # vendored VM present (library sources, no standalone mains)
+def test_one_lua_runtime_wired():
+    """#67 -> moycore: ONE Lua runtime, and moy_lua is the VM under it.
+
+    The three tests this replaces pinned the OTHER runtime -- its module
+    registration, its trampoline registry, its direct-draw family, its batch
+    protocol. All of that is deleted: moycore binds the same vendored VM
+    through libmoy's own binding, so what is left to assert is the negative
+    (moy_lua exports no module) and that every tier reaches moycore with no
+    chooser in front of it.
+    """
     lua_dir = ROOT / "native" / "moy_lua" / "lua"
+    assert not (ROOT / "native" / "moy_lua" / "modmoy_lua.c").exists(), \
+        "the second Lua runtime is back"
+    # The VM survives, library sources only, no standalone mains.
     assert (lua_dir / "lvm.c").exists() and not (lua_dir / "lua.c").exists()
+    cmake = (ROOT / "native" / "moy_lua" / "micropython.cmake").read_text(
+        encoding="utf-8")
+    assert "MP_REGISTER_MODULE" not in cmake and "modmoy_lua" not in \
+        cmake.split("# ")[-1], "the VM target must export no module"
+
+    mod = (ROOT / "native" / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    assert "MP_REGISTER_MODULE(MP_QSTR_moycore" in mod
+    assert "MP_REGISTER_ROOT_POINTER" in mod       # gc-rooted callables list
+    assert "moy_lua_open" in mod and "moy_lua_update" in mod   # libmoy's loop
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "moy_lua/micropython.cmake" in build       # staged into ext_mod
-    # the glue is SHARED: moy_lua_glue.py (extracted from device_api.py for the
-    # #151 web runner -- the third moy_lua target), staged to the P4 tree and
-    # re-exported by device_api so each board's moy_runtime wiring is unchanged
-    glue_src = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
-    assert "class LuaCartRun" in glue_src
-    assert "_LUA_TOKEN" in glue_src                   # the Lua writer's batch token
+    assert "moy_lua/micropython.cmake" in build    # the VM is still staged
+    assert "moycore" in build
+
+    # No chooser on any tier: one import, one factory, an ImportError floor.
+    for src_path in ((ROOT / "modules" / "moy_runtime.py"),
+                     (Path("firmware/esp32_p4_wifi6_touch_lcd_7b") / "modules"
+                      / "moy_runtime.py"),
+                     (Path("firmware/web_runner") / "web_boot.py")):
+        src = src_path.read_text(encoding="utf-8")
+        assert "from moycore_glue import make_moycore_runtime" in src, src_path
+        assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
+        assert "except ImportError" in src, src_path
+    assert not (ROOT / "modules" / "moy_lua_glue.py").exists()
     api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
-    assert "from moy_lua_glue import" in api_src      # the boards' re-export seam
-    runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    # Both boards now CHOOSE per cart: moycore for a source inside the SPEC
-    # verb table, the trampoline registry (still constructed, below) for one
-    # using moybyte's superset.
-    assert "_legacy = make_lua_runtime(ws)" in runtime_src
-    assert "from moycore_glue import make_moycore_runtime" in runtime_src
-    assert "lua_runtime = _make_lua" in runtime_src
-    assert "except ImportError" in runtime_src
-    p4 = Path("firmware/esp32_p4_wifi6_touch_lcd_7b")
-    p4_runtime = (p4 / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    # The P4 has the same wiring (stage 2, verified on glass -- moycore.active()
-    # reads True under a running cart there). The S3's is stage 3: identical
-    # code, built and linked for Xtensa, but its on-GLASS verification is
-    # owner-gated -- that board has no BOOT button (the trackball is GPIO0, held
-    # while powering on) so it cannot be flashed unattended.
-    assert "_legacy = make_lua_runtime(ws)" in p4_runtime
-    assert "from moycore_glue import make_moycore_runtime" in p4_runtime
-    assert "lua_runtime = _make_lua" in p4_runtime
-    assert "moy_lua" in (p4 / "native" / "micropython.cmake").read_text(encoding="utf-8")
-    assert "moy_lua" in (p4 / "build.sh").read_text(encoding="utf-8")
-    assert "moy_lua_glue.py" in (p4 / "build.sh").read_text(encoding="utf-8")
+    assert "moy_lua_glue" not in api_src
 
 
-def test_moy_lua_hardware_learned_constraints_pinned():
-    """#67 Phase 4: the two S3-measured taxes (both halved the VM when lost) and
-    the safety contracts must survive any re-vendor / refactor of moy_lua.
-    Behavioral protocol parity lives in test_device_canvas_parity._LuaSpr; these
-    greps pin what no host test can execute."""
-    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
-    # 1) lua_Alloc is internal-SRAM-first with a headroom floor, PSRAM fallback
-    #    (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus).
+def test_moycore_hardware_learned_constraints_pinned():
+    """The S3-measured taxes and the safety contracts, now on moycore.
+
+    Each of these cost real hardware time to find, and none of them is
+    executable by a host test -- so they are greps, and they moved with the
+    code rather than being retired with it.
+    """
+    mod = (ROOT / "native" / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    lua_dir = ROOT / "native" / "moy_lua" / "lua"
+    # 1) lua_Alloc is internal-SRAM-first with a headroom floor and a PSRAM
+    #    fallback (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus),
+    #    and the floor is a RUNTIME knob -- run_desktop drops it 48 -> 24KB
+    #    once the boot-time internal claims are taken. moycore shipped without
+    #    the knob while run_desktop lowered the old runtime's, which left a
+    #    moycore cart at 48KB: ~97% PSRAM on this board, i.e. the 2x regime.
     assert "MALLOC_CAP_INTERNAL" in mod
     assert "48 * 1024" in mod                          # the WiFi/DMA headroom floor
     assert mod.index("MALLOC_CAP_INTERNAL") < mod.index("MALLOC_CAP_SPIRAM")
+    assert "MP_QSTR_set_sram_floor" in mod
+    runtime_src = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
+    assert 'for _mod in ("moy_lua", "moycore")' in runtime_src, \
+        "the boot-time floor drop must reach moycore by name"
     # 2) every vendored Lua source carries the in-source -O2 pragma (usermods
     #    compile at -Os, which halved the VM -- the #77 moy_gfx lesson; cmake
     #    source-file properties never reach the linked objects).
-    lua_dir = ROOT / "native" / "moy_lua" / "lua"
-    missing = [p.name for p in sorted(lua_dir.glob("*.c"))
-               if "#pragma GCC optimize" not in p.read_text(encoding="utf-8")]
+    missing = [q.name for q in sorted(lua_dir.glob("*.c"))
+               if "#pragma GCC optimize" not in q.read_text(encoding="utf-8")]
     assert missing == [], "vendored lua sources missing the -O2 pragma: %s" % missing
-    # 3) sandbox: the unsafe base entries are stripped after luaopen_base, and
-    #    only the safe stdlib subset is opened.
-    for fn in ("dofile", "loadfile", "load", "require"):
-        assert '"%s"' % fn in mod
-    for lib in ("luaopen_io", "luaopen_os", "luaopen_package", "luaopen_debug"):
-        assert lib not in mod
-    # 4) MP exceptions never longjmp through Lua frames: the trampoline's Python
-    #    call and l_spr's begin_batch upcall are both nlr-protected.
-    assert mod.count("nlr_push") >= 2
-    # 5) the token init masks to int16-positive so the header compare in l_spr
-    #    can never alias the Python writer (0) or a gate token.
-    assert "0x7FFF" in mod
-    # 6) the shared glue declines the C fast path on a canvas without a batch
-    #    array (the #151 web runner's recording CommandCanvas). The old
-    #    `_r`-sniff for the device TeeCanvas died with that class in the
-    #    2026-08 streaming sunset -- no surviving canvas both records and
-    #    forwards _batch_arr, so the plain getattr IS the guard now.
-    glue_src = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
-    assert 'arr = getattr(canvas, "_batch_arr", None)' in glue_src
-    assert "0x7A11" in glue_src                        # the documented Lua token
-    # 7) LUA_32BITS is ON (#67 owner decision 2026-07-18): both boards' FPUs are
+    # 3) MP exceptions never longjmp through Lua frames: the trampoline's call
+    #    into Python is nlr-protected.
+    assert "nlr_push" in mod
+    # 4) LUA_32BITS is ON (#67 owner decision 2026-07-18): both boards' FPUs are
     #    single-precision, so doubles are soft-float; 32-bit floats/ints use the
     #    HW FPU and halve TValue. Host lupa stays on doubles -- golden-frame
     #    parity is host-only for float-heavy carts.
     conf = (lua_dir / "luaconf.h").read_text(encoding="utf-8")
     assert "#define LUA_32BITS\t1" in conf
-    # 8) the upcall marshalling diet (#107): lua_to_mp small-ints integer args
-    #    and hands interned names back as qstrs. mp_obj_new_int_from_ll
-    #    unconditionally heap-allocates an mpz, and paying it per coordinate
-    #    was 11KB/frame of garbage in celeste -- a 160-200ms auto-collect
-    #    every ~6s of play (the #107 stutter metronome, P4 on glass
-    #    2026-07-27). from_ll survives only as the >31-bit fallback.
+    # 5) the upcall marshalling diet (#107): small-ints integer args and
+    #    interned names back as qstrs. mp_obj_new_int_from_ll unconditionally
+    #    heap-allocates an mpz, and paying it per coordinate was 11KB/frame of
+    #    garbage in celeste -- a 160-200ms auto-collect every ~6s of play (P4
+    #    on glass 2026-07-27). from_ll survives only as the >31-bit fallback.
     tramp = mod[mod.index("static mp_obj_t lua_to_mp"):]
-    tramp = tramp[:tramp.index("static bool push_scalar")]
     assert "mp_obj_new_int((mp_int_t)v)" in tramp
-    assert "qstr_find_strn" in tramp
-    assert "(lua_Integer)(mp_int_t)v == v" in tramp    # the fits-check guard
-
-
-def test_moy_lua_libmoy_direct_draw_wired():
-    """#189: the libmoy-direct draw verbs. Pixel parity is the unix-build A/B
-    (tests/test_lua_draw_direct.py); these greps pin the WIRING no host test
-    can execute -- the layout-probed include, the sibling staging on both
-    boards, and the wasm build's deliberate exclusion."""
-    mod = (ROOT / "native" / "moy_lua" / "modmoy_lua.c").read_text(encoding="utf-8")
-    # The direct path probes for moy_gfx BY LAYOUT (sibling dir), so the wasm
-    # runner -- which stages moy_lua without moy_gfx -- compiles it out.
-    assert '__has_include("../moy_gfx/moy_gfx_capi.h")' in mod
-    assert "MOY_LUA_DRAW_DIRECT" in mod
-    assert "bind_draw" in mod and "draw_stats" in mod
-    # The #63 order rule crosses into the direct lane: a queued sprite run
-    # lands before any direct primitive, via the protected flush upcall.
-    assert "moy_gfx_capi_batch_pending" in mod
-    assert "MP_QSTR_flush_batch" in mod
-    # The exported C API lives beside the gates it mirrors.
-    gfx = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    assert (ROOT / "native" / "moy_gfx" / "moy_gfx_capi.h").exists()
-    assert "moy_gfx_capi_ctx" in gfx and "moy_gfx_capi_pump_due" in gfx
-    # Both boards stage the two modules as SIBLINGS (what the include probe
-    # rides): the T-Deck into ext_mod/, the P4 into .staged/.
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "ext_mod/moy_gfx" in build and "ext_mod/moy_lua" in build
-    p4_build = (ROOT.parent / "esp32_p4_wifi6_touch_lcd_7b" / "build.sh"
-                ).read_text(encoding="utf-8")
-    assert 'moy_gfx" "${STAGED_NATIVE}' in p4_build.replace("\n", "")
+    assert "mp_obj_new_int_from_ll" in tramp           # the >31-bit fallback
+    # NB: #107's other half -- interning returned names as qstrs -- was the old
+    # runtime's and did not come across, deliberately. It paid for itself there
+    # because every verb was a trampoline; here the only string-taking verbs
+    # left are image/table/text, which carts call once and cache.
+    # 6) rnd is SEEDED per run. libmoy's xorshift32 treats con->rng == 0 as a
+    #    fixed constant, so leaving it zero gave every run of every cart the
+    #    same sequence -- invisible under the old runtime, whose prelude
+    #    shadowed rnd with Lua's per-state math.random.
+    assert "RUN.con.rng    = (uint32_t)mp_hal_ticks_us()" in mod
+    # 7) the p8 shim's masked map walk came across with the cart (#66 M0):
+    #    4.5ms of celeste's S3 render, and the shim nil-guards the names, so
+    #    losing them costs performance silently.
+    assert "__moy_map_masked" in mod and "__moy_map_flags" in mod
 
 
 def test_every_new_layer_pins_retained_frames_to_one():
@@ -3448,15 +3417,12 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     """#164: the #78 `table()` cart verb must ride Lua's `table` LIBRARY as a
     metatable __call, never replace it -- a ported cart's p8 shim needs
     table.remove (the shim generator lives in moy-spec now)."""
-    api = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
-    assert 'moy_lua.register("moy_table_verb", v)' in api
-    # The graft itself lives in the shared prelude now (runtime/lua_ext.py), so
-    # every runtime that imports it inherits the #164 fix instead of carrying
-    # its own copy of the line.
+    # The graft lives in the shared prelude (runtime/lua_ext.py), so every
+    # runtime that imports it inherits the #164 fix instead of carrying its own
+    # copy of the line.
     ext = (ROOT.parent.parent / "runtime" / "lua_ext.py").read_text(
         encoding="utf-8")
     assert "setmetatable(table, { __call" in ext
-    assert "PRELUDE_TABLE" in api
     host = (ROOT.parent.parent / "runtime" / "lua_host.py").read_text(
         encoding="utf-8")
     assert 'g["moy_table_verb"] = v' in host            # lupa's own lane
@@ -3465,5 +3431,6 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     assert 'reg("moy_table_verb", tv)' in host
     glue = (ROOT / "modules" / "moycore_glue.py").read_text(encoding="utf-8")
     assert '_moycore.register("moy_table_verb", tv)' in glue
-    assert "table" not in glue[glue.index("SUPERSET = ("):
-                               glue.index(")", glue.index("SUPERSET = ("))]
+    # ...and the register loop must SKIP the bare name, or it sets the global
+    # `table` and clobbers the library before the prelude can graft anything.
+    assert '"table",' in glue[glue.index("NOT_REGISTRABLE = frozenset(("):]

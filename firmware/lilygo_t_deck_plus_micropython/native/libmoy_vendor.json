@@ -10,10 +10,10 @@
     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_pixel.h": "6fbf26844e06f6f5ecd50e80b984e5216be6cb81475255de79f0caf957f77ee6",
     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/moy_sprite.c": "b4b89c7ab1614831cc00e9bf3a3d6d4439bd5ac952003376d9f675c6c2416105",
     "firmware/lilygo_t_deck_plus_micropython/native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "firmware/lilygo_t_deck_plus_micropython/native/moycore/libmoy/moy_lua.c": "6524b066cdb8062cf41418527c5ae50e29ad3fa275864475f2bde11fcee2f891"
+    "firmware/lilygo_t_deck_plus_micropython/native/moycore/libmoy/moy_lua.c": "465935eadf85592c6e876b5b6830b33161459d93f7f3b24710b47d0cececb530"
   },
   "upstream": {
-    "commit": "f4cb45df0eec82f8bed174e4bd894fc8ba8e29be",
+    "commit": "896c1974f2aaf8cb713e7bc6e67cdcedca44cc61",
     "date": "2026-08-13",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"

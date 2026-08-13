@@ -78,6 +78,15 @@
 #include "esp_heap_caps.h"
 #define MOYCORE_PSRAM 1
 #endif
+// Which REGION a pointer is in, for the allocator census. Its own probe and
+// its own INCLUDE: the S3 gets esp_ptr_internal transitively through
+// esp_heap_caps.h and the P4 does not, so a probe that tests for the header
+// without including it compiles on one board and fails on the other with an
+// implicit declaration. (It did.)
+#if __has_include("esp_memory_utils.h")
+#include "esp_memory_utils.h"
+#define MOYCORE_PTR_REGION 1
+#endif
 #endif
 
 // Internal-SRAM headroom the VM must leave for the WiFi/DMA pools. 48KB at
@@ -107,10 +116,10 @@ static uint32_t g_sram_denied;
 
 static inline int mc_region(const void *p)
 {
-#if __has_include("esp_memory_utils.h")
+#ifdef MOYCORE_PTR_REGION
     return esp_ptr_internal(p) ? 0 : 1;
 #else
-    (void)p;
+    (void)p;                     // no way to ask: report everything as PSRAM
     return 1;
 #endif
 }
@@ -686,7 +695,16 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     RUN.con.canvas = &RUN.canvas;
     RUN.con.sheet  = RUN.sheet.pix ? &RUN.sheet : NULL;
     RUN.con.map    = RUN.map.cells ? &RUN.map : NULL;
-    RUN.con.rng    = 0;
+    // SEED IT. libmoy's rnd is xorshift32 over con->rng and treats 0 as "use
+    // the golden-ratio constant" -- correct, deterministic, and therefore the
+    // SAME sequence on every run of every cart. moy_lua never showed this
+    // because its prelude shadowed rnd with Lua's math.random, which Lua 5.4
+    // seeds per state; moving a cart to moycore made sakura's petals fall the
+    // same way twice. SPEC.md 9 fixes rnd's range and explicitly not its
+    // sequence (no conformance scene may call it), so the seed is a host
+    // quality choice and this is the quality we want.
+    RUN.con.rng    = (uint32_t)mp_hal_ticks_us();
+    if (RUN.con.rng == 0) RUN.con.rng = 1;
     moy_host *hs = &RUN.con.host;
     hs->user = NULL;
     hs->btn = h_btn;  hs->btnp = h_btnp;  hs->players = h_players;

@@ -34,7 +34,7 @@ from device_input import TrackBall, Touch
 # the loop's hitch threshold + one-shot calib flag (mutated in place).
 from device_diag import (
     _diag_flush, _diag_perf_sample, _diag_hitch, _diag_drawbrk, _diag_draw2,
-    _diag_draw3, _diag_luadraw, _diag_loop, _diag_chromebrk, _diag_layerbrk,
+    _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk,
     _diag_homebrk, _diag_pump,
     _diag_luamem,
     _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
@@ -444,48 +444,28 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # #67 Phase 1: the Lua cart runtime -- wired only when the moy_lua native
     # module is in this build; without it a "runtime": "lua" cart opens the
     # Player's runtime-missing panel (the Phase 2 graceful floor).
+    # ONE Lua runtime. moycore runs the cart's whole frame inside libmoy --
+    # `_update` and `_draw` back to back in C, one upcall per frame instead of
+    # hundreds -- and moybyte's superset verbs ride it as registered
+    # trampolines, with the object-valued ones (layers, images) on the shared
+    # int-handle glue. There is no second engine and no chooser: a build
+    # without the module opens the Player's runtime-missing panel, which is the
+    # same graceful floor a build without a Lua VM always had.
+    #
+    # The S3's presentation is unchanged by this: moycore renders the cart
+    # canvas and the #190 flush-bounce fold synthesizes its bands from that
+    # buffer exactly as before, because the buffer is the same one.
     lua_runtime = None
     try:
-        import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
-        from device_api import make_lua_runtime
-        _legacy = make_lua_runtime(ws)
-        # moycore (stage 3): a cart inside the SPEC verb table runs its WHOLE
-        # frame in C -- one upcall per frame instead of hundreds. A cart using
-        # moybyte's superset keeps the trampoline registry. Same split, same
-        # source scan, as the P4 (stage 2, verified on glass first).
-        #
-        # The S3's presentation is unchanged by this: moycore renders the cart
-        # canvas and the #190 flush-bounce fold synthesizes its bands from that
-        # buffer exactly as before, because the buffer is the same one.
-        _moycore = None
-        try:
-            from moycore_glue import make_moycore_runtime
-            _moycore = make_moycore_runtime(ws)
-        except ImportError:
-            pass
-
-        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
-            # EVERY lua cart goes to moycore; the superset verbs ride it as
-            # registered trampolines. _legacy survives only as the graceful
-            # floor for a build or a cart moycore cannot take.
-            if _mc is not None:
-                try:
-                    run = _mc(ns, src)
-                    print("Moybyte: cart on MOYCORE")
-                    return run
-                except Exception as exc:  # noqa: BLE001 -- fall back, say why
-                    print("Moybyte: moycore declined ->", exc)
-            return _old(ns, src)
-
-        lua_runtime = _make_lua
-        # Say whether moycore is actually in this image. The S3's USB-CDC RX is
-        # dead under the desktop, so serial is READ-only here -- a status that
-        # is not printed cannot be asked for, and "the cart took the old path"
-        # and "moycore is missing" look identical without it.
-        _diag_note("carts", "lua runtime ON (moycore %s)"
-                   % ("available" if _moycore is not None else "ABSENT"))
+        from moycore_glue import make_moycore_runtime
+        lua_runtime = make_moycore_runtime(ws)
     except ImportError:
         pass
+    # Say whether moycore is actually in this image. The S3's USB-CDC RX is
+    # dead under the desktop, so serial is READ-only here -- a status that is
+    # not printed cannot be asked for.
+    _diag_note("carts", "lua runtime %s"
+               % ("ON (moycore)" if lua_runtime is not None else "ABSENT"))
 
     # Set by the SD-session trace below, cleared by the first frame that flushes after
     # one -- the "the panel survived the SD session" half of the #183 bracket.
@@ -884,7 +864,6 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_draw2(diag, ws)       # #63: split render into layer-copy vs sprite-batch us
             _diag_draw3(diag, ws)       # the REST of render (spr/circ/line) + the
                                         # measured dispatch residual
-            _diag_luadraw(diag, ws)     # #189: the libmoy-direct Lua verbs' counters
                                         # (dead RX: serial TX is this board's only proof)
             _diag_loop(diag, ws, _loop_acc)     # the average frame by loop stage --
             for _i in range(12):                # the steady-state HITCH never sees

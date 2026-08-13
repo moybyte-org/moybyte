@@ -529,14 +529,3 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
 
         ns["draw_scene"] = draw_scene
     return ns
-
-
-# --- #67 Phase 1: the device Lua cart runtime (native moy_lua bridge) ---------
-#
-# Shared by BOTH boards (this file stages to the P4 tree): each board's
-# The moy_lua cart-runtime glue (#67) lives in moy_lua_glue.py -- shared by both
-# boards AND the #151 web runner (which has no device canvas, hence no home for
-# it here). Re-exported so run_desktop's `device_api.make_lua_runtime` wiring
-# and the frozen-module contract are unchanged.
-from moy_lua_glue import (_LUA_PRELUDE, _LUA_TOKEN,  # noqa: F401
-                          LuaCartRun, make_lua_runtime)

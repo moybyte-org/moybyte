@@ -17,8 +17,9 @@ log, the audio command log and the final pmem image are compared 1:1.
 Both paths are the REAL device code, run under the unix-port MicroPython with
 the real native modules -- nothing is faked but the board:
 
-  side A (lua):    moy_lua VM + moy_lua_glue.LuaCartRun + the #189/#191 direct
-                   C lanes + the C batch protocol, over a real DeviceCanvas
+  side A (lua):    the vendored Lua VM under moycore -- libmoy's binding, the
+                   whole cart frame in C -- driven by the real moycore_glue,
+                   over a real DeviceCanvas
   side B (python): the same trace exec'd as a Python cart over the same
                    device_api.make_api closures and a second real DeviceCanvas
 
@@ -64,7 +65,7 @@ sys.path.insert(0, str(ROOT))
 
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
 UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix" / "build-moyluagfx" / "micropython")
+           / "ports" / "unix" / "build-moycore" / "micropython")
 
 DT = 0.03125          # 1/32: binary-exact, so LUA_32BITS floats carry it whole
 FRAMES = 24
@@ -281,10 +282,10 @@ sys.path.insert(0, @STAGE@)
 sys.path.insert(0, @MODULES@)
 import hashlib
 
-import moy_gfx, moy_lua                     # both usermods, or die loudly
+import moy_gfx, moycore                    # both usermods, or die loudly
 import device_api
 import device_canvas
-from moy_lua_glue import LuaCartRun
+from moycore_glue import MoycoreRun
 from editors_sheet import SpriteSheet, TileMap
 from widgets import Pmem
 
@@ -396,18 +397,21 @@ def run_side(kind):
         proj.sheet = sheet
         proj.tilemap = tilemap
         ws.project = proj
-        run = LuaCartRun(ws, ns, LUA_CART)
+        ws.input = inp
+        ws.pmem = pmem
+        run = MoycoreRun(ws, ns, LUA_CART)
         inp.set_frame(0)
-        if run.init:
-            run.init()
+        # _init ran inside run_begin (libmoy's moy_lua_init), so there is no
+        # separate init step -- run.init is None by construction.
         canvas.reset_state()
         for f in range(1, FRAMES + 1):
             inp.set_frame(f)
-            run.update(DT)
-            run.draw()
+            run.update(DT)                  # _update AND _draw, both in C
+            run.draw()                      # present, empty: shape parity
             canvas.reset_state()            # the Player's frame-end flush
             hashes.append(hashlib.sha256(canvas._buf).digest().hex())
-        stats = (moy_lua.draw_stats(), moy_lua.batch_stats())
+        stats = (moycore.active(), moycore.alloc_stats())
+        run.flush_pmem()
         run.close()
     else:
         exec(PY_CART, ns)
@@ -446,8 +450,9 @@ print("DRIVER_DONE")
 
 def test_semantic_trace_lua_vs_python(tmp_path):
     if not UNIX_MP.exists():
-        pytest.skip("no ports/unix MicroPython built with moy_gfx+moy_lua "
-                    "(see tests/test_lua_draw_direct.py's docstring)")
+        pytest.skip("no ports/unix MicroPython built with "
+                    "moy_gfx+moy_lua+moycore (see tests/test_moycore_loop.py's "
+                    "docstring for the two build commands)")
     stage = tmp_path / "stage"
     stage.mkdir()
     # moy_font is what build.sh stages from runtime/font.py -- the gate ctx
@@ -502,10 +507,11 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # The persistent image both carts leave behind.
     assert pmem_a == pmem_b, (pmem_a, pmem_b)
 
-    # And side A really exercised the C lanes (a silently-degraded run that
-    # fell back to trampolines everywhere would pass vacuously).
-    draw_stats, batch_stats = stats.split(") (")
-    direct_shapes = sum(int(x.strip("(), ")) for x in draw_stats.split(",")[:3])
-    assert direct_shapes > 0, stats
-    bs = [int(x.strip("(), ")) for x in batch_stats.split(",")]
-    assert bs[0] > 0 and bs[3] == 0, stats     # C stamps, zero upcall-falls
+    # And side A really ran under moycore. Vacuity is the failure mode this
+    # guards: a run that quietly fell back would agree with side B perfectly,
+    # for the wrong reason -- it would BE side B's closures. The old form
+    # checked the direct-draw and batch counters; those mechanisms are gone
+    # with the runtime that had them, so what is observable now is that the
+    # module held the VM for the whole trace.
+    assert stats.startswith("True "), \
+        "side A did not run under moycore: %s" % stats

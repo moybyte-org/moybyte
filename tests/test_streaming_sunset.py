@@ -18,6 +18,7 @@ rather than raster-shaped and which that same RPC speaks.
 """
 
 import os
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TDECK = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython")
@@ -111,8 +112,14 @@ def test_console_has_no_web_hook_surface():
 
 
 def test_lua_glue_has_no_tee_sniff():
+    # The glue that carried the sniff is gone entirely -- the second Lua
+    # runtime went with the deletion of LuaCartRun -- so the claim is now
+    # about the one that replaced it.
+    root = Path(__file__).resolve().parent.parent
+    assert not (root / "firmware" / "lilygo_t_deck_plus_micropython"
+                / "modules" / "moy_lua_glue.py").exists()
     src = _read("firmware", "lilygo_t_deck_plus_micropython",
-                "modules", "moy_lua_glue.py")
+                "modules", "moycore_glue.py")
     assert 'getattr(canvas, "_r"' not in src
     assert "is_tee" not in src
 
