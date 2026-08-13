@@ -1,22 +1,61 @@
 # Moycore (2026-08): one engine under two languages — the C play path, the Python shell, and the sunset ledger
 
-**Status: v12 (2026-08-13) — THE LADDER IS WALKED, ALL FIVE RUNGS, AND
-§9'S LAST OPEN QUESTION IS CLOSED** (layers/images stay Python-side, on a
+**Status: v13 (2026-08-13) — THE LADDER IS WALKED, AND THEN TWO THINGS
+v12 CLAIMED TURNED OUT TO BE HALF TRUE.** Both are fixed; both are recorded
+here rather than quietly amended, because the shape of the mistake is the
+lesson.
+
+*One: the browser was never on moycore.* v12 said "all five rungs" and meant
+the boards and the host. `web_runner/build.sh` staged `moy_lua` and not
+`moycore`, and `web_boot` injected the old factory, so the tier most likely to
+be somebody's first Moybyte ran a different engine from the two that had been
+audited. It stages the usermod now and wires the boards' chooser verbatim
+(+25KB wasm; sakura_lua/brick_siege_lua/ray_lua all report `moycore.active()`
+True, screenshot correctly, and the shipped page boots in real Chrome).
+
+*Two: on every tier, moycore was running almost no real cart.* Every Lua seed
+calls `make_layer` or `image()` in `_init`. Those are OBJECT-valued, and no
+runtime here marshals objects — so the registered trampoline handed the cart
+`nil`, `_init` raised, the load failed, and `_make_lua` fell back. On device
+that printed a decline nobody was reading; on the host it was silent. The
+per-cart evidence that had been collected was real and was collected on the
+one cart that happens not to do this. The fix is the glue moy_lua has always
+had, promoted to `runtime/lua_ext.py` and imported by all three: one prelude,
+one int-handle registry. moycore grew `exec()` for the chunk (the prelude must
+run after `register` and before the cart — the window `load()` closes), and the
+host binding's dispatch went 4 → 8 int args because `__layer_spr` takes seven
+and four silently dropped colorkey/scale/flip.
+
+*What both have in common:* the gate said yes and nothing asked the carts. The
+new pins do — every Lua SEED, launched through the real shell, must be a
+`MoycoreHostRun`, and a fallback is a successful start, so the assertion is on
+the run's TYPE. Chasing this also turned up a crash that predates all of it:
+`moy_console` holds sheet and map by pointer, a brand-new project has neither,
+and libmoy's binding dereferenced both — `function _draw() spr(0,0,0) end` in
+an empty cart segfaulted, which on a board is a reset with no message. Fixed
+upstream (degrade to empty, per SPEC.md §10's rule) and vendored.
+
+**§9'S LAST OPEN QUESTION IS CLOSED** (layers/images stay Python-side, on a
 cart census: one cart, one blit per frame, against the cost of a second
 console in C). Stage
 3's code landed too: the S3 stages moycore, injects the same per-cart
 chooser, and links `usermod_moycore` into a full flash image, with the
 allocator moved to internal-SRAM-first because the all-PSRAM version is a
-measured ~2x regression on that board. The ONLY thing outstanding in the
-entire plan is putting that image on the T-Deck and watching it, which
-needs a hand on the hardware: no BOOT button, the trackball IS GPIO0. moycore
+measured ~2x regression on that board. moycore
 runs a Lua cart's whole frame in C on P4 glass (`moycore.active()` True
 under a conformance cart, on-glass suite 22/22); `canvas.py`'s verbs
 delegate to libmoy with the conformance goldens unchanged; the host runs
-the boards' own Lua for spec-only carts. What remains of the whole plan
-is: the S3 swap at the bench, and §9's superset question — which is a
-product call, and which is what keeps lupa in `[dev,sim]` and
-`spr(Image)` on the Python raster.** v9 — the ladder RE-SEQUENCES on a finding
+the boards' own Lua for every cart.
+
+**What remains: BOTH BOARDS need flashing**, and neither has run the fixes
+above — the P4's last image predates them and the T-Deck has never had one,
+which needs a hand on the hardware (no BOOT button; the trackball IS GPIO0).
+Until then the per-cart evidence stands only for the host and the browser.
+Then §9's superset question, which is a product call and is what keeps lupa
+in `[dev,sim]` and `spr(Image)` on the Python raster; and the retirement of
+`LuaCartRun` itself, which stays deliberately — a fallback that fired for
+every real cart until 2026-08-13 has not earned deletion on two verified
+tiers out of three.** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
 the loop entry points, so those crossings are ABSORBED into stage 2 rather
 than written twice. v8: RUNG 1 IS DONE — stage 4 SHIPPED and the
@@ -432,7 +471,14 @@ cart and a Python cart get *mostly* the same behavior by construction —
 source of truth for `btnp` timing, `pmem` semantics, clip edge cases. Mostly:
 the trampoline cannot marshal tables or buffers, so `spr_batch`/`rect_batch`/
 `spans` and direct `Image` use are ALREADY unavailable to Lua carts — a
-standing semantic asymmetry the v4 draft understated. Post-moycore, Lua
+standing semantic asymmetry the v4 draft understated. It understated it in a
+second way too, found on 2026-08-13: it cannot marshal OBJECTS either, which
+is why `make_layer`/`draw_layer`/`image` have never been registry entries on
+any runtime. They ride int handles and a Lua prelude
+(`runtime/lua_ext.py`) — and the reason that file exists is that the glue
+was reachable from the two device runtimes and invisible to the host's, so
+the host registered the raw closures and every layer cart fell off moycore
+without saying so. Post-moycore, Lua
 carts get C implementations of input/state/audio verbs while Python carts
 keep the Python ones: parallel implementations at the *semantic* layer,
 where pixel conformance sees nothing. That trade is accepted — the
@@ -469,7 +515,9 @@ lane (the maintainability case is THIS table, kept honest):
 | `l_draw` direct-C hot shapes (#189) | **becomes moycore's native surface** | `test_lua_draw_direct` byte-parity |
 | `__moy_map_masked` + flags (the p8 shim's C map walk, #66 M0) | **already moycore-shaped** — folds into the native surface | the 12 masked-map A/B scenes (byte-exact) |
 | prelude `rnd`/`flr` (pure Lua, M0) | **stays** — VM-local by design | flr: add to the trace vocabulary; rnd: unpinnable on purpose (random), the recorded exception |
-| trampoline → Python closure (per-verb) | **dies for Lua on the boards** at stages 1–2 (the registry survives on the wasm tier until stage 4); note tables/buffers never crossed it, so `spr_batch`/`rect_batch`/`spans`/`Image` are already Python-cart-only | the §4.2 semantic traces, verb by verb as each crosses |
+| trampoline → Python closure (per-verb) | **dead for Lua on all three tiers** (the wasm tier joined 2026-08-13, later than stage 4 planned — see the status header); what survives is the SUPERSET registry, which is the point, plus the object-verb handles that never were registry entries | the §4.2 semantic traces, verb by verb as each crosses |
+| `LuaCartRun` (the whole old runtime) | **stays, deliberately** — it is the fallback, and until 2026-08-13 it was the fallback that ran every real cart; delete it after both boards are flashed and observed, not before | `test_host_moycore_route`'s seed sweep asserts nothing reaches it |
+| object-verb glue (`make_layer`/`draw_layer`/`image` handles + prelude) | **shared, one definition** (`runtime/lua_ext.py`) — it was never a trampoline candidate and the copy that did not exist is what broke the host | `test_moycore_loop`'s OBJ block runs the real file under MicroPython |
 | `l_draw_fallback` odd shapes (pix 2-arg read, nils) | **must move C-side or the registry survives** — stage-1 decision, not a footnote | NOT yet pinned: the 16-case matrix is hot-shapes-only and the dispatch assert proves the fallback *fires*, not that it *matches* — the stage-1 decision ships WITH a real odd-form A/B |
 | batch protocol (`begin_batch`/`flush_batch` upcalls, token, order rule) | **dead since 1a** — flush moved into C | pixel goldens + the trace harness's interleaved spr/primitive frames (the named "order-rule test" was only ever a source grep + a zero-pixel flush; the harness is the behavioral pin) |
 | camera/clip/pal Python-authoritative mirrors | **ownership flips** to moycore during a run; shell reads back at exit | state-verb traces — which do NOT yet observe the exit-time read-back (the trace resets state per frame); extend before this crossing |

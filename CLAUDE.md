@@ -239,8 +239,13 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   Numbers live in the plan; the operational summary is that the console half of a
   frame is now a fraction of a millisecond and the PRESENT (heap copy + RGBA
   expansion) is the expensive half, so optimize there first. Real headless Chrome
-  holds 60fps locked. A Lua cart's sprites take the native batch path here now,
-  which the old recording canvas could not do. `build.sh` also clones + patches the webassembly port (custom
+  holds 60fps locked. **The browser runs moycore too since 2026-08-13** — the
+  usermod is staged beside `moy_gfx`/`moy_lua`/`moy_audio` and `web_boot` wires
+  the boards' chooser verbatim, so a Lua cart's whole frame runs inside libmoy
+  on all three tiers rather than two. It needs no wasm variant of the module:
+  its `micropython.mk` compiles only `modmoycore.c` + libmoy's Lua binding and
+  reaches the raster and the VM through its staged SIBLINGS, and its board
+  allocator is `__has_include`-guarded down to `realloc`. `build.sh` also clones + patches the webassembly port (custom
   `moybyte` variant: GC_SPLIT_HEAP_AUTO, no asyncify) and compiles `moy_lua` +
   `moy_audio`; two of its Makefile patches are load-bearing and non-obvious.
   (1) `-Wno-unknown-pragmas` has to be appended to the PORT's CFLAGS, not to
@@ -518,7 +523,19 @@ to whoever called it.
   `make_api` closures (tuple returns fan out to Lua multivalues, so `touch()`
   needs no wrapper), and layers/images stay Python-side behind int-handle glue
   (`device_api.LuaCartRun`, shared by both boards' `moy_runtime.run_desktop`
-  wiring). Related S3 lever, same date: the **#190 flush-bounce scale fold** —
+  wiring). **That glue is `runtime/lua_ext.py` now** (staged like any shared
+  console module) and EVERY Lua runtime imports it — `moy_lua_glue`, `moycore_glue`
+  and the host's ctypes binding. It is one file because it was two: object-valued
+  verbs (`make_layer`/`draw_layer`/`image`) can never be registry entries — a
+  trampoline marshals scalars, and a Layer comes back nil — so a runtime without
+  the handles+prelude silently loses every cart that calls them. That is what
+  happened: until 2026-08-13 all five Lua seeds fell back off moycore on every
+  tier (device printed a decline, the host was silent, the gate test asked the
+  gate and the gate was right). **If you add a runtime, import that module; if
+  you add an object-valued verb, it goes there, not in a SUPERSET list.**
+  Related trap in the same family, fixed upstream: `moy_console` holds its sheet
+  and map by POINTER and a brand-new project has neither, so `spr(0,0,0)` in an
+  empty cart used to segfault libmoy's binding — a board reset with no message. Related S3 lever, same date: the **#190 flush-bounce scale fold** —
   a small-canvas game frame's composite is synthesized inside the bounce bands
   (root fb untouched on quiet frames; overlays disarm and pay the old cost;
   PUMP diag `fold=N` is the on-glass proof). Three hardware-learned constraints
