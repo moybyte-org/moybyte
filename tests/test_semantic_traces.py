@@ -283,6 +283,7 @@ sys.path.insert(0, @MODULES@)
 import hashlib
 
 import moy_gfx, moycore                    # both usermods, or die loudly
+from input import InputState               # the console's real input class
 import device_api
 import device_canvas
 from moycore_glue import MoycoreRun
@@ -307,35 +308,21 @@ def norm(v):
     return v
 
 
-class ScriptInput:
-    def __init__(self):
-        self._prev = ()
-        self._cur = ()
+class ScriptInput(InputState):
+    """The scripted feed, driving the REAL InputState rather than imitating it.
+
+    It used to reimplement held/pressed over its own two tuples, and when
+    moycore started asking for button_masks() that would have been a THIRD
+    copy of the bit order living in the very suite meant to catch drift.
+    Subclassing means the harness exercises production's edge detection, its
+    set handling and its mask derivation -- so if any of those change, this
+    trace moves with them instead of quietly agreeing with a stale twin."""
 
     def set_frame(self, f):
-        self._prev = self._cur
-        self._cur = HELD.get(f, ())
-
-    def held(self, name):
-        return name in self._cur
-
-    def pressed(self, name):
-        return name in self._cur and name not in self._prev
-
-    # moycore's snapshot asks for both masks in one call and has no fallback
-    # path -- see moycore_glue._refresh for why. A stub that drives it
-    # implements this, which also means the harness exercises the SAME code
-    # production does rather than a slow lane kept alive for tests.
-    _BIT = {n: 1 << i for i, n in enumerate(
-        ("left", "right", "up", "down", "a", "b", "run", "home"))}
-
-    def button_masks(self):
-        h = p = 0
-        for n in self._cur:
-            h |= self._BIT.get(n, 0)
-            if n not in self._prev:
-                p |= self._BIT.get(n, 0)
-        return h, p
+        want = HELD.get(f, ())
+        for n in self.BUTTONS:
+            self.set_held(n, n in want)
+        self.begin_frame()
 
 
 class RecAudio:
@@ -476,6 +463,9 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # lua_ext is the object-verb glue (prelude + int-handle registry) both Lua
     # runtimes import; build.sh stages it from runtime/ the same way.
     shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
+    # input.py so the scripted feed can BE the console's InputState rather than
+    # a second implementation of held/pressed/button_masks.
+    shutil.copy(ROOT / "runtime" / "input.py", stage / "input.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),
