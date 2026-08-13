@@ -62,8 +62,9 @@ exhausted — 23KB free, so the Lua heap runs 48.8KB SRAM against 110–265KB
 PSRAM even with the floor knob working correctly.
 Then §9's superset question, which is a product call and is what keeps lupa
 in `[dev,sim]` and `spr(Image)` on the Python raster; the §6.10
-batching rung (auto-batch belongs in libmoy, and taking it there is what lets
-`spr_batch`/`rect_batch`/`spans` LEAVE the cart API). (`LuaCartRun` is
+batching question (MEASURED the same night and mostly dead: the kernels are
+identical, so nothing goes upstream -- what is left is whether the per-call
+cost is small enough on the S3 to delete the batch verbs outright). (`LuaCartRun` is
 GONE as of 2026-08-13 — the deletion that rung had been holding, taken once
 moycore was actually equivalent; see §6.9's ledger.)** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
@@ -893,7 +894,59 @@ nothing took it. Whatever routes work to moycore, assert that something
 actually arrives -- per cart, by name. An untaken path is the failure mode
 these swaps are most likely to have.
 
-### 6.10 The batching rung — auto-batch belongs in libmoy, not in the verb table
+### 6.10 The batching rung — MEASURED AND MOSTLY DEAD (2026-08-13, same night)
+
+**The premise below was falsified within the hour, by the measurement it asked
+for.** Kept in full rather than rewritten, because the reasoning was sound and
+only the number was missing, and because the shape of the error is the useful
+part: every step was a plausible inference from real data, and the one control
+nobody had run turned a 2.9x into a 1.0x.
+
+`experiments/batch_kernel_ab/batch_ab.py` on the unix build, 200 sprites, same
+tiles, same positions, same canvas, both paths verified to draw an IDENTICAL
+12,656 pixels:
+
+    A  one moy_gfx.blit_batch of 200          10 us
+    B  200 x libmoy moy_spr, via moycore/Lua  29 us   B/A = 2.90x
+    C  the same Lua loop, sprites clipped     19 us   (VM loop + call overhead)
+    B - C  the kernel alone                   10 us   (B-C)/A = 1.00x
+
+**The kernels are identical.** `blit_batch` is not a better kernel than N
+`moy_spr` calls; 65% of the apparent gap was the Lua loop and its per-call
+overhead. Three consequences, each retiring something asserted above:
+
+  1. **libmoy needs no batch kernel.** `moy_spr_batch` upstream would buy
+     nothing. That half of this rung does not exist.
+  2. **"moycore broke auto-batching for Lua" is wrong in its consequence.** The
+     old `l_spr`'s value was avoiding a PYTHON call; moycore avoids Python by
+     construction. Restoring gate-feeding would save the kernel difference,
+     which is zero.
+  3. **The gate cannot help Lua at all.** It coalesces N calls into one kernel
+     pass; the cart still makes N calls. With no kernel difference there is
+     nothing left for it to save.
+
+**What survives, and it is the real question.** Batching still helps by
+amortising the CALLS, and the only thing that amortises N calls is one call --
+i.e. exactly the explicit verb the owner wants deleted. There is no free lunch
+here, so the decision is not "can auto-batching replace the verbs" but **"is the
+per-call cost small enough to delete them?"** On x86 the loop+call is ~95ns per
+sprite. On the S3 it will be several times that, and THAT is the number that
+decides: 200 sprites x 1us is 0.2ms and nobody cares; x 5us is 1ms and it
+matters. Measure it on glass (the Bench pair's new DRAW phase is the
+instrument) before touching the cart API.
+
+Two methodology notes, both of which cost a wrong answer first:
+
+  * The first run reported 4.83x with the two paths drawing 6,589 and 12,456
+    pixels -- `blit_batch` takes its stride in PIXELS (`self._stride = self.w`)
+    and it was handed bytes, so it wrapped every row and lost half its writes
+    off the end. **Compare pixel counts before comparing times**; a path that
+    draws less is not faster.
+  * Without control C the 2.9x reads as a kernel result and this rung gets
+    built. One clipped-sprite run is the whole difference between a measurement
+    and a reconstruction.
+
+### 6.10 (superseded premise, kept for the reasoning) — auto-batch belongs in libmoy, not in the verb table
 
 Opened 2026-08-13 from an owner question with a better answer than the one it
 was asked about. The chain: the Lua and Python cart APIs have diverged
