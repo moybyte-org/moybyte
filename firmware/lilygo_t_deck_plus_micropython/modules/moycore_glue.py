@@ -21,12 +21,19 @@ this class does the three things that cannot live in C --
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
 has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
 
-EVERY Lua cart runs here. moybyte's superset verbs (make_layer/draw_layer/
-image, scenes, tables, texts, view) are not in libmoy's table, so they are
-REGISTERED on top of it as trampolines back to the same `make_api` closures
-they always had -- `moycore.register()` between `run_begin` and `load`, which
-is the window a cart needs because it captures its globals into locals as it
-executes.
+EVERY Lua cart runs here. moybyte's superset verbs (scenes, tables, texts,
+flags, the batch forms) are not in libmoy's table, so they are REGISTERED on
+top of it as trampolines back to the same `make_api` closures they always had
+-- `moycore.register()` between `run_begin` and `load`, which is the window a
+cart needs because it captures its globals into locals as it executes.
+
+The OBJECT-valued ones (make_layer/draw_layer/image) cannot be registered at
+all: a trampoline marshals scalars and tuples, so a Layer comes back as
+"unsupported value". They take the same route they take under moy_lua --
+int-handle functions on this side, Lua wrappers on that side -- and the route
+is literally the same code (`moy_lua_glue.install_handles` +
+`PRELUDE_HANDLES`, run through `moycore.exec` before the cart loads), because
+two copies of a wrapper is how the two runtimes would start drifting.
 
 That is a correction, and worth stating plainly: the first version read "layers
 stay Python-side" as "carts using layers keep the old runtime", which left TWO
@@ -37,6 +44,12 @@ split it justified.
 """
 
 from array import array
+
+try:
+    from lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+except ImportError:                      # host tests importing the device module
+    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES,
+                                 install_handles)
 
 try:
     import moycore as _moycore
@@ -60,15 +73,21 @@ except ImportError:                      # a build without the module
 # view costs nothing now (libmoy records it; read it back with moycore.view()),
 # and background is a clear libmoy does itself.
 #
-# make_layer/draw_layer ARE still registered even though libmoy has them, and
-# deliberately: moybyte's layers accept an Image (`lay:spr(image("bg"), ...)`),
-# which is the moybyte.images vendor extension and not something libmoy's
-# sheet-tile spr can take. Registering after moy_lua_open shadows libmoy's with
-# the richer pair. A cart using only spec verbs on a layer would be equally
-# happy with libmoy's; the shadow costs it one upcall per layer draw.
-SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
+# NOT make_layer/draw_layer/image either, though moybyte's DO shadow libmoy's:
+# those three are object-valued, and objects do not cross this boundary any
+# more than they cross moy_lua's. They ride the SHARED prelude instead --
+# `install_handles` puts int-handle functions here and PRELUDE_HANDLES defines
+# the Lua-side make_layer/draw_layer/image on top of them. That is why moybyte
+# layers can take an Image (`lay:spr(image("bg"), ...)`, the moybyte.images
+# vendor extension) where libmoy's sheet-tile pair cannot.
+#
+# NOT `table` either, for the #164 reason: registering that name would set the
+# GLOBAL `table`, clobbering Lua's library, and celeste's p8 shim needs
+# table.remove. It goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto
+# the library as a metatable __call, exactly as under moy_lua.
+SUPERSET = ("scene", "load_scene",
             "actors", "touching", "move_actor", "move_actor_to",
-            "remove_actor", "draw_scene", "table", "text",
+            "remove_actor", "draw_scene", "text",
             "spr_batch", "rect_batch", "spans", "mouse",
             "col", "on_net", "fget", "fset", "mouse_wheel")
 
@@ -134,6 +153,18 @@ class MoycoreRun:
             for name in ns:
                 if name in SUPERSET and callable(ns[name]):
                     _moycore.register(name, ns[name])
+            tv = ns.get("table") if hasattr(ns, "get") else None
+            if callable(tv):
+                _moycore.register("moy_table_verb", tv)
+            # The object-valued verbs and their Lua wrappers -- the same two
+            # halves moy_lua uses, from the same source. Without this a cart
+            # calling make_layer() gets "unsupported value" back from the
+            # trampoline and the whole run falls to the old runtime, which is
+            # what sakura_lua/brick_siege/ray did before this landed.
+            self._layers, self._images = install_handles(ns, _moycore.register)
+            err = _moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            if err:
+                raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
             raise
@@ -293,6 +324,10 @@ class MoycoreRun:
         try:
             self.flush_pmem()
         finally:
+            # Drop the handle registries: they are what PIN the run's layers
+            # and images, and a layer is a full-canvas allocation.
+            self._layers = None
+            self._images = None
             if _moycore is not None:
                 _moycore.close()
 

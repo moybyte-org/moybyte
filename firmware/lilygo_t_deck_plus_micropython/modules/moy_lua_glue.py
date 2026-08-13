@@ -23,63 +23,19 @@ _LUA_TOKEN = 0x7A11   # the Lua writer's batch token: never 0 (the Python
                       # writer) and outside the spr_gate sequence (1..0x4000),
                       # so interleaved runs always break via begin_batch.
 
-_LUA_PRELUDE = """
-do
-  -- #164: `table` stays the Lua LIBRARY (celeste's p8 shim needs
-  -- table.remove); the #78 cart verb rides it as a metatable __call.
-  if moy_table_verb ~= nil then
-    local tv = moy_table_verb
-    setmetatable(table, { __call = function(_, name) return tv(name) end })
-    moy_table_verb = nil
-  end
-  local layer_new, layer_spr_img = __layer_new, __layer_spr_img
-  local layer_spr, layer_cls = __layer_spr, __layer_cls
-  local draw_layer_h, image_h = __draw_layer, __image_handle
-  __layer_new, __layer_spr_img, __layer_spr = nil, nil, nil
-  __layer_cls, __draw_layer, __image_handle = nil, nil, nil
-  function make_layer(w, h)
-    local l = { __id = layer_new(w, h), W = w, H = h }
-    l.spr = function(self, img, x, y, ck, sc, fl)
-      if type(img) == "table" then
-        layer_spr_img(self.__id, img.__img, x or 0, y or 0)
-      else
-        layer_spr(self.__id, img, x or 0, y or 0, ck or -1, sc or 1, fl or 0)
-      end
-    end
-    l.cls = function(self, c) layer_cls(self.__id, c or 0) end
-    return l
-  end
-  function draw_layer(l, cx, cy)
-    draw_layer_h(l.__id, cx or 0, cy or 0)
-  end
-  local cache = {}
-  function image(name)
-    local t = cache[name]
-    if t ~= nil then
-      if t == false then return nil end
-      return t
-    end
-    local h = image_h(name)
-    if h < 0 then
-      cache[name] = false
-      return nil
-    end
-    t = { __img = h }
-    cache[name] = t
-    return t
-  end
-  -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
-  -- upcall for what is one arithmetic op; shadowing them here (after the
-  -- register loop, before the cart) makes them VM-local. rnd's PRNG changes
-  -- from Python's to Lua's -- rnd is random, no cart may depend on the
-  -- stream. time() deliberately STAYS a trampoline: it reads live input
-  -- state (cart_start_ms) in MicroPython's 30-bit ticks domain, and no cart
-  -- calls it hot enough to pay for a second clock.
-  local mrandom, mfloor = math.random, math.floor
-  function rnd(n) return mrandom() * (n or 1.0) end
-  function flr(x) return mfloor(x) end
-end
-"""
+# The prelude and the int-handle registry live in runtime/lua_ext.py -- ONE
+# definition for every Lua runtime in the tree (this one, moycore on both
+# boards and the browser, and the host's ctypes binding). Imported rather than
+# copied for the reason recorded there: the copy that did not exist is why the
+# host crashed on layer carts while the device merely declined them.
+try:
+    from lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, PRELUDE_FASTMATH,
+                         install_handles)
+except ImportError:                      # host tests importing the device module
+    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES,
+                                 PRELUDE_FASTMATH, install_handles)
+
+_LUA_PRELUDE = PRELUDE_TABLE + PRELUDE_HANDLES + PRELUDE_FASTMATH
 
 
 class LuaCartRun:
@@ -186,48 +142,7 @@ class LuaCartRun:
             raise
 
     def _install_handles(self, ns):
-        # The object-valued API entries (layers, paint images) stay in these
-        # Python-side registries; _LUA_PRELUDE's wrappers speak the int handles.
-        # The registries also PIN the objects for the run's lifetime.
-        layers = []
-        images = []
-        make_layer = ns.get("make_layer")
-        draw_layer = ns.get("draw_layer")
-        image = ns.get("image")
-        reg = self._moy_lua.register
-
-        def _layer_new(w, h):
-            layers.append(make_layer(int(w), int(h)))
-            return len(layers) - 1
-
-        def _layer_spr_img(lid, ih, x, y):
-            layers[int(lid)].spr(images[int(ih)], int(x), int(y))
-
-        def _layer_spr(lid, tile, x, y, ck, sc, fl):
-            layers[int(lid)].spr(int(tile), int(x), int(y), int(ck),
-                                 int(sc), int(fl))
-
-        def _layer_cls(lid, c):
-            layers[int(lid)].cls(int(c))
-
-        def _draw_layer(lid, cx, cy):
-            draw_layer(layers[int(lid)], cx, cy)
-
-        def _image_handle(name):
-            img = image(name) if image is not None else None
-            if img is None:
-                return -1
-            images.append(img)
-            return len(images) - 1
-
-        reg("__layer_new", _layer_new)
-        reg("__layer_spr_img", _layer_spr_img)
-        reg("__layer_spr", _layer_spr)
-        reg("__layer_cls", _layer_cls)
-        reg("__draw_layer", _draw_layer)
-        reg("__image_handle", _image_handle)
-        self._layers = layers
-        self._images = images
+        self._layers, self._images = install_handles(ns, self._moy_lua.register)
 
     def close(self):
         self.init = None

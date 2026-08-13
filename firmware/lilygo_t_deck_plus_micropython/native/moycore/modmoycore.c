@@ -565,12 +565,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 12, 12, mod_run_begin);
 
-// load(src, chunkname) -> None, or the error text. Runs the cart chunk and its
-// _init. Call AFTER any register()s.
-static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
+// Run one chunk. Shared by exec() and load(); the only difference between them
+// is whether _init follows.
+static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 {
-    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
-                                MP_ERROR_TEXT("moycore: no run"));
     size_t srclen = 0;
     const char *src = mp_obj_str_get_data(src_obj, &srclen);
     const char *name = mp_obj_str_get_str(name_obj);
@@ -580,6 +578,38 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
         return mp_obj_new_str(msg ? msg : "load failed",
                               strlen(msg ? msg : "load failed"));
     }
+    return mp_const_none;
+}
+
+// exec(src, chunkname) -> None, or the error text. A chunk that is NOT the
+// cart: the glue PRELUDE, whose Lua-side wrappers are how object-valued verbs
+// reach a cart at all.
+//
+// They cannot be register()ed, and that is a property of the boundary rather
+// than a gap here: a registered verb marshals numbers, strings, booleans, nil
+// and tuples, so `make_layer` -- which returns a Layer OBJECT -- comes back as
+// "unsupported value" and the whole cart falls back to the trampoline runtime.
+// moy_lua has always solved this the same way (int-handle registries plus Lua
+// wrappers that hide them), so moycore runs the SAME prelude rather than
+// growing an object marshaller. Hence a chunk verb: the prelude has to execute
+// after register() and before the cart, which is exactly the window load()
+// closes.
+static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
+{
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    return run_chunk(src_obj, name_obj);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_exec_obj, mod_exec);
+
+// load(src, chunkname) -> None, or the error text. Runs the cart chunk and its
+// _init. Call AFTER any register()s and any exec()s.
+static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
+{
+    if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
+                                MP_ERROR_TEXT("moycore: no run"));
+    mp_obj_t err_obj = run_chunk(src_obj, name_obj);
+    if (err_obj != mp_const_none) return err_obj;
     char err[192];
     if (moy_lua_init(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
@@ -707,6 +737,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
+    { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },

@@ -31,6 +31,69 @@ def test_a_superset_cart_is_not_routed_away_any_more():
 
 @pytest.mark.skipif(not lua_host._moycore_available(),
                     reason="no C compiler for the host lua binding")
+def test_every_lua_seed_cart_really_runs_on_moycore(tmp_path):
+    """The net the route test above did not have: run the SHIPPED carts.
+
+    `moycore_supports` answering True is not the same as the cart starting, and
+    for a while it was not even close. Every Lua seed calls make_layer or
+    image() somewhere in `_init`; those are object-valued, the trampoline
+    cannot marshal a Layer, so the load raised and `_make_lua` handed the cart
+    to lupa. The route test passed the whole time -- it asks the gate, and the
+    gate was right. This asks the carts.
+
+    Deliberately checks the run's TYPE rather than that it merely started: a
+    fallback is a successful start.
+    """
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    titles = [c["title"] for c in ws.launcher.items
+              if c.get("runtime") == "lua"]
+    assert len(titles) >= 3, "no lua seeds to check -- the roster moved"
+    for title in titles:
+        ws.launcher.sel = next(i for i, c in enumerate(ws.launcher.items)
+                               if c["title"] == title)
+        ws.open()                       # the real launch path, so the project
+        assert ws.player.cart_error is None, title   # (and its sheet) is live
+        assert type(ws.player._lua).__name__ == "MoycoreHostRun", \
+            "%s fell back off moycore" % title
+        for _ in range(5):
+            ws.frame(1 / 60)
+            assert ws.player.cart_error is None, title
+        ws._exit_to_caller()
+
+
+@pytest.mark.skipif(not lua_host._moycore_available(),
+                    reason="no C compiler for the host lua binding")
+def test_a_cart_with_no_sheet_or_map_does_not_take_the_process_down():
+    """A brand-new project draws NOTHING, and that has to be survivable.
+
+    moy_console holds its sheet and map by pointer and a fresh project has
+    neither, so libmoy's binding was handing NULL to a raster that
+    dereferences it: `function _draw() spr(0, 0, 0) end` in an empty cart
+    segfaulted -- on a board, a reset with no message, from two lines a
+    beginner types first. Fixed upstream (the verbs degrade to empty rather
+    than crash) and vendored; this is the pin that keeps it fixed here, since
+    every SHIPPED cart has a sheet and so proves nothing about this path.
+    """
+    from runtime.lua_binding import HostLuaRun
+    buf = bytearray(64 * 64)
+    run = HostLuaRun(buf, 64, 64)                    # no sheet, no map
+    try:
+        assert run.load("function _update(dt) end\n"
+                        "function _draw()\n"
+                        "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
+                        "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
+                        "  mset(1, 1, 3) X = mget(1, 1)\n"
+                        "end\n", "@c") is None
+        assert run.tick(1 / 60.0) is None
+        assert run.get_global("X") == -1, "no map must read as empty, not junk"
+        assert not any(buf), "an absent sheet drew something"
+    finally:
+        run.close()
+
+
+@pytest.mark.skipif(not lua_host._moycore_available(),
+                    reason="no C compiler for the host lua binding")
 def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     """End to end through build_workstation: the run object must BE the
     moycore one, and a frame must reach the canvas."""

@@ -294,11 +294,35 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # draw family (#189/#191) is live in the browser.
     # Guarded like the boards: a build without the usermod still boots (a lua
     # cart opens the runtime-missing panel).
+    #
+    # And since moycore reached the browser, the chooser is the boards' chooser
+    # verbatim: EVERY Lua cart runs its whole frame inside libmoy, with
+    # moybyte's superset verbs registered on top as trampolines, and the old
+    # per-verb registry surviving only as the floor for a build or a cart
+    # moycore cannot take. Wiring it here is what makes "one Lua runtime" true
+    # across all three tiers rather than two -- this was the last head still
+    # running a second engine against the same spec.
     lua_runtime = None
     try:
         import moy_lua  # noqa: F401 -- availability probe only
         from moy_lua_glue import make_lua_runtime
-        lua_runtime = make_lua_runtime(ws)
+        _legacy = make_lua_runtime(ws)
+        _moycore = None
+        try:
+            from moycore_glue import make_moycore_runtime
+            _moycore = make_moycore_runtime(ws)
+        except ImportError:
+            pass
+
+        def _make_lua(ns, src, _mc=_moycore, _old=_legacy):
+            if _mc is not None:
+                try:
+                    return _mc(ns, src)
+                except Exception as exc:  # noqa: BLE001 -- fall back, say why
+                    print("Moybyte: moycore declined ->", exc)
+            return _old(ns, src)
+
+        lua_runtime = _make_lua
     except ImportError:
         pass
     # The board-agnostic service wiring, in the one canonical order (host + both

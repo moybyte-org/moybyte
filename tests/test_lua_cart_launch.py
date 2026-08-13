@@ -176,8 +176,17 @@ def test_bullet_storm_seed_cart_runs(tmp_path):
     # hundreds of live pooled bullets through the batch spr path. 300 frames
     # crash-free, the swarm actually fills, and a forced death reaches the
     # game-over state without an error.
+    #
+    # Pinned to LUPA, which is the runtime this reads and WRITES cart globals
+    # through -- that is how it parks the ship inside the storm to force a
+    # death, and the moycore binding exposes globals read-only by design (the
+    # int-handle boundary marshals no objects and no writes). The cart runs on
+    # moycore too; test_bullet_storm_runs_on_moycore below is that half, and it
+    # asserts what it can observe from outside rather than reaching in.
     pytest.importorskip("lupa")
     ws = _ws(tmp_path)
+    from runtime import lua_host
+    ws.lua_runtime = lua_host.make_lua_runtime
     _open(ws, "Bullet Storm")
     assert ws.player.cart_error is None
     g = ws.player._lua._lua.globals()
@@ -196,6 +205,32 @@ def test_bullet_storm_seed_cart_runs(tmp_path):
             break
     assert g.over                                        # death -> panel, no crash
     ws.frame(1 / 60)                                     # game-over frame draws clean
+
+
+def test_bullet_storm_runs_on_moycore(tmp_path):
+    """The same cart on the boards' own Lua, observed from outside.
+
+    This is the half the lupa test cannot cover and the half that regressed:
+    bullet_storm's `_init` calls make_layer, which is object-valued, so before
+    the shared handle glue reached this runtime the cart's layer came back nil
+    -- and because _init raised, the run failed to LOAD and quietly fell back
+    to lupa, which is why every lua test still passed while moycore ran none of
+    these carts. So the assertion that matters is the negative one: the run is
+    a MoycoreHostRun, not a fallback.
+    """
+    from runtime import lua_host
+    if lua_host.moycore_supports("") is not True:
+        pytest.skip("host lua binding not built")
+    ws = _ws(tmp_path)
+    _open(ws, "Bullet Storm")
+    assert ws.player.cart_error is None
+    assert type(ws.player._lua).__name__ == "MoycoreHostRun", \
+        "the cart fell back to lupa -- the handle glue did not take"
+    for _ in range(300):
+        ws.frame(1 / 60)
+        assert ws.player.cart_error is None
+    # The swarm is live, read through the runtime-agnostic global reader.
+    assert ws.player._lua.get_global("nb") > 30
 
 
 def test_missing_runtime_opens_the_panel_not_a_hang(tmp_path):

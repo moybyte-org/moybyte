@@ -27,6 +27,12 @@ host_app probes availability and injects `make_lua_runtime` iff it's there.
 Canonical home is runtime/; tests import it as runtime.lua_host.
 """
 
+# The object-verb glue shared with both device runtimes (runtime/lua_ext.py).
+# lupa needs none of it -- it hands Python objects to Lua directly, which is
+# what the PRELUDE below adapts -- but MoycoreHostRun does, because the ctypes
+# dispatch marshals ints and one string.
+from runtime.lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+
 PRELUDE = """
 do
   local py_touch = touch
@@ -189,11 +195,26 @@ class MoycoreHostRun:
         # runs -- see the device glue for why this is registration and not a
         # second runtime.
         reg = getattr(self._run, "register", None)
+        self._layers = self._images = None
         if reg is not None:
             for name in SUPERSET:
                 fn = ns.get(name)
                 if callable(fn):
                     reg(name, fn)
+            tv = ns.get("table")
+            if callable(tv):
+                reg("moy_table_verb", tv)
+            # The object-valued verbs, through the shared int-handle glue --
+            # the same module and the same prelude the boards run. Without it
+            # `make_layer` returns a Layer, the dispatch cannot marshal it, and
+            # the cart gets nil back: sakura_lua died on `lay:spr(...)` rather
+            # than falling back to lupa, which is a worse failure than the one
+            # the fallback exists for.
+            self._layers, self._images = install_handles(ns, reg)
+            err = self._run.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            if err:
+                self._run.close()
+                raise RuntimeError(err)
         err = self._run.load(src, "@cart")
         if err:
             self._run.close()
@@ -281,46 +302,24 @@ class MoycoreHostRun:
         self._run.close()
 
 
-# The verbs libmoy does not bind; a cart naming one keeps lupa. Kept beside the
-# device list (moycore_glue.SUPERSET) rather than imported from it: this file
-# is host-only and that one is staged into firmware trees.
-SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
+# The verbs libmoy does not bind, registered on top of its table. Kept beside
+# the device list (moycore_glue.SUPERSET) rather than imported from it: this
+# file is host-only and that one is staged into firmware trees.
+#
+# What is deliberately NOT here, and each for a different reason:
+#   view/background -- SPEC.md 6 core since the layers promotion, so libmoy
+#     installs them; registering ours would shadow C with a trampoline and, for
+#     view, hide the declaration hl_get_view is meant to read back.
+#   make_layer/draw_layer/image -- object-valued; they ride install_handles +
+#     PRELUDE_HANDLES instead (see __init__).
+#   table -- registering that name sets the GLOBAL `table` and clobbers Lua's
+#     library (#164); it goes in as moy_table_verb and PRELUDE_TABLE grafts it.
+SUPERSET = ("scene", "load_scene",
             "actors", "touching", "move_actor", "move_actor_to",
-            "remove_actor", "draw_scene", "table", "text", "view",
-            "spr_batch", "rect_batch", "spans", "mouse", "background",
+            "remove_actor", "draw_scene", "text",
+            "spr_batch", "rect_batch", "spans", "mouse",
             "col", "on_net", "wifi", "net")
 
-
-
-# A verb is a CALL, so that is what this looks for: the name at a word
-# boundary followed by "(". The first cut of this was a plain substring
-# search, which sounded conservative and was in fact a gate that never
-# opened -- `table.insert`, a variable named `col`, or the letters "net"
-# inside any identifier disqualified every cart in the tree. Erring toward
-# the old path is right; erring so far that the new one is unreachable is
-# a silent no-op, which is worse than either.
-def _uses(src, names):
-    """The first superset verb `src` CALLS, or None.
-
-    Scans by hand rather than by regex: MicroPython's `re` has no lookbehind,
-    and this predicate has a device twin (moycore_glue._calls) that must agree
-    with it -- a host gate that opens where the board's does not is worse than
-    either being strict. The version before this one was a plain substring
-    test, which disqualified every cart in the tree.
-    """
-    for name in names:
-        n = len(name)
-        i = src.find(name)
-        while i >= 0:
-            before = src[i - 1] if i else " "
-            j = i + n
-            while j < len(src) and src[j] == " ":
-                j += 1
-            if (j < len(src) and src[j] == "("
-                    and not (before.isalnum() or before in "_.:")):
-                return name
-            i = src.find(name, i + 1)
-    return None
 
 
 def moycore_supports(src):
@@ -331,7 +330,9 @@ def moycore_supports(src):
     routed superset carts to lupa. That left TWO Lua runtimes, both
     implementing the spec verbs, which is the duplication this project exists
     to end. The superset rides moycore as registered trampolines now, so the
-    only question left is whether the binding built at all.
+    only question left is whether the binding built at all. (The word-boundary
+    source scan that backed the old answer went with it; the last thing that
+    read it was this function.)
     """
     del src                     # every cart qualifies; the arg stays for callers
     return _moycore_available() is not None

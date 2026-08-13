@@ -3450,8 +3450,20 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     table.remove (the shim generator lives in moy-spec now)."""
     api = (ROOT / "modules" / "moy_lua_glue.py").read_text(encoding="utf-8")
     assert 'moy_lua.register("moy_table_verb", v)' in api
-    assert "setmetatable(table, { __call" in api
+    # The graft itself lives in the shared prelude now (runtime/lua_ext.py), so
+    # every runtime that imports it inherits the #164 fix instead of carrying
+    # its own copy of the line.
+    ext = (ROOT.parent.parent / "runtime" / "lua_ext.py").read_text(
+        encoding="utf-8")
+    assert "setmetatable(table, { __call" in ext
+    assert "PRELUDE_TABLE" in api
     host = (ROOT.parent.parent / "runtime" / "lua_host.py").read_text(
         encoding="utf-8")
-    assert 'g["moy_table_verb"] = v' in host
+    assert 'g["moy_table_verb"] = v' in host            # lupa's own lane
     assert "setmetatable(table, { __call" in host
+    # ...and moycore's, which registers the verb rather than assigning it.
+    assert 'reg("moy_table_verb", tv)' in host
+    glue = (ROOT / "modules" / "moycore_glue.py").read_text(encoding="utf-8")
+    assert '_moycore.register("moy_table_verb", tv)' in glue
+    assert "table" not in glue[glue.index("SUPERSET = ("):
+                               glue.index(")", glue.index("SUPERSET = ("))]

@@ -44,6 +44,8 @@ MP = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", ".build",
                   "build-moycore", "micropython")
 
 DRIVER = r'''
+import sys
+sys.path.insert(0, "@RUNTIME@")          # for lua_ext, staged by build.sh
 import moycore
 from array import array
 
@@ -116,6 +118,69 @@ moycore.tick(0.03125)
 print("EXTCALLS", seen, moycore.get_global("L"))
 moycore.close()
 
+# OBJECT-valued verbs ride the shared prelude, not the trampoline. This is the
+# real runtime/lua_ext.py, imported and executed -- not a transcription of it.
+from lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+
+class _Layer:
+    def __init__(self, w, h):
+        self.wh = (w, h)
+    def spr(self, *a):
+        calls.append(("spr",) + a)
+    def cls(self, c):
+        calls.append(("cls", c))
+
+class _Img:
+    pass
+
+calls = []
+_img = _Img()
+NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
+      "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
+      "image": lambda n: _img if n == "bg" else None,
+      "table": lambda n: 77}
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+moycore.register("moy_table_verb", NS["table"])
+install_handles(NS, moycore.register)
+print("PRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
+print("OBJ", moycore.load(
+    "function _init()\n"
+    "  L = make_layer(9, 5)\n"
+    "  B = image('bg')\n"
+    "  MISS = image('nope')\n"
+    "  T = table('scores')\n"
+    "  N = #({1,2,3})\n"          # the table LIBRARY must survive the graft
+    "end\n"
+    "function _update(dt) end\n"
+    "function _draw()\n"
+    "  L:cls(3) L:spr(B, 1, 2) L:spr(9, 1, 2, -1, 2, 1) draw_layer(L, 5, 6)\n"
+    "end\n", "@obj"))
+moycore.tick(0.03125)
+print("OBJCALLS", calls)
+print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
+      moycore.get_global("MISS"))
+moycore.close()
+
+# A cart with NO sheet and NO map -- a brand-new project. Every sheet/map verb
+# must survive it, because on this side a NULL deref is a board reset.
+for i in range(len(fb)):
+    fb[i] = 0
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+print("BARE", moycore.load(
+    "function _update(dt) end\n"
+    "function _draw()\n"
+    "  spr(1, 0, 0) sspr(0, 0, 8, 8, 0, 0)\n"
+    "  map(0, 0) tline(0, 0, 8, 8, 0, 0, 65536, 0)\n"
+    "  mset(1, 1, 3) X = mget(1, 1)\n"
+    "end\n", "@bare"))
+print("BARETICK", moycore.tick(0.03125))
+nz = 0
+for b in fb:
+    if b:
+        nz += 1
+print("BAREPX", nz, moycore.get_global("X"))
+moycore.close()
+
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
 moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
@@ -126,7 +191,8 @@ moycore.close()
 
 
 def _run():
-    p = subprocess.run([MP, "-c", DRIVER], capture_output=True, text=True,
+    src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime"))
+    p = subprocess.run([MP, "-c", src], capture_output=True, text=True,
                        timeout=180)
     assert p.returncode == 0, p.stdout + p.stderr
     return p.stdout
@@ -176,6 +242,34 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["EXT"][1] == "None", out
     assert "EXTCALLS [(9, 5), (7, 1, 2)] 7" in out, \
         "a registered verb did not reach Python (or its return did not reach Lua): %s" % out
+
+    # Object-valued verbs. A trampoline cannot marshal a Layer, so before the
+    # shared prelude reached this runtime a cart calling make_layer() got
+    # "unsupported value" and fell back to the OLD Lua runtime -- which is what
+    # sakura_lua, brick_siege_lua, ray_lua and bullet_storm all did, silently,
+    # while every test passed. These pins are the ones that would have said so.
+    assert by["PRE"][1] == "None", out
+    assert by["OBJ"][1] == "None", \
+        "the prelude did not define make_layer/image for the cart: %s" % out
+    assert ("OBJCALLS [('new', 9, 5), ('cls', 3), "
+            "('spr', <_Img object>, 1, 2), ('spr', 9, 1, 2, -1, 2, 1), "
+            "('draw', (9, 5), 5, 6)]" in out.replace(
+                out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
+                "<_Img object>")), \
+        "layer/image handles did not reach the Python objects: %s" % out
+    # table() rides Lua's table LIBRARY as __call (#164), so both work.
+    assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
+        "the table graft or the missing-image nil regressed: %s" % out
+
+    # A console with no sheet and no map is a legal console (a brand-new
+    # project), and every sheet/map verb has to survive it: libmoy took those
+    # by pointer and dereferenced without asking, so `spr(0,0,0)` in an empty
+    # cart was a segfault -- on a board, a reset with no message, from the two
+    # lines a beginner types first. Fixed upstream, vendored, pinned here.
+    assert by["BARE"][1] == "None" and by["BARETICK"][1] == "None", out
+    assert by["BAREPX"][1] == "0", "an absent sheet drew something: %s" % out
+    assert by["BAREPX"][2] == "-1", \
+        "an absent map must read as empty, not junk: %s" % out
 
     # A cart error is text, not an exception, and the module recovers.
     assert by["START2"][1] == "None", out

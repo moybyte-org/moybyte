@@ -36,6 +36,7 @@ modules/files_app.py
 modules/formula.py
 modules/launcher_layer.py
 modules/layers.py
+modules/lua_ext.py
 modules/map_editor_ui.py
 modules/moy_carts.py
 modules/moy_font.py

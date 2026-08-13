@@ -265,6 +265,9 @@ cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"
 cp "${REPO_ROOT}/runtime/system_menu_ui.py" "${SCRIPT_DIR}/modules/system_menu_ui.py"
 cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"
 cp "${REPO_ROOT}/runtime/layers.py" "${SCRIPT_DIR}/modules/layers.py"
+# The object-verb Lua glue (prelude + int-handle registry), shared by moy_lua,
+# moycore and the host binding -- see runtime/lua_ext.py.
+cp "${REPO_ROOT}/runtime/lua_ext.py" "${SCRIPT_DIR}/modules/lua_ext.py"
 cp "${REPO_ROOT}/runtime/bar_layer.py" "${SCRIPT_DIR}/modules/bar_layer.py"
 cp "${REPO_ROOT}/runtime/cards_layer.py" "${SCRIPT_DIR}/modules/cards_layer.py"
 cp "${REPO_ROOT}/runtime/paint_layer.py" "${SCRIPT_DIR}/modules/paint_layer.py"

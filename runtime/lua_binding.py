@@ -127,6 +127,8 @@ def _lib():
             d.hl_retarget.argtypes = [_P, _P]
             d.hl_load.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_load.restype = _I
+            d.hl_exec.argtypes = [_P, _C, _I, _C, _P, _I]
+            d.hl_exec.restype = _I
             d.hl_tick.argtypes = [_P, _F, _P, _I]
             d.hl_tick.restype = _I
             d.hl_pmem_image.argtypes = [_P, _P, _I]
@@ -235,6 +237,16 @@ class HostLuaRun:
         except (TypeError, ValueError):
             return 0
         return 1
+
+    def exec(self, src, name="glue"):
+        """Run a chunk that is NOT the cart -- the glue prelude. None, or the
+        error text. See moyhost_lua.c's hl_exec for why the split exists."""
+        err = ctypes.create_string_buffer(256)
+        b = src.encode("utf-8") if isinstance(src, str) else bytes(src)
+        if self._d.hl_exec(self._r, b, len(b), name.encode(),
+                           ctypes.cast(err, _P), 256):
+            return err.value.decode("utf-8", "replace")
+        return None
 
     def load(self, src, name="@cart"):
         """Run the chunk and `_init`. Returns None, or the error text."""

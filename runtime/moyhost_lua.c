@@ -111,7 +111,12 @@ static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL
  * (image("bg") is the only string-taking verb), and an integer result or
  * nothing. Objects have never crossed this boundary -- layers and images
  * travel as int handles, which is what the prelude's wrappers speak. */
-#define HL_MAX_IARGS 4
+/* Eight, not four: the widest wrapper is the prelude's
+ * __layer_spr(lid, tile, x, y, ck, scale, flip) at seven. Four silently
+ * TRUNCATED it -- the extra arguments never reached Python, the closure raised
+ * on its missing parameters, and hl_tramp reads a raising verb as nil. A layer
+ * sprite would simply not draw, with nothing printed anywhere. */
+#define HL_MAX_IARGS 8
 
 typedef int (*hl_dispatch_fn)(int idx, int argc, const int *iargs,
                               const char *sarg, int *out);
@@ -188,8 +193,8 @@ void hl_set_map(host_lua *r, uint8_t *cells, int w, int h)
 
 void hl_retarget(host_lua *r, uint8_t *pix) { r->canvas.pix = pix; }
 
-/* Load a chunk and run _init. 0 on success; the message lands in err. */
-int hl_load(host_lua *r, const char *src, int len, const char *name,
+/* Run one chunk. 0 on success; the message lands in err. */
+int hl_exec(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
     CUR = r;
@@ -199,6 +204,19 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
         if (err && errlen > 0) { strncpy(err, m ? m : "load failed", errlen - 1); err[errlen - 1] = 0; }
         return 1;
     }
+    return 0;
+}
+
+/* Load a chunk and run _init. 0 on success; the message lands in err.
+ *
+ * The split exists for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
+ * after hl_register and before the cart: moybyte's object-valued verbs reach
+ * Lua as int-handle functions plus wrappers, because this dispatch marshals
+ * ints and one string and a Layer is neither. */
+int hl_load(host_lua *r, const char *src, int len, const char *name,
+            char *err, int errlen)
+{
+    if (hl_exec(r, src, len, name, err, errlen) != 0) return 1;
     return moy_lua_init(r->L, err, (size_t)errlen);
 }
 

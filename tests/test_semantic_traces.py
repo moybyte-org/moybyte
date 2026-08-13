@@ -453,6 +453,9 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # moy_font is what build.sh stages from runtime/font.py -- the gate ctx
     # (and with it every direct lane) needs it at device_canvas import time.
     shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    # lua_ext is the object-verb glue (prelude + int-handle registry) both Lua
+    # runtimes import; build.sh stages it from runtime/ the same way.
+    shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),

@@ -294,7 +294,14 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
         if moycore_supports(src):
             try:
                 return MoycoreHostRun(_ws, ns, src)
-            except RuntimeError:
+            except RuntimeError as exc:
+                # SAY SO. The fallback used to be silent, and that is how
+                # moycore came to run none of the seed carts while every test
+                # stayed green: make_layer's Layer would not marshal, the load
+                # raised, lupa quietly took the cart, and the only observable
+                # difference was a cart running on the runtime we were trying
+                # to retire. The device has printed this since it shipped.
+                print("Moybyte: moycore declined ->", exc)
                 if _lupa_make is None:
                     raise
         if _lupa_make is None:

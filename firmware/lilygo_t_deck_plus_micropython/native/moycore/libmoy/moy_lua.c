@@ -166,9 +166,27 @@ static int l_palt(lua_State *L)
 
 /* -- sprites and map ----------------------------------------------------- */
 
+/* moy_console's sheet and map are POINTERS, so a host may legitimately supply
+ * neither: a brand-new project has no sheet drawn and no map painted yet, and
+ * an embedder that only wants the geometry verbs need not invent either. The
+ * raster takes them by reference and dereferences without asking -- correct
+ * for a caller that has the data, fatal for a cart that calls spr() before its
+ * host has any. Not a theoretical hole: two lines of Lua in an empty project
+ * (`function _draw() spr(0, 0, 0) end`) segfaulted the process, which on a
+ * microcontroller is a silent reset.
+ *
+ * So the BINDING is where the console's optional halves get checked -- once
+ * per call, rather than a NULL test inside per-pixel loops that already hold
+ * the pointer. The semantics follow SPEC.md 10's rule for a feature the host
+ * did not supply: degrade truthfully. No sheet means every sprite is empty,
+ * which is what an unpainted sheet looks like; no map means every cell is
+ * empty, which is what mget already answers for a cell out of range. A cart
+ * cannot tell "no sheet" from "a sheet full of colour 0", and should not have
+ * to. */
 static int l_spr(lua_State *L)
 {
     moy_console *con = con_of(L);
+    if (!con->sheet) return 0;
     moy_spr(con->canvas, con->sheet, argi(L, 1, 0), argi(L, 2, 0), argi(L, 3, 0),
             argi(L, 4, -1), argi(L, 5, 1), argi(L, 6, 0));
     return 0;
@@ -177,7 +195,9 @@ static int l_spr(lua_State *L)
 static int l_sspr(lua_State *L)
 {
     moy_console *con = con_of(L);
-    int sw = argi(L, 3, 0), sh = argi(L, 4, 0);
+    int sw, sh;
+    if (!con->sheet) return 0;
+    sw = argi(L, 3, 0); sh = argi(L, 4, 0);
     moy_sspr(con->canvas, con->sheet, argi(L, 1, 0), argi(L, 2, 0), sw, sh,
              argi(L, 5, 0), argi(L, 6, 0), argi(L, 7, sw), argi(L, 8, sh),
              argi(L, 9, -1), argi(L, 10, 0));
@@ -187,6 +207,7 @@ static int l_sspr(lua_State *L)
 static int l_tline(lua_State *L)
 {
     moy_console *con = con_of(L);
+    if (!con->sheet || !con->map) return 0;
     moy_tline(con->canvas, con->sheet, con->map,
               argi(L, 1, 0), argi(L, 2, 0), argi(L, 3, 0), argi(L, 4, 0),
               (int32_t)argi(L, 5, 0), (int32_t)argi(L, 6, 0),
@@ -198,7 +219,9 @@ static int l_tline(lua_State *L)
 static int l_map(lua_State *L)
 {
     moy_console *con = con_of(L);
-    int mx = argi(L, 1, 0), my = argi(L, 2, 0);
+    int mx, my;
+    if (!con->sheet || !con->map) return 0;
+    mx = argi(L, 1, 0); my = argi(L, 2, 0);
     moy_map_draw(con->canvas, con->map, con->sheet, mx, my,
                  argi(L, 3, con->map->w - mx), argi(L, 4, con->map->h - my),
                  argi(L, 5, 0), argi(L, 6, 0), argi(L, 7, -1), argi(L, 8, 1));
@@ -207,13 +230,19 @@ static int l_map(lua_State *L)
 
 static int l_mget(lua_State *L)
 {
-    lua_pushinteger(L, moy_mget(con_of(L)->map, argi(L, 1, 0), argi(L, 2, 0)));
+    moy_console *con = con_of(L);
+    /* -1 is what mget already answers off the edge of a map, so a cart's
+     * collision code needs no second case for "no map at all". */
+    lua_pushinteger(L, con->map
+                    ? moy_mget(con->map, argi(L, 1, 0), argi(L, 2, 0)) : -1);
     return 1;
 }
 
 static int l_mset(lua_State *L)
 {
-    moy_mset(con_of(L)->map, argi(L, 1, 0), argi(L, 2, 0), argi(L, 3, -1));
+    moy_console *con = con_of(L);
+    if (!con->map) return 0;
+    moy_mset(con->map, argi(L, 1, 0), argi(L, 2, 0), argi(L, 3, -1));
     return 0;
 }
 
