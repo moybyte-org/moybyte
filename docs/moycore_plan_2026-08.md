@@ -60,13 +60,19 @@ What that leaves as the S3's biggest lever is no longer the engine: chrome is
 **2.2× the entire cart** (10.17ms against 4.56ms), and internal SRAM is
 exhausted — 23KB free, so the Lua heap runs 48.8KB SRAM against 110–265KB
 PSRAM even with the floor knob working correctly.
+**Read that chrome figure with the 2026-08-14 instrument fix in mind** (#66):
+CHROMEBRK's `other` was a residual of a residual over six MILLISECOND-quantized
+brackets, so it carried up to ~6ms of pure rounding on top of whatever was real,
+and the stack walk — the biggest genuinely-unnamed piece — was never summed into
+the split at all. Both are fixed (microsecond brackets throughout, plus a `stk`
+bucket), and on P4 glass the walk is now **81% of chrome** where every named
+bucket used to read 0.00. Re-measure the S3 before treating 10.17ms as the
+target.
 Then §9's superset question, which is a product call and is what keeps lupa
-in `[dev,sim]` and `spr(Image)` on the Python raster; the §6.10
-batching question (MEASURED the same night and mostly dead: the kernels are
-identical, so nothing goes upstream -- what is left is whether the per-call
-cost is small enough on the S3 to delete the batch verbs outright -- and
-NOTE the x86 result is exactly the class of unix microbench #66 warns does not
-transfer). (`LuaCartRun` is
+in `[dev,sim]` and `spr(Image)` on the Python raster. The §6.10
+batching question is CLOSED (2026-08-14): the verbs are deleted, and the P4
+A/B says the plain loop is ~0.53ms FASTER than the batch it replaced, because
+the cart had to pack the span buffer in Python to use it. (`LuaCartRun` is
 GONE as of 2026-08-13 — the deletion that rung had been holding, taken once
 moycore was actually equivalent; see §6.9's ledger.)** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
@@ -925,6 +931,35 @@ from `make_api` on both boards and the host, from `docs/moy_cart_api.md`, and
 from the carts that use them (`ray_test`, `brick_siege`) — which also makes
 those pairs comparable by construction. No libmoy change, no new kernel, no
 gate work.
+
+**DONE 2026-08-14, and the deletion turned out to be a WIN, not a cost.** The
+verbs are gone from both `make_api`s, the docs, the blocks reserved list and the
+`moy-api.lua` stubs (which had declared `rect_batch`/`spans` to Lua carts that
+could never call them). Ray Test and Ray Lua now render **0 differing pixels
+over 45 frames** — the pair is one program in two languages.
+
+The number this rung had been arguing about, measured properly on P4 glass with
+the real console running (`ws.canvas`, 160 spans, best-of-9, the two paths
+INTERLEAVED so drift hits both):
+
+    160 x rect()                          1,135 us   <- what the cart writes now
+    pack the span buffer + 1 fill_rects   1,659 us   <- what rect_batch needed
+      of which: Python packing            1,325 us
+                the kernel                  364 us
+
+**The loop is ~0.53ms FASTER** (two independent runs: 524us, 551us). The batch
+kernel really is cheap — 364us for 160 spans — but a cart that must refill its
+span buffer every frame pays 800 array stores in Python to reach it, and that
+costs more than the calls it saves. So the verbs were not merely worth ≤1ms:
+for the raycaster that motivated them, they were a **net loss**, and the "kid
+writes the obvious loop" answer is also the fast one.
+
+Two caveats on reading this. It measures the RECT pair; `spr_batch` was already
+redundant with the auto-batch gate, which coalesces a plain `spr()` run into the
+same native `blit_batch` with no packing at all. And 9.16us/`rect()` is the P4's
+dispatch cost, which the S3's differs from — but the S3's Bench twins already
+answered the same question from the other direction (DRAW +0.0 Python vs +1.0
+Lua at 300 calls), and the two agree.
 
 ### 6.10a The kernel A/B that got there (2026-08-13, superseded conclusion kept)
 
