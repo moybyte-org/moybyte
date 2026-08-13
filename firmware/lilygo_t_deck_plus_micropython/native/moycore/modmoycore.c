@@ -80,10 +80,40 @@
 #endif
 #endif
 
-// Internal-SRAM headroom the VM must leave for the WiFi/DMA pools. Same floor
-// moy_lua ships (48KB), for the same reason and measured on the same board.
+// Internal-SRAM headroom the VM must leave for the WiFi/DMA pools. 48KB at
+// boot, for the same reason moy_lua sizes it that way -- room for a WiFi stack
+// that might start at any moment -- and a RUNTIME KNOB for the same reason
+// moy_lua made it one: the #66 census showed that on the S3's 269KB internal
+// heap a 48KB floor leaves celeste's Lua about 9KB, i.e. 97% PSRAM, which is
+// precisely the measured-2x regime the SRAM-first allocator exists to avoid.
+// run_desktop drops it to 24KB once everything with a boot-time internal claim
+// has taken it.
+//
+// This was missing when moycore shipped, and silently: run_desktop lowered
+// moy_lua's floor and moycore's stayed at 48KB, so moving a cart to the new
+// runtime handed most of the SRAM-first win back. Nothing would have said so
+// except the cart being slower.
 #ifndef MOYCORE_SRAM_FLOOR
 #define MOYCORE_SRAM_FLOOR (48 * 1024)
+#endif
+#ifdef MOYCORE_PSRAM
+static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
+// The census the floor is set from: live bytes per region, the peak, and how
+// often the floor sent an allocation to PSRAM. Deliberately four numbers where
+// moy_lua reports sixteen -- the size-class buckets were for CHOOSING the
+// policy and the policy is chosen; these are for confirming it took.
+static size_t g_live_r[2], g_live_total, g_peak;
+static uint32_t g_sram_denied;
+
+static inline int mc_region(const void *p)
+{
+#if __has_include("esp_memory_utils.h")
+    return esp_ptr_internal(p) ? 0 : 1;
+#else
+    (void)p;
+    return 1;
+#endif
+}
 #endif
 
 // The snapshot the host refreshes before every tick. Plain int32 slots in a
@@ -296,22 +326,47 @@ static void *buf_r(mp_obj_t o, size_t *len)
 // (host, unix pin, wasm) this compiles down to plain realloc.
 static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
 {
-    (void)ud; (void)osize;
+    (void)ud;
+#ifdef MOYCORE_PSRAM
+    if (ptr == NULL) osize = 0;      // lua_Alloc contract: a type tag, not a size
     if (nsize == 0) {
-        free(ptr);
+        if (ptr != NULL) {
+            g_live_r[mc_region(ptr)] -= osize;
+            g_live_total -= osize;
+            free(ptr);
+        }
         return NULL;
     }
-#ifdef MOYCORE_PSRAM
     void *np = NULL;
+    int tried_sram = 0;
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-            >= nsize + MOYCORE_SRAM_FLOOR) {
+            >= nsize + g_sram_floor) {
+        tried_sram = 1;
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
     if (np == NULL) {
-        np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!tried_sram) g_sram_denied++;   // the FLOOR turned it away, not a
+        np = heap_caps_realloc(ptr, nsize,  // failed internal allocation
+                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (np != NULL) {
+        // A realloc may MOVE the block between regions, so the old bytes come
+        // off whichever region the old ADDRESS was in and the new bytes go on
+        // wherever the block landed. Reading the region of a pointer realloc
+        // has already released is safe: it is an address-range comparison, not
+        // a dereference.
+        if (ptr != NULL) {
+            g_live_r[mc_region(ptr)] -= osize;
+            g_live_total -= osize;
+        }
+        g_live_r[mc_region(np)] += nsize;
+        g_live_total += nsize;
+        if (g_live_total > g_peak) g_peak = g_live_total;
     }
     return np;                       // NULL: Lua runs an emergency GC and retries
 #else
+    (void)osize;                     // no region to account for off-board
+    if (nsize == 0) { free(ptr); return NULL; }
     return realloc(ptr, nsize);
 #endif
 }
@@ -439,6 +494,98 @@ static int l_tramp(lua_State *L)
     return push_mp_to_lua(L, ret);
 }
 
+// -- the p8 shim's masked map walk (#66 M0) ----------------------------------
+//
+// Carried over from moy_lua, which is the point: without it a ported p8 cart
+// runs its map through the shim's LUA cell loop -- 4.5ms of celeste's S3
+// render, measured by difference -- and moving the cart to moycore would have
+// silently handed that back. "One runtime" has to mean the fast one.
+//
+// Simpler here than in moy_lua by exactly the amount moycore is worth: there,
+// each surviving cell had to be appended as a quad through the batch protocol
+// so blit_batch's walk drew it; here the raster IS libmoy and a cell is a call
+// to the same moy_spr the cart's own spr() reaches. No new raster either way.
+//
+// Deliberately NOT named `map`: the console's map() keeps its Python lane (it
+// owns the Fold-2 cache). These are shim machinery with p8 semantics -- tile 0
+// never draws, colorkey 0, scale 1, no flip -- and the __gff__ flag byte gates
+// each cell against the mask. The shim nil-guards both and keeps its Lua loop,
+// which is what a host without them (lupa) still takes.
+
+static uint8_t g_map_flags[256];
+
+static int mc_unhex(int ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+// __moy_map_flags(hex): the baked __gff__ table, two hex chars per sprite,
+// crossed ONCE at shim boot. A bad nibble reads as 0, exactly like the shim's
+// own tonumber(..., 16). Non-string clears.
+static int l_map_flags(lua_State *L)
+{
+    size_t len = 0, n, i;
+    const char *s;
+    memset(g_map_flags, 0, sizeof(g_map_flags));
+    s = (lua_type(L, 1) == LUA_TSTRING) ? lua_tolstring(L, 1, &len) : NULL;
+    if (s == NULL) { lua_pushboolean(L, 0); return 1; }
+    n = len / 2;
+    if (n > sizeof(g_map_flags)) n = sizeof(g_map_flags);
+    for (i = 0; i < n; i++) {
+        int hi = mc_unhex((unsigned char)s[2 * i]);
+        int lo = mc_unhex((unsigned char)s[2 * i + 1]);
+        if (hi >= 0 && lo >= 0) g_map_flags[i] = (uint8_t)((hi << 4) | lo);
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+// __moy_map_masked(celx, cely, sx, sy, cw, ch, mask) -> bool: true when the
+// walk ran (even if every cell was masked out); false when the caller must
+// take its Lua-loop fallback (no sheet/map, odd args). Map cells store tile
+// id + 1 (0 = empty), so a cell draws when its id > 0 and, under a nonzero
+// mask, when (gff[id] & mask) != 0 -- the shim's exact condition.
+static int l_map_masked(lua_State *L)
+{
+    int v[7], i, cx, cy;
+    int celx, cely, sx, sy, cw, ch, mask, mw, mh;
+    const uint8_t *cells;
+    if (!RUN.con.sheet || !RUN.con.map || lua_gettop(L) != 7) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    for (i = 0; i < 7; i++) {
+        if (!lua_isnumber(L, i + 1)) { lua_pushboolean(L, 0); return 1; }
+        v[i] = (int)lua_tointeger(L, i + 1);
+    }
+    celx = v[0]; cely = v[1]; sx = v[2]; sy = v[3];
+    cw = v[4]; ch = v[5]; mask = v[6];
+    cells = RUN.con.map->cells;
+    mw = RUN.con.map->w;
+    mh = RUN.con.map->h;
+    for (cy = 0; cy < ch; cy++) {
+        int my = cely + cy;
+        const uint8_t *row;
+        int py = sy + cy * 8;
+        if (my < 0 || my >= mh) continue;     // off-map rows read empty
+        row = cells + (size_t)my * (size_t)mw;
+        for (cx = 0; cx < cw; cx++) {
+            int mx = celx + cx, id;
+            if (mx < 0 || mx >= mw) continue;
+            id = (int)row[mx] - 1;
+            if (id <= 0) continue;            // empty, or p8's never-drawn 0
+            if (mask != 0 && (g_map_flags[id] & mask) == 0) continue;
+            moy_spr(RUN.con.canvas, RUN.con.sheet, id,
+                    sx + cx * 8, py, 0, 1, 0);
+        }
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 // register(name, callable) -- add a verb libmoy does not bind. Must be called
 // AFTER run_begin (the VM and the spec table exist by then) and BEFORE the
 // cart executes, because a cart captures its globals into locals at load.
@@ -559,6 +706,14 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
         lua_close(RUN.L); RUN.L = NULL;
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: sandbox failed"));
     }
+    // The p8 shim's helpers, installed before anything the cart can capture.
+    // Plain globals, not verb shadows: the shim's own map() picks them up
+    // nil-safely and the console's map() is untouched.
+    lua_pushcfunction(RUN.L, l_map_masked);
+    lua_setglobal(RUN.L, "__moy_map_masked");
+    lua_pushcfunction(RUN.L, l_map_flags);
+    lua_setglobal(RUN.L, "__moy_map_flags");
+    memset(g_map_flags, 0, sizeof(g_map_flags));
 
     RUN.open = 1;
     return mp_const_none;
@@ -733,6 +888,45 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_view_obj, mod_view);
 static mp_obj_t mod_active(void) { return mp_obj_new_bool(RUN.open); }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
 
+// set_sram_floor(kb) -> the effective kb. Clamped [16, 256]; returns the
+// compiled default unchanged on a build with no region to choose between, so
+// callers can set it unconditionally. run_desktop calls this once the boot-time
+// internal claims (flush bounce, poller, audio reserve) have been taken.
+static mp_obj_t mod_set_sram_floor(mp_obj_t kb_obj)
+{
+#ifdef MOYCORE_PSRAM
+    mp_int_t kb = mp_obj_get_int(kb_obj);
+    if (kb < 16) kb = 16;
+    if (kb > 256) kb = 256;
+    g_sram_floor = (size_t)kb * 1024;
+    return mp_obj_new_int(kb);
+#else
+    (void)kb_obj;
+    return mp_obj_new_int(MOYCORE_SRAM_FLOOR / 1024);
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_sram_floor_obj, mod_set_sram_floor);
+
+// alloc_stats() -> (sram_live, psram_live, peak, sram_denied), or None where
+// there is only one region. The four numbers that say whether the SRAM-first
+// policy took: how the cart's heap actually SPLIT, its high-water mark, and how
+// many allocations the floor pushed to PSRAM. Live counters, not a sample --
+// read them while a cart runs.
+static mp_obj_t mod_alloc_stats(void)
+{
+#ifdef MOYCORE_PSRAM
+    mp_obj_t items[4];
+    items[0] = mp_obj_new_int((mp_int_t)g_live_r[0]);
+    items[1] = mp_obj_new_int((mp_int_t)g_live_r[1]);
+    items[2] = mp_obj_new_int((mp_int_t)g_peak);
+    items[3] = mp_obj_new_int((mp_int_t)g_sram_denied);
+    return mp_obj_new_tuple(4, items);
+#else
+    return mp_const_none;
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
+
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
@@ -744,6 +938,8 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
+    { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
     { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },
     // The snapshot layout, exported so the Python side cannot drift from it.

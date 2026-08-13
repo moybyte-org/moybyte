@@ -90,6 +90,14 @@ for f in range(4):
 print("PMEM", moycore.pmem_image(pm), pm[0])
 moycore.close()
 print("CLOSED", moycore.active())
+# The SRAM floor knob and the census behind it. Off-board there is one region,
+# so the knob reports the compiled default and the census is None -- but the
+# NAMES have to be there, because the caller (run_desktop) sets the floor
+# unconditionally on both runtimes and a missing name is what left moycore at
+# 48KB on the S3 while moy_lua went to 24.
+print("FLOOR", moycore.set_sram_floor(24), moycore.set_sram_floor(1),
+      moycore.set_sram_floor(9999))
+print("CENSUS", moycore.alloc_stats())
 
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
@@ -161,6 +169,48 @@ print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
       moycore.get_global("MISS"))
 moycore.close()
 
+# The p8 shim's masked map walk (#66 M0). A 4x1 strip of cells with distinct
+# flag bytes, drawn under three masks; each surviving cell stamps one 8x8 tile.
+MAPW, MAPH = 4, 1
+cells = bytearray(MAPW * MAPH)
+cells[0] = 0 + 1        # tile 0: p8 NEVER draws it, whatever its flags say
+cells[1] = 5 + 1        # tile 5: gff 0x01
+cells[2] = 6 + 1        # tile 6: gff 0x02
+cells[3] = 0            # empty cell
+solid = bytearray(128 * 256)
+for i in range(len(solid)):
+    solid[i] = 9        # every tile fully opaque colour 9
+
+for i in range(len(fb)):
+    fb[i] = 0
+moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None)
+print("MASKPRESENT", moycore.exec(
+    "P = (__moy_map_masked ~= nil) and (__moy_map_flags ~= nil)", "@probe"),
+    moycore.get_global("P"))
+print("MASKLOAD", moycore.load(
+    "function _init() __moy_map_flags('00000000000102') end\n"
+    "function _update(dt) end\n"
+    "function _draw() end\n", "@mask"))
+
+
+def _walk(mask):
+    moycore.exec("cls(0) R = __moy_map_masked(0, 0, 0, 0, 4, 1, %d)" % mask,
+                 "@walk")
+    # PIXELS, not bytes: a 565 pixel is two bytes and a palette entry may have
+    # a zero half, so counting bytes counts some pixels once and some twice.
+    n = 0
+    for i in range(0, len(fb), 2):
+        if fb[i] or fb[i + 1]:
+            n += 1
+    return moycore.get_global("R"), n
+
+
+print("MASK0", _walk(0))        # no mask: tiles 5 and 6 draw, tile 0 never
+print("MASK1", _walk(1))        # gff bit 0: tile 5 only
+print("MASK2", _walk(2))        # gff bit 1: tile 6 only
+print("MASK4", _walk(4))        # nothing carries bit 2
+moycore.close()
+
 # A cart with NO sheet and NO map -- a brand-new project. Every sheet/map verb
 # must survive it, because on this side a NULL deref is a board reset.
 for i in range(len(fb)):
@@ -230,6 +280,16 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["PMEM"][1] == "True" and by["PMEM"][2] == "45", out
     assert by["CLOSED"][1] == "False", out
 
+    # The SRAM-floor knob exists and clamps. moycore shipped without it while
+    # run_desktop lowered moy_lua's 48KB -> 24KB at boot, so a cart that moved
+    # to the new runtime kept the high floor -- on the S3's 269KB internal heap
+    # that is the ~97%-PSRAM case the SRAM-first allocator exists to avoid, and
+    # nothing reported it. Off-board this build has one region, so the values
+    # are the compiled default; what is under test is that the NAME is there.
+    assert by["FLOOR"][1:] == ["48", "48", "48"], \
+        "set_sram_floor missing or not clamping: %s" % out
+    assert by["CENSUS"][1] == "None", out
+
     # view/background reached the cart with no trampoline registered for them.
     assert by["VIEW0"][1] == "None", out
     assert by["VIEWLOAD"][1] == "None", out
@@ -260,6 +320,23 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # table() rides Lua's table LIBRARY as __call (#164), so both work.
     assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
         "the table graft or the missing-image nil regressed: %s" % out
+
+    # The p8 shim's masked map walk. moy_lua has had this since #66 M0 and
+    # moycore did not, so a ported p8 cart moving to the new runtime silently
+    # dropped back to the shim's LUA cell loop -- 4.5ms of celeste's S3 render,
+    # measured by difference. "One runtime" has to mean the fast one, so the
+    # walk crossed; these are the semantics it has to keep.
+    assert by["MASKPRESENT"][1:] == ["None", "True"], \
+        "the shim probes these by name; without them it takes its Lua loop: %s" % out
+    assert by["MASKLOAD"][1] == "None", out
+    # Each drawn cell is one opaque 8x8 tile = 64 pixels. tile 0 NEVER draws
+    # (p8 semantics), so an unmasked walk draws 2 of the 4 cells, not 3.
+    assert by["MASK0"][1:] == ["(True,", "128)"], \
+        "unmasked walk: tiles 5 and 6, and NOT p8's tile 0: %s" % out
+    assert by["MASK1"][1:] == ["(True,", "64)"], out
+    assert by["MASK2"][1:] == ["(True,", "64)"], out
+    assert by["MASK4"][1:] == ["(True,", "0)"], \
+        "a mask nothing carries must draw nothing, not everything: %s" % out
 
     # A console with no sheet and no map is a legal console (a brand-new
     # project), and every sheet/map verb has to survive it: libmoy took those

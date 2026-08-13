@@ -609,13 +609,19 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # grant grows by the difference. The accepted edge: a FIRST wifi start
     # mid-cart can fail for RAM -- games are fullscreen so the wifi/OTA flows
     # normally run with no Lua cart loaded (a closed cart frees its whole heap).
-    try:
-        import moy_lua as _ml
-        _fl = getattr(_ml, "set_sram_floor", None)
-        if _fl is not None:
-            _diag_log("boot", "lua sram floor=%dKB" % _fl(24), diag)
-    except Exception:
-        pass
+    # BOTH runtimes: moycore has its own allocator with its own floor, and for
+    # a while only moy_lua's was lowered here -- so a cart on moycore kept the
+    # 48KB floor, which on this board's 269KB internal heap is the ~97%-PSRAM
+    # case the whole SRAM-first policy exists to avoid. Nothing said so; the
+    # cart was just slower.
+    for _mod in ("moy_lua", "moycore"):
+        try:
+            _m = __import__(_mod)
+            _fl = getattr(_m, "set_sram_floor", None)
+            if _fl is not None:
+                _diag_log("boot", "%s sram floor=%dKB" % (_mod, _fl(24)), diag)
+        except Exception:
+            pass
 
     # #66/#67 indexed-SRAM-canvas pricing: one MEMBENCH line at boot when PERF
     # DIAG is persisted on (the T-Deck has no serial RX to ask for it later; the

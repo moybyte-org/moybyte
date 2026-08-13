@@ -278,8 +278,22 @@ def _diag_luamem(diag, ws):
     try:
         if ws.perf_sample() is None:
             return
-        import moy_lua
-        st = moy_lua.alloc_stats()
+        # Whichever runtime is holding the cart. moycore reports the same four
+        # leading fields and stops there -- the size-class buckets existed to
+        # CHOOSE the SRAM-first policy, and the policy is chosen; what is left
+        # to watch is whether it took. A short tuple prints a short line rather
+        # than nothing, which is what the old unconditional st[15] would have
+        # done here.
+        st = None
+        try:
+            import moycore
+            if moycore.active():
+                st = moycore.alloc_stats()
+        except ImportError:
+            pass
+        if st is None:
+            import moy_lua
+            st = moy_lua.alloc_stats()
         if not st or (st[0] + st[1]) == 0:
             return
         # In-play internal-SRAM headroom rides along (#66 census): free +
@@ -295,6 +309,13 @@ def _diag_luamem(diag, ws):
         except Exception:
             pass
         k = 1024.0
+        if len(st) < 16:                    # moycore's four
+            diag.log("LUAMEM",
+                     "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%d "
+                     "int=%d/%dk core=1"
+                     % (st[0] / k, st[1] / k, st[2] / k, st[3],
+                        int_free // 1024, int_big // 1024))
+            return
         diag.log("LUAMEM",
                  "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%.0fKB "
                  "sc=%.1f/%.1f/%.1f/%.1f pc=%.1f/%.1f/%.1f/%.1f n=%d/%d "
