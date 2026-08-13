@@ -61,10 +61,11 @@ What that leaves as the S3's biggest lever is no longer the engine: chrome is
 exhausted — 23KB free, so the Lua heap runs 48.8KB SRAM against 110–265KB
 PSRAM even with the floor knob working correctly.
 Then §9's superset question, which is a product call and is what keeps lupa
-in `[dev,sim]` and `spr(Image)` on the Python raster; and the retirement of
-`LuaCartRun` itself, which stays deliberately — a fallback that fired for
-every real cart until 2026-08-13 has not earned deletion on two verified
-tiers out of three.** v9 — the ladder RE-SEQUENCES on a finding
+in `[dev,sim]` and `spr(Image)` on the Python raster; the §6.10
+batching rung (auto-batch belongs in libmoy, and taking it there is what lets
+`spr_batch`/`rect_batch`/`spans` LEAVE the cart API). (`LuaCartRun` is
+GONE as of 2026-08-13 — the deletion that rung had been holding, taken once
+moycore was actually equivalent; see §6.9's ledger.)** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
 the loop entry points, so those crossings are ABSORBED into stage 2 rather
 than written twice. v8: RUNG 1 IS DONE — stage 4 SHIPPED and the
@@ -891,6 +892,82 @@ EVERY cart in the tree, so the new path existed, the suite was green, and
 nothing took it. Whatever routes work to moycore, assert that something
 actually arrives -- per cart, by name. An untaken path is the failure mode
 these swaps are most likely to have.
+
+### 6.10 The batching rung — auto-batch belongs in libmoy, not in the verb table
+
+Opened 2026-08-13 from an owner question with a better answer than the one it
+was asked about. The chain: the Lua and Python cart APIs have diverged
+(`spr_batch`/`rect_batch`/`spans` marshal ARRAYS, so the bridge cannot carry
+them and a Lua cart cannot call them); the owner asked to DROP those verbs
+rather than port them, on the grounds that they are complicated to teach; and
+then asked whether automated batching could replace them.
+
+**It already does, and moycore broke it.** `DeviceCanvas` has carried the
+`spr_gate` auto-batch since #43/#63 — a plain `spr()` loop coalesces into ONE
+native `blit_batch`, which is why a kid never needed the explicit verb.
+moycore's `spr` is libmoy's `l_spr`, which draws each sprite immediately and
+never touches the gate. Two independent signs, both already on glass:
+
+  * celeste under moycore logs `BATCH flushes=0 sprites=0 maxrun=0` — the gate
+    sits idle for the whole run.
+  * Bench: Lua `spr` **15.5µs/sprite** against Python's batched **9.5µs**.
+
+`modmoy_lua.c`'s `l_spr` appended int16 quads straight into `_batch_arr` via the
+spr_gate protocol; that is what made a Lua sprite loop coalesce, and it was
+deleted with `LuaCartRun` on 2026-08-13 on the reasoning that libmoy's `spr`
+superseded it. It superseded the DRAWING, not the BATCHING. Recoverable from
+git rather than needing reinvention — but see the premise below before
+recovering it, because the right home may not be moycore at all.
+
+**THE PREMISE, WHICH IS NOT YET MEASURED.** Everything below rests on where the
+6µs goes, and the honest reading of the bench is a reconstruction, not a
+measurement:
+
+    Python individual   14.5µs  = ~5µs crossing + ~9.5µs batched pixels
+    Python batched       9.5µs  = pixels only
+    Lua under moycore   15.5µs  = no crossing at all
+
+If the batch win were only amortising the host crossing, Lua — which has none —
+would already sit at ~9.5. It sits at 15.5, which says the win is in the KERNEL
+(`blit_batch` hoists colorkey resolution, palette state and clip across a run;
+`moy_spr` redoes them per call). **That inference comes from two rows of a table
+taken on different carts and different runs.** Step one is therefore a direct
+A/B in one place: time N × `moy_spr` against one batched call of the same N on
+the unix build. It is twenty minutes and it decides whether this rung exists —
+if the gap is the crossing after all, libmoy has no problem to solve and Lua
+under moycore needs nothing.
+
+**If the premise holds, the shape is a KERNEL, not a VERB.** `moy_spr_batch(c,
+sheet, quads, n)` beside `moy_spr` in libmoy, with the host coalescing runs into
+it. Nothing enters SPEC.md's verb table: batching stays an implementation
+detail, so the API a kid learns does not grow by one word, and a cart that says
+`spr()` in a loop is fast in both languages by construction.
+
+Why upstream rather than in `moy_gfx`: the win is in the raster, and the raster
+is libmoy's. Building it here would be a parallel implementation of a libmoy
+concern — §3.5's disease, committed knowingly. Upstream it also lands in the
+wasm player and the ESP-IDF reference for free, and `moy_gfx`'s own
+`blit_batch` can then be deleted rather than maintained beside it.
+
+**What it deletes, which is the point.** `spr_batch`, `rect_batch` and `spans`
+leave the cart API entirely — from the docs, from `make_api`, from both boards.
+The two Python-only verbs that forced the twin carts apart go with them, so
+`ray_test`/`ray_lua` and `brick_siege`/`brick_siege_lua` become comparable BY
+CONSTRUCTION instead of by a cfg switch (the twin audit is in the bench commit;
+only the bench pair is an instrument today).
+
+`rect`'s gate is the genuinely new half — `spr` has one and `rect` does not, and
+`ray_test`'s whole thesis is that one `rect_batch` per frame is what makes
+software 3D affordable (its own header prices the wall pixels at ~0.03ms;
+per-column `rect` calls would be ~4.1ms). A span gate feeding `fill_spans` is
+the same shape as the sprite gate and is what lets that verb go.
+
+**And it settles the tier question §9 has been carrying.** Same verbs in both
+languages means a kid's cart is spec-portable — which is the thing actually
+being bought, and the reason to do this at all rather than document the
+divergence and move on. Today: blocks compile to `main.py`, `moy_carts.create`
+defaults to `runtime="python"`, so a kid never meets Lua and never meets the
+divergence either. That is why this is a rung and not a fire.
 
 ## 7. Architecture sketch (what changed from v1)
 
