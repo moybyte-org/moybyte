@@ -43,11 +43,18 @@ try:
 except ImportError:                      # a build without the module
     _moycore = None
 
-# The verbs libmoy's binding does NOT install, and which are therefore
-# registered on top of it from the cart's own api namespace. `Image` is
-# excluded for the same reason it always was: it is a constructor returning an
-# object, and objects do not cross this boundary -- layers and images travel as
-# int handles (the prelude's wrappers).
+# The verbs libmoy's binding does not install, registered on top of it from the
+# cart's own api namespace.
+#
+# NOT "moybyte's superset" -- that framing was wrong and it matters. SPEC.md 10
+# defines `layers` (make_layer/draw_layer/background) and `viewport` (view) as
+# STANDARD extensions, specified so two consoles implementing them implement
+# the same thing; the rest are moybyte's, namespaced `vendor.feature` exactly
+# as 10 requires. So this list is "optional spec features libmoy has not
+# implemented yet, plus our own", and the first group is an upstream gap rather
+# than a local invention. `Image` is excluded as always: it is a constructor
+# returning an object, and objects do not cross this boundary -- layers and
+# images travel as int handles (the prelude's wrappers).
 SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
             "actors", "touching", "move_actor", "move_actor_to",
             "remove_actor", "draw_scene", "table", "text", "view",

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 6,
   "title": "Sakura Lua",
   "type": "game",
   "runtime": "lua",
@@ -64,5 +64,9 @@
       ],
       "card": "BLOSSOMS ARE {value}"
     }
+  ],
+  "extensions": [
+    "layers",
+    "moybyte.images"
   ]
 }
