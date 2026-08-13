@@ -147,6 +147,8 @@ class MoycoreRun:
                 raise RuntimeError(err)
 
         self.snap[_moycore.SNAP_PLAYERS] = 1
+        self._view = None
+        self._sync_view()          # a view declared in _init must land now
         # init already ran inside run_begin (libmoy's moy_lua_init), so the
         # Player's `lua.init()` step has nothing left to do.
         self.init = None
@@ -193,6 +195,26 @@ class MoycoreRun:
                 s[_moycore.SNAP_TOUCH_DOWN] = 0
         s[_moycore.SNAP_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
+    def _sync_view(self):
+        """Apply the cart's view() to the console.
+
+        libmoy owns the verb (SPEC.md 6 core) and records the declaration; the
+        console still has to ACT on it -- ws.input.game_view is what the WM
+        composites from. So this reads the recording instead of the cart
+        crossing into Python to set it, which is the whole point of the verb
+        moving into core. Checked per frame because the spec allows a cart to
+        change its region at runtime, and skipped when unchanged so a cart that
+        declares once pays one comparison.
+        """
+        v = _moycore.view()
+        if v == self._view:
+            return
+        self._view = v
+        try:
+            self.ws.input.game_view = v
+        except Exception:  # noqa: BLE001 -- a console without the field is fine
+            pass
+
     def _drain_audio(self):
         n = self.aq[0]
         if n <= 0:
@@ -235,6 +257,7 @@ class MoycoreRun:
             _moycore.retarget(buf)
             self._buf = buf
         err = _moycore.tick(dt)
+        self._sync_view()
         self._drain_audio()
         if err:
             raise RuntimeError(err)

@@ -200,6 +200,8 @@ class MoycoreHostRun:
             raise RuntimeError(err)
         self._ns = ns
         self._ws = ws
+        self._view = None
+        self._sync_view()                   # a view declared in _init lands now
         self.init = None                    # load() already ran it
         self.update = self._update
         # The C loop runs _update and _draw back to back inside the tick, so
@@ -226,6 +228,7 @@ class MoycoreHostRun:
                 pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
         err = self._run.tick(dt)
+        self._sync_view()
         # Audio drains through the SAME api closures a Python cart uses, so the
         # engine's behaviour lives in one place; only the per-call trip is gone.
         for op, a, b, _c in self._run.audio():
@@ -246,6 +249,18 @@ class MoycoreHostRun:
                 pass
         if err:
             raise RuntimeError(err)
+
+    def _sync_view(self):
+        """Apply the cart's view() to the console -- libmoy owns the verb and
+        records it, the console still has to composite accordingly."""
+        v = self._run.view()
+        if v == self._view:
+            return
+        self._view = v
+        try:
+            self._ws.input.game_view = v
+        except Exception:  # noqa: BLE001
+            pass
 
     def get_global(self, name):
         """A cart global as a number, or None -- what the parity suites read."""

@@ -265,6 +265,17 @@ int hl_heap_peak_bytes(host_lua *r)
     return lua_gc(r->L, LUA_GCCOUNT, 0) * 1024 + lua_gc(r->L, LUA_GCCOUNTB, 0);
 }
 
+/* What the cart last declared with view(), or 0 when it has not. libmoy
+ * records it on the console (SPEC.md 6), so the host reads rather than being
+ * called -- see the device glue for why that matters. */
+int hl_get_view(host_lua *r, int *w, int *h)
+{
+    if (r->con.view_w <= 0) return 0;
+    *w = r->con.view_w;
+    *h = r->con.view_h;
+    return 1;
+}
+
 void hl_free(host_lua *r)
 {
     if (!r) return;

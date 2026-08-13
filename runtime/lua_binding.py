@@ -137,6 +137,8 @@ def _lib():
             # which truncates a 64-bit pointer and hands the C a garbage
             # host_lua*. That is a segfault, not a TypeError, so it presents as
             # "the process died" with no Python traceback.
+            d.hl_get_view.argtypes = [_P, ctypes.POINTER(_I), ctypes.POINTER(_I)]
+            d.hl_get_view.restype = _I
             d.hl_heap_bytes.argtypes = [_P]
             d.hl_heap_bytes.restype = _I
             d.hl_heap_peak_bytes.argtypes = [_P]
@@ -266,6 +268,13 @@ class HostLuaRun:
         img = (ctypes.c_int32 * 256)()
         dirty = self._d.hl_pmem_image(self._r, ctypes.cast(img, _P), 256)
         return bool(dirty), list(img)
+
+    def view(self):
+        """(w, h) as the cart last declared with view(), or None."""
+        w, h = _I(0), _I(0)
+        if self._d.hl_get_view(self._r, ctypes.byref(w), ctypes.byref(h)):
+            return (w.value, h.value)
+        return None
 
     def heap_bytes(self, collect=True):
         """The cart's Lua heap -- live after a collect, or as-reached."""
