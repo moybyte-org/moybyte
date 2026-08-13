@@ -299,6 +299,25 @@ class MoycoreRun:
     def _draw_noop(self):
         return None
 
+    def frame_split(self):
+        """(update_ms, draw_ms) for the last tick, or None.
+
+        The loop times `update()` and `draw()` to get its logic/render split,
+        and both of those happen inside our update() -- so without this the
+        diag reads `logic = the whole cart frame, render = 0`. Every per-cart
+        number recorded since #67 is a logic/render pair, so the lump does not
+        merely lose detail: compared against them it reads as a doubling of
+        logic that never happened. The C side still has the halves; this is how
+        they get back. A build whose module predates tick_split reports None
+        and the loop keeps its own timing, which is wrong in the old way rather
+        than crashing.
+        """
+        f = getattr(_moycore, "tick_split", None)
+        if f is None:
+            return None
+        upd, drw = f()
+        return (upd / 1000.0, drw / 1000.0)
+
     def _update(self, dt):
         """The whole cart frame. `draw` is None because this already drew: the
         C loop runs _update and _draw back to back, which is the point."""

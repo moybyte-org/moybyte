@@ -924,6 +924,17 @@ class Player:
                 if _perf:
                     upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
                     cart = _ticks_diff(_td, _tm) + bg     # cart _draw + backdrop -> RENDERING
+                    # A runtime that runs the WHOLE cart frame inside update()
+                    # (moycore: _update and _draw back to back in C) makes those
+                    # two clocks read `logic = everything, render = 0`. It can
+                    # still say where its own time went, in microseconds, so ask
+                    # -- otherwise every logic/render pair this project has
+                    # recorded since #67 becomes incomparable to the next one.
+                    _fs = getattr(self._lua, "frame_split", None)
+                    if _fs is not None:
+                        _sp = _fs()
+                        if _sp is not None:
+                            upd, cart = _sp[0], _sp[1] + bg
                     aud = _ticks_diff(_ticks_ms(), _td)   # audio.tick (mixer feed)
                     ws._pf_upd = upd
                     ws._pf_cart = cart

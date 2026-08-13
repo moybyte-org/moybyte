@@ -87,6 +87,9 @@ for f in range(4):
         if b:
             nz += 1
     print("F", f, err, nz, aq[0], list(aq[1:1 + moycore.AQ_SLOTS]))
+sp = moycore.tick_split()
+print("SPLIT", len(sp), 1 if (sp[0] >= 0 and sp[1] >= 0) else 0,
+      1 if (sp[0] + sp[1]) > 0 else 0)
 print("PMEM", moycore.pmem_image(pm), pm[0])
 moycore.close()
 print("CLOSED", moycore.active())
@@ -275,6 +278,15 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
         "btnp edge did not reach the cart as sfx(3): %s" % out
     assert frames[2][4] == "1" and frames[2][5:] == ["[0,", "5,", "2,", "0]"], \
         "btn held did not reach the cart as sfx(5, 2): %s" % out
+
+    # The tick's two halves, in microseconds. The loop times update() and
+    # draw() to get its logic/render split and moycore runs BOTH inside
+    # update(), so without this the diag reads `logic = the whole frame,
+    # render = 0` -- which against every logic/render pair recorded since #67
+    # looks like logic doubling. Both halves non-negative and something
+    # measurable in the pair; the actual durations are a machine's business.
+    assert by["SPLIT"][1:] == ["2", "1", "1"], \
+        "tick_split must report both halves of the last tick: %s" % out
 
     # pmem: 41 from _init plus one per frame, and the dirty flag armed.
     assert by["PMEM"][1] == "True" and by["PMEM"][2] == "45", out
