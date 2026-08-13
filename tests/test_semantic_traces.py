@@ -322,6 +322,21 @@ class ScriptInput:
     def pressed(self, name):
         return name in self._cur and name not in self._prev
 
+    # moycore's snapshot asks for both masks in one call and has no fallback
+    # path -- see moycore_glue._refresh for why. A stub that drives it
+    # implements this, which also means the harness exercises the SAME code
+    # production does rather than a slow lane kept alive for tests.
+    _BIT = {n: 1 << i for i, n in enumerate(
+        ("left", "right", "up", "down", "a", "b", "run", "home"))}
+
+    def button_masks(self):
+        h = p = 0
+        for n in self._cur:
+            h |= self._BIT.get(n, 0)
+            if n not in self._prev:
+                p |= self._BIT.get(n, 0)
+        return h, p
+
 
 class RecAudio:
     def __init__(self):

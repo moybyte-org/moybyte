@@ -56,6 +56,15 @@ try:
 except ImportError:                      # a build without the module
     _moycore = None
 
+# Hoisted out of _refresh, where it was an `import` statement executed once per
+# frame. Device-only, so it stays optional: the host and the web runner have no
+# device_util and simply skip the time slot (libmoy adds the intra-tick elapsed
+# term itself -- see modmoycore.c's h_time_ms).
+try:
+    from device_util import _ticks_ms, _ticks_diff
+except ImportError:
+    _ticks_ms = _ticks_diff = None
+
 # The verbs libmoy's binding does not install, registered on top of it from the
 # cart's own api namespace.
 #
@@ -113,10 +122,10 @@ NOT_REGISTRABLE = frozenset((
     "table",                               # goes in as moy_table_verb (#164)
 ))
 
-# moy_button bit positions, SPEC.md 7.1 order. The snapshot packs them into one
-# int; this is the only place the two orders meet, so it is a table rather than
-# an assumption spread across the file.
-BUTTONS = ("left", "right", "up", "down", "a", "b", "run", "home")
+# The moy_button bit order lives in ONE place now -- InputState._BIT, built
+# from InputState.BUTTONS -- and reaches the snapshot through button_masks().
+# This module used to carry its own copy of the tuple, which is two orders that
+# had to agree and no test that they did.
 
 
 class MoycoreRun:
@@ -138,6 +147,16 @@ class MoycoreRun:
         sheet = getattr(project, "sheet", None) if project is not None else None
         tilemap = getattr(project, "tilemap", None) if project is not None else None
 
+        # Slot numbers bound ONCE: every one of these was a module attribute
+        # lookup per frame in _refresh.
+        self._I_BTN = _moycore.SNAP_BTN
+        self._I_BTNP = _moycore.SNAP_BTNP
+        self._I_TIME = _moycore.SNAP_TIME_MS
+        self._I_TX = _moycore.SNAP_TOUCH_X
+        self._I_TY = _moycore.SNAP_TOUCH_Y
+        self._I_TD = _moycore.SNAP_TOUCH_DOWN
+        self._I_TMS = _moycore.SNAP_TOUCH_MS
+        self._I_KEY = _moycore.SNAP_KEY
         self.snap = array("i", bytearray(4 * _moycore.SNAP_LEN))
         self.aq = array("h", bytearray(2 * (1 + _moycore.AQ_SLOTS * self.AUDIO_MAX)))
         self.pmem_img = array("i", bytearray(4 * 256))
@@ -215,39 +234,52 @@ class MoycoreRun:
     # -- the frame ----------------------------------------------------------
 
     def _refresh(self):
+        """Fill the snapshot the tick will read. Runs before EVERY frame, so
+        what it costs is what every Lua cart pays before its own code starts.
+
+        It cost ~1ms on the S3 and that was visible on glass: the Bench twins'
+        FLOOR phase (the console's own frame, cart doing nothing) read 18ms for
+        Python and 19ms for Lua, and the whole game-scene gap was this, not the
+        scene. Which is the wrong way round for the glue whose entire job is to
+        stop a cart making per-frame Python calls -- moycore deleted hundreds of
+        crossings from the cart and this function put thirty back.
+
+        What went: sixteen held/pressed calls (~6.35us each on that board --
+        `CALIB call4=635us/100`) became ONE `button_masks()`; an `import`
+        statement that ran every frame moved to module scope; and the SNAP_*
+        slot numbers are bound once at construction instead of being looked up
+        on the module object a dozen times a frame."""
         s = self.snap
-        ws = self.ws
-        inp = ws.input
-        held = pressed = 0
-        for i in range(len(BUTTONS)):
-            name = BUTTONS[i]
+        inp = self.ws.input
+        # No fallback path here, deliberately. Every tier builds a real
+        # InputState (host_app, web_boot, both boards' run_desktop) and the
+        # multiplayer PlayerRouter is ATTACHED to it rather than replacing it,
+        # so `button_masks` is always there. A getattr-guarded slow path would
+        # exist only to be taken by test stubs -- i.e. the suite would exercise
+        # a path production never runs, which is the failure mode this plan
+        # keeps getting bitten by. A stub that wants to drive moycore
+        # implements the method.
+        held, pressed = inp.button_masks()
+        s[self._I_BTN] = held
+        s[self._I_BTNP] = pressed
+        if _ticks_ms is not None:
             try:
-                if inp.held(name):
-                    held |= 1 << i
-                if inp.pressed(name):
-                    pressed |= 1 << i
-            except Exception:  # noqa: BLE001 -- a missing button is not held
+                s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
+            except Exception:  # noqa: BLE001
                 pass
-        s[_moycore.SNAP_BTN] = held
-        s[_moycore.SNAP_BTNP] = pressed
-        try:
-            from device_util import _ticks_ms, _ticks_diff
-            s[_moycore.SNAP_TIME_MS] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)
-        except Exception:  # noqa: BLE001
-            pass
         # The pointer, in the cart's own coordinates. touch() reads nil when
         # down is 0, which is what "no pointer" means in SPEC.md 7.3.
         t = getattr(inp, "touch_state", None)
         if t is not None:
             try:
                 x, y, down, ms = t()
-                s[_moycore.SNAP_TOUCH_X] = int(x)
-                s[_moycore.SNAP_TOUCH_Y] = int(y)
-                s[_moycore.SNAP_TOUCH_DOWN] = 1 if down else 0
-                s[_moycore.SNAP_TOUCH_MS] = int(ms)
+                s[self._I_TX] = int(x)
+                s[self._I_TY] = int(y)
+                s[self._I_TD] = 1 if down else 0
+                s[self._I_TMS] = int(ms)
             except Exception:  # noqa: BLE001
-                s[_moycore.SNAP_TOUCH_DOWN] = 0
-        s[_moycore.SNAP_KEY] = int(getattr(inp, "last_key", 0) or 0)
+                s[self._I_TD] = 0
+        s[self._I_KEY] = int(getattr(inp, "last_key", 0) or 0)
 
     def _sync_view(self):
         """Apply the cart's view() to the console.

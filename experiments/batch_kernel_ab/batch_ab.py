@@ -20,8 +20,8 @@ import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join("/home/nikola/Documents/Work/moybyte", "tests"))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, "tests"))   # for the unix-build path
 import test_moycore_loop as t                                    # noqa: E402
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 200

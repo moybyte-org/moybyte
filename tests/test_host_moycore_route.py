@@ -116,3 +116,46 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
         assert after > before, "the C loop drew nothing into the host canvas"
     finally:
         run.close()
+
+
+def test_button_masks_agree_with_the_per_name_walk():
+    """The fast path and the slow path must produce identical bitmasks.
+
+    moycore's snapshot refresh built these two integers with sixteen
+    `held`/`pressed` calls -- ~100us of pure call overhead per frame on the S3,
+    in the glue whose whole job is to stop a cart making calls like that. It
+    asks `button_masks()` for both in one call now, and the failure mode of
+    that swap is not a crash but SUBTLY WRONG INPUT, which would present as a
+    cart that mostly works. So: every combination, both ways, must agree.
+    """
+    from runtime.input import InputState
+
+    names = InputState.BUTTONS
+    for combo in range(1 << len(names)):          # all 256 held-sets
+        inp = InputState()
+        inp.begin_frame()                          # frame 1: nothing held
+        for i, n in enumerate(names):
+            if combo & (1 << i):
+                inp.set_held(n, True)
+        inp.begin_frame()                          # frame 2: these are PRESSED
+        want_h = want_p = 0
+        for i, n in enumerate(names):
+            if inp.held(n):
+                want_h |= 1 << i
+            if inp.pressed(n):
+                want_p |= 1 << i
+        assert inp.button_masks() == (want_h, want_p), combo
+        inp.begin_frame()                          # frame 3: held, not pressed
+        want_h2 = 0
+        for i, n in enumerate(names):
+            if inp.held(n):
+                want_h2 |= 1 << i
+        assert inp.button_masks() == (want_h2, 0), combo
+
+    # A name outside BUTTONS must not corrupt the mask (the set can hold keys
+    # the button table has never heard of).
+    inp = InputState()
+    inp.set_held("zorp", True)
+    inp.set_held("a", True)
+    inp.begin_frame()
+    assert inp.button_masks() == (1 << names.index("a"), 1 << names.index("a"))
