@@ -47,14 +47,19 @@ under a conformance cart, on-glass suite 22/22); `canvas.py`'s verbs
 delegate to libmoy with the conformance goldens unchanged; the host runs
 the boards' own Lua for every cart.
 
-**The P4 is FLASHED and verified (2026-08-13, the deletion build):** on-glass
-suite 22/22, spec conformance 10/10 against the board, every Lua cart a
-`MoycoreRun`, and the stage-2 GC claim finally measured — **a 60.1s celeste
-window with ZERO hitches** where the case was built on 160–200ms collects every
-~6s. Numbers in #66. **The T-Deck is not**, and it is the board the GC claim was
-originally written about, so treat that result as one board and the friendly
-one; flashing it needs a hand on the hardware (no BOOT button; the trackball IS
-GPIO0).
+**BOTH BOARDS ARE FLASHED AND MEASURED (2026-08-13, the deletion build).**
+P4: on-glass suite 22/22, spec conformance 10/10 against the board, every Lua
+cart a `MoycoreRun`, a 60.1s celeste window with zero hitches — and fps
+UNCHANGED, because that roster was already at the 60 cap and the deletable slice
+was 2–4ms of a 33ms frame. **The S3 is where the case was, and it paid:
+celeste p50 30 → 43 fps, worst 27 → 39, GC 2 collects/57s at 192–195ms → 1 at
+149ms.** M0(c)'s gate ("p50 ≥ 30 AND worst ≥ 28"), which last month failed on
+the floor by one sample, now passes with room. Numbers and caveats in #66.
+
+What that leaves as the S3's biggest lever is no longer the engine: chrome is
+**2.2× the entire cart** (10.17ms against 4.56ms), and internal SRAM is
+exhausted — 23KB free, so the Lua heap runs 48.8KB SRAM against 110–265KB
+PSRAM even with the floor knob working correctly.
 Then §9's superset question, which is a product call and is what keeps lupa
 in `[dev,sim]` and `spr(Image)` on the Python raster; and the retirement of
 `LuaCartRun` itself, which stays deliberately — a fallback that fired for
