@@ -539,3 +539,34 @@ float moy_rnd(moy_console *con, float n)
     con->rng = x;
     return (float)((double)x / 4294967296.0) * n;
 }
+
+/* SPEC.md 10 `layers`. See moy.h for why this ignores camera, clip and pal:
+ * it composites a finished buffer rather than drawing into one, which is the
+ * same reason cls ignores them.
+ *
+ * The clamp is what makes a layer usable as a scrolling world without the cart
+ * doing bounds arithmetic: a window that runs off the edge repeats the edge
+ * column or row instead of reading outside the buffer. A host that wants the
+ * other behaviour clamps its own camera before calling. */
+void moy_blit_window(moy_canvas *dst, const moy_canvas *src, int cam_x, int cam_y)
+{
+    int y;
+    if (!dst || !src || !dst->pix || !src->pix) return;
+    if (src->w <= 0 || src->h <= 0) return;
+    for (y = 0; y < dst->h; y++) {
+        int sy = cam_y + y;
+        int x;
+        const moy_pixel *srow;
+        moy_pixel *drow;
+        if (sy < 0) sy = 0;
+        if (sy >= src->h) sy = src->h - 1;
+        srow = src->pix + (size_t)sy * (size_t)src->w;
+        drow = dst->pix + (size_t)y * (size_t)dst->w;
+        for (x = 0; x < dst->w; x++) {
+            int sx = cam_x + x;
+            if (sx < 0) sx = 0;
+            if (sx >= src->w) sx = src->w - 1;
+            drow[x] = srow[sx];
+        }
+    }
+}

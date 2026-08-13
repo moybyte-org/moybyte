@@ -682,6 +682,24 @@ static mp_obj_t mod_get_global(mp_obj_t name_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_get_global_obj, mod_get_global);
 
+// view() -> (w, h) as the cart last declared it, or None.
+//
+// SPEC.md 6 made view a core verb that RECORDS on the console whether or not
+// the host takes a callback, which means the host can read it after the tick
+// instead of being called during one. So moybyte's view() costs zero crossings
+// now: libmoy answers the cart, the console reads the answer here, and the WM
+// composites accordingly. That is the whole shape the spec's host interface was
+// built for, and it only became available because the verb moved into core.
+static mp_obj_t mod_view(void)
+{
+    if (!RUN.open || RUN.con.view_w <= 0) return mp_const_none;
+    mp_obj_t t[2];
+    t[0] = mp_obj_new_int(RUN.con.view_w);
+    t[1] = mp_obj_new_int(RUN.con.view_h);
+    return mp_obj_new_tuple(2, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_view_obj, mod_view);
+
 static mp_obj_t mod_active(void) { return mp_obj_new_bool(RUN.open); }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_active_obj, mod_active);
 
@@ -696,6 +714,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
+    { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },
     // The snapshot layout, exported so the Python side cannot drift from it.
     { MP_ROM_QSTR(MP_QSTR_SNAP_LEN),    MP_ROM_INT(SNAP_LEN) },
     { MP_ROM_QSTR(MP_QSTR_SNAP_BTN),    MP_ROM_INT(SNAP_BTN) },

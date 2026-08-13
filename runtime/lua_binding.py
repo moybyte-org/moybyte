@@ -137,6 +137,10 @@ def _lib():
             # which truncates a 64-bit pointer and hands the C a garbage
             # host_lua*. That is a segfault, not a TypeError, so it presents as
             # "the process died" with no Python traceback.
+            d.hl_heap_bytes.argtypes = [_P]
+            d.hl_heap_bytes.restype = _I
+            d.hl_heap_peak_bytes.argtypes = [_P]
+            d.hl_heap_peak_bytes.restype = _I
             d.hl_get_global_len.argtypes = [_P, _C]
             d.hl_get_global_len.restype = _I
             d.hl_get_global_num.argtypes = [_P, _C, ctypes.POINTER(ctypes.c_double)]
@@ -262,6 +266,12 @@ class HostLuaRun:
         img = (ctypes.c_int32 * 256)()
         dirty = self._d.hl_pmem_image(self._r, ctypes.cast(img, _P), 256)
         return bool(dirty), list(img)
+
+    def heap_bytes(self, collect=True):
+        """The cart's Lua heap -- live after a collect, or as-reached."""
+        if collect:
+            return self._d.hl_heap_bytes(self._r)
+        return self._d.hl_heap_peak_bytes(self._r)
 
     def get_global(self, name):
         """A cart global as a number, or None."""

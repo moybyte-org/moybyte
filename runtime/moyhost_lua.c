@@ -249,6 +249,22 @@ int hl_get_global_len(host_lua *r, const char *name)
     return n;
 }
 
+/* The Lua heap in bytes -- what SPEC.md 1.1's "Cart heap" row budgets. Taken
+ * after a full collect so it is live data rather than uncollected garbage:
+ * the floor has to cover what a cart KEEPS, and a host may collect whenever. */
+int hl_heap_bytes(host_lua *r)
+{
+    lua_gc(r->L, LUA_GCCOLLECT, 0);
+    return lua_gc(r->L, LUA_GCCOUNT, 0) * 1024 + lua_gc(r->L, LUA_GCCOUNTB, 0);
+}
+
+/* The same WITHOUT collecting: what the heap actually reaches mid-play, which
+ * is the number that decides whether a host must reserve headroom. */
+int hl_heap_peak_bytes(host_lua *r)
+{
+    return lua_gc(r->L, LUA_GCCOUNT, 0) * 1024 + lua_gc(r->L, LUA_GCCOUNTB, 0);
+}
+
 void hl_free(host_lua *r)
 {
     if (!r) return;

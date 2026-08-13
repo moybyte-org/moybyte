@@ -429,7 +429,170 @@ static int l_textmode(lua_State *L)
     return 0;
 }
 
+
+/* -- SPEC.md 10 extensions ------------------------------------------------
+ *
+ * Installed only when the host supplies the matching callback, because 10 says
+ * an extension's verbs "simply do not exist as globals on a host without it" --
+ * so the capability is the pointer, and a cart's `if view ~= nil` is answering
+ * a real question.
+ *
+ * `layers` is a full drawing surface, and the trick that keeps it from being a
+ * second implementation of the verb table is that it reuses the FIRST one: a
+ * layer method swaps con->canvas, calls the ordinary verb unchanged, and swaps
+ * back. Every verb already takes its canvas from the console, none of them
+ * raise (argi() coerces rather than checks), and the layer's method receiver is
+ * removed before the call so the verb sees exactly the arguments it always
+ * does. Twenty verbs, one wrapper, and no way for the two paths to disagree
+ * about what rect() means.
+ */
+
+#define LAYER_MT "moy.layer"
+
+typedef struct {
+    moy_canvas c;
+    moy_pixel *pix;          /* the host's buffer, for layer_free */
+} moy_lua_layer;
+
+/* The verbs a layer answers: everything that draws, and the draw STATE that
+ * scopes it. Not spr's siblings from other extensions, and not input/audio --
+ * a layer is a surface, not a console. */
+static const luaL_Reg LAYER_VERBS[] = {
+    {"cls", l_cls}, {"pix", l_pix}, {"line", l_line}, {"rect", l_rect},
+    {"rectb", l_rectb}, {"circ", l_circ}, {"circb", l_circb},
+    {"print", l_print}, {"camera", l_camera}, {"clip", l_clip},
+    {"pal", l_pal}, {"palt", l_palt},
+    {"spr", l_spr}, {"map", l_map},
+    {"tri", l_tri}, {"trib", l_trib}, {"sspr", l_sspr}, {"tline", l_tline},
+    {NULL, NULL}
+};
+
+static int l_layer_method(lua_State *L)
+{
+    moy_lua_layer *ly = (moy_lua_layer *)luaL_checkudata(L, 1, LAYER_MT);
+    int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
+    moy_console *con = con_of(L);
+    moy_canvas *save;
+    int n;
+    lua_remove(L, 1);                       /* drop `self`: the verb sees its
+                                               own argument list, unshifted */
+    save = con->canvas;
+    con->canvas = &ly->c;
+    n = LAYER_VERBS[idx].func(L);
+    con->canvas = save;
+    return n;
+}
+
+static int l_make_layer(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    int w = argi(L, 1, MOY_W), h = argi(L, 2, MOY_H);
+    moy_pixel *pix;
+    moy_lua_layer *ly;
+    /* A host that supplies no allocator can still be conforming only if no
+     * cart asks -- 1.1 reserves one layer, so this is the "asked for more than
+     * I reserved" path and nil is its answer, same as a refused allocation. */
+    if (w <= 0 || h <= 0 || !con->host.layer_new) return 0;      /* nil */
+    pix = con->host.layer_new(con->host.user, w, h);
+    if (!pix) return 0;          /* the host declined (no room): nil, not an
+                                    error -- a cart can test for it */
+    ly = (moy_lua_layer *)lua_newuserdata(L, sizeof(moy_lua_layer));
+    ly->pix = pix;
+    moy_canvas_init(&ly->c, pix, w, h);
+#ifdef MOY_PIXEL_RGB565
+    /* A layer is composited onto the screen verbatim, so it must encode
+     * colours the way the screen does. */
+    moy_canvas_wire(&ly->c, con->canvas->wire);
+#endif
+    luaL_getmetatable(L, LAYER_MT);
+    lua_setmetatable(L, -2);
+    return 1;
+}
+
+static int l_draw_layer(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    moy_lua_layer *ly = (moy_lua_layer *)luaL_checkudata(L, 1, LAYER_MT);
+    moy_blit_window(con->canvas, &ly->c, argi(L, 2, 0), argi(L, 3, 0));
+    return 0;
+}
+
+static int l_background(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    con->bg = argi(L, 1, 0);
+    con->has_bg = 1;
+    /* A host that can do better than a full clear -- restore a cached
+     * backdrop, blit a prepared layer -- takes it here. One that cannot does
+     * nothing, and moy_lua_draw clears for it. Either way the cart's call
+     * worked, which is why this verb needs no guard. */
+    if (con->host.background) con->host.background(con->host.user, con->bg);
+    return 0;
+}
+
+static int l_layer_gc(lua_State *L)
+{
+    moy_lua_layer *ly = (moy_lua_layer *)luaL_checkudata(L, 1, LAYER_MT);
+    moy_console *con = con_of(L);
+    if (ly->pix && con->host.layer_free) {
+        con->host.layer_free(con->host.user, ly->pix);
+    }
+    ly->pix = NULL;
+    return 0;
+}
+
+static int l_view(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    con->view_w = argi(L, 1, MOY_W);
+    con->view_h = argi(L, 2, MOY_H);
+    if (con->view_w < 0) con->view_w = 0;
+    if (con->view_h < 0) con->view_h = 0;
+    /* The declaration is recorded whatever the host does with it: a host may
+     * poll con->view_w instead of taking a callback, and a host that ignores
+     * it entirely simply presents the whole canvas -- the cart's region drawn
+     * unscaled, which is the honest degrade and the reason this verb does not
+     * need guarding. */
+    if (con->host.view) con->host.view(con->host.user, con->view_w, con->view_h);
+    return 0;
+}
+
+/* Install whichever extensions this host implements. */
+static void open_extensions(lua_State *L, moy_console *con)
+{
+    /* All CORE (SPEC.md 6). None of these is gated on a host callback, because
+     * none of them can leave a cart unable to tell it was denied: view and
+     * background degrade truthfully (unscaled presentation; a clear), and
+     * 1.1's floor reserves one full-screen layer, so make_layer succeeds at
+     * least once everywhere. What a host may still refuse is the SECOND layer
+     * -- which surfaces as nil from make_layer, an ordinary allocation failure
+     * a cart tests for rather than a verb that is missing. */
+    lua_pushcfunction(L, l_view);
+    lua_setglobal(L, "view");
+    lua_pushcfunction(L, l_background);
+    lua_setglobal(L, "background");
+    {
+        int i;
+        luaL_newmetatable(L, LAYER_MT);
+        lua_newtable(L);                              /* the method table */
+        for (i = 0; LAYER_VERBS[i].name; i++) {
+            lua_pushinteger(L, i);
+            lua_pushcclosure(L, l_layer_method, 1);
+            lua_setfield(L, -2, LAYER_VERBS[i].name);
+        }
+        lua_setfield(L, -2, "__index");
+        lua_pushcfunction(L, l_layer_gc);
+        lua_setfield(L, -2, "__gc");
+        lua_pop(L, 1);                                /* the metatable */
+        lua_pushcfunction(L, l_make_layer);
+        lua_setglobal(L, "make_layer");
+        lua_pushcfunction(L, l_draw_layer);
+        lua_setglobal(L, "draw_layer");
+    }
+}
+
 /* -- installation -------------------------------------------------------- */
+
 
 static const luaL_Reg VERBS[] = {
     {"cls", l_cls}, {"pix", l_pix}, {"line", l_line}, {"rect", l_rect},
@@ -497,6 +660,10 @@ int moy_lua_open(struct lua_State *Ls, moy_console *con)
         lua_pushcfunction(L, v->func);
         lua_setglobal(L, v->name);
     }
+    /* SPEC.md 10's optional features, each installed only if this host
+     * implements it -- so a cart's `if make_layer ~= nil` is a real question
+     * with a real answer, and a host that implements none is unchanged. */
+    open_extensions(L, con);
     /* SPEC.md 9: read these, do not assume 320x240. */
     lua_pushinteger(L, con->canvas->w);
     lua_setglobal(L, "W");
@@ -546,5 +713,14 @@ int moy_lua_update(struct lua_State *L, float dt, char *err, size_t errlen)
 
 int moy_lua_draw(struct lua_State *L, char *err, size_t errlen)
 {
+    /* SPEC.md 10: background(x) declares a backdrop repainted each frame. A
+     * host that took the callback has already done it its own way; one that
+     * did not gets it here, which is what lets a cart call background()
+     * unguarded on every console. Before _draw, where the cart would have
+     * cls()'d itself. */
+    moy_console *con = con_of((lua_State *)L);
+    if (con && con->has_bg && !con->host.background) {
+        moy_cls(con->canvas, con->bg);
+    }
     return call_hook((lua_State *)L, "_draw", 0, err, errlen);
 }

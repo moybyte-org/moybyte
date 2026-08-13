@@ -89,6 +89,19 @@ print("PMEM", moycore.pmem_image(pm), pm[0])
 moycore.close()
 print("CLOSED", moycore.active())
 
+# view and background are CORE upstream now, so libmoy answers them and the
+# host READS the result instead of being called -- zero crossings for view.
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+print("VIEW0", moycore.view())
+print("VIEWLOAD", moycore.load(
+    "function _init() view(128, 120) background(5) end\n"
+    "function _update(dt) end\n"
+    "function _draw() rect(0, 0, 2, 2, 9) end\n", "@view"))
+moycore.tick(0.03125)
+print("VIEW1", moycore.view())
+print("BG", 1 if fb[(63 * W + 95) * 2] or fb[(63 * W + 95) * 2 + 1] else 0)
+moycore.close()
+
 # The superset rides the same runtime: register a Python-backed verb, then a
 # cart that calls it.
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
@@ -150,6 +163,14 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # pmem: 41 from _init plus one per frame, and the dirty flag armed.
     assert by["PMEM"][1] == "True" and by["PMEM"][2] == "45", out
     assert by["CLOSED"][1] == "False", out
+
+    # view/background reached the cart with no trampoline registered for them.
+    assert by["VIEW0"][1] == "None", out
+    assert by["VIEWLOAD"][1] == "None", out
+    assert by["VIEW1"][1:] == ["(128,", "120)"], \
+        "libmoy did not record the cart's view() for the host to read: %s" % out
+    assert by["BG"][1] == "1", \
+        "background() did not clear -- libmoy owns that when no host takes it: %s" % out
 
     # The superset registers onto the SAME runtime and the cart calls it.
     assert by["EXT"][1] == "None", out

@@ -55,10 +55,21 @@ except ImportError:                      # a build without the module
 # than a local invention. `Image` is excluded as always: it is a constructor
 # returning an object, and objects do not cross this boundary -- layers and
 # images travel as int handles (the prelude's wrappers).
+# NOT view or background: SPEC.md 6 made both core, so libmoy installs them and
+# registering ours would SHADOW the C with a trampoline -- the wrong direction.
+# view costs nothing now (libmoy records it; read it back with moycore.view()),
+# and background is a clear libmoy does itself.
+#
+# make_layer/draw_layer ARE still registered even though libmoy has them, and
+# deliberately: moybyte's layers accept an Image (`lay:spr(image("bg"), ...)`),
+# which is the moybyte.images vendor extension and not something libmoy's
+# sheet-tile spr can take. Registering after moy_lua_open shadows libmoy's with
+# the richer pair. A cart using only spec verbs on a layer would be equally
+# happy with libmoy's; the shadow costs it one upcall per layer draw.
 SUPERSET = ("make_layer", "draw_layer", "image", "scene", "load_scene",
             "actors", "touching", "move_actor", "move_actor_to",
-            "remove_actor", "draw_scene", "table", "text", "view",
-            "spr_batch", "rect_batch", "spans", "mouse", "background",
+            "remove_actor", "draw_scene", "table", "text",
+            "spr_batch", "rect_batch", "spans", "mouse",
             "col", "on_net", "fget", "fset", "mouse_wheel")
 
 # moy_button bit positions, SPEC.md 7.1 order. The snapshot packs them into one

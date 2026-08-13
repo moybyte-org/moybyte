@@ -62,10 +62,10 @@ function _init()
 
   if cfg("low_res", 0) ~= 0 then
     VW, VH = 160, 120
-    -- SPEC.md 10: `viewport` is an optional extension. Used opportunistically
-    -- and guarded, so this cart declares nothing and still runs on a host
-    -- without it -- just letterboxed at 1x, which the centering below handles.
-    if view ~= nil then view(VW, VH) end
+    -- SPEC.md 6: view is core and always present. A console that cannot
+    -- composite a scaled region draws this one unscaled, which the centering
+    -- below already handles -- so no guard, and nothing to declare.
+    view(VW, VH)
   else
     VW, VH = W, H
   end
