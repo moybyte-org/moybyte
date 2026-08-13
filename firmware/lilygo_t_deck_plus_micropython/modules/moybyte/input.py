@@ -44,6 +44,24 @@ class InputState:
         else:
             self._held.discard(name)
 
+    # name -> bit, in BUTTONS order. Twin of runtime/input.py's -- see the
+    # note there. THESE TWO CLASSES SHOULD BE ONE; today they are not, and
+    # adding a method to only one of them is what dropped a cart into the
+    # code editor with `no attribute button_masks`.
+    _BIT = {n: 1 << i for i, n in enumerate(BUTTONS)}
+
+    def button_masks(self):
+        """(held, pressed) as bitmasks over BUTTONS order, in ONE call --
+        moycore's per-frame snapshot needs exactly these two integers and was
+        building them with sixteen held/pressed calls (~6.35us each here)."""
+        h = p = 0
+        bit = self._BIT
+        for n in self._held:
+            h |= bit.get(n, 0)
+        for n in self._pressed:
+            p |= bit.get(n, 0)
+        return h, p
+
     def held(self, name):
         return name in self._held
 

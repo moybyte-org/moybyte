@@ -259,7 +259,24 @@ class MoycoreRun:
         # a path production never runs, which is the failure mode this plan
         # keeps getting bitten by. A stub that wants to drive moycore
         # implements the method.
-        held, pressed = inp.button_masks()
+        masks = getattr(inp, "button_masks", None)
+        if masks is None:
+            # The guard is BACK, and the reason is worth keeping: it was removed
+            # on the argument that every tier builds the real InputState, which
+            # was wrong -- there are TWO InputState classes (runtime/input.py
+            # and modules/moybyte/input.py), the boards use the second, and
+            # removing this dropped a Lua cart into the crash-to-code editor
+            # with `no attribute button_masks`. A per-frame getattr is cheap
+            # insurance against an input object this file has never heard of.
+            held = pressed = 0
+            for i, name in enumerate(("left", "right", "up", "down",
+                                      "a", "b", "run", "home")):
+                if inp.held(name):
+                    held |= 1 << i
+                if inp.pressed(name):
+                    pressed |= 1 << i
+        else:
+            held, pressed = masks()
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
         if _ticks_ms is not None:
