@@ -197,10 +197,32 @@ static int h_players(void *user)
     return n < 1 ? 1 : n;
 }
 
+// The frame's base time, stamped when the tick begins. See h_time_ms.
+static uint32_t g_tick_ms;
+
+// time() -- the snapshot's base PLUS the milliseconds elapsed inside this tick.
+//
+// The base alone was the whole answer once, and it was wrong in a way no test
+// could see: input is deliberately FROZEN for a frame (a cart polling btn() 60
+// times must get one consistent answer), and time got bundled in with it. But a
+// frozen clock is not a clock. Anything that measures its own work inside a
+// frame reads zero, forever.
+//
+// Bench Lua is exactly that program: it grows a batch until the batch costs at
+// least TARGET_MS, measured with time(). Against a frozen clock the cost is
+// always 0, so it doubles the batch every frame and never stops -- on glass, a
+// purple screen and "cls k=32768" climbing. The cart was fine.
+//
+// The base still comes from the host, so the console keeps authority over what
+// "since the cart started" means (and over anything that would reset it); C
+// only adds the part the host cannot see. No crossing either way -- this is a
+// hardware counter read.
 static uint32_t h_time_ms(void *user)
 {
+    uint32_t base;
     (void)user;
-    return RUN.snap ? (uint32_t)RUN.snap[SNAP_TIME_MS] : 0;
+    base = RUN.snap ? (uint32_t)RUN.snap[SNAP_TIME_MS] : 0;
+    return base + ((uint32_t)mp_hal_ticks_ms() - g_tick_ms);
 }
 
 static int32_t h_pmem_get(void *user, int slot)
@@ -784,6 +806,10 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
     mp_obj_t err_obj = run_chunk(src_obj, name_obj);
     if (err_obj != mp_const_none) return err_obj;
     char err[192];
+    // _init runs here, before any tick has stamped the frame base, and it may
+    // call time(). Stamp it now so the elapsed term starts from zero instead
+    // of from whatever the counter last held.
+    g_tick_ms = (uint32_t)mp_hal_ticks_ms();
     if (moy_lua_init(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     return mp_const_none;
@@ -814,6 +840,7 @@ static mp_obj_t mod_tick(mp_obj_t dt_obj)
     uint32_t t0, t1;
     moy_reset_state(&RUN.canvas);
     float dt = (float)mp_obj_get_float(dt_obj);
+    g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
     t0 = (uint32_t)mp_hal_ticks_us();
     if (moy_lua_update(RUN.L, dt, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));

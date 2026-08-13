@@ -1,3 +1,7 @@
+/* clock_gettime/CLOCK_MONOTONIC are POSIX, and this builds at -std=c99,
+ * which hides them. Must precede every include. */
+#define _POSIX_C_SOURCE 200809L
+
 /* The host's libmoy LUA shim (moycore plan rung 4).
  *
  * The host sim runs Lua carts through lupa -- a second Lua embedding, with a
@@ -15,6 +19,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "lua.h"
 #include "lauxlib.h"
@@ -46,14 +51,35 @@ typedef struct {
 
 static host_lua *CUR;        /* the callbacks take void*; one run at a time */
 
+/* A monotonic millisecond counter -- the host twin of mp_hal_ticks_ms. Only
+ * time() needs it, and only for the elapsed-inside-this-tick term. */
+static uint32_t hl_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)(ts.tv_sec * 1000u + (uint32_t)(ts.tv_nsec / 1000000));
+}
+
 static int h_btn(void *u, moy_button b, int p)
 { (void)u; return CUR && CUR->snap ? (CUR->snap[p > 0 ? SNAP_BTN_P1 : SNAP_BTN] >> (int)b) & 1 : 0; }
 static int h_btnp(void *u, moy_button b, int p)
 { (void)u; return CUR && CUR->snap ? (CUR->snap[p > 0 ? SNAP_BTNP_P1 : SNAP_BTNP] >> (int)b) & 1 : 0; }
 static int h_players(void *u)
 { (void)u; int n = (CUR && CUR->snap) ? CUR->snap[SNAP_PLAYERS] : 1; return n < 1 ? 1 : n; }
+/* time() = the snapshot's frame base PLUS the milliseconds elapsed inside this
+ * tick. The base alone froze the clock for the whole frame -- correct for
+ * input, which must answer consistently all frame, and wrong for a clock:
+ * anything measuring its own work inside a frame read zero forever. (Bench Lua
+ * grows a batch until it costs TARGET_MS, so it grew without bound.) The host
+ * keeps authority over the base; C adds only what the host cannot see. */
+static uint32_t g_tick_ms;
+
 static uint32_t h_time(void *u)
-{ (void)u; return (CUR && CUR->snap) ? (uint32_t)CUR->snap[SNAP_TIME_MS] : 0; }
+{
+    uint32_t base = (CUR && CUR->snap) ? (uint32_t)CUR->snap[SNAP_TIME_MS] : 0;
+    (void)u;
+    return base + (hl_now_ms() - g_tick_ms);
+}
 static int32_t h_pget(void *u, int s)
 { (void)u; return (CUR && s >= 0 && s < 256) ? CUR->pmem[s] : 0; }
 static void h_pset(void *u, int s, int32_t v)
@@ -217,12 +243,14 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
     if (hl_exec(r, src, len, name, err, errlen) != 0) return 1;
+    g_tick_ms = hl_now_ms();              /* _init may call time(), below */
     return moy_lua_init(r->L, err, (size_t)errlen);
 }
 
 int hl_tick(host_lua *r, float dt, char *err, int errlen)
 {
     CUR = r;
+    g_tick_ms = hl_now_ms();              /* h_time counts from here */
     moy_reset_state(&r->canvas);
     if (moy_lua_update(r->L, dt, err, (size_t)errlen) != 0) return 1;
     return moy_lua_draw(r->L, err, (size_t)errlen);

@@ -172,6 +172,26 @@ print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
       moycore.get_global("MISS"))
 moycore.close()
 
+# time() must ADVANCE INSIDE a tick. Input is frozen for the frame on purpose;
+# a clock bundled into that same snapshot is not a clock, and the cart that
+# proves it is Bench Lua -- it grows a batch until the batch costs TARGET_MS,
+# measured with time(), so against a frozen clock it doubles forever (on glass:
+# a purple screen and "cls k=32768" climbing).
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+snap[moycore.SNAP_TIME_MS] = 5000
+print("TLOAD", moycore.load(
+    "function _update(dt)\n"
+    "  T0 = time()\n"
+    "  local s = 0\n"
+    "  for i = 1, 1500000 do s = s + i % 7 end\n"
+    "  T1 = time()\n"
+    "end\n"
+    "function _draw() end\n", "@clock"))
+moycore.tick(0.03125)
+_t0, _t1 = moycore.get_global("T0"), moycore.get_global("T1")
+print("CLOCK", 1 if _t0 >= 5000 else 0, 1 if _t1 > _t0 else 0)
+moycore.close()
+
 # The p8 shim's masked map walk (#66 M0). A 4x1 strip of cells with distinct
 # flag bytes, drawn under three masks; each surviving cell stamps one 8x8 tile.
 MAPW, MAPH = 4, 1
@@ -332,6 +352,15 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # table() rides Lua's table LIBRARY as __call (#164), so both work.
     assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
         "the table graft or the missing-image nil regressed: %s" % out
+
+    # time() reads the host's frame base AND advances within the tick. The
+    # snapshot freezes INPUT for a frame deliberately; freezing the clock with
+    # it made every in-frame measurement read zero, which is not a subtle
+    # failure -- Bench Lua grows a batch until it costs TARGET_MS, so it grew
+    # without bound and painted a purple screen with "cls k=32768" climbing.
+    assert by["TLOAD"][1] == "None", out
+    assert by["CLOCK"][1:] == ["1", "1"], \
+        "time() must carry the host's base AND advance inside a tick: %s" % out
 
     # The p8 shim's masked map walk. moy_lua has had this since #66 M0 and
     # moycore did not, so a ported p8 cart moving to the new runtime silently
