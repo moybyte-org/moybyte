@@ -64,7 +64,9 @@ Then §9's superset question, which is a product call and is what keeps lupa
 in `[dev,sim]` and `spr(Image)` on the Python raster; the §6.10
 batching question (MEASURED the same night and mostly dead: the kernels are
 identical, so nothing goes upstream -- what is left is whether the per-call
-cost is small enough on the S3 to delete the batch verbs outright). (`LuaCartRun` is
+cost is small enough on the S3 to delete the batch verbs outright -- and
+NOTE the x86 result is exactly the class of unix microbench #66 warns does not
+transfer). (`LuaCartRun` is
 GONE as of 2026-08-13 — the deletion that rung had been holding, taken once
 moycore was actually equivalent; see §6.9's ledger.)** v9 — the ladder RE-SEQUENCES on a finding
 (§6.0): libmoy already implements every remaining stage-1 verb in C, plus
@@ -934,6 +936,25 @@ sprite. On the S3 it will be several times that, and THAT is the number that
 decides: 200 sprites x 1us is 0.2ms and nobody cares; x 5us is 1ms and it
 matters. Measure it on glass (the Bench pair's new DRAW phase is the
 instrument) before touching the cart API.
+
+**PRIOR ART, and it argues the S3 may disagree.** This was measured on x86, and
+#66 already records a case of exactly this shape going the other way on glass:
+"a pal() dispatcher split measured 5x on unix but is NOT shipped -- an extra
+call layer costs ~5us on-glass (#63's empty-method number) and per-board
+verdicts don't transfer", plus the lab hazard that "unix-MP microbenches of
+LARGE functions carry a ~4us/call cliff". The S3's own per-call number is
+known and large: `CALIB call4=635 us/100` = **6.35us per 4-arg call**, which is
+precisely the 14.5 vs 9.5us gap the Bench micro phase shows between Python's
+individual and batched spr.
+
+So the S3 may not agree that the kernels are equal. The hint is in the same
+table: Lua's spr measures 15.5us against Python's batched 9.5. If the kernels
+were equal there, that whole 6us would have to be one `lua_CFunction` call --
+possible, but large. The alternative is that `blit_batch` genuinely wins on a
+board where hoisting the sheet and palette pointers across 200 sprites matters
+more than it does on a machine with a real cache hierarchy. **Run the same
+experiment on glass before concluding anything about the boards** -- the
+harness is `experiments/batch_kernel_ab/`, and porting it is a small edit.
 
 Two methodology notes, both of which cost a wrong answer first:
 
