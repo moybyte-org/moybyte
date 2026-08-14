@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Put the wasm web console onto a board, so its WEB CONSOLE row has something
-to serve.
+"""Put a folder of files onto a board over WiFi.
 
-    python tools/p4_push_web.py --port /dev/ttyACM1
+    python tools/p4_push_web.py --port /dev/ttyACM1              # the web console
+    python tools/p4_push_web.py --dir ports/celeste.moy \
+        --dest /moy/carts/celeste.moy --port /dev/ttyACM1        # any cart
 
 The board serves `firmware/web_runner/dist` from `/moy/web` (P4) or `/sd/web`
 (T-Deck); this is how those ~1.17MB get there.
@@ -20,6 +21,16 @@ flashed. Deploying a new web build costs no rebuild and no reflash.
 
 It is deliberately not a `make` target. It needs a board on a serial port and
 both machines on one network, which is a bench operation, not a build step.
+
+WHY IT ALSO PUSHES CARTS (2026-08-15). `tools/p4_push_cart.py` sends a cart down
+the SERIAL link as base64 chunks, and on a 43KB main.lua that failed: the board
+stalled ~7.5s (a BLE keyboard scan), its UART receive buffer overflowed mid-line
+while it was not draining, the harness resent the chunk it had heard nothing
+about, and the resend landed on the truncated remains as a SyntaxError. No chunk
+size fixes a multi-second stall -- but the board is already on WiFi and already
+knows how to pull, so the same downloader that carries a 1MB wasm carries a cart
+in one request. The serial tool still works for a one-file edit where standing
+up a server is the heavier half.
 """
 
 from __future__ import annotations
@@ -129,8 +140,22 @@ def main(argv=None):
     ap.add_argument("--web-dir", default="/moy/web",
                     help="destination on the board (/sd/web on the T-Deck)")
     ap.add_argument("--dist", default=DIST)
+    ap.add_argument("--dir", help="push THIS folder instead of the web bundle")
+    ap.add_argument("--dest", help="destination for --dir (e.g. /moy/carts/x.moy)")
     ap.add_argument("--http-port", type=int, default=8731)
     args = ap.parse_args(argv)
+
+    global FILES
+    if args.dir:
+        args.dist = args.dir.rstrip("/")
+        if not args.dest:
+            sys.exit("--dir needs --dest (e.g. /moy/carts/celeste.moy)")
+        args.web_dir = args.dest
+        FILES = tuple(sorted(f for f in os.listdir(args.dist)
+                             if os.path.isfile(os.path.join(args.dist, f))
+                             and not f.startswith(".")))
+        if not FILES:
+            sys.exit("no files in " + args.dist)
 
     missing = [f for f in FILES if not os.path.exists(os.path.join(args.dist, f))]
     if missing:
