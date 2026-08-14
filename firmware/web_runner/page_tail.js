@@ -89,7 +89,20 @@ window.__moyRefetchAssets=function(){getA().catch(function(){});};
 // page-side splash and dev-reload polling.
 const sEl2 = document.getElementById("s");
 try {
-  const w = new Worker("worker.js", { type: "module" });
+  // Stamped by build.sh with worker.js's content hash (see below). Left as the
+  // literal placeholder by a hand-assembled index.html, which still works --
+  // any token makes the url differ from the bare "worker.js" a browser may have
+  // cached -- it just stops changing between builds.
+  const MOY_BUILD = "@MOY_BUILD@";
+  // The worker url carries a CACHE BUSTER, and it is not superstition: browsers
+  // cache worker scripts stubbornly, and a hard reload that refreshes the
+  // document will happily keep an old worker.js. That is not hypothetical --
+  // the board served a correct new console for an hour while a browser ran the
+  // previous worker, and the tier decision lives in exactly that file. The
+  // document is no-store from the board, so a reload always fetches this line
+  // fresh, and a changed token makes the worker a different url the cache has
+  // never seen.
+  const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
   w.postMessage({ t: "init", search: location.search });
   // ---- play-button splash ----------------------------------------------------

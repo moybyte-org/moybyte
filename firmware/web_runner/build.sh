@@ -313,7 +313,15 @@ PYEOF
 #    page_core.html).
 # ---------------------------------------------------------------------------
 echo "== generating index.html"
-cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" > "${STAGE_DIR}/index.html"
+# @MOY_BUILD@ becomes worker.js's CONTENT HASH, which the page appends to the
+# worker url. Browsers cache worker scripts hard enough that a hard reload of
+# the document keeps an old one, and the tier/boot logic lives in that file --
+# measured the slow way, with a board serving a correct console to a browser
+# running the previous worker. Content-addressed so the url changes when, and
+# only when, the worker does.
+MOY_BUILD="$(sha1sum "${SCRIPT_DIR}/worker.js" | cut -c1-12)"
+cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" \
+  | sed "s/@MOY_BUILD@/${MOY_BUILD}/" > "${STAGE_DIR}/index.html"
 
 # ---------------------------------------------------------------------------
 # 5. The FROZEN build (skipped with --stage-only): freeze the staged console
