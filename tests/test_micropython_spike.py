@@ -3441,10 +3441,11 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     assert "setmetatable(table, { __call" in ext
     host = (ROOT.parent.parent / "runtime" / "lua_host.py").read_text(
         encoding="utf-8")
-    assert 'g["moy_table_verb"] = v' in host            # lupa's own lane
-    assert "setmetatable(table, { __call" in host
-    # ...and moycore's, which registers the verb rather than assigning it.
+    # The host has ONE lane now (lupa went on 2026-08-14), and it REGISTERS the
+    # verb rather than assigning it into the globals -- the assignment lane this
+    # used to also pin was lupa's, which could hand Lua a Python object directly.
     assert 'reg("moy_table_verb", tv)' in host
+    assert 'g["moy_table_verb"] = v' not in host
     glue = (ROOT / "modules" / "moycore_glue.py").read_text(encoding="utf-8")
     assert '_moycore.register("moy_table_verb", tv)' in glue
     # ...and the register loop must SKIP the bare name, or it sets the global

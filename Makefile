@@ -46,7 +46,7 @@ setup:
 # no PEP 660 editable hook -- and there is no setup.py to fall back to since the
 # .moyproj SDK went. Upgrade first, then install.
 	$(PYTHON) -m pip install -q --upgrade pip setuptools
-	$(PYTHON) -m pip install -e '.[dev,sim,lua]'
+	$(PYTHON) -m pip install -e '.[dev,sim]'
 # Host audio binding (#97 stage 0): compile vendored libmoy into the cached
 # .so the sim's AudioEngine loads. Never fails setup -- with no C compiler it
 # prints a note and the host runs silent (the boards are unaffected).

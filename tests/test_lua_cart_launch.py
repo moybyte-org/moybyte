@@ -1,10 +1,12 @@
 """The #67 Phase 2 launch seam: a manifest "runtime": "lua" cart starts through
-the injected Lua runtime (runtime/lua_host.py over lupa on the host), ticks
-under the normal Player loop, exits cleanly, and degrades to the cart-error
-panel when the runtime is missing (today's device builds). Store-side, the
+the injected Lua runtime, ticks under the normal Player loop, exits cleanly, and
+degrades to the cart-error panel when the runtime is missing. Store-side, the
 runtime/main fields survive load and duplicate.
 
-The Lua-side tests skip without lupa; the store passthrough tests always run.
+The host runs the BOARDS' Lua now (libmoy's binding over the same vendored 5.4);
+lupa went on 2026-08-14. So the Lua-side tests skip when the native binding did
+not BUILD -- a C compiler, not a wheel -- and the store passthrough tests always
+run.
 """
 
 import sys
@@ -14,6 +16,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+
+def _need_lua():
+    """Skip unless the host lua binding BUILT. It used to be
+    `importorskip("lupa")`; the host has no second Lua VM any more, so what can
+    be missing is a compiler rather than a package."""
+    from runtime import lua_host
+    if lua_host.moycore_supports("") is not True:
+        pytest.skip("host lua binding not built (needs a C compiler)")
 
 
 def _ws(tmp_path):
@@ -73,7 +84,7 @@ def test_save_code_writes_the_manifest_main(tmp_path):
 # -- the launch seam (needs lupa) ------------------------------------------------
 
 def test_lua_cart_runs_under_the_player(tmp_path):
-    pytest.importorskip("lupa")
+    _need_lua()
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
     assert ws.player.cart_error is None
@@ -90,7 +101,7 @@ def test_lua_cart_runs_under_the_player(tmp_path):
 
 
 def test_lua_cart_exit_closes_the_state(tmp_path):
-    pytest.importorskip("lupa")
+    _need_lua()
     ws = _ws(tmp_path)
     _open(ws, "Sakura Lua")
     ws.frame(1 / 30)
@@ -101,7 +112,7 @@ def test_lua_cart_exit_closes_the_state(tmp_path):
 
 
 def test_lua_error_routes_to_the_cart_panel(tmp_path):
-    pytest.importorskip("lupa")
+    _need_lua()
     from runtime import moy_carts
     ws = _ws(tmp_path)
     bad = moy_carts.create("Bad Lua", str(tmp_path / "carts"),
@@ -123,7 +134,7 @@ def test_lua_error_routes_to_the_cart_panel(tmp_path):
 def test_lua_crash_line_is_the_deepest_frame(tmp_path):
     # The raise point inside a helper wins over the _update call site -- the
     # same deepest-cart-frame rule the Python traceback walk applies.
-    pytest.importorskip("lupa")
+    _need_lua()
     from runtime import moy_carts
     ws = _ws(tmp_path)
     src = ("function helper()\n"
@@ -144,7 +155,7 @@ def test_lua_crash_line_is_the_deepest_frame(tmp_path):
 def test_lua_load_error_drops_on_the_line(tmp_path):
     # A syntax error opens the panel AT START with the offending line, like a
     # Python SyntaxError (#24) -- so EDIT lands the kid on the bad line.
-    pytest.importorskip("lupa")
+    _need_lua()
     from runtime import moy_carts
     ws = _ws(tmp_path)
     bad = moy_carts.create("Broken Lua", str(tmp_path / "carts"),
@@ -171,41 +182,19 @@ def test_lua_cart_line_parser_shapes():
     assert _lua_cart_line(None) is None
 
 
-def test_bullet_storm_seed_cart_runs(tmp_path):
-    # The bullet-hell stress cart (#67): a Lua seed whose whole point is
-    # hundreds of live pooled bullets through the batch spr path. 300 frames
-    # crash-free, the swarm actually fills, and a forced death reaches the
-    # game-over state without an error.
-    #
-    # Pinned to LUPA, which is the runtime this reads and WRITES cart globals
-    # through -- that is how it parks the ship inside the storm to force a
-    # death, and the moycore binding exposes globals read-only by design (the
-    # int-handle boundary marshals no objects and no writes). The cart runs on
-    # moycore too; test_bullet_storm_runs_on_moycore below is that half, and it
-    # asserts what it can observe from outside rather than reaching in.
-    pytest.importorskip("lupa")
-    ws = _ws(tmp_path)
-    from runtime import lua_host
-    ws.lua_runtime = lua_host.make_lua_runtime
-    _open(ws, "Bullet Storm")
-    assert ws.player.cart_error is None
-    g = ws.player._lua._lua.globals()
-    for _ in range(300):
-        ws.frame(1 / 60)
-        assert ws.player.cart_error is None
-    assert g.nb > 30                                     # the swarm is live
-    g.px, g.py = g.ex, g.ey                              # park inside the storm
-    g.iframe = 0
-    for _ in range(900):
-        ws.frame(1 / 60)
-        assert ws.player.cart_error is None
-        g.px, g.py = g.ex, g.ey
-        g.iframe = 0
-        if g.over:
-            break
-    assert g.over                                        # death -> panel, no crash
-    ws.frame(1 / 60)                                     # game-over frame draws clean
-
+# test_bullet_storm_seed_cart_runs lived here until 2026-08-14. It forced a
+# DEATH by writing the cart's globals (park the ship on the enemy, zero the
+# i-frames) and asserting the game-over state came out clean -- and it could
+# only do that through lupa, which hands Lua real Python objects. The moycore
+# boundary marshals ints and one string, exposes globals READ-ONLY by design,
+# and lupa is gone, so the poke is not expressible any more.
+#
+# What is lost, stated rather than quietly dropped: nothing else drives this
+# cart to its game-over branch. test_bullet_storm_runs_on_moycore below keeps
+# the load, the 300 crash-free frames and the live swarm; the death path is
+# uncovered until something can reach it from OUTSIDE the VM (a scripted input
+# feed that plays badly on purpose is the obvious shape, and the semantic-trace
+# harness already has that machinery).
 
 def test_bullet_storm_runs_on_moycore(tmp_path):
     """The same cart on the boards' own Lua, observed from outside.

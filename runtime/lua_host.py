@@ -1,172 +1,44 @@
-"""Host Lua cart runtime (#67 Phase 2/3): run a "runtime": "lua" cart over lupa.
+"""Host Lua cart runtime: a "runtime": "lua" cart on the BOARDS' own Lua.
 
-`LuaCartRun(ns, src)` builds one Lua 5.4 state per running cart, registers the
-cart's make_api namespace (the SAME dict a Python cart would exec under) as the
-Lua globals -- lupa makes the Python callables directly callable -- executes the
-cart source, and exposes `.init/.update/.draw` (Lua functions, callable from
-Python) plus `.close()`. Player._start_lua drives it; a Lua error raises
-lupa.LuaError, a normal Python exception, so the Player's existing panel
-routing needs nothing special.
+`MoycoreHostRun(ws, ns, src)` runs the cart through `runtime/lua_binding` --
+libmoy's own binding over the same vendored Lua 5.4 the firmware compiles,
+LUA_32BITS and all -- so the host is not a different program from the device.
+Player._start_lua drives it; a Lua error surfaces as a normal Python exception,
+so the Player's existing crash-to-code panel needs nothing special.
 
-The PRELUDE adapts the three API entries whose Python shape doesn't map 1:1:
-  * touch()      -> MULTIPLE VALUES (x, y, tapped, held) or nil, instead of a
-                    tuple. No per-call table = no per-frame garbage, which is
-                    the Lua tier's whole GC argument applied to the API shape.
-  * make_layer() -> wraps the Python _Layer so `lay:spr(img, x, y)` colon calls
-                    work (a colon call passes self, which a BOUND Python method
-                    must not receive).
-  * draw_layer() -> unwraps that wrapper back to the _Layer.
-It then strips the stdlib to the device plan's sandbox (base + math + string +
-table -- no io/os/load/require/debug) and removes lupa's `python` escape hatch,
-so a lua cart is sandboxed like a python cart (portable-subset ethos).
+**lupa is GONE (2026-08-14), and with it `LuaCartRun` and the PRELUDE that
+adapted its Python-object bridge.** It was a SECOND embedding with second
+semantics -- 64-bit doubles where both boards build LUA_32BITS, so a float-heavy
+cart could agree with the host goldens and disagree on glass, and an integer that
+wraps at 2^31 on the board did not wrap here. It survived two justifications:
+first as the runtime for carts using moybyte's superset (dead once lua_ext's
+handle glue put layers/images ON moycore), then as the fallback for a host with
+no C compiler. The second is not a trade this project makes -- the host already
+REQUIRES a compiler for audio, where "no compiler" means SILENCE rather than a
+second synth (plan 3.1). Two Lua engines to spare a compiler is that same trade,
+refused there.
 
-HOST-ONLY by design: never staged/frozen into a firmware build (the device
-equivalent is the moy_lua native module, #67 Phase 1). Import requires lupa;
-host_app probes availability and injects `make_lua_runtime` iff it's there.
+So: no compiler, no Lua carts on the host, and the Player says so through the
+runtime-missing panel exactly as a device build without the module does.
 
 Canonical home is runtime/; tests import it as runtime.lua_host.
 """
 
-# The object-verb glue shared with both device runtimes (runtime/lua_ext.py).
-# lupa needs none of it -- it hands Python objects to Lua directly, which is
-# what the PRELUDE below adapts -- but MoycoreHostRun does, because the ctypes
-# dispatch marshals ints and one string.
+# The object-verb glue shared with the device runtimes (runtime/lua_ext.py):
+# make_layer/draw_layer/image return OBJECTS, and the ctypes dispatch marshals
+# ints and one string, so they ride int handles plus a Lua prelude.
 from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
                              install_handles)
 
-PRELUDE = """
-do
-  local py_touch = touch
-  touch = function()
-    local t = py_touch()
-    if t == nil then return nil end
-    -- t is the Python tuple (x, y, tapped, held): 0-based via lupa indexing
-    return t[0], t[1], t[2], t[3]
-  end
-
-  local py_make_layer = make_layer
-  local py_draw_layer = draw_layer
-  local function wrap_layer(pyl)
-    -- Colon-call adapter: lay:spr(...) => shim(lay, ...) => pyl.spr(...) with
-    -- the Lua self dropped (pyl.spr is already bound). Verbs resolve lazily and
-    -- cache; plain data attributes (W/H) pass straight through.
-    local w = { __py = pyl, W = pyl.W, H = pyl.H }
-    return setmetatable(w, { __index = function(self, k)
-      local v = pyl[k]
-      if type(v) == "userdata" then
-        local shim = function(_, ...) return v(...) end
-        rawset(self, k, shim)
-        return shim
-      end
-      return v
-    end })
-  end
-  make_layer = function(w, h) return wrap_layer(py_make_layer(w, h)) end
-  draw_layer = function(l, cx, cy)
-    if type(l) == "table" and l.__py ~= nil then l = l.__py end
-    py_draw_layer(l, cx or 0, cy or 0)
-  end
-
-  -- The #78 `table()` cart verb collides with Lua's `table` LIBRARY (the one
-  -- stdlib name the kid API shares; found via celeste's p8 shim calling
-  -- table.remove on the injected Python closure, #164). The library stays the
-  -- global -- portable lua (table.insert/remove/...) keeps working -- and a
-  -- metatable __call makes it double as the verb: table("scores") -> rows.
-  if moy_table_verb ~= nil then
-    local tv = moy_table_verb
-    setmetatable(table, { __call = function(_, name) return tv(name) end })
-    moy_table_verb = nil
-  end
-
-  -- Sandbox: the device plan's "safe stdlib only" (base/math/string/table),
-  -- mirrored on the host so a cart that runs here runs there. `python` is
-  -- lupa's Python bridge -- the one escape hatch a kid cart must not have.
-  io = nil
-  os = nil
-  package = nil
-  require = nil
-  dofile = nil
-  loadfile = nil
-  load = nil
-  debug = nil
-  python = nil
-  -- lupa's luaL_openlibs opens these three; the device VM never does (moy_lua
-  -- opens only base/math/string/table, strips collectgarbage, and its build
-  -- drops lcorolib.c/lutf8lib.c from the sources outright). Nil them so a cart
-  -- that runs here runs on glass -- SPEC.md 4.1's stdlib list is a MAXIMUM, and
-  -- utf8 is the one lupa leaks that the device physically cannot provide.
-  coroutine = nil
-  collectgarbage = nil
-  utf8 = nil
-end
-"""
-
-
-class LuaCartRun:
-    """One running lua cart: its lua_State + the captured cart verbs."""
-
-    def __init__(self, ns, src):
-        try:
-            from lupa import lua54
-            self._lua = lua54.LuaRuntime(register_eval=False,
-                                         register_builtins=False)
-        except ImportError:  # pragma: no cover - older lupa wheels
-            import lupa
-            self._lua = lupa.LuaRuntime(register_eval=False,
-                                        register_builtins=False)
-        g = self._lua.globals()
-        for k, v in ns.items():
-            if k == "table":
-                # Never clobber Lua's `table` library (#164): the prelude
-                # grafts the #78 verb onto it as a metatable __call instead.
-                g["moy_table_verb"] = v
-                continue
-            g[k] = v
-        # Captured BEFORE the prelude's sandbox nils `load`: the cart chunk is
-        # loaded as "@cart" so every error position renders `cart:12:` -- the
-        # same chunkname the device passes to moy_lua.exec, which is what
-        # player._lua_cart_line parses for the drop-on-the-bad-line panel (#24).
-        loadstring = self._lua.eval("load")
-        self._lua.execute(PRELUDE)
-        chunk = loadstring(src, "@cart")
-        if isinstance(chunk, tuple):     # (nil, errmsg): a load/syntax error
-            from lupa import LuaError
-            raise LuaError(chunk[1])     # errmsg already carries `cart:N:`
-        chunk()
-        # Captured post-exec, like the Python path's ns.get("_update"): a cart
-        # may define any subset; missing verbs just don't run.
-        self.init = g["_init"]
-        self.update = g["_update"]
-        self.draw = g["_draw"]
-
-    def close(self):
-        """Drop the state; the interpreter (and the cart's whole Lua heap) is
-        collected with it. Mirrors the device moy_lua close() contract."""
-        self.init = None
-        self.update = None
-        self.draw = None
-        self._lua = None
-
-
-def make_lua_runtime(ns, src):
-    """The ws.lua_runtime factory shape Player._start_lua expects."""
-    return LuaCartRun(ns, src)
-
-
 # ---------------------------------------------------------------------------
-# The moycore lane (plan rung 4): the boards' OWN Lua, not lupa's.
+# The moycore lane -- now the ONLY lane.
 #
-# lupa is a second embedding with second semantics -- 64-bit doubles where both
-# boards build LUA_32BITS -- so a float-heavy cart can agree with the goldens
-# here and disagree on glass, and an integer that wraps at 2^31 there does not
-# wrap here. `runtime/lua_binding.py` is the same C the boards run; this routes
-# a cart to it when it can.
-#
-# WHEN IT CAN: libmoy binds the SPEC verb table, and moybyte's cart API is a
-# superset (layers/images, scenes, tables, texts, view). A cart using one of
-# those keeps lupa, which supplies the whole namespace through the trampoline
-# -- correct, and the slower of two correct paths. The same split moycore_glue
-# makes on the device, for the same reason and by the same source scan.
+# `runtime/lua_binding.py` is the same C the boards run. This used to route only
+# the carts libmoy's SPEC table could serve and hand the rest to lupa; the
+# superset (layers/images, scenes, tables, texts, view) reaches moycore through
+# lua_ext's handles now, so every cart qualifies and the source gate that used
+# to decide is gone. What `moycore_supports` still answers is whether the module
+# BUILT -- see below.
 # ---------------------------------------------------------------------------
 
 def _moycore_available():
@@ -181,7 +53,7 @@ def _moycore_available():
 
 
 class MoycoreHostRun:
-    """A cart run under the boards' Lua. Same shape lupa's run exposes."""
+    """A cart run under the boards' Lua -- the host's only Lua runtime."""
 
     def __init__(self, ws, ns, src):
         HostLuaRun = _moycore_available()
