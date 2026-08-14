@@ -152,15 +152,22 @@ class FileResponse:
     play, and a whole-file `bytes` would have to come out of PSRAM and be built
     before the first byte reached the wire.
 
-    Cache-Control is `max-age`, not `no-store` like the JSON path: these are
-    build artifacts that change only when the console is reflashed, and the
-    difference is a ~9s first load (at the T-Deck's measured ~137KB/s) versus
-    that same 9s on EVERY page open.
+    NOT CACHED, and the reasoning that said otherwise was wrong (fixed
+    2026-08-15). This shipped with `max-age=86400` on the argument that these
+    are build artifacts which "change only when the console is reflashed" --
+    but they change whenever someone pushes a new web build, which is the
+    routine action and the entire point of tools/p4_push_web.py needing NO
+    reflash. The result was a board serving a correct new console to a browser
+    that kept showing yesterday's, for a day, with nothing to indicate why.
+
+    The cost of being right is small and measured: the 1MB wasm streams at
+    ~700KB/s off the P4, so a full reload is ~1.5s. `max_age` stays a parameter
+    for a caller that genuinely has immutable assets; the default is honest.
     """
 
     CHUNK = 1024
 
-    def __init__(self, path, size, content_type, max_age=86400):
+    def __init__(self, path, size, content_type, max_age=0):
         self.path = path
         self.size = size
         self.content_type = content_type
@@ -171,10 +178,12 @@ class FileResponse:
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: %s\r\n"
             "Content-Length: %d\r\n"
-            "Cache-Control: max-age=%d\r\n"
+            "Cache-Control: %s\r\n"
             "Access-Control-Allow-Origin: *\r\n"
             "Connection: close\r\n\r\n"
-        ) % (self.content_type, self.size, self.max_age)).encode("utf-8")
+        ) % (self.content_type, self.size,
+             ("max-age=%d" % self.max_age) if self.max_age
+             else "no-store")).encode("utf-8")
 
 
 class ChunkedResponse:

@@ -112,10 +112,12 @@ def test_a_megabyte_asset_is_streamed_not_held(tmp_path):
     assert r.CHUNK <= 4096, "a chunk this big defeats the purpose"
     head = r.head().decode()
     assert "Content-Length: 5004" in head
-    # Cached, unlike the JSON: these change only when the board is reflashed,
-    # and re-sending 1.1MB on every page open is a ~9s tax at the T-Deck's
-    # measured ~137KB/s.
-    assert "max-age=" in head and "no-store" not in head
+    # NOT cached. This shipped as max-age=86400 on the reasoning that the
+    # assets change only on a reflash -- they change on every web-build push,
+    # which is the routine action, and a board then served a correct console to
+    # a browser showing yesterday's for a day. A full reload is ~1.5s at the
+    # measured ~700KB/s, which is the price of never being stale.
+    assert "no-store" in head and "max-age" not in head
 
 
 def test_carts_json_is_json_and_live(tmp_path):
@@ -453,3 +455,14 @@ def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
         assert h.serving is False
     finally:
         WebServer.start = orig
+
+
+def test_an_asset_is_never_cached_by_default(tmp_path):
+    """The regression that shipped: a day-long cache on files whose whole
+    delivery mechanism is "push a new build, no reflash". Pinned as a DEFAULT,
+    because the bug was not the parameter existing -- it was the default."""
+    from moy_webserver import FileResponse as FR
+    assert FR("x", 1, "text/plain").max_age == 0
+    assert "no-store" in FR("x", 1, "text/plain").head().decode()
+    # ...and a caller with genuinely immutable assets can still opt in.
+    assert "max-age=60" in FR("x", 1, "text/plain", max_age=60).head().decode()
