@@ -65,8 +65,13 @@ def docs():
 # document's own directory (UPSTREAM.md files legitimately say `../foo`), and
 # against docs/history/ for links into the archive.
 
+# The leading `+` is the PLANNED MARKER: `+runtime/_bootstrap.py` means "a file
+# this document proposes to create". It lives AT the reference rather than in a
+# list over here, which is the whole point -- a central allowlist (this file
+# carried one until 2026-08-14) puts the fact that a path is aspirational
+# somewhere the reader of the document never looks.
 PATH_RE = re.compile(
-    r"`([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
+    r"`(\+?)([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
     r"\.(?:py|md|c|h|lua|json|sh|cmake|mk|yml|jsonl|service|patch|txt))`")
 
 # Where a relative path in a document may be rooted. The two board directories
@@ -76,11 +81,6 @@ PATH_RE = re.compile(
 ROOTS = ("", "firmware/lilygo_t_deck_plus_micropython",
          "firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware/web_runner",
          "firmware/seeed_xiao_esp32s3_zero", "docs/history")
-
-# Modules a PLAN proposes rather than describes. A planning document naming the
-# file it intends to create is not stale; it is doing its job. Delete the entry
-# when the file lands -- an existing path makes it a no-op either way.
-PLANNED = ("runtime/present.py",)
 
 # Paths that are deliberately not in this repo. Each is a fact about the world,
 # not a reference we can resolve -- and each is documented where it appears.
@@ -126,8 +126,19 @@ def check_paths():
     for rel in docs():
         for i, line in enumerate(read(rel).splitlines(), 1):
             for m in PATH_RE.finditer(line):
-                p = m.group(1)
-                if any(t in p for t in NOT_OURS + PLANNED) or "*" in p or "..." in p:
+                planned, p = m.group(1), m.group(2)
+                if any(t in p for t in NOT_OURS) or "*" in p or "..." in p:
+                    continue
+                if planned:
+                    # A document naming the file it intends to create is not
+                    # stale, it is doing its job -- so a missing one is fine.
+                    # But the marker has to EXPIRE, or "planned" quietly becomes
+                    # a lie about shipped code: once the file lands, say so.
+                    if any(os.path.exists(os.path.join(ROOT, c))
+                           for c in _candidates(rel, p)):
+                        PROBLEMS.append(
+                            "%s:%d marks %s as planned (+), but it exists now "
+                            "-- drop the +" % (rel, i, p))
                     continue
                 # A two-letter stem is an attribute, not a file: `cv.w/cv.h` is
                 # a canvas's width and height, and the regex cannot know that.

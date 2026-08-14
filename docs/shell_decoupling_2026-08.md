@@ -109,7 +109,7 @@ One commit per row, on `dev`, each independently revertable.
 
 | # | Step | Removes | Risk | Ratchet |
 |---|---|---|---|---|
-| 1 | meta-path finder → `runtime/_bootstrap.py` | 142 ladders, 22 `setdefault`s | low | no `except ImportError` in `runtime/` |
+| 1 | meta-path finder → `+runtime/_bootstrap.py` | 142 ladders, 22 `setdefault`s | low | no `except ImportError` in `runtime/` |
 | 2 | Leaf module for `Layout`/`NAMES`/`Pointer`/`color`/`_in`/`_err_text`/`_clamp_scroll` | 2 of 3 cycles, 257-site injection | low | no function-level intra-runtime imports |
 | 3 | **Freeze** facade + barrel (do not migrate) | — | none | no *new* `ws.cart`-style or `console.X` refs in `runtime/` |
 | 4 | `AppContext` + migrate Calc | — | low | — |

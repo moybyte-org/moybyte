@@ -229,7 +229,7 @@ them keeps Phase 3's allowlist from becoming a permanent exemption list.
   green at HEAD, since both commits shipped regression tests. A gate that cannot
   fail is not a gate.)*
   **Standalone value; the recommended stopping point if the rest is deferred.**
-- **Phase 1 — the contract, host + web.** `runtime/present.py`; host and
+- **Phase 1 — the contract, host + web.** `+runtime/present.py`; host and
   recording presenters; the discrimination sites converted. Gates: host goldens
   pixel-identical **including windowed sizes**; web payload shapes byte-identical
   — and this must land **before** `surface_model_v1` Phase B, which versions the
