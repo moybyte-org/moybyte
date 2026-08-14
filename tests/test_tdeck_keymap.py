@@ -65,8 +65,14 @@ def _vendor_matrix():
 
 EXPECTED = {
     "w": "up", "s": "down", "a": "left", "d": "right",
-    "l": "a", "k": "b", "r": "run",
+    "l": "a", "k": "b",
 }
+# ...plus the non-letters, which are not in EXPECTED because the uppercase test
+# below folds case and they have none.
+EXPECTED_CODES = {0x0D: "run", 0x08: "home", 0x20: "a"}
+# SPACE is the one deliberate alias: `a` is reachable as L *and* as space,
+# because a kid arrives already knowing space = jump.
+ALIASES = {0x20: "a"}
 
 
 def test_the_button_scheme_is_wasd_plus_l_and_k():
@@ -80,7 +86,22 @@ def test_the_button_scheme_is_wasd_plus_l_and_k():
     KEY_BUTTON = _input_module().KEY_BUTTON
     for ch, button in EXPECTED.items():
         assert KEY_BUTTON.get(ord(ch)) == button, ch
-    assert KEY_BUTTON.get(0x08) == "home", "BACKSPACE is THE console key"
+    for code, button in EXPECTED_CODES.items():
+        assert KEY_BUTTON.get(code) == button, hex(code)
+    # One key per button, and EXACTLY ONE alias. The table is small enough to
+    # say so exactly, and saying so exactly is what stops the next convenience
+    # alias landing quietly -- every one of them is somebody's habit, so the
+    # only way the map stays small is if adding to it has to argue here first.
+    assert len(KEY_BUTTON) == len(EXPECTED) + len(EXPECTED_CODES) + 1, \
+        sorted(KEY_BUTTON.items())          # +1 = ESC/stop, ASCII path only
+    seen = {}
+    for code, button in KEY_BUTTON.items():
+        if button in seen:
+            pair = {code, seen[button]}
+            assert pair & set(ALIASES), \
+                "undeclared alias: %r and %r both mean %r" % (
+                    chr(min(pair)), chr(max(pair)), button)
+        seen[button] = code
 
 
 def test_the_keys_that_deliberately_stopped_being_buttons():
@@ -93,9 +114,32 @@ def test_the_keys_that_deliberately_stopped_being_buttons():
     alias is exactly the kind of thing that gets added back as a kindness.
     """
     KEY_BUTTON = _input_module().KEY_BUTTON
-    for ch in ("z", "x", "h", "j", "q", "e", " "):
+    for ch in ("z", "x", "h", "j", "q", "e", "r"):
         assert ord(ch) not in KEY_BUTTON, "%r fires a button again" % ch
-    assert 0x0D not in KEY_BUTTON, "enter fires a button again"
+    # `r` is on that list because ENTER took `run` -- one key per button, so R
+    # goes back to being a letter a typing cart can read.
+    assert KEY_BUTTON.get(0x0D) == "run"
+    # SPACE is NOT on that list: it kept `a`, deliberately (see ALIASES).
+    assert KEY_BUTTON.get(0x20) == "a"
+
+
+def test_enter_confirms_in_the_launcher_the_way_r_does():
+    """The launcher opens on `pressed("a") or pressed("run")`, so ENTER opening
+    a cart is not a special case anywhere -- it falls out of ENTER being `run`.
+
+    Pinned because the clean break briefly took ENTER out of the button table
+    entirely, which silently removed "press enter to open" from a menu. It was
+    the right removal of the wrong thing: ENTER should not be a jump button, but
+    a menu still needs a confirm key.
+    """
+    mod = _input_module()
+    kbd = mod.TDeckKeyboard.__new__(mod.TDeckKeyboard)
+    assert kbd._buttons_for_key(0x0D) == ("run",)
+    data = bytearray(5)
+    for idx, bit, code in mod.RAW_KEYS:
+        if code == 0x0D:
+            data[idx] |= bit
+    assert mod.decode_raw(data) == (("run",), 0x0D)
 
 
 # -- the two decoders agree --------------------------------------------------
@@ -181,16 +225,73 @@ def test_every_raw_bit_is_the_vendor_matrix_position_for_that_key():
             % (idx, row, chr(code), matrix.get((idx, row))))
 
 
-def test_the_host_simulator_uses_the_same_action_keys():
-    """A kid who learns the keys in the sim must find them there on glass.
+def test_the_p4_ble_keyboard_is_an_arrow_host_too():
+    """A BLE keyboard has arrows, so the P4 gets arrows + Z/X, not the T-Deck's
+    L/K. Its table said it was "shared with the T-Deck keyboard's game-button
+    mapping" and was a fourth hand-written copy -- still carrying hjkl as a
+    d-pad and R as `run` after the others had moved on."""
+    src = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
+           / "p4_ble_keyboard.py").read_text(encoding="utf-8")
+    tbl = re.search(r"BUTTON_FOR_KEY = \{(.+?)\n\}", src, re.S).group(1)
+    for want in ('ord("z"): "a"', 'ord("x"): "b"', 'ord(" "): "a"',
+                 '0x0D: "run"', '0x08: "home"'):
+        assert want in tbl, want
+    for gone in ('ord("l")', 'ord("k")', 'ord("h")', 'ord("j")', 'ord("r")'):
+        assert gone not in tbl, "%s still fires a button on the P4" % gone
+    # the HID arrow usages are what make it an arrow host in the first place
+    direct = re.search(r"_DIRECT_BUTTON = \{(.+?)\n\}", src, re.S).group(1)
+    for want in ('0x4F: "right"', '0x50: "left"',
+                 '0x51: "down"', '0x52: "up"'):
+        assert want in direct, want
 
-    The sim had Z/X long after the board did; the two are edited in different
-    files and only a human notices.
+
+def test_the_two_arrow_key_hosts_agree_with_each_other():
+    """A host WITH arrow keys uses arrows + Z/X. Both of them must.
+
+    The pygame sim and the browser page are one tier wearing two coats, and they
+    had drifted the other way from the device: the page has done arrows-as-d-pad
+    + Z/X since 2026-07-31 while the sim still steered a trackball with the
+    arrows and had no d-pad at all. Each file was self-consistent, which is
+    exactly why neither could notice.
     """
-    src = (ROOT / "tools" / "simulate_desktop.py").read_text(encoding="utf-8")
-    assert "pygame.K_l: \"a\"" in src and "pygame.K_k: \"b\"" in src
-    assert "pygame.K_z: \"a\"" not in src and "pygame.K_x: \"b\"" not in src
-    nav = re.search(r"nav_keys = \{(.+?)\}", src, re.S).group(1)
-    for key, button in (("K_a", "left"), ("K_d", "right"),
-                        ("K_w", "up"), ("K_s", "down")):
-        assert key in nav and button in nav
+    sim = (ROOT / "tools" / "simulate_desktop.py").read_text(encoding="utf-8")
+    page = (ROOT / "firmware" / "web_runner"
+            / "page_core.html").read_text(encoding="utf-8")
+
+    shortcuts = re.search(r"shortcuts = \{(.+?)\}", sim, re.S).group(1)
+    assert "K_z: \"a\"" in shortcuts and "K_x: \"b\"" in shortcuts
+    assert "K_RETURN: \"run\"" in shortcuts
+    assert "K_SPACE: \"a\"" in shortcuts, "space = jump is every tier's"
+    assert "K_r:" not in shortcuts, "R stopped being `run` on 2026-08-14"
+
+    sc = re.search(r"SC=\{(.+?)\}", page).group(1)
+    for want in ('z:"a"', 'x:"b"', 'Enter:"run"', '" ":"a"'):
+        assert want in sc, (want, sc)
+
+    arrows = re.search(r"arrow_keys = \{(.+?)\}", sim, re.S).group(1)
+    for key, button in (("K_LEFT", "left"), ("K_RIGHT", "right"),
+                        ("K_UP", "up"), ("K_DOWN", "down")):
+        assert key in arrows and button in arrows
+    assert "AN={ArrowLeft:\"left\"" in page
+
+
+def test_the_device_and_the_arrow_hosts_differ_ON_PURPOSE():
+    """A/B are L/K on the T-Deck and Z/X on a host, and that is not a bug.
+
+    Recorded as a test because it looks exactly like one. The T-Deck has NO
+    arrow keys (see the vendor matrix) so it needs WASD, and its Z/X are
+    bottom-row keys under the same thumb WASD wants -- while on a desktop
+    keyboard arrows + Z/X is what every emulator and PICO-8 itself uses. Same
+    console, two keyboards, two ergonomics. The shared part is the BUTTON set,
+    and `space` = jump and `Enter` = run everywhere.
+    """
+    KEY_BUTTON = _input_module().KEY_BUTTON
+    assert KEY_BUTTON[ord("l")] == "a" and KEY_BUTTON[ord("k")] == "b"
+    assert ord("z") not in KEY_BUTTON and ord("x") not in KEY_BUTTON
+
+    sim = (ROOT / "tools" / "simulate_desktop.py").read_text(encoding="utf-8")
+    shortcuts = re.search(r"shortcuts = \{(.+?)\}", sim, re.S).group(1)
+    assert "K_l:" not in shortcuts and "K_k:" not in shortcuts
+
+    # ...and what the two DO share.
+    assert KEY_BUTTON[0x0D] == "run" and KEY_BUTTON[0x20] == "a"

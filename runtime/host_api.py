@@ -831,6 +831,23 @@ class ConsoleDriver:
         self.pointer.place(int(x), int(y))   # drag with the button down (no tap)
         self._down = True
 
+    def hover(self, x, y):
+        """Pointer position with NO button down -- the mouse as a cursor.
+
+        The exact twin of the browser's `hover` event (web_input.apply_events):
+        `place` and nothing else. Deliberately not `touch_drag`, which asserts
+        `down` and would fake a drag out of an idle mouse -- drag-scrolling a
+        grid, or moving a window, just by crossing it.
+
+        The shell has real hover feedback (the desk icon highlight, the cards
+        grid's msel) and web_input's note claimed the pygame sim got it for free
+        "because that loop reads the mouse every frame". It does not and never
+        did -- it only placed the pointer while a button was down, so the sim's
+        shell looked as dead under the cursor as the browser's did before 2026-
+        07-31. Same fix, same shape, one tier late.
+        """
+        self.pointer.place(int(x), int(y))
+
     def touch_up(self):
         self._down = False
 

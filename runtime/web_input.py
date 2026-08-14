@@ -62,10 +62,13 @@ def apply_events(events, input, pointer, on_press=None, on_pan=None,
             elif t == "hover":
                 # POINTER POSITION WITHOUT A BUTTON (2026-07-31). The shell has
                 # real hover feedback -- the desk icon highlight (_lhover), the
-                # cards grid's msel -- and it works in the pygame sim because
-                # that loop reads the mouse every frame. The browser only ever
-                # reported the pointer while a button was down, so on the web
-                # the whole shell looked dead under the cursor. Deliberately NOT
+                # cards grid's msel -- and the browser only ever reported the
+                # pointer while a button was down, so on the web the whole shell
+                # looked dead under the cursor. (This note used to add "it works
+                # in the pygame sim because that loop reads the mouse every
+                # frame". It did not: that loop only placed the pointer on
+                # button-down, and got its own ConsoleDriver.hover on
+                # 2026-08-14.) Deliberately NOT
                 # "move": that one asserts `down`, which would fake a drag out
                 # of an idle mouse (drag-scrolling grids, moving windows).
                 pointer.place(int(ev.get("x", 0)), int(ev.get("y", 0)))

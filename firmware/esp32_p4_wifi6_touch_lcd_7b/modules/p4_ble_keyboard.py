@@ -190,27 +190,36 @@ def usage_to_keycode(usage, modifiers=0, caps=False):
     return ord(ch) if ch else 0
 
 
+# THE ARROW-KEY HOST SCHEME (owner call, 2026-08-14): arrows + Z/X, which is
+# PICO-8's and every emulator's. A BLE keyboard HAS arrows (see _DIRECT_BUTTON
+# below, the HID usages), so this board belongs with the pygame sim and the
+# browser page -- NOT with the T-Deck, whose keyboard has no arrows at all and
+# whose Z/X sit under the same thumb WASD needs, and which therefore uses L/K.
+#
+# This docstring used to say "shared with the T-Deck keyboard's game-button
+# mapping". It was never shared -- it was a fourth hand-written copy, and by the
+# time anyone looked it still had hjkl as a d-pad and R as `run`, both of which
+# the other tiers had moved on from.
+BUTTON_FOR_KEY = {
+    ord("w"): "up",
+    ord("s"): "down",
+    ord("a"): "left",
+    ord("d"): "right",
+    ord("z"): "a",
+    ord(" "): "a",          # SPACE = jump, every tier -- the one alias
+    ord("x"): "b",
+    0x0D: "run",            # ENTER, also the launcher's "open this cart"
+    0x1B: "stop",
+    0x08: "home",           # BACKSPACE: THE console key / hold to exit
+}
+
+
 def buttons_for_key(key):
-    """ASCII aliases shared with the T-Deck keyboard's game-button mapping."""
-    if key in (ord("a"), ord("A"), ord("h"), ord("H")):
-        return ("left",)
-    if key in (ord("d"), ord("D"), ord("l"), ord("L")):
-        return ("right",)
-    if key in (ord("w"), ord("W"), ord("k"), ord("K")):
-        return ("up",)
-    if key in (ord("s"), ord("S"), ord("j"), ord("J")):
-        return ("down",)
-    if key in (ord("z"), ord("Z"), ord(" "), 0x0D):
-        return ("a",)
-    if key in (ord("x"), ord("X")):
-        return ("b",)
-    if key in (ord("r"), ord("R")):
-        return ("run",)
-    if key == 0x1B:
-        return ("stop",)
-    if key == 0x08:
-        return ("home",)
-    return ()
+    """A typed ASCII byte -> the buttons it fires on a keyboard WITH arrows."""
+    if 65 <= key <= 90:                      # uppercase -> the same button
+        key += 32
+    b = BUTTON_FOR_KEY.get(key)
+    return (b,) if b is not None else ()
 
 
 _DIRECT_BUTTON = {

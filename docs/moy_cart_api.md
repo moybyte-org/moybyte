@@ -394,20 +394,34 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 
 Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.
 
-**Which key is which** (T-Deck keyboard, and the host simulator matches it):
+**Which key is which.** The buttons are the same everywhere; the *keys* differ, because
+a thumb keyboard and a desktop keyboard are not the same instrument:
 
-| button | key |
-|---|---|
-| `left` `down` `up` `right` | **A S W D** — left thumb |
-| `a` | **L** — right thumb, home row |
-| `b` | **K** |
-| `run` | **R** (host: also Enter) |
-| `home` | **BACKSPACE** — hold ~700ms to exit a game |
+| button | T-Deck | a keyboard with arrows (sim, browser) |
+|---|---|---|
+| `up` `left` `down` `right` | **W A S D** | **arrows** (W A S D also work) |
+| `a` | **L** or **SPACE** | **Z** or **SPACE** |
+| `b` | **K** | **X** |
+| `run` | **ENTER** | **ENTER** |
+| `home` | **BACKSPACE** | **BACKSPACE** |
+| `stop` | — | **ESC** |
 
-Left thumb steers, right thumb fires. `Z`/`X` used to be `a`/`b` and are now ordinary
-letters a cart can read with `key()`; so are `H`, `J`, `Q`, `E`, space and enter.
-Nothing else on the keyboard fires a button, so a typing game can use every other key
-without it also moving the player.
+On the T-Deck the left thumb steers and the right thumb fires, both on the home row.
+That board has **no arrow keys at all**, and its `Z`/`X` are bottom-row keys the left
+thumb has to leave `WASD` to reach — so it gets `L`/`K`. A desktop keyboard has arrows
+and comfortable `Z`/`X`, which is PICO-8's layout and every emulator's, so it gets
+those. `SPACE` is jump and `ENTER` is `run` on both.
+
+`run` is also the launcher's **open this cart**, so Enter confirms in menus.
+`home` is the **exit**: hold it ~700ms while a game is running.
+
+**Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing
+no button — including `R`, `H`, `J`, `Q`, `E` and (on the T-Deck) `Z`/`X`, all of which
+used to be buttons. A typing game can use the whole keyboard without a letter also
+moving the player; a stolen letter is a bug you only find by playing.
+
+In **text mode** (`textmode(True)`, the code editor, a wifi password) no key fires a
+button at all — even Backspace, Enter and space arrive as plain characters to type.
 
 | call | returns |
 |---|---|

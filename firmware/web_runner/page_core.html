@@ -277,7 +277,10 @@ wb("ba","a");wb("bb","b");wb("bh","home");  // &#9776; = HOME (Stage 5 EXIT key)
 document.addEventListener("contextmenu",function(e){var t=e.target;
 if(t===cv||(t.closest&&t.closest("#ctl")))e.preventDefault();});
 var PAN={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},
-NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"},pH={},nH={};
+NAV={a:"left",d:"right",w:"up",s:"down"},SC={Enter:"run",z:"a",x:"b"," ":"a"},pH={},nH={};
+// SPACE = jump, everywhere (owner call 2026-08-14): a kid already has that habit
+// from every other game, and a scheme they must unlearn is the worse scheme. The
+// one alias in the whole map; the boards carry it too (moybyte/input.py).
 // No letter->HOME shortcut: page buttons BYPASS the device's text-mode alias
 // suppression, so h-as-HOME stole the letter h from typing carts (Letter
 // Blitz). EXIT from the page (Stage 5) = HOLD the burger button ~700ms for a

@@ -49,11 +49,32 @@ KEY_BUTTON = {
     ord("a"): "left",
     ord("d"): "right",
     ord("l"): "a",          # right thumb, home row
+    ord(" "): "a",          # ...and SPACE. The one alias -- see below.
     ord("k"): "b",
-    ord("r"): "run",
+    0x0D: "run",            # ENTER -- see below
     0x1B: "stop",           # ESC -- ASCII path only (no matrix key)
     0x08: "home",           # BACKSPACE: THE console key, every input mode
 }
+# SPACE IS THE ONE ALIAS, and it is here because a real kid already has the
+# habit: space = jump, learned everywhere else. That beats the tidiness rule --
+# a scheme a child has to unlearn is a worse scheme, whatever the table looks
+# like. It is the only exception, and the test asserts it is the only one, so
+# the next "just one more convenience alias" has to argue for itself.
+#
+# What it costs, accepted: a non-text-mode cart that reads space via key() also
+# gets btn("a") that frame. Typing games are unaffected -- they run textmode(),
+# which suppresses every alias before this table is consulted.
+#
+# ENTER is `run`, and it is the ONLY key that is. R held that job and is now an
+# ordinary letter: one key per button, the same rule the rest of this table
+# follows, and a typing cart gets R back.
+#
+# `run` on ENTER is also what makes the launcher behave like a menu -- it opens
+# the selected cart on `pressed("a") or pressed("run")`, so Enter confirms.
+# ENTER used to be an `a` ALIAS, which did that job by accident while also
+# duplicating the jump button; as `run` it is deliberate. A text-mode screen
+# (code editor, wifi password) suppresses every alias before this table is
+# consulted, so Enter still inserts a newline there.
 
 # (byte index, bit, ASCII code) for every key the console decodes from the raw
 # matrix, in the order they are tested -- the LAST match wins the `key` slot,
