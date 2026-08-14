@@ -177,6 +177,43 @@ class FileResponse:
         ) % (self.content_type, self.size, self.max_age)).encode("utf-8")
 
 
+class ChunkedResponse:
+    """A response whose body is GENERATED, streamed as it is produced.
+
+    `handle_http` may return one of these; `body()` is a generator of str/bytes
+    pieces, sent with `Transfer-Encoding: chunked` so no length is needed up
+    front. That is the whole point: the alternative is building the answer
+    first to measure it.
+
+    Measured on P4 glass 2026-08-14, which is why this exists rather than a
+    `json.dumps` -- packing that board's 46-cart store took 21.8s and dumping
+    it 39.3s, for a 982KB string. 61 seconds, one allocation, and the frame
+    loop blocked for all of it; the request timed out before a byte moved. The
+    S3 would not have survived the string at all.
+    """
+
+    def __init__(self, body_iter, content_type="application/json"):
+        self.body_iter = body_iter
+        self.content_type = content_type
+
+    def head(self):
+        return ((
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Cache-Control: no-store\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n"
+        ) % self.content_type).encode("utf-8")
+
+
+# How much generated body to gather before one TCP send (ChunkedResponse).
+# 8KB, not 1KB: measured on P4 glass 2026-08-14, serving the 981KB store took
+# 41.3s at 23.7KB/s with 1KB chunks -- ~960 chunks, and each was THREE sendall
+# calls (size line, body, CRLF). The OTA path moves 137KB/s on the same radio,
+# so the wire was never the limit; the syscalls were.
+CHUNK_MIN = 8192
+
 # WebSocket opcodes we care about.
 WS_OP_TEXT = 0x1
 WS_OP_CLOSE = 0x8
@@ -480,6 +517,8 @@ class WebServer:
         try:
             if isinstance(data, FileResponse):
                 self._send_file(conn, data)
+            elif isinstance(data, ChunkedResponse):
+                self._send_chunked(conn, data)
             else:
                 conn.sendall(data)
         except Exception:  # noqa: BLE001 -- a stalled client: drop it, nothing to wait on
@@ -488,6 +527,35 @@ class WebServer:
             conn.close()
         except Exception:  # noqa: BLE001
             pass
+
+    def _send_chunked(self, conn, resp):
+        """Head, then each generated piece as one HTTP chunk, then the
+        terminator. Pieces are COALESCED to at least CHUNK_MIN bytes: the
+        packer yields a few bytes at a time (a key, a value) and one TCP send
+        per token would spend the whole transfer in syscall overhead."""
+        conn.sendall(resp.head())
+        buf = []
+        n = 0
+        for piece in resp.body_iter:
+            if isinstance(piece, str):
+                piece = piece.encode("utf-8")
+            buf.append(piece)
+            n += len(piece)
+            if n >= CHUNK_MIN:
+                self._send_chunk(conn, b"".join(buf))
+                buf = []
+                n = 0
+        if n:
+            self._send_chunk(conn, b"".join(buf))
+        conn.sendall(b"0\r\n\r\n")
+
+    @staticmethod
+    def _send_chunk(conn, data):
+        # ONE sendall, not three. The size line and the trailing CRLF are tiny,
+        # and a separate send for each is a separate trip through the stack --
+        # on a board that is measurable, and it also invites Nagle to sit on the
+        # small ones waiting for an ACK.
+        conn.sendall(b"%x\r\n" % len(data) + data + b"\r\n")
 
     def _send_file(self, conn, resp):
         """Head, then the file in CHUNK-sized pieces off a reused buffer.

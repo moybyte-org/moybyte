@@ -35,7 +35,10 @@ try:
 except ImportError:                      # pragma: no cover
     os = None
 
-from moy_webserver import WebServer, http_response, FileResponse
+import json as _json
+
+from moy_webserver import (WebServer, http_response, FileResponse,
+                           ChunkedResponse)
 
 # Where `firmware/web_runner/dist` was copied on this board. The T-Deck has an
 # SD card and the P4 does not, so the caller passes the directory rather than
@@ -93,6 +96,71 @@ def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
         text = _read(full)
         if text is not None:             # binary/unreadable: skip, never crash
             out[rel] = text
+
+
+def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
+    """The same bundle as pack_store, yielded as JSON pieces -- never assembled.
+
+    A generator and not a dict-then-dumps because on real hardware the dict IS
+    the problem: the P4's store is 982KB of JSON, which took 61s to build and
+    would not fit on the S3 at all. One file's text is the largest thing
+    resident here.
+
+    Escaping goes through `_jstr` -- see the measured note there for why that is
+    json.dumps and not the hand-rolled walk it started as.
+    """
+    _listdir = listdir or os.listdir
+    _isdir = isdir or _is_dir
+    _read = read or _read_text
+    yield "{"
+    first = [True]
+    for cart in sorted(_listdir(carts_root)):
+        cdir = carts_root + "/" + cart
+        if not _isdir(cdir):
+            continue
+        for piece in _stream_dir(cdir, cart, _listdir, _isdir, _read, first):
+            yield piece
+    yield "}"
+
+
+def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
+    for name in sorted(_listdir(path)):
+        if name in SKIP_DIRS:
+            continue
+        full = path + "/" + name
+        rel = prefix + "/" + name
+        if _isdir(full):
+            for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
+                yield piece
+            continue
+        text = _read(full)
+        if text is None:                 # binary/unreadable: skip, never crash
+            continue
+        if not first[0]:
+            yield ","
+        first[0] = False
+        yield _jstr(rel)
+        yield ":"
+        yield _jstr(text)
+
+
+def _jstr(s):
+    """A JSON string literal -- `json.dumps`, which is C.
+
+    This was hand-rolled, on the reasoning that dumps allocates a second copy of
+    a 40KB source file. MEASURED ON P4 GLASS 2026-08-14 and the reasoning was
+    backwards: the escaper walked every character in a Python loop, so packing
+    the 981KB store took 39.9s with no network involved at all -- ~1M
+    interpreter iterations at ~40us each. The allocation it saved was the cheap
+    half; the loop was the whole cost.
+
+    The general lesson, and the reason this comment is long: on MicroPython a
+    per-character Python loop is never the optimisation. Handing a whole string
+    to a C builtin allocates, and allocating is what this file otherwise works
+    hard to avoid -- but ONE file's copy is bounded and transient, where the
+    dict-of-everything this replaced was not.
+    """
+    return _json.dumps(s)
 
 
 def _is_dir(path):
@@ -161,9 +229,22 @@ class WebHost(WebServer):
         return FileResponse(full, size, ASSETS[name])
 
     def _carts_json(self):
-        try:
-            bundle = self._with_sd(lambda: pack_store(self.carts_root))
-        except Exception as exc:  # noqa: BLE001
-            return http_response(500, '{"error":"%s"}' % exc)
-        import json
-        return http_response(200, json.dumps(bundle))
+        """The store, STREAMED as JSON -- never built.
+
+        Measured on P4 glass before this was a generator: 46 carts / 225 files
+        packed in 21.8s and `json.dumps`ed in 39.3s into a 982KB string, so the
+        request timed out at 60s having sent nothing, with the frame loop
+        blocked throughout. The dict and the dump are both gone; what is left is
+        the unavoidable part, reading the files.
+
+        The SD gate is entered ONCE, here, and the walk then runs outside it --
+        which is correct only because of what `with_sd_live` is: it mounts the
+        card once and KEEPS IT RESIDENT for the session (moybyte_sd; tearing it
+        down per op is what corrupts the shared bus and hangs the next panel
+        flush). So the gate's job is "make sure the card is up", and a generator
+        that yields for a minute must not hold anything. Wrapping the whole
+        iteration would mean holding the gate across every read, which is the
+        opposite of that module's contract.
+        """
+        self._with_sd(lambda: None)          # ensure the card is mounted
+        return ChunkedResponse(stream_store_json(self.carts_root))

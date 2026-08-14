@@ -121,11 +121,11 @@ def test_a_megabyte_asset_is_streamed_not_held(tmp_path):
 def test_carts_json_is_json_and_live(tmp_path):
     h = _host(tmp_path)
     r = h.handle_http("GET", "/carts.json", b"")
-    assert isinstance(r, bytes)
-    head, _, body = r.partition(b"\r\n\r\n")
-    assert b"application/json" in head
-    assert b"no-store" in head, "the store is live; caching it serves stale carts"
-    assert json.loads(body)["hop.moy/main.py"].startswith("def _draw()")
+    head = r.head().decode()
+    assert "application/json" in head
+    assert "no-store" in head, "the store is live; caching it serves stale carts"
+    assert json.loads("".join(r.body_iter))["hop.moy/main.py"].startswith(
+        "def _draw()")
 
 
 def test_only_the_four_known_assets_are_reachable(tmp_path):
@@ -178,8 +178,16 @@ def test_the_sd_gate_wraps_the_store_read(tmp_path):
         return fn()
 
     h._with_sd = gate
-    h.handle_http("GET", "/carts.json", b"")
+    r = h.handle_http("GET", "/carts.json", b"")
     assert calls == [1], "the store was read outside the SD gate"
+    # The gate is entered BEFORE the generator is built, and the walk runs
+    # after -- which is right for with_sd_live (mount once, keep resident) and
+    # would be wrong for a scoped mount. Pinned because the generator rewrite
+    # silently turned "wrap the read" into "wrap building an iterator", and the
+    # count above passes either way.
+    assert calls == [1] and hasattr(r, "body_iter")
+    json.loads("".join(r.body_iter))       # the walk, after the gate returned
+    assert calls == [1], "the walk re-entered the gate per file"
 
 
 @pytest.mark.parametrize("name,ctype", sorted(wh.ASSETS.items()))
@@ -240,3 +248,96 @@ def test_the_stream_delivers_the_file_byte_for_byte(tmp_path):
     assert b"Content-Length: %d" % len(payload) in head
     assert body == payload, "streamed body differs (len %d vs %d)" % (
         len(body), len(payload))
+
+
+# -- the streamed store ------------------------------------------------------
+
+def _stream_to_json(root):
+    return json.loads("".join(wh.stream_store_json(str(root))))
+
+
+def test_the_streamed_json_equals_the_packed_dict(tmp_path):
+    """The generator replaced pack_store on the wire because the dict did not
+    fit (982KB / 61s on P4 glass). It must produce the SAME bundle -- an
+    equality this direct is worth having precisely because the two now share no
+    code path."""
+    root = _store(tmp_path)
+    assert _stream_to_json(root) == wh.pack_store(str(root))
+
+
+def test_the_stream_escapes_what_json_requires(tmp_path):
+    """Hand-rolled escaping, because json.dumps on a 40KB main.py allocates a
+    second 40KB string -- the same mistake one level down. Hand-rolled means it
+    has to be checked against the real thing."""
+    root = tmp_path / "carts"
+    (root / "odd.moy").mkdir(parents=True)
+    nasty = 'q = "hi"\\ntab\\there\\n\\u0001 \\\\ backslash\\r\\n'
+    (root / "odd.moy" / "main.py").write_text(nasty)
+    assert _stream_to_json(root)["odd.moy/main.py"] == nasty
+
+
+def test_an_ascii_file_is_not_rebuilt_character_by_character():
+    """The common case -- a cart source with nothing to escape -- must return
+    the input string itself, not a rebuilt copy. On a 40KB file the difference
+    is a 40KB allocation per cart, which is the whole reason this is not
+    json.dumps."""
+    plain = "def _draw():\n"          # \n IS escaped, so use a truly plain one
+    plain = "def _draw(): cls(1)"
+    assert wh._jstr(plain) == '"' + plain + '"'
+
+
+def test_carts_json_is_a_chunked_response_now(tmp_path):
+    from moy_webserver import ChunkedResponse
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/carts.json", b"")
+    assert isinstance(r, ChunkedResponse)
+    head = r.head().decode()
+    assert "Transfer-Encoding: chunked" in head
+    assert "Content-Length" not in head, "chunked and length are exclusive"
+    assert json.loads("".join(r.body_iter))["hop.moy/main.py"]
+
+
+def test_the_chunked_wire_format_is_well_formed(tmp_path):
+    """Framing over a real socket: `<hex>\\r\\n<data>\\r\\n` per chunk, `0\\r\\n\\r\\n`
+    to end. A browser is unforgiving here and the failure is a page that hangs
+    mid-load with no error."""
+    import socket
+    import threading
+    from moy_webserver import WebServer, ChunkedResponse
+
+    body = ["{", '"a/b.py"', ":", '"x"', "}"]
+    resp = ChunkedResponse(iter(body))
+    a, b = socket.socketpair()
+    srv = WebServer.__new__(WebServer)
+
+    def pump():
+        try:
+            srv._send_chunked(a, resp)
+        finally:
+            a.close()
+
+    t = threading.Thread(target=pump)
+    t.start()
+    b.settimeout(5)
+    got = b""
+    while True:
+        c = b.recv(65536)
+        if not c:
+            break
+        got += c
+    t.join(5)
+    b.close()
+
+    head, _, wire = got.partition(b"\r\n\r\n")
+    assert b"chunked" in head
+    assert wire.endswith(b"0\r\n\r\n"), wire[-16:]
+    # De-chunk and require the original JSON back.
+    out, rest = b"", wire
+    while True:
+        size_s, _, rest = rest.partition(b"\r\n")
+        n = int(size_s, 16)
+        if n == 0:
+            break
+        out += rest[:n]
+        rest = rest[n + 2:]
+    assert json.loads(out) == {"a/b.py": "x"}

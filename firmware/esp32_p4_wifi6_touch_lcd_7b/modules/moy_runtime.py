@@ -1011,6 +1011,23 @@ def run_desktop(fps_cap=60):
                         print("PY ok")
                 except Exception as exc:  # noqa: BLE001
                     print("PY ERR %s: %s" % (type(exc).__name__, exc))
+            if parts and parts[0] == "web":
+                # `web [port]`: serve the wasm console FROM this board (plan
+                # 3.4 pull half, moy_webhost). Prints the url to open. A dev
+                # command rather than a Settings row for now, because the
+                # endpoint is unsecured -- see moy_webhost's module docstring.
+                try:
+                    if getattr(ws, "_webhost", None) is None:
+                        from moy_webhost import WebHost, P4_WEB_DIR
+                        if ws.wifi is not None and not ws.wifi.status()[0]:
+                            autoconnect_wifi(ws.wifi)
+                        port = int(parts[1]) if len(parts) > 1 else 8080
+                        h = WebHost(carts_root, P4_WEB_DIR, port=port)
+                        h.start()
+                        ws._webhost = h
+                    print("WEB %s" % ws._webhost.url())
+                except Exception as exc:  # noqa: BLE001
+                    print("WEB ERR %s: %s" % (type(exc).__name__, exc))
             if parts and parts[0] == "state":
                 # `state`: one-line JSON snapshot (world/windows/settings scroll/
                 # wifi/cart claims) -- the harness's assertion source.
@@ -1182,6 +1199,18 @@ def run_desktop(fps_cap=60):
             except Exception as exc:  # noqa: BLE001 -- never break a frame over this
                 print("Moybyte P4 OTA: confirm failed:", exc)
                 _ota = None
+        _wh = getattr(ws, "_webhost", None)
+        if _wh is not None:
+            # One non-blocking accept/serve per frame (plan 3.4 pull half).
+            # Costs a poll on a non-blocking listener when nobody is connected,
+            # and a whole 1MB asset transfer when someone is -- which is why it
+            # sits HERE, at the frame tail, outside every timing bracket: a
+            # browser loading the console will visibly stall the desktop, and
+            # that is the honest behaviour for a single-threaded board.
+            try:
+                _wh.poll()
+            except Exception as exc:  # noqa: BLE001 -- never break a frame
+                print("WEB ERR %s: %s" % (type(exc).__name__, exc))
         elapsed = _ticks_diff(_ticks_ms(), now)
         _pf_n += 1
         _pf_busy += elapsed
