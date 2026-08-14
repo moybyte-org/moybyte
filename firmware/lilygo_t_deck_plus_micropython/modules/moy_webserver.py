@@ -142,6 +142,41 @@ def http_response(status, body, content_type="application/json"):
     return head.encode("utf-8") + body
 
 
+class FileResponse:
+    """A response whose BODY is a file on the device, streamed rather than read.
+
+    `handle_http` may return one of these instead of bytes. The transport sends
+    the head, then pumps the file in CHUNK-sized pieces, so serving the wasm
+    head (a 1.0MB `micropython.wasm`) costs a 1KB buffer instead of a 1MB one.
+    That is not a nicety on the S3: #66 measures ~23KB of internal SRAM free in
+    play, and a whole-file `bytes` would have to come out of PSRAM and be built
+    before the first byte reached the wire.
+
+    Cache-Control is `max-age`, not `no-store` like the JSON path: these are
+    build artifacts that change only when the console is reflashed, and the
+    difference is a ~9s first load (at the T-Deck's measured ~137KB/s) versus
+    that same 9s on EVERY page open.
+    """
+
+    CHUNK = 1024
+
+    def __init__(self, path, size, content_type, max_age=86400):
+        self.path = path
+        self.size = size
+        self.content_type = content_type
+        self.max_age = max_age
+
+    def head(self):
+        return ((
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Length: %d\r\n"
+            "Cache-Control: max-age=%d\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n"
+        ) % (self.content_type, self.size, self.max_age)).encode("utf-8")
+
+
 # WebSocket opcodes we care about.
 WS_OP_TEXT = 0x1
 WS_OP_CLOSE = 0x8
@@ -434,19 +469,42 @@ class WebServer:
         return did
 
     def _http_send_close(self, conn, data):
-        """sendall `data` (with a short send budget) then close -- the one-shot HTTP path."""
+        """sendall `data` (with a short send budget) then close -- the one-shot HTTP path.
+
+        `data` is either complete response bytes or a FileResponse, which is
+        streamed in chunks so a megabyte asset never has to be resident."""
         try:
             conn.settimeout(WEB_SEND_TIMEOUT)
         except Exception:  # noqa: BLE001
             pass
         try:
-            conn.sendall(data)
+            if isinstance(data, FileResponse):
+                self._send_file(conn, data)
+            else:
+                conn.sendall(data)
         except Exception:  # noqa: BLE001 -- a stalled client: drop it, nothing to wait on
             pass
         try:
             conn.close()
         except Exception:  # noqa: BLE001
             pass
+
+    def _send_file(self, conn, resp):
+        """Head, then the file in CHUNK-sized pieces off a reused buffer.
+
+        `readinto` and a memoryview slice, not `read(n)`: read() mints a fresh
+        bytes object per chunk, and a thousand of those during a 1MB transfer is
+        exactly the allocation churn that costs a collect mid-frame on the S3.
+        """
+        conn.sendall(resp.head())
+        buf = bytearray(resp.CHUNK)
+        mv = memoryview(buf)
+        with open(resp.path, "rb") as f:
+            while True:
+                n = f.readinto(buf)
+                if not n:
+                    break
+                conn.sendall(mv[:n] if n < resp.CHUNK else buf)
 
     def _recv_request(self, conn):
         """Read one request head (+ body up to Content-Length) off a freshly accepted conn.
