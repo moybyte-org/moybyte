@@ -14,7 +14,7 @@
      AudioWorklet PCM ring, and layout. build.sh concatenates this with
      page_tail.js (the worker transport + loader) into dist/index.html. -->
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Moybyte</title><style>
+<link rel=icon href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhUlEQVR42mNgGAW4wX8y8dB3ANig5rI5ZGFqOGTAHIBi8aHDx1HwyHPAgEfBcHAAydl0cDrg/8cXKJiQOCVRNLgdgC6PS3z4OYDaeOg5gJDDaB4FA+4AQgUM3dLAgDtg5OaCEeUAFIfUqQZTFZPSUBncDsCVHalh8aBxAKGuGbXUDw4HAAAJtsp8ecvLrQAAAABJRU5ErkJggg=="><title>Moybyte</title><style>
 html,body{margin:0;height:100%;background:#0b0f1a;color:#c2c3c7;
 font:14px ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;
 align-items:center}
@@ -81,7 +81,7 @@ opacity:0;font-size:16px;background:transparent;color:transparent;caret-color:tr
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
-<h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small></h1>
+<h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a></h1>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
 <div id=ctl><div id=joy><div id=th></div></div>

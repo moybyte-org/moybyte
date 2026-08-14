@@ -128,9 +128,16 @@ async function init(search) {
     let cart = qs.get("cart");
     const names = [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))];
     if (!cart && names.length === 1) cart = names[0];
-    // TIER SELECT (#73/#175): default is the handheld 320x240 console; ?desktop=1
-    // boots the windowed desktop, ?size=WxH overrides its panel size.
-    const desktop = qs.get("desktop");
+    // TIER SELECT (#73/#175). The DESKTOP desk is the default everywhere (owner
+    // call 2026-08-14) -- on moybyte.com and on a board serving its own console
+    // alike. It was the handheld 320x240 tier, which made the full-size product
+    // the thing you had to know a url parameter to see.
+    //   ?handheld=1  the 320x240 console (the phone-shaped one)
+    //   ?size=WxH    override the desk's panel size
+    // A single ?cart=<name> still implies handheld: that url is the one-cart
+    // player (moy export / the gallery), where a desk around one game is chrome
+    // nobody asked for.
+    const desktop = qs.get("handheld") ? null : (qs.get("desktop") || !cart);
     let dw = 1024, dh = 600;
     const szm = /^(\d+)x(\d+)$/.exec(qs.get("size") || "");
     if (szm) { dw = +szm[1]; dh = +szm[2]; }

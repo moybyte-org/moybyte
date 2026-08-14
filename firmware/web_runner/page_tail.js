@@ -111,6 +111,16 @@ try {
       { once: true });
     document.body.appendChild(ov);
   }
+  // The tier link is a TOGGLE, not a one-way door: from the desk it offers the
+  // small screen, from the small screen it offers the desk back. "?" alone is
+  // the desktop, because an empty query is the default now.
+  try {
+    const a = document.getElementById("tier");
+    if (a && new URLSearchParams(location.search).get("handheld")) {
+      a.href = "?";
+      a.textContent = "full desktop";
+    }
+  } catch (e) { /* the link is decoration; never break boot over it */ }
   // ---- dev hot-reload (?dev=1, the moy CLI's watch loop) ---------------------
   // Poll the CLI server's /stamp (latest cart-file mtime); on change the WORKER
   // refetches carts.json, restarts the cart and pushes fresh assets. Static
