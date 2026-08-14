@@ -288,7 +288,7 @@ sys.path.insert(0, @STAGE@)
 import hashlib
 
 import moy_gfx, moycore                    # both usermods, or die loudly
-from input import InputState               # the console's real input class
+from input import InputState, BUTTONS      # the BOARDS' real input class
 import device_api
 import device_canvas
 from moycore_glue import MoycoreRun
@@ -321,12 +321,26 @@ class ScriptInput(InputState):
     copy of the bit order living in the very suite meant to catch drift.
     Subclassing means the harness exercises production's edge detection, its
     set handling and its mask derivation -- so if any of those change, this
-    trace moves with them instead of quietly agreeing with a stale twin."""
+    trace moves with them instead of quietly agreeing with a stale twin.
+
+    AND IT SUBCLASSES THE BOARDS' CLASS, not the host's (2026-08-14). There are
+    two InputState classes; this harness models a DEVICE build, and it was
+    staging runtime/input.py -- so for input it compared the host against
+    itself. That is the hole the rotated d-pad went through: the boards' BUTTONS
+    is a different tuple in a different ORDER, moycore packs the mask from it,
+    and every Lua cart on both boards read its d-pad a quarter turn off while
+    this suite stayed green.
+
+    It cannot happen quietly again, because of the ASYMMETRY between the twins:
+    the Python cart reads buttons BY NAME through make_api, the Lua cart reads
+    the BITMASK through moycore's snapshot. A wrong bit order moves one twin and
+    not the other, so it lands as a frame-hash mismatch here rather than as a
+    bug report from a kid."""
 
     def set_frame(self, f):
         want = HELD.get(f, ())
-        for n in self.BUTTONS:
-            self.set_held(n, n in want)
+        for n in BUTTONS:
+            self.set_button(n, n in want)
         self.begin_frame()
 
 
@@ -469,8 +483,11 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # runtimes import; build.sh stages it from runtime/ the same way.
     shutil.copy(ROOT / "runtime" / "lua_ext.py", stage / "lua_ext.py")
     # input.py so the scripted feed can BE the console's InputState rather than
-    # a second implementation of held/pressed/button_masks.
-    shutil.copy(ROOT / "runtime" / "input.py", stage / "input.py")
+    # a second implementation of held/pressed/button_masks -- and it is the
+    # BOARDS' one, because this harness models a device build. Staging the
+    # host's (which is what it used to do) meant the one suite that drives real
+    # input through the real glue was testing the wrong tier's input class.
+    shutil.copy(TDECK / "modules" / "moybyte" / "input.py", stage / "input.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),
