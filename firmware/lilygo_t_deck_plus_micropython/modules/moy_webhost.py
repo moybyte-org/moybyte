@@ -72,25 +72,22 @@ def pack_store(carts_root, listdir=None, read=None, isdir=None):
     The three injected callables are for testing on the host, where there is no
     device filesystem; they default to the real ones.
     """
-    _listdir = listdir or os.listdir
-    _isdir = isdir or _is_dir
     _read = read or _read_text
     out = {}
-    for cart in sorted(_listdir(carts_root)):
-        cdir = carts_root + "/" + cart
-        if not _isdir(cdir):
+    for cart, isdir_ in sorted(_entries(carts_root, listdir, isdir)):
+        if not isdir_:
             continue
-        _pack_dir(out, cdir, cart, _listdir, _isdir, _read)
+        _pack_dir(out, carts_root + "/" + cart, cart, listdir, isdir, _read)
     return out
 
 
 def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
-    for name in sorted(_listdir(path)):
+    for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
         if name in SKIP_DIRS:
             continue
         full = path + "/" + name
         rel = prefix + "/" + name
-        if _isdir(full):
+        if isdir_:
             _pack_dir(out, full, rel, _listdir, _isdir, _read)
             continue
         text = _read(full)
@@ -109,27 +106,25 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
     Escaping goes through `_jstr` -- see the measured note there for why that is
     json.dumps and not the hand-rolled walk it started as.
     """
-    _listdir = listdir or os.listdir
-    _isdir = isdir or _is_dir
     _read = read or _read_text
     yield "{"
     first = [True]
-    for cart in sorted(_listdir(carts_root)):
-        cdir = carts_root + "/" + cart
-        if not _isdir(cdir):
+    for cart, isdir_ in sorted(_entries(carts_root, listdir, isdir)):
+        if not isdir_:
             continue
-        for piece in _stream_dir(cdir, cart, _listdir, _isdir, _read, first):
+        for piece in _stream_dir(carts_root + "/" + cart, cart,
+                                 listdir, isdir, _read, first):
             yield piece
     yield "}"
 
 
 def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
-    for name in sorted(_listdir(path)):
+    for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
         if name in SKIP_DIRS:
             continue
         full = path + "/" + name
         rel = prefix + "/" + name
-        if _isdir(full):
+        if isdir_:
             for piece in _stream_dir(full, rel, _listdir, _isdir, _read, first):
                 yield piece
             continue
@@ -161,6 +156,36 @@ def _jstr(s):
     dict-of-everything this replaced was not.
     """
     return _json.dumps(s)
+
+
+def _entries(path, _listdir=None, _isdir=None):
+    """(name, is_dir) for everything in `path`, in ONE directory traversal.
+
+    `os.ilistdir` yields the TYPE alongside the name, which is the whole point:
+    the obvious `listdir` + `stat`-each costs a full path resolution per entry,
+    and on littlefs that is not a small constant.
+
+    MEASURED ON P4 GLASS, 2026-08-14 -- littlefs walks from the root on every
+    path operation, so the cost is linear in how many entries the parent holds:
+
+        stat /moy                          5.3 ms   (depth 1)
+        stat /moy/carts                   28.9 ms   (depth 2, 46 entries)
+        stat /moy/carts/<cart>/main.py    59.4 ms   (depth 4)
+
+    A stat cost MORE than opening and reading an 11KB file (44.0 ms). The store
+    walk was doing 271 of them, ~16s of a 27s pack, to learn something ilistdir
+    hands over for free.
+    """
+    ils = getattr(os, "ilistdir", None)
+    if ils is not None and _listdir is None:
+        for e in ils(path):
+            yield e[0], (e[1] & 0x4000) != 0
+        return
+    # Host/test path: no ilistdir (CPython's os has none), or injected fakes.
+    ld = _listdir or os.listdir
+    isd = _isdir or _is_dir
+    for name in ld(path):
+        yield name, isd(path + "/" + name)
 
 
 def _is_dir(path):
