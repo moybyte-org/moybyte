@@ -103,6 +103,19 @@ def test_device_webserver_is_transport_core_only():
 
 
 def test_console_has_no_web_hook_surface():
+    """The STREAMING web view's surface, specifically.
+
+    Settings grew a "WEB CONSOLE" row on 2026-08-14 and that is not a
+    regression here: it is the opposite design. The stream pushed PIXELS over
+    the wire and its defect class was cache agreement across a lossy transport;
+    the new row hands a browser the wasm console ONCE and then only cart data
+    crosses (moycore plan 3.4, moy_webhost.py). Different key, different label,
+    and none of the machinery below.
+
+    So these assertions stay narrow on purpose -- `"web"` as a whole settings
+    key and the exact "WEB VIEW" label -- rather than banning the substring
+    "web", which would forbid the successor along with the thing being buried.
+    """
     console = _read("runtime", "console.py")
     assert "web_hook" not in console
     assert "_toggle_web_view" not in console

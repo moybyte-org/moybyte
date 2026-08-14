@@ -856,6 +856,19 @@ class Workstation:
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self.updater = None
+        # Serve the web console FROM this console (moycore plan 3.4 pull half):
+        # injected by the device (moy_webhost.WebHost); None on the host and on a
+        # build without it, which is what makes the Settings row appear only where
+        # it can work. Contract, deliberately four members so the shell needs to
+        # know nothing about sockets: `.serving` (bool), `.start()`, `.stop()`,
+        # `.url()`.
+        #
+        # NOT the old web view. That one streamed PIXELS and was sunset (plan
+        # 3.2); this hands the browser the wasm console once and then only cart
+        # data crosses. The name differs for the same reason the sunset test
+        # pins the old one's absence -- they are opposite designs, and a reader
+        # who conflates them will re-derive the wrong bug list.
+        self.webhost = None
         self._updater_ok = None     # cached updater.available() (cheap, but not per-frame)
         self._online_ok = None      # cached updater.online_available() (#53 Phase 3)
         # The firmware-update SCREEN (#53, extracted from this class -- see
@@ -1685,6 +1698,61 @@ class Workstation:
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
         self._persist_system()
+
+    # -- WEB CONSOLE (moycore plan 3.4 pull half) ----------------------------
+    #
+    # Three thin verbs over the injected `webhost`, so settings_layer never
+    # touches a socket and every tier without the service is untouched. The
+    # service contract is `.serving` / `.start()` / `.stop()` / `.url()`.
+
+    def webhost_serving(self):
+        wh = self.webhost
+        return bool(wh is not None and getattr(wh, "serving", False))
+
+    def webhost_label(self):
+        """What the Settings row shows: the ADDRESS while serving, else OFF.
+
+        The address IS the feature -- the kid has to type it into a browser --
+        so a row that said only "ON" would be telling them to go and find the
+        IP somewhere else. A failure shows its reason here too, for the same
+        reason: this row is the only surface this feature has.
+        """
+        wh = self.webhost
+        if wh is None:
+            return "OFF"
+        if getattr(wh, "error", None):
+            return str(wh.error)[:22]
+        if not getattr(wh, "serving", False):
+            return "OFF"
+        url = ""
+        try:
+            url = wh.url() or ""
+        except Exception:  # noqa: BLE001 -- a url is not worth a crash
+            url = ""
+        # Strip the scheme: the row is ~22 chars at 1x and "http://" spends 7 of
+        # them on something every browser assumes anyway.
+        return url.replace("http://", "").rstrip("/") or "ON"
+
+    def toggle_webhost(self):
+        """Start or stop serving. Errors are CAUGHT and shown on the row.
+
+        Starting touches WiFi, which can fail slowly and in ways nobody can act
+        on from a Settings screen (no AP, wrong password, DHCP). A raised
+        exception here would take the console down from a toggle, so the failure
+        becomes the row's own label instead.
+        """
+        wh = self.webhost
+        if wh is None:
+            return
+        try:
+            wh.error = None
+            if getattr(wh, "serving", False):
+                wh.stop()
+            else:
+                wh.start()
+        except Exception as exc:  # noqa: BLE001
+            wh.error = "%s" % exc
+        self._dirty = True
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.

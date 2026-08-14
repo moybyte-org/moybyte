@@ -136,6 +136,7 @@ class SettingsLayer:
         self._rows_bt = False
         self._rows_upd = False
         self._rows_onl = False
+        self._rows_web = False
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -651,8 +652,10 @@ class SettingsLayer:
         bt = self._bt_service() is not None
         upd = ws._update_available()
         onl = ws._online_update_available()
+        web = getattr(ws, "webhost", None) is not None
         if (self._rows_cache is not None and bt == self._rows_bt
-                and upd == self._rows_upd and onl == self._rows_onl):
+                and upd == self._rows_upd and onl == self._rows_onl
+                and web == self._rows_web):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -660,6 +663,13 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
+        if web:
+            # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
+            # board, so a browser on the same network opens YOUR carts. Its own
+            # kind rather than a "diag" ON/OFF because when it is on the useful
+            # thing to show is the ADDRESS -- an "ON" with no url is just an
+            # instruction to go find the IP somewhere else.
+            rows = rows + (("webhost", "WEB CONSOLE", "webhost"),)
         if upd:
             rows = rows + (("update", "UPDATE FW", "action"),)
         if onl:
@@ -668,6 +678,7 @@ class SettingsLayer:
         self._rows_bt = bt
         self._rows_upd = upd
         self._rows_onl = onl
+        self._rows_web = web
         self._rows_cache = rows
         return rows
 
@@ -717,6 +728,9 @@ class SettingsLayer:
             return
         if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
             self._toggle_diag_row(key)
+            return
+        if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
+            ws.toggle_webhost()
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -917,6 +931,9 @@ class SettingsLayer:
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
                     return True
+                if rows[i][2] == "webhost":        # WEB CONSOLE: any tap toggles
+                    self.ws.toggle_webhost()
+                    return True
                 if rows[i][2] == "diag":           # ON/OFF gates: any tap flips (#68/#77)
                     self._toggle_diag_row(rows[i][0])
                     return True
@@ -1092,8 +1109,12 @@ class SettingsLayer:
             on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
+        elif kind == "webhost":            # WEB CONSOLE: the ADDRESS, not "ON"
+            cv.print(ws.webhost_label(), vx, y + 5,
+                     NAMES["orange"] if ws.webhost_serving()
+                     else NAMES["dark_grey"], 1)
         # Mark not-yet-functional rows clearly (wifi + font + channel +
         # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "diag"):
+                        "diag", "webhost"):
             cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)

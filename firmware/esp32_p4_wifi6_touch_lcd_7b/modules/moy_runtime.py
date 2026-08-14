@@ -736,6 +736,43 @@ def run_desktop(fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: reboot hook unavailable:", exc)
+    # WEB CONSOLE (moycore plan 3.4 pull half): serve the wasm console from this
+    # board. Constructed, NOT started -- __init__ binds no socket, so injecting
+    # it only makes the Settings row appear. `ensure_online` returns the STA IP,
+    # which is what the row displays: 0.0.0.0 is the one address nobody can type
+    # into a browser.
+    try:
+        from moy_webhost import WebHost, P4_WEB_DIR
+
+        def _web_online():
+            """Connect if needed, then WAIT for the link, then report the IP.
+
+            The wait is not optional and the reason is recorded in moy_ota's
+            ensure_online: `connect()` polls for 4s and gives up, and on this
+            board a saved network measured 1.5s SLOWER than that (the radio is
+            a separate C6 over SDIO, so cold association is slow). Without it a
+            perfectly good network reads as "no wifi" -- which is exactly what
+            this row did on its first try.
+            """
+            if ws.wifi is None:
+                raise OSError("no wifi service")
+            if not ws.wifi.status()[0]:
+                try:
+                    autoconnect_wifi(ws.wifi)
+                except Exception:  # noqa: BLE001 -- the wait below decides
+                    pass
+                for _ in range(48):            # 12s, moy_ota's ONLINE_WAIT_MS
+                    if ws.wifi.status()[0]:
+                        break
+                    time.sleep_ms(250)
+            st = ws.wifi.status()
+            if not st[0]:
+                raise OSError("no wifi")
+            return st[2]
+
+        ws.webhost = WebHost(carts_root, P4_WEB_DIR, ensure_online=_web_online)
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: web console unavailable:", exc)
     # The P4 presentation tier (#73/#58, two worlds #105): the DESK is home
     # (make world, windows); the PLAY icon drops to the fullscreen Library.
     # Installed AFTER load_system (same order as host build_workstation) so the
@@ -1017,15 +1054,13 @@ def run_desktop(fps_cap=60):
                 # command rather than a Settings row for now, because the
                 # endpoint is unsecured -- see moy_webhost's module docstring.
                 try:
-                    if getattr(ws, "_webhost", None) is None:
-                        from moy_webhost import WebHost, P4_WEB_DIR
-                        if ws.wifi is not None and not ws.wifi.status()[0]:
-                            autoconnect_wifi(ws.wifi)
-                        port = int(parts[1]) if len(parts) > 1 else 8080
-                        h = WebHost(carts_root, P4_WEB_DIR, port=port)
-                        h.start()
-                        ws._webhost = h
-                    print("WEB %s" % ws._webhost.url())
+                    if ws.webhost is None:
+                        print("WEB no service")
+                    else:
+                        if not ws.webhost.serving:
+                            ws.toggle_webhost()
+                        print("WEB %s %s" % (ws.webhost.url(),
+                                             ws.webhost.error or ""))
                 except Exception as exc:  # noqa: BLE001
                     print("WEB ERR %s: %s" % (type(exc).__name__, exc))
             if parts and parts[0] == "state":
@@ -1199,8 +1234,8 @@ def run_desktop(fps_cap=60):
             except Exception as exc:  # noqa: BLE001 -- never break a frame over this
                 print("Moybyte P4 OTA: confirm failed:", exc)
                 _ota = None
-        _wh = getattr(ws, "_webhost", None)
-        if _wh is not None:
+        _wh = ws.webhost
+        if _wh is not None and _wh.serving:
             # One non-blocking accept/serve per frame (plan 3.4 pull half).
             # Costs a poll on a non-blocking listener when nobody is connected,
             # and a whole 1MB asset transfer when someone is -- which is why it

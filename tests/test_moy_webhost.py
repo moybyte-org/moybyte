@@ -341,3 +341,115 @@ def test_the_chunked_wire_format_is_well_formed(tmp_path):
         out += rest[:n]
         rest = rest[n + 2:]
     assert json.loads(out) == {"a/b.py": "x"}
+
+
+# -- the Settings row --------------------------------------------------------
+
+class _FakeHost:
+    """The four members console.Workstation's webhost verbs use."""
+
+    def __init__(self, fail=None):
+        self.serving = False
+        self.error = None
+        self._fail = fail
+        self.stops = 0
+
+    def start(self):
+        if self._fail:
+            raise OSError(self._fail)
+        self.serving = True
+
+    def stop(self):
+        self.serving = False
+        self.stops += 1
+
+    def url(self):
+        return "http://192.168.1.151:8080/"
+
+
+def _ws(tmp_path):
+    from runtime import host_app
+    return host_app.build_workstation(str(tmp_path / "carts"))
+
+
+def _row_keys(ws):
+    return [r[0] for r in ws.settings_layer._settings_rows()]
+
+
+def test_the_row_appears_only_where_the_service_is_injected(tmp_path):
+    """A Settings row for a thing the tier cannot do is worse than no row --
+    the host has no webhost, so it must not offer one."""
+    ws = _ws(tmp_path)
+    assert ws.webhost is None
+    assert "webhost" not in _row_keys(ws)
+    ws.webhost = _FakeHost()
+    assert "webhost" in _row_keys(ws)
+
+
+def test_the_row_is_appended_so_existing_row_indices_do_not_move(tmp_path):
+    """Settings rows are pinned by index and by frozen 320x240 pixels
+    elsewhere. Gating is only safe if it APPENDS."""
+    ws = _ws(tmp_path)
+    before = _row_keys(ws)
+    ws.webhost = _FakeHost()
+    after = _row_keys(ws)
+    assert after[:len(before)] == before
+    assert after[-1] == "webhost"
+
+
+def test_the_row_shows_the_ADDRESS_not_just_ON(tmp_path):
+    """The address IS the feature -- it has to be typed into a browser. A row
+    reading "ON" would be telling the kid to go find the IP somewhere else."""
+    ws = _ws(tmp_path)
+    ws.webhost = _FakeHost()
+    assert ws.webhost_label() == "OFF"
+    ws.toggle_webhost()
+    assert ws.webhost_serving() is True
+    assert ws.webhost_label() == "192.168.1.151:8080"   # scheme stripped
+    ws.toggle_webhost()
+    assert ws.webhost_serving() is False
+    assert ws.webhost_label() == "OFF"
+
+
+def test_a_failed_start_shows_its_reason_and_does_not_raise(tmp_path):
+    """Starting touches WiFi, which fails slowly and in ways nobody can act on
+    from a Settings screen. A raised exception would take the console down from
+    a toggle; the row is this feature's only surface, so it carries the news."""
+    ws = _ws(tmp_path)
+    ws.webhost = _FakeHost(fail="no wifi")
+    ws.toggle_webhost()
+    assert ws.webhost_serving() is False
+    assert "no wifi" in ws.webhost_label()
+
+
+def test_the_verbs_are_safe_with_no_service(tmp_path):
+    ws = _ws(tmp_path)
+    assert ws.webhost_serving() is False
+    assert ws.webhost_label() == "OFF"
+    ws.toggle_webhost()                     # must not raise
+
+
+def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
+    """WebServer.start RETURNS False on a busy port rather than raising (it is
+    guarded so it cannot take the loop down). Not checking it is how a row comes
+    to say ON over a server that is serving nothing."""
+    h = wh.WebHost.__new__(wh.WebHost)
+    h.serving = False
+    h.error = None
+    h.port = 8080
+    h._ensure_online = lambda: "10.0.0.5"
+    h.ip = None
+    from moy_webserver import WebServer
+    h.__class__.__mro__      # sanity: WebHost derives from WebServer
+    orig = WebServer.start
+    try:
+        WebServer.start = lambda self, ip=None: False      # simulate a busy port
+        raised = False
+        try:
+            wh.WebHost.start(h)
+        except OSError:
+            raised = True
+        assert raised, "a failed bind was reported as success"
+        assert h.serving is False
+    finally:
+        WebServer.start = orig

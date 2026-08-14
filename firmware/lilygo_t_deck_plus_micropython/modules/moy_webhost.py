@@ -213,18 +213,53 @@ def _file_size(path):
 class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
-    def __init__(self, carts_root, web_dir, port=None, with_sd=None):
+    def __init__(self, carts_root, web_dir, port=None, with_sd=None,
+                 ensure_online=None):
         if port is None:
             WebServer.__init__(self)
         else:
             WebServer.__init__(self, port=port)
         self.carts_root = carts_root
         self.web_dir = web_dir
+        # Settings contract (console.Workstation.toggle_webhost): `.serving`,
+        # `.start()`, `.stop()`, `.url()`, and `.error` for a failure the row can
+        # show. Constructed but NOT started -- __init__ binds no socket, so
+        # injecting this costs nothing until a kid turns it on.
+        self.serving = False
+        self.error = None
+        # Brought up by start(), because a Settings toggle cannot be asked to
+        # connect the WiFi first: the row is the whole UI this feature has.
+        self._ensure_online = ensure_online
         # The T-Deck's store lives on a shared-SPI SD card that must be touched
         # through moybyte_sd.with_sd_live, never directly (see that module and
         # the hard-constraints section of CLAUDE.md). The P4 has no SD and
         # passes None, which makes this a plain call-through.
         self._with_sd = with_sd or (lambda fn: fn())
+
+    def start(self, ip=None):
+        """Bring the link up, then listen. Sets `serving` only if BOTH worked.
+
+        The order matters and is not cosmetic: binding first would give a row
+        reading "0.0.0.0:8080" on a board with no network, which looks like
+        success and is not.
+
+        `ip` is the address to ADVERTISE, not to bind -- the socket still
+        listens on every interface. The base transport reports whatever it was
+        given, which is 0.0.0.0 by default, and 0.0.0.0 is exactly the one
+        address a kid cannot type into a browser.
+        """
+        if self._ensure_online is not None and ip is None:
+            ip = self._ensure_online()
+        # The base start() RETURNS False on a bind failure rather than raising
+        # (it is guarded so a busy port cannot take the loop down). Checking it
+        # is what stops the row saying ON over a server that is serving nothing.
+        if not WebServer.start(self, ip):
+            raise OSError("port %d busy" % self.port)
+        self.serving = True
+
+    def stop(self):
+        WebServer.stop(self)
+        self.serving = False
 
     def handle_http(self, method, path, body):
         if method != "GET":
