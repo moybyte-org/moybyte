@@ -1,0 +1,201 @@
+#!/usr/bin/env python3
+"""Put the wasm web console onto a board, so its WEB CONSOLE row has something
+to serve.
+
+    python tools/p4_push_web.py --port /dev/ttyACM1
+
+The board serves `firmware/web_runner/dist` from `/moy/web` (P4) or `/sd/web`
+(T-Deck); this is how those ~1.17MB get there.
+
+**The board PULLS.** This script stands up a throwaway HTTP server on the
+machine you run it from and hands the board a URL over serial; the board then
+downloads the four files over WiFi. The obvious alternative -- pushing the bytes
+down the serial link -- means ~1500 base64'd chunks through a REPL for
+`micropython.wasm` alone, and it cannot carry binary without escaping it. The
+board already has WiFi up (the WEB CONSOLE row needs it anyway) and pulls at
+tens of KB/s, so this takes seconds and needs no firmware support at all.
+
+That last part is the point: this works against a board that has ALREADY been
+flashed. Deploying a new web build costs no rebuild and no reflash.
+
+It is deliberately not a `make` target. It needs a board on a serial port and
+both machines on one network, which is a bench operation, not a build step.
+"""
+
+from __future__ import annotations
+
+import argparse
+import http.server
+import os
+import socket
+import sys
+import threading
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from p4_autotest import P4Board                                # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
+
+# What the board serves, and nothing else -- moy_webhost.ASSETS is the allowlist
+# on the device side, so pushing a file that is not in it would just sit there.
+# carts.json is NOT here on purpose: the board GENERATES that from its own store,
+# which is the entire point of serving the console from the console.
+FILES = ("index.html", "worker.js", "micropython.mjs", "micropython.wasm")
+
+
+def _lan_ip():
+    """This machine's address ON THE BOARD'S NETWORK.
+
+    A UDP connect to a routable address picks the interface the kernel would
+    actually use, without sending anything. `gethostname()` is the usual
+    shortcut and it resolves to 127.0.0.1 on most desktop Linux, which the board
+    cannot reach and which fails as a timeout rather than an error.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.168.1.1", 1))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+
+# The downloader that runs ON the board. Plain sockets: `urequests` is not in
+# this build, and the response is BINARY (a wasm module), so it reads bytes and
+# writes "wb" rather than decoding anything.
+DOWNLOADER = '''
+import socket, os
+
+def _mkdirp(d):
+    parts = d.strip("/").split("/")
+    at = ""
+    for p in parts:
+        at += "/" + p
+        try:
+            os.mkdir(at)
+        except OSError:
+            pass
+
+def _get(host, port, name, dest):
+    ai = socket.getaddrinfo(host, port)[0][-1]
+    s = socket.socket()
+    s.settimeout(20)
+    try:
+        s.connect(ai)
+        s.send(b"GET /" + name.encode() + b" HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n")
+        buf = b""
+        while b"\\r\\n\\r\\n" not in buf:
+            c = s.recv(512)
+            if not c:
+                raise OSError("no header")
+            buf += c
+        head, _, rest = buf.partition(b"\\r\\n\\r\\n")
+        if b"200" not in head.split(b"\\r\\n")[0]:
+            raise OSError("http %s" % head.split(b"\\r\\n")[0])
+        f = open(dest, "wb")
+        n = 0
+        try:
+            if rest:
+                f.write(rest)
+                n += len(rest)
+            while True:
+                c = s.recv(1024)
+                if not c:
+                    break
+                f.write(c)
+                n += len(c)
+        finally:
+            f.close()
+        return n
+    finally:
+        s.close()
+
+_mkdirp(WEBDIR)
+for _name in FILES:
+    _dest = WEBDIR + "/" + _name
+    try:
+        _n = _get(HOST, PORT, _name, _dest)
+        print("PUSH ok %s %d" % (_name, _n))
+    except Exception as _e:
+        print("PUSH err %s %s" % (_name, _e))
+print("PUSH done")
+'''
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--port", default="/dev/ttyACM1", help="board serial port")
+    ap.add_argument("--web-dir", default="/moy/web",
+                    help="destination on the board (/sd/web on the T-Deck)")
+    ap.add_argument("--dist", default=DIST)
+    ap.add_argument("--http-port", type=int, default=8731)
+    args = ap.parse_args(argv)
+
+    missing = [f for f in FILES if not os.path.exists(os.path.join(args.dist, f))]
+    if missing:
+        sys.exit("error: %s missing from %s\n  build it: cd firmware/web_runner "
+                 "&& ./build.sh" % (", ".join(missing), args.dist))
+    sizes = {f: os.path.getsize(os.path.join(args.dist, f)) for f in FILES}
+    total = sum(sizes.values())
+    print("serving %s (%d files, %.2f MB)" % (args.dist, len(FILES),
+                                              total / 1024.0 / 1024.0))
+
+    dist = args.dist
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=dist, **kw)
+
+        def log_message(self, *a):        # one line per file is enough
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("0.0.0.0", args.http_port), Handler)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+
+    ip = _lan_ip()
+    print("  http://%s:%d/  ->  %s on the board" % (ip, args.http_port,
+                                                    args.web_dir))
+    board = P4Board(args.port, log=lambda s: None)
+    ok = False
+    try:
+        board.reset(boot_timeout=90)
+        time.sleep(2)
+        # The WEB CONSOLE row owns the WiFi bring-up (and its 12s link wait), so
+        # turning it on is also how this gets a network. Idempotent: already-on
+        # stays on.
+        board.pyval("(ws.webhost_serving() or ws.toggle_webhost()) or 1",
+                    timeout=90)
+        print("board wifi:", board.pyval("ws.webhost_label()"))
+        code = ("HOST = %r\nPORT = %d\nWEBDIR = %r\nFILES = %r\n"
+                % (ip, args.http_port, args.web_dir, list(FILES))) + DOWNLOADER
+        board.lines.clear()
+        board.pyexec(code, timeout=240)
+        time.sleep(2)
+        got = {}
+        for line in board.lines:
+            line = line.strip()
+            if line.startswith("PUSH ok "):
+                _, _, name, n = line.split()
+                got[name] = int(n)
+                print("  %-18s %8d bytes" % (name, int(n)))
+            elif line.startswith("PUSH err"):
+                print("  " + line)
+        bad = [f for f in FILES if got.get(f) != sizes[f]]
+        if bad:
+            print("MISMATCH: %s" % ", ".join(
+                "%s got %s want %d" % (f, got.get(f), sizes[f]) for f in bad))
+        else:
+            ok = True
+            print("all %d files match. open http://%s in a browser."
+                  % (len(FILES),
+                     (board.pyval("ws.webhost_label()") or "the board")))
+    finally:
+        board.close()
+        httpd.shutdown()
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

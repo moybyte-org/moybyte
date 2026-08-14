@@ -41,8 +41,16 @@ const server = createServer((req, res) => {
         res.end(body);
     } catch (e) { res.writeHead(404); res.end("nope"); }
 });
+// MOY_BASE points this at a page served by SOMETHING ELSE -- in practice a
+// BOARD running the WEB CONSOLE Settings row (moycore plan 3.4). Serving dist/
+// locally proves the build; only fetching it from the console proves the
+// feature, because the board is where the carts, the mime types and the
+// generated carts.json actually come from.
+//   MOY_BASE=http://192.168.1.151:8080 node browsershot.mjs scenario.json
+const BASE = process.env.MOY_BASE || "";
 await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
 const PORT = server.address().port;
+const ORIGIN = BASE || `http://127.0.0.1:${PORT}`;
 
 // -- headless chrome + CDP ---------------------------------------------------
 const profile = join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
@@ -118,7 +126,7 @@ if (scenario.device) {
     await cdp("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     await cdp("Emulation.setEmitTouchEventsForMouse", { enabled: true, configuration: "mobile" });
 }
-await cdp("Page.navigate", { url: `http://127.0.0.1:${PORT}/${scenario.query || ""}` });
+await cdp("Page.navigate", { url: `${ORIGIN}/${scenario.query || ""}` });
 await sleep(scenario.boot_ms || 6000);
 
 // Canvas rect, so scenario coordinates are CANVAS pixels like every other probe.
