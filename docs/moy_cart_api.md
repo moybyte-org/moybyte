@@ -394,6 +394,21 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 
 Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.
 
+**Which key is which** (T-Deck keyboard, and the host simulator matches it):
+
+| button | key |
+|---|---|
+| `left` `down` `up` `right` | **A S W D** — left thumb |
+| `a` | **L** — right thumb, home row |
+| `b` | **K** |
+| `run` | **R** (host: also Enter) |
+| `home` | **BACKSPACE** — hold ~700ms to exit a game |
+
+Left thumb steers, right thumb fires. `Z`/`X` used to be `a`/`b` and are now ordinary
+letters a cart can read with `key()`; so are `H`, `J`, `Q`, `E`, space and enter.
+Nothing else on the keyboard fires a button, so a typing game can use every other key
+without it also moving the player.
+
 | call | returns |
 |---|---|
 | `btn(name, player=0)` | `True` while the button is **held**. `player=0` is this console's own controls (the default — every existing cart is unchanged). `player=1, 2, …` read **extra controllers** (see Multiplayer below) |

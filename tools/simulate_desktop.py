@@ -169,7 +169,12 @@ def run_live(driver, dt, scale):
     # tap is a single edge the cart reads. In text mode the branch above routes it as typed
     # 0x08 instead (DELETE for a tool). K_h is a host-only convenience alias for held "home".
     exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
-    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b"}
+    # A/B are L and K, matching the T-Deck (2026-08-14): there the action keys
+    # moved off Z/X onto the home row so the RIGHT thumb fires while the left
+    # steers with WASD. The sim mirrors the device's scheme rather than keeping
+    # a comfortable host-only one -- a kid who learns the keys here should find
+    # them where they left them on glass.
+    shortcuts = {pygame.K_RETURN: "run", pygame.K_l: "a", pygame.K_k: "b"}
     pan_held = set()
     mouse_down = False
     running = True

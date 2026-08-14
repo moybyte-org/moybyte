@@ -19,6 +19,85 @@ BUTTONS = (
     "start",
 )
 
+# -- the T-Deck keyboard, in ONE place -------------------------------------
+#
+# THE MATRIX, from the vendor keyboard firmware (examples/Keyboard_ESP32C3's
+# `keyboard[col][row]`): five columns, streamed as bytes d0..d4, one bit per
+# row. Written out because a bare `d4 & 0x40` is unreadable, and because
+# reading these off by eye is how the comments here came to describe a mapping
+# the bits did not have.
+#
+#   d0: q  w  sym  a   ALT  space  Mic
+#   d1: e  s  d    p   x    z      LShift
+#   d2: r  g  t    RSh v    c      f
+#   d3: u  h  y    Ent b    n      j
+#   d4: o  l  i    Bsp $    m      k
+#        ^0 ^1 ^2  ^3  ^4   ^5     ^6      <- bit
+#
+# THE SCHEME (owner call, 2026-08-14): LEFT thumb steers, RIGHT thumb fires.
+# W A S D are the d-pad; L is A and K is B, so the action keys sit on the home
+# row under the right thumb rather than on Z/X, which are bottom-row keys the
+# left thumb must leave WASD to reach.
+#
+# Two things it deliberately gives up. H J K L can no longer be a vim d-pad
+# (it was, on the raw path only) -- K and L are the buttons now and a key
+# cannot be both. And Z/X/space/enter stop being A/B: a clean break, so there
+# is ONE answer to "which key jumps" instead of five.
+KEY_BUTTON = {
+    ord("w"): "up",
+    ord("s"): "down",
+    ord("a"): "left",
+    ord("d"): "right",
+    ord("l"): "a",          # right thumb, home row
+    ord("k"): "b",
+    ord("r"): "run",
+    0x1B: "stop",           # ESC -- ASCII path only (no matrix key)
+    0x08: "home",           # BACKSPACE: THE console key, every input mode
+}
+
+# (byte index, bit, ASCII code) for every key the console decodes from the raw
+# matrix, in the order they are tested -- the LAST match wins the `key` slot,
+# so BACKSPACE is last and beats any letter held with it.
+#
+# Keys with no KEY_BUTTON entry are PLAIN LETTERS: readable via key()/keyp(),
+# firing no button. q/e lost their home/stop chrome roles in #71 (a letter that
+# also fires chrome is a stolen letter -- pressing Q paused the game instead of
+# shooting the Q target); h/j/z/x/space/enter join them under the scheme above.
+RAW_KEYS = (
+    (0, 0x02, ord("w")), (1, 0x02, ord("s")),
+    (0, 0x08, ord("a")), (1, 0x04, ord("d")),
+    (4, 0x02, ord("l")), (4, 0x40, ord("k")),
+    (2, 0x01, ord("r")),
+    (0, 0x01, ord("q")), (1, 0x01, ord("e")),
+    (3, 0x02, ord("h")), (3, 0x40, ord("j")),
+    (1, 0x20, ord("z")), (1, 0x10, ord("x")),
+    (0, 0x20, ord(" ")), (3, 0x08, 0x0D),
+    (4, 0x08, 0x08),
+)
+
+
+def decode_raw(data):
+    """Five raw matrix bytes -> (buttons_tuple, last_key).
+
+    A module function and not a method because it is PURE, and pure is what
+    makes it testable: `_read_raw_buttons` around it is all I2C and fallback
+    state, so the decode could only ever have been checked on hardware. It
+    never was -- the two decoders on this keyboard drifted for want of exactly
+    this seam (tests/test_tdeck_keymap.py).
+
+    Runs on the #69 poller thread, not the frame loop, so the table walk is
+    off the frame budget by construction.
+    """
+    buttons = []
+    key = 0
+    for i, bit, code in RAW_KEYS:
+        if data[i] & bit:
+            key = code                      # later entries win the key slot
+            b = KEY_BUTTON.get(code)
+            if b is not None:
+                buttons.append(b)
+    return (tuple(buttons), key)
+
 
 class InputState:
     def __init__(self):
@@ -336,75 +415,27 @@ class TDeckKeyboard:
                 self._held_until_ms = _ticks_ms() + self.KEY_HOLD_MS
                 return (buttons, key)
 
-        d0, d1, _d2, d3, d4 = data[0], data[1], data[2], data[3], data[4]
-        buttons = []
-        key = 0
-        if (d0 & 0x08) or (d3 & 0x02):
-            buttons.append("left")
-            key = ord("a")
-        if (d1 & 0x04) or (d4 & 0x02):
-            buttons.append("right")
-            key = ord("d")
-        if (d0 & 0x02) or (d4 & 0x40):
-            buttons.append("up")
-            key = ord("w")
-        if (d1 & 0x02) or (d3 & 0x40):
-            buttons.append("down")
-            key = ord("s")
-        if (d1 & 0x20) or (d0 & 0x20) or (d3 & 0x08):
-            buttons.append("a")
-            key = ord("z")
-        if d1 & 0x10:
-            buttons.append("b")
-            key = ord("x")
-        if _d2 & 0x01:
-            buttons.append("run")
-            key = ord("r")
-        # q and e are PLAIN LETTERS now (readable via key()/keyp() like the other
-        # decoded letters) -- their old home/stop chrome roles made them stolen
-        # keys (#71). THE one console key in every input mode is BACKSPACE
-        # (matrix [4][3] -> d4 bit 3, the byte the C3 streams per column): it maps
-        # to "home" here exactly like typed 0x08 does on the ASCII path, so pause
-        # is the same physical key whether a cart runs raw, ASCII or text mode.
-        if d0 & 0x01:
-            key = ord("q")
-        if d1 & 0x01:
-            key = ord("e")
-        if d4 & 0x08:
-            buttons.append("home")
-            key = 0x08
-        self._raw_last = (tuple(buttons), key)  # held across a capped stall (see above)
+        self._raw_last = decode_raw(data)   # held across a capped stall (see above)
         return self._raw_last
 
     def _buttons_for_key(self, key):
-        if key in (ord("a"), ord("A"), ord("h"), ord("H")):
-            return ("left",)
-        elif key in (ord("d"), ord("D"), ord("l"), ord("L")):
-            return ("right",)
-        elif key in (ord("w"), ord("W"), ord("k"), ord("K")):
-            return ("up",)
-        elif key in (ord("s"), ord("S"), ord("j"), ord("J")):
-            return ("down",)
-        elif key in (ord("z"), ord("Z"), ord(" "), 0x0D):
-            return ("a",)
-        elif key in (ord("x"), ord("X")):
-            return ("b",)
-        elif key in (ord("r"), ord("R")):
-            return ("run",)
-        elif key == 0x1B:
-            return ("stop",)
-        elif key == 0x08:
-            # BACKSPACE is THE console key (#71 pause / HOME) -- the same physical
-            # key in every input mode: here on the typed-ASCII path, in
-            # _read_raw_buttons on the raw-matrix path (d4 bit 3), and via the
-            # Workstation's last_key edge for a text-mode cart. q/Q and e/E lost
-            # their old home/stop aliases: typing carts (Letter Blitz) read
-            # letters via key()/keyp(), and a letter that ALSO fires console
-            # chrome is a stolen letter -- pressing Q paused the game instead of
-            # shooting the Q target. Text-mode screens (code editor, wifi
-            # password) suppress ALL aliases, so backspace still deletes there.
-            return ("home",)
-        return ()
+        """A typed ASCII byte -> the buttons it fires, via the SAME KEY_BUTTON
+        table the raw-matrix path uses.
+
+        These were two hand-written mappings that had to agree, and they had
+        already drifted: hjkl was a d-pad on the raw path and only some of it on
+        this one. One table now, so "which key jumps" has a single answer and
+        changing it is a single edit.
+
+        BACKSPACE (0x08) is THE console key in every input mode -- here, on the
+        raw path (d4 bit 3), and via the Workstation's last_key edge for a
+        text-mode cart. Text-mode screens (code editor, wifi password) suppress
+        ALL aliases before calling this, so backspace still deletes there.
+        """
+        if 65 <= key <= 90:                      # uppercase -> the same button
+            key += 32
+        b = KEY_BUTTON.get(key)
+        return (b,) if b is not None else ()
 
 
 class InputPoller:

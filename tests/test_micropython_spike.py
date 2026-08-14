@@ -1310,8 +1310,11 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     # key: a held/streamed "home" is exactly what the Player's hold-BACKSPACE exit
     # gesture watches (raw mode streams the held key each frame, so this held
     # frame -> st.held("home") is the device wiring the exit relies on). q and e are
-    # PLAIN LETTERS now (last_key only, no chrome role), and b is only the x key
-    # (backspace no longer doubles as B, which collided with home).
+    # PLAIN LETTERS now (last_key only, no chrome role), and so is x: the action
+    # buttons moved off Z/X onto K/L on 2026-08-14 (owner call -- Z/X are bottom
+    # row, under the same thumb as WASD), so B is the K key. The rest of that
+    # scheme is pinned in tests/test_tdeck_keymap.py, which also checks every raw
+    # bit against the vendor firmware's own matrix table.
     spec = importlib.util.spec_from_file_location(
         "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
     )
@@ -1340,8 +1343,13 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     assert not st._held
     assert st.last_key == ord("e")
 
-    st = poll_frame(bytes([0, 0x10, 0, 0, 0]))    # x held: THE b button
+    st = poll_frame(bytes([0, 0, 0, 0, 0x40]))    # k held: THE b button
     assert st.held("b")
+    st = poll_frame(bytes([0, 0, 0, 0, 0x02]))    # l held: THE a button
+    assert st.held("a")
+    st = poll_frame(bytes([0, 0x10, 0, 0, 0]))    # x is a plain letter now
+    assert not st._held
+    assert st.last_key == ord("x")
     st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace is NOT b anymore
     assert not st.held("b")
 
