@@ -127,6 +127,52 @@ petme128 text kernel as a side effect.
 | crosshair lags or sticks | `over20` on the I2CSTAT line. The GT911 clock-stretches 20-45ms on most finger-down reads (#74); this smoke is single-threaded, which is exactly the cost stage 3's poller thread removes |
 | `gate=OFF (blind polling)` | the INT pin (GPIO16) could not be claimed. Touch still works; it just spends bus time on every pass |
 
+#### `MODE = "keyboard"` (stage 3)
+
+Three 15-second phases, then a verdict. A **moving green bar** runs across the
+top the whole time — a frozen bar is a frozen loop, which is the failure this
+smoke exists to make visible without a stopwatch. Under it: the last key byte,
+the raw five matrix bytes, the held buttons lit green, and everything typed so
+far.
+
+| phase | what it proves |
+|---|---|
+| 1 ASCII sync | the C3 answers at 0x55 and returns clean 1-byte ASCII — the mode the code editor runs in. **A held key does not repeat**; that is correct, not a fault |
+| 2 raw sync | `0x03` took, and reads return five bytes. **Hold W and the `up` chip stays lit** — that is the whole reason raw mode exists |
+| 3 raw poller | the same reads on `InputPoller`'s thread. Compare its `loop_max` with phase 2's |
+
+```
+Moybyte kbd: 2 raw sync         frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: poller thread up (12ms cadence)
+Moybyte kbd: 3 raw poller       frames=NNN loop_max=NNms over20=N | i2c reads=NNN max=NN.Nms ...
+Moybyte kbd: GIL VERDICT loop_max sync=NNms poller=NNms
+Moybyte kbd: reverted to ASCII -- raw_mode=False
+```
+
+**Read the verdict like this.** The C3 clock-stretches; measured stalls on this
+board run 21–60ms. In phase 2 that stall lands inside the loop and *is* the
+frame. In phase 3 it lands on the poller thread — but only if `machine_i2c.c`
+released the GIL, because MicroPython threads share one, so without the patch
+the stall freezes the VM from whichever thread took it.
+
+* phase 3 `loop_max` collapses toward the flush cost while its `i2c max=` stays
+  bad → **the patch works**, which is the whole reason this port carries it.
+* both `loop_max` values bad → the patch is not in this image. `grep "Moybyte #69 GIL"
+  firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/esp32/machine_i2c.c`.
+* both `loop_max` values good *and* `i2c max=` small → the C3 simply was not
+  stalling this run. Hold several keys at once and re-run `tdeck_smoke.keyboard()`.
+
+| what you see | what it means |
+|---|---|
+| `RAW MODE UNSUPPORTED` | C3 firmware older than 2025-06-12 ignored `0x03`. The driver stuck the session back on ASCII + the hold latch, which is correct — but hold-to-move will stall. Flash `T-Keyboard_..._250620.bin` |
+| phase 2 lights no buttons | the matrix decode. `bytes=` on screen is the raw five; `moybyte/input.py`'s `RAW_KEYS` table maps (byte, bit) → key |
+| `poller thread FAILED to start` | no `_thread` or no RAM. The console degrades to synchronous polling, which *is* phase 2 — a real fallback, not a break |
+| the bar freezes and never resumes | not a stall — a hang. The last serial line names the phase |
+
+The last thing the smoke does is send `0x04`. Skipping that revert is what once
+left the keyboard streaming matrix bytes at the code editor, irreversibly,
+because nothing re-sends it.
+
 ---
 
 ## What is here
