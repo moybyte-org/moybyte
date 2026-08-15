@@ -1,16 +1,21 @@
 """Build + load the host's libmoy LUA binding (moycore plan rung 4).
 
-The host sim runs Lua carts through **lupa**, which is a second Lua embedding
+The host sim USED to run Lua carts through **lupa**, a second Lua embedding
 with second semantics: 64-bit doubles where both boards build `LUA_32BITS`
-(their FPUs are single-precision, so doubles would be soft-float). The plan
-records that as a standing parity hole -- golden-frame parity for float-heavy
-carts is host-only, and device integers wrap at 2^31 where the host's do not.
+(their FPUs are single-precision, so doubles would be soft-float). That was a
+standing parity hole -- golden-frame parity for float-heavy carts was host-only,
+and device integers wrapped at 2^31 where the host's did not.
 
-This closes it by giving CPython the same program the boards run: libmoy's
+This closed it by giving CPython the same program the boards run: libmoy's
 binding of the spec verb table over the same vendored Lua 5.4, compiled with
 the same `LUA_32BITS`, reached by ctypes. Same build-and-cache shape as
-`audio_binding` and `raster_binding`; same graceful absence (no compiler means
-`available()` is False and the caller keeps lupa).
+`audio_binding` and `raster_binding`.
+
+lupa was DELETED on 2026-08-14 once this was the only sane lane, so absence is
+no longer graceful in the old sense: no compiler means `available()` is False
+and there are no Lua carts on the host at all, exactly as a device build without
+the native module has none. That is the same trade host AUDIO already makes,
+where no compiler means silence rather than a second synth.
 
 The shim it loads (`runtime/moyhost_lua.c`) is deliberately `modmoycore.c` with
 the MicroPython removed -- same console, same snapshot-in/queue-out host
