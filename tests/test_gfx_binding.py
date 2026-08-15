@@ -59,6 +59,16 @@ blit_batch(buf, 16, 8, quads, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 0, 0, 16,
 blit_batch(buf, 16, 8, quads, sheet, 128, 256, lut, palt, 7, 1, 2, 1, 0, 0, 16, 8)
 blit_map(buf, 16, 8, 0, 0, cells, 4, 4, 0, 0, 2, 2, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 16, 8)
 blit_map(buf, 16, 8, 3, 2, cells, 4, 4, 1, 1, 3, 3, sheet, 128, 256, lut, palt, 5, 1, 0, 0, 16, 8)
+line(buf, 16, 8, 1, 1, 14, 6, 0x3210, 0, 0, 0, 0, 16, 8)
+line(buf, 16, 8, -4, 3, 20, 3, 0x3210, 2, 1, 1, 1, 15, 7)
+circ(buf, 16, 8, 8, 4, 3, 0x7bef, 0, 0, 0, 0, 16, 8)
+circb(buf, 16, 8, 12, 5, 4, 0x001f, 1, 1, 0, 0, 16, 8)
+tri(buf, 16, 8, 1, 1, 14, 2, 6, 7, 0xf800, 0, 0, 0, 0, 16, 8)
+blit_indices(buf, 16, 8, 2, 1, idx, 5, 4, pal565)
+blit_indices(buf, 16, 8, -2, 6, idx, 5, 4, pal565)
+sspr(buf, 16, 8, sheet, 128, 256, 0, 0, 8, 8, 2, 1, 11, 5, -1, 0, lut, palt, 0, 0, 0, 0, 16, 8)
+sspr(buf, 16, 8, sheet, 128, 256, 8, 0, 8, 8, 4, 2, 6, 3, 3, 1, lut, palt, 1, 1, 0, 0, 16, 8)
+tline(buf, 16, 8, cells, 4, 4, sheet, 128, 256, 0, 1, 15, 6, 0, 0, 65536, 32768, -1, lut, palt, 0, 0, 0, 0, 16, 8)
 """
 
 # Sheet/map fixtures, built identically on both sides. Tiles 0 and 1 are given
@@ -86,13 +96,16 @@ quads[4:8] = array.array("h", [0, 2, 3, 0])
 quads[8:12] = array.array("h", [1, 9, 1, 1])       # flip=1 on an asymmetric tile
 quads[0] = 12
 cells = bytearray([0, 1, 2, 1, 1, 0, 1, 2, 2, 1, 0, 1, 1, 2, 1, 0])
+idx = bytearray([(_i * 7) % 64 for _i in range(5 * 4)])
+pal565 = array.array("H", [(0xF000 - i * 0x0123) & 0xFFFF for i in range(64)])
 """
 
 
 def _fixtures():
     ns = {"array": __import__("array"), "bytearray": bytearray, "range": range}
     exec(FIXTURES, ns)                         # noqa: S102 -- fixed text
-    return {k: ns[k] for k in ("sheet", "lut", "palt", "quads", "cells")}
+    return {k: ns[k] for k in ("sheet", "lut", "palt", "quads", "cells",
+                               "idx", "pal565")}
 
 
 def _run_ops(mod, buf, src):
@@ -204,6 +217,13 @@ def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
+def line(*a): moy_gfx.line(*a); _shot()
+def circ(*a): moy_gfx.circ(*a); _shot()
+def circb(*a): moy_gfx.circb(*a); _shot()
+def tri(*a): moy_gfx.tri(*a); _shot()
+def blit_indices(*a): moy_gfx.blit_indices(*a); _shot()
+def sspr(*a): moy_gfx.sspr(*a); _shot()
+def tline(*a): moy_gfx.tline(*a); _shot()
 
 @OPS@
 '''

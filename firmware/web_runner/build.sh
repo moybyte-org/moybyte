@@ -205,7 +205,7 @@ mkdir -p "${STAGE_DIR}/modules"
 # tests/test_staging_closure.py is what noticed.
 DENY="host_app.py lua_host.py palette.py font.py __init__.py \
       raster_binding.py audio_binding.py lua_binding.py \
-      gfx_binding.py native_build.py"
+      gfx_binding.py native_build.py host_canvas.py"
 for f in "${REPO_ROOT}/runtime/"*.py; do
   base="$(basename "${f}")"
   skip=0

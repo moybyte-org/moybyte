@@ -83,7 +83,7 @@ HOST_ONLY = {
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
             "raster_binding", "audio_binding", "lua_binding",
-            "gfx_binding", "native_build"},
+            "gfx_binding", "native_build", "host_canvas"},
 }
 
 # Modules a build GENERATES into the frozen tree. They are not in git and not

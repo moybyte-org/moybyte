@@ -274,6 +274,122 @@ void hg_blit_batch(uint16_t *dst, size_t dcap, int dw, int dh,
     }
 }
 
+/* A canvas for the verbs that take ONE already-resolved colour. moybyte's
+ * kernels are handed a 565 word; libmoy's take an index and look it up. Filling
+ * the table with that one word and passing index 0 bridges the two exactly --
+ * libmoy reads store[col & 63] and cannot tell that the other 63 slots agree. */
+static void hg_canvas_solid(moy_canvas *c, uint16_t *dst, int dw, size_t cap,
+                            uint16_t col, int cam_x, int cam_y,
+                            int cx0, int cy0, int cx1, int cy1)
+{
+    uint16_t lut[MOY_PALETTE];
+    for (int i = 0; i < MOY_PALETTE; i++) lut[i] = col;
+    hg_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
+}
+
+#define HG_SOLID_PROLOGUE()                                                   \
+    moy_canvas c;                                                             \
+    if (dw <= 0 || dh <= 0) return;                                           \
+    hg_clip_rect(dw, dcap, &cx0, &cy0, &cx1, &cy1);                           \
+    hg_canvas_solid(&c, dst, dw, dcap, (uint16_t)col, cam_x, cam_y,           \
+                    cx0, cy0, cx1, cy1)
+
+void hg_line(uint16_t *dst, size_t dcap, int dw, int dh,
+             int x0, int y0, int x1, int y1, int col,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    HG_SOLID_PROLOGUE();
+    moy_line(&c, x0, y0, x1, y1, 0);
+}
+
+void hg_circ(uint16_t *dst, size_t dcap, int dw, int dh,
+             int ccx, int ccy, int r, int col,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    HG_SOLID_PROLOGUE();
+    moy_circ(&c, ccx, ccy, r, 0);
+}
+
+void hg_circb(uint16_t *dst, size_t dcap, int dw, int dh,
+              int ccx, int ccy, int r, int col,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    HG_SOLID_PROLOGUE();
+    moy_circb(&c, ccx, ccy, r, 0);
+}
+
+void hg_tri(uint16_t *dst, size_t dcap, int dw, int dh,
+            int x1, int y1, int x2, int y2, int x3, int y3, int col,
+            int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    HG_SOLID_PROLOGUE();
+    moy_tri(&c, x1, y1, x2, y2, x3, y3, 0);
+}
+
+void hg_blit_indices(uint16_t *dst, size_t dcap, int dw, int dh, int dx, int dy,
+                     const uint8_t *idx, size_t icap, int iw, int ih,
+                     const uint16_t *pal, size_t pcap)
+{
+    if (dw <= 0 || dh <= 0 || iw <= 0 || ih <= 0 || pcap == 0) return;
+    if ((size_t)dw * (size_t)dh > dcap) dh = (int)(dcap / (size_t)dw);
+    for (int row = 0; row < ih; row++) {
+        int ty = dy + row;
+        if (ty < 0 || ty >= dh) continue;
+        size_t srow = (size_t)row * (size_t)iw;
+        int drow = ty * dw;
+        for (int col = 0; col < iw; col++) {
+            int tx = dx + col;
+            if (tx < 0 || tx >= dw) continue;
+            size_t si = srow + (size_t)col;
+            if (si >= icap) continue;
+            size_t p = (size_t)idx[si];
+            if (p >= pcap) continue;            /* index past palette -> skip */
+            dst[(size_t)drow + (size_t)tx] = pal[p];
+        }
+    }
+}
+
+void hg_sspr(uint16_t *dst, size_t dcap, int dw, int dh,
+             int sx, int sy, int sw, int srch, int ddx, int ddy,
+             int ddw, int ddh,
+             const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+             const uint16_t *lut, const uint8_t *palt, int ck, int flip,
+             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || dh <= 0) return;
+    if (!hg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    hg_clip_rect(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    moy_canvas c;
+    moy_sheet sheet_o;
+    hg_canvas(&c, dst, dw, dcap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&sheet_o, (uint8_t *)sheet);
+    moy_sspr(&c, &sheet_o, sx, sy, sw, srch, ddx, ddy, ddw, ddh, ck, flip);
+}
+
+void hg_tline(uint16_t *dst, size_t dcap, int dw, int dh,
+              int x0, int y0, int x1, int y1, int u, int v, int du, int dv,
+              const uint8_t *cells, size_t cells_len, int mw, int mh,
+              const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+              const uint16_t *lut, const uint8_t *palt, int ck,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || dh <= 0 || mw <= 0 || mh <= 0) return;
+    if ((size_t)(mw * mh) > cells_len) return;
+    if (!hg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return;
+    hg_clip_rect(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    moy_canvas c;
+    moy_sheet sheet_o;
+    moy_map m;
+    hg_canvas(&c, dst, dw, dcap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&sheet_o, (uint8_t *)sheet);
+    moy_map_init(&m, (uint8_t *)cells, mw, mh);
+    /* NOTE the argument order: libmoy takes (canvas, SHEET, MAP, ...) here,
+     * where map_draw takes (canvas, MAP, SHEET, ...). Getting it backwards
+     * compiles cleanly -- both are pointers -- and draws garbage. */
+    moy_tline(&c, &sheet_o, &m, x0, y0, x1, y1, u, v, du, dv, ck);
+}
+
 void hg_blit_map(uint16_t *dst, size_t dcap, int dw, int dsx, int dsy,
                  const uint8_t *cells, size_t cells_len, int mw, int mh,
                  int mx, int my, int rw, int rh,

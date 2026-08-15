@@ -63,6 +63,22 @@ _SIGS = (
                        _I, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
                      _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
+    # The solid-colour libmoy verbs: device_canvas calls circ/circb/line
+    # DIRECTLY (guarded only on the kernel existing), and reaches tri/sspr/
+    # tline through getattr with a Python fallback. Implemented alike, because
+    # "optional" there means "the board would be slower", not "the host may
+    # diverge" -- a Python lane here would be the per-platform difference this
+    # whole exercise removes.
+    ("hg_line", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("hg_circ", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("hg_circb", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("hg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                _I], None),
+    ("hg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("hg_sspr", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
+                 _P, _P, _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("hg_tline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
+                  _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I, _I], None),
 )
 
 
@@ -207,6 +223,112 @@ def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt,
         ctypes.cast(ptarr, _P) if ptarr is not None else None,
         int(key), int(scale), int(cam_x), int(cam_y),
         int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def line(dst, dw, dh, x0, y0, x1, y1, col, cam_x=0, cam_y=0,
+         cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().hg_line(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                   int(x0), int(y0), int(x1), int(y1), int(col) & 0xFFFF,
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def circ(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
+         cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().hg_circ(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                   int(cx), int(cy), int(r), int(col) & 0xFFFF,
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def circb(dst, dw, dh, cx, cy, r, col, cam_x=0, cam_y=0,
+          cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().hg_circb(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                    int(cx), int(cy), int(r), int(col) & 0xFFFF,
+                    int(cam_x), int(cam_y), int(cx0), int(cy0),
+                    int(dw) if cx1 is None else int(cx1),
+                    int(dh) if cy1 is None else int(cy1))
+
+
+def tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, col, cam_x=0, cam_y=0,
+        cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    _lib().hg_tri(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                  int(x1), int(y1), int(x2), int(y2), int(x3), int(y3),
+                  int(col) & 0xFFFF, int(cam_x), int(cam_y),
+                  int(cx0), int(cy0),
+                  int(dw) if cx1 is None else int(cx1),
+                  int(dh) if cy1 is None else int(cy1))
+
+
+def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
+    darr, dcap = _buf(dst)
+    imv = memoryview(idx).cast("B")        # index bytes: 1 per pixel
+    iarr, _ = _rbuf(imv)
+    # `len()` on an array("H") is the ELEMENT count, not bytes -- so deriving
+    # the palette's entry count by halving it produced 32 entries for a 64-entry
+    # table and dropped every index above 31 (the C skips `p >= pcap`). Take the
+    # byte length from the memoryview and halve THAT, which is right for both an
+    # array and a bytes-like.
+    pmv = memoryview(pal).cast("B")
+    parr, _ = _rbuf(pmv)
+    _lib().hg_blit_indices(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                           int(dx), int(dy),
+                           ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
+                           ctypes.cast(parr, _P), len(pmv) // 2)
+
+
+def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy,
+         ddw, ddh, ck, flip, lut, palt,
+         cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=None, cy1=None):
+    # Argument ORDER is the native module's, not a tidier one. It reads oddly --
+    # the sheet before its own source rect, the palette after the flip -- and
+    # the first draft here "improved" it, which the parity test caught as a
+    # TypeError from the device side. The shim's whole job is that
+    # device_canvas cannot tell which module it got.
+    darr, dcap = _buf(dst)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().hg_sspr(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                   int(sx), int(sy), int(sw), int(sh), int(dx), int(dy),
+                   int(ddw), int(ddh),
+                   ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                   ctypes.cast(lutarr, _P),
+                   ctypes.cast(ptarr, _P) if ptarr is not None else None,
+                   int(ck), int(flip), int(cam_x), int(cam_y),
+                   int(cx0), int(cy0),
+                   int(dw) if cx1 is None else int(cx1),
+                   int(dh) if cy1 is None else int(cy1))
+
+
+def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
+          x0, y0, x1, y1, u, v, du, dv, ck, lut, palt,
+          cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=None, cy1=None):
+    darr, dcap = _buf(dst)
+    carr, _ = _rbuf(cells)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().hg_tline(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                    int(x0), int(y0), int(x1), int(y1),
+                    int(u), int(v), int(du), int(dv),
+                    ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
+                    ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+                    ctypes.cast(lutarr, _P),
+                    ctypes.cast(ptarr, _P) if ptarr is not None else None,
+                    int(ck), int(cam_x), int(cam_y), int(cx0), int(cy0),
+                    int(dw) if cx1 is None else int(cx1),
+                    int(dh) if cy1 is None else int(cy1))
 
 
 def blit_map(dst, dw, dh, dsx, dsy, cells, mw, mh, mx, my, rw, rh,
