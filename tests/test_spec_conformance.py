@@ -133,17 +133,63 @@ def replay(calls, canvas, sheet=None, tilemap=None):
             raise ValueError("unknown trace verb %r" % (verb,))
 
 
-def render(scene):
+def _index_frame(c):
+    """The canvas as one byte of palette INDEX per pixel, whatever it stores.
+
+    THE GOLDENS ARE NOT OURS TO MOVE. `hashes.json` is vendored verbatim from
+    moy-spec and `test_the_vendored_suite_is_the_spec_suite_when_a_checkout_is_
+    present` below fails if it drifts, so when the host canvas becomes RGB565
+    the answer is to convert BACK here -- never to re-record.
+
+    The conversion is exact, not best-effort: MOY64's 64 entries map to 64
+    DISTINCT RGB565 words, so the reverse LUT is total (checked below, because
+    a collision would silently merge two colours into one hash). It reads the
+    canvas's own reverse table, which is built from PAL565_WIRE and is
+    therefore byte-order-correct by construction -- under CPython that order is
+    the T-Deck's byte-SWAPPED one, since `moy_dsi` is absent.
+
+    A word no palette index produced has no honest index to become. That should
+    be impossible in a trace replay (every verb here resolves through the
+    palette), so it RAISES rather than mapping to 0 -- a silent 0 would move
+    the hash and look like a raster bug.
+    """
+    buf = getattr(c, "buf", None)
+    if buf is not None and len(buf) == W * H:
+        return bytes(buf)                       # already an index buffer
+    raw = getattr(c, "_buf", None)
+    if raw is None or len(raw) != W * H * 2:
+        raise AssertionError(
+            "canvas exposes neither a %dx%d index buffer nor a 565 one"
+            % (W, H))
+    import device_canvas as _dc
+    rev = _dc._PAL565_INDEX
+    assert len(rev) == 64, (
+        "the RGB565 reverse LUT holds %d of 64 entries -- two palette colours "
+        "share a word, so this conversion would merge them" % len(rev))
+    words = memoryview(raw).cast("H")
+    out = bytearray(W * H)
+    for i, w in enumerate(words):
+        idx = rev.get(w)
+        if idx is None:
+            raise AssertionError(
+                "pixel %d holds 0x%04X, which no palette index produces -- the "
+                "frame cannot be reduced to indices for the golden hash"
+                % (i, w))
+        out[i] = idx
+    return bytes(out)
+
+
+def render(scene, canvas=None):
     """Replay one scene and return its index framebuffer as bytes."""
     with open(os.path.join(HERE, "traces", scene + ".json")) as fh:
         calls = json.load(fh)
     sheet, tilemap = _build_assets(scene)
-    c = canvas_mod.Canvas(W, H)
+    c = canvas if canvas is not None else canvas_mod.Canvas(W, H)
     replay(calls, c, sheet, tilemap)
     flush = getattr(c, "flush_batch", None)
     if flush is not None:
         flush()          # the console auto-batches sprites; the goldens do not
-    return bytes(c.buf)
+    return _index_frame(c)
 
 
 @pytest.mark.parametrize("scene,core,golden",
