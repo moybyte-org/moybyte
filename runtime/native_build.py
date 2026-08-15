@@ -26,7 +26,7 @@ you host audio and nothing else. It does not any more: the host draws on
 `device_canvas.DeviceCanvas` over `runtime/gfx_binding.py`, which ctypes-loads
 what this module builds. So no C compiler is now no host console -- and what a
 user actually SAW was `AttributeError: 'NoneType' object has no attribute
-'hg_fill'` out of a ctypes wrapper, four frames deep, naming nothing they could
+'mg_fill'` out of a ctypes wrapper, four frames deep, naming nothing they could
 act on. There is deliberately no fallback added here; the failure is simply
 stated, once, in the terms of the thing they have to install.
 """
@@ -52,6 +52,15 @@ LIBMOY = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython",
 # aggressive optimizer could win that would be worth re-arguing conformance
 # over. (The boards reached the same verdict independently -- see the -O2
 # pragmas in the vendored Lua sources and the #159/#190 A/Bs.)
+#
+# ONE FILE OVERRIDES THIS AND IS MEANT TO: native/moy_gfx/moy_gfx_kernels.c,
+# the compositor the host binding and both boards all compile, carries an
+# in-source `#pragma GCC optimize("O3")`. It has to -- on the boards it used to
+# live inside modmoy_gfx.c, which has carried that pragma since #77, and a new
+# translation unit without it would silently halve those loops. Since the file
+# is single-source, the host gets the same code generation as the glass, which
+# is the stronger guarantee; the conformance goldens and
+# tests/test_gfx_binding.py both run against it either way.
 BASE_CFLAGS = ["-std=c99", "-O2", "-fPIC", "-shared"]
 
 

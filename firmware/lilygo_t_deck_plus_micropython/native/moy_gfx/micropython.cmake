@@ -13,8 +13,15 @@ add_library(usermod_moy_gfx INTERFACE)
 # libmoy_kernels.c, which exists to compile them at -O3 alongside the kernel
 # that calls them. Listing them here as well would define every symbol twice.
 # That file's header explains why the pragma cannot live in the vendored copies.
+#
+# moy_gfx_kernels.c is the COMPOSITOR (the loops runtime/moyhost_gfx.c also
+# links, so there is one copy); it carries its own -O3 pragma. THIS LIST AND
+# micropython.mk'S ARE TWINS -- the .mk is what the unix build reads, and the
+# two have drifted before (when six verbs became libmoy calls, cmake gained the
+# sources and the .mk did not, and the unix port stopped linking).
 target_sources(usermod_moy_gfx INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_gfx.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_gfx_kernels.c
     ${CMAKE_CURRENT_LIST_DIR}/libmoy_kernels.c
 )
 

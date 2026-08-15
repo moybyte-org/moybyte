@@ -10,8 +10,9 @@ editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
 # addresses a sheet with the geometry BAKED IN (it takes no stride argument), so
 # every sheet-READING verb refuses anything else and draws NOTHING --
 # blit_map (map), blit_batch (spr/spr_batch), sspr, tline. The gate is
-# `moy_gfx_is_moy_sheet` in native/moy_gfx/modmoy_gfx.c and `hg_is_moy_sheet` in
-# runtime/moyhost_gfx.c; set_batch_src is the one that raises instead.
+# `mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h -- ONE predicate, which
+# both the usermod and runtime/moyhost_gfx.c include; set_batch_src is the one
+# that raises instead.
 #
 # Declining silently is the RIGHT call for a draw verb: throwing mid-frame takes
 # the cart down. But it means a wrong-shaped sheet is invisible at the only place

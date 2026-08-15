@@ -145,7 +145,7 @@ libmoy addresses a sprite sheet with SPEC.md §3.2's fixed geometry — 128×256
 16 tiles per row, 512 tiles — rather than a width passed per call. A cart sheet
 is exactly that (`Project._build_sheet` makes a 16×32 `SpriteSheet`, and
 `from_hex` pads a short pre-512 blob into the top half with tile ids unchanged),
-so the two agree. `moy_gfx_is_moy_sheet` guards it anyway: a sheet of another
+so the two agree. `mg_is_moy_sheet` guards it anyway: a sheet of another
 shape would be read at the wrong stride, and drawing it wrong is worse than not
 drawing it.
 

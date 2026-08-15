@@ -25,18 +25,6 @@
 // machinery they wrap, below.
 #include "moy_gfx_capi.h"
 
-// The libmoy bridge helpers live further down, next to the per-pixel put they
-// belong with; blit_map sits above them and needs them. Declared here rather
-// than moved, because their neighbours are the reason they are readable.
-static inline void moy_gfx_clip(mp_int_t dw, size_t cap, mp_int_t *cx0, mp_int_t *cy0,
-                                mp_int_t *cx1, mp_int_t *cy1);
-static inline void moy_gfx_canvas(moy_canvas *c, uint16_t *dst, mp_int_t dw,
-                                  size_t cap, const uint16_t *lut,
-                                  const uint8_t *palt, mp_int_t cam_x,
-                                  mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
-                                  mp_int_t cx1, mp_int_t cy1);
-static inline bool moy_gfx_is_moy_sheet(mp_int_t w, mp_int_t h, size_t len);
-
 // #77: build the pixel kernel at -O3 (the ports default to -O2). In-source
 // pragma, NOT cmake: source-file properties are directory-scoped and the linked
 // object is compiled by the micropython.elf target, which never sees them
@@ -53,6 +41,16 @@ static inline bool moy_gfx_is_moy_sheet(mp_int_t w, mp_int_t h, size_t len);
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC optimize("O3")
 #endif
+
+// The COMPOSITOR, which this file and runtime/moyhost_gfx.c both run and used
+// to both CONTAIN: fill/fill_rect/blit565/blit565_scale/blit_window/
+// scroll_rect/blit_indices/text plus the fill-run and libmoy-bridge helpers.
+// One copy now; that header says why, and why nothing may be forked back in
+// here. INCLUDED AFTER THE PRAGMA on purpose -- its mg_fill_run and canvas
+// helpers are `static inline` and are inlined into gate_fill/fill_spans below,
+// and GCC refuses to inline across a mismatch in optimization attributes, so a
+// header pulled in at -O2 would turn the per-row fill into a per-row call.
+#include "moy_gfx_kernels.h"
 
 // Async layer copy (#54 Stage 2 / #63): GDMA-driven PSRAM->PSRAM memcpy so the
 // per-frame draw_layer background restore (~7ms CPU for a full screen) can run
@@ -80,44 +78,11 @@ static inline const uint16_t *moy_gfx_buf_r(mp_obj_t obj, size_t *npix) {
     return (const uint16_t *)bi.buf;
 }
 
-// A run of `n` RGB565 pixels set to `c`, written 32 bits at a time.
-//
-// WHY (measured on P4 glass 2026-07-26): a full-screen 1.2MB fill through the
-// naive uint16 loop took 18.8ms -- while memcpy moved TWICE the bytes (a 1.2MB
-// read plus a 1.2MB write) in 26.9ms, i.e. ~40% less time per byte. A copy
-// cannot beat a fill on a memory-bound path, so the loop was the bottleneck,
-// not the bus: one 16-bit store per pixel leaves half of every 32-bit bus beat
-// unused and pays full loop overhead per pixel. Pairing the pixels into 32-bit
-// stores and unrolling by four fixes both. (RV32 has no wider scalar store, so
-// 32 bits is the ceiling here.)
-static inline void moy_gfx_fill_run(uint16_t *px, size_t n, uint16_t c) {
-    if (n == 0) return;
-    // Align to a 4-byte boundary so the 32-bit stores never straddle one.
-    if (((uintptr_t)px & 2u) != 0) {
-        *px++ = c;
-        n--;
-    }
-    uint32_t c2 = ((uint32_t)c << 16) | c;
-    uint32_t *w = (uint32_t *)px;
-    size_t pairs = n >> 1;
-    while (pairs >= 4) {
-        w[0] = c2; w[1] = c2; w[2] = c2; w[3] = c2;
-        w += 4;
-        pairs -= 4;
-    }
-    while (pairs--) *w++ = c2;
-    if (n & 1) *((uint16_t *)w) = c;
-}
-
 // fill(buf, npix, color) -- set the first `npix` pixels (clamped to capacity).
 static mp_obj_t moy_gfx_fill(mp_obj_t buf_obj, mp_obj_t npix_obj, mp_obj_t color_obj) {
     size_t cap;
     uint16_t *px = moy_gfx_buf_w(buf_obj, &cap);
-    mp_int_t n = mp_obj_get_int(npix_obj);
-    uint16_t c = (uint16_t)(mp_obj_get_int(color_obj) & 0xFFFF);
-    if (n < 0) n = 0;
-    if ((size_t)n > cap) n = (mp_int_t)cap;
-    moy_gfx_fill_run(px, (size_t)n, c);
+    mg_fill(px, cap, mp_obj_get_int(npix_obj), mp_obj_get_int(color_obj));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_fill_obj, moy_gfx_fill);
@@ -127,25 +92,10 @@ static mp_obj_t moy_gfx_fill_rect(size_t n_args, const mp_obj_t *a) {
     (void)n_args;
     size_t cap;
     uint16_t *px = moy_gfx_buf_w(a[0], &cap);
-    mp_int_t stride = mp_obj_get_int(a[1]);
-    mp_int_t x = mp_obj_get_int(a[2]);
-    mp_int_t y = mp_obj_get_int(a[3]);
-    mp_int_t w = mp_obj_get_int(a[4]);
-    mp_int_t h = mp_obj_get_int(a[5]);
-    uint16_t c = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
-    if (stride <= 0) return mp_const_none;
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x >= stride) return mp_const_none;
-    if (x + w > stride) w = stride - x;
-    if (w <= 0 || h <= 0) return mp_const_none;
-    mp_int_t max_rows = (mp_int_t)(cap / (size_t)stride);
-    if (y >= max_rows) return mp_const_none;
-    if (y + h > max_rows) h = max_rows - y;
-    for (mp_int_t row = 0; row < h; row++) {
-        moy_gfx_fill_run(px + (size_t)(y + row) * (size_t)stride + (size_t)x,
-                         (size_t)w, c);
-    }
+    mg_fill_rect(px, cap, mp_obj_get_int(a[1]),
+                 mp_obj_get_int(a[2]), mp_obj_get_int(a[3]),
+                 mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
+                 mp_obj_get_int(a[6]));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_fill_rect_obj, 7, 7, moy_gfx_fill_rect);
@@ -166,43 +116,14 @@ static mp_obj_t moy_gfx_blit565(size_t n_args, const mp_obj_t *a) {
     mp_int_t sw = mp_obj_get_int(a[6]);
     mp_int_t sh = mp_obj_get_int(a[7]);
     mp_int_t key = mp_obj_get_int(a[8]);
-    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return mp_const_none;
-    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
-    if ((size_t)sw * (size_t)sh > scap) sh = (mp_int_t)(scap / (size_t)sw);
-    // Clip rect, intersected with the buffer; defaults to the whole destination.
-    mp_int_t cx0 = (n_args > 9) ? mp_obj_get_int(a[9]) : 0;
-    mp_int_t cy0 = (n_args > 10) ? mp_obj_get_int(a[10]) : 0;
-    mp_int_t cx1 = (n_args > 11) ? mp_obj_get_int(a[11]) : dw;
-    mp_int_t cy1 = (n_args > 12) ? mp_obj_get_int(a[12]) : dh;
-    if (cx0 < 0) cx0 = 0;
-    if (cy0 < 0) cy0 = 0;
-    if (cx1 > dw) cx1 = dw;
-    if (cy1 > dh) cy1 = dh;
-    for (mp_int_t row = 0; row < sh; row++) {
-        mp_int_t ty = dy + row;
-        if (ty < cy0 || ty >= cy1) continue;
-        const uint16_t *srow = src + (size_t)row * (size_t)sw;
-        uint16_t *drow = dst + (size_t)ty * (size_t)dw;
-        if (key < 0) {
-            // OPAQUE fast lane (#66 CHROMEBRK): no colorkey test means the row's
-            // clipped span is one contiguous copy -- memcpy instead of the
-            // per-pixel loop. Matters for blit_strip (the cached top bar stamps
-            // a 320x18 strip every cart frame) and the paint-image bakes.
-            mp_int_t s0 = (dx < cx0) ? (cx0 - dx) : 0;
-            mp_int_t s1 = (dx + sw > cx1) ? (cx1 - dx) : sw;
-            if (s1 > s0) {
-                memcpy(drow + dx + s0, srow + s0, (size_t)(s1 - s0) * 2u);
-            }
-            continue;
-        }
-        for (mp_int_t col = 0; col < sw; col++) {
-            mp_int_t tx = dx + col;
-            if (tx < cx0 || tx >= cx1) continue;
-            uint16_t p = srow[col];
-            if (key >= 0 && p == (uint16_t)key) continue;
-            drow[tx] = p;
-        }
-    }
+    // Clip rect: defaults to the whole destination (the kernel intersects it
+    // with the buffer). dw/dh here are the ARGUMENTS, not the kernel's clamped
+    // values -- which is what a pre-#11 9-arg call site got and must keep.
+    mg_blit565(dst, dcap, dw, dh, dx, dy, src, scap, sw, sh, key,
+               (n_args > 9) ? mp_obj_get_int(a[9]) : 0,
+               (n_args > 10) ? mp_obj_get_int(a[10]) : 0,
+               (n_args > 11) ? mp_obj_get_int(a[11]) : dw,
+               (n_args > 12) ? mp_obj_get_int(a[12]) : dh);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_obj, 9, 13, moy_gfx_blit565);
@@ -228,44 +149,7 @@ static mp_obj_t moy_gfx_blit565_scale(size_t n_args, const mp_obj_t *a) {
     mp_int_t sw = mp_obj_get_int(a[6]);
     mp_int_t sh = mp_obj_get_int(a[7]);
     mp_int_t scale = mp_obj_get_int(a[8]);
-    if (scale < 1) scale = 1;
-    if (dw <= 0 || dh <= 0 || sw <= 0 || sh <= 0) return mp_const_none;
-    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
-    if ((size_t)sw * (size_t)sh > scap) sh = (mp_int_t)(scap / (size_t)sw);
-    // Visible destination-x span of the scaled image, clamped to the buffer.
-    mp_int_t x0 = dx < 0 ? 0 : dx;
-    mp_int_t x1 = dx + sw * scale;
-    if (x1 > dw) x1 = dw;
-    if (x1 <= x0) return mp_const_none;
-    for (mp_int_t row = 0; row < sh; row++) {
-        mp_int_t ty0 = dy + row * scale;         // first dst row of this src row
-        mp_int_t ty1 = ty0 + scale;              // one past its last dst row
-        if (ty1 <= 0 || ty0 >= dh) continue;
-        if (ty1 > dh) ty1 = dh;
-        const uint16_t *srow = src + (size_t)row * (size_t)sw;
-        mp_int_t wy = ty0 < 0 ? 0 : ty0;         // first VISIBLE dst row
-        uint16_t *first = dst + (size_t)wy * (size_t)dw;
-        // Expand the source row once into the first visible dst row (run-length
-        // stepped: no per-pixel division)...
-        mp_int_t off = x0 - dx;                  // >= 0 by construction
-        const uint16_t *sp = srow + off / scale;
-        mp_int_t rep = scale - (off % scale);    // copies left of the first col
-        uint16_t *out = first + x0;
-        mp_int_t remaining = x1 - x0;
-        while (remaining > 0) {
-            uint16_t v = *sp++;
-            mp_int_t n = rep < remaining ? rep : remaining;
-            for (mp_int_t i = 0; i < n; i++) out[i] = v;
-            out += n;
-            remaining -= n;
-            rep = scale;
-        }
-        // ...then duplicate it to the band's remaining visible rows.
-        for (mp_int_t ty = wy + 1; ty < ty1; ty++) {
-            memcpy(dst + (size_t)ty * (size_t)dw + x0, first + x0,
-                   (size_t)(x1 - x0) * 2u);
-        }
-    }
+    mg_blit565_scale(dst, dcap, dw, dh, dx, dy, src, scap, sw, sh, scale);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit565_scale_obj, 9, 9, moy_gfx_blit565_scale);
@@ -307,18 +191,18 @@ static mp_obj_t moy_gfx_blit_map(size_t n_args, const mp_obj_t *a) {
     }
     mp_int_t ck = mp_obj_get_int(a[17]);
     mp_int_t scale = mp_obj_get_int(a[18]);
-    mp_int_t cx0 = mp_obj_get_int(a[19]), cy0 = mp_obj_get_int(a[20]);
-    mp_int_t cx1 = mp_obj_get_int(a[21]), cy1 = mp_obj_get_int(a[22]);
+    int cx0 = mp_obj_get_int(a[19]), cy0 = mp_obj_get_int(a[20]);
+    int cx1 = mp_obj_get_int(a[21]), cy1 = mp_obj_get_int(a[22]);
     if (dw <= 0 || mw <= 0 || mh <= 0 || rw <= 0 || rh <= 0) return mp_const_none;
     if ((size_t)(mw * mh) > cb.len) return mp_const_none;
-    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
     if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return mp_const_none;
-    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     {
         moy_canvas c;
         moy_sheet sh;
         moy_map m;
-        moy_gfx_canvas(&c, dst, dw, dcap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
+        mg_canvas(&c, dst, dw, dcap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
         moy_sheet_init(&sh, (uint8_t *)sb.buf);
         moy_map_init(&m, (uint8_t *)cb.buf, (int)mw, (int)mh);
         // Camera is ZERO here on purpose: the caller has already resolved the
@@ -384,14 +268,14 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
     mp_int_t scale = mp_obj_get_int(a[10]);
     mp_int_t cam_x = mp_obj_get_int(a[11]);
     mp_int_t cam_y = mp_obj_get_int(a[12]);
-    mp_int_t cx0 = mp_obj_get_int(a[13]);
-    mp_int_t cy0 = mp_obj_get_int(a[14]);
-    mp_int_t cx1 = mp_obj_get_int(a[15]);
-    mp_int_t cy1 = mp_obj_get_int(a[16]);
+    int cx0 = mp_obj_get_int(a[13]);
+    int cy0 = mp_obj_get_int(a[14]);
+    int cx1 = mp_obj_get_int(a[15]);
+    int cy1 = mp_obj_get_int(a[16]);
     if (dw <= 0 || dh <= 0) return mp_const_none;
     if (scale < 1) scale = 1;
-    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
-    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     {
         // ONE canvas for the whole batch -- which is the point of this verb. The
         // #43 protocol exists because N per-sprite MicroPython->C calls were the
@@ -409,7 +293,7 @@ static mp_obj_t moy_gfx_blit_batch(size_t n_args, const mp_obj_t *a) {
         // moy_spr applies it, and its fast path hoists it out of the pixel loop.
         moy_canvas c;
         moy_sheet sh;
-        moy_gfx_canvas(&c, dst, dw, dcap, lut, palt,
+        mg_canvas(&c, dst, dw, dcap, lut, palt,
                        cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_sheet_init(&sh, (uint8_t *)sb.buf);
         for (size_t i = 0; i < n_items; i++) {
@@ -666,86 +550,11 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_copy_obj, 5, 5, moy_gfx_copy)
 // clipped pixel put). The clip rect is intersected with the buffer so a bad
 // coordinate clips rather than overrunning.
 
-// Clamp the clip rect to the buffer (cols to dw, rows to capacity/dw). Returns the
-// usable row count via *max_rows; callers then test cx0<=x<cx1 && cy0<=y<cy1.
-static inline void moy_gfx_clip(mp_int_t dw, size_t cap, mp_int_t *cx0, mp_int_t *cy0,
-                               mp_int_t *cx1, mp_int_t *cy1) {
-    mp_int_t max_rows = (mp_int_t)(cap / (size_t)dw);
-    if (*cx0 < 0) *cx0 = 0;
-    if (*cy0 < 0) *cy0 = 0;
-    if (*cx1 > dw) *cx1 = dw;
-    if (*cy1 > max_rows) *cy1 = max_rows;
-}
-
-// -- the libmoy bridge -------------------------------------------------------
-//
-// libmoy holds camera, clip and the index->pixel table in a moy_canvas; this
-// module passes them as scalars on every call. Rather than invert either side,
-// a canvas is BORROWED for the duration of one call: it points at the caller's
-// buffer and is filled in from the same arguments the hand-written kernel used.
-//
-// The cost is the store[] copy -- 128 bytes for the 64-entry table. That is the
-// whole bridge, and it is why this is affordable per call: no allocation, no
-// palette rebuild (the LUT arrives already folded through `pal`, which is
-// exactly what libmoy's store[] is), nothing that scales with the pixels drawn.
-//
-// `dh` is derived from the buffer capacity rather than trusted, the same way
-// moy_gfx_clip does it: a canvas whose h exceeds its buffer would let libmoy's
-// own clamping write past the end.
-static inline void moy_gfx_canvas(moy_canvas *c, uint16_t *dst, mp_int_t dw,
-                                  size_t cap, const uint16_t *lut,
-                                  const uint8_t *palt, mp_int_t cam_x,
-                                  mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
-                                  mp_int_t cx1, mp_int_t cy1) {
-    c->pix = dst;
-    c->w = (int)dw;
-    c->h = (int)(cap / (size_t)dw);
-    c->cam_x = (int)cam_x;
-    c->cam_y = (int)cam_y;
-    c->clip_x0 = (int)cx0;
-    c->clip_y0 = (int)cy0;
-    c->clip_x1 = (int)cx1;
-    c->clip_y1 = (int)cy1;
-    // pal is already folded into `lut` by the Python side (_wire_pal), so
-    // store[] IS that table and pal[] stays identity -- libmoy reads store[]
-    // on every pixel and pal[] only when rebuilding, which never happens here.
-    for (int i = 0; i < MOY_PALETTE; i++) {
-        c->pal[i] = (uint8_t)i;
-        c->store[i] = lut[i];
-        c->wire[i] = lut[i];
-    }
-    if (palt != NULL) {
-        memcpy(c->palt, palt, MOY_PALETTE);
-    } else {
-        memset(c->palt, 0, MOY_PALETTE);
-    }
-}
-
-// libmoy addresses a sheet with SPEC.md 3.2's FIXED geometry (128 x 256, 16
-// tiles per row) rather than a width passed per call, so handing it anything
-// else would read at the wrong stride or past the end. A cart sheet is exactly
-// that shape -- Project._build_sheet makes a 16x32 SpriteSheet and from_hex
-// pads a short (pre-512) blob into the top half -- so this is a guard against
-// a wrong caller, not a case that happens. Silent rather than raising, like the
-// other malformed-input guards here: a draw verb that throws mid-frame takes
-// the cart down.
-static inline bool moy_gfx_is_moy_sheet(mp_int_t w, mp_int_t h, size_t len) {
-    return w == MOY_SHEET_W && h == MOY_SHEET_H &&
-           len >= (size_t)(MOY_SHEET_W * MOY_SHEET_H);
-}
-
-// A canvas for the verbs that take ONE already-resolved colour. moybyte's
-// kernels are handed a 565 word; libmoy's take an index and look it up. Filling
-// the table with that one word and passing index 0 bridges the two exactly --
-// libmoy reads store[col & 63] and cannot tell that the other 63 slots agree.
-static inline void moy_gfx_canvas_solid(moy_canvas *c, uint16_t *dst, mp_int_t dw,
-                                        size_t cap, uint16_t col, mp_int_t cam_x,
-                                        mp_int_t cam_y, mp_int_t cx0, mp_int_t cy0,
-                                        mp_int_t cx1, mp_int_t cy1) {
-    uint16_t lut[MOY_PALETTE];
-    for (int i = 0; i < MOY_PALETTE; i++) lut[i] = col;
-    moy_gfx_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
-}
+// The clip clamp (mg_clip) and the libmoy bridge (mg_canvas / mg_canvas_solid /
+// mg_is_moy_sheet) used to be defined here and again in runtime/moyhost_gfx.c.
+// They are moy_gfx_kernels.h's now -- one definition, both surfaces. That
+// header carries the reasoning that used to live in this block; a libmoy struct
+// that grows a field is edited THERE and both tiers accept it.
 
 // fill_spans(dst, dw, dh, arr, n, ox, oy, col, pal, cam_x, cam_y, cx0, cy0, cx1, cy1)
 // -- the #163 span batch WITHOUT a DrawCtx (#167).
@@ -785,13 +594,13 @@ static mp_obj_t moy_gfx_fill_spans(size_t n_args, const mp_obj_t *a) {
     }
     mp_int_t cam_x = mp_obj_get_int(a[9]);
     mp_int_t cam_y = mp_obj_get_int(a[10]);
-    mp_int_t cx0 = mp_obj_get_int(a[11]);
-    mp_int_t cy0 = mp_obj_get_int(a[12]);
-    mp_int_t cx1 = mp_obj_get_int(a[13]);
-    mp_int_t cy1 = mp_obj_get_int(a[14]);
+    int cx0 = mp_obj_get_int(a[11]);
+    int cy0 = mp_obj_get_int(a[12]);
+    int cx1 = mp_obj_get_int(a[13]);
+    int cy1 = mp_obj_get_int(a[14]);
     (void)dh;
     if (dw <= 0 || (cov < 0 && pal == NULL)) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     for (mp_int_t i = 0; i < n; i++) {
         const int16_t *p = q + i * 5;
         uint16_t col = (cov >= 0) ? (uint16_t)cov : pal[p[4] & 63];
@@ -807,7 +616,7 @@ static mp_obj_t moy_gfx_fill_spans(size_t n_args, const mp_obj_t *a) {
         size_t run = (size_t)(x1 - x0);
         uint16_t *row = dst + (size_t)y0 * (size_t)dw + (size_t)x0;
         for (mp_int_t y = y0; y < y1; y++) {
-            moy_gfx_fill_run(row, run, col);
+            mg_fill_run(row, run, col);
             row += (size_t)dw;
         }
     }
@@ -840,10 +649,10 @@ static mp_obj_t moy_gfx_tri(size_t n_args, const mp_obj_t *a) {
     mp_int_t x3 = mp_obj_get_int(a[7]), y3 = mp_obj_get_int(a[8]);
     uint16_t col = (uint16_t)mp_obj_get_int(a[9]);
     mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
-    mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
-    mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
+    int cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
+    int cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
     if (dw <= 0) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_tri (#97). This verb used to be a hand transcription of it;
     // the transcription is gone rather than kept beside it, because two copies
     // that have to agree is the arrangement this is replacing.
@@ -853,7 +662,7 @@ static mp_obj_t moy_gfx_tri(size_t n_args, const mp_obj_t *a) {
     // does not care that the other 63 slots are the same word.
     {
         moy_canvas c;
-        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        mg_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_tri(&c, (int)x1, (int)y1, (int)x2, (int)y2, (int)x3, (int)y3, 0);
     }
     return mp_const_none;
@@ -891,16 +700,16 @@ static mp_obj_t moy_gfx_sspr(size_t n_args, const mp_obj_t *a) {
         palt = (const uint8_t *)pb.buf;
     }
     mp_int_t cam_x = mp_obj_get_int(a[18]), cam_y = mp_obj_get_int(a[19]);
-    mp_int_t cx0 = mp_obj_get_int(a[20]), cy0 = mp_obj_get_int(a[21]);
-    mp_int_t cx1 = mp_obj_get_int(a[22]), cy1 = mp_obj_get_int(a[23]);
+    int cx0 = mp_obj_get_int(a[20]), cy0 = mp_obj_get_int(a[21]);
+    int cx1 = mp_obj_get_int(a[22]), cy1 = mp_obj_get_int(a[23]);
     if (dw <= 0 || sw <= 0 || sh <= 0 || ddw <= 0 || ddh <= 0) return mp_const_none;
-    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_sspr (#97).
     {
         moy_canvas c;
         moy_sheet s;
-        moy_gfx_canvas(&c, dst, dw, cap, lut, palt,
+        mg_canvas(&c, dst, dw, cap, lut, palt,
                        cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_sheet_init(&s, (uint8_t *)sheet);
         moy_sspr(&c, &s, (int)sx, (int)sy, (int)sw, (int)sh,
@@ -944,14 +753,14 @@ static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
         palt = (const uint8_t *)pb.buf;
     }
     mp_int_t cam_x = mp_obj_get_int(a[20]), cam_y = mp_obj_get_int(a[21]);
-    mp_int_t cx0 = mp_obj_get_int(a[22]), cy0 = mp_obj_get_int(a[23]);
-    mp_int_t cx1 = mp_obj_get_int(a[24]), cy1 = mp_obj_get_int(a[25]);
+    int cx0 = mp_obj_get_int(a[22]), cy0 = mp_obj_get_int(a[23]);
+    int cx1 = mp_obj_get_int(a[24]), cy1 = mp_obj_get_int(a[25]);
     if (dw <= 0 || mw <= 0 || mh <= 0) return mp_const_none;
     if ((size_t)(mw * mh) > cb.len || (size_t)(sheetw * sheeth) > sb.len)
         return mp_const_none;
-    if (!moy_gfx_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
+    if (!mg_is_moy_sheet(sheetw, sheeth, sb.len)) return mp_const_none;
     if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_tline (#97). The hand transcription this replaces passed
     // every conformance scene on the HOST and failed provisional_tline on the
     // board by 2773 pixels -- which is the whole argument for calling the
@@ -960,7 +769,7 @@ static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
         moy_canvas c;
         moy_sheet s;
         moy_map m;
-        moy_gfx_canvas(&c, dst, dw, cap, lut, palt,
+        mg_canvas(&c, dst, dw, cap, lut, palt,
                        cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_sheet_init(&s, (uint8_t *)sheet);
         moy_map_init(&m, (uint8_t *)cells, (int)mw, (int)mh);
@@ -985,20 +794,20 @@ static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
     uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
     mp_int_t cam_x = mp_obj_get_int(a[7]);
     mp_int_t cam_y = mp_obj_get_int(a[8]);
-    mp_int_t cx0 = mp_obj_get_int(a[9]);
-    mp_int_t cy0 = mp_obj_get_int(a[10]);
-    mp_int_t cx1 = mp_obj_get_int(a[11]);
-    mp_int_t cy1 = mp_obj_get_int(a[12]);
+    int cx0 = mp_obj_get_int(a[9]);
+    int cy0 = mp_obj_get_int(a[10]);
+    int cx1 = mp_obj_get_int(a[11]);
+    int cy1 = mp_obj_get_int(a[12]);
     (void)dh;
     if (dw <= 0 || r < 0) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_circ (#97). It walks the half-width as an integer rather
     // than calling sqrt per row -- which is where the 8.4x came from when that
     // algorithm was first adopted by hand here (10,880us -> 1,297us on a P4).
     // This is the same code, now as a call rather than a copy of it.
     {
         moy_canvas c;
-        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        mg_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_circ(&c, (int)cx, (int)cy, (int)r, 0);
     }
     return mp_const_none;
@@ -1019,19 +828,19 @@ static mp_obj_t moy_gfx_circb(size_t n_args, const mp_obj_t *a) {
     uint16_t col = (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF);
     mp_int_t cam_x = mp_obj_get_int(a[7]);
     mp_int_t cam_y = mp_obj_get_int(a[8]);
-    mp_int_t cx0 = mp_obj_get_int(a[9]);
-    mp_int_t cy0 = mp_obj_get_int(a[10]);
-    mp_int_t cx1 = mp_obj_get_int(a[11]);
-    mp_int_t cy1 = mp_obj_get_int(a[12]);
+    int cx0 = mp_obj_get_int(a[9]);
+    int cy0 = mp_obj_get_int(a[10]);
+    int cx1 = mp_obj_get_int(a[11]);
+    int cy1 = mp_obj_get_int(a[12]);
     (void)dh;
     if (dw <= 0 || r < 0) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_circb (#97) -- the midpoint error term, eight octant points
     // per step. A fill and an outline are different rasterizations, which is
     // why the spec keeps them as separate verbs.
     {
         moy_canvas c;
-        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        mg_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_circb(&c, (int)cx, (int)cy, (int)r, 0);
     }
     return mp_const_none;
@@ -1053,18 +862,18 @@ static mp_obj_t moy_gfx_line(size_t n_args, const mp_obj_t *a) {
     uint16_t col = (uint16_t)(mp_obj_get_int(a[7]) & 0xFFFF);
     mp_int_t cam_x = mp_obj_get_int(a[8]);
     mp_int_t cam_y = mp_obj_get_int(a[9]);
-    mp_int_t cx0 = mp_obj_get_int(a[10]);
-    mp_int_t cy0 = mp_obj_get_int(a[11]);
-    mp_int_t cx1 = mp_obj_get_int(a[12]);
-    mp_int_t cy1 = mp_obj_get_int(a[13]);
+    int cx0 = mp_obj_get_int(a[10]);
+    int cy0 = mp_obj_get_int(a[11]);
+    int cx1 = mp_obj_get_int(a[12]);
+    int cy1 = mp_obj_get_int(a[13]);
     (void)dh;
     if (dw <= 0) return mp_const_none;
-    moy_gfx_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
     // libmoy's moy_line (#97): Bresenham, with its axis-aligned and
     // wholly-visible fast paths -- the shapes carts actually draw most.
     {
         moy_canvas c;
-        moy_gfx_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
+        mg_canvas_solid(&c, dst, dw, cap, col, cam_x, cam_y, cx0, cy0, cx1, cy1);
         moy_line(&c, (int)x0, (int)y0, (int)x1, (int)y1, 0);
     }
     return mp_const_none;
@@ -1087,20 +896,7 @@ static mp_obj_t moy_gfx_blit_window(size_t n_args, const mp_obj_t *a) {
     mp_int_t src_w = mp_obj_get_int(a[4]);
     mp_int_t sx = mp_obj_get_int(a[5]);
     mp_int_t sy = mp_obj_get_int(a[6]);
-    if (dw <= 0 || dh <= 0 || src_w <= 0) return mp_const_none;
-    if (sx < 0) sx = 0;
-    if (sy < 0) sy = 0;
-    if (sx + dw > src_w) dw = src_w - sx;            // clamp window to source width
-    if (dw <= 0) return mp_const_none;
-    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);  // dst guard
-    mp_int_t src_rows = (mp_int_t)(scap / (size_t)src_w);
-    if (sy + dh > src_rows) dh = src_rows - sy;      // src guard
-    if (dh <= 0) return mp_const_none;
-    for (mp_int_t row = 0; row < dh; row++) {
-        memcpy(dst + (size_t)row * (size_t)dw,
-               src + (size_t)(sy + row) * (size_t)src_w + (size_t)sx,
-               (size_t)dw * 2u);
-    }
+    mg_blit_window(dst, dcap, dw, dh, src, scap, src_w, sx, sy);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_window_obj, 7, 7, moy_gfx_blit_window);
@@ -1123,32 +919,7 @@ static mp_obj_t moy_gfx_scroll_rect(size_t n_args, const mp_obj_t *a) {
     mp_int_t rh = mp_obj_get_int(a[5]);
     mp_int_t dx = mp_obj_get_int(a[6]);
     mp_int_t dy = mp_obj_get_int(a[7]);
-    if (stride <= 0 || (dx == 0 && dy == 0)) return mp_const_none;
-    mp_int_t rows = (mp_int_t)(cap / (size_t)stride);
-    mp_int_t x0 = rx < 0 ? 0 : rx;
-    mp_int_t y0 = ry < 0 ? 0 : ry;
-    mp_int_t x1 = rx + rw; if (x1 > stride) x1 = stride;
-    mp_int_t y1 = ry + rh; if (y1 > rows) y1 = rows;
-    // Destination span: the part of the rect whose source is also inside it.
-    mp_int_t tx0 = x0 + (dx > 0 ? dx : 0);
-    mp_int_t tx1 = x1 + (dx < 0 ? dx : 0);
-    mp_int_t ty0 = y0 + (dy > 0 ? dy : 0);
-    mp_int_t ty1 = y1 + (dy < 0 ? dy : 0);
-    if (tx0 >= tx1 || ty0 >= ty1) return mp_const_none;
-    size_t cw = (size_t)(tx1 - tx0) * 2u;
-    if (dy > 0) {
-        for (mp_int_t ty = ty1 - 1; ty >= ty0; ty--) {
-            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
-                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
-                    cw);
-        }
-    } else {
-        for (mp_int_t ty = ty0; ty < ty1; ty++) {
-            memmove(px + (size_t)ty * (size_t)stride + (size_t)tx0,
-                    px + (size_t)(ty - dy) * (size_t)stride + (size_t)(tx0 - dx),
-                    cw);
-        }
-    }
+    mg_scroll_rect(px, cap, stride, rx, ry, rw, rh, dx, dy);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_scroll_rect_obj, 8, 8, moy_gfx_scroll_rect);
@@ -1175,72 +946,15 @@ static mp_obj_t moy_gfx_blit_indices(size_t n_args, const mp_obj_t *a) {
     mp_int_t iw = mp_obj_get_int(a[6]);
     mp_int_t ih = mp_obj_get_int(a[7]);
     const uint16_t *pal = moy_gfx_buf_r(a[8], &pcap); // index -> RGB565
-    if (dw <= 0 || dh <= 0 || iw <= 0 || ih <= 0 || pcap == 0) return mp_const_none;
-    if ((size_t)dw * (size_t)dh > dcap) dh = (mp_int_t)(dcap / (size_t)dw);
-    for (mp_int_t row = 0; row < ih; row++) {
-        mp_int_t ty = dy + row;
-        if (ty < 0 || ty >= dh) continue;
-        size_t srow = (size_t)row * (size_t)iw;
-        mp_int_t drow = ty * dw;
-        for (mp_int_t col = 0; col < iw; col++) {
-            mp_int_t tx = dx + col;
-            if (tx < 0 || tx >= dw) continue;
-            size_t si = srow + (size_t)col;
-            if (si >= icap) continue;
-            size_t p = (size_t)idx[si];
-            if (p >= pcap) continue;                 // index past palette -> skip
-            dst[(size_t)drow + (size_t)tx] = pal[p];
-        }
-    }
+    mg_blit_indices(dst, dcap, dw, dh, dx, dy, idx, icap, iw, ih, pal, pcap);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_blit_indices_obj, 9, 9, moy_gfx_blit_indices);
 
 // The petme128 rasterizer, shared by the `text` op and the print draw gate. The
 // clip rect is intersected with the buffer here, so every caller is bounds-safe.
-static void moy_gfx_text_raw(uint16_t *dst, size_t dcap, mp_int_t dw,
-                             const uint8_t *s, size_t slen,
-                             mp_int_t x, mp_int_t y, uint16_t col,
-                             const uint8_t *font, mp_int_t nglyphs,
-                             mp_int_t first, mp_int_t scale,
-                             mp_int_t cam_x, mp_int_t cam_y,
-                             mp_int_t cx0, mp_int_t cy0,
-                             mp_int_t cx1, mp_int_t cy1) {
-    if (dw <= 0 || nglyphs <= 0) return;
-    if (scale < 1) scale = 1;
-    moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
-    x -= cam_x;
-    y -= cam_y;
-    mp_int_t adv = 8 * scale;                    // cell advance per character
-    if (y >= cy1 || y + adv <= cy0) return;      // whole line off-clip
-    for (size_t i = 0; i < slen; i++, x += adv) {
-        if (x >= cx1) break;                     // rest of the string is right of clip
-        if (x + adv <= cx0) continue;            // this glyph entirely left of clip
-        mp_int_t gi = (mp_int_t)s[i] - first;
-        if (gi < 0 || gi >= nglyphs) gi = 0;     // out of range -> first glyph (space)
-        const uint8_t *g = font + (size_t)gi * 8u;
-        for (mp_int_t j = 0; j < 8; j++) {
-            uint8_t bits = g[j];
-            if (bits == 0) continue;
-            mp_int_t bx = x + j * scale;
-            if (bx >= cx1 || bx + scale <= cx0) continue;
-            for (mp_int_t row = 0; bits != 0; bits >>= 1, row++) {
-                if (!(bits & 1)) continue;
-                mp_int_t by = y + row * scale;
-                for (mp_int_t sub_y = 0; sub_y < scale; sub_y++) {
-                    mp_int_t ty = by + sub_y;
-                    if (ty < cy0 || ty >= cy1) continue;
-                    uint16_t *drow = dst + (size_t)ty * (size_t)dw;
-                    for (mp_int_t sub_x = 0; sub_x < scale; sub_x++) {
-                        mp_int_t tx = bx + sub_x;
-                        if (tx < cx0 || tx >= cx1) continue;
-                        drow[tx] = col;
-                    }
-                }
-            }
-        }
-    }
-}
+// The rasterizer itself is mg_text_raw in moy_gfx_kernels.c (the host draws the
+// same chrome glyphs through it); what stayed here are its MicroPython callers.
 
 // text(dst, dw, dh, s, x, y, color, font, first, scale, cam_x, cam_y,
 //      cx0, cy0, cx1, cy1) -- render a whole string in ONE C call (issue #62): the
@@ -1261,46 +975,16 @@ static mp_obj_t moy_gfx_text(size_t n_args, const mp_obj_t *a) {
     mp_get_buffer_raise(a[3], &sbi, MP_BUFFER_READ);
     mp_buffer_info_t fbi;
     mp_get_buffer_raise(a[7], &fbi, MP_BUFFER_READ);
-    // THE CART's text is scale 1 and goes through libmoy (#97). SPEC.md 6 is
-    // explicit that "print has no scale parameter; text is always 8px", and
-    // moybyte agrees -- DeviceCanvas.print hardcodes 1 and documents its own
-    // `scale` argument as accepted-and-ignored. So scale > 1 is never a cart:
-    // it is this console's CHROME at the #39 system font size, which is host
-    // business (SPEC.md 0) and keeps the kernel below.
-    //
-    // This crossed, was REVERTED on an S3 number of 1.21x, and crossed again
-    // when that number was re-measured at 1.04x against current libmoy -- the
-    // 1.21x had been taken before moy_print grew its whole-column off-clip
-    // early-out. See libmoy/UPSTREAM.md; the reversal is recorded there rather
-    // than tidied away.
-    //
-    // libmoy uses its own compiled-in font rather than the blob passed here.
-    // Both are petme128 and SPEC.md 6 requires them byte-identical or text
-    // conformance fails -- so the `text` and `text_bytes` scenes are what
-    // license this, not the assumption.
-    if (mp_obj_get_int(a[9]) == 1) {
-        moy_canvas c;
-        mp_int_t cam_x = mp_obj_get_int(a[10]), cam_y = mp_obj_get_int(a[11]);
-        mp_int_t cx0 = mp_obj_get_int(a[12]), cy0 = mp_obj_get_int(a[13]);
-        mp_int_t cx1 = mp_obj_get_int(a[14]), cy1 = mp_obj_get_int(a[15]);
-        if (dw <= 0) return mp_const_none;
-        moy_gfx_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
-        moy_gfx_canvas_solid(&c, dst, dw, dcap,
-                             (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
-                             cam_x, cam_y, cx0, cy0, cx1, cy1);
-        moy_print(&c, (const uint8_t *)sbi.buf, sbi.len,
-                  mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), 0);
-        return mp_const_none;
-    }
-    moy_gfx_text_raw(dst, dcap, dw,
-                     (const uint8_t *)sbi.buf, sbi.len,
-                     mp_obj_get_int(a[4]), mp_obj_get_int(a[5]),
-                     (uint16_t)(mp_obj_get_int(a[6]) & 0xFFFF),
-                     (const uint8_t *)fbi.buf, (mp_int_t)(fbi.len / 8u),
-                     mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
-                     mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
-                     mp_obj_get_int(a[12]), mp_obj_get_int(a[13]),
-                     mp_obj_get_int(a[14]), mp_obj_get_int(a[15]));
+    // THE CART's text is scale 1 and goes through libmoy (#97), the chrome's
+    // scale > 1 through the hand-written rasterizer; mg_text is that fork, and
+    // the reasoning for it lives with it in moy_gfx_kernels.c.
+    mg_text(dst, dcap, dw, (const uint8_t *)sbi.buf, sbi.len,
+            mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+            (const uint8_t *)fbi.buf, (int)(fbi.len / 8u),
+            mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+            mp_obj_get_int(a[10]), mp_obj_get_int(a[11]),
+            mp_obj_get_int(a[12]), mp_obj_get_int(a[13]),
+            mp_obj_get_int(a[14]), mp_obj_get_int(a[15]));
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_text_obj, 16, 16, moy_gfx_text);
@@ -1507,7 +1191,7 @@ static mp_obj_t moy_gfx_draw_ctx_set_batch_src(size_t n_args, const mp_obj_t *a)
     mp_get_buffer_raise(a[1], &sb, MP_BUFFER_READ);
     mp_int_t w = mp_obj_get_int(a[2]);
     mp_int_t h = mp_obj_get_int(a[3]);
-    if (!moy_gfx_is_moy_sheet(w, h, sb.len)) {
+    if (!mg_is_moy_sheet(w, h, sb.len)) {
         mp_raise_ValueError(MP_ERROR_TEXT("set_batch_src: not a moy sheet"));
     }
     const uint8_t *palt = NULL;
@@ -1627,7 +1311,7 @@ static inline void gate_fill(moy_gfx_draw_ctx_obj_t *c, mp_int_t x, mp_int_t y,
     if (y1 > rows) y1 = rows;
     if (x1 <= x0 || y1 <= y0) return;
     for (mp_int_t row = y0; row < y1; row++) {
-        moy_gfx_fill_run(c->px + (size_t)row * (size_t)stride + (size_t)x0,
+        mg_fill_run(c->px + (size_t)row * (size_t)stride + (size_t)x0,
                          (size_t)(x1 - x0), col);
     }
 }
@@ -1663,7 +1347,7 @@ static mp_obj_t draw_gate_call(mp_obj_t self_in, size_t n_args, size_t n_kw,
         }
         size_t slen;
         const char *s = mp_obj_str_get_data(args[0], &slen);
-        moy_gfx_text_raw(c->px, c->cap, st[ST_W], (const uint8_t *)s, slen,
+        mg_text_raw(c->px, c->cap, st[ST_W], (const uint8_t *)s, slen,
                          x, y, c->pal[(size_t)(ci & 63) % c->npal],
                          c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
                          st[ST_CAM_X], st[ST_CAM_Y],
@@ -1803,8 +1487,8 @@ static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_make_draw_gate_obj,
 // --- the exported C draw API (moy_gfx_capi.h -- moy_lua's direct verbs) -----
 //
 // Thin non-static wrappers over the SAME machinery the gates and MP verbs use:
-// gate_fill for the fill family, moy_gfx_canvas_solid + the libmoy kernels for
-// the shapes, moy_gfx_text_raw for print (the gate's lane -- at cart scale it
+// gate_fill for the fill family, mg_canvas_solid + the libmoy kernels for
+// the shapes, mg_text_raw for print (the gate's lane -- at cart scale it
 // and libmoy's moy_print are pinned byte-identical by the text conformance
 // scenes). Nothing here parses args, upcalls, allocates, or raises: the
 // callers run inside Lua C functions where an MP exception must not longjmp.
@@ -1872,10 +1556,10 @@ static bool capi_solid(moy_gfx_draw_ctx_t *c, moy_canvas *mc, int ci) {
     if (dw <= 0 || c->px == NULL) {
         return false;
     }
-    mp_int_t cx0 = st[ST_CX0], cy0 = st[ST_CY0];
-    mp_int_t cx1 = st[ST_CX1], cy1 = st[ST_CY1];
-    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
-    moy_gfx_canvas_solid(mc, c->px, dw, c->cap, capi_col(c, ci),
+    int cx0 = st[ST_CX0], cy0 = st[ST_CY0];
+    int cx1 = st[ST_CX1], cy1 = st[ST_CY1];
+    mg_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    mg_canvas_solid(mc, c->px, dw, c->cap, capi_col(c, ci),
                          st[ST_CAM_X], st[ST_CAM_Y], cx0, cy0, cx1, cy1);
     return true;
 }
@@ -1912,7 +1596,7 @@ void moy_gfx_capi_tri(moy_gfx_draw_ctx_t *c, int x1, int y1, int x2, int y2,
 void moy_gfx_capi_print(moy_gfx_draw_ctx_t *c, const uint8_t *s, size_t slen,
                         int x, int y, int ci) {
     const int32_t *st = c->st;
-    moy_gfx_text_raw(c->px, c->cap, st[ST_W], s, slen, x, y, capi_col(c, ci),
+    mg_text_raw(c->px, c->cap, st[ST_W], s, slen, x, y, capi_col(c, ci),
                      c->font, c->nglyphs, c->first, st[ST_FONT_SCALE],
                      st[ST_CAM_X], st[ST_CAM_Y],
                      st[ST_CX0], st[ST_CY0], st[ST_CX1], st[ST_CY1]);
@@ -1953,13 +1637,13 @@ bool moy_gfx_capi_flush_batch(moy_gfx_draw_ctx_t *c, int token) {
     if (scale < 1) {
         scale = 1;
     }
-    mp_int_t cx0 = c->st[ST_CX0], cy0 = c->st[ST_CY0];
-    mp_int_t cx1 = c->st[ST_CX1], cy1 = c->st[ST_CY1];
-    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    int cx0 = c->st[ST_CX0], cy0 = c->st[ST_CY0];
+    int cx1 = c->st[ST_CX1], cy1 = c->st[ST_CY1];
+    mg_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
     q[0] = 4;                          // reset FIRST -- mirror flush_batch
     moy_canvas cv;
     moy_sheet sh;
-    moy_gfx_canvas(&cv, c->px, dw, c->cap, c->pal, c->bpalt,
+    mg_canvas(&cv, c->px, dw, c->cap, c->pal, c->bpalt,
                    c->st[ST_CAM_X], c->st[ST_CAM_Y], cx0, cy0, cx1, cy1);
     moy_sheet_init(&sh, (uint8_t *)c->bsrc);
     for (mp_int_t i = 4; i + 4 <= next; i += 4) {
@@ -1992,10 +1676,10 @@ static bool capi_texture_canvas(moy_gfx_draw_ctx_t *c, moy_canvas *mc) {
     if (dw <= 0 || c->px == NULL) {
         return false;
     }
-    mp_int_t cx0 = st[ST_CX0], cy0 = st[ST_CY0];
-    mp_int_t cx1 = st[ST_CX1], cy1 = st[ST_CY1];
-    moy_gfx_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
-    moy_gfx_canvas(mc, c->px, dw, c->cap, c->pal, c->bpalt,
+    int cx0 = st[ST_CX0], cy0 = st[ST_CY0];
+    int cx1 = st[ST_CX1], cy1 = st[ST_CY1];
+    mg_clip(dw, c->cap, &cx0, &cy0, &cx1, &cy1);
+    mg_canvas(mc, c->px, dw, c->cap, c->pal, c->bpalt,
                    st[ST_CAM_X], st[ST_CAM_Y], cx0, cy0, cx1, cy1);
     return true;
 }

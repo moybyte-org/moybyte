@@ -239,13 +239,17 @@ def test_libmoy_and_the_c_gate_pin_the_same_shape():
 
 
 def test_both_c_twins_still_gate_every_sheet_reading_verb():
-    # The device binding and the host binding are two files that must refuse the
-    # same thing; losing the gate on one tier is how this stays undetectable.
+    # The PREDICATE is single-source now (mg_is_moy_sheet in
+    # native/moy_gfx/moy_gfx_kernels.h, which both surfaces include), so the two
+    # can no longer disagree about what a moy sheet IS. What is still per-file is
+    # the CALL SITES -- each sheet-reading verb marshals its own arguments and
+    # has to remember to ask -- and losing the gate on one tier is how that stays
+    # undetectable.
     dev = (ROOT / "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx"
            / "modmoy_gfx.c").read_text(encoding="utf-8")
     host = (ROOT / "runtime/moyhost_gfx.c").read_text(encoding="utf-8")
     # blit_map, blit_batch, sspr, tline -- plus set_batch_src on the device, which
     # is a REGISTRATION (not mid-frame) and therefore raises instead of declining.
-    assert dev.count("if (!moy_gfx_is_moy_sheet(") == 5
+    assert dev.count("if (!mg_is_moy_sheet(") == 5
     assert "set_batch_src: not a moy sheet" in dev
-    assert host.count("if (!hg_is_moy_sheet(") == 4
+    assert host.count("if (!mg_is_moy_sheet(") == 4

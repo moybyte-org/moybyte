@@ -6,7 +6,7 @@ ctypes-loads a library runtime/native_build.py compiles. So "no C compiler = no
 host console" stopped being a caveat and became the plain truth -- and what the
 user actually got was
 
-    AttributeError: 'NoneType' object has no attribute 'hg_fill'
+    AttributeError: 'NoneType' object has no attribute 'mg_fill'
 
 four frames inside a ctypes wrapper, naming nothing they could act on.
 
@@ -80,7 +80,8 @@ def _build_gfx(**kw):
     from runtime import gfx_binding
     return native_build.build("moyhost_gfx", gfx_binding._SHIM,
                               gfx_binding._LIBMOY, str(ROOT / ".build" / "t"),
-                              cflags=gfx_binding._CFLAGS, **kw)
+                              cflags=gfx_binding._CFLAGS,
+                              libmoy_dir=gfx_binding._SRC_DIRS, **kw)
 
 
 def test_nothing_on_path_returns_None_and_explains(monkeypatch, capsys):

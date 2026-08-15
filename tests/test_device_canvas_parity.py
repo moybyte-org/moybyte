@@ -786,8 +786,8 @@ def test_map_camera_clip_matches_host():
         # Build a sheet + tilemap (both sides share editors.py classes).
         # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
         # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
-        # NOTHING (`moy_gfx_is_moy_sheet` in modmoy_gfx.c, `hg_is_moy_sheet` in
-        # the host shim, `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
+        # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both
+        # C surfaces include; `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
         # has to be handed the shape a real cart has, or this compares two blank
         # framebuffers and calls it agreement.
         sheet_h = SpriteSheet(16, 32)

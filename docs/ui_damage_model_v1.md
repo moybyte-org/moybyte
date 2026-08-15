@@ -40,7 +40,7 @@ and then immediately fill `lay.panel` **in the same colour**:
 
 `map_editor_ui.py:861,864` and `paint_layer.py:686,690`. `panel` covers `body_fill`
 except two 8px columns and a bottom strip, so **~94% of ~450K px is written twice**
-— ~848KB of redundant writes per frame, and `moy_gfx_fill_run` is a cached store
+— ~848KB of redundant writes per frame, and `mg_fill_run` is a cached store
 loop, so on PSRAM write-allocate genuinely doubles a fill's traffic.
 
 This exact bug was already fixed in **Settings** during this session, and its own

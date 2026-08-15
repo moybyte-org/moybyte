@@ -8,9 +8,20 @@ hand.
 
 Function names, argument order and return values match the native module
 EXACTLY, because the whole point is that `device_canvas.py` does not know which
-one it got. `tests/test_gfx_binding.py` diffs this surface against the verbs
-device_canvas actually calls, so a signature that drifts fails there rather
-than at a call site months later.
+one it got. `tests/test_gfx_binding.py` pins that two ways: it reads the verb
+names `device_canvas.py` actually reaches for out of its source and asserts each
+one exists here (so a verb the canvas calls and this surface lacks fails on the
+day it is added, not at a call site months later), and it drives 131 ops through
+both this binding and the REAL native module, comparing byte for byte.
+
+TWO C PREFIXES, AND THE DIFFERENCE MATTERS. `mg_*` is
+`native/moy_gfx/moy_gfx_kernels.c` -- the compositor, ONE copy, linked by this
+shim and compiled into the MicroPython usermod. `hg_*` is `moyhost_gfx.c`, and
+after the extraction it holds only what is genuinely host-side: the libmoy
+bridge verbs (whose marshalling differs from the usermod's because ctypes and
+MicroPython hand over arguments differently) and the async-copy refusal. A new
+compositor loop belongs in the kernels file, where it gets an `mg_` name and
+both tiers get it at once.
 
 BUFFERS. The native module takes MicroPython buffer objects and derives their
 capacity through `moy_gfx_buf_w`; ctypes hands over a bare pointer, so capacity
@@ -32,6 +43,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _SHIM = os.path.join(_HERE, "moyhost_gfx.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_gfx")
 
+# The native module's own directory, searched alongside the vendored libmoy one:
+# the compositor kernel is moy_gfx's, not libmoy's, and it lives with the
+# usermod that also compiles it.
+_MOY_GFX = os.path.dirname(native_build.LIBMOY)
+
 # RGB565, matching the boards. This define is the whole difference between this
 # library and the indexed one next door: it makes a libmoy pixel two bytes
 # instead of one, changing sizeof(moy_pixel) and the layout of every struct.
@@ -39,10 +55,21 @@ _CACHE = os.path.join(native_build.ROOT, ".build", "host_gfx")
 # then draws garbage.
 _CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
 
-# blit_batch and blit_map are not pure compositing -- they draw SPRITES, and
-# sprites are libmoy's. Same translation units the indexed binding compiles,
-# same vendored source, different pixel width.
-_LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
+# The sources compiled beside the shim. The first three are vendored libmoy --
+# blit_batch, blit_map and the shape verbs are not pure compositing, they draw
+# SPRITES, and sprites are libmoy's. The last two are moy_gfx's own compositor,
+# out of the native module's directory: the SAME FILE the boards build, which is
+# the whole point of the extraction. read_sources() searches both directories
+# and refuses a name that appears in each, so this cannot silently pick up a
+# stale copy.
+_LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c",
+           "moy_gfx_kernels.h", "moy_gfx_kernels.c")
+
+# ...and where to find them. One tuple rather than a literal at the call site,
+# because a caller that reconstructs the build (tests/test_native_build_no_
+# compiler.py does) must search the same directories or it fails on a source it
+# cannot find and reports it as a toolchain problem.
+_SRC_DIRS = (native_build.LIBMOY, _MOY_GFX)
 
 _LIB = [None]
 
@@ -51,13 +78,20 @@ _Z = ctypes.c_size_t
 _P = ctypes.c_void_p
 
 _SIGS = (
-    ("hg_fill", [_P, _Z, _I, _I], None),
-    ("hg_fill_rect", [_P, _Z, _I, _I, _I, _I, _I, _I], None),
-    ("hg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
-    ("hg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
+    # The shared compositor (native/moy_gfx/moy_gfx_kernels.c) -- the same
+    # symbols the usermod's MicroPython wrappers call, reached here with no
+    # forwarder in between.
+    ("mg_fill", [_P, _Z, _I, _I], None),
+    ("mg_fill_rect", [_P, _Z, _I, _I, _I, _I, _I, _I], None),
+    ("mg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
+    ("mg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
                     _I, _I, _I, _I], None),
-    ("hg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
-    ("hg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
+    ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("mg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _I, _I, _I, _I, _I,
+                 _I, _I, _I, _I], None),
+    # ...and the host-side rest.
     ("hg_copy_async", [_P, _Z, _I, _P, _Z, _I, _I], _I),
     ("hg_copy_wait", [], _I),
     ("hg_blit_batch", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
@@ -75,9 +109,6 @@ _SIGS = (
     ("hg_circb", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
                 _I], None),
-    ("hg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
-    ("hg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I,
-                 _I, _I, _I, _I], None),
     ("hg_sspr", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
                  _P, _P, _I, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_tline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
@@ -87,7 +118,8 @@ _SIGS = (
 
 def build(verbose=False):
     return native_build.build("moyhost_gfx", _SHIM, _LIBMOY, _CACHE,
-                              cflags=_CFLAGS, verbose=verbose)
+                              cflags=_CFLAGS, libmoy_dir=_SRC_DIRS,
+                              verbose=verbose)
 
 
 def _lib():
@@ -138,18 +170,18 @@ def _rbuf(b):
 
 def fill(buf, npix, color):
     arr, cap = _buf(buf)
-    _lib().hg_fill(ctypes.cast(arr, _P), cap, int(npix), int(color) & 0xFFFF)
+    _lib().mg_fill(ctypes.cast(arr, _P), cap, int(npix), int(color) & 0xFFFF)
 
 
 def fill_rect(buf, stride, x, y, w, h, color):
     arr, cap = _buf(buf)
-    _lib().hg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
+    _lib().mg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
                         int(w), int(h), int(color) & 0xFFFF)
 
 
 def scroll_rect(buf, stride, rx, ry, rw, rh, dx, dy):
     arr, cap = _buf(buf)
-    _lib().hg_scroll_rect(ctypes.cast(arr, _P), cap, int(stride), int(rx),
+    _lib().mg_scroll_rect(ctypes.cast(arr, _P), cap, int(stride), int(rx),
                           int(ry), int(rw), int(rh), int(dx), int(dy))
 
 
@@ -157,7 +189,7 @@ def blit565(dst, dw, dh, dx, dy, src, sw, sh, key,
             cx0=0, cy0=0, cx1=None, cy1=None):
     darr, dcap = _buf(dst)
     sarr, scap = _rbuf(src)
-    _lib().hg_blit565(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_blit565(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
                       int(dx), int(dy),
                       ctypes.cast(sarr, _P), scap, int(sw), int(sh), int(key),
                       int(cx0), int(cy0),
@@ -174,7 +206,7 @@ def blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale):
     probes for this name and otherwise expands every row in Python."""
     darr, dcap = _buf(dst)
     sarr, scap = _rbuf(src)
-    _lib().hg_blit565_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_blit565_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
                             int(dx), int(dy),
                             ctypes.cast(sarr, _P), scap, int(sw), int(sh),
                             int(scale))
@@ -183,7 +215,7 @@ def blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale):
 def blit_window(dst, dw, dh, src, src_w, sx, sy):
     darr, dcap = _buf(dst)
     sarr, scap = _rbuf(src)
-    _lib().hg_blit_window(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_blit_window(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
                           ctypes.cast(sarr, _P), scap, int(src_w),
                           int(sx), int(sy))
 
@@ -295,7 +327,7 @@ def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
     # array and a bytes-like.
     pmv = memoryview(pal).cast("B")
     parr, _ = _rbuf(pmv)
-    _lib().hg_blit_indices(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+    _lib().mg_blit_indices(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
                            int(dx), int(dy),
                            ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
                            ctypes.cast(parr, _P), len(pmv) // 2)
@@ -314,14 +346,18 @@ def text(dst, dw, dh, s, x, y, color, font, first, scale,
 
     A str is UTF-8-encoded, which is the buffer MicroPython would have taken
     from it anyway; bytes pass straight through, so moy_lua's non-UTF-8 strings
-    draw the same glyphs here as on glass (device_canvas._text_bytes)."""
+    draw the same glyphs here as on glass (device_canvas._text_bytes).
+
+    The kernel takes a GLYPH COUNT where this signature takes a blob, so the
+    //8 happens here -- exactly as it happens in the usermod's wrapper. petme128
+    is 8 bytes per glyph, column-major."""
     darr, dcap = _buf(dst)
     sarr, _ = _rbuf(s.encode("utf-8") if isinstance(s, str) else s)
     farr, _ = _rbuf(font)
-    _lib().hg_text(ctypes.cast(darr, _P), dcap, int(dw),
+    _lib().mg_text(ctypes.cast(darr, _P), dcap, int(dw),
                    ctypes.cast(sarr, _P), len(sarr),
                    int(x), int(y), int(color) & 0xFFFF,
-                   ctypes.cast(farr, _P), len(farr), int(first), int(scale),
+                   ctypes.cast(farr, _P), len(farr) // 8, int(first), int(scale),
                    int(cam_x), int(cam_y), int(cx0), int(cy0),
                    int(cx1), int(cy1))
 

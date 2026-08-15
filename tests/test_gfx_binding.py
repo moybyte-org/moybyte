@@ -35,6 +35,7 @@ can SEE rather than a write past the end that both sides make invisibly.
 """
 
 import os
+import re
 import struct
 import subprocess
 import warnings
@@ -287,7 +288,7 @@ circb(buf, 16, 8, 8, 4, 40, 0x4444, 0, 0, 0, 0, 16, 8)
 circb(buf, 16, 8, 2, 2, 5, 0x5555, 0, 0, 6, 6, 2, 2)
 circb(buf, 16, 8, 20, 2, 3, 0x6666, 10, 0, 0, 0, 16, 8)
 # The clip rect is intersected with the BUFFER by every libmoy verb here
-# (hg_clip_rect / moy_gfx_clip). One past each edge, so a mutant that
+# (mg_clip, which is one function both sides include). One past each edge, so a mutant that
 # intersects one late has somewhere to write and be seen.
 circ(buf, 16, 8, 8, 6, 5, 0x7777, 0, 0, 0, 0, 16, 9)
 line(buf, 16, 8, 0, 4, 20, 4, 0x8888, 0, 0, 0, 0, 17, 8)
@@ -315,6 +316,25 @@ text(buf, 16, 8, long, 0, 3, 0x4321, font, 65, 1, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, long, -5, 2, 0x4322, font, 65, 2, 0, 0, 2, 1, 14, 7)
 text(buf, 16, 8, msg, 0, 6, 0x4323, font, 65, 2, 0, 0, 0, 0, 16, 8)
 text(buf, 16, 8, msg, 0, 7, 0x4324, font, 65, 1, 0, 0, 0, 0, 16, 8)
+# -- dh = 0 on the libmoy verbs, which is where the two sides ACTUALLY differed
+#
+# Found 2026-08-15 while extracting the compositor, and the reason the "one
+# semantic difference" claim needed checking rather than believing. These verbs
+# ignore `dh` on the device (`(void)dh`; the row count comes from the buffer
+# capacity) but moyhost_gfx.c used to refuse `dh <= 0` outright -- so `line`
+# with a zero-height canvas drew NOTHING on the host and fourteen pixels on
+# glass. Nothing could see it: the goldens only ever replay a real canvas, and
+# these ops were the first to hand the kernels a degenerate one. The host was
+# moved onto the board's behaviour; these pin it, and they are only meaningful
+# with an EXPLICIT clip rect (a defaulted cy1 would be 0 and clip everything
+# away on both sides, agreeing for the wrong reason).
+line(buf, 16, 0, 1, 1, 14, 6, 0x2001, 0, 0, 0, 0, 16, 8)
+circ(buf, 16, 0, 8, 4, 3, 0x2002, 0, 0, 0, 0, 16, 8)
+circb(buf, 16, 0, 5, 3, 3, 0x2003, 0, 0, 0, 0, 16, 8)
+tri(buf, 16, 0, 1, 1, 13, 2, 5, 6, 0x2004, 0, 0, 0, 0, 16, 8)
+sspr(buf, 16, 0, sheet, 128, 256, 0, 0, 8, 8, 2, 1, 9, 5, -1, 0, lut, palt, 0, 0, 0, 0, 16, 8)
+tline(buf, 16, 0, cells, 4, 4, sheet, 128, 256, 0, 1, 15, 6, 0, 0, 65536, 32768, -1, lut, palt, 0, 0, 0, 0, 16, 8)
+blit_batch(buf, 16, 0, quads, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 0, 0, 16, 8)
 """
 
 OPS = OPS + CLAMP_OPS
@@ -429,6 +449,86 @@ def _run_ops(mod, arena, buf, src):
 
 def test_the_binding_is_available_when_a_compiler_is():
     assert g.available()
+
+
+# -- the surface, against the verbs device_canvas actually reaches for --------
+#
+# gfx_binding.py's header promised this check for a while before it existed. It
+# is worth having because the two ways a verb reaches the kernel are NOT the
+# same risk. An unguarded `self._gfx.circ(...)` is a hard dependency: if the
+# host binding lacks that name, the host console dies at its first draw with an
+# AttributeError out of a ctypes wrapper. A `getattr(gfx, "sspr", None)` is
+# optional by construction -- the canvas carries a Python fallback -- so a
+# native-only accelerator (make_draw_ctx, fill_spans) is allowed to be absent
+# here and says nothing about drift.
+#
+# Reading the CALL SITES rather than a hand-kept list is the whole point: a verb
+# added to device_canvas and forgotten here fails on the day it is added.
+
+_CANVAS = TDECK / "modules" / "device_canvas.py"
+
+# `getattr(gfx, "name", ...)` / `getattr(self._gfx, "name", ...)` -- probed, so
+# the canvas has a fallback and the binding need not carry it.
+_PROBED = re.compile(r'getattr\(\s*(?:self\._)?gfx\s*,\s*"(\w+)"')
+# `gfx.name(...)` / `self._gfx.name(...)` -- called outright. The negative
+# lookbehind keeps `self._gfx_text` and other attributes out.
+_CALLED = re.compile(r'(?:self\._gfx|(?<![\w.])gfx)\.(\w+)\s*\(')
+
+
+def _canvas_verbs():
+    src = _CANVAS.read_text(encoding="utf-8")
+    probed = set(_PROBED.findall(src))
+    return probed, set(_CALLED.findall(src)) - probed
+
+
+def test_the_binding_carries_every_verb_device_canvas_calls_outright():
+    probed, required = _canvas_verbs()
+    # A floor on both, so a refactor that changes how the canvas names its
+    # kernel cannot turn this into a test of an empty set that still passes.
+    assert len(required) >= 12, sorted(required)
+    assert len(probed) >= 4, sorted(probed)
+    missing = sorted(n for n in required if not callable(getattr(g, n, None)))
+    assert not missing, (
+        "device_canvas calls these on the kernel with no fallback, and the host "
+        "binding does not have them -- on the host that is an AttributeError at "
+        "the first draw: %s" % missing)
+
+
+def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
+    """tri/sspr/tline/text are PROBED by device_canvas, and present regardless.
+
+    Pinning the decision _SIGS records: "optional" on a board means "the board
+    would be slower", not "the host may diverge". If one of these were dropped
+    here the canvas would quietly take its Python fallback and the host would
+    stop exercising the same raster the glass runs -- green, and no longer
+    testing anything.
+    """
+    probed, _ = _canvas_verbs()
+    for name in ("tri", "sspr", "tline", "text"):
+        assert name in probed, "%s is no longer probed by device_canvas" % name
+        assert callable(getattr(g, name, None)), name
+
+
+# copy_async/copy_wait are the refusal pair -- they move no pixels, so an op
+# script entry for them would compare two unchanged framebuffers. They have
+# test_the_async_pair_refuses_so_callers_take_the_sync_path instead.
+_NO_PIXELS = frozenset(("copy_async", "copy_wait"))
+
+
+def test_the_op_script_exercises_every_verb_the_canvas_depends_on():
+    """The compiled-vs-compiled check must reach each of them.
+
+    This is the hole the provisional_tline day went through: a verb can be
+    present on both sides, be called by the canvas, and still never be run
+    through two independently compiled kernels -- and then the only thing
+    comparing them is a transcription, which can be right while the C is wrong.
+    """
+    _, required = _canvas_verbs()
+    run = {line.partition("(")[0] for line in _op_lines(OPS)}
+    uncovered = sorted(n for n in required - _NO_PIXELS if n not in run)
+    assert not uncovered, (
+        "device_canvas depends on these and the host/device op script never "
+        "runs them, so nothing compares the two compilations: %s" % uncovered)
 
 
 def test_fill_respects_the_buffer_capacity():

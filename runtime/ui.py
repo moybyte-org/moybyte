@@ -472,7 +472,7 @@ def fill_uncovered(cv, inner, outer, col):
     fills use the SAME colour and the panel sits almost entirely inside the body.
     On the P4's 1024x600 editor those two rects are ~450K and ~426K pixels, so the
     second fill was rewriting ~94% of the first in the same colour -- ~848KB of
-    redundant writes per frame, and `moy_gfx_fill_run` is a cached store loop, so
+    redundant writes per frame, and `mg_fill_run` is a cached store loop, so
     PSRAM's write-allocate doubles a fill's traffic. Settings hit the identical bug
     and deleting its duplicate fill was worth ~9ms (see settings_layer.draw).
 
