@@ -193,6 +193,31 @@ else
   fi
 fi
 
+# Bake the BROWSER CONSOLE into the image (moy_web). The board serves the wasm
+# console over WiFi (moy_webhost); until 2026-08-15 it could only serve a copy
+# somebody had put on the SD card, which drifts silently -- and THIS board
+# cannot be pushed to at all, because the push tool talks to the board over
+# serial and this fork's USB-CDC RX is dead under the desktop. So the image
+# carries the bundle: tools/gen_web_blob.py .incbin's the four PRE-GZIPPED
+# assets (572,693 B; raw would be 1,155,953 B and would not fit this slot) into
+# a generated C file, and moy_webhost falls back to it when storage has none.
+# A pushed copy still WINS, so the fast dev loop survives.
+#
+# With no bundle built the generator emits an EMPTY table and shouts; under CI
+# (or MOYBYTE_REQUIRE_WEB_BUNDLE=1) it fails the build instead, because a
+# PUBLISHED image with no console is the drift this replaced.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" \
+  --out "${SCRIPT_DIR}/native/moy_web/moy_web_blob.gen.c"
+MOY_WEB_SRC="${SCRIPT_DIR}/native/moy_web"
+MOY_WEB_DST="${UPSTREAM_DIR}/ext_mod/moy_web"
+if [ -d "${MOY_WEB_SRC}" ]; then
+  rm -rf "${MOY_WEB_DST}"
+  cp -r "${MOY_WEB_SRC}" "${MOY_WEB_DST}"
+  if ! grep -q 'moy_web/micropython.cmake' "${EXT_MOD_CMAKE}"; then
+    sed -i '/moy_sd\/micropython.cmake/a include(${CMAKE_CURRENT_LIST_DIR}/moy_web/micropython.cmake)' "${EXT_MOD_CMAKE}"
+  fi
+fi
+
 # Stage the shared host/device modules into the frozen modules tree (#161
 # Phase 3). WHAT crosses and WHY now lives in board.toml, not here: the stager
 # copies every runtime/*.py EXCEPT the files that board file denies, each with
@@ -735,6 +760,12 @@ echo "Updated current app alias: ${CURRENT_APP_BIN}"
 # had accumulated unnoticed over two weeks. Print image size + remaining headroom on
 # every build, and warn loudly under the threshold -- growing the slot again costs
 # every deployed device a full-erase USB flash, so the number has to be seen early.
+#
+# The overflow case FAILS the build now (it warned until 2026-08-15, and the
+# next steps only merge the image -- so a warning produced a full set of
+# artifacts that esptool would refuse and that no board could take over OTA).
+# The margin got thin the moment the web console was baked in: ~573KB of the
+# slot is the browser bundle, which the build prints above.
 APP_SLOT_BYTES="${MOYBYTE_APP_SLOT_BYTES:-5242880}"
 APP_HEADROOM_WARN_BYTES="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"   # 200KB
 APP_SIZE_BYTES="$(wc -c < "${APP_BIN}" | tr -d '[:space:]')"
@@ -742,7 +773,16 @@ APP_HEADROOM_BYTES=$(( APP_SLOT_BYTES - APP_SIZE_BYTES ))
 printf 'App image: %s bytes of a %s-byte slot -- %s bytes headroom (%s KB)\n' \
   "${APP_SIZE_BYTES}" "${APP_SLOT_BYTES}" "${APP_HEADROOM_BYTES}" "$(( APP_HEADROOM_BYTES / 1024 ))"
 if [ "${APP_HEADROOM_BYTES}" -lt 0 ]; then
-  echo "Moybyte WARNING (#168): the app image does NOT fit the ${APP_SLOT_BYTES}-byte OTA slot" >&2
+  echo "" >&2
+  echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+  echo "!!   slot:     ${APP_SLOT_BYTES} bytes (ota_0/ota_1 on the 16MB part)" >&2
+  echo "!!   image:    ${APP_SIZE_BYTES} bytes" >&2
+  echo "!!   OVERFLOW: $(( -APP_HEADROOM_BYTES )) bytes ($(( (-APP_HEADROOM_BYTES) / 1024 )) KB)" >&2
+  echo "!! An image this size cannot be flashed and cannot be installed over OTA." >&2
+  echo "!! Trim it (the baked web console is ~573KB -- see tools/gen_web_blob.py)" >&2
+  echo "!! or change the partition table, which costs every deployed device a" >&2
+  echo "!! full-erase USB flash." >&2
+  exit 1
 elif [ "${APP_HEADROOM_BYTES}" -lt "${APP_HEADROOM_WARN_BYTES}" ]; then
   echo "Moybyte WARNING (#168): under $(( APP_HEADROOM_WARN_BYTES / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
 fi

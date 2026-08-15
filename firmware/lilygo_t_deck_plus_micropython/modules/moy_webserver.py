@@ -142,7 +142,76 @@ def http_response(status, body, content_type="application/json"):
     return head.encode("utf-8") + body
 
 
-class FileResponse:
+class _SizedResponse:
+    """The head of a 200 whose body length is known up front.
+
+    Shared by the two bodies that have one -- a file on storage and a blob in
+    the image -- because the header block is the part a browser is unforgiving
+    about (a wrong Content-Length or a missing Content-Encoding on gzipped
+    bytes is a page that fails with nothing useful in the console), and two
+    copies of it is two chances to get it wrong in one place only.
+    """
+
+    # How much body per sendall. Small on purpose: the file body reads into a
+    # reused buffer of exactly this size, and #66 measures ~23KB of internal
+    # SRAM free during play on the S3.
+    CHUNK = 1024
+
+    def __init__(self, size, content_type, max_age=0, encoding=None):
+        self.size = size
+        self.content_type = content_type
+        self.max_age = max_age
+        # `encoding` names a Content-Encoding the body is ALREADY stored in --
+        # the board never compresses anything. A pre-gzipped bundle halves the
+        # bytes on the wire (1,155,953 -> 572,693 for the four console assets)
+        # and the BROWSER inflates it, which it does for most of the web
+        # already. Content-Length stays the compressed length, which is what
+        # HTTP wants: it describes the body actually sent.
+        self.encoding = encoding
+
+    def head(self):
+        return ((
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Length: %d\r\n"
+            "%s"
+            "Cache-Control: %s\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "Connection: close\r\n\r\n"
+        ) % (self.content_type, self.size,
+             ("Content-Encoding: %s\r\n" % self.encoding) if self.encoding
+             else "",
+             ("max-age=%d" % self.max_age) if self.max_age
+             else "no-store")).encode("utf-8")
+
+
+class BlobResponse(_SizedResponse):
+    """A response whose body is a memoryview -- the bundle baked into the image.
+
+    `moy_web` (native) hands out read-only memoryviews straight at the
+    flash-mapped `.rodata` the build embedded, so this response holds no bytes
+    of its own and neither does the send: `_send_blob` slices the view and
+    sendall reads the slice through the buffer protocol, flash -> lwip. That is
+    the entire reason the embedded copy is affordable on a board with ~23KB of
+    internal SRAM free in play; a `bytes(blob)` for the 523KB wasm would be a
+    path that does not run rather than a slow one.
+
+    No storage gate here, unlike FileResponse: there is no card and no shared
+    SPI host involved, so the T-Deck's panel-DMA hazard does not apply.
+    """
+
+    # Bigger than the file CHUNK because there is no buffer to size: this only
+    # bounds how much one sendall is asked to push, and each slice of a
+    # memoryview costs an object header and copies nothing.
+    CHUNK = 4096
+
+    def __init__(self, data, content_type, max_age=0, encoding=None):
+        _SizedResponse.__init__(self, len(data), content_type, max_age,
+                                encoding)
+        self.data = data
+
+
+class FileResponse(_SizedResponse):
     """A response whose BODY is a file on the device, streamed rather than read.
 
     `handle_http` may return one of these instead of bytes. The transport sends
@@ -165,35 +234,9 @@ class FileResponse:
     for a caller that genuinely has immutable assets; the default is honest.
     """
 
-    CHUNK = 1024
-
     def __init__(self, path, size, content_type, max_age=0, encoding=None):
+        _SizedResponse.__init__(self, size, content_type, max_age, encoding)
         self.path = path
-        self.size = size
-        self.content_type = content_type
-        self.max_age = max_age
-        # `encoding` names a Content-Encoding the file is ALREADY stored in --
-        # the board never compresses anything. A pre-gzipped bundle halves the
-        # bytes on the wire (1,155,953 -> 572,747 for the four console assets)
-        # and the BROWSER inflates it, which it does for most of the web
-        # already. Content-Length stays the compressed length, which is what
-        # HTTP wants: it describes the body actually sent.
-        self.encoding = encoding
-
-    def head(self):
-        return ((
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: %s\r\n"
-            "Content-Length: %d\r\n"
-            "%s"
-            "Cache-Control: %s\r\n"
-            "Access-Control-Allow-Origin: *\r\n"
-            "Connection: close\r\n\r\n"
-        ) % (self.content_type, self.size,
-             ("Content-Encoding: %s\r\n" % self.encoding) if self.encoding
-             else "",
-             ("max-age=%d" % self.max_age) if self.max_age
-             else "no-store")).encode("utf-8")
 
 
 class ChunkedResponse:
@@ -536,6 +579,8 @@ class WebServer:
         try:
             if isinstance(data, FileResponse):
                 self._send_file(conn, data)
+            elif isinstance(data, BlobResponse):
+                self._send_blob(conn, data)
             elif isinstance(data, ChunkedResponse):
                 self._send_chunked(conn, data)
             else:
@@ -575,6 +620,28 @@ class WebServer:
         # on a board that is measurable, and it also invites Nagle to sit on the
         # small ones waiting for an ACK.
         conn.sendall(b"%x\r\n" % len(data) + data + b"\r\n")
+
+    def _send_blob(self, conn, resp):
+        """Head, then the baked bundle, sliced out of flash.
+
+        No buffer and no gate. `resp.data` is a read-only memoryview at the
+        image's own `.rodata` (moy_web), so a slice allocates an object header
+        and copies nothing, and sendall reads it through the buffer protocol --
+        the bytes go flash -> lwip with nothing resident in between. The slice
+        exists at all only to bound how much one sendall is asked to push over
+        a slow link; one call for 523KB would sit inside the send timeout with
+        no way to tell a busy client from a dead one.
+        """
+        conn.sendall(resp.head())
+        mv = resp.data
+        n = len(mv)
+        i = 0
+        while i < n:
+            j = i + resp.CHUNK
+            if j > n:
+                j = n
+            conn.sendall(mv[i:j])
+            i = j
 
     def _send_file(self, conn, resp):
         """Head, then the file, through the subclass's storage gate if it has one.

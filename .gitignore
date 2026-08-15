@@ -35,6 +35,12 @@ ports/celeste.moy/
 # The web runner (#151) static bundle output (build.sh assembles it; .build is
 # covered by the build-trees rule above).
 firmware/web_runner/dist/
+# ...and the C file that BAKES that bundle into the firmware image
+# (tools/gen_web_blob.py, run by both boards' build.sh). Generated, because it
+# carries absolute .incbin paths and a digest of build output -- and because a
+# build that writes into a TRACKED file would leave the tree dirty, which
+# `make release` refuses.
+firmware/lilygo_t_deck_plus_micropython/native/moy_web/moy_web_blob.gen.c
 # The toolchain (emsdk + a micropython checkout, ~2GB). No trailing slash:
 # a shared toolchain is often a SYMLINK to another checkout's copy, and a
 # `.build/` pattern matches directories only -- which is how one got

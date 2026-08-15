@@ -65,6 +65,11 @@ jobs:
       # committed FIRMWARE_VERSION; unstable stamps a build epoch, so every beta
       # publish reads as newer than the last.
       MOYBYTE_OTA_CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'unstable' }}
+      # The browser console is BAKED INTO the image (moy_web), and a published
+      # image whose web console is missing is exactly the silent drift that
+      # baking it was meant to end -- so here it is a hard failure, not the
+      # warning a local flash gets. Set this to 0 to publish without one.
+      MOYBYTE_REQUIRE_WEB_BUNDLE: "1"
     steps:
       - name: Should this board run?
         id: gate
@@ -163,9 +168,30 @@ jobs:
             !firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython/ports/esp32/build-*
           key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**') }}
 
+      # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
+      # emsdk + a micropython checkout, both pinned by web_runner/build.sh).
+      - name: Cache the wasm toolchain
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: firmware/web_runner/.build
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-${{ runner.os }}-
+
       - name: Host venv (make setup)
         if: steps.gate.outputs.run == 'true'
         run: make setup
+
+      # The firmware now CARRIES the browser console (moy_web), so the wasm
+      # head has to be built before the board image that embeds it -- otherwise
+      # the generator has nothing to bake and MOYBYTE_REQUIRE_WEB_BUNDLE fails
+      # the build. Deliberately NOT continue-on-error: an image published to
+      # the OTA channels must serve a console current with itself, which was
+      # the entire point (a board once served a bundle old enough to carry a
+      # bug fixed hours earlier, and nothing said so).
+      - name: Build the browser console (baked into the image)
+        if: steps.gate.outputs.run == 'true'
+        run: firmware/web_runner/build.sh
 
       - name: Build T-Deck (S3) firmware
         if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'

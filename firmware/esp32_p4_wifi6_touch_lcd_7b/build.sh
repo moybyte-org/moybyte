@@ -143,6 +143,17 @@ cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
 # two above -- it compiles neither a raster nor a VM, and reaches theirs by
 # sibling include path.
 cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
+# moy_web: the BROWSER CONSOLE baked into the image. This board serves the wasm
+# console over WiFi (moy_webhost) and, until 2026-08-15, only from a copy
+# pushed to /moy/web -- which drifts silently and needs a human to remember.
+# The generator .incbin's the four pre-gzipped assets (572,693 B) into a C file
+# inside the module; a pushed copy still WINS at serve time, so
+# tools/p4_push_web.py stays the fast dev loop. No bundle built = an empty
+# table + a loud warning; under CI (or MOYBYTE_REQUIRE_WEB_BUNDLE=1) it is a
+# hard failure, because a PUBLISHED image with no console is the whole bug.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" \
+  --out "${TDECK_DIR}/native/moy_web/moy_web_blob.gen.c"
+cp -r "${TDECK_DIR}/native/moy_web" "${STAGED_NATIVE}/moy_web"
 
 # 2d) Stage the shared PYTHON modules (#58 console staging, #161 Phase 3).
 #     WHAT crosses and WHY is declared in board.toml, not here. Two sources,
@@ -248,8 +259,37 @@ make BOARD_DIR="${BOARD_DIR}" \
   USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
   FROZEN_MANIFEST="${MANIFEST}"
 
-# 5) Collect the merged image (bootloader+partitions+app; flash at 0x2000).
+# 4b) Size guard, the T-Deck's (#168) brought over -- this board never had one.
+#     The app slot is read from the board's OWN partition table rather than
+#     hardcoded, so the check cannot drift from the layout it is checking. An
+#     overflow FAILS here: the alternative is esptool refusing the image later,
+#     or worse, an OTA payload that no board can install. It matters now that
+#     ~573KB of the slot is the baked web console.
 BOUT="build-${BOARD}"
+APP_SLOT_HEX="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' \
+  "${BOARD_DIR}/partitions-moybyte-p4.csv")"
+APP_SLOT_BYTES="$(( ${APP_SLOT_HEX:-0x400000} ))"
+APP_HEADROOM_WARN_BYTES="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"   # 200KB
+APP_SIZE_BYTES="$(wc -c < "${BOUT}/micropython.bin" | tr -d '[:space:]')"
+APP_HEADROOM_BYTES=$(( APP_SLOT_BYTES - APP_SIZE_BYTES ))
+printf 'App image: %s bytes of a %s-byte slot -- %s bytes headroom (%s KB)\n' \
+  "${APP_SIZE_BYTES}" "${APP_SLOT_BYTES}" "${APP_HEADROOM_BYTES}" "$(( APP_HEADROOM_BYTES / 1024 ))"
+if [ "${APP_HEADROOM_BYTES}" -lt 0 ]; then
+  echo "" >&2
+  echo "!! Moybyte BUILD FAILED: the app image does not fit its OTA slot" >&2
+  echo "!!   slot:     ${APP_SLOT_BYTES} bytes (ota_0/ota_1, partitions-moybyte-p4.csv)" >&2
+  echo "!!   image:    ${APP_SIZE_BYTES} bytes" >&2
+  echo "!!   OVERFLOW: $(( -APP_HEADROOM_BYTES )) bytes ($(( (-APP_HEADROOM_BYTES) / 1024 )) KB)" >&2
+  echo "!! An image this size cannot be flashed and cannot be installed over OTA." >&2
+  echo "!! Trim it (the baked web console is ~573KB -- see tools/gen_web_blob.py)" >&2
+  echo "!! or change the partition table, which costs every deployed device a" >&2
+  echo "!! full-erase USB flash." >&2
+  exit 1
+elif [ "${APP_HEADROOM_BYTES}" -lt "${APP_HEADROOM_WARN_BYTES}" ]; then
+  echo "Moybyte WARNING: under $(( APP_HEADROOM_WARN_BYTES / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
+fi
+
+# 5) Collect the merged image (bootloader+partitions+app; flash at 0x2000).
 cp "${BOUT}/firmware.bin" "${DIST_DIR}/moybyte_p4.bin"
 echo "OK -> ${DIST_DIR}/moybyte_p4.bin (flash at offset 0x2000)"
 # ...and the app-partition image beside it: what an OTA writes into the

@@ -134,7 +134,13 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   `firmware/lilygo_t_deck_plus_micropython/native/`; both are plain-C usermods
   whose S3-only pieces are include-guarded, so they compile unchanged on the
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
-  integer-upscale composite the windowed presentation needs.
+  integer-upscale composite the windowed presentation needs. `moy_web` is
+  staged the same way: it is the **browser console baked into the image**
+  (~573KB of pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
+  `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
+  a flashed board always serves a console current with its own firmware. A copy
+  pushed to `/moy/web` still WINS — `make p4-web-push` stays the sub-minute dev
+  loop — and `moy_webhost.start()` prints which of the two it is serving.
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
   - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the

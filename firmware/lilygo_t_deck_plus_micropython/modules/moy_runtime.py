@@ -502,12 +502,18 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # board. Constructed, NOT started -- injecting it only makes the Settings row
     # appear, and the row is what brings the radio up.
     #
-    # This board differs from the P4 in two ways that are both arguments, not
-    # code: the bundle lives on the SD card (/sd/web), and every read of it must
-    # go through the _with_sd_synced gate -- SD shares the panel's SPI host, so
-    # an op may not overlap an in-flight flush DMA (see the hard constraints).
-    # Streaming a ~1MB wasm therefore reads between frames, the same way the OTA
-    # download to SD already does.
+    # The bundle itself is BAKED INTO THIS IMAGE (native/moy_web) and needs no
+    # card at all -- which matters most here, because this is the board that
+    # cannot be pushed to: tools/p4_push_web.py hands the board a url over
+    # serial and this fork's USB-CDC RX is dead under the desktop, so before
+    # baking, /sd/web went on by card reader or not at all.
+    #
+    # A copy on the card still WINS (an explicit human override), and THAT is
+    # what the gate below is for: /sd/web shares the panel's SPI host, so an op
+    # may not overlap an in-flight flush DMA (see the hard constraints), and
+    # streaming a ~1MB wasm off the card therefore reads between frames the way
+    # the OTA download to SD already does. The baked path takes no gate: flash
+    # rodata races nothing.
     #
     # THE RISK THAT IS THIS BOARD'S ALONE, and the reason this is off until asked
     # for: the WLAN stack reserves internal RAM the LCD DMA flush needs, which is

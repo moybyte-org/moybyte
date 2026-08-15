@@ -153,12 +153,23 @@ UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
 UNIX_MP_NATIVE := firmware/lilygo_t_deck_plus_micropython/native
 # Every native module that ships a Makefile fragment. moy_alloc/moy_sd have
 # none (ESP-IDF only) and are skipped by the port's own discovery anyway.
-UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio
+# moy_web is here so the BAKED web console is exercised as code on a real
+# MicroPython -- its memoryview is handed straight at flash-mapped rodata and
+# must stay read-only, which is the kind of thing that otherwise fails first on
+# glass. Its blob table is generated (see the recipe below).
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web
 UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
 
 .PHONY: unix-micropython
 unix-micropython:
 	@mkdir -p $(UNIX_MP_DIR) $(UNIX_MP_USERMODS)
+# moy_web's blob table is build OUTPUT (gitignored): it .incbin's the web
+# runner's bundle, so on a tree that has never built one it has to exist as an
+# empty table or this build stops on a missing source file. REQUIRE=0 and quiet
+# on purpose: the generator is strict under CI, where this binary is built and
+# where no wasm bundle exists -- and "this image has no browser console" is not
+# news about a test binary that is not an image.
+	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
 	@test -d $(UNIX_MP_SRC)/.git || git clone --depth 1 --branch $(UNIX_MP_TAG) \
 	    --quiet https://github.com/micropython/micropython $(UNIX_MP_SRC)
 # Outside the clone guard on purpose (the web runner's build.sh learned the
@@ -170,6 +181,17 @@ unix-micropython:
 # this proves the parity of a stale snapshot.
 	@for m in $(UNIX_MP_MODULES); do \
 	    ln -sfn $(abspath $(UNIX_MP_NATIVE))/$$m $(UNIX_MP_USERMODS)/$$m; done
+# The frozen bytecode carries a SUPPLEMENTARY qstr enum: every name the frozen
+# modules use that the compiled pool does not already have. A usermod that adds
+# or drops one of those names moves it across that boundary, and upstream's own
+# rule regenerates frozen_content.c from a pool that this same pass is still
+# rebuilding -- so the file goes stale, `redeclaration of enumerator MP_QSTR_x`
+# (or the reverse once it is gone), and re-running make does NOT converge. It
+# cost a confused half hour when moy_web landed with a `names()` verb.
+# Regenerating is ~5s and only happens when a usermod source actually changed.
+	@f=$(UNIX_MP_SRC)/ports/unix/build-moybyte/frozen_content.c; \
+	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
+	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
@@ -355,17 +377,18 @@ firmware-flash-p4:
 	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
 	@$(MAKE) --no-print-directory p4-web-push PORT=$(PORT) WEB_PUSH_OPTIONAL=1
 
-# The web console the BOARD serves (`/moy/web`, reached over WiFi) is a separate
-# copy of firmware/web_runner/dist -- it cannot ride the firmware image: the
-# bundle is ~1.13MB against ~1.04MB of app-partition headroom, and writing it
-# into the VFS tail at flash time would erase the kid's carts and files. So it
-# is pushed, and the ONLY question that matters is whether anyone remembers to.
-# Nobody did: on 2026-08-15 the board served a bundle old enough to still carry
-# the #43 desktop-blackout bug that had been fixed in dist hours earlier, and
-# nothing anywhere said so. Hence: the flash target pushes it (optional -- a
-# board with no WiFi must not fail a cable flash), and `p4-web-stale` is the
-# check you can run on its own. p4_push_web.py compares byte-for-byte per file,
-# so a re-push is idempotent and cheap; running it is the verification.
+# The web console the BOARD serves (`/moy/web`, reached over WiFi) RIDES THE
+# FIRMWARE IMAGE now (moy_web / tools/gen_web_blob.py): baking it was ruled out
+# while the bundle was ~1.13MB against ~1.04MB of headroom, and pre-gzipping it
+# (572,693 B) made it fit both slots. So a flashed board always serves a console
+# current with its own firmware, and this push is the OVERRIDE -- storage wins
+# over the image, which is what keeps the sub-minute dev loop alive without a
+# reflash (and the T-Deck cannot be pushed to at all: its USB-CDC RX is dead
+# under the desktop, so baking was the only way that board could ever be
+# current). The flash target still pushes (optional -- a board with no WiFi must
+# not fail a cable flash), and `p4-web-stale` is the check you can run on its
+# own. p4_push_web.py compares byte-for-byte per file, so a re-push is
+# idempotent and cheap; running it is the verification.
 p4-web-push:
 	$(REQUIRE_PORT)
 	@if [ ! -f firmware/web_runner/dist/micropython.wasm ]; then \

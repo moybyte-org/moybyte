@@ -11,6 +11,13 @@ thing that crosses the wire afterwards is cart data.
     GET /<asset>         -> micropython.wasm, worker.js, ...   [streamed]
     GET /carts.json      -> THIS BOARD's store, packed live
 
+The assets come from the FIRMWARE IMAGE (native/moy_web, gzipped, ~573KB of
+the app slot), and a copy pushed onto the board's storage overrides them. That
+way round because the drift went the other way for months: the bundle was only
+ever a hand-placed copy, so a board could serve a console older than its own
+firmware -- and the T-Deck could not even be pushed to (its USB-CDC RX is dead
+under the desktop), so its copy went on by card reader or not at all.
+
 The last line is why this needs almost nothing new on the page. `worker.js`
 already boots by doing `fetch("carts.json")` and writing the result into the
 wasm VFS -- a RELATIVE url, so a page served from the board fetches the board's
@@ -38,11 +45,23 @@ except ImportError:                      # pragma: no cover
 import json as _json
 
 from moy_webserver import (WebServer, http_response, FileResponse,
-                           ChunkedResponse)
+                           ChunkedResponse, BlobResponse)
 
-# Where `firmware/web_runner/dist` was copied on this board. The T-Deck has an
-# SD card and the P4 does not, so the caller passes the directory rather than
-# this module guessing; these are the conventional homes.
+# The console BAKED INTO THIS IMAGE (native/moy_web + tools/gen_web_blob.py).
+# Optional by construction: a build without it (a host test, an older image, a
+# firmware built with no web bundle available) simply falls back to storage,
+# which is what the whole feature was before 2026-08-15.
+try:
+    import moy_web as _moy_web
+except ImportError:                      # pragma: no cover -- host/no-bundle
+    _moy_web = None
+
+# Where a PUSHED copy of `firmware/web_runner/dist` lives on this board -- the
+# override, not the source of truth: since 2026-08-15 the bundle is baked into
+# the firmware image (native/moy_web) and this directory is what a human puts
+# there to iterate faster than a reflash. The T-Deck has an SD card and the P4
+# does not, so the caller passes the directory rather than this module
+# guessing; these are the conventional homes.
 TDECK_WEB_DIR = "/sd/web"
 P4_WEB_DIR = "/moy/web"
 
@@ -210,6 +229,36 @@ def _file_size(path):
         return None
 
 
+def _baked(name):
+    """The named asset out of the firmware image, or None.
+
+    Guarded rather than trusted: an image built before moy_web existed has no
+    module, and one built with no bundle available has a module reporting zero
+    assets. Neither is a request-time error -- both mean "fall through".
+    """
+    if _moy_web is None:
+        return None
+    try:
+        return _moy_web.asset(name)
+    except Exception:                    # noqa: BLE001 -- never fail a request
+        return None
+
+
+def baked_stamp():
+    """The image's own bundle as "<count> <bytes> <digest>", or None.
+
+    The answer to the question that started this: WHICH console is this board
+    serving? Reachable from a REPL (`py moy_webhost.baked_stamp()`) and from
+    the P4's serial `py`, so the check costs one line and no reflash.
+    """
+    if _moy_web is None:
+        return None
+    try:
+        return _moy_web.stamp()
+    except Exception:                    # noqa: BLE001
+        return None
+
+
 class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
@@ -262,6 +311,37 @@ class WebHost(WebServer):
         if not WebServer.start(self, ip):
             raise OSError("port %d busy" % self.port)
         self.serving = True
+        try:
+            print("WEBHOST", self.source_note())
+        except Exception:                # noqa: BLE001 -- a log is never fatal
+            pass
+
+    def source_note(self):
+        """One line naming WHICH bundle this board is about to serve.
+
+        Storage overriding the image is the right precedence and also the exact
+        shape of the old bug -- a stale pushed copy shadowing a good one, with
+        nothing anywhere saying so. It cost a day the last time. So the override
+        announces itself, with the image's own stamp beside it: two strings on
+        one serial line, and the question stops needing an investigation.
+
+        The probe goes through the storage gate, because on the T-Deck a stat
+        of /sd/web touches a card that shares the panel's SPI host.
+        """
+        pushed = self._with_sd(lambda: [
+            n for n in ASSETS
+            if _file_size(self.web_dir + "/" + n + ".gz") is not None
+            or _file_size(self.web_dir + "/" + n) is not None])
+        stamp = baked_stamp()
+        if not pushed:
+            return "serving the bundle baked into this firmware (%s)" % (
+                stamp or "NONE -- this image has no web console")
+        if len(pushed) == len(ASSETS):
+            return "serving the PUSHED copy at %s, not the image's (%s)" % (
+                self.web_dir, stamp or "none")
+        return "MIXED: %d of %d assets pushed to %s, the rest from the " \
+               "image (%s) -- push all four or delete them" % (
+                   len(pushed), len(ASSETS), self.web_dir, stamp or "none")
 
     def stop(self):
         WebServer.stop(self)
@@ -293,20 +373,37 @@ class WebHost(WebServer):
         # Raw stays the fallback: `dist/` keeps both, because a plain static
         # host (moybyte.com, tools/serve.py) sets no Content-Encoding, and a
         # browser handed gzip bytes without that header sees garbage.
+        #
+        # STORAGE WINS OVER THE IMAGE, and that order is the decision. A copy
+        # on the board is an explicit human action -- tools/p4_push_web.py, a
+        # card reader -- and if the baked copy took precedence that dev loop
+        # would die and a baked bundle would be a bundle nobody could iterate
+        # on. The image's job is the GUARANTEE: a board that has never been
+        # pushed to still serves a console, and it is the one its firmware was
+        # built from. (Which also means a HALF-pushed bundle is a mixed one --
+        # push all four or none; p4_push_web does.)
         full = self.web_dir + "/" + name
         size = _file_size(full + ".gz")
         if size is not None:
             return FileResponse(full + ".gz", size, ASSETS[name],
                                 encoding="gzip")
         size = _file_size(full)
-        if size is None:
-            # A board with no web bundle copied to it. Say WHICH directory,
-            # because the failure is a setup step and not a bug, and a bare 404
-            # in a browser tells the owner nothing.
-            return http_response(
-                404, "no web bundle at %s -- copy firmware/web_runner/dist "
-                     "there" % self.web_dir, "text/plain; charset=utf-8")
-        return FileResponse(full, size, ASSETS[name])
+        if size is not None:
+            return FileResponse(full, size, ASSETS[name])
+        blob = _baked(name + ".gz")
+        if blob is not None:
+            return BlobResponse(blob, ASSETS[name], encoding="gzip")
+        blob = _baked(name)
+        if blob is not None:
+            return BlobResponse(blob, ASSETS[name])
+        # Nothing on storage and nothing in the image -- a firmware built
+        # without a web bundle (build.sh says so loudly at build time). Name
+        # the directory AND the reason, because the failure is a setup step and
+        # not a bug, and a bare 404 in a browser tells the owner nothing.
+        return http_response(
+            404, "no web bundle in this firmware and none at %s -- build "
+                 "firmware/web_runner/dist and reflash, or copy it there"
+                 % self.web_dir, "text/plain; charset=utf-8")
 
     def _carts_json(self):
         """The store, STREAMED as JSON -- never built.

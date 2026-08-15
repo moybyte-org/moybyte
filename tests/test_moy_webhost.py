@@ -157,6 +157,231 @@ def test_a_board_with_no_bundle_says_which_directory(tmp_path):
     assert h.web_dir.encode() in r and b"web_runner/dist" in r
 
 
+# -- the bundle baked into the firmware image --------------------------------
+#
+# The board used to serve ONLY a copy a human had put on its storage, and that
+# copy drifts with nothing to detect it: a board once served a bundle old
+# enough to still carry a desktop-blackout bug fixed in dist/ hours earlier.
+# The T-Deck could not even be pushed to (its USB-CDC RX is dead under the
+# desktop), so its copy went on by card reader or not at all. Hence moy_web:
+# the gzipped bundle rides the image, and a console that boots is current with
+# its own firmware.
+
+
+class _FakeMoyWeb:
+    """The native module's three verbs, over a dict of bytes."""
+
+    def __init__(self, blobs, stamp="4 572693 deadbeef1234"):
+        self.blobs = {k: memoryview(v) for k, v in blobs.items()}
+        self._stamp = stamp
+
+    def asset(self, name):
+        return self.blobs.get(name)
+
+    def names(self):
+        return tuple(self.blobs)
+
+    def stamp(self):
+        return self._stamp
+
+    def total(self):
+        return sum(len(v) for v in self.blobs.values())
+
+
+@pytest.fixture
+def baked(monkeypatch):
+    """Install a fake baked bundle for the duration of one test."""
+    def _install(blobs, **kw):
+        mod = _FakeMoyWeb(blobs, **kw)
+        monkeypatch.setattr(wh, "_moy_web", mod)
+        return mod
+    return _install
+
+
+def test_the_image_serves_the_console_when_storage_has_none(tmp_path, baked):
+    """The guarantee. A board that has never been pushed to still serves a
+    console, and it is the one its firmware was built from."""
+    from moy_webserver import BlobResponse
+    baked({"index.html.gz": b"\x1f\x8b" + b"page",
+           "micropython.wasm.gz": b"\x1f\x8b" + b"w" * 900})
+    h = _host(tmp_path, web=False)
+    r = h.handle_http("GET", "/", b"")
+    assert isinstance(r, BlobResponse)
+    assert r.content_type.startswith("text/html")
+    head = r.head().decode()
+    assert "Content-Encoding: gzip" in head, "stored gzipped, served as gzip"
+    assert "Content-Length: 6" in head
+    assert "no-store" in head
+
+
+def test_a_pushed_copy_BEATS_the_baked_one(tmp_path, baked):
+    """THE PRECEDENCE DECISION, and it is not arbitrary. A copy on the board is
+    an explicit human action (tools/p4_push_web.py, a card reader). If the
+    image won, that dev loop would die and a baked bundle would be one nobody
+    could iterate on without a full reflash."""
+    baked({"index.html.gz": b"BAKED", "worker.js.gz": b"BAKED"})
+    h = _host(tmp_path)                     # writes index.html + worker.js
+    r = h.handle_http("GET", "/", b"")
+    assert isinstance(r, FileResponse)
+    assert r.path.endswith("index.html"), "the image overrode a pushed copy"
+
+
+def test_a_pushed_gz_also_beats_the_baked_one(tmp_path, baked):
+    baked({"worker.js.gz": b"BAKED"})
+    h = _host(tmp_path)
+    (Path(h.web_dir) / "worker.js.gz").write_bytes(b"\x1f\x8bPUSHED")
+    r = h.handle_http("GET", "/worker.js", b"")
+    assert isinstance(r, FileResponse) and r.path.endswith(".gz")
+    assert r.encoding == "gzip"
+
+
+def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
+    """The build bakes .gz today, but the lookup is the same two-step rule as
+    on storage, so a raw bundle needs no code change -- and must not be
+    announced as gzip, which is a page that fails to boot."""
+    from moy_webserver import BlobResponse
+    baked({"worker.js": b"// raw"})
+    h = _host(tmp_path, web=False)
+    r = h.handle_http("GET", "/worker.js", b"")
+    assert isinstance(r, BlobResponse)
+    assert r.encoding is None
+    assert "Content-Encoding" not in r.head().decode()
+
+
+def test_an_image_with_no_bundle_falls_through_to_the_404(tmp_path, baked):
+    """A firmware built without a web bundle (the generator warns loudly, and
+    CI refuses to publish one). The module is still there and reports nothing,
+    so the request must land on the 404 -- not on an exception mid-request."""
+    baked({})
+    h = _host(tmp_path, web=False)
+    r = h.handle_http("GET", "/", b"")
+    assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
+    assert b"no web bundle in this firmware" in r
+
+
+def test_a_broken_native_module_is_not_a_broken_request(tmp_path, monkeypatch):
+    """`_baked` is guarded, not trusted. An old image has no module at all and
+    a wedged one must cost the request its bundle, not the whole endpoint."""
+    class _Boom:
+        def asset(self, name):
+            raise RuntimeError("nope")
+
+    monkeypatch.setattr(wh, "_moy_web", _Boom())
+    h = _host(tmp_path, web=False)
+    r = h.handle_http("GET", "/", b"")
+    assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
+
+
+def test_the_baked_response_holds_no_copy_of_the_bundle(tmp_path, baked):
+    """The reason this is affordable at all. The blob is flash-mapped rodata
+    and the response is a memoryview at it -- #66 measures ~23KB of internal
+    SRAM free during play, so a bytes() of the 523KB wasm is not a slow path,
+    it is one that does not run."""
+    from moy_webserver import BlobResponse
+    mod = baked({"micropython.wasm.gz": b"\x1f\x8b" + b"z" * 4000})
+    h = _host(tmp_path, web=False)
+    r = h.handle_http("GET", "/micropython.wasm", b"")
+    assert isinstance(r, BlobResponse)
+    assert r.data is mod.blobs["micropython.wasm.gz"], "the bundle was copied"
+    assert r.size == 4002
+
+
+def test_the_baked_stamp_answers_which_console_this_board_serves(baked):
+    """The question that started the whole thing, now one line over a REPL."""
+    baked({"index.html.gz": b"x"}, stamp="4 572693 d44b8756bf08")
+    assert wh.baked_stamp() == "4 572693 d44b8756bf08"
+
+
+def test_the_baked_stamp_is_none_on_an_image_without_the_module(monkeypatch):
+    monkeypatch.setattr(wh, "_moy_web", None)
+    assert wh.baked_stamp() is None
+
+
+def test_the_baked_body_streams_byte_for_byte(tmp_path, baked):
+    """The chunk pump over a REAL socket, the same net FileResponse has.
+
+    A blob send slices a memoryview instead of refilling a buffer, so the
+    failure mode is the mirror image: correct for every full chunk and short or
+    doubled in the tail. On a wasm binary that means a browser that refuses to
+    instantiate and says nothing useful, so: a payload that is deliberately not
+    a chunk multiple, compared byte for byte.
+    """
+    import socket
+    import threading
+    from moy_webserver import WebServer, BlobResponse
+
+    payload = bytes(range(256)) * 40 + b"tail"        # 10244 B: 2 chunks + 2052
+    resp = BlobResponse(memoryview(payload), "application/wasm",
+                        encoding="gzip")
+    a, b = socket.socketpair()
+    srv = WebServer.__new__(WebServer)
+
+    def pump():
+        try:
+            srv._send_blob(a, resp)
+        finally:
+            a.close()
+
+    t = threading.Thread(target=pump)
+    t.start()
+    b.settimeout(5)
+    got = b""
+    while True:
+        chunk = b.recv(65536)
+        if not chunk:
+            break
+        got += chunk
+    t.join(5)
+    assert not t.is_alive(), "the send never finished"
+    b.close()
+
+    head, _, body = got.partition(b"\r\n\r\n")
+    assert b"Content-Length: %d" % len(payload) in head
+    assert b"Content-Encoding: gzip" in head
+    assert body == payload, "streamed body differs (len %d vs %d)" % (
+        len(body), len(payload))
+
+
+def test_a_blob_goes_out_through_the_transports_dispatch(tmp_path, baked):
+    """`_http_send_close` decides by TYPE, and a new response class that nobody
+    added a branch for would be sent with `sendall(<object>)` -- i.e. a
+    TypeError swallowed by that method's catch-all, which reads to a browser as
+    a connection that closed with no reply."""
+    import socket
+    import threading
+    from moy_webserver import WebServer, BlobResponse
+
+    resp = BlobResponse(memoryview(b"\x1f\x8bbody"), "text/html")
+    a, b = socket.socketpair()
+    srv = WebServer.__new__(WebServer)
+    t = threading.Thread(target=lambda: srv._http_send_close(a, resp))
+    t.start()
+    b.settimeout(5)
+    got = b""
+    while True:
+        c = b.recv(65536)
+        if not c:
+            break
+        got += c
+    t.join(5)
+    b.close()
+    assert got.endswith(b"\x1f\x8bbody"), got[-32:]
+
+
+def test_the_blob_send_pays_no_storage_gate(tmp_path, baked):
+    """The T-Deck's SD gate exists because its card shares the panel's SPI host.
+    The baked bundle is in flash and races nothing, so a gate here would put an
+    unrelated mount in the path of every asset request."""
+    baked({"worker.js.gz": b"\x1f\x8bx"})
+    entered = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "nowhere"),
+                      with_sd=lambda fn: (entered.append(1), fn())[1])
+    conn = _Conn()
+    host._send_blob(conn, host._asset("worker.js"))
+    assert not entered, "the baked bundle went through the SD gate"
+    assert bytes(conn.sent).endswith(b"\x1f\x8bx")
+
+
 def test_a_write_is_refused_in_a_way_a_newer_page_can_read(tmp_path):
     """The push half is the next slice. A page from a build that HAS it will
     POST at a board that does not, and 405-with-a-reason is a thing the page

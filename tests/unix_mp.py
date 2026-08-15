@@ -44,9 +44,10 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
 
 # What `make unix-micropython` builds: mainline MicroPython's unix port with
 # every native module that ships a Makefile fragment (moy_gfx, moy_lua, moycore,
-# moy_audio) compiled in. Note moy_lua is the vendored VM and no longer a
-# module -- `import moy_lua` is MEANT to fail; moycore is the runtime that binds
-# it.
+# moy_audio, moy_web) compiled in. Note moy_lua is the vendored VM and no longer
+# a module -- `import moy_lua` is MEANT to fail; moycore is the runtime that
+# binds it. moy_web is the browser console baked into the firmware image, here
+# so its flash-mapped memoryview is exercised somewhere other than a board.
 CANONICAL = (ROOT / ".build" / "unix_micropython" / "micropython" / "ports"
              / "unix" / "build-moybyte" / "micropython")
 

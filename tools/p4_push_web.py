@@ -8,6 +8,13 @@
 The board serves `firmware/web_runner/dist` from `/moy/web` (P4) or `/sd/web`
 (T-Deck); this is how those ~1.17MB get there.
 
+Since 2026-08-15 the bundle also rides the FIRMWARE IMAGE (`native/moy_web`),
+and storage still wins over it -- which is what keeps this tool worth having:
+baking made a flashed board current-by-default, this makes a new web build
+testable in seconds instead of a reflash. Delete `/moy/web` when you are done
+with an experiment, or the board keeps serving your copy; it says which one it
+is serving on the serial line `WEBHOST ...` when the row is switched on.
+
 **The board PULLS.** This script stands up a throwaway HTTP server on the
 machine you run it from and hands the board a URL over serial; the board then
 downloads the four files over WiFi. The obvious alternative -- pushing the bytes

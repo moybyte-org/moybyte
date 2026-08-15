@@ -467,3 +467,58 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
                  "ws._notice = None\n")
     assert "pending.json" not in board.pyval(
         "__import__('os').listdir(ws.updater.update_dir)")
+
+
+# -- the browser console baked into the image (moy_web) -----------------------
+
+
+def test_the_web_console_is_baked_into_this_image(board):
+    """The bundle is `.incbin`'d into flash rodata and handed out as a
+    memoryview at it, which is the one part of this that no host test can
+    reach: whether the linker put the blob where the table says it is.
+
+    Deliberately SELF-CONSISTENT rather than compared against this checkout's
+    `dist/` -- the board may legitimately be running an older build, and the
+    question here is "does the image's own console read back correctly", not
+    "is it today's". The stamp is what answers the second question, by eye.
+    """
+    stamp = board.pyval("__import__('moy_web').stamp()")
+    assert stamp and stamp != "0 0 none", (
+        "this image has NO baked web console (stamp %r) -- it was built with "
+        "no firmware/web_runner/dist" % (stamp,))
+    count, total = int(stamp.split()[0]), int(stamp.split()[1])
+    assert count == 4, stamp
+    assert total > 400000, "a bundle this small is not the wasm console"
+    names = board.pyval("__import__('moy_web').assets()")
+    assert set(names) == {"index.html.gz", "worker.js.gz",
+                          "micropython.mjs.gz", "micropython.wasm.gz"}, names
+    # Each blob read back at its recorded length, starting with the gzip magic.
+    # A misplaced symbol still gives plausible lengths -- it is the first bytes
+    # that say the pointer landed on the right thing.
+    got = board.pyval(
+        "[(n, len(__import__('moy_web').asset(n)), "
+        "bytes(__import__('moy_web').asset(n)[:3])) "
+        "for n in __import__('moy_web').assets()]")
+    assert sum(g[1] for g in got) == total, got
+    for name, size, magic in got:
+        assert magic == b"\x1f\x8b\x08", (name, magic)
+        assert size > 0, name
+
+
+def test_the_console_serves_the_image_when_storage_has_none(board):
+    """Storage WINS on purpose (a pushed copy is a human's explicit override),
+    so this asserts the fallback the way the handler sees it -- pointed at a
+    directory that cannot exist. If the real /moy/web has a pushed copy, that
+    is the correct answer for the live host and the reason `start()` prints
+    which source it is using."""
+    assert board.pyexec(
+        "import moy_webhost\n"
+        "H = moy_webhost.WebHost('/moy/carts', '/moy/no_such_web')\n"
+        "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
+    kind = board.pyval("eval('type(R).__name__', ws._g)")
+    assert kind == "BlobResponse", kind
+    head = board.pyval("eval('R.head()', ws._g)")
+    assert b"Content-Encoding: gzip" in head, head
+    assert b"200 OK" in head and b"no-store" in head
+    note = board.pyval("eval('H.source_note()', ws._g)")
+    assert "baked into this firmware" in note, note

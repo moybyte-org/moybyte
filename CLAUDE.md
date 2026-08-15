@@ -258,7 +258,7 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0           # esptool, de
 make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @115200
 ```
 
-- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/moy_gfx`, `moy_alloc`, `moy_sd`, `moy_audio`, and `moy_lua` — the #67 Lua cart VM) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). **Which shared modules cross is DATA, not a list in the script** (#161 Phase 3): each board carries a `board.toml` whose `[modules.shared]` is a **denylist** over `runtime/*.py` — every `[[deny]]` names the file, a kind, and a prose `why` — read by `tools/board_config.py`. So a new shared module reaches every board by default and staying off one is a written decision; the old per-board allowlists (54 `cp` lines on the T-Deck, 65 names on the P4) are what let the T-Deck silently miss the web console. The P4's `[modules.device]` staging from the T-Deck tree deliberately stays an ALLOWLIST — `runtime/` is a shared tree whose default answer is "yes", a board's `modules/` is not. The stager also **prunes untracked strays**: `modules/` is gitignored and never cleaned while the freeze takes the whole DIRECTORY, so deleted modules (`canvas.py`, `palette.py`, `moy_lua_glue.py`) kept shipping in every image built on a warm tree. It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
+- The build (`firmware/lilygo_t_deck_plus_micropython/build.sh`) **clones `lvgl_micropython` into `.build/`**, stages the native C modules (`native/moy_gfx`, `moy_alloc`, `moy_sd`, `moy_audio`, `moy_lua` — the #67 Lua cart VM — and `moy_web`, the browser console baked into the image, below) into its `ext_mod` tree (re-staged every build because `ext_mod` is wiped on re-clone) and the shared `runtime/` modules into `modules/`, freezes the `modules/` Python, and emits `app` + full-flash images to `dist/` (both gitignored). **Which shared modules cross is DATA, not a list in the script** (#161 Phase 3): each board carries a `board.toml` whose `[modules.shared]` is a **denylist** over `runtime/*.py` — every `[[deny]]` names the file, a kind, and a prose `why` — read by `tools/board_config.py`. So a new shared module reaches every board by default and staying off one is a written decision; the old per-board allowlists (54 `cp` lines on the T-Deck, 65 names on the P4) are what let the T-Deck silently miss the web console. The P4's `[modules.device]` staging from the T-Deck tree deliberately stays an ALLOWLIST — `runtime/` is a shared tree whose default answer is "yes", a board's `modules/` is not. The stager also **prunes untracked strays**: `modules/` is gitignored and never cleaned while the freeze takes the whole DIRECTORY, so deleted modules (`canvas.py`, `palette.py`, `moy_lua_glue.py`) kept shipping in every image built on a warm tree. It needs the ESP-IDF 5.5 toolchain (`IDF_PYTHON ?= ~/.espressif/.../idf5.5_py3.10_env/bin/python`).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
 
 ### Second device target: ESP32-P4 (Waveshare 7B) — bring-up (#58)
@@ -286,7 +286,27 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   Numbers live in the plan; the operational summary is that the console half of a
   frame is now a fraction of a millisecond and the PRESENT (heap copy + RGBA
   expansion) is the expensive half, so optimize there first. Real headless Chrome
-  holds 60fps locked. **The browser runs moycore too since 2026-08-13** — the
+  holds 60fps locked.
+  **This bundle RIDES BOTH BOARD IMAGES (2026-08-15).** A board serves the wasm
+  console over its own WiFi (`moy_webhost`), and it used to serve only a copy a
+  human had put on its storage — which drifts with nothing to detect it (a board
+  served a bundle old enough to carry a desktop-blackout bug fixed hours earlier),
+  and the T-Deck cannot be pushed to at all because the push hands the board a url
+  over serial and that board's USB-CDC RX is dead under the desktop. So
+  `tools/gen_web_blob.py` `.incbin`s the four PRE-GZIPPED assets (572,693 B; raw
+  is 1,155,953 B and does not fit the S3's slot) into the `moy_web` usermod, which
+  hands them out as READ-ONLY memoryviews at flash — never a `bytes` per request,
+  on a board with ~23KB of internal SRAM free in play. **Storage still WINS**, so
+  `make p4-web-push` stays the sub-minute dev loop and the image is the guarantee,
+  not the ceiling; `start()` prints which of the two it is serving, because a
+  stale pushed copy shadowing a good baked one is the same bug one level down. The
+  cost is ~573KB of every app image and of every OTA payload, which left the
+  T-Deck **186KB of its 5MB slot** — so an oversized image is now a BUILD FAILURE
+  on both boards (it was a warning that still emitted artifacts esptool would
+  refuse), and the next growth spurt is a partition-table decision, not a
+  surprise. Building the bundle needs emsdk, so a missing one only WARNS locally
+  and FAILS under `CI`/`MOYBYTE_REQUIRE_WEB_BUNDLE` — the firmware workflow builds
+  the web runner before each board, so a published image always carries one. **The browser runs moycore too since 2026-08-13** — the
   usermod is staged beside `moy_gfx`/`moy_lua`/`moy_audio` and `web_boot` wires
   the boards' chooser verbatim, so a Lua cart's whole frame runs inside libmoy
   on all three tiers rather than two. It needs no wasm variant of the module:
