@@ -184,15 +184,26 @@ def to_indices(buf, wire=None, strict=True):
         rev = {}
         for _i in range(len(wire) - 1, -1, -1):
             rev[wire[_i]] = _i
-    words = memoryview(buf).cast("H")
-    out = bytearray(len(words))
-    for i in range(len(words)):
-        idx = rev.get(words[i])
+    # Byte pairs, NOT memoryview.cast("H"): MicroPython's memoryview has no
+    # `cast`, and this function is meant to be callable on a board. Caught on P4
+    # glass 2026-08-15 -- it worked in every host test and raised AttributeError
+    # the first time it ran on the hardware it was written for. (The other
+    # `.cast("H")` sites in this file are older and dormant: they sit in the
+    # `_gfx is None` Python fallbacks, which never run on a board that has the
+    # kernel. They would fail the same way if one ever did.)
+    #
+    # Little-endian, which is what `.cast("H")` gave on the host and what both
+    # the Xtensa and RISC-V targets are, so the two agree.
+    n = len(buf) // 2
+    out = bytearray(n)
+    for i in range(n):
+        w = buf[2 * i] | (buf[2 * i + 1] << 8)
+        idx = rev.get(w)
         if idx is None:
             if strict:
                 raise ValueError(
                     "pixel %d holds 0x%04X, which no palette index produces"
-                    % (i, words[i]))
+                    % (i, w))
             idx = 0
         out[i] = idx
     return bytes(out)
