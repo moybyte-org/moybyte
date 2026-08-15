@@ -42,7 +42,7 @@ def test_paint_editor_default_is_8x8():
 
 def test_cycle_size_steps_1_2_3():
     from runtime.editors import PaintEditor, SpriteSheet
-    pe = PaintEditor(SpriteSheet(cols=16, rows=16))
+    pe = PaintEditor(SpriteSheet())
     assert pe.size == 1
     pe.cycle_size(); assert pe.size == 2 and pe.dim == 16
     pe.cycle_size(); assert pe.size == 3 and pe.dim == 24
@@ -53,8 +53,8 @@ def test_2x2_writes_the_four_constituent_sheet_tiles():
     # A 2x2 sprite at top-left tile n spans tiles n, n+1, n+cols, n+cols+1; painting
     # the 16x16 region must land pixels in all four (TIC-80 multi-tile layout).
     from runtime.editors import PaintEditor, SpriteSheet
-    cols = 16
-    sh = SpriteSheet(cols=cols, rows=16)
+    cols = SpriteSheet.SPEC_COLS
+    sh = SpriteSheet()
     pe = PaintEditor(sh)
     pe.n = 0
     pe.cycle_size()                               # 2x2 (16x16)
@@ -74,7 +74,9 @@ def test_size_clamps_near_sheet_edge():
     # A 3x3 sprite whose origin sits one tile from the right edge can't fit; size
     # shrinks so the span never reads out of bounds.
     from runtime.editors import PaintEditor, SpriteSheet
-    sh = SpriteSheet(cols=2, rows=2)              # only a 2x2 tile sheet
+    # spec=False: a 2x2 sheet exists here precisely to be too small for a 3x3
+    # sprite -- it is a clamp fixture, not a cart sheet (editors_sheet, SPEC.md 3.2).
+    sh = SpriteSheet(cols=2, rows=2, spec=False)  # only a 2x2 tile sheet
     pe = PaintEditor(sh)
     pe.n = 0
     pe.cycle_size()                               # asks for 2x2 -> fits (max here)
@@ -90,7 +92,7 @@ def test_size_clamps_near_sheet_edge():
 
 def test_tile_span_image_covers_the_block():
     from runtime.editors import SpriteSheet
-    sh = SpriteSheet(cols=16, rows=16)
+    sh = SpriteSheet()
     sh.pset(0, 0, 5)
     sh.pset(15, 15, 6)                            # bottom-right pixel of a 2x2 block
     img = sh.tile_span_image(0, 2, 2)
@@ -130,7 +132,7 @@ def test_spr_with_wh_span_blits_a_16x16_image():
         def pressed(self, n):
             return False
 
-    sheet = SpriteSheet(cols=16, rows=16)
+    sheet = SpriteSheet()
     api = host_app.make_api(StubCanvas(), StubInput(), {}, sheet)
     api["spr"](0, 10, 20)                          # default 8x8 -> auto-batch (spr_tile)
     assert calls[-1] == (8, 8, 10, 20, 1)

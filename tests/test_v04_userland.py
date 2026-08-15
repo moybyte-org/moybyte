@@ -101,14 +101,17 @@ def test_canvas_spr_scaled_blit_with_transparency():
 # -- sprite sheet ----------------------------------------------------------
 
 def test_sprite_sheet_tiles_and_hex_roundtrip():
-    sh = SpriteSheet(cols=4, rows=4)        # 32x32, 16 sprites
+    # spec=False: a 4x4 sheet keeps the tile/hex arithmetic below readable. This
+    # exercises tile_origin/tget/to_hex, none of which reach libmoy -- see
+    # editors_sheet's SPEC.md 3.2 note for what the shape is really for.
+    sh = SpriteSheet(cols=4, rows=4, spec=False)   # 32x32, 16 sprites
     assert sh.count == 16 and (sh.w, sh.h) == (32, 32)
     assert sh.is_blank()
     assert sh.tile_origin(5) == (8, 8)      # sprite 5 = col 1, row 1
     sh.tset(5, 1, 2, 9)                     # sprite 5, local (1,2) -> color 9
     assert sh.pget(9, 10) == 9 and sh.tget(5, 1, 2) == 9
     assert not sh.is_blank() and sh.dirty
-    sh2 = SpriteSheet.from_hex(sh.to_hex(), cols=4, rows=4)
+    sh2 = SpriteSheet.from_hex(sh.to_hex(), cols=4, rows=4, spec=False)
     assert sh2.pix == sh.pix and sh2.dirty is False
     img = sh.tile_image(5, transparent=0)
     assert (img.w, img.h, img.transparent) == (8, 8, 0)
@@ -977,7 +980,12 @@ def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
     # wrap ids into the next tile row -- the span clamps exactly like
     # tile_span_image, so the stamp still matches what spr() would draw.
     from runtime.editors import MapEditor
-    sheet = SpriteSheet()                    # 16x16 tiles
+    # spec=False: a 16-ROW sheet, deliberately. The clamp is pure geometry
+    # ((sheet.h - oy) // TILE), but the bottom-row half is only reachable through
+    # place() on a short sheet -- on the real 16x32 sheet the last row starts at
+    # id 496 and TileMap caps a placeable id at 254. The spec-sheet span is pinned
+    # at the end of this test.
+    sheet = SpriteSheet(16, 16, spec=False)  # 16x16 tiles
     tm = TileMap(20, 15)
     me = MapEditor(tm, sheet)
     me.size = 2
@@ -994,6 +1002,14 @@ def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
     me.place(10, 10)
     assert tm.mget(10, 10) == 240 and tm.mget(11, 10) == 241
     assert tm.mget(10, 11) == TileMap.EMPTY
+
+    # Same clamp on a real SPEC.md 3.2 sheet: its last tile row is 31, not 15.
+    spec_me = MapEditor(TileMap(20, 15), SpriteSheet())
+    spec_me.size = 2
+    spec_me.n = 30 * 16                      # a full row above the bottom -> 2x2 fits
+    assert spec_me.stamp_span() == (2, 2)
+    spec_me.n = 31 * 16                      # the sheet's last row -> clamps to 1 down
+    assert spec_me.stamp_span() == (2, 1)
 
 
 def test_map_size_stamp_renders_identical_to_spr_multitile():

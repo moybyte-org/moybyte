@@ -238,7 +238,10 @@ def test_a_sheet_that_is_not_the_spec_geometry_is_declined():
     """libmoy addresses a sheet as 128x256 whatever it was handed, so a shorter
     one is an out-of-bounds READ on every sprite. The device raises on it; this
     declines the sheet, and the cart draws nothing rather than garbage."""
-    small = SpriteSheet(16, 16)                 # 128x128: half a spec sheet
+    # spec=False is the point of the fixture: SpriteSheet REFUSES to build a
+    # non-spec sheet unasked now (that default was this bug's other half), and the
+    # opt-out is what lets a test still hand libmoy the shape it declines.
+    small = SpriteSheet(16, 16, spec=False)     # 128x128: half a spec sheet
     for i in range(len(small.pix)):
         small.pix[i] = 7
     px = _run(host_canvas.make_canvas(W, H), "cls(0) spr(5, 10, 12)", small)

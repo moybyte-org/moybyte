@@ -97,6 +97,10 @@ def run_cfg(label, canvas, sheet, use_gate, frames=60):
 
 
 def make_sheet():
+    # Spec-shaped by default now (16 x 32, SPEC.md 3.2). It has to be: the C gate
+    # lane flushes through moy_gfx.blit_batch, which REFUSES a non-spec sheet and
+    # draws nothing -- so while the default was 16x16 this bench's parity check was
+    # comparing an empty canvas against the python spr path's real one.
     sheet = SpriteSheet()
     px = sheet.pix
     for i in range(len(px)):

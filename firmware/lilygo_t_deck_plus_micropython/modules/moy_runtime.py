@@ -231,6 +231,9 @@ def run_perf_bench(handler):
     import gc
 
     canvas = DeviceCanvas(comp)
+    # 16 x 32 by default (SPEC.md 3.2) = 32KB of index pixels, twice the old 16x16
+    # default -- and required, since the C spr_gate flushes through blit_batch,
+    # which refuses a non-spec sheet and draws nothing. MOYBYTE_BENCH builds only.
     sheet = SpriteSheet()
     px = sheet.pix
     for i in range(len(px)):

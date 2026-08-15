@@ -173,7 +173,13 @@ def gfx_to_kgfx(gfx_lines):
     hex_text = "\n".join(rows)
     # Normalize through the real SpriteSheet so we emit *exactly* what the editor
     # would (and prove the round-trip is stable for the caller's tests).
-    sheet = SpriteSheet.from_hex(hex_text, cols=16, rows=16)
+    #
+    # spec=False deliberately: PICO-8's __gfx__ region is 128x128, the TOP HALF of
+    # a SPEC.md 3.2 cart sheet, and this is a normalizing pass over that region --
+    # not a sheet anything draws with. Project._build_sheet re-reads the emitted
+    # 128-line blob as 16x32 with the ids unchanged, so padding it to 256 blank
+    # lines here would only double every ported cart's sprites.moygfx.
+    sheet = SpriteSheet.from_hex(hex_text, cols=16, rows=16, spec=False)
     return sheet.to_hex()
 
 

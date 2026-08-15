@@ -22,8 +22,10 @@ sys.path.insert(0, str(ROOT))
 # -- core: MapEditor region verbs -------------------------------------------
 
 def _me(w=10, h=10):
+    # spec=False: a MapEditor fixture sheet, not a cart sheet -- nothing here
+    # draws, only tile ids are placed (see editors_sheet's SPEC.md 3.2 note).
     from runtime.editors import MapEditor, TileMap, SpriteSheet
-    return MapEditor(TileMap(w, h), SpriteSheet(cols=16, rows=16))
+    return MapEditor(TileMap(w, h), SpriteSheet(cols=16, rows=16, spec=False))
 
 
 def _put(me, x, y, tile):

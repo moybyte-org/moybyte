@@ -31,7 +31,10 @@ def test_tile_image_is_memoised_until_an_edit():
     recorder's atlas dedups it, shipping the defspr ONCE instead of every frame -- the launcher/
     settings `unknown`-churn + payload fix). A pset bumps `gen`, which drops the cache so the
     next call reflects the edit."""
-    sheet = _paint_glyph(SpriteSheet(cols=16, rows=16), 3)
+    # spec=False on the small fixtures below: these exercise copy_tile ACROSS
+    # sheet sizes and tile_image memoisation, neither of which touches libmoy --
+    # see editors_sheet's SPEC.md 3.2 note for why a cart sheet may not be one.
+    sheet = _paint_glyph(SpriteSheet(cols=16, rows=16, spec=False), 3)
     a = sheet.tile_image(3)
     assert sheet.tile_image(3) is a                 # memoised: same object across frames
     assert sheet.tile_image(3, transparent=0) is not a   # a different colorkey is its own entry
@@ -44,8 +47,8 @@ def test_tile_image_is_memoised_until_an_edit():
 
 
 def test_copy_tile_imports_one_sprite_between_sheets():
-    src = _paint_glyph(SpriteSheet(cols=8, rows=8), 5)   # 64x64, 64 sprites
-    dst = SpriteSheet(cols=16, rows=16)                  # different size sheet
+    src = _paint_glyph(SpriteSheet(cols=8, rows=8, spec=False), 5)   # 64x64, 64 sprites
+    dst = SpriteSheet(cols=16, rows=16, spec=False)      # different size sheet
     assert dst.is_blank()
 
     returned = dst.copy_tile(src, 5, dst_n=3)
@@ -59,15 +62,15 @@ def test_copy_tile_imports_one_sprite_between_sheets():
 
 
 def test_copy_tile_defaults_destination_to_same_id():
-    src = _paint_glyph(SpriteSheet(cols=4, rows=4), 2)
-    dst = SpriteSheet(cols=4, rows=4)
+    src = _paint_glyph(SpriteSheet(cols=4, rows=4, spec=False), 2)
+    dst = SpriteSheet(cols=4, rows=4, spec=False)
     assert dst.copy_tile(src, 2) == 2                     # dst_n defaults to src_n
     assert _tile_pixels(dst, 2) == _tile_pixels(src, 2)
 
 
 def test_copy_tile_rejects_out_of_range_ids():
-    src = _paint_glyph(SpriteSheet(cols=4, rows=4), 0)    # 16 sprites
-    dst = SpriteSheet(cols=4, rows=4)
+    src = _paint_glyph(SpriteSheet(cols=4, rows=4, spec=False), 0)    # 16 sprites
+    dst = SpriteSheet(cols=4, rows=4, spec=False)
     assert dst.copy_tile(src, 99) is None                 # source id out of range
     assert dst.copy_tile(src, 0, dst_n=99) is None        # dest id out of range
     assert dst.copy_tile(src, -1) is None
@@ -87,7 +90,7 @@ def test_load_shared_sheet_is_none_before_first_save(tmp_path):
 
 def test_shared_sheet_roundtrips_through_save_load(tmp_path):
     root = str(tmp_path / "carts")
-    shared = _paint_glyph(SpriteSheet(), 7)               # default 16x16 sheet
+    shared = _paint_glyph(SpriteSheet(), 7)               # the spec 16x32 default
     moy_carts.save_shared_sheet(shared.to_hex(), root)
 
     # It lands at the well-known sibling path, not inside any cart.

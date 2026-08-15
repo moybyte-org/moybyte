@@ -104,7 +104,9 @@ def test_gfx_roundtrip_stable(tmp_path):
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
     kgfx = (out / "sprites.moygfx").read_text(encoding="utf-8")
-    sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16)
+    # spec=False: p8's __gfx__ is 128x128, the top half of a SPEC.md 3.2 cart
+    # sheet, and the importer emits exactly that region (see import_p8._kgfx).
+    sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16, spec=False)
     assert sheet.to_hex() == kgfx
 
 

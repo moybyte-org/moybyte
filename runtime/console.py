@@ -3947,7 +3947,14 @@ class Workstation:
     # (the import primitive) and the moy_carts shared-sheet store.
 
     def _load_shared_sheet(self):
-        """Read the shared sheet into a SpriteSheet (empty one if never saved)."""
+        """Read the shared sheet into a SpriteSheet (empty one if never saved).
+
+        Spec-shaped (16 x 32) like every cart sheet -- explicit here because it is
+        load-bearing twice over. It has to span all 512 tile ids or copy_tile()
+        refuses a PUT/GET of anything past id 255 (which is what the old 16x16
+        default did, silently, as "CAN'T PUT"); and it is a SpriteSheet like any
+        other, so a shape libmoy would refuse has no business being one. An older
+        128-line shared.moygfx parses into the top half with ids unchanged."""
         try:
             hexs = self._with_sd(lambda: self.carts_store.load_shared_sheet(self.carts_root))
         except Exception as exc:  # noqa: BLE001
@@ -3955,10 +3962,10 @@ class Workstation:
             return None
         if hexs:
             try:
-                return SpriteSheet.from_hex(hexs)
+                return SpriteSheet.from_hex(hexs, cols=16, rows=32)
             except Exception:  # noqa: BLE001
                 pass
-        return SpriteSheet()
+        return SpriteSheet(16, 32)
 
     def share_tile_get(self):
         """Import the current tile FROM the shared sheet into this cart's sheet
