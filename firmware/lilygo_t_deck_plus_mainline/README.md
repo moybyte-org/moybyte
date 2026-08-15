@@ -34,7 +34,7 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 
 | | shipping fork build | this build |
 |---|---|---|
-| app image | 5,052,032 B | **3,564,304 B** |
+| app image | 5,052,032 B | **3,564,672 B** |
 | headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
 
 Same console, same baked browser bundle (572,693 B), same partition table —
@@ -547,11 +547,13 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | compiles |
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | compiles |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | compiles |
-| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,304 B | compiles |
+| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | compiles |
 
 Nothing after stage 1 has been on glass. Each row is one commit; its message
 says what to look for.
 
-The stage-6 figure includes the 572,693 B baked browser bundle. Build without
-one (no `firmware/web_runner/dist`) and the image is 2,991,488 B, with a
-warning — a bundle-less image serves a console only from storage.
+The stage-6 figure includes the 572,693 B baked browser bundle. Build on a tree
+with no `firmware/web_runner/dist` and the image is about 573 KB smaller, with
+a warning — such an image serves a console only from a copy on its storage. The
+warning becomes a hard failure under `CI` (or `MOYBYTE_REQUIRE_WEB_BUNDLE=1`),
+because a published image with no console is the whole bug the baking fixes.
