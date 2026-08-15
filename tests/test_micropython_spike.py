@@ -3501,4 +3501,9 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     assert '_moycore.register("moy_table_verb", tv)' in glue
     # ...and the register loop must SKIP the bare name, or it sets the global
     # `table` and clobbers the library before the prelude can graft anything.
-    assert '"table",' in glue[glue.index("NOT_REGISTRABLE = frozenset(("):]
+    # NOT_REGISTRABLE moved into the shared lua_ext with the prelude it pairs
+    # with (it was twinned between the glue and lua_host, unchecked); the glue
+    # is pinned on IMPORTING it, so a board that stopped sharing the list would
+    # still be caught here.
+    assert "NOT_REGISTRABLE" in glue
+    assert '"table",' in ext[ext.index("NOT_REGISTRABLE = frozenset(("):]

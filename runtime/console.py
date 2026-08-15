@@ -4499,8 +4499,13 @@ class Workstation:
           delta spanning three frames is divided by three frames of time. Charge
           one frame's dt to it instead and the velocity reads ~3x too fast.
 
-        On a backend that samples every frame (mouse, and the P4's touch) every
-        frame is fresh, so this is exactly `self._frame_dt_ms`."""
+        On a backend that samples every frame (the host's mouse, the scripted
+        remote gestures) every frame is fresh, so this is exactly
+        `self._frame_dt_ms`. BOTH boards' GT911 drivers hold + flag: the P4's
+        p4_input.Touch does it for the same reason device_input.Touch does,
+        which it did not until 2026-08-15 -- it held the point and flagged
+        nothing, so this docstring's old claim that the P4 "samples every frame"
+        described the bug rather than the board."""
         dt = self._frame_dt_ms
         if getattr(p, "fresh", True):
             self._pointer_dt_ms = min(dt + self._stale_ptr_ms, 100.0)

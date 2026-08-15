@@ -83,6 +83,13 @@ try:
 except ImportError:  # pragma: no cover
     json = None
 
+# The cart API's names, once (see runtime/cart_verbs.py) -- _RESERVED_NAMES
+# below is derived from them.
+try:
+    from cart_verbs import CART_VERBS as _CART_VERBS
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+
 
 # ============================================================================
 # Slot types (for the editor's param UI -- Part 2 reads these)
@@ -1621,16 +1628,14 @@ _KEYWORDS = {
 # generated code calls, a compiler helper, or a lifecycle function would SHADOW it
 # and break the cart. The editor gates proc names through this too, so a BlockError
 # here only ever fires on a hand-corrupted blocks.json.
-_RESERVED_NAMES = {
-    # cart API verbs (host_app.make_api / moy_runtime -- keep in sync if that grows)
-    "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr",
-    "background", "make_layer", "draw_layer", "map", "mget", "mset",
-    "print", "touch", "mouse", "clip", "camera", "pal", "palt", "btn", "btnp",
-    "key", "keyp", "time", "pmem", "textmode", "quit", "cfg", "col", "sfx", "beep",
-    "music", "music_stop", "sound_stop", "volume", "rnd", "flr", "Image", "image",
-    "wifi", "scene", "load_scene", "table", "text",   # #85 scenes + #78 Desk Lab interop
-    "actors", "touching", "move_actor", "move_actor_to",  # #109 actor-aware verbs
-    "remove_actor", "draw_scene", "broadcast",            # #85/#93 messages
+_RESERVED_NAMES = set(_CART_VERBS) | {
+    # (The cart API verbs are DERIVED, from runtime/cart_verbs.CART_VERBS --
+    # they used to be retyped here under a comment reading "keep in sync if
+    # that grows", and by 2026-08-15 the copy was missing sspr/tline/tri/trib/
+    # view/players/net/on_net. That is not cosmetic: a proc compiles to
+    # `def <name>(...)`, so a kid who named a custom block `tri` shadowed the
+    # verb and silently broke every triangle their cart drew.)
+    "broadcast",                                          # #85/#93 messages
     # builtins the generated code relies on
     "int", "range", "len", "str", "min", "max", "abs", "round", "bool",
     # lifecycle functions + the compiler's own helpers (all `_`-prefixed)

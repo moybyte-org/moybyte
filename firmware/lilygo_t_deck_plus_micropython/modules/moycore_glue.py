@@ -47,9 +47,10 @@ from array import array
 
 try:
     from lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
-                         install_handles)
+                         LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 except ImportError:                      # host tests importing the device module
     from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+                                 LIBMOY_VERBS, NOT_REGISTRABLE,
                                  install_handles)
 
 try:
@@ -66,68 +67,17 @@ try:
 except ImportError:
     _ticks_ms = _ticks_diff = None
 
-# The verbs libmoy's binding does not install, registered on top of it from the
-# cart's own api namespace.
+# What NOT to register on top of libmoy's table -- LIBMOY_VERBS (the names
+# libmoy's own binding installs) and NOT_REGISTRABLE (ours, each excluded for
+# its own reason) -- is imported above from lua_ext, with the full rationale
+# beside the declaration there. So is the MOY_BUTTONS bit order.
 #
-# NOT "moybyte's superset" -- that framing was wrong and it matters. SPEC.md 10
-# defines `layers` (make_layer/draw_layer/background) and `viewport` (view) as
-# STANDARD extensions, specified so two consoles implementing them implement
-# the same thing; the rest are moybyte's, namespaced `vendor.feature` exactly
-# as 10 requires. So this list is "optional spec features libmoy has not
-# implemented yet, plus our own", and the first group is an upstream gap rather
-# than a local invention. `Image` is excluded as always: it is a constructor
-# returning an object, and objects do not cross this boundary -- layers and
-# images travel as int handles (the prelude's wrappers).
-# NOT view or background: SPEC.md 6 made both core, so libmoy installs them and
-# registering ours would SHADOW the C with a trampoline -- the wrong direction.
-# view costs nothing now (libmoy records it; read it back with moycore.view()),
-# and background is a clear libmoy does itself.
-#
-# NOT make_layer/draw_layer/image either, though moybyte's DO shadow libmoy's:
-# those three are object-valued, and objects do not cross this boundary any
-# more than they cross moy_lua's. They ride the SHARED prelude instead --
-# `install_handles` puts int-handle functions here and PRELUDE_HANDLES defines
-# the Lua-side make_layer/draw_layer/image on top of them. That is why moybyte
-# layers can take an Image (`lay:spr(image("bg"), ...)`, the moybyte.images
-# vendor extension) where libmoy's sheet-tile pair cannot.
-#
-# NOT `table` either, for the #164 reason: registering that name would set the
-# GLOBAL `table`, clobbering Lua's library, and celeste's p8 shim needs
-# table.remove. It goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto
-# the library as a metatable __call, exactly as under moy_lua.
-#
-# So this is a DENY list, not an allow list, and the inversion is deliberate:
-# what is stable and enumerable is the set of names libmoy OWNS (SPEC.md's verb
-# table, which is versioned and changes by spec revision). moybyte's own side is
-# open -- a new cart verb, a test harness's `trace`, an app-specific hook -- and
-# an allow list silently drops whatever nobody remembered to add to it. Erring
-# toward registering is also the safe direction: an extra global a cart never
-# calls costs one closure, where a missing one is a nil-call crash.
-LIBMOY_VERBS = frozenset((
-    # SPEC.md 6 draw + state
-    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
-    "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
-    "spr", "map", "mget", "mset",
-    # 7 input, 8 audio, 9 misc
-    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
-    "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
-    "touch", "key", "keyp", "textmode",
-    # core since the layers promotion
-    "view", "background",
-))
-
-# Names moybyte owns that still must NOT be registered, each for its own reason.
-NOT_REGISTRABLE = frozenset((
-    "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
-    "Image",                               # a constructor, likewise
-    "table",                               # goes in as moy_table_verb (#164)
-))
-
-# The moy_button bit order is MOY_BUTTONS, imported above from lua_ext -- the
-# module every runtime already shares. It briefly lived in InputState.BUTTONS
-# instead, which looked like the same de-duplication and was not: read the note
-# in lua_ext.py before touching this, because that swap rotated the d-pad of
-# every Lua cart on both boards and nothing in the tree noticed.
+# All three used to be written out here AND in runtime/lua_host.py. Read
+# lua_ext's note before moving any of them back: the button order spent a day
+# duplicated-by-another-name and rotated the d-pad of every Lua cart on both
+# boards, silently, and the deny lists fail the same way -- a name that goes
+# missing from one copy shadows libmoy's C with a Python trampoline and raises
+# nothing.
 
 
 class MoycoreRun:

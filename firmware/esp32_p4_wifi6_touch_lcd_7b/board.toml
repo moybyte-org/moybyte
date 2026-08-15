@@ -205,10 +205,26 @@ PHASE 4/5 UPDATE (2026-08-15): the boot spine and frame pump did NOT move here
 SHARED denylist above, which is why nothing was added to this section for them.
 The line that decides is whether a module can import with no board present:
 device_boot takes every hardware object as an argument, so it loads on CPython
-and its shared half is executed by tests/test_device_boot.py. The four modules
-above cannot -- they reach `framebuf`, `moy_gfx`, `machine` -- so moving them to
-`runtime/` would put un-importable files in the tree the host and the wasm head
-glob. They stay here until that is fixed, which is a bigger job than #161."""
+and its shared half is executed by tests/test_device_boot.py.
+
+CORRECTION, same day: this paragraph used to END by saying the four modules in
+the first group "cannot -- they reach `framebuf`, `moy_gfx`, `machine`", and
+that reason is FALSE. None of the four imports `machine` or `moy_gfx` at all
+(device_api mentions moy_gfx once, in a comment; the rest not at all), and
+`framebuf` appears only inside device_canvas methods -- its own docstring says
+so: "the native modules (moy_gfx/moy_alloc/lcd_bus/framebuf) are imported
+lazily inside methods". All four bare-import on CPython today, which is how
+tests/test_multiplayer.py already builds the device `make_api`.
+
+So the blocker is not importability, and nobody should re-derive that by
+testing it again. What is actually left is ordinary work: `runtime/` is the
+tree the host and the wasm head GLOB, so a move has to answer for the staging
+config on both boards, the `runtime.`-prefixed import lane these files use as
+their host fallback, and the frozen-module names the boards already ship. This
+file's whole premise is that its reasons are CHECKABLE -- a wrong one is worse
+than none, because it converts a scheduling decision into a false technical
+impossibility and stops anyone looking. They stay here until someone does that
+job; it is bigger than #161, and it is not blocked."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState

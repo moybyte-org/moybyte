@@ -24,11 +24,13 @@ runtime-missing panel exactly as a device build without the module does.
 Canonical home is runtime/; tests import it as runtime.lua_host.
 """
 
-# The object-verb glue shared with the device runtimes (runtime/lua_ext.py):
-# make_layer/draw_layer/image return OBJECTS, and the ctypes dispatch marshals
-# ints and one string, so they ride int handles plus a Lua prelude.
+# The glue shared with the device runtimes (runtime/lua_ext.py): the object-verb
+# handles (make_layer/draw_layer/image return OBJECTS, and the ctypes dispatch
+# marshals ints and one string, so they ride int handles plus a Lua prelude),
+# the moy_button bit order, and the two deny lists that decide what gets
+# registered on top of libmoy's table.
 from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
-                             install_handles)
+                             LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 
 # ---------------------------------------------------------------------------
 # The moycore lane -- now the ONLY lane.
@@ -206,32 +208,16 @@ class MoycoreHostRun:
         self._run.close()
 
 
-# What to register on top of libmoy's table: everything in the cart namespace
-# that libmoy does not already own. A DENY list, kept in step with the device's
-# (moycore_glue.LIBMOY_VERBS) rather than imported from it -- this file is
-# host-only and that one is staged into firmware trees.
+# (What to register on top of libmoy's table -- everything in the cart
+# namespace libmoy does not already own -- is decided by LIBMOY_VERBS /
+# NOT_REGISTRABLE, imported from runtime.lua_ext at the top of this file.
 #
-# It was an allow list until an extra verb went missing from it. What is stable
-# and enumerable is what libmoy OWNS (SPEC.md's table, versioned by spec
-# revision); moybyte's own side is open-ended, and an allow list silently drops
-# whatever nobody thought to add.
-LIBMOY_VERBS = frozenset((
-    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
-    "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
-    "spr", "map", "mget", "mset",
-    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
-    "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
-    "touch", "key", "keyp", "textmode",
-    "view", "background",
-))
-
-# Ours, and still not registrable -- each for its own reason.
-NOT_REGISTRABLE = frozenset((
-    "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
-    "Image",                               # a constructor, likewise
-    "table",                               # goes in as moy_table_verb (#164)
-))
-
+# They were written out HERE as well until 2026-08-15, defended by a comment
+# saying this file is host-only while the other copy is staged into firmware
+# trees. That was not the operative fact: the staged module already imports
+# lua_ext, by the same name a board freezes it under -- there was no boundary
+# between the two copies, only 46 hand-matched names and no test comparing
+# them.)
 
 
 def moycore_supports(src):

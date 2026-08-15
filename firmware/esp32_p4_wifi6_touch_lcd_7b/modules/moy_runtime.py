@@ -118,7 +118,15 @@ class P4SystemCanvas(DeviceCanvas):
             DeviceCanvas.print(self, s, x, y, c)
             return
         self.flush_batch()
-        self._gfx_text(self._buf, self.w, self.h, str(s), int(x), int(y),
+        # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
+        # two diverge the moment a viewport is set (#155) -- which is exactly
+        # what wm_windowed._direct_render does to paint a window's content in
+        # place. Passing the window's logical size as the stride makes every
+        # glyph row step by the window width instead of 1024, so scaled text
+        # walks diagonally out of its rect. Both twins of this call already got
+        # it right (device_canvas.DeviceCanvas.print, host_canvas SystemCanvas);
+        # this copy was the drifted one.
+        self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
                        self._col(c), _FONT8, _FONT8_FIRST, fs,
                        self._cam_x, self._cam_y,
                        self._clip_x0, self._clip_y0,
@@ -754,9 +762,18 @@ def run_desktop(fps_cap=60):
     _swipe_script = None           # remote `swipe` playback state (see below)
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
-    # console's own draw/flush/logic/render/chrome EMAs (filled because
-    # perf_capture is on). Costs two tick reads per frame.
-    ws.perf_capture = True
+    # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
+    # per frame; the LINE is unconditional (its fps= field reads _frames_drawn,
+    # so it is valid with the meters off, and tools/p4_perf.py parses it).
+    #
+    # The METERS follow Settings -> PERF DIAG, exactly as on the T-Deck
+    # (#68 kid mode: perf_capture arms per-layer walk timing, per-op canvas
+    # timers and the EMA tail -- ~1-1.5ms of every frame there). This line read
+    # an unconditional True until 2026-08-15, so the toggle gated nothing at
+    # boot on this board and the shipping fps could not be measured without
+    # first issuing `diag 0` -- which tools/p4_perf.py already did, its
+    # docstring already claiming "DIAG IS OFF BY DEFAULT".
+    ws.perf_capture = bool(getattr(ws, "diag_live", False))
     _pf_at = _ticks_ms() + 2000
     _pf_n = 0
     _pf_busy = 0
@@ -776,6 +793,14 @@ def run_desktop(fps_cap=60):
         _serial_cmd = False        # a dev command counts as activity (wakes it)
         tp = touch.poll()
         pointer.down = tp is not None
+        # Touch.poll holds a held finger's last point across the passes the GT911
+        # produced no fresh buffer for, so `down` above is a real LEVEL and a
+        # drag survives them; `fresh` marks those repeats so kinetic scrolling
+        # (#113) doesn't measure finger speed against a sample the hardware
+        # never took. Same two lines as the T-Deck's loop -- this board held the
+        # point without ever flagging the repeats, which is what made a fling
+        # die on the desk here and carry there.
+        pointer.fresh = getattr(touch, "fresh", True)
         if tp is not None:
             pointer.place(tp[0], tp[1])
             if tp[2]:
@@ -859,8 +884,18 @@ def run_desktop(fps_cap=60):
                 # the on-screen FPS chip) to measure the TRUE shipping fps. The
                 # fps= field of the PERF line reads _frames_drawn either way, so
                 # it stays valid with perf_capture off (only the ms EMAs go
-                # stale). Default here is ON (a measurement build).
+                # stale). Default follows Settings -> PERF DIAG (i.e. OFF on a
+                # shipped console), so a measurement session says `diag 1`.
                 on = not (len(parts) == 2 and parts[1] == "0")
+                # Through set_diag_live, not around it: the sampler below
+                # re-syncs perf_capture from diag_live every ~2s (the T-Deck's
+                # 3s diag tick does the same), so poking perf_capture alone
+                # would be silently undone two seconds later. persist=False --
+                # a serial A/B must not rewrite the kid's system.json.
+                try:
+                    ws.set_diag_live(on, persist=False)
+                except Exception:  # noqa: BLE001 -- older console: flag only
+                    ws.diag_live = on
                 ws.perf_capture = on
                 ws.show_fps = on
                 ws._dirty = True
@@ -1051,6 +1086,9 @@ def run_desktop(fps_cap=60):
                 off = 0 if i == 0 else (tri - 10) * s["step"]  # amplitude = step*10
                 pointer.place(s["cx"] + off, s["cy"])
                 pointer.down = True
+                pointer.fresh = True    # a scripted sample every frame, by
+                                        # construction -- and it must outrank
+                                        # whatever touch.poll left behind
                 click = (i == 0)                        # frame 0 arms the drag
                 s["i"] = i + 1
         if _swipe_script is not None:
@@ -1069,6 +1107,7 @@ def run_desktop(fps_cap=60):
                 y = s["y0"] + int((s["y1"] - s["y0"]) * f)
                 pointer.place(x, y)
                 pointer.down = i < n
+                pointer.fresh = True    # scripted: every frame is a real sample
                 click = (i == 0)
                 s["i"] = i + 1
         # -- idle screen blank (#58) -------------------------------------------
@@ -1159,6 +1198,11 @@ def run_desktop(fps_cap=60):
         _pf_n += 1
         _pf_busy += elapsed
         if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
+            # The meters follow Settings -> PERF DIAG live, so flipping it needs
+            # no reboot (T-Deck twin: the 3s diag tick in its run_desktop).
+            _live = bool(getattr(ws, "diag_live", False))
+            if ws.perf_capture != _live:
+                ws.perf_capture = _live
             _drawn = getattr(ws, "_frames_drawn", 0)
             # home(wp/grid/bar): the LAUNCHER frame's section split (stashed by
             # the shared launcher_layer under perf_capture) -- names where a

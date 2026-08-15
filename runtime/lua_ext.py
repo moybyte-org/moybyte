@@ -38,6 +38,83 @@ nothing, so it costs a frozen module and no runtime dependency.
 # enum out of moy.h and asserts the two still agree.
 MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
+# -- what NOT to register on top of libmoy's table ---------------------------
+#
+# Every runtime registers the cart's api namespace on top of libmoy's verb
+# table, minus these two sets. They lived TWICE until 2026-08-15 -- in
+# moycore_glue (staged to both boards and the wasm head) and in lua_host --
+# with 46 names agreeing by hand and nothing in the tree comparing them. That
+# is the same shape as MOY_BUTTONS above, and it fails the same silent way: a
+# name present in one copy and missing in the other does not raise, it just
+# registers a Python trampoline OVER libmoy's C for that verb. The cart runs.
+# Either the host stops testing what the board runs, or the board quietly takes
+# a per-verb slowdown with nothing pointing at a cause -- which is exactly the
+# shape of the three moycore regressions CLAUDE.md records.
+#
+# lua_host used to carry a comment defending its copy on the grounds that "this
+# file is host-only and that one is staged into firmware trees". That was never
+# the operative fact: both files ALREADY import this module (for MOY_BUTTONS
+# and install_handles), by the same name on a board and by `runtime.lua_ext` on
+# the host. There was no boundary to cross.
+#
+# NOT a tripwire, which is the distinction that decides it. The staging
+# closure's HOST_ONLY / NEVER_ON_A_BOARD tables are deliberately kept as twins
+# of board.toml (tests/test_staging_closure.py) because they exist to go RED
+# when somebody removes a denial -- derive those from the denials and removing
+# one removes its own assertion. Nothing asserts anything about the names
+# below; they are operational data both runtimes READ, and their failure mode
+# is divergence, which is the thing one definition removes.
+
+# The names libmoy's own binding installs -- SPEC.md's verb table. Registering
+# any of them would SHADOW a C function with a trampoline, the opposite of the
+# point of moycore.
+#
+# This is a DENY list, not an allow list, and the inversion is deliberate: what
+# is stable and enumerable is the set of names libmoy OWNS (SPEC.md's table,
+# versioned by spec revision). moybyte's own side is open -- a new cart verb, a
+# test harness's `trace`, an app-specific hook -- and an allow list silently
+# drops whatever nobody remembered to add to it. It WAS an allow list until an
+# extra verb went missing from it. Erring toward registering is also the safe
+# direction: an extra global a cart never calls costs one closure, where a
+# missing one is a nil-call crash.
+#
+# Note what is NOT "moybyte's superset" here: SPEC.md 10 defines `layers`
+# (make_layer/draw_layer/background) and `viewport` (view) as STANDARD
+# extensions, and 6 made view + background core -- so libmoy installs both and
+# ours must not shadow them (view costs nothing now: libmoy records it and
+# moycore.view() reads it back; background is a clear libmoy does itself).
+LIBMOY_VERBS = frozenset((
+    # SPEC.md 6 draw + state
+    "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
+    "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
+    "spr", "map", "mget", "mset",
+    # 7 input, 8 audio, 9 misc
+    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
+    "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
+    "touch", "key", "keyp", "textmode",
+    # core since the layers promotion
+    "view", "background",
+))
+
+# Names moybyte owns that still must NOT be registered, each for its own reason.
+#
+# make_layer/draw_layer/image/Image are object-valued, and objects do not cross
+# any of these bindings -- moy_lua passed scalars, moycore passes scalars and
+# tuples, the host's ctypes binding passes ints and one string. They ride
+# install_handles + PRELUDE_HANDLES below instead, which is also why a moybyte
+# layer can take an Image (`lay:spr(image("bg"), ...)`) where libmoy's
+# sheet-tile pair cannot.
+#
+# `table` is the #164 case: registering that name would set the GLOBAL `table`
+# and clobber Lua's library, which celeste's p8 shim needs for table.remove. It
+# goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto the library as a
+# metatable __call.
+NOT_REGISTRABLE = frozenset((
+    "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
+    "Image",                               # a constructor, likewise
+    "table",                               # goes in as moy_table_verb (#164)
+))
+
 # The prelude in three chunks, because moycore takes only two of them.
 #
 # Under moy_lua every verb is a registered Python trampoline, so all three

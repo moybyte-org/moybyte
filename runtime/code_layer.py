@@ -37,6 +37,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+# The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
+# highlighter's builtin class is derived from them below.
+try:
+    from cart_verbs import CART_VERBS as _CART_VERBS
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
 # palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
 # label. Looked up LAZILY (not a top-level import): chrome.py imports THIS module for
@@ -102,15 +109,22 @@ _HL_LUA_KEYWORDS = (
     "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
     "then", "true", "until", "while",
 )
-# Cart-API verbs + the common builtins a kid actually types. Keep roughly in
-# sync with make_api (host_app / moy_runtime); an extra name here is harmless.
-_HL_BUILTINS = (
-    "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
-    "map", "mget", "mset",
-    "print", "btn", "btnp", "touch", "mouse", "key", "keyp", "time", "pmem",
-    "cfg", "col", "rnd", "flr", "abs", "min",
-    "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
+# Cart-API verbs + the common builtins a kid actually types.
+#
+# The verb half is DERIVED (runtime/cart_verbs.CART_VERBS, pinned against
+# make_api's real namespace by a test) rather than retyped. It used to be a
+# hand-kept copy under a comment reading "keep roughly in sync with make_api";
+# it had drifted to 37 names against make_api's 62, and still highlighted
+# `pset`, which was renamed `pix` long enough ago that no cart uses it.
+#
+# The LANGUAGE builtins below stay local -- they are what a kid types that the
+# cart API does not define, so they are this module's own vocabulary and have
+# no business in a cart-verb list.
+_HL_LANG_BUILTINS = (
+    "abs", "min", "max", "sin", "cos", "range", "len", "int", "str", "float",
+    "round", "sqrt", "bool",
 )
+_HL_BUILTINS = tuple(_CART_VERBS) + _HL_LANG_BUILTINS
 
 
 def _is_alpha(ch):

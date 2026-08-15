@@ -207,6 +207,81 @@ def test_device_cart_buttons_match_host():
     assert dev == host_api.CART_BUTTONS
 
 
+def test_host_and_device_make_api_agree_with_every_capability_gate_open():
+    """Two backends, one cart namespace: the whole name set, all gates open.
+
+    The BASE set is already pinned twice (test_wifi's keyset test, and
+    test_multiplayer's), and each pins ONE gate on top of it -- wifi there, net
+    there. Nothing pinned the rest, and the rest is where the names arrive in
+    batches: `scenes` alone injects nine (#85/#109's actor verbs), added to two
+    files by hand on the same day.
+
+    This is the case the staging closure's keep-the-twin rule does NOT cover
+    (tests/test_staging_closure.py, "derive them and the tripwire fires
+    never"): there is no denial to derive from here, just two independent
+    implementations of one contract, and asserting they match is the only way
+    to learn that they stopped. A verb added to one only is a cart that runs on
+    the host and raises NameError on glass, or the reverse.
+    """
+    import importlib
+    from runtime import host_app
+    from runtime import widgets
+
+    class _StubInput:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    class _Stub:
+        w, h = 320, 240
+
+        def __getattr__(self, name):
+            return lambda *a, **k: 0
+
+    modules_dir = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    sys.path.insert(0, str(modules_dir))
+    try:
+        for stale in ("device_util", "device_canvas", "device_api"):
+            sys.modules.pop(stale, None)
+        dev = importlib.import_module("device_api")
+    finally:
+        sys.path.remove(str(modules_dir))
+
+    def names(mod, **kw):
+        return set(mod.make_api(_Stub(), _StubInput(), {}, **kw).keys())
+
+    base_h, base_d = names(host_app), names(dev)
+    assert base_h == base_d
+
+    # Every gate the Player can open, together -- so a name that only appears
+    # under a combination is compared too.
+    gates = dict(scenes=widgets.Scenes({}, []), images={}, tables={},
+                 texts={}, wifi=object())
+    full_h, full_d = names(host_app, **gates), names(dev, **gates)
+    assert full_h == full_d, (
+        "host-only: %s / device-only: %s"
+        % (sorted(full_h - full_d), sorted(full_d - full_h)))
+    # ...and the gates really do add something, or this test would pass while
+    # measuring nothing (a Scenes that silently failed to construct, say).
+    assert full_h - base_h, "the capability gates injected no names at all"
+
+    # And the CANONICAL name list is this set. runtime/cart_verbs.CART_VERBS is
+    # what the code editor's highlighter and the block compiler's reserved-name
+    # gate derive from; both used to retype it by hand and both had drifted.
+    # This is the assertion that makes it a single source rather than a fifth
+    # copy, so it belongs here, beside the two namespaces it describes.
+    from runtime.cart_verbs import CART_VERBS
+    from runtime import players as players_mod
+    with_net = names(host_app, net=players_mod.LoopbackNet(), **gates)
+    public = set(n for n in with_net if not n.startswith("_"))
+    assert set(CART_VERBS) == public, (
+        "cart_verbs.CART_VERBS drifted from make_api -- missing: %s / extra: %s"
+        % (sorted(public - set(CART_VERBS)), sorted(set(CART_VERBS) - public)))
+    assert len(set(CART_VERBS)) == len(CART_VERBS), "duplicate name in CART_VERBS"
+
+
 # -- SPEC.md 4.1: the host sandbox is a MAXIMUM, matched to what glass can give -
 
 def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
