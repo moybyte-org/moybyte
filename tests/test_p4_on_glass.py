@@ -425,13 +425,36 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     What is device-specific here is exactly what a host test cannot reach: this
     board has no SD, so `with_sd` is a plain call-through and the marker lands on
     the internal VFS -- the same path that has to hold a rollback's evidence
-    across a reboot."""
-    board.pyexec(
+    across a reboot.
+
+    The mkdir is not scaffolding, it is the firmware's own step: `update_dir`
+    does NOT exist on a board whose VFS has never taken an OTA, and `finish()`
+    and the download opener each create it before their first write. This test
+    writes the marker directly, so it has to do the same -- without it the test
+    passes only on a board that happens to have downloaded an update earlier,
+    and fails on any freshly-flashed one (a full cable flash wipes the VFS).
+    That is exactly how it failed on 2026-08-15 after the canvas-flip reflash.
+
+    AND IT HAS TO BE ITS OWN SHORT COMMAND, not a line of the snippet below.
+    `pyexec` uploads a multi-line snippet in chunks; `cmd` sends one line. A
+    real `os.mkdir` is a flash erase+write that stalls the frame loop for long
+    enough that, with PERF diag streaming (the module fixture sends `diag 1`),
+    a diag line interleaves into the chunk exchange and the reader parses the
+    fragment as a serial COMMAND instead of Python -- surfacing as the baffling
+    `PY ERR SyntaxError: invalid syntax for integer with base 10`. It reproduces
+    only when the mkdir actually creates something: with the directory already
+    present mkdir raises EEXIST immediately, never stalls, and the upload is
+    clean. Any device call that blocks on flash belongs outside a chunked
+    upload for the same reason."""
+    board.cmd("py (lambda: (__import__('os').mkdir(ws.updater.update_dir), 1)[1])()",
+              wait_for="PY", timeout=20)     # EEXIST if it is already there
+    assert board.pyexec(
         "import json\n"
         "f = open(ws.updater._pending_path(), 'w')\n"
         "f.write(json.dumps({'slot': 'nowhere', 'label': 'v99'}))\n"
         "f.close()\n"
-        "V = ws.updater.boot_check()\n")
+        "V = ws.updater.boot_check()\n"), \
+        "the device raised while writing the pending marker"
     verdict = board.pyval("eval('V', ws._g)")
     assert verdict[0] == "rolled_back", verdict
     # Reading it must NOT consume it: an image that reports and then dies has to
