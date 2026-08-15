@@ -452,6 +452,59 @@ def _diag_pump(diag, comp):
         pass
 
 
+def _diag_webhost(diag, ws):
+    """Log a WEBHOST line: what the web console's SOCKET is actually doing.
+
+    Written 2026-08-16 because the T-Deck's console served one page and then
+    refused every connection afterwards, and there was no way to ask it why.
+    The desktop stayed responsive (2.9ms frames), `web=` stayed 0.0 in LOOP,
+    ICMP answered at 289-391ms, and TCP was REFUSED rather than timing out --
+    which is the signature of nothing bound, not a full backlog. But `poll()`
+    returns instantly both when `sock is None` and when there is simply no
+    traffic, so `web=0.0` could not distinguish "dead" from "idle", and this
+    board has no serial RX under the desktop to ask with.
+
+    The P4 runs this same shared code and does not do it, so the cause is
+    environmental rather than logical -- the S3's on-die WLAN shares internal
+    RAM with the LCD DMA (the documented ESP_ERR_NO_MEM coexistence hazard),
+    where the P4's radio is a separate C6 over SDIO.
+
+    So: print the state, not the symptom. `sock=` none means the listener is
+    gone (the interesting case); `err=` carries whatever killed it; `mem=` is
+    internal-SRAM free, because if the socket died of allocation that is where
+    it shows. Costs one line per diag tick and only when the row is on."""
+    if diag is None:
+        return
+    wh = getattr(ws, "webhost", None)
+    if wh is None:
+        return
+    try:
+        sock = getattr(wh, "sock", None)
+        # Only speak up once the owner has switched the row on -- an untouched
+        # console should not narrate a feature it is not running.
+        if sock is None and not getattr(wh, "serving", False) \
+                and not getattr(wh, "error", None):
+            return
+        try:
+            import gc as _gc
+            free = _gc.mem_free()
+        except Exception:
+            free = -1
+        url = ""
+        try:
+            url = wh.url() or ""
+        except Exception:
+            url = "?"
+        diag.log("WEBHOST",
+                 "sock=%s serving=%s err=%s url=%s free=%dk"
+                 % ("none" if sock is None else "open",
+                    bool(getattr(wh, "serving", False)),
+                    getattr(wh, "error", None) or "-",
+                    url or "-", free // 1024))
+    except Exception:
+        pass
+
+
 def _diag_i2cstat(diag, keyboard, touch):
     """Log an I2CSTAT line (#69): per-session I2C latency stats for the two
     peripherals sharing I2C0 -- the keyboard C3 and the GT911 touch. n=reads,

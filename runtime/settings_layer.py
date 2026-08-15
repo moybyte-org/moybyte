@@ -1110,9 +1110,26 @@ class SettingsLayer:
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
         elif kind == "webhost":            # WEB CONSOLE: the ADDRESS, not "ON"
-            cv.print(ws.webhost_label(), vx, y + 5,
-                     NAMES["orange"] if ws.webhost_serving()
-                     else NAMES["dark_grey"], 1)
+            # RIGHT-ALIGNED, not printed at the value column, because the value
+            # column is 78px = 9 characters and the thing this row exists to
+            # show is 18 ("192.168.1.155:8080"). It rendered as "192.168.1" on
+            # glass -- an address that is not merely ugly but WRONG, since a kid
+            # would type it into a browser and get nothing. Right-aligning lets
+            # it use the empty gap between the label and the edge, which is
+            # where the room already was; it stops at the label rather than
+            # overprinting it, and only then falls back to dropping :8080 (the
+            # default port a browser assumes for nothing, so it is the last
+            # resort and not the first).
+            lbl = ws.webhost_label()
+            col = (NAMES["orange"] if ws.webhost_serving()
+                   else NAMES["dark_grey"])
+            room = w - 84 * lay.fs         # gap after "WEB CONSOLE" at this scale
+            if len(lbl) * fw > room and lbl.endswith(":8080"):
+                lbl = lbl[:-5]
+            tx = x + w - len(lbl) * fw - 2
+            if tx < x + 84 * lay.fs:       # still too long: keep the tail, which
+                tx = x + 84 * lay.fs       # is the part that varies (the host)
+            cv.print(lbl, tx, y + 5, col, 1)
         # Mark not-yet-functional rows clearly (wifi + font + channel +
         # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",

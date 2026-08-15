@@ -45,7 +45,7 @@ from device_diag import (
     _diag_draw3, _diag_loop, _diag_chromebrk, _diag_layerbrk,
     _diag_homebrk, _diag_pump,
     _diag_luamem,
-    _diag_i2cstat, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
+    _diag_i2cstat, _diag_webhost, _diag_calib, _diag_gc, HITCH_MS, _CALIB_DONE,
 )
 # The device AUDIO backend (#16, extracted to device_audio.py). run_desktop wires
 # ws.make_audio = make_audio; DeviceAudio is the injected I2S backend.
@@ -825,6 +825,8 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                                         # DRAWBRK never fires on the home screen)
             _diag_pump(diag, comp)      # #66 lever 4: bounce-feed pacing (SPI idle gaps)
             _diag_i2cstat(diag, keyboard, touch)  # #69: kbd/touch I2C session latency
+            _diag_webhost(diag, ws)     # the web console's SOCKET state -- `web=`
+                                        # in LOOP cannot tell dead from idle
             _diag_calib(diag)           # #63: one-shot interpreter cost model (spill probe)
             if _live:
                 _diag_gc(diag)          # #63/#68: the FORCED collect sample -- diag-only,
