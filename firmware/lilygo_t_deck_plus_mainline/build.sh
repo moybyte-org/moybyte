@@ -388,14 +388,31 @@ BOUT="build-${BOARD}"
 cp "${BOUT}/firmware.bin" "${DIST_DIR}/moybyte_tdeck.bin"
 cp "${BOUT}/micropython.bin" "${DIST_DIR}/moybyte_tdeck_app.bin"
 
-APP_SLOT_BYTES="${MOYBYTE_APP_SLOT_BYTES:-5242880}"
+# The slot size is READ FROM THE BOARD'S OWN PARTITION TABLE, not restated, so
+# the check cannot drift from the layout it is checking (the P4's guard learned
+# this first). MOYBYTE_APP_SLOT_BYTES overrides for a what-if.
+APP_SLOT_HEX="$(awk -F',' '/^[[:space:]]*ota_0[[:space:]]*,/ { gsub(/[[:space:]]/, "", $5); print $5; exit }' \
+  "${BOARD_DIR}/partitions-moybyte-tdeck.csv")"
+APP_SLOT_BYTES="${MOYBYTE_APP_SLOT_BYTES:-$(( ${APP_SLOT_HEX:-0x500000} ))}"
 APP_HEADROOM_WARN_BYTES="${MOYBYTE_APP_HEADROOM_WARN_BYTES:-204800}"
 APP_SIZE_BYTES="$(wc -c < "${DIST_DIR}/moybyte_tdeck_app.bin" | tr -d '[:space:]')"
 APP_HEADROOM_BYTES=$(( APP_SLOT_BYTES - APP_SIZE_BYTES ))
 printf 'App image: %s bytes of a %s-byte ota_0 slot -- %s bytes headroom (%s KB)\n' \
   "${APP_SIZE_BYTES}" "${APP_SLOT_BYTES}" "${APP_HEADROOM_BYTES}" "$(( APP_HEADROOM_BYTES / 1024 ))"
 if [ "${APP_HEADROOM_BYTES}" -lt 0 ]; then
-  echo "Moybyte WARNING (#168): the app image does NOT fit the ${APP_SLOT_BYTES}-byte OTA slot" >&2
+  # FAILS, it does not warn -- the P4's rule, and the right one. An image that
+  # does not fit its slot cannot be cable-flashed and cannot be installed over
+  # OTA by any board, so the alternatives to stopping here are esptool refusing
+  # it later or a published payload nobody can take.
+  echo "" >&2
+  echo "!! Moybyte BUILD FAILED (#168): the app image does not fit its OTA slot" >&2
+  echo "!!   slot:     ${APP_SLOT_BYTES} bytes (ota_0/ota_1, partitions-moybyte-tdeck.csv)" >&2
+  echo "!!   image:    ${APP_SIZE_BYTES} bytes" >&2
+  echo "!!   OVERFLOW: $(( -APP_HEADROOM_BYTES )) bytes ($(( (-APP_HEADROOM_BYTES) / 1024 )) KB)" >&2
+  echo "!! Trim it (the baked web console is ~573KB -- see tools/gen_web_blob.py)" >&2
+  echo "!! or change the partition table, which costs every deployed device a" >&2
+  echo "!! full-erase USB flash." >&2
+  exit 1
 elif [ "${APP_HEADROOM_BYTES}" -lt "${APP_HEADROOM_WARN_BYTES}" ]; then
   echo "Moybyte WARNING (#168): under $(( APP_HEADROOM_WARN_BYTES / 1024 ))KB of OTA-slot headroom left" >&2
 fi
