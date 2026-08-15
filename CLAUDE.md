@@ -121,6 +121,31 @@ the spec said. The device inherits it through `test_device_canvas_parity.py`
 (host↔device), and `tools/p4_conformance.py` is still the only check that
 reaches the real C kernel on real glass — run it when the raster changes.
 
+**The compiled-vs-compiled check is a `make` target now (2026-08-15).**
+`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` drives **131 ops
+across 16 verbs** through the host's ctypes binding AND through the real native
+`moy_gfx` under a desktop MicroPython — the only lane in `make test` where two
+independently COMPILED rasters meet. It used to point at a hand-built binary
+nothing produced, so it passed on one machine and silently SKIPPED in CI.
+**`make unix-micropython`** builds it (~15s cold, <1s warm, **no cache** — a
+cache miss that skips the check is the bug), CI runs it every push, and a
+missing binary WARNS locally and FAILS under `CI`/`MOYBYTE_REQUIRE_UNIX_MP`.
+The same binary carries `moycore` and `moy_audio`. On the strength of it,
+`tests/test_device_canvas_parity.py` shed its ~400-line Python transcription of
+libmoy's nine verbs — `_FakeGfx` forwards them to the binding and transcribes
+only `moy_gfx`'s OWN compositor; its `gfx=False` arm STAYS, because it is the
+only thing anywhere that runs `device_canvas`'s no-kernel Python lanes. Two
+things not to undo in that op script: its framebuffer is a `memoryview` into a
+larger **patterned** arena (without it a capacity guard that fails to clamp
+writes past the end on BOTH sides and reads as agreement), and its clamp ops aim
+ONE pixel past each edge, because a mutant that clamps at `max_rows + 1`
+survives any large overhang. Five other suites still point at their own
+hand-built binaries and skip the same way (`test_flush_fold`,
+`test_gate_pal_sync`, `test_semantic_traces`, `test_moycore_loop`,
+`test_audio_parity`'s native case) — all five pass against this one binary and
+want the same candidate-path line; do NOT instead symlink into
+`firmware/.../.build/lvgl_micropython/`, which `build.sh` git-clones into.
+
 ### Audio is VENDORED from moy-spec, not implemented here (#97)
 
 The one subsystem where that rule is inverted. SPEC.md §8.3 pins synthesis to
