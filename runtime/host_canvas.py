@@ -358,59 +358,16 @@ def _system_canvas_class():
                 lay.palette = self._palette
             return lay
 
-        # Does `blit_game` also paint the LETTERBOX around the composite?
+        # NO `blit_game` OVERRIDE, and no `letterbox_composite` of its own.
         #
-        # `DeviceCanvas.blit_game` is the T-Deck's, and the T-Deck's canvas IS
-        # the glass: it fills four black bands over everything outside the game
-        # rect, because on that tier everything outside the game rect IS
-        # letterbox. `FullscreenStackWM.composite_game` relies on exactly that --
-        # it probes for the verb and RETURNS, so the `sc.cls(_VIEWPORT_BEZEL)`
-        # below the probe never runs on a canvas that has one.
-        #
-        # The windowed tier means the opposite by the same call.
-        # `WindowedWM._blit_game` passes a WINDOW's content origin, and paints
-        # the play world's own bezel itself (behind a stale-by-N latch, so it
-        # does not refill the screen every frame). Bands there cover the desk,
-        # its icons, the OS bar and every other window -- which is what the host
-        # started doing the moment it inherited this method: a black desktop
-        # with one game window floating on it.
-        #
-        # The P4 has the same split and does not feel it, because it only ever
-        # runs the windowed WM and its `P4SystemCanvas.blit_game` override
-        # paints no bands. The host runs BOTH tiers, so one inherited meaning
-        # cannot serve it -- `build_workstation` clears this when it installs
-        # WindowedWM. (`WebSystemCanvas` inherits the T-Deck's unchanged and
-        # runs the windowed WM: same defect, on the wasm head, unfixed here.)
-        letterbox_composite = True
-
-        def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
-            if self.letterbox_composite:
-                return DeviceCanvas.blit_game(self, gc, ox, oy, scale, defer,
-                                              src)
-            # CLIP the bands away rather than re-implementing the composite:
-            # the base method's bezel fills go through `_fill`, which intersects
-            # with the clip rect, while the composite itself is one
-            # `blit565_scale` writing exactly the destination rect. So a clip to
-            # that rect drops the four fills and leaves every drawn pixel
-            # untouched -- one meaning of the verb, expressed as a restriction
-            # of the other, instead of a second copy to keep in step.
-            gw, gh = gc.w, gc.h
-            vw, vh = (src[2], src[3]) if src is not None else (gw, gh)
-            # FLUSH FIRST. The base method flushes any pending sprite run of its
-            # own, and under the narrowed clip below that run would be emitted
-            # clipped to the game rect -- silently dropping chrome sprites
-            # queued before the composite.
-            self.flush_batch()
-            keep = (self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
-            self._clip_x0 = max(keep[0], self._ox + int(ox))
-            self._clip_y0 = max(keep[1], self._oy + int(oy))
-            self._clip_x1 = min(keep[2], self._ox + int(ox) + vw * int(scale))
-            self._clip_y1 = min(keep[3], self._oy + int(oy) + vh * int(scale))
-            try:
-                DeviceCanvas.blit_game(self, gc, ox, oy, scale, defer, src)
-            finally:
-                (self._clip_x0, self._clip_y0,
-                 self._clip_x1, self._clip_y1) = keep
+        # The host wants the windowed meaning of that verb and the T-Deck wants
+        # the letterboxing one, but that split is not the host's to express: the
+        # wasm head has exactly the same two tiers out of one binary, so a fix
+        # written here would have to be transcribed there (and for three weeks
+        # was not -- the browser's desk was black behind every game window). The
+        # flag and the guard live on `DeviceCanvas` itself now; see the note
+        # above its `blit_game`. `build_workstation` clears it where it installs
+        # WindowedWM, which is the one place the host chooses a tier.
 
         def blit_cover(self, gc):
             """wallpaper._backdrop_blit's raster path: the smallest integer

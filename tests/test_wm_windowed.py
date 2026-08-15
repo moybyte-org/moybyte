@@ -18,6 +18,7 @@ presentation's contracts:
   * the game viewport == the player window's content rect (ws._game_xy).
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -105,7 +106,153 @@ def test_the_fullscreen_tier_still_gets_its_letterbox(tmp_path):
     assert ws.cart_error is None, ws.cart_error
     ox, oy, _scale = ws.wm.viewport()
     assert ox > 0 and oy > 0                     # there IS a letterbox here
+    # STAIN the bezel first. `_VIEWPORT_BEZEL` is 0 and a fresh RGB565 buffer
+    # reads back as index 0 everywhere, so the bare assertion below also passes
+    # on a corner nothing ever drew -- i.e. it passed with the bands turned off.
+    # The sentinel is what makes this a measurement of the fill.
+    ws.sys_canvas.cls(8)
+    drv.frame(1 / 30)
     assert ws.sys_canvas.pix(0, 0) == WM._VIEWPORT_BEZEL
+
+
+def _web_canvas_module():
+    """`firmware/web_runner/web_canvas.py`, imported on CPython.
+
+    It stages `device_canvas` from the T-Deck tree exactly as the wasm build
+    does, so `host_canvas.install()` (which registers `moy_gfx`/`framebuf` and
+    puts that tree on the path) is all it needs -- the same trick that lets the
+    host run the boards' raster. Imported on demand, and the runner's directory
+    is dropped off sys.path again afterwards, so nothing else in the suite can
+    accidentally resolve a module out of it.
+    """
+    import importlib
+    from runtime import host_canvas
+    host_canvas.install()
+    runner = str(ROOT / "firmware" / "web_runner")
+    sys.path.append(runner)
+    try:
+        return importlib.import_module("web_canvas")
+    finally:
+        if runner in sys.path:
+            sys.path.remove(runner)
+
+
+def test_the_wasm_head_shares_the_same_two_meanings(tmp_path):
+    """The browser's half, on the REAL `WebSystemCanvas`.
+
+    The wasm head presents both tiers out of one binary (handheld 320x240 and
+    the windowed desk), so it needs both meanings of `blit_game` -- and it
+    shipped only one: it inherited `DeviceCanvas.blit_game` unchanged and its
+    desk went black behind every game window. Screenshotted through
+    `pageshot.mjs` before the fix.
+
+    Both halves are asserted here on one canvas, because it is the SAME method
+    now: the default letterboxes (the T-Deck's meaning, which
+    `FullscreenStackWM.composite_game` depends on) and clearing the flag leaves
+    everything outside the game rect untouched.
+    """
+    web_canvas = _web_canvas_module()
+    from device_canvas import DeviceCanvas
+
+    # The default is the letterboxing meaning: a canvas nobody told otherwise
+    # IS the glass. (The T-Deck's whole tier rests on this line.)
+    assert DeviceCanvas.letterbox_composite is True
+    assert web_canvas.WebSystemCanvas.letterbox_composite is True
+
+    sc = web_canvas.make_canvas(200, 120)
+    gc = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(40, 30))
+    gc.cls(8)
+
+    sc.cls(12)                                   # "the desk", in one colour
+    sc.blit_game(gc, 20, 15, 2)
+    assert sc.pix(25, 20) == 8                   # the game landed
+    assert sc.pix(0, 0) == 0                     # ...and so did the bezel
+
+    sc.cls(12)
+    sc.letterbox_composite = False               # what web_boot does for the desk
+    sc.blit_game(gc, 20, 15, 2)
+    assert sc.pix(25, 20) == 8                   # the same composite...
+    assert sc.pix(0, 0) == 12, \
+        "the game composite letterboxed the whole desktop black"
+    assert sc.pix(199, 119) == 12 and sc.pix(199, 0) == 12
+
+
+# Every place a tier is chosen, and what it owes the flag. A file that builds a
+# WindowedWM either clears `letterbox_composite` in the same branch or carries a
+# reason it need not -- and the discovery test below fails on a fourth tier, so
+# the next presentation cannot inherit the black desk by saying nothing.
+_CLEARS = True
+WINDOWED_INSTALLERS = {
+    "runtime/host_app.py": _CLEARS,
+    "firmware/web_runner/web_boot.py": _CLEARS,
+    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py":
+        "P4SystemCanvas overrides blit_game outright (its composite is the "
+        "hardware PPA) and paints no bands at all, so the shared flag never "
+        "reaches a fill on that board -- and it only ever runs this WM",
+}
+
+
+def _windowed_install_sites():
+    """Every module that CONSTRUCTS a WindowedWM, found rather than listed."""
+    import ast
+    import warnings
+    found = {}
+    # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
+    # escapes in vendored/staged sources); this walk is a search, not a lint.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for base in ("runtime", "firmware"):
+            for dirpath, dirnames, filenames in os.walk(ROOT / base):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".build", "__pycache__", "dist")]
+                for name in filenames:
+                    if not name.endswith(".py"):
+                        continue
+                    path = Path(dirpath) / name
+                    try:
+                        tree = ast.parse(path.read_text(encoding="utf-8",
+                                                        errors="replace"))
+                    except SyntaxError:
+                        continue
+                    for node in ast.walk(tree):
+                        if (isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Name)
+                                and node.func.id == "WindowedWM"):
+                            found[path.relative_to(ROOT).as_posix()] = (path,
+                                                                        tree)
+    return found
+
+
+def test_every_windowed_tier_answers_for_the_letterbox_flag():
+    """The ratchet. `blit_game` means two things and the INSTALL SITE is what
+    picks one, so the table above must cover every install site there is."""
+    found = _windowed_install_sites()
+    assert set(found) == set(WINDOWED_INSTALLERS), (
+        "a tier was added or moved -- say whether it clears "
+        "letterbox_composite: " + repr(sorted(set(found) ^ set(WINDOWED_INSTALLERS))))
+    for rel, verdict in WINDOWED_INSTALLERS.items():
+        if verdict is not _CLEARS:
+            assert isinstance(verdict, str) and verdict.strip(), rel
+            continue
+        import ast
+        _path, tree = found[rel]
+        # The clear must sit in the SAME branch that installs the WM: a clear
+        # somewhere else in the file is a clear that a future refactor drops.
+        branches = [n for n in ast.walk(tree)
+                    if isinstance(n, ast.If)
+                    and "WindowedWM" in ast.dump(n)]
+        assert branches, rel
+        inner = min(branches, key=lambda n: len(ast.dump(n)))
+        cleared = [
+            n for n in ast.walk(inner)
+            if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Attribute)
+                    and t.attr == "letterbox_composite" for t in n.targets)
+            and isinstance(n.value, ast.Constant) and n.value.value is False
+        ]
+        assert cleared, (
+            rel + ": installs WindowedWM without clearing letterbox_composite "
+            "-- the desk goes black behind the first game window")
 
 
 # ---------------------------------------------------------------------------

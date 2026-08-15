@@ -326,8 +326,10 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
         # cart inside a WINDOW here, and the fullscreen meaning of the same verb
         # (fill everything outside the game rect black) would paint over the
         # desk, its icons, the bar and every other window. See
-        # HostSystemCanvas.letterbox_composite -- the tier is chosen here, so
-        # this is where the canvas is told which meaning it serves.
+        # DeviceCanvas.letterbox_composite (the flag is on the shared class, so
+        # the wasm head's twin of this line -- web_boot.boot -- clears the same
+        # one) -- the tier is chosen here, so this is where the canvas is told
+        # which meaning it serves.
         ws._sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
         ws.open_desk()                 # two worlds (#105): boot onto the DESK

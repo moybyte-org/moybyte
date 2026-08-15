@@ -1173,6 +1173,34 @@ class DeviceCanvas:
 
     # -- the native game composite (probed via getattr by wm.composite_game) --
 
+    # Does `blit_game` also paint the LETTERBOX bands around the composite?
+    #
+    # ONE verb, two meanings, and the tier decides which. On the HANDHELD tier
+    # (the T-Deck's, and the wasm head's 320x240 arrangement) this canvas IS the
+    # glass: everything outside the game rect is letterbox, so the four black
+    # bands belong here -- and `FullscreenStackWM.composite_game` DEPENDS on
+    # them, because it probes for this verb and RETURNS, so its own
+    # `sc.cls(_VIEWPORT_BEZEL)` never runs on a canvas that has one. Hence the
+    # default is True: a canvas nobody told otherwise letterboxes.
+    #
+    # The WINDOWED tier means the opposite by the same call.
+    # `WindowedWM._blit_game` passes a WINDOW's content origin and paints the
+    # play world's own bezel itself; bands there cover the desk, its icon
+    # column, the OS bar and every other window. That is not hypothetical: the
+    # host inherited this method when `runtime/canvas.py` was deleted
+    # (2026-08-15) and its desktop went black behind the first game window, and
+    # the wasm head shipped the same defect until 2026-08-15 -- screenshotted
+    # through `pageshot.mjs` before it was fixed.
+    #
+    # So the flag lives HERE, on the class every tier's system canvas descends
+    # from, rather than being re-expressed per tier: `host_app.build_workstation`
+    # and `web_boot.boot` clear it exactly where they install `WindowedWM` --
+    # the tier is chosen there, so that is where the canvas is told which
+    # meaning it serves. (The P4 overrides `blit_game` outright for its PPA
+    # path and paints no bands, so the flag is moot there and it only ever runs
+    # the windowed WM anyway.)
+    letterbox_composite = True
+
     def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
         """FullscreenStackWM's device composite for a cart-declared small canvas
         (SPEC.md 1/3.1): THIS canvas is the promoted system surface (the glass),
@@ -1224,14 +1252,18 @@ class DeviceCanvas:
             comp.arm_scale_fold(src_buf, vw, vh, ox, oy, scale)
             return
         # Bezel: only the four strips outside the viewport (raw 565 black).
-        if oy > 0:
-            self._fill(0, 0, self.w, oy, 0)
-        if oy + rh < self.h:
-            self._fill(0, oy + rh, self.w, self.h - (oy + rh), 0)
-        if ox > 0:
-            self._fill(0, oy, ox, rh, 0)
-        if ox + rw < self.w:
-            self._fill(ox + rw, oy, self.w - (ox + rw), rh, 0)
+        # Skipped on a WINDOWED tier -- see letterbox_composite above; the
+        # composite below writes exactly the game rect either way, so this is
+        # the ONLY difference between the two meanings of the verb.
+        if self.letterbox_composite:
+            if oy > 0:
+                self._fill(0, 0, self.w, oy, 0)
+            if oy + rh < self.h:
+                self._fill(0, oy + rh, self.w, self.h - (oy + rh), 0)
+            if ox > 0:
+                self._fill(0, oy, ox, rh, 0)
+            if ox + rw < self.w:
+                self._fill(ox + rw, oy, self.w - (ox + rw), rh, 0)
         g.blit565_scale(self._buf, self.w, self.h, ox, oy,
                         src_buf, vw, vh, scale)
         if self._pump is not None:

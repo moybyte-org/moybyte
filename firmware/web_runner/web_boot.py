@@ -325,6 +325,17 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # place() keeps it hidden as always.
     ws.pointer.visible = False
     if windowed and ws._sys_canvas is not None:
+        # A windowed composite must NOT letterbox. `blit_game` means two things
+        # -- fill everything outside the game rect black (this canvas IS the
+        # glass, the handheld tier below) versus put a cart inside a WINDOW --
+        # and the shared `DeviceCanvas.blit_game` defaults to the first. Left
+        # set, the desk, its icon column, the OS bar and every other window go
+        # black behind the first game window opened. This build shipped exactly
+        # that until 2026-08-15; see DeviceCanvas.letterbox_composite. The tier
+        # is chosen HERE, so this is where the canvas is told which meaning it
+        # serves -- the same line, in the same place, as
+        # host_app.build_workstation.
+        ws._sys_canvas.letterbox_composite = False
         # Installed LAST so it anchors its root context -- and its per-window
         # content buffers, via root.new_layer -- to the system canvas. Two
         # worlds (#105): boot onto the desk.
