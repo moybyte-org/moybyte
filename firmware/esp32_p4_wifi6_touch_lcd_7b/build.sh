@@ -144,63 +144,27 @@ cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
 # sibling include path.
 cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
 
-# 2d) Stage the shared PYTHON modules (#58 console staging).
-#     From runtime/ (canonical, same list the T-Deck build stages) -- the whole
-#     shared console -- PLUS wm_windowed.py: the P4 is the windowed presentation
-#     tier (#73), deliberately NOT staged into the S3 build.
+# 2d) Stage the shared PYTHON modules (#58 console staging, #161 Phase 3).
+#     WHAT crosses and WHY is declared in board.toml, not here. Two sources,
+#     two deliberately different strategies, both spelled out there:
 #
-#     web_view_ws.py is moy_webserver's HARD dependency, not a leftover of the
-#     streaming sunset. Its import ladder (`import web_view_ws` / `from runtime
-#     import web_view_ws`) has no third branch and there is no `runtime` package
-#     on device, so dropping it makes `import moy_webhost` raise -- which the
-#     caller catches, which makes the WEB CONSOLE row silently not exist. The
-#     sunset removed it (06506ab) and the web console re-added its dependent
-#     without it (a0a9d21); this build kept working only because modules/ is
-#     gitignored and still held the pre-sunset copy, so a fresh clone would have
-#     lost the feature. tests/test_staging_closure.py now says this out loud.
+#       runtime/          -- DENYLIST. A shared tree's default answer is "yes,
+#                            this crosses", so the list that needs writing down
+#                            is the exclusions: the host bindings, palette.py
+#                            (colorsys at import time), web_input.py. This board
+#                            denies TWO FEWER files than the T-Deck -- it keeps
+#                            wm_windowed.py and its surface.py leaf, because it
+#                            is the windowed desktop tier (#73/#105).
+#       the T-Deck tree   -- ALLOWLIST, and it stays one. That is a BOARD tree
+#                            whose default answer is "no" (S3 panel, SD, keyboard,
+#                            compositor); a denylist over it would import another
+#                            board's driver the moment somebody added a file.
 #
-#     canvas.py + palette.py are DELIBERATELY ABSENT (2026-08-15). They carried
-#     the Wallpaper preview runner, which never once worked on a board:
-#     runtime/palette.py builds indices 16-63 with CPython's `colorsys` at import
-#     time and MicroPython has none, so `import palette` raised, `import canvas`
-#     with it, and wallpaper._ensure_preview took `return False` every time. The
-#     preview has always been a black rectangle here. Owner call: tapping a
-#     wallpaper applies it, so a second raster on the device buys nothing.
-for f in editors.py editors_base.py editors_code.py editors_sheet.py \
-         editors_paint_map.py editors_block.py editors_music.py \
-         editors_scene.py block_editor_ui.py map_editor_ui.py \
-         scene_editor_ui.py audio.py \
-         music_editor_ui.py perf_hud.py update_ui.py system_menu_ui.py \
-         achievements_ui.py layers.py bar_layer.py cards_layer.py \
-         paint_layer.py settings_layer.py code_layer.py widgets.py \
-         wallpaper.py artwork.py appearance_app.py app_shell.py file_widgets.py files_app.py writer_app.py storybook_app.py sheets_app.py formula.py launcher_layer.py project.py player.py editor_app.py \
-         wm.py wm_windowed.py surface.py players.py chrome.py ui.py calc_app.py console.py moy_carts.py \
-         moybuf.py moy_fs.py moy_image.py moy_journal.py op_history.py blocks.py lua_ext.py \
-         web_view_ws.py; do
-  cp "${REPO_ROOT}/runtime/${f}" "${MODULES_DIR}/${f}"
-done
-cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
-#     From the T-Deck modules tree (canonical home of the device-shared backend
-#     units): the drawing backend + the cart namespace + wifi + the leaf utils +
-#     the moybyte input package (InputState). These are board-agnostic by
-#     construction (their lvgl/S3-only imports are guarded).
-#     moy_ota is here too (#53): maintained in the T-Deck tree because that is
-#     the board it was written for, but board-agnostic -- its staging directory
-#     is a constructor argument (this board has no SD; run_desktop passes a path
-#     on the internal VFS) and its board identity is stamped into _ota_build.
-#     moy_webserver/moy_webhost: the socket core + the "serve the wasm console
-#     from this board" handler (plan 3.4 pull half). Board-agnostic -- the web
-#     directory and the SD gate are constructor arguments.
-for f in device_util.py device_canvas.py device_api.py \
-         moycore_glue.py device_wifi.py \
-         moy_webserver.py moy_webhost.py \
-         moy_ota.py; do
-  cp "${TDECK_DIR}/modules/${f}" "${MODULES_DIR}/${f}"
-done
-rm -rf "${MODULES_DIR}/moybyte"
-mkdir -p "${MODULES_DIR}/moybyte"
-cp "${TDECK_DIR}/modules/moybyte/__init__.py" "${TDECK_DIR}/modules/moybyte/input.py" \
-   "${MODULES_DIR}/moybyte/"
+#     The stager also PRUNES untracked strays it did not just stage: the frozen
+#     manifest freezes the whole modules/ DIRECTORY, and this one is gitignored,
+#     so an unstaged module otherwise stays in the image forever (canvas.py,
+#     palette.py and moy_lua_glue.py were all still here when this landed).
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 #     carts_data.py is GENERATED from system_carts/ (same as the T-Deck) so the
 #     P4's seed/fallback carts can never drift from the host source of truth.
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"

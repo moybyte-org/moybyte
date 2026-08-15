@@ -100,16 +100,29 @@ def test_surface_is_a_leaf_module():
 
 
 def test_s3_build_does_not_stage_the_leaf():
-    src = _read("firmware/lilygo_t_deck_plus_micropython/build.sh")
-    assert "surface.py" not in src, (
-        "the S3 stages by allowlist and the surface leaf must stay off it")
+    # Both boards stage by DENYLIST since #161 Phase 3 (board.toml), so the
+    # exclusion is now a line with a reason on it rather than an absence from a
+    # shell script -- but the claim is unchanged, and it is asked of the staged
+    # set rather than of build.sh's text.
+    from tools.board_config import staged_modules, denials
+
+    board = os.path.join(_REPO, "firmware", "lilygo_t_deck_plus_micropython")
+    assert "surface.py" not in staged_modules(board, _REPO), (
+        "the S3 is the fullscreen-stack tier and the surface leaf must stay off it")
+    assert denials(board)["surface.py"]["kind"] == "tier", (
+        "the S3's denial of surface.py must be recorded as a TIER decision, "
+        "not as a host-only or broken-import one")
 
 
 def test_p4_build_stages_the_leaf():
-    src = _read("firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh")
-    assert "surface.py" in src, (
+    from tools.board_config import staged_modules
+
+    board = os.path.join(_REPO, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
+    staged = staged_modules(board, _REPO)
+    assert "surface.py" in staged, (
         "the P4 stages wm_windowed.py, which imports surface -- the leaf "
         "must ride along or the frozen import fails")
+    assert "wm_windowed.py" in staged
 
 
 # ---------------------------------------------------------------------------

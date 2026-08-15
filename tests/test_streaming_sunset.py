@@ -143,17 +143,23 @@ def test_lua_glue_has_no_tee_sniff():
 
 
 def test_boards_no_longer_freeze_the_recording_stack():
-    # Pin the cp STAGING lines, not prose (the T-Deck comment narrates this).
-    tdeck = _read("firmware", "lilygo_t_deck_plus_micropython", "build.sh")
-    assert 'cp "${REPO_ROOT}/runtime/web_view_ws.py"' in tdeck   # framing survives
-    assert 'cp "${REPO_ROOT}/runtime/web_view.py"' not in tdeck
-    assert 'cp "${REPO_ROOT}/runtime/web_view_page.py"' not in tdeck
-    p4 = _read("firmware", "esp32_p4_wifi6_touch_lcd_7b", "build.sh")
-    # Same carve-out as the T-Deck above: web_view_ws.py is the RFC 6455 framing
-    # leaf moy_webserver's transport core imports, and it survives the sunset by
-    # decision (see this module's docstring). Banning the bare substring
-    # "web_view" also banned its dependency -- which is how the P4 lost it in
-    # 06506ab and shipped a web console that could not import for two days. So
-    # the ban is on the two DELETED modules by name.
-    assert "web_view.py" not in p4
-    assert "web_view_page.py" not in p4
+    # Pin the STAGED SET, not prose and not shell syntax. Since #161 Phase 3 the
+    # boards stage every runtime/*.py minus their board.toml denylist, so the
+    # question this test always meant -- "is the recorder frozen onto a board?"
+    # -- is answered by asking what a fresh build stages.
+    #
+    # web_view_ws.py is the carve-out: the RFC 6455 framing leaf moy_webserver's
+    # transport core imports, kept by decision (see this module's docstring).
+    # Banning the bare substring "web_view" once banned its dependency too --
+    # which is how the P4 lost it in 06506ab and shipped a web console that
+    # could not import for two days. So the ban is on the DELETED modules by
+    # name, and the survivor is asserted present.
+    from tools.board_config import staged_modules
+
+    root = Path(__file__).resolve().parent.parent
+    for board in ("lilygo_t_deck_plus_micropython",
+                  "esp32_p4_wifi6_touch_lcd_7b"):
+        staged = staged_modules(root / "firmware" / board, root)
+        assert "web_view_ws.py" in staged, board          # framing survives
+        assert "web_view.py" not in staged, board
+        assert "web_view_page.py" not in staged, board

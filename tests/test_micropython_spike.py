@@ -5,6 +5,19 @@ from pathlib import Path
 
 ROOT = Path("firmware/lilygo_t_deck_plus_micropython")
 EDITORS_SRC = Path("runtime") / "editors.py"
+_REPO = Path(__file__).resolve().parent.parent
+
+
+def _staged():
+    """The shared modules a FRESH T-Deck build freezes, by destination name.
+
+    Since #161 Phase 3, `build.sh` stages every `runtime/*.py` except the files
+    `board.toml` denies (each with its reason recorded there) -- so there is no
+    per-module `cp` line left to grep for, and the greps below ask the staged
+    set instead. That was always the question they meant.
+    """
+    from tools.board_config import staged_modules
+    return staged_modules(_REPO / ROOT, _REPO)
 
 
 def _editors_src():
@@ -1889,8 +1902,7 @@ def test_native_text_wired_with_shared_font():
     assert "import moy_font" in device_canvas                   # shared glyph source
     assert "self._gfx_text(self._buf" in device_canvas          # native one-call text
     assert "self._fb.text(" in device_canvas                    # framebuf fallback kept
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "runtime/font.py" in build and "moy_font.py" in build   # staged at build
+    assert "moy_font.py" in _staged()      # runtime/font.py, staged RENAMED
 
 
 def test_native_spr_batch_wired_for_sprites():
@@ -2458,12 +2470,15 @@ def test_device_draw_api_uses_tic80_names():
 def test_device_sprite_sheet_and_paint_editor():
     m = _load_moy_runtime()
     S, P = m.SpriteSheet, m.PaintEditor
-    sh = S(4, 4)                            # 32x32, 16 sprites
+    # spec=False throughout this block: these are small fixtures for the sheet's
+    # own tile arithmetic and the paint editor, none of which reaches libmoy. A
+    # real CART sheet is 16x32 (SPEC.md 3.2) -- see editors_sheet's module note.
+    sh = S(4, 4, spec=False)                # 32x32, 16 sprites
     assert sh.count == 16 and (sh.w, sh.h) == (32, 32) and sh.is_blank()
     assert sh.tile_origin(5) == (8, 8)
     sh.tset(5, 1, 2, 9)
     assert sh.tget(5, 1, 2) == 9 and sh.dirty
-    sh2 = S.from_hex(sh.to_hex(), 4, 4)     # hex round-trips, dirty resets
+    sh2 = S.from_hex(sh.to_hex(), 4, 4, spec=False)   # hex round-trips, dirty resets
     assert sh2.pix == sh.pix and sh2.dirty is False
     pe = P(sh)
     pe.color = 12
@@ -2477,7 +2492,7 @@ def test_device_sprite_sheet_and_paint_editor():
 
 def test_device_spr_is_sheet_indexed_and_accepts_image():
     m = _load_moy_runtime()
-    sheet = m.SpriteSheet(4, 4)
+    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
     sheet.tset(3, 0, 0, 11)
     calls = []
     tiles = []
@@ -2523,7 +2538,7 @@ def test_device_paint_editor_sizes_and_spans(tmp_path=None):
     # and tile_span_image builds the contiguous block.
     m = _load_moy_runtime()
     cols = 16
-    sh = m.SpriteSheet(cols, 16)
+    sh = m.SpriteSheet(cols, 16, spec=False)     # half-height fixture, not a cart sheet
     pe = m.PaintEditor(sh)
     assert pe.size == 1 and pe.dim == 8
     pe.cycle_size(); assert pe.size == 2 and pe.dim == 16
@@ -2540,7 +2555,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
     m = _load_moy_runtime()
     from editors import TileMap
-    sheet = m.SpriteSheet(4, 4)
+    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
     tm = TileMap(3, 3)
     mapped = []
 
@@ -2577,7 +2592,7 @@ def test_sprite_sheet_pset_bumps_gen():
     # pset bumps a generation counter so a running cart's tile cache can detect a
     # sprite edit and rebuild (host/device parity for live sprite edits).
     SpriteSheet = _load_moy_runtime().SpriteSheet
-    sh = SpriteSheet(4, 4)
+    sh = SpriteSheet(4, 4, spec=False)           # small fixture, not a cart sheet
     assert sh.gen == 0
     sh.pset(0, 0, 5)
     assert sh.gen == 1
@@ -2600,7 +2615,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
     # still resolves through make_api's tile_cache); plain 1x1 sprites auto-batch (#63)
     # straight from the sheet, so a paint edit needs no cache invalidation at all.
     m = _load_moy_runtime()
-    sheet = m.SpriteSheet(4, 4)
+    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
     sheet.tset(0, 0, 0, 3)
     blitted = []
 
@@ -2713,7 +2728,7 @@ def test_device_audio_wired():
     assert "def save_sounds(cart, bank_dict):" in carts
     assert '"sounds": sounds' in carts
     # build.sh stages the shared audio module into the frozen modules tree.
-    assert 'cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"' in build
+    assert "audio.py" in _staged()
 
 
 def test_music_editor_wired_into_device_shell():
@@ -2779,13 +2794,10 @@ def test_music_editor_wired_into_device_shell():
     assert "def _play_music_preview(self):" in music_ui
     assert "ws.audio.tick(dt)" in layers
     # The editor lives in the shared files build.sh freezes onto the device.
-    assert 'cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/system_menu_ui.py" "${SCRIPT_DIR}/modules/system_menu_ui.py"' in build
-    assert 'cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"' in build
+    staged = _staged()
+    for name in ("editors.py", "console.py", "music_editor_ui.py", "perf_hud.py",
+                 "update_ui.py", "system_menu_ui.py", "achievements_ui.py"):
+        assert name in staged, name
 
 
 def test_native_moy_audio_is_vendored_libmoy():
@@ -3073,13 +3085,11 @@ def test_editor_cores_are_shared_single_source():
     for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
         assert cls not in host_canvas, "host canvas redefines " + cls
-    # build.sh stages the canonical files into modules/ so the device freezes them.
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    # The build stages the canonical files into modules/ so the device freezes them.
+    staged = _staged()
     for name in ("editors", "editors_base", "editors_code", "editors_sheet",
                  "editors_paint_map", "editors_block", "editors_music"):
-        line = ('cp "${REPO_ROOT}/runtime/%s.py" "${SCRIPT_DIR}/modules/%s.py"'
-                % (name, name))
-        assert line in build, name
+        assert name + ".py" in staged, name
 
 
 def test_micropython_offline_diag_wiring():

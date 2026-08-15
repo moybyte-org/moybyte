@@ -1,71 +1,46 @@
-# Build output. build.sh `cp`s these in from runtime/ on every build (they are
-# re-staged after each re-clone), so they are generated, not source -- edit
-# runtime/ instead. Without this they sit in `git status` forever and a
-# `git add -A` commits them.
+# modules/ mixes BOARD-AUTHORED sources (tracked, un-ignored below) with copies
+# staged at build time from runtime/ and the files build.sh generates. The
+# staged half is build output -- edit runtime/ instead -- and without an ignore
+# rule it sits in `git status` forever and a `git add -A` commits it.
 #
-# Authored device-only modules (device_canvas.py, device_api.py, moy_runtime.py,
-# moybyte_shell.py, ...) have no runtime/ twin and stay tracked.
-
-modules/_ota_build.py
-modules/achievements_ui.py
-modules/app_shell.py
-modules/appearance_app.py
-modules/artwork.py
-modules/audio.py
-modules/bar_layer.py
-modules/block_editor_ui.py
-modules/blocks.py
-modules/calc_app.py
-modules/canvas.py
-modules/cards_layer.py
-modules/carts_data.py
-modules/chrome.py
-modules/code_layer.py
-modules/console.py
-modules/editor_app.py
-modules/editors.py
-modules/editors_base.py
-modules/editors_block.py
-modules/editors_code.py
-modules/editors_music.py
-modules/editors_paint_map.py
-modules/editors_scene.py
-modules/editors_sheet.py
-modules/file_widgets.py
-modules/files_app.py
-modules/formula.py
-modules/launcher_layer.py
-modules/layers.py
-modules/lua_ext.py
-modules/map_editor_ui.py
-modules/moy_carts.py
-modules/moy_font.py
-modules/moybuf.py
-modules/moy_fs.py
-modules/moy_image.py
-modules/moy_journal.py
-modules/music_editor_ui.py
-modules/op_history.py
-modules/paint_layer.py
-modules/palette.py
-modules/perf_hud.py
-modules/player.py
-modules/players.py
-modules/project.py
-modules/scene_editor_ui.py
-modules/settings_layer.py
-modules/sheets_app.py
-modules/storybook_app.py
-modules/system_menu_ui.py
-modules/ui.py
-modules/update_ui.py
-modules/wallpaper.py
-modules/web_view.py
-modules/web_view_page.py
-modules/web_view_ws.py
-modules/widgets.py
-modules/wm.py
-modules/writer_app.py
+# A PATTERN, not a list. Until #161 Phase 3 this file enumerated every staged
+# module by name, which was a second copy of build.sh's staging allowlist (and
+# the repo root's .gitignore held a third). It had gone stale in both
+# directions: it still named canvas.py, palette.py, web_view.py and
+# web_view_page.py, none of which are staged any more, and any module added to
+# runtime/ would have had to be added here too. Staging is a DENYLIST now
+# (board.toml), so a new shared module reaches the board with nobody editing
+# anything -- and an ignore rule that had to be edited per module would have
+# handed the paperwork straight back.
+#
+# Un-ignore a new board-authored file explicitly, as the entries below do.
+modules/*
+!modules/boot.py
+!modules/main.py
+!modules/moybyte_shell.py
+!modules/moybyte_sd.py
+!modules/moybyte_diag.py
+!modules/moy_runtime.py
+!modules/moy_canvas.py
+!modules/moy_compositor.py
+!modules/moy_ota.py
+!modules/moy_webserver.py
+!modules/moy_webhost.py
+!modules/moycore_glue.py
+!modules/tdeck_board.py
+!modules/tdeck_display.py
+!modules/device_api.py
+!modules/device_audio.py
+!modules/device_canvas.py
+!modules/device_diag.py
+!modules/device_input.py
+!modules/device_util.py
+!modules/device_wifi.py
+# The moybyte PACKAGE (moybyte.input -- the boards' InputState + the T-Deck
+# keyboard matrix). The DIRECTORY has to be un-ignored: git does not descend
+# into an ignored directory, so a rule naming files inside it would never be
+# consulted.
+!modules/moybyte/
 
 # Toolchain + build tree (contains nested git repos).
 .build/

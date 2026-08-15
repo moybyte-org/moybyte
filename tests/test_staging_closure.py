@@ -24,14 +24,23 @@ quarter:
 The shape of the defect is always the same: an import that fails on device
 turns into a MISSING FEATURE rather than a crash, because the callers are
 guarded and the UI is capability-gated. Nothing goes red. So the frozen set is
-derived from `build.sh` (the source of truth for what a FRESH build produces)
-and never from `modules/` on disk, which is precisely where the staleness hides.
+derived from what a FRESH build produces -- each board's `board.toml` (#161
+Phase 3), and the web runner's inline `DENY=` -- and never from `modules/` on
+disk, which is precisely where the staleness hides.
 
 The rule is deliberately weak enough not to be noisy: for each import site, at
 least ONE branch of its try/except-ImportError ladder must resolve. That accepts
-both ladder orderings -- `wallpaper.py` puts the host lane in `try` and the
-device lane in `except`, `moy_webserver.py` does the opposite -- while still
-failing when no branch can possibly work.
+both ladder orderings -- most shared modules put the bare device name in `try`
+and `from runtime import ...` in `except`, `moy_webserver.py` does the opposite
+-- while still failing when no branch can possibly work.
+
+What it CANNOT see is a ladder whose branches all resolve on the tier running
+the test and none of them on device, which is how the wallpaper preview stayed
+black on both boards (#31): `runtime.host_canvas` then `web_canvas`, host-green
+and board-dead, no import site to complain about because the whole ladder was
+the bug. That one is gone -- the preview asks `ws.make_game_canvas`, an injected
+service, and tests/test_wallpaper_preview.py pins the absence of the ladder --
+but the blind spot is the reason this file is not the only net.
 """
 
 import ast
@@ -41,10 +50,13 @@ from pathlib import Path
 
 import pytest
 
+from tools import board_config
+
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 WEB = ROOT / "firmware" / "web_runner"
+BOARD_DIR = {"tdeck": TDECK, "p4": P4}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -73,11 +85,21 @@ NATIVE = {
 # mirror-image bug, a module that imports fine and then cannot work. Per target
 # and not global, because `host_api` is genuinely the WEB head's cart API
 # (web_boot.py imports it by name) while being meaningless on a board.
+#
+# The boards' rows used to be four names shorter than the web's -- no
+# `gfx_binding`, `native_build`, `host_canvas` or `input` -- which is to say the
+# tripwire was WEAKER on the two targets that actually ship in a kid's hands, for
+# no recorded reason. Found 2026-08-15 by cross-checking this table against the
+# boards' new `board.toml` denials (#161 Phase 3), which is what that check is
+# for: two statements of one truth are only worth having if something compares
+# them.
 HOST_ONLY = {
-    "tdeck": {"host_app", "host_api", "lua_host",
-              "audio_binding", "lua_binding", "simulate_desktop"},
-    "p4": {"host_app", "host_api", "lua_host",
-           "audio_binding", "lua_binding", "simulate_desktop"},
+    "tdeck": {"host_app", "host_api", "host_canvas", "lua_host", "input",
+              "audio_binding", "lua_binding", "gfx_binding", "native_build",
+              "simulate_desktop"},
+    "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
+           "audio_binding", "lua_binding", "gfx_binding", "native_build",
+           "simulate_desktop"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
@@ -124,21 +146,25 @@ NEVER_ON_A_BOARD = {
         "on device_canvas.DeviceCanvas like everything else, so the file this "
         "names does not exist to stage. Its only device consumer had been "
         "wallpaper._ensure_preview, which could never import it there anyway "
-        "(see `palette`). Kept as a tripwire: a second raster in frozen flash "
-        "bought a preview nobody ever saw, and should not come back."),
+        "(see `palette`). Kept as a tripwire: the preview it was wanted for "
+        "renders on the boards' OWN raster now (#31), so a second one in "
+        "frozen flash would buy nothing and should not come back."),
     "palette": (
         "builds indices 16-63 with CPython's `colorsys` at IMPORT time, and "
         "MicroPython has none. VERIFIED ON P4 GLASS 2026-08-15, on firmware "
         "built before this file was unstaged: `import colorsys`, `import "
         "palette` and `import canvas` all raise ImportError('no module named "
-        "colorsys'), and the consequence is visible one level up -- "
-        "wallpaper._ensure_preview() returns False and _static_preview() "
-        "returns None, so the Appearance screen's cart-wallpaper panel drew "
+        "colorsys'), and the consequence was visible one level up -- "
+        "wallpaper._ensure_preview() returned False and _static_preview() "
+        "returned None, so the Appearance screen's cart-wallpaper panel drew "
         "its black fill and nothing else. Staging this means a module that "
         "raises on import, which reads as a missing FEATURE rather than a "
-        "crash because every caller is guarded. The web head needs the same "
-        "table and GENERATES a literal twin instead; a board that ever needs "
-        "MOY64 should do the same, never stage this file."),
+        "crash because every caller is guarded -- and that panel is exactly "
+        "how long such a thing survives unreported. (The preview itself is "
+        "FIXED, #31: it renders on device_canvas through the backend's own "
+        "make_game_canvas, needing neither of these two files.) The web head "
+        "needs the same table and GENERATES a literal twin instead; a board "
+        "that ever needs MOY64 should do the same, never stage this file."),
 }
 
 
@@ -211,8 +237,12 @@ def _for_staged(sh):
 
 
 def _web_staged(sh):
-    """The web runner globs runtime/*.py minus a DENY list -- the only one of
-    the three strategies that cannot silently omit a new module."""
+    """The web runner globs runtime/*.py minus an inline DENY list.
+
+    It got there first; both boards followed in #161 Phase 3, where the
+    equivalent list moved into `board.toml` so the REASON for each exclusion
+    could live beside it. This one is still shell, so it is still parsed.
+    """
     m = re.search(r'DENY="([^"]*)"', sh)
     deny = set(m.group(1).split()) if m else set()
     found = {p.stem: p for p in (ROOT / "runtime").glob("*.py")
@@ -241,11 +271,16 @@ def frozen_set(target):
             if p.exists():
                 mods[name] = p
     else:
-        board = TDECK if target == "tdeck" else P4
-        sh = (board / "build.sh").read_text()
+        # The boards DECLARE their staging (#161 Phase 3): board.toml holds the
+        # denylist over runtime/ and the allowlist over the T-Deck's device
+        # tree, and build.sh does nothing but call the stager. So this reads the
+        # declaration rather than re-deriving it from shell syntax -- one source
+        # for what a build produces, and the regex extractors below survive only
+        # for the web runner, which still declares its DENY inline.
+        board = BOARD_DIR[target]
         mods = dict(_tracked(board / "modules"))
-        mods.update(_cp_staged(sh, board))
-        mods.update(_for_staged(sh))
+        mods.update({Path(name).stem: path for name, path
+                     in board_config.staged_modules(board, ROOT).items()})
     for name in GENERATED[target] | PACKAGES[target]:
         mods.setdefault(name, None)        # real, but with no single source file
     return mods
@@ -406,13 +441,102 @@ def test_no_host_only_module_is_frozen_onto_a_target(target):
     assert not leaked, "%s freezes host-only modules: %s" % (target, leaked)
 
 
-def test_the_frozen_set_is_derived_from_build_sh():
+# -- the tables above vs. the board files ------------------------------------
+#
+# `board.toml` and the two tables above describe the same truth twice, and the
+# obvious move -- derive the tables from the board files -- is WRONG, so the
+# reason is recorded rather than rediscovered.
+#
+# `HOST_ONLY` and `NEVER_ON_A_BOARD` are tripwires: they exist to go red when
+# somebody REMOVES a denial. Derive them from the denials and removing a denial
+# removes its own assertion, and the tripwire fires never. So the names stay
+# stated independently here, the PROSE lives once (in the board file, beside
+# the line that encodes it, per #161), and the two are checked against each
+# other in both directions below. Disagreement is the finding either way: a
+# board that stopped denying something the policy forbids, or a board denying
+# something for a reason nobody wrote down here.
+
+
+def _kinds(target):
+    """{filename: kind} from a board's declared denials."""
+    out = {}
+    for name, entry in board_config.denials(BOARD_DIR[target]).items():
+        out[name] = entry.get("kind", "")
+    return out
+
+
+@pytest.mark.parametrize("target", ("tdeck", "p4"))
+def test_board_toml_denies_everything_the_policy_tables_forbid(target):
+    declared = _kinds(target)
+    # HOST_ONLY carries names that are not runtime modules at all
+    # (`simulate_desktop` is a tool); only the ones a denylist could stage are
+    # the board file's business.
+    runtime_names = {p.stem for p in (ROOT / "runtime").glob("*.py")}
+    for name in sorted(HOST_ONLY[target] & runtime_names):
+        assert declared.get(name + ".py") == "host-only", (
+            "%s/board.toml does not deny %s.py as host-only -- the policy "
+            "table in this file says it must never be frozen there" % (target, name))
+    for name in sorted(NEVER_ON_A_BOARD):
+        assert name + ".py" in declared, (
+            "%s/board.toml does not name %s.py at all. NEVER_ON_A_BOARD wants "
+            "it denied WITH its reason, and a denylist may name a file that no "
+            "longer exists -- that is what makes it a tripwire" % (target, name))
+
+
+@pytest.mark.parametrize("target", ("tdeck", "p4"))
+def test_every_board_toml_denial_is_explained_and_classified(target):
+    """#161: the prose rationale moves WITH the data. An unexplained denial is
+    the state this phase existed to leave behind -- a staging list whose
+    exclusions were invisible because they were silence."""
+    kinds = {"host-only", "never-on-a-board", "tier", "no-consumer"}
+    for name, entry in sorted(board_config.denials(BOARD_DIR[target]).items()):
+        assert entry.get("kind") in kinds, (
+            "%s/board.toml denies %s with kind=%r; expected one of %s"
+            % (target, name, entry.get("kind"), sorted(kinds)))
+        assert len(entry.get("why", "").split()) >= 8, (
+            "%s/board.toml denies %s without saying why" % (target, name))
+        if entry["kind"] == "host-only":
+            assert Path(name).stem in HOST_ONLY[target], (
+                "%s/board.toml calls %s host-only but HOST_ONLY in this file "
+                "does not -- one of the two is wrong" % (target, name))
+        if entry["kind"] == "never-on-a-board":
+            assert Path(name).stem in NEVER_ON_A_BOARD, (
+                "%s/board.toml classes %s never-on-a-board but this file's "
+                "table does not carry it" % (target, name))
+        if entry["kind"] != "never-on-a-board":
+            assert (ROOT / "runtime" / name).exists(), (
+                "%s/board.toml denies %s, which is not a runtime module. Only "
+                "a never-on-a-board TRIPWIRE may name a file that is not there"
+                % (target, name))
+
+
+def test_the_two_boards_differ_by_exactly_the_presentation_tier():
+    """The whole point of the flip, stated as an invariant.
+
+    Two boards, one shared tree: the difference between their frozen consoles
+    should be a TIER (a 320x240 fullscreen stack vs a 1024x600 windowed desk),
+    not an accident of who remembered to edit which shell script. When this
+    fails, read the diff before changing the test -- either a real tier
+    difference just appeared, or a module went missing from one board.
+    """
+    tdeck = set(board_config.denials(TDECK))
+    p4 = set(board_config.denials(P4))
+    assert tdeck - p4 == {"wm_windowed.py", "surface.py"}, (
+        "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
+    assert p4 - tdeck == set(), (
+        "the P4 denies modules the S3 stages: %s" % sorted(p4 - tdeck))
+
+
+def test_the_frozen_set_is_derived_from_the_declaration():
     """The staleness this whole file exists to defeat.
 
     `modules/` is gitignored on both boards and never cleaned, so a module
     dropped from a staging list keeps working on every machine that has built
     before. Deriving the frozen set from that directory would inherit exactly
-    the blind spot that let the P4 web console break unnoticed.
+    the blind spot that let the P4 web console break unnoticed. (The stager
+    PRUNES that directory now -- `board.toml`'s `prune` -- but a build that has
+    not run yet cannot have pruned anything, so the derivation still has to
+    come from the declaration.)
 
     Board-AUTHORED modules do legitimately live in `modules/` (they are tracked,
     and the P4 whitelists seven of them in .gitignore). What must never happen is

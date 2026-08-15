@@ -306,20 +306,56 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
 
 ## 8. The staging seam (new — the cheapest fix in this doc)
 
-Both reviews landed on a seam v1.0 ignored, and it has already produced a bug:
+**Status: RESOLVED 2026-08-15 (#161 Phase 3). Both boards stage by denylist,
+and the closure test exists. What follows records what was true, what this doc
+got wrong about it, and what shipped.**
 
-- The S3's `build.sh` stages an **explicit `cp` allowlist**.
-- The P4's and web_runner's are **denylists** (glob + `DENY`).
+Both reviews landed on a seam v1.0 ignored, and it had already produced a bug.
+v1.1 stated the seam like this:
 
-So a new `runtime/*.py` reaches the P4 and the web automatically and the S3
-**never** — silently, with no test asserting staging completeness. That is the
-same failure family as §1.3's bugs, and it is how the `effective_input_kinds`
-re-export went missing for eleven days.
+> - The S3's `build.sh` stages an **explicit `cp` allowlist**.
+> - The P4's and web_runner's are **denylists** (glob + `DENY`).
 
-Since §6 puts `present.py` on the S3, this is a **prerequisite, not context**:
-add a test asserting that every module imported by a staged module is itself
-staged, per target. It is small, it is host-side, and it would have caught a
-shipped bug none of the other work here addresses.
+**Half of that was wrong, and it is worth recording which half.** The S3's
+allowlist was real (~70 hand-written `cp` lines). The P4's was **also an
+allowlist** — a hand-written `for f in editors.py editors_base.py … ; do cp`
+list — and had never been anything else; `git log -S'DENY' --
+docs/backend_contract_v1.md` is empty, and so is the same search over that
+board's `build.sh`. Only `web_runner/build.sh` ever globbed-minus-`DENY`. So
+the real risk was **twice** what this section claimed: a new `runtime/*.py`
+reached the web automatically and **neither board**, silently, with no test
+asserting staging completeness. That is the same failure family as §1.3's bugs,
+and it is how the `effective_input_kinds` re-export went missing for eleven
+days — and, later, how the T-Deck went without the web console the P4 had.
+
+A doc that describes a mechanism the code does not have is worse than one that
+says nothing, because the next reader trusts it. This one was trusted: the
+P4's own `surface.py` docstring says "the S3 build.sh denylists this file",
+which was aspiration, not description, until Phase 3 made it true.
+
+**What shipped (2026-08-15):**
+
+- Each board declares its staging in **`firmware/<board>/board.toml`**
+  (`tools/board_config.py` reads it; `build.sh` calls the stager and holds no
+  module list). Shared modules are a **denylist over `runtime/*.py`**, one
+  entry per exclusion, each carrying its `kind` and the prose reason — per
+  #161, "whatever moves, the prose rationale moves with it".
+- The two boards' shared sets now differ by exactly `wm_windowed.py` and its
+  `surface.py` leaf — the presentation TIER — and by nothing else. That is an
+  asserted invariant, not an observation.
+- The stager also **prunes**: `modules/` is gitignored and the frozen manifest
+  freezes the whole *directory*, so an unstaged module used to stay in the
+  image forever on any tree that had built before. It was not hypothetical —
+  `canvas.py`, `palette.py` and (on the P4) `moy_lua_glue.py` were all still
+  there, and therefore still frozen, when this landed.
+- `tests/test_staging_closure.py` is the completeness gate this section asked
+  for: every module imported by a staged module must itself be staged, per
+  target, deriving the frozen set from the declaration rather than from
+  `modules/` on disk. `tests/test_board_toml.py` checks the declaration and its
+  reader.
+
+The one target still declaring its denylist inline in shell is
+`firmware/web_runner/build.sh` (`DENY=`), which the closure test still parses.
 
 **Also declared out of scope by name** (same "None means absent" pattern, other
 objects — listed so they are decisions rather than omissions): `ws.wifi`,

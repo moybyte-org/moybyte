@@ -15,51 +15,15 @@ firmware/lilygo_t_deck_plus_micropython/.build
 firmware/esp32_p4_wifi6_touch_lcd_7b/.build
 firmware/lilygo_t_deck_plus_micropython/dist/
 /dist/
-# Shared host/device modules staged from runtime/ by build.sh (canonical lives in runtime/)
-firmware/lilygo_t_deck_plus_micropython/modules/editors.py
-firmware/lilygo_t_deck_plus_micropython/modules/block_editor_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/map_editor_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/music_editor_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/perf_hud.py
-firmware/lilygo_t_deck_plus_micropython/modules/update_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/system_menu_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/achievements_ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/layers.py
-firmware/lilygo_t_deck_plus_micropython/modules/lua_ext.py
-firmware/lilygo_t_deck_plus_micropython/modules/bar_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/cards_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/paint_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/settings_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/code_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/widgets.py
-firmware/lilygo_t_deck_plus_micropython/modules/wallpaper.py
-firmware/lilygo_t_deck_plus_micropython/modules/artwork.py
-firmware/lilygo_t_deck_plus_micropython/modules/appearance_app.py
-firmware/lilygo_t_deck_plus_micropython/modules/writer_app.py
-firmware/lilygo_t_deck_plus_micropython/modules/storybook_app.py
-firmware/lilygo_t_deck_plus_micropython/modules/launcher_layer.py
-firmware/lilygo_t_deck_plus_micropython/modules/project.py
-firmware/lilygo_t_deck_plus_micropython/modules/player.py
-firmware/lilygo_t_deck_plus_micropython/modules/editor_app.py
-firmware/lilygo_t_deck_plus_micropython/modules/wm.py
-firmware/lilygo_t_deck_plus_micropython/modules/audio.py
-firmware/lilygo_t_deck_plus_micropython/modules/console.py
-firmware/lilygo_t_deck_plus_micropython/modules/moy_carts.py
-firmware/lilygo_t_deck_plus_micropython/modules/moybuf.py
-firmware/lilygo_t_deck_plus_micropython/modules/blocks.py
-firmware/lilygo_t_deck_plus_micropython/modules/web_view.py
-firmware/lilygo_t_deck_plus_micropython/modules/chrome.py
-firmware/lilygo_t_deck_plus_micropython/modules/web_view_page.py
-firmware/lilygo_t_deck_plus_micropython/modules/web_view_ws.py
-firmware/lilygo_t_deck_plus_micropython/modules/moy_font.py
-firmware/lilygo_t_deck_plus_micropython/modules/ui.py
-firmware/lilygo_t_deck_plus_micropython/modules/calc_app.py
-# carts_data.py is generated from system_carts/ by tools/gen_device_carts.py at build
-firmware/lilygo_t_deck_plus_micropython/modules/carts_data.py
-# _ota_build.py is stamped by build.sh (OTA channel/version/label, #53)
-firmware/lilygo_t_deck_plus_micropython/modules/_ota_build.py
-# _moy_bench.py is stamped by build.sh (MOYBYTE_BENCH=1 perf-bench boot, #63)
-firmware/lilygo_t_deck_plus_micropython/modules/_moy_bench.py
+# The two boards' staged modules/ trees are ignored by PATTERN, in each board's
+# own .gitignore -- not by a list here. This used to be a hand-maintained
+# enumeration of every staged file, i.e. a third copy of the staging allowlist
+# beside build.sh's and each board's own; it had gone stale in both directions
+# (it still named canvas.py / web_view.py / web_view_page.py, gone; it would
+# have missed every module added after it). #161 Phase 3 made staging a
+# denylist declared in firmware/<board>/board.toml, so a new shared module
+# reaches a board without anyone editing anything -- and an ignore list that has
+# to be edited for each one would have put the paperwork straight back.
 firmware/lilygo_t_deck_plus_reference/
 firmware/reference_tulipcc/
 firmware/lilygo_t_deck_plus/include/moybyte_project_bundle.h

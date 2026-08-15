@@ -193,134 +193,28 @@ else
   fi
 fi
 
-# Stage the shared host/device modules into the frozen modules tree. Canonical
-# sources live in runtime/ (imported by the host as runtime.*); the device freezes
-# these copies as top-level modules, so both consoles run literally the same code:
-#   editors.py    -- CodeEditor / SpriteSheet / PaintEditor
-#   block_editor_ui.py -- the block editor's UI (#29 Part 2: BlockEditorUI +
-#                    BlockLayout, extracted from console.py); console.py does
-#                    `from block_editor_ui import BlockEditorUI, ...`
-#   map_editor_ui.py -- the map/tilemap editor's UI (#32: MapEditorUI, extracted
-#                    from console.py); console.py does `from map_editor_ui
-#                    import MapEditorUI, ...`
-#   music_editor_ui.py -- the music/sound editor's UI (#50: MusicEditorUI,
-#                    extracted from console.py); console.py does `from
-#                    music_editor_ui import MusicEditorUI, ...`
-#   perf_hud.py   -- the perf HUD's rendering (#43/#44: PerfHud, extracted from
-#                    console.py); console.py does `from perf_hud import PerfHud`
-#   update_ui.py  -- the firmware-update (OTA) screen's UI (#53: UpdateUI,
-#                    extracted from console.py); console.py does `from update_ui
-#                    import UpdateUI`
-#   system_menu_ui.py -- the ≡ dropdown / system menu's UI (#52: SystemMenuUI,
-#                    extracted from console.py); console.py does `from
-#                    system_menu_ui import SystemMenuUI`
-#   achievements_ui.py -- the Easter-egg subsystem + achievement/egg drawing (#21:
-#                    AchievementsUI, extracted from console.py); console.py does
-#                    `from achievements_ui import AchievementsUI`
-#   audio.py      -- sound model + AudioEngine synth/mixer (#16)
-#   project.py    -- the open cart's live workspace (Stage 1: Project + the four
-#                    builders + the commit_* persistence verbs, extracted from
-#                    console.py); console.py does `from project import Project`
-#   player.py     -- the cart PLAYER (Stage 2: Player.start/tick/handle_input/
-#                    handle_pointer + crash/pause chrome, extracted from console.py);
-#                    console.py does `from player import Player`
-#   editor_app.py -- the EDITOR app (Stage 3: EditorApp -- the tab ladder + tab state
-#                    + builders + PLAY, extracted from console.py); console.py does
-#                    `from editor_app import EditorApp`
-#   wm.py         -- the window manager (Stage 6: FullscreenStackWM -- the game<->system
-#                    viewport composite + the back-stack screen projects onto + the
-#                    memoized layer stack, extracted from console.py); console.py does
-#                    `from wm import FullscreenStackWM`
-#   chrome.py     -- the console's stateless base layer (MOY64 palette, Layout/CodeLayout
-#                    geometry, the icon-glyph vocabulary + themeable IconSheet defaults,
-#                    the small pure helpers), extracted from console.py; console.py does
-#                    `from chrome import (...)` and re-exports under the old console.X names
-#   console.py    -- launcher + desktop + cards/code/paint UI + Pointer
-#   moy_carts.py  -- the .moy store (scan/load/save/create/duplicate/delete)
-#   moy_fs.py     -- crash-safe file primitives (atomic write / .bak recover)
-#   moy_image.py  -- the moyimg codec + cover-thumb sidecars
-#   moy_journal.py -- the per-project undo/redo journal (#7 Stage 7)
-#   blocks.py     -- block model + blocks->Python compiler (#29; moy_carts imports it)
-#   web_view_ws.py -- the WS transport primitives (RFC 6455 handshake + framing)
-#                    moy_webserver's transport core rides; the rest of the old
-#                    web-view staging died in the 2026-08 streaming sunset
-#   moy_font.py   -- petme128 glyph blob (runtime/font.py) for the native
-#                    moy_gfx.text kernel (#62), so device text rasterizes from the
-#                    SAME bytes the host does (pixel parity)
-cp "${REPO_ROOT}/runtime/editors.py" "${SCRIPT_DIR}/modules/editors.py"
-cp "${REPO_ROOT}/runtime/editors_base.py" "${SCRIPT_DIR}/modules/editors_base.py"
-cp "${REPO_ROOT}/runtime/editors_code.py" "${SCRIPT_DIR}/modules/editors_code.py"
-cp "${REPO_ROOT}/runtime/editors_sheet.py" "${SCRIPT_DIR}/modules/editors_sheet.py"
-cp "${REPO_ROOT}/runtime/editors_paint_map.py" "${SCRIPT_DIR}/modules/editors_paint_map.py"
-cp "${REPO_ROOT}/runtime/editors_block.py" "${SCRIPT_DIR}/modules/editors_block.py"
-cp "${REPO_ROOT}/runtime/editors_music.py" "${SCRIPT_DIR}/modules/editors_music.py"
-cp "${REPO_ROOT}/runtime/editors_scene.py" "${SCRIPT_DIR}/modules/editors_scene.py"
-cp "${REPO_ROOT}/runtime/block_editor_ui.py" "${SCRIPT_DIR}/modules/block_editor_ui.py"
-cp "${REPO_ROOT}/runtime/map_editor_ui.py" "${SCRIPT_DIR}/modules/map_editor_ui.py"
-cp "${REPO_ROOT}/runtime/scene_editor_ui.py" "${SCRIPT_DIR}/modules/scene_editor_ui.py"
-cp "${REPO_ROOT}/runtime/audio.py" "${SCRIPT_DIR}/modules/audio.py"
-cp "${REPO_ROOT}/runtime/music_editor_ui.py" "${SCRIPT_DIR}/modules/music_editor_ui.py"
-cp "${REPO_ROOT}/runtime/perf_hud.py" "${SCRIPT_DIR}/modules/perf_hud.py"
-cp "${REPO_ROOT}/runtime/update_ui.py" "${SCRIPT_DIR}/modules/update_ui.py"
-cp "${REPO_ROOT}/runtime/system_menu_ui.py" "${SCRIPT_DIR}/modules/system_menu_ui.py"
-cp "${REPO_ROOT}/runtime/achievements_ui.py" "${SCRIPT_DIR}/modules/achievements_ui.py"
-cp "${REPO_ROOT}/runtime/layers.py" "${SCRIPT_DIR}/modules/layers.py"
-# The object-verb Lua glue (prelude + int-handle registry), shared by moy_lua,
-# moycore and the host binding -- see runtime/lua_ext.py.
-cp "${REPO_ROOT}/runtime/lua_ext.py" "${SCRIPT_DIR}/modules/lua_ext.py"
-cp "${REPO_ROOT}/runtime/bar_layer.py" "${SCRIPT_DIR}/modules/bar_layer.py"
-cp "${REPO_ROOT}/runtime/cards_layer.py" "${SCRIPT_DIR}/modules/cards_layer.py"
-cp "${REPO_ROOT}/runtime/paint_layer.py" "${SCRIPT_DIR}/modules/paint_layer.py"
-cp "${REPO_ROOT}/runtime/settings_layer.py" "${SCRIPT_DIR}/modules/settings_layer.py"
-cp "${REPO_ROOT}/runtime/code_layer.py" "${SCRIPT_DIR}/modules/code_layer.py"
-cp "${REPO_ROOT}/runtime/widgets.py" "${SCRIPT_DIR}/modules/widgets.py"
-cp "${REPO_ROOT}/runtime/wallpaper.py" "${SCRIPT_DIR}/modules/wallpaper.py"
-cp "${REPO_ROOT}/runtime/artwork.py" "${SCRIPT_DIR}/modules/artwork.py"
-cp "${REPO_ROOT}/runtime/appearance_app.py" "${SCRIPT_DIR}/modules/appearance_app.py"
-cp "${REPO_ROOT}/runtime/app_shell.py" "${SCRIPT_DIR}/modules/app_shell.py"
-cp "${REPO_ROOT}/runtime/file_widgets.py" "${SCRIPT_DIR}/modules/file_widgets.py"
-cp "${REPO_ROOT}/runtime/files_app.py" "${SCRIPT_DIR}/modules/files_app.py"
-cp "${REPO_ROOT}/runtime/writer_app.py" "${SCRIPT_DIR}/modules/writer_app.py"
-cp "${REPO_ROOT}/runtime/storybook_app.py" "${SCRIPT_DIR}/modules/storybook_app.py"
-cp "${REPO_ROOT}/runtime/sheets_app.py" "${SCRIPT_DIR}/modules/sheets_app.py"
-cp "${REPO_ROOT}/runtime/formula.py" "${SCRIPT_DIR}/modules/formula.py"
-cp "${REPO_ROOT}/runtime/launcher_layer.py" "${SCRIPT_DIR}/modules/launcher_layer.py"
-cp "${REPO_ROOT}/runtime/project.py" "${SCRIPT_DIR}/modules/project.py"
-cp "${REPO_ROOT}/runtime/player.py" "${SCRIPT_DIR}/modules/player.py"
-cp "${REPO_ROOT}/runtime/editor_app.py" "${SCRIPT_DIR}/modules/editor_app.py"
-cp "${REPO_ROOT}/runtime/wm.py" "${SCRIPT_DIR}/modules/wm.py"
-cp "${REPO_ROOT}/runtime/players.py" "${SCRIPT_DIR}/modules/players.py"
-cp "${REPO_ROOT}/runtime/chrome.py" "${SCRIPT_DIR}/modules/chrome.py"
-cp "${REPO_ROOT}/runtime/ui.py" "${SCRIPT_DIR}/modules/ui.py"
-cp "${REPO_ROOT}/runtime/calc_app.py" "${SCRIPT_DIR}/modules/calc_app.py"
-cp "${REPO_ROOT}/runtime/console.py" "${SCRIPT_DIR}/modules/console.py"
-cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
-cp "${REPO_ROOT}/runtime/moybuf.py" "${SCRIPT_DIR}/modules/moybuf.py"
-cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
-cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
-# canvas.py + palette.py are DELIBERATELY NOT STAGED (2026-08-15). They were
-# here for the Wallpaper preview runner, which computes the Appearance monitor's
-# frame on an offscreen pure-Python Canvas -- except that never once worked on a
-# board. runtime/palette.py builds indices 16-63 with CPython's `colorsys` at
-# import time and MicroPython has none, so `import palette` raised, `import
-# canvas` raised with it, and wallpaper._ensure_preview took its `return False`
-# path every time. The preview has always been a black rectangle here; no
-# thumbs/wp*.mct sidecar can exist either, because writing one needs the Canvas
-# that cannot import. Owner call: the preview is not worth a second raster on
-# the device -- tapping a wallpaper applies it, which is the whole interaction.
-# So the two files stay host/web-only, the frozen image gets ~1,600 lines of
-# flash back, and the LAST consumer of the pure-Python raster is gone.
-# tests/test_staging_closure.py pins the absence.
-cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
-cp "${REPO_ROOT}/runtime/op_history.py" "${SCRIPT_DIR}/modules/op_history.py"
-cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
-# web_view_ws.py only: the RFC 6455 framing moy_webserver's transport core
-# rides. It is all that is left of the old web-view staging -- the recorder and
-# the page went to the wasm head in the 2026-08 streaming sunset and were
-# DELETED outright at moycore stage 4, when that head started rasterizing and
-# stopped needing a replayer to ship pixels to.
-cp "${REPO_ROOT}/runtime/web_view_ws.py" "${SCRIPT_DIR}/modules/web_view_ws.py"
-cp "${REPO_ROOT}/runtime/font.py" "${SCRIPT_DIR}/modules/moy_font.py"
+# Stage the shared host/device modules into the frozen modules tree (#161
+# Phase 3). WHAT crosses and WHY now lives in board.toml, not here: the stager
+# copies every runtime/*.py EXCEPT the files that board file denies, each with
+# its reason written beside it, and applies the one rename (font.py ->
+# moy_font.py, the name device_canvas imports for the native text kernel).
+# Canonical sources live in runtime/ (the host imports them as runtime.*); the
+# device freezes these copies as top-level modules, so both consoles run
+# literally the same code.
+#
+# This was ~70 hand-written `cp` lines until 2026-08-15. An allowlist asks "did
+# somebody remember to add this module?", and when the answer is no nothing
+# says so: every consumer in this tree is capability-gated, so a module that is
+# not staged reads as a FEATURE THAT DOES NOT EXIST (which is how this board
+# went without the web console while the P4 had it). A denylist asks "is there
+# a reason this must not cross?" -- a question with a checkable answer.
+#
+# The stager also PRUNES. The generated manifest freezes the whole modules/
+# DIRECTORY, not the list this script copied, and modules/ is gitignored and
+# never cleaned -- so a file that stops being staged keeps being frozen forever
+# on every tree that has built before. It removes untracked strays it did not
+# just stage (board.toml's `keep` covers the ones generated below) and says so.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 # carts_data.py is GENERATED from system_carts/ (it replaces the ~1800 lines of
 # embedded carts moy_runtime used to hand-duplicate) so the device's seed /
 # fallback carts can never drift from the host source of truth -- moy_runtime
