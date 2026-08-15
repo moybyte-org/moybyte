@@ -30,7 +30,15 @@ the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
 
 import time
 
-from console import Pointer, Workstation, draw_splash, wire_workstation_core
+from console import Pointer, Workstation, wire_workstation_core
+# The boot spine + frame pump, shared with the T-Deck (#161 Phase 4/5,
+# canonical: runtime/device_boot.py; board.toml stages it like every other
+# shared module). The steps that used to be written twice -- boot splash, cart
+# seed+scan, the Lua runtime probe, the OTA verdict + rollback confirm, the
+# frame cadence -- live there now; everything this board does that the S3 does
+# not (the DPI scan-out, the PPA composite, BLE HID, the serial dev channel,
+# the idle screen blank) stays here, because it is hardware and not an oversight.
+from device_boot import DeviceBoot, FramePump, OtaHealth
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -313,25 +321,13 @@ class P4SystemCanvas(DeviceCanvas):
                         gc._buf, gc.w, gc.h, int(scale))
 
 
-def _load_carts(progress=None):
-    """Load carts from the internal-flash store (seeding built-ins on first
-    boot); fall back to the embedded CARTS on any store failure.
-
-    `progress` is handed to seed_builtins so the boot splash can show a bar:
-    on a full-erase boot this call is 17.5 of the 25 seconds before anything
-    composes, and every second of it is seeding."""
-    try:
-        import moy_carts
-        moy_carts.ensure_dirs(CARTS_ROOT)
-        moy_carts.seed_builtins(CARTS, CARTS_ROOT, progress=progress)
-        carts = moy_carts.scan(CARTS_ROOT)
-        if carts:
-            print("Moybyte P4 loaded %d carts from flash" % len(carts))
-            return carts, CARTS_ROOT
-    except Exception as exc:  # noqa: BLE001
-        print("Moybyte P4 flash carts unavailable:", exc)
-    print("Moybyte P4 using built-in carts")
-    return [dict(c) for c in CARTS], None
+# Loading the carts is DeviceBoot.load_carts now (#161 Phase 4): the seed +
+# scan + built-in fallback is the same on both boards, and what differs here is
+# arguments -- the internal-flash root above, no storage SESSION at all (this
+# console has no SD card and the store races nobody), and the word "flash" in
+# the serial lines. On a full-erase boot that call is 17.5 of the 25 seconds
+# before anything composes, and every second of it is seeding -- which is what
+# the splash's progress bar is for.
 
 
 def run_touch_calibrate():
@@ -603,7 +599,12 @@ def run_desktop(fps_cap=60):
     # if it fails to register.
     print("Moybyte P4 PPA:", "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
 
-    # -- boot splash (#58) ------------------------------------------------
+    # -- the shared boot spine (#45/#58/#161) ------------------------------
+    # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
+    # the Lua runtime probe and the "first frame in Nms" report -- one
+    # implementation, both boards. What differs here is its arguments: the
+    # serial prefix and this board's panel-light function.
+    #
     # The panel stays dark until a frame has composed (#45), which is right:
     # an uninitialised framebuffer is worse than black. But it makes a slow
     # boot indistinguishable from a dead board. Owner-reported after a full
@@ -613,55 +614,10 @@ def run_desktop(fps_cap=60):
     # WHY that boot was slow is still unmeasured -- a warm boot composes in
     # ~23ms, so it is something the erase forced (re-seeding, cache rebuilds)
     # and not the steady state. Naming it is what the timing line at the end of
-    # this function is for; this splash is so the wait is legible while it
+    # this function is for; the splash is so the wait is legible while it
     # happens, on the glass and on the wire.
-    #
-    # So compose a real frame early and say what is happening on it. Navy
-    # rather than black on purpose: the point is to prove the panel is LIT.
-    # Each stage repaints one line, and the same text goes to the wire, so a
-    # boot that stalls says where it stalled on both channels.
-    _splash = {"lit": False}
-
-    def _boot_note(msg, frac=None):
-        if _splash.get("done"):
-            return                 # the desktop owns the glass now
-        if frac is None:
-            print("Moybyte P4 boot:", msg)   # a stage; the bar stays quiet
-        try:
-            w, h = sys_canvas.w, sys_canvas.h
-            # THE thing that makes this a loading screen rather than a strobe.
-            # The canvas caches its framebuffer pointer, and flush() rotates the
-            # back buffer (3 of them, #58 render overlap) -- so without this the
-            # splash repaints ONE buffer while the panel shows the other two,
-            # i.e. two frames in three are stale. The desktop loop calls this
-            # every frame for the same reason.
-            sys_canvas.sync_back()
-            # The SHIPPED boot logo (console.draw_splash -- Moy + the two-tone
-            # wordmark), with the bar and status under it. Deliberately the same
-            # picture the Workstation shows at #45's splash: a loading screen
-            # that looks like a different program makes the machine appear to
-            # start twice.
-            draw_splash(sys_canvas, frac=frac, status=msg)
-            comp.flush()
-            if not _splash["lit"]:
-                set_backlight(True)
-                _splash["lit"] = True
-        except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
-            print("Moybyte P4 splash unavailable:", exc)
-
-    def _seed_progress(done, total, title):
-        # One repaint per cart: at ~550ms of flash writes each, 32 repaints of a
-        # static screen are free (measured: the boot stays at 25.4s), and this
-        # is the only 17 seconds of the boot that knows how much of itself is
-        # left. Every 8th also goes to the wire -- a repaint says nothing to
-        # someone watching over serial, which was half the original complaint,
-        # and one line per cart would drown the boot log.
-        if done % 8 == 0:
-            print("Moybyte P4 boot: loading cartridges %d/%d" % (done + 1, total))
-        _boot_note("loading cartridges  %d/%d" % (done + 1, total),
-                   frac=float(done) / total if total else 1.0)
-
-    _boot_note("starting")
+    boot = DeviceBoot(sys_canvas, comp, set_backlight, "Moybyte P4")
+    boot.note("starting")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same
     # native kernel; the windowed WM composites it into the player window.
     # (#77: -O3 on moy_gfx and an internal-SRAM game canvas were A/B'd here --
@@ -675,15 +631,16 @@ def run_desktop(fps_cap=60):
     pointer = Pointer(sys_canvas.w, sys_canvas.h)
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
 
-    _boot_note("loading cartridges")
-    carts, carts_root = _load_carts(progress=_seed_progress)
+    boot.note("loading cartridges")
+    carts, carts_root = boot.load_carts(moy_carts, CARTS, root=CARTS_ROOT,
+                                        media="flash")
     # P4 keyboard (#26): the C6_WIFI MicroPython variant already exposes NimBLE
     # central/GATT-client bindings over ESP-Hosted SDIO. Keep construction lazy
     # until /moy exists (the bond store lives beside the carts), and start the
     # radio after the Workstation has finished its boot allocations below.
     keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
                               auto_start=False)
-    _boot_note("building the desktop")
+    boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
@@ -692,19 +649,10 @@ def run_desktop(fps_cap=60):
     # like any game composite (a 128x120 view fills the 600px height at 5x).
     ws.make_game_canvas = lambda w, h: DeviceCanvas(
         _LayerComp(int(w), int(h), gfx))
-    # ONE Lua runtime (#67 -> moycore). The cart's whole frame runs inside
-    # libmoy; moybyte's superset verbs ride it as registered trampolines and
-    # the object-valued ones (layers, images) on the shared int-handle glue.
-    # No chooser and no second engine: a build without the module opens the
-    # Player's runtime-missing panel.
-    lua_runtime = None
-    try:
-        from moycore_glue import make_moycore_runtime
-        lua_runtime = make_moycore_runtime(ws)
-    except ImportError:
-        pass
-    print("Moybyte P4: lua runtime %s"
-          % ("ON (moycore)" if lua_runtime is not None else "ABSENT"))
+    # The #67 Lua cart runtime (DeviceBoot.lua_runtime -- one probe, both
+    # boards; see its docstring for why there is no chooser and what a build
+    # without the module does instead).
+    lua_runtime = boot.lua_runtime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards; this used to be a hand-kept "same order as
     # host build_workstation" copy). P4 notes: can_manage's carts_root default is
@@ -781,27 +729,23 @@ def run_desktop(fps_cap=60):
     # Say what became of the last update before anything else can overwrite the
     # evidence (#53). The rollback CONFIRM does not happen here -- reaching this
     # line only proves the desktop was built, and an image that never paints has
-    # already shipped once (#56). It is fired from the frame loop below, after
-    # the console has actually drawn.
-    _ota = getattr(ws, "updater", None)   # cleared once the confirm below has fired
-    if _ota is not None:
-        try:
-            verdict = _ota.boot_check()
-            if verdict:
-                print("Moybyte P4 OTA: last update %s (%s)" % verdict)
-                ws.announce_update()      # and say so on the desktop, not just here
-        except Exception as exc:  # noqa: BLE001 -- never block the desktop
-            print("Moybyte P4 OTA: boot_check failed:", exc)
+    # already shipped once (#56). It is fired from the frame loop below
+    # (FramePump.tail), after the console has actually drawn.
+    _ota = OtaHealth(ws, log=lambda m: print("Moybyte P4 OTA: %s" % m))
+    _ota.boot_check()
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
     # The last thing before the loop, and the stage the silent wait was in:
     # everything above had already printed when the screen was reported black.
-    _boot_note("drawing the first frame")
-    _first_at = _ticks_ms()
-    frame_ms = 1000 // fps_cap
-    last = _ticks_ms()
+    # start_frames also arms the boot logo, but ONLY if the splash never came up
+    # (arming it otherwise replays the splash and delays the desktop).
+    boot.start_frames(ws)
+    # The shared frame pump (#161 Phase 5): the dt clock, the once-only
+    # first-frame/OTA housekeeping, and the cadence + pacing debt. Everything
+    # BETWEEN its head and its tail is this board's own hardware.
+    pump = FramePump(boot, _ota, fps_cap)
     # Dark until the first composed frame (#45) -- unless the splash already
     # composed one, in which case the panel is lit and stays lit.
-    _backlight_on = _splash["lit"]
+    _backlight_on = boot.lit
     _ps_ms = POWER_SAVE_MS         # idle blank timeout (serial `power` retunes)
     _asleep = False                # panel blanked by the idle timer
     _ps_force = False              # serial `power off`: blank on the next frame
@@ -817,18 +761,8 @@ def run_desktop(fps_cap=60):
     _pf_n = 0
     _pf_busy = 0
     _pf_drawn = 0
-    # NOT a second logo. arm_splash holds the boot picture for 1.5s once the
-    # desktop is ready, which is right on a board that boots straight into it --
-    # but here that same picture has been on the glass for the whole boot, so
-    # arming it just replays the splash and delays the desktop. Armed only if
-    # the splash never came up (its draw failed), which is the one case where
-    # the logo would otherwise never be seen.
-    if not _splash["lit"]:
-        ws.arm_splash()
     while True:
-        now = _ticks_ms()
-        dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
-        last = now
+        now, dt = pump.begin()
         # BLE notifications arrive asynchronously; applying their latest level
         # state before begin_frame gives InputState clean press/release edges.
         # poll() also advances scan/reconnect and flushes a newly-created bond
@@ -1016,8 +950,15 @@ def run_desktop(fps_cap=60):
                 # surface under test). Dev-board serial only, like every
                 # command here.
                 _code = line.split(None, 1)[1]
+                # `boot` and `pump` are in scope because the shared spine (#161
+                # Phase 4/5) is the half of this loop with no other on-glass
+                # witness: `pump.debt` is the #77 pacing debt this board gained
+                # with the extraction, and `boot.lit`/`boot.done` are the splash
+                # hand-over. A lever nobody can read from the harness is how the
+                # debt came to exist on one board only.
                 _env = {"ws": ws, "wm": ws.wm, "pointer": pointer,
-                        "comp": comp, "game": game}
+                        "comp": comp, "game": game,
+                        "boot": boot, "pump": pump}
                 try:
                     try:
                         print("PY %r" % (eval(_code, _env),))
@@ -1194,24 +1135,14 @@ def run_desktop(fps_cap=60):
                 and getattr(ws, "_frames_drawn", 0) > 0:
             set_backlight(True)
             _backlight_on = True
-        # How long the desktop actually took to put something on the glass --
-        # the number that was missing when a black screen had to be diagnosed
-        # by guesswork. Reported once, then the splash hands over.
-        if not _splash.get("done") and getattr(ws, "_frames_drawn", 0) > 0:
-            _splash["done"] = True
-            print("Moybyte P4 first frame in %dms"
-                  % _ticks_diff(_ticks_ms(), _first_at))
-        # The OTA rollback confirm (#53), now that frames are really going out.
-        # Cheap (an int compare) and self-disarming after it fires once.
-        if _ota is not None:
-            try:
-                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
-                    print("Moybyte P4 OTA: marked app valid (slot %s)" % _ota.slot())
-                if _ota.confirmed:
-                    _ota = None       # fired (or a non-OTA build): stop asking
-            except Exception as exc:  # noqa: BLE001 -- never break a frame over this
-                print("Moybyte P4 OTA: confirm failed:", exc)
-                _ota = None
+        # The shared once-only tail (#161 Phase 5): the splash hands the glass
+        # over and reports how long the desktop took to reach it -- the number
+        # that was missing when a black screen had to be diagnosed by guesswork
+        # -- and the OTA rollback confirm fires now that frames are really going
+        # out. Both are self-disarming; both run AFTER the backlight gate above,
+        # which stays here because on this board the idle screen blank owns the
+        # panel light too (hence its `not _asleep` guard).
+        pump.tail(ws)
         _wh = ws.webhost
         if _wh is not None and _wh.serving:
             # One non-blocking accept/serve per frame (plan 3.4 pull half).
@@ -1249,11 +1180,12 @@ def run_desktop(fps_cap=60):
             _pf_n = 0
             _pf_busy = 0
             _pf_drawn = _drawn
-        try:
-            _fms = 1000 // ws.frame_cap_fps()
-        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
-            _fms = frame_ms
-        if _fms < frame_ms:
-            _fms = frame_ms
-        if elapsed < _fms:
-            time.sleep_ms(_fms - elapsed)
+        # Frame pacing (#63/#77): the shared cadence + pacing debt. The DEBT is
+        # new on this board (#161 Phase 5) and is the asymmetry that made the
+        # case for sharing the pump: it shipped into the T-Deck's loop alone on
+        # 2026-08-10, while frameskip -- the thing it corrects -- has shipped on
+        # BOTH boards since 2026-07-10, and this board even has a serial
+        # `skip 0|1` to A/B it. It is inert while frames fit their budget.
+        _t_sleep = pump.pace(ws, elapsed)
+        if _t_sleep:
+            time.sleep_ms(_t_sleep)

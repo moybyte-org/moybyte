@@ -555,13 +555,62 @@ def test_no_updater_at_all_defaults_to_stable(tmp_path):
 # -- both boards are wired to it ---------------------------------------------
 
 def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
-    """A grep test, like the rest of the frozen-module suite: these two files are
-    never imported by the host (they import esp32/machine), so the only thing CI
-    can check is the shape of the source."""
-    for mod_path, frames in ((TDECK / "moy_runtime.py", "_frames_drawn"),
-                             (P4 / "moy_runtime.py", "_frames_drawn")):
+    """WHERE each half runs, asserted structurally rather than by grep.
+
+    Both boards drive one shared implementation now (`runtime/device_boot.py`'s
+    OtaHealth + FramePump, #161 Phase 4/5), which makes the old string match
+    both weaker and misleading: a literal that lives in a third file says
+    nothing about whether a board reached it, and the whole claim here is about
+    PLACEMENT. So this walks each `run_desktop` and asserts the boot verdict is
+    read OUTSIDE the frame loop while the confirm is pumped INSIDE it -- the
+    distinction #56 was: made where the desktop is merely CONSTRUCTED, the
+    confirm certifies an image that has never drawn a pixel.
+
+    These two files are never imported by the host (they import esp32/machine),
+    so the source is all CI can reach -- same house rule as the rest of the
+    frozen-module suite.
+    """
+    import ast
+
+    for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
         src = mod_path.read_text(encoding="utf-8")
-        assert "confirm_when_healthy(getattr(ws, \"%s\", 0))" % frames in src, mod_path
-        assert "boot_check()" in src, mod_path
+        fn = None
+        for node in ast.walk(ast.parse(src, filename=str(mod_path))):
+            if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
+                fn = node
+        assert fn is not None, mod_path
+
+        seen = {}
+
+        def walk(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                loop = in_loop or isinstance(node, (ast.While, ast.For))
+                if isinstance(child, ast.Call):
+                    name = (child.func.attr
+                            if isinstance(child.func, ast.Attribute)
+                            else getattr(child.func, "id", None))
+                    if name:
+                        seen.setdefault(name, set()).add(loop)
+                walk(child, loop)
+
+        walk(fn, False)
+        assert seen.get("OtaHealth") == {False}, (
+            "%s: the OTA health reporter must be built on the boot path" % mod_path)
+        assert seen.get("boot_check") == {False}, (
+            "%s: the boot verdict is read once, before the loop" % mod_path)
+        assert seen.get("tail") == {True}, (
+            "%s: the rollback confirm is pumped from the FRAME LOOP -- made "
+            "where the desktop is merely constructed it would certify an image "
+            "that never painted (#56)" % mod_path)
         # The old unconditional confirm at desktop-construction time is gone.
         assert "ws.updater.mark_valid()" not in src, mod_path
+
+    # And the shared half really does confirm on painted frames, not on boot.
+    spine = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in spine
+    tree = ast.parse(spine)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "boot_check":
+            assert "confirm_when_healthy" not in ast.dump(node), (
+                "device_boot.OtaHealth.boot_check must NOT confirm -- reaching "
+                "the boot path proves only that the desktop was constructed")

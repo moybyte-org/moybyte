@@ -16,7 +16,15 @@ from array import array
 # shared verbatim with the host (canonical: runtime/editors.py; build.sh stages a
 # copy into modules/ so it freezes here as the top-level module `editors`).
 from editors import CodeEditor, PaintEditor, SpriteSheet
-from console import NAMES, Pointer, Workstation, _cursor_delta, draw_splash, wire_workstation_core
+from console import NAMES, Pointer, Workstation, _cursor_delta, wire_workstation_core
+# The boot spine + frame pump, shared with the P4 (#161 Phase 4/5, canonical:
+# runtime/device_boot.py; build.sh stages it like every other shared module).
+# The steps that used to be written twice -- boot splash, cart seed+scan, the
+# Lua runtime probe, the OTA verdict + rollback confirm, the frame cadence --
+# live there now; everything this board does that the P4 does not (trackball,
+# the I2C poller thread, the SD/panel bus gate, the diag ring, HITCH/LOOP
+# accounting) stays here, because it is hardware and not an oversight.
+from device_boot import DeviceBoot, FramePump, OtaHealth
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
 # import them without a moy_runtime cycle -- see device_util.py's module docstring).
@@ -99,40 +107,15 @@ SD_TRACE = True
 # run_desktop calls them between frames when perf capture is on.
 
 
-def _load_carts(session=None, progress=None):
-    """Load cartridges from SD (seeding the built-ins on first boot). Returns
-    (carts, carts_root); carts_root is None (management disabled) on fallback to
-    the embedded carts if the SD card is missing/unreadable.
-
-    `session` is the SD lifecycle wrapper to mount under. Default is the
-    pre-display machine.SDCard path (used by the boot prefetch); pass
-    moybyte_sd.with_sd_live for the post-display native path.
-
-    `progress(done, total, title)` feeds the boot splash's bar. Seeding is the
-    long pole of a first boot -- 17.5s of the P4's 25s, and this board writes
-    the same cartridges to SD rather than internal flash."""
-    try:
-        import moybyte_sd
-        import moy_carts
-
-        if session is None:
-            session = moybyte_sd.with_sd
-
-        def _seed_and_scan():
-            moy_carts.ensure_dirs()
-            moy_carts.seed_builtins(CARTS, progress=progress)
-            return moy_carts.scan()
-
-        # Mount only for the seed+scan, then unmount: the render loop must own
-        # the shared SPI bus with no SDCard device attached, or flushes hang.
-        carts = session(_seed_and_scan)
-        if carts:
-            print("Moybyte loaded %d carts from SD" % len(carts))
-            return carts, moy_carts.CARTS_DIR
-    except Exception as exc:  # noqa: BLE001
-        print("Moybyte SD carts unavailable:", exc)
-    print("Moybyte using built-in carts")
-    return [dict(c) for c in CARTS], None
+# Loading the carts is DeviceBoot.load_carts now (#161 Phase 4): the seed +
+# scan + built-in fallback is the same on both boards, and the two things that
+# differ are arguments -- the storage SESSION (here moybyte_sd.with_sd_live: SD
+# shares the panel's SPI host, so the mount must bracket the whole seed+scan and
+# the render loop must own the bus with no SDCard device attached, or flushes
+# hang) and the word for the medium in the serial lines. Seeding is the long
+# pole of a FIRST boot -- 17.5s of the P4's 25s, and this board writes the same
+# cartridges to SD rather than internal flash -- which is what the splash's
+# progress bar is for.
 
 
 # --- the device WEB VIEW (the streaming browser mirror) was DELETED in the
@@ -323,7 +306,7 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         except Exception as exc:
             print("Moybyte desktop: takeover failed:", exc)
     try:
-        from tdeck_display import get_display_bus
+        from tdeck_display import get_display_bus, set_backlight
         from moy_compositor import make_compositor
         from moybyte.input import InputState, TDeckKeyboard, InputPoller
     except Exception as exc:
@@ -340,46 +323,20 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
 
     canvas = DeviceCanvas(comp)
 
-    # -- boot splash (#45/#58) --------------------------------------------
+    # -- the shared boot spine (#45/#58/#161) ------------------------------
+    # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
+    # the Lua runtime probe and the "first frame in Nms" report -- one
+    # implementation, both boards. The two things that differ here are its
+    # arguments: the serial prefix and this board's panel-light function.
+    #
     # The panel is dark until the first frame ships (the backlight gate in the
     # loop below), which is right -- it keeps the ST7789's power-on GRAM noise
     # off the glass. The cost is that a slow boot looks like a dead board, and
     # a FIRST boot is slow: every built-in cartridge is written out before
-    # anything composes. Measured on the P4, whose store is internal flash:
-    # 17.5s of a 25s boot. This board seeds to SD.
-    #
-    # So show the SHIPPED boot logo early (console.draw_splash -- the same
-    # picture arm_splash holds, so the machine never appears to start twice)
-    # with the seeding bar under it, and say the same on serial.
-    _splash = {"lit": False}
-
-    def _boot_note(msg, frac=None):
-        if _splash.get("done"):
-            return                       # the desktop owns the glass now
-        if frac is None:
-            print("Moybyte boot:", msg)  # a stage; the bar stays quiet
-        try:
-            # The canvas caches its framebuffer pointer, and flush() may rotate
-            # the back buffer -- a cheap no-op in single-buffer mode, and
-            # load-bearing otherwise (on the P4 its absence strobed two frames
-            # in every three).
-            canvas.sync_back()
-            draw_splash(canvas, frac=frac, status=msg)
-            comp.flush()
-            if not _splash["lit"]:
-                import tdeck_display
-                tdeck_display.set_backlight(True)
-                _splash["lit"] = True
-        except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
-            print("Moybyte splash unavailable:", exc)
-
-    def _seed_progress(done, total, title):
-        if done % 8 == 0:                # the wire, without one line per cart
-            print("Moybyte boot: loading cartridges %d/%d" % (done + 1, total))
-        _boot_note("loading cartridges  %d/%d" % (done + 1, total),
-                   frac=float(done) / total if total else 1.0)
-
-    _boot_note("starting")
+    # anything composes. The splash is how that wait becomes legible, on the
+    # glass and on the wire.
+    boot = DeviceBoot(canvas, comp, set_backlight, "Moybyte")
+    boot.note("starting")
 
     inp = InputState()
     keyboard = TDeckKeyboard(inp)
@@ -405,16 +362,17 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             _diag_note("input", "poller setup failed: %s" % (exc,))
             poller = None
     import moybyte_sd
+    import moy_carts
     # Carts are read from SD before display init; only fall back to a post-display
     # mount (now safe via the native moy_sd path) if the shell didn't prefetch.
     sram_census("rd-entry")         # compositor/canvas/input are up by here
-    _boot_note("loading cartridges")
+    boot.note("loading cartridges")
     carts, carts_root = (prefetched if prefetched is not None
-                         else _load_carts(moybyte_sd.with_sd_live,
-                                          progress=_seed_progress))
-    import moy_carts
+                         else boot.load_carts(moy_carts, CARTS,
+                                              session=moybyte_sd.with_sd_live,
+                                              media="SD"))
     sram_census("carts")
-    _boot_note("building the desktop")
+    boot.note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
     sram_census("console")
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
@@ -444,31 +402,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                    % ("ON" if _player_mod.NATIVE_CARTS else "OFF"))
     except Exception:  # noqa: BLE001 -- diagnostic only
         pass
-    # #67 Phase 1: the Lua cart runtime -- wired only when the moy_lua native
-    # module is in this build; without it a "runtime": "lua" cart opens the
-    # Player's runtime-missing panel (the Phase 2 graceful floor).
-    # ONE Lua runtime. moycore runs the cart's whole frame inside libmoy --
-    # `_update` and `_draw` back to back in C, one upcall per frame instead of
-    # hundreds -- and moybyte's superset verbs ride it as registered
-    # trampolines, with the object-valued ones (layers, images) on the shared
-    # int-handle glue. There is no second engine and no chooser: a build
-    # without the module opens the Player's runtime-missing panel, which is the
-    # same graceful floor a build without a Lua VM always had.
+    # The #67 Lua cart runtime (DeviceBoot.lua_runtime -- one probe, both
+    # boards; see its docstring for why there is no chooser). The S3's
+    # presentation is unchanged by it: moycore renders the cart canvas and the
+    # #190 flush-bounce fold synthesizes its bands from that buffer exactly as
+    # before, because the buffer is the same one.
     #
-    # The S3's presentation is unchanged by this: moycore renders the cart
-    # canvas and the #190 flush-bounce fold synthesizes its bands from that
-    # buffer exactly as before, because the buffer is the same one.
-    lua_runtime = None
-    try:
-        from moycore_glue import make_moycore_runtime
-        lua_runtime = make_moycore_runtime(ws)
-    except ImportError:
-        pass
-    # Say whether moycore is actually in this image. The S3's USB-CDC RX is
-    # dead under the desktop, so serial is READ-only here -- a status that is
-    # not printed cannot be asked for.
-    _diag_note("carts", "lua runtime %s"
-               % ("ON (moycore)" if lua_runtime is not None else "ABSENT"))
+    # The status line goes to the DIAG RING as well as the wire: this board's
+    # USB-CDC RX is dead under the desktop, so serial is read-only here and a
+    # status that is not recorded cannot be asked for afterwards.
+    lua_runtime = boot.lua_runtime(ws, log=lambda m: _diag_note("carts", m))
 
     # Set by the SD-session trace below, cleared by the first frame that flushes after
     # one -- the "the panel survived the SD session" half of the #183 bracket.
@@ -653,17 +596,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # (#53). Reaching here means the panel, SD, keyboard and desktop all came up --
     # but NOT that a single frame reached the glass, and a board that boots to a
     # black screen has shipped here before (#56). So the rollback CONFIRM is not
-    # made here; it is made from the frame loop below, once frames are really going
-    # out (ws.updater.confirm_when_healthy).
-    _ota = getattr(ws, "updater", None)          # cleared once the confirm has fired
-    if _ota is not None:
-        try:
-            _verdict = _ota.boot_check()
-            if _verdict:
-                _diag_log("ota", "last update %s (%s)" % _verdict, diag)
-                ws.announce_update()      # and say so on the desktop, not just here
-        except Exception as exc:
-            _diag_log("ota", "boot_check failed: %s" % exc, diag)
+    # made here; it is made from the frame loop below (FramePump.tail), once
+    # frames are really going out. The log sink is the DIAG RING, not bare
+    # serial: this board has no REPL to ask afterwards.
+    _ota = OtaHealth(ws, log=lambda m: _diag_log("ota", m, diag))
+    _ota.boot_check()
 
     import gc
     gc.collect()                                # defrag after the heavy boot so the LCD
@@ -676,12 +613,13 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                   % (gc.mem_free(), esp32.idf_heap_info(esp32.HEAP_DATA)), diag)
     except Exception as _e:                     # noqa: BLE001 -- diagnostic only
         _diag_log("mem", "gc_free=%d (esp32 n/a: %s)" % (gc.mem_free(), _e), diag)
-    frame_ms = 1000 // fps_cap
-    last = _ticks_ms()
+    # The shared frame pump (#161 Phase 5): the dt clock, the once-only
+    # first-frame/OTA housekeeping, and the cadence + pacing debt. Everything
+    # BETWEEN its head and its tail is this board's own hardware.
+    pump = FramePump(boot, _ota, fps_cap)
     # #45: the panel stays dark until the first frame ships -- unless the boot
     # splash already composed one, in which case it is lit and stays lit.
-    _backlight_on = _splash["lit"]
-    _first_at = _ticks_ms()
+    _backlight_on = boot.lit
     # Diag timers: flush the RAM ring to SD every ~5s (between frames, never during a
     # panel flush -- with_sd_live mounts on the native single-bus path), and sample
     # the perf HUD numbers into a PERF line every ~3s while a cart runs.
@@ -694,25 +632,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # fires on SPIKES, so a steady per-frame cost that never crosses HITCH_MS was
     # invisible until this line existed (2026-07-29 fps hunt).
     _loop_acc = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    # Pacing debt (#77, 2026-08-10): ms the loop is BEHIND its cadence. The old
-    # per-frame clamp couldn't pace a frameskip pair whose FULL frame overruns
-    # the 33ms budget (celeste: 50ms full + 33ms padded skip = 83ms pairs, the
-    # game 20% slow and 12fps -- worse on both axes). An over-budget frame now
-    # borrows from the next frames' sleeps so the PAIR lands on cadence
-    # (50 + 16 = 66ms = two 30fps slots). Capped at one pair so a real hitch
-    # (a 200ms GC) doesn't eat the sleeps for a second afterwards.
-    _pace_debt = 0
-    _boot_note("drawing the first frame")
-    # NOT a second logo: the boot splash has held this exact picture for the
-    # whole boot, so arming it again would replay the splash and delay the
-    # launcher. Armed only if the splash never came up (its draw failed) --
-    # the one case where the logo would otherwise go unseen.
-    if not _splash["lit"]:
-        ws.arm_splash()           # boot logo: the moybyte mascot before the launcher
+    # Says "drawing the first frame", starts the first-frame clock, and arms the
+    # boot logo ONLY if the splash never came up (see DeviceBoot.start_frames --
+    # arming it otherwise replays the splash and delays the launcher).
+    boot.start_frames(ws)
     while True:
-        now = _ticks_ms()
-        dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
-        last = now
+        now, dt = pump.begin()
         # #69: with the poller thread live, the frame loop only APPLIES staged
         # input (no I2C -> no stall can land here). If the thread ever dies,
         # detach and fall back to the synchronous poll -- input never goes dark.
@@ -829,28 +754,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         # desktop, not garbage. One-shot; guarded so a no-op redraw frame won't re-light.
         if not _backlight_on and getattr(ws, "_frames_drawn", 0) > 0:
             try:
-                import tdeck_display
-                tdeck_display.set_backlight(True)
+                set_backlight(True)
             except Exception as _bl:            # display-less host / bring-up: ignore
                 print("Moybyte backlight on failed:", _bl)
             _backlight_on = True
-        # How long the desktop took to reach the glass -- reported once, then
-        # the splash hands over and stops painting.
-        if not _splash.get("done") and getattr(ws, "_frames_drawn", 0) > 0:
-            _splash["done"] = True
-            print("Moybyte first frame in %dms"
-                  % _ticks_diff(_ticks_ms(), _first_at))
-        # The OTA rollback confirm (#53), now that frames are really going out.
-        # Cheap (an int compare) and self-disarming after it fires once.
-        if _ota is not None:
-            try:
-                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
-                    _diag_log("ota", "marked app valid (slot %s)" % _ota.slot(), diag)
-                if _ota.confirmed:
-                    _ota = None       # fired (or a non-OTA build): stop asking
-            except Exception as exc:  # never break a frame over this
-                _diag_log("ota", "confirm failed: %s" % exc, diag)
-                _ota = None
+        # The shared once-only tail (#161 Phase 5): the splash hands the glass
+        # over and reports how long the desktop took to reach it, and the OTA
+        # rollback confirm fires now that frames are really going out. Both are
+        # self-disarming; both run AFTER the backlight gate above, which stays
+        # here because the panel light is board hardware.
+        pump.tail(ws)
         # Diag perf sample (~3s): a structured "PERF cart=<name> fps=<n> flush=<ms>
         # draw=<ms>" line while a cart runs -- the payload that makes "play -> reboot
         # -> paste the serial" yield per-cart frame timings offline. No SD touch here
@@ -964,28 +877,11 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
                         _t_diag, _t_sd, _t_web, _t_hi, _t_hp)
-        # Frame pacing (#63): a running GAME locks to a steady cadence (30fps
-        # default, manifest "fps": 60 for carts that sustain it) -- a LOCKED 30
-        # feels smoother than a 38-55 swing, and the freed headroom absorbs
-        # GC/SD hitches. Console screens/tools keep the loop's fps_cap (pointer
-        # responsiveness). Re-read per iteration: it changes on cart open/exit.
-        try:
-            _fms = 1000 // ws.frame_cap_fps()
-        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
-            _fms = frame_ms
-        if _fms < frame_ms:
-            _fms = frame_ms                     # never pace FASTER than the loop cap
-        if elapsed < _fms:
-            _t_sleep = _fms - elapsed
-            if _pace_debt:                      # pay the debt out of this sleep
-                _take = _t_sleep if _t_sleep < _pace_debt else _pace_debt
-                _t_sleep -= _take
-                _pace_debt -= _take
-        else:
-            _t_sleep = 0
-            _pace_debt += elapsed - _fms
-            if _pace_debt > 2 * _fms:
-                _pace_debt = 2 * _fms           # unpayable: just run flat out
+        # Frame pacing (#63/#77): the shared cadence + pacing debt -- a running
+        # GAME locks to a steady rate, console screens keep the loop's own cap,
+        # and an over-budget frame borrows from the next frames' sleeps so a
+        # frameskip PAIR lands on cadence. See FramePump.pace.
+        _t_sleep = pump.pace(ws, elapsed)
         # LOOP accumulation (see _loop_acc): plain int adds, one per stage per
         # frame. Done BEFORE the sleep so `frame` is work, and `sleep` is carried
         # separately -- a paced loop must not read as a slow one.

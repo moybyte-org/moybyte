@@ -20,6 +20,27 @@ def _staged():
     return staged_modules(_REPO / ROOT, _REPO)
 
 
+def _device_backend_src():
+    """The device backend's source, as the greps below mean it.
+
+    Three files now, for two different reasons. `make_api` moved to
+    `device_api.py` (#58, staged to every device target), and the BOOT SPINE +
+    FRAME PUMP moved to the shared `runtime/device_boot.py` (#161 Phase 4/5) --
+    the boot splash, the cart seed+scan, the Lua probe, the OTA verdict and the
+    frame cadence were the last things this console wrote twice. `run_desktop`
+    and everything that is this board's own hardware stay in `moy_runtime.py`.
+
+    device_boot is read through `_staged()` rather than by path on purpose: that
+    asserts it really is staged onto this board. A spine that is not frozen is a
+    board that cannot boot, which a grep against `runtime/` would not notice.
+    """
+    return "\n".join((
+        (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8"),
+        (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"),
+        _staged()["device_boot.py"].read_text(encoding="utf-8"),
+    ))
+
+
 def _editors_src():
     """The editor cores' combined source: editors.py is the re-exporting
     umbrella since the per-editor split (editors_base/_code/_sheet/_paint_map/
@@ -152,11 +173,11 @@ def test_ota_updater_module_flashes_inactive_slot_from_sd():
 
 
 def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+    # See _device_backend_src: moy_runtime + device_api + the shared boot spine
+    # are the surface these greps mean. The updater is still CONSTRUCTED here
+    # (its SD gate is this board's alone); what it does afterwards -- the boot
+    # verdict and the rollback confirm -- is the spine's OtaHealth.
+    runtime = _device_backend_src()
 
     assert "import moy_ota" in runtime
     assert "ws.updater = moy_ota.OtaUpdater(_with_sd_synced)" in runtime
@@ -164,7 +185,7 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     # actually painted -- not on the boot path, where "the desktop was built"
     # would confirm an image that never reaches the glass (#56). See
     # tests/test_ota_health.py for the behaviour; this pins the wiring.
-    assert 'confirm_when_healthy(getattr(ws, "_frames_drawn", 0))' in runtime
+    assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in runtime
     assert "boot_check()" in runtime
     assert "ws.updater.mark_valid()" not in runtime
 
@@ -3353,14 +3374,24 @@ def test_one_lua_runtime_wired():
     assert "moycore" in build
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
-    for src_path in ((ROOT / "modules" / "moy_runtime.py"),
-                     (Path("firmware/esp32_p4_wifi6_touch_lcd_7b") / "modules"
-                      / "moy_runtime.py"),
+    # The two BOARDS reach it through the shared boot spine since #161 Phase 4
+    # -- runtime/device_boot.py holds ONE probe where there used to be two
+    # hand-kept copies, which is the whole class of bug that phase exists to
+    # close -- so the import lives there. Each board still has to CALL it, and
+    # the second loop is what pins that: a spine nobody invokes is a feature
+    # that quietly does not exist, exactly like the web console on the T-Deck.
+    for src_path in ((_REPO / "runtime" / "device_boot.py"),
                      (Path("firmware/web_runner") / "web_boot.py")):
         src = src_path.read_text(encoding="utf-8")
         assert "from moycore_glue import make_moycore_runtime" in src, src_path
         assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
         assert "except ImportError" in src, src_path
+    for src_path in ((ROOT / "modules" / "moy_runtime.py"),
+                     (Path("firmware/esp32_p4_wifi6_touch_lcd_7b") / "modules"
+                      / "moy_runtime.py")):
+        src = src_path.read_text(encoding="utf-8")
+        assert "boot.lua_runtime(ws" in src, src_path
+        assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
     assert not (ROOT / "modules" / "moy_lua_glue.py").exists()
     api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
     assert "moy_lua_glue" not in api_src

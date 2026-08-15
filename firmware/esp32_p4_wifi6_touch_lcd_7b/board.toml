@@ -198,7 +198,17 @@ These files live in the T-Deck tree for historical reasons -- that is the board
 they were written for -- but each is board-AGNOSTIC by construction, with its
 S3-only imports guarded and its board-specific inputs passed as constructor
 arguments. Moving them to a shared tree is the right end state and is #161's
-Phase 4/5 work, not this file's."""
+Phase 4/5 work, not this file's.
+
+PHASE 4/5 UPDATE (2026-08-15): the boot spine and frame pump did NOT move here
+-- they went into `runtime/device_boot.py` and reach this board through the
+SHARED denylist above, which is why nothing was added to this section for them.
+The line that decides is whether a module can import with no board present:
+device_boot takes every hardware object as an argument, so it loads on CPython
+and its shared half is executed by tests/test_device_boot.py. The four modules
+above cannot -- they reach `framebuf`, `moy_gfx`, `machine` -- so moving them to
+`runtime/` would put un-importable files in the tree the host and the wasm head
+glob. They stay here until that is fixed, which is a bigger job than #161."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState
