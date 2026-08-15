@@ -78,6 +78,10 @@ _SIGS = (
     ("hr_mget", [_P, _I, _I]),
     ("hr_mset", [_P, _I, _I, _I]),
     ("hr_peek", [_P, _I, _I]),
+    # moybyte's own two -- see the note above their definitions in
+    # runtime/moyhost_raster.c. NOT spec verbs, so libmoy has no counterpart.
+    ("hr_blit_indices", [_P, _P, _I, _I, _I, _I, _I, _I, _I]),
+    ("hr_print_scaled", [_P, _P, _I, _I, _I, _I, _P, _I, _I]),
 )
 
 _LIB = [None]          # the loaded CDLL, or False once we know there isn't one
@@ -297,6 +301,55 @@ class NativeRaster:
     def spr(self, n, x, y, colorkey=-1, scale=1, flip=0):
         self._d.hr_spr(self._r, int(n), int(x), int(y), int(colorkey),
                        int(scale), int(flip))
+
+    @staticmethod
+    def index_view(pix):
+        """A ZERO-COPY c_int8 view of `pix`, or None if it is not a buffer.
+
+        None is a real answer, not a failure: a list-backed Image has nothing to
+        view and the caller keeps the Python path. Returning a converted copy
+        instead would be the slow case pretending to be the fast one.
+
+        Signed, because an Image carries -1 for "nothing" -- and a view rather
+        than a copy because the map autocache re-rasterizes into the SAME
+        bytearray it already handed out, so any snapshot goes stale the moment
+        a tile changes.
+        """
+        try:
+            return (ctypes.c_int8 * len(pix)).from_buffer(pix)
+        except TypeError:                 # a list/tuple: no buffer protocol
+            return None
+
+    @staticmethod
+    def index_buffer(pix):
+        """A c_int8 array of `pix`, for blit_indices.
+
+        SIGNED on purpose: an Image carries -1 for "nothing", which is not a
+        colour, and reading it unsigned would turn every hole into index 255.
+
+        Built by the CALLER so it can be cached. A paint image is ~77k pixels
+        and a per-frame rebuild of that is the kind of copy this whole binding
+        exists to remove -- Canvas.spr stashes one on the Image, exactly as the
+        device caches its RGB565 bake (#63 Fold 3).
+        """
+        return (ctypes.c_int8 * len(pix)).from_buffer_copy(
+            bytearray((v & 0xFF) for v in pix))
+
+    def blit_indices(self, pix, iw, ih, x, y, transparent, scale=1, flip=0):
+        """An Image (arbitrary palette-index bitmap) -- moybyte's, not the
+        spec's. `pix` is either a raw sequence or an already-built
+        index_buffer()."""
+        buf = pix if isinstance(pix, ctypes.Array) else self.index_buffer(pix)
+        self._d.hr_blit_indices(self._r, buf, int(iw), int(ih), int(x), int(y),
+                                int(transparent), int(scale), int(flip))
+
+    def print_scaled(self, s, x, y, c, font, first, scale):
+        """Text at the SYSTEM font size. The font blob comes from the caller --
+        runtime/font.py is the one glyph source both backends rasterize (#62)."""
+        b = s.encode("latin-1", "replace") if isinstance(s, str) else bytes(s)
+        fb = (ctypes.c_ubyte * len(font)).from_buffer_copy(bytes(font))
+        self._d.hr_print_scaled(self._r, b, len(b), int(x), int(y), int(c),
+                                fb, int(first), int(scale))
 
     def sspr(self, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
              colorkey=-1, flip=0):

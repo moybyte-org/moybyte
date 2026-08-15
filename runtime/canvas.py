@@ -800,6 +800,28 @@ class Canvas:
         y = int(y)
         scale = int(scale)
         flip = int(flip)
+        nr = self._nr
+        view = nr.index_view(img.pix) if nr is not None else None
+        if view is not None:
+            # moyhost_raster's hr_blit_indices -- byte-identical to the loop
+            # below over every scale/flip/camera/clip/pal/palt combination.
+            #
+            # ZERO-COPY, and only when the pixels are a real buffer. The first
+            # version cached a converted copy on the Image keyed by the pix
+            # object's identity, which is wrong for exactly the hottest caller:
+            # the map autocache re-rasterizes INTO the same bytearray and hands
+            # back an Image wrapping it, so after an mset the identity was
+            # unchanged and the stale copy was drawn (3 pixels, caught by the
+            # device-parity test). A view over the live buffer cannot go stale,
+            # and it also skips the per-pixel Python conversion a 77k-pixel
+            # paint image would otherwise pay every frame.
+            #
+            # A list-backed Image (ASCII art) has no buffer to view, so it keeps
+            # the loop below -- those are small and rare, and converting one per
+            # call would cost more than it saves.
+            nr.blit_indices(view, img.w, img.h, x, y, img.transparent,
+                            scale, flip)
+            return
         fx = flip & 1
         fy = (flip >> 1) & 1
         t = img.transparent
@@ -1285,6 +1307,17 @@ class SystemCanvas(Canvas):
         # like Canvas.print, so callers that pass 1/2 keep working.
         ci = c & 63
         fs = self.font_scale
+        nr = self._nr
+        if fs > 1 and nr is not None:
+            # moyhost_raster's hr_print_scaled -- byte-identical to the
+            # draw_scaled loop below. libmoy has no counterpart on purpose:
+            # SPEC.md 6 fixes print at 8px so text conformance is decidable, and
+            # a scaled font upstream would be a second source of truth for a
+            # size the spec pins. This is CHROME, which is host business (SPEC
+            # 0), so it lives in moybyte's own shim beside blit_indices.
+            self.flush_batch()
+            nr.print_scaled(s, int(x), int(y), ci, _font.DATA, _font.FIRST, fs)
+            return
         if fs <= 1:
             put = self._put
 
