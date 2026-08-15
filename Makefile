@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy check-venv
+.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy vendor-p8-import check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -116,6 +116,60 @@ PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 test:
 	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
 
+# ---------------------------------------------------------------------------
+# The desktop MicroPython that the COMPILED-VS-COMPILED checks run against.
+#
+# tests/test_gfx_binding.py::test_matches_the_native_moy_gfx drives the same
+# ops through the host's ctypes binding and through the REAL native moy_gfx,
+# and diffs the framebuffers. That is the only lane in `make test` where two
+# independently COMPILED kernels are compared -- everything else either
+# compares the host to itself or compares it to a transcription, and a
+# transcription can be right while the C is wrong (CLAUDE.md records the
+# provisional_tline day). The same binary carries `moycore` and `moy_audio`,
+# so tests/test_moycore_loop.py, tests/test_semantic_traces.py and
+# test_audio_parity's native pass are the other consumers.
+#
+# It used to be a HAND-BUILT artifact under firmware/.../.build (prose
+# instructions in native/moycore/README.md), gitignored and built by nobody --
+# so the check passed on the one machine that had it and SILENTLY SKIPPED
+# everywhere else, which is the exact failure mode a parity test exists to
+# prevent. Hence a real target, and a CI step that runs it.
+#
+# ~15s from cold (2s clone, 4s submodules, 2s mpy-cross, 5s compile on 12
+# cores) and under a second warm, which is why there is no cache to go stale.
+# MICROPY_PY_SSL=0 drops the only submodule the standard variant would
+# otherwise need (mbedtls) and nothing here speaks TLS.
+UNIX_MP_TAG ?= v1.28.0
+UNIX_MP_DIR ?= .build/unix_micropython
+UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
+UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
+UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
+UNIX_MP_NATIVE := firmware/lilygo_t_deck_plus_micropython/native
+# Every native module that ships a Makefile fragment. moy_alloc/moy_sd have
+# none (ESP-IDF only) and are skipped by the port's own discovery anyway.
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio
+UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
+.PHONY: unix-micropython
+unix-micropython:
+	@mkdir -p $(UNIX_MP_DIR) $(UNIX_MP_USERMODS)
+	@test -d $(UNIX_MP_SRC)/.git || git clone --depth 1 --branch $(UNIX_MP_TAG) \
+	    --quiet https://github.com/micropython/micropython $(UNIX_MP_SRC)
+# Outside the clone guard on purpose (the web runner's build.sh learned the
+# same lesson): a checkout can exist WITHOUT its submodules if a previous run
+# died between the two, and a guarded init could never repair that.
+	@cd $(UNIX_MP_SRC) && git submodule update --init --depth 1 --quiet \
+	    lib/micropython-lib lib/berkeley-db-1.xx
+# Symlinks, not copies: the modules under test must be the working tree's, or
+# this proves the parity of a stale snapshot.
+	@for m in $(UNIX_MP_MODULES); do \
+	    ln -sfn $(abspath $(UNIX_MP_NATIVE))/$$m $(UNIX_MP_USERMODS)/$$m; done
+	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
+	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
+	    VARIANT=standard MICROPY_PY_SSL=0 BUILD=build-moybyte \
+	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
+	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
+
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:
 #   firmware/web_runner/build.sh && make site
@@ -155,6 +209,17 @@ sync-issues:
 #   make vendor-libmoy SPEC=/path/to/moy-spec
 vendor-libmoy:
 	$(PYTHON) tools/vendor_libmoy.py $(if $(SPEC),--spec $(SPEC))
+
+# Re-vendor moy-spec's PICO-8 asset converter (tools/p8_import.py), the same way
+# and for the same reason: SPEC.md 8.1 is what says what a converted note MEANS,
+# so the converter belongs upstream and travels HERE. It was a hand-copy once;
+# upstream corrected PICO-8's pitch offset, the copy never heard, and every cart
+# imported here played two octaves flat for ten days with a green suite.
+# tests/test_p8_import_vendor.py is what makes that loud now.
+#   make vendor-p8-import
+#   make vendor-p8-import SPEC=/path/to/moy-spec
+vendor-p8-import:
+	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
 
 firmware-build-lilygo-micropython:
 	bash firmware/lilygo_t_deck_plus_micropython/build.sh

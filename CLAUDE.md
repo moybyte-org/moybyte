@@ -285,9 +285,27 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   raster in wasm can fill 76,800 px/frame, so the page's whole JS
   draw-command replayer stopped being necessary. That repo is still SPEC.md
   ("moy core 0.1") + runner + the `moy` CLI (new/run/export/port/demo) + the
-  vendored p8 converters (re-vendor `p8_import.py` whenever `tools/import_p8.py`
-  changes — a mechanical stdlib-only transform, see the session scripts in git
-  history). One thing the swap COST, recorded in the spec's
+  **p8 converter, which is UPSTREAM of us** (2026-08-15). This line used to say
+  "re-vendor `p8_import.py` whenever `tools/import_p8.py` changes", i.e.
+  moybyte → spec, and it had the arrow backwards: SPEC.md is what says what a
+  converted cart MEANS (§8.1 fixes `57 = A4 = 440 Hz`, hence PICO-8's pitch
+  offset of 24; §8.1's keyed rest is what makes a ported slide glide from the
+  right note), so corrections are worked out there and travel HERE. They did
+  not: upstream fixed the offset `0 → 24`, our hand-copy never heard, and
+  **every cart imported through this repo came out two octaves flat while
+  `make test` stayed green** — the tests had pinned the wrong model too, so
+  re-syncing meant deliberately breaking a passing test and nobody did.
+  So it is vendored now, like libmoy: `tools/p8_import.py` is moy-spec's file
+  byte-for-byte, refreshed with **`make vendor-p8-import`**
+  (`tools/vendor_p8_import.py`, stamping `tools/p8_import_vendor.json`), and
+  **editing it here is a red test** — `tests/test_p8_import_vendor.py` hashes
+  it against the manifest, diffs it against a sibling checkout at the pinned
+  commit, refuses to let `tools/import_p8.py` re-grow a converter verb, and
+  checks the thing that actually broke: that the converter and the vendored
+  synth (`moy_audio.c`'s `pitch - 24.0f`) still put A4 in the same place. What
+  stays ours in `tools/import_p8.py` is only the CLI, the `.moy` folder
+  writer, and the guided PICO-8 → Python port notes (#36); a Lua port is `moy
+  port`, over there. One thing the swap COST, recorded in the spec's
   `conformance/README.md`: that JS replayer was the project's only *independent*
   raster, and moycore/libmoy/moy_gfx all share one lineage — the ESP32-P4 run is
   now the only cross-check that cannot have inherited a bug. AUDIO on the web

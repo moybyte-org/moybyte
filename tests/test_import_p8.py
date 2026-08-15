@@ -1,17 +1,33 @@
-"""Tests for the offline PICO-8 .p8 -> .moy asset importer (tools/import_p8.py).
+"""Tests for the offline PICO-8 .p8 -> .moy importer (tools/import_p8.py).
 
 Feeds a small hand-written synthetic .p8 (a few __gfx__ rows + a tiny __sfx__ +
 one __music__ row) and asserts:
   * the emitted sprites.moygfx nibbles match the input __gfx__ (round-trip stable),
-  * sounds.json parses via runtime.audio.AudioBank.from_dict and is lossy-correct,
+  * sounds.json parses via runtime.audio.AudioBank.from_dict and lands on the
+    right NOTES -- checked in Hz through runtime.audio, never by restating the
+    importer's own constant,
   * manifest.json is valid and well-shaped,
   * main.py keeps the Lua only as a comment (never executable),
   * the cart load()s cleanly via runtime.moy_carts.
+
+WHY THE Hz. These tests used to assert `steps[0][0] == 0x1E` -- the p8 pitch
+byte, unchanged -- with the comment "pitch maps 1:1". It looked like a tight
+assertion and it was a copy of the bug: PICO-8's tracker LABELS its pitch 0 as
+C0, but its synth tunes pitch 33 to 440 Hz, so the labels sit two octaves below
+concert naming and every imported cart played two octaves flat. Restating a
+constant cannot catch a wrong constant. Asking `note_to_freq` what the note
+came out as can, so that is what these assert.
+
+The converter itself is moy-spec's, vendored (tools/p8_import.py) --
+tests/test_p8_import_vendor.py is what keeps the two copies from diverging
+again.
 """
 
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -19,8 +35,13 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import import_p8  # noqa: E402
 from runtime import moy_carts  # noqa: E402
-from runtime.audio import AudioBank  # noqa: E402
+from runtime.audio import AudioBank, note_to_freq  # noqa: E402
 from runtime.editors import SpriteSheet  # noqa: E402
+
+# PICO-8's synth is key_to_freq(k) = 440 * 2^((k-33)/12), so ITS pitch 33 is
+# A4. Written out here as Hz so the expectations below are notes, not indices.
+P8_A4 = 33
+HZ = {p: 440.0 * 2.0 ** ((p - P8_A4) / 12.0) for p in range(64)}
 
 
 # A synthetic .p8: 3 distinct __gfx__ rows (the rest blank), one __sfx__ line
@@ -31,7 +52,9 @@ GFX_ROW1 = "f0f0f0f0" + "0" * 120              # checker
 GFX_ROW2 = "8" * 8 + "0" * 120                 # 8 red px
 
 # __sfx__ line layout: [mode:2][duration:2][loopstart:2][loopend:2] + 32 notes*5.
-# duration 0x10 (=16 ticks/row) -> speed = round(120/16) = 8.
+# duration 0x10 (=16 ticks/row) -> speed = 120/16 = 7.5 steps/sec, kept exact
+# (SPEC.md 8.1's speed is not integer-only; rounding it to 8 drifts the SFX
+# against the row clock that _row_secs computes from the same tick count).
 # notes: pitch=0x1E inst=0 vol=6 eff=0 ; pitch=0x21 inst=3 vol=5 eff=0 ;
 #        pitch=0x18 inst=6 vol=7 eff=0 ; then all rest (vol 0).
 _HEADER = "00" + "10" + "00" + "00"
@@ -99,13 +122,21 @@ def test_gfx_nibbles_match_input(tmp_path):
 
 
 def test_gfx_roundtrip_stable(tmp_path):
-    """parse -> kgfx -> SpriteSheet.from_hex -> to_hex is a fixed point."""
+    """parse -> kgfx -> SpriteSheet.from_hex -> to_hex is a fixed point.
+
+    This is the test that LICENSES the vendored converter to skip a
+    normalization pass. This repo's copy used to run its output back through
+    the real SpriteSheet before writing it; moy-spec's cannot (it is stdlib
+    only) and does not need to, because the grid it builds is already exactly
+    what the editor would emit. That claim is only worth anything while
+    something checks it here, where SpriteSheet actually exists.
+    """
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
     kgfx = (out / "sprites.moygfx").read_text(encoding="utf-8")
     # spec=False: p8's __gfx__ is 128x128, the top half of a SPEC.md 3.2 cart
-    # sheet, and the importer emits exactly that region (see import_p8._kgfx).
+    # sheet, and the importer emits exactly that region.
     sheet = SpriteSheet.from_hex(kgfx, cols=16, rows=16, spec=False)
     assert sheet.to_hex() == kgfx
 
@@ -119,14 +150,17 @@ def test_sounds_parse_via_audiobank(tmp_path):
     bank = AudioBank.from_dict(data)            # must not raise
     assert len(bank.sfx) >= 1
     sfx0 = bank.sfx[0]
-    # speed: duration 0x10 -> round(120/16) == 8
-    assert sfx0.speed == 8
+    # speed: duration 0x10 -> 120/16 == 7.5 steps/sec, not rounded to 8
+    assert sfx0.speed == 7.5
     # the 3 authored notes survive (trailing rests trimmed)
     assert len(sfx0.steps) == 3
-    # pitch maps 1:1 (PICO-8 pitch == Moybyte semitone index)
-    assert sfx0.steps[0][0] == 0x1E
-    assert sfx0.steps[1][0] == 0x21
-    assert sfx0.steps[2][0] == 0x18
+    # PITCH: the three notes must come out at the FREQUENCIES PICO-8 would have
+    # played them at. Note 2 is p8 pitch 33, which is PICO-8's A4 -- so this
+    # asserts, in Hz, that a ported A4 is still an A4 and not the A2 two
+    # octaves down that a literal reading of p8's tracker labels produces.
+    assert note_to_freq(sfx0.steps[0][0]) == pytest.approx(HZ[0x1E])
+    assert note_to_freq(sfx0.steps[1][0]) == pytest.approx(440.0)
+    assert note_to_freq(sfx0.steps[2][0]) == pytest.approx(HZ[0x18])
     # instruments folded to waveforms: tri->1, square->0, noise->3
     assert sfx0.steps[0][1] == 1
     assert sfx0.steps[1][1] == 0
@@ -327,10 +361,13 @@ def test_sfx_effect_nibble_and_new_waves_import_verbatim():
             + "30" + "7" + "6" + "7"      # phaser, arp slow
             + "00000" * 28)
     d = import_p8._sfx_line_to_dict(line)
-    assert d["steps"][0] == [0x1E, 6, 6, 1]
-    assert d["steps"][1] == [0x21, 4, 5, 2]
-    assert d["steps"][2] == [0x18, 5, 7]
-    assert d["steps"][3] == [0x30, 7, 6, 7]
+    off = import_p8.PICO8_PITCH_C0
+    assert d["steps"][0] == [0x1E + off, 6, 6, 1]
+    assert d["steps"][1] == [0x21 + off, 4, 5, 2]
+    assert d["steps"][2] == [0x18 + off, 5, 7]
+    assert d["steps"][3] == [0x30 + off, 7, 6, 7]
+    # and the offset is the right one -- p8's 0x21 (33) is A4 (see HZ above)
+    assert note_to_freq(d["steps"][1][0]) == pytest.approx(440.0)
 
 
 def test_music_rows_import_all_channels_with_fixed_positions():
@@ -370,7 +407,25 @@ def test_sfx_loop_range_imports_as_looping_with_start():
     d = import_p8._sfx_line_to_dict(line)
     assert d["loop"] is True and d["loop_start"] == 2
     assert len(d["steps"]) == 4                      # incl. the rest at idx 3
-    assert d["steps"][3][0] == import_p8.REST
+    assert d["steps"][3][2] == 0                     # silent
+
+
+def test_a_p8_rest_imports_as_a_keyed_rest_not_a_minus_one():
+    """SPEC.md 8.1: a note with vol 0 but a real pitch is a KEYED rest --
+    silent, yet still the note a following slide glides from; only pitch -1
+    leaves that origin untouched. Every PICO-8 tracker slot has a key, so a
+    silent p8 slot must keep its pitch or the next slide starts from whatever
+    was playing two rows ago. This repo's old copy of the converter emitted
+    [-1, wave, 0] and quietly broke every ported slide."""
+    line = ("00" + "10" + "00" + "00"
+            + "1e060"                     # audible
+            + "24000"                     # p8 pitch 0x24, vol 0 -> keyed rest
+            + "26060"                     # audible again
+            + "00000" * 29)
+    steps = import_p8._sfx_line_to_dict(line)["steps"]
+    assert steps[1][2] == 0, "a vol-0 p8 slot must stay silent"
+    assert steps[1][0] == 0x24 + import_p8.PICO8_PITCH_C0, (
+        "and must keep its key, or a following slide has no origin")
 
 
 def test_sfx_length_trick_loop_start_with_end_zero():

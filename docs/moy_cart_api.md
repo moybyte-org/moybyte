@@ -543,7 +543,17 @@ Since #170 the model is PICO-8-parity:
   untouched. (PICO-8 works this way, so ported slides land right.)
 
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
-over verbatim — waves, effects and all four music channels.
+over verbatim — waves, effects, keyed rests and all four music channels. The
+two tools land on the *same* `sounds.json` because they are the same converter:
+moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. They differ
+only in what they do with the cart's *code* — `moy port` writes Lua plus a p8
+compat shim, `tools/import_p8.py` writes a Python stub for you to port into.
+
+**One number worth knowing if you read a `.p8` by hand:** PICO-8's tracker
+labels its pitch `0` as "C0", but its synth tunes pitch `33` to 440 Hz, so its
+labels sit two octaves below concert naming. The import adds **24**, which is
+why a p8 `21` (33) arrives here as pitch `57` — A4, the same note you heard in
+PICO-8.
 
 **Instruments are not equally loud, on purpose.** The triangle family is about
 twice the square family, which is PICO-8's own mix; music is balanced against

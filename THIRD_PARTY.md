@@ -257,8 +257,10 @@ names it, and a reader deserves to know where the numbers came from.
 Listed so a reviewer does not have to wonder. Each of these reproduces a
 published format, protocol or behaviour; none contains third-party code.
 
-- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/import_p8.py`) — the
-  section layout (`__gfx__`, `__gff__`,
+- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/p8_import.py`, vendored from
+  the project's own [moy-spec](https://github.com/moybyte-org/moy-spec) — same
+  authors, not third-party, so it is not listed in §2) — the section layout
+  (`__gfx__`, `__gff__`,
   `__map__`, `__sfx__`, `__music__`), the pre-0.2.0 `:c:` compression lookup
   table, and the steganographic 2-bit-per-channel PNG packing are format
   constants. The implementation is stdlib-only and written from the format
@@ -269,7 +271,7 @@ published format, protocol or behaviour; none contains third-party code.
 - **PICO-8 audio parity** (`runtime/audio.py`) — waveform numbering and the
   per-note effect column follow PICO-8's numbering so imported carts sound
   right. The synthesis is Moybyte's own.
-- **PNG decoding** (`tools/import_p8.py`) and **PNG encoding**
+- **PNG decoding** (`tools/p8_import.py`) and **PNG encoding**
   (`tools/render_icons.py`) — hand-written per the PNG specification, with
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
