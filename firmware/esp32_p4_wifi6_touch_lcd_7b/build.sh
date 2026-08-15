@@ -148,6 +148,16 @@ cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
 #     From runtime/ (canonical, same list the T-Deck build stages) -- the whole
 #     shared console -- PLUS wm_windowed.py: the P4 is the windowed presentation
 #     tier (#73), deliberately NOT staged into the S3 build.
+#
+#     web_view_ws.py is moy_webserver's HARD dependency, not a leftover of the
+#     streaming sunset. Its import ladder (`import web_view_ws` / `from runtime
+#     import web_view_ws`) has no third branch and there is no `runtime` package
+#     on device, so dropping it makes `import moy_webhost` raise -- which the
+#     caller catches, which makes the WEB CONSOLE row silently not exist. The
+#     sunset removed it (06506ab) and the web console re-added its dependent
+#     without it (a0a9d21); this build kept working only because modules/ is
+#     gitignored and still held the pre-sunset copy, so a fresh clone would have
+#     lost the feature. tests/test_staging_closure.py now says this out loud.
 for f in editors.py editors_base.py editors_code.py editors_sheet.py \
          editors_paint_map.py editors_block.py editors_music.py \
          editors_scene.py block_editor_ui.py map_editor_ui.py \
@@ -158,6 +168,7 @@ for f in editors.py editors_base.py editors_code.py editors_sheet.py \
          wallpaper.py artwork.py appearance_app.py app_shell.py file_widgets.py files_app.py writer_app.py storybook_app.py sheets_app.py formula.py launcher_layer.py project.py player.py editor_app.py \
          wm.py wm_windowed.py surface.py players.py chrome.py ui.py calc_app.py console.py moy_carts.py \
          moybuf.py moy_fs.py moy_image.py moy_journal.py op_history.py blocks.py lua_ext.py \
+         web_view_ws.py \
          canvas.py palette.py; do
   cp "${REPO_ROOT}/runtime/${f}" "${MODULES_DIR}/${f}"
 done

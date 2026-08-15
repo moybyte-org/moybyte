@@ -144,4 +144,11 @@ def test_boards_no_longer_freeze_the_recording_stack():
     assert 'cp "${REPO_ROOT}/runtime/web_view.py"' not in tdeck
     assert 'cp "${REPO_ROOT}/runtime/web_view_page.py"' not in tdeck
     p4 = _read("firmware", "esp32_p4_wifi6_touch_lcd_7b", "build.sh")
-    assert "web_view" not in p4
+    # Same carve-out as the T-Deck above: web_view_ws.py is the RFC 6455 framing
+    # leaf moy_webserver's transport core imports, and it survives the sunset by
+    # decision (see this module's docstring). Banning the bare substring
+    # "web_view" also banned its dependency -- which is how the P4 lost it in
+    # 06506ab and shipped a web console that could not import for two days. So
+    # the ban is on the two DELETED modules by name.
+    assert "web_view.py" not in p4
+    assert "web_view_page.py" not in p4

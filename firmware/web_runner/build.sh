@@ -198,7 +198,13 @@ fi
 echo "== staging runtime/ modules"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/modules"
-DENY="host_app.py lua_host.py palette.py font.py __init__.py"
+# The three *_binding.py are the HOST's ctypes loaders: they shell out to a C
+# compiler (subprocess/shutil) and dlopen the result. The browser reaches libmoy
+# through its compiled-in usermods instead, so these were pure dead weight in the
+# image -- swept in only because a denylist includes whatever nobody excluded.
+# tests/test_staging_closure.py is what noticed.
+DENY="host_app.py lua_host.py palette.py font.py __init__.py \
+      raster_binding.py audio_binding.py lua_binding.py"
 for f in "${REPO_ROOT}/runtime/"*.py; do
   base="$(basename "${f}")"
   skip=0
