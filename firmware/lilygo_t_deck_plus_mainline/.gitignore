@@ -3,9 +3,16 @@
 # firmware/lilygo_t_deck_plus_micropython/native/).
 native/.staged/
 # modules/ mixes board-authored files (tracked, whitelisted below) with copies
-# staged at build time from runtime/ -- the canonical sources live there.
+# staged at build time from runtime/ and from the fork build's modules/ tree --
+# the canonical sources live there and board.toml declares which of them cross.
+#
+# The whitelist is ALSO what the stager's prune reads: it asks `git ls-files`
+# inside modules/, treats a tracked file as board-authored and never deletes it,
+# and deletes any untracked .py that board.toml no longer stages. So a new
+# board-authored module has to be listed here, or the next build removes it.
 modules/*
 !modules/boot.py
 !modules/main.py
 !modules/moybyte_shell.py
 !modules/tdeck_panel.py
+!modules/tdeck_smoke.py

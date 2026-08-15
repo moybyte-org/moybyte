@@ -12,8 +12,8 @@
 # read is not a write): the shared native modules under native/, which stay
 # single-sourced there, and two .patch files that are board-agnostic.
 #
-# Stage 1 = PANEL ONLY. The frozen tree is this board's own four modules; the
-# shared runtime/ console arrives with stage 6. Build -> flash -> look:
+# The bring-up runs in six stages (panel, touch, keyboard, SD, audio, console);
+# `modules/moybyte_shell.py` picks which one boots. Build -> flash -> look:
 #
 #   ./build.sh
 #   make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
@@ -37,6 +37,19 @@ MODULES_DIR="${SCRIPT_DIR}/modules"
 STAGED_NATIVE="${SCRIPT_DIR}/native/.staged"
 MANIFEST="${BUILD_DIR}/moybyte_tdeck_manifest.py"
 BUILD_JOBS="${MOYBYTE_BUILD_JOBS:-$(nproc)}"
+
+# tools/board_config.py is stdlib-only ON PURPOSE (see its docstring): a board
+# must be buildable on nothing but the system python3, without `make setup`.
+# The venv is preferred when it is there so the stager runs the same
+# interpreter the tests do.
+BUILD_PYTHON="${MOYBYTE_BUILD_PYTHON:-}"
+if [ -z "${BUILD_PYTHON}" ]; then
+  if [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+    BUILD_PYTHON="${REPO_ROOT}/.venv/bin/python"
+  else
+    BUILD_PYTHON="python3"
+  fi
+fi
 
 mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
@@ -185,10 +198,10 @@ fi
 #    firmware/lilygo_t_deck_plus_micropython/native/ -- this build reads that
 #    tree and never writes to it. native/.staged/ is gitignored.
 #
-#    Stage 1 needs two: moy_gfx (the RGB565 pixel kernel every draw verb runs
+#    Stages 1-3 need two: moy_gfx (the RGB565 pixel kernel every draw verb runs
 #    through, plus the vendored libmoy raster under it) and moy_alloc (the
-#    off-gc-heap DMA allocator). moy_sd / moy_audio / moy_lua / moycore land
-#    with their own stages.
+#    off-gc-heap DMA allocator). moy_sd / moy_audio / moy_lua / moycore / moy_web
+#    land with their own stages.
 # ---------------------------------------------------------------------------
 SHARED_NATIVE="${MOYBYTE_SHARED_NATIVE:-moy_gfx moy_alloc}"
 rm -rf "${STAGED_NATIVE}"
@@ -206,19 +219,32 @@ mkdir -p "${STAGED_NATIVE}"
 } > "${STAGED_NATIVE}/micropython.cmake"
 echo "== staged shared native modules: ${SHARED_NATIVE}"
 
-# The moy_gfx text kernel rasterizes petme128 from runtime/font.py's blob, so
-# host and device text are the same pixels (#62). It is a frozen PYTHON module,
-# staged under the name moy_gfx expects.
-cp "${REPO_ROOT}/runtime/font.py" "${MODULES_DIR}/moy_font.py"
+# ---------------------------------------------------------------------------
+# 4b) Stage the shared PYTHON modules (#161 Phase 3). WHAT crosses and WHY is
+#     declared in board.toml, not here -- there is no `cp runtime/*.py` list in
+#     this file and there must never be one again. Two sources, two deliberately
+#     different strategies, both spelled out there:
+#
+#       runtime/          -- DENYLIST. A shared tree's default answer is "yes,
+#                            this crosses", so what needs writing down is the
+#                            exclusions, with a reason on each. Identical to the
+#                            fork build's list, because it is the same board and
+#                            the same 320x240 tier.
+#       the fork's tree   -- ALLOWLIST, and it stays one. That is a BOARD tree
+#                            whose default answer is "no": three of its modules
+#                            drive lcd_bus/lvgl and two are that build's own boot
+#                            spine, which would SHADOW this one's.
+#
+#     The stager also PRUNES untracked strays it did not just stage: the frozen
+#     manifest freezes the whole modules/ DIRECTORY and this one is gitignored,
+#     so an unstaged module would otherwise stay in the image forever.
+#
+#     runtime/font.py crosses as `moy_font.py` (a declared rename): the moy_gfx
+#     text kernel rasterizes petme128 from its blob, so host and device text are
+#     the same pixels (#62).
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 
-# STAGE 6 NOTE, deliberately not code yet: the shared runtime/ console gets
-# staged into modules/ here. Do NOT reproduce the fork build's 60-odd hand-
-# written `cp` lines -- that per-board allowlist is exactly what let this board
-# silently miss shared modules. The console-staging step is a data-driven
-# denylist over runtime/*.py, and it should be the SAME mechanism both other
-# boards use when this target reaches that stage.
-
-rm -rf "${MODULES_DIR}/__pycache__"
+rm -rf "${MODULES_DIR}/__pycache__" "${MODULES_DIR}/moybyte/__pycache__"
 
 # ---------------------------------------------------------------------------
 # 5) Frozen manifest: the port's default frozen stdlib + this board's modules.
