@@ -77,7 +77,13 @@ HOST_ONLY = {
               "audio_binding", "lua_binding", "simulate_desktop"},
     "p4": {"host_app", "host_api", "lua_host", "raster_binding",
            "audio_binding", "lua_binding", "simulate_desktop"},
-    "web": {"host_app", "lua_host", "simulate_desktop"},
+    # The browser reaches libmoy through its compiled-in usermods, so every
+    # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
+    # the one that would look most plausible to stage, because it is the host's
+    # half of the very module device_canvas imports.
+    "web": {"host_app", "lua_host", "simulate_desktop",
+            "raster_binding", "audio_binding", "lua_binding",
+            "gfx_binding", "native_build"},
 }
 
 # Modules a build GENERATES into the frozen tree. They are not in git and not
