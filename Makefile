@@ -47,9 +47,23 @@ setup:
 # .moyproj SDK went. Upgrade first, then install.
 	$(PYTHON) -m pip install -q --upgrade pip setuptools
 	$(PYTHON) -m pip install -e '.[dev,sim]'
+# THE HOST NEEDS A C COMPILER. Not for a nicety -- for the console. The host
+# draws on the same libmoy raster both boards run, ctypes-loaded from a .so this
+# builds (runtime/gfx_binding.py); the pure-Python raster that used to stand
+# behind it was deleted with runtime/canvas.py. So say it HERE, where the person
+# who can act on it is still watching, instead of letting them find out at the
+# first draw via `AttributeError: 'NoneType' object has no attribute 'hg_fill'`.
+# Non-fatal on purpose: the venv and the deps are installed and useful either
+# way, and firmware work needs the ESP-IDF toolchain rather than this one.
+	@$(PYTHON) -m runtime.native_build || { \
+	  echo ""; \
+	  echo "  ^^ make setup FINISHED, but the host console will not run until"; \
+	  echo "     a C compiler is installed. Re-run 'make setup' after that."; \
+	  echo ""; }
 # Host audio binding (#97 stage 0): compile vendored libmoy into the cached
 # .so the sim's AudioEngine loads. Never fails setup -- with no C compiler it
-# prints a note and the host runs silent (the boards are unaffected).
+# prints a note and the host runs silent (which, since the check above, is the
+# smaller half of what a missing compiler costs).
 	$(PYTHON) -m runtime.audio_binding
 
 # Without this, every venv-backed target below dies with a bare
