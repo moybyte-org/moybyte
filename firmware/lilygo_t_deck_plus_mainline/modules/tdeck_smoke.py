@@ -423,6 +423,206 @@ def _paint_kbd(comp, canvas, label, kbd, inp, raw, typed, frame, worst):
     _present(comp, canvas)
 
 
+# ---------------------------------------------------------------------------
+# STAGE 4 -- the SD card, which shares SPI2 with the panel.
+# ---------------------------------------------------------------------------
+
+SD_TEST_DIR = "/sd/moybyte"
+SD_TEST_FILE = SD_TEST_DIR + "/mainline_smoke.txt"
+SD_ROUNDS = 10          # write / flush / read / flush cycles in the torture loop
+SD_PAYLOAD = 4096       # bytes per round -- several sectors, so DMA is exercised
+
+
+def sd(rounds=SD_ROUNDS):
+    """SD bring-up on the LIVE panel bus -- the stage that hangs boards.
+
+    Every line of this is shaped by damage. The card and the ST7789 share ONE
+    SPI host, and the ways that goes wrong do not announce themselves: the board
+    stops, USB stays enumerated but dead, and there is no panic to read. So:
+
+      NOTHING TOUCHES SD BEFORE THE PANEL. `moy_lcd.init()` runs
+      `spi_bus_initialize()` once. `machine.SDCard` would run it AGAIN on a host
+      esp_lcd already owns -- on a POPULATED card the mount even succeeds, and
+      then the next panel init fails with something that names nothing
+      ("can't convert '' to int"). The card attaches through the native `moy_sd`
+      module instead: `sdspi_host_init_device` on the already-initialised host,
+      the ESP-IDF "Sharing the SPI Bus" pattern, no bus re-init.
+
+      THE DEVICE IS NEVER TORN DOWN. `with_sd_live` mounts once and keeps the
+      card resident for the session. A per-op `sdspi_host_deinit` corrupts the
+      shared bus/DMA state and the NEXT PANEL FLUSH silent-hangs the board --
+      the write lands on SD, then resume freezes.
+
+      CS PINS ARE LEFT ALONE. `TFT_CS` (12) and `SD_CS` (39) are driver-owned;
+      re-creating a `Pin` on either afterwards causes the same hang. Only the
+      unused LoRa `RADIO_CS` (9) is parked high.
+
+      NO FLUSH INSIDE A SESSION. The desktop loop is single-threaded so SD ops
+      run between frames; this smoke keeps that discipline and calls `comp.sync()`
+      first, exactly as stage 6's `_with_sd_synced` does.
+
+    THE BRACKET IS THE DIAGNOSTIC. Each phase prints before and after, so if the
+    board does hang, the LAST LINE names the op that wedged it:
+
+      `SD > sync` last   -> the pre-op DMA drain
+      `SD > op` last     -> the SD transaction itself
+      `SD < op` last     -> the next PANEL FLUSH, i.e. the shared-bus corruption
+                            this whole design exists to avoid. `SD = panel ok`
+                            is the line that says it did not happen.
+
+    Then it does that `rounds` times, because one clean write proves nothing:
+    bus/DMA corruption is cumulative, and a design that survives ten
+    write-flush-read-flush cycles is a design that works.
+    """
+    import os
+    import moybyte_sd
+
+    comp, canvas = _canvas()
+    log = _SdLog(comp, canvas)
+    comp.set_backlight(True)
+
+    # The two modules each carry the bus facts, and they MUST agree: attaching
+    # the card to the wrong host id is a hang with no message, and a constant
+    # that drifted is exactly how that would happen.
+    log.say("host lcd=%d sd=%d  cs lcd_sd=%d sd=%d"
+            % (moy_lcd.SPI_HOST, moybyte_sd.SPI_HOST,
+               moy_lcd.SD_CS, moybyte_sd.SD_CS))
+    if (moy_lcd.SPI_HOST != moybyte_sd.SPI_HOST
+            or moy_lcd.SD_CS != moybyte_sd.SD_CS):
+        log.say("MISMATCH -- refusing to attach", RED)
+        print("Moybyte sd: ABORT, moy_lcd and moybyte_sd disagree about the bus")
+        return
+
+    def _session(label, fn):
+        """One bracketed SD session + the panel flush that proves the bus lived."""
+        print("SD > sync   (%s)" % label)
+        comp.sync()
+        print("SD > op     (%s)" % label)
+        t0 = time.ticks_ms()
+        try:
+            out = moybyte_sd.with_sd_live(fn)
+            ms = time.ticks_diff(time.ticks_ms(), t0)
+            print("SD < op     (%s) %dms" % (label, ms))
+        except Exception as exc:        # noqa: BLE001 -- a failure is a RESULT
+            ms = time.ticks_diff(time.ticks_ms(), t0)
+            print("SD ! op     (%s) %dms FAILED: %s: %s"
+                  % (label, ms, type(exc).__name__, exc))
+            log.say("%s FAILED: %s" % (label, exc), RED)
+            # The important half: a FAILED mount must not have poisoned the bus.
+            log.say("panel after failure...", YELLOW)
+            log.say("panel ok", GREEN)
+            print("SD = panel ok after a failed %s" % label)
+            return None, ms, exc
+        log.say("%s ok %dms" % (label, ms), GREEN)
+        print("SD = panel ok (%s)" % label)
+        return out, ms, None
+
+    # 1) Mount. The first with_sd_live is the one that attaches; every later
+    #    call is a plain call-through, which is the point of keeping it resident.
+    def _mount_probe():
+        import moy_sd
+        return (moy_sd.sector_count(), os.listdir("/sd"))
+
+    out, _ms, exc = _session("mount", _mount_probe)
+    if exc is not None:
+        print("Moybyte sd: no card, or the attach failed. The panel survived it, "
+              "which is the other thing this stage had to prove.")
+        print("Moybyte sd smoke done -> REPL")
+        return
+    sectors, root = out
+    log.say("card %d sectors (%d MB)" % (sectors, sectors // 2048))
+    log.say("/sd: %s" % ", ".join(root[:6]) if root else "/sd: (empty)")
+    print("Moybyte sd: sectors=%d (%dMB) root=%s" % (sectors, sectors // 2048, root))
+
+    def _statvfs():
+        st = os.statvfs("/sd")
+        return (st[0] * st[2], st[0] * st[3])       # total, free bytes
+
+    out, _ms, exc = _session("statvfs", _statvfs)
+    if out:
+        log.say("fs %dMB total %dMB free" % (out[0] >> 20, out[1] >> 20))
+        print("Moybyte sd: fs total=%d free=%d" % out)
+
+    # 2) The torture loop. One clean write proves nothing -- shared-bus and DMA
+    #    corruption is cumulative, and the documented failure is "the write
+    #    lands, then the NEXT flush freezes". So: write, flush, read back,
+    #    flush, `rounds` times, verifying the bytes every round.
+    payload = bytes(bytearray((i * 7 + 13) & 0xFF for i in range(SD_PAYLOAD)))
+    bad = 0
+    worst_w = 0
+    worst_r = 0
+    for n in range(rounds):
+        def _write():
+            try:
+                os.mkdir(SD_TEST_DIR)
+            except OSError:
+                pass
+            with open(SD_TEST_FILE, "wb") as fh:
+                fh.write(payload)
+            return len(payload)
+
+        def _read():
+            with open(SD_TEST_FILE, "rb") as fh:
+                return fh.read()
+
+        _o, wms, exc = _session("write %d/%d" % (n + 1, rounds), _write)
+        if exc is not None:
+            bad += 1
+            break
+        got, rms, exc = _session("read %d/%d" % (n + 1, rounds), _read)
+        if exc is not None:
+            bad += 1
+            break
+        if got != payload:
+            bad += 1
+            log.say("round %d: BYTES DIFFER" % (n + 1), RED)
+            print("SD ! round %d: read back %d bytes, differ" % (n + 1, len(got)))
+        worst_w = wms if wms > worst_w else worst_w
+        worst_r = rms if rms > worst_r else worst_r
+
+    # 3) A full-rate flush burst AFTER all that: the corruption this design
+    #    guards against shows up as a hang on a LATER flush, not the next one.
+    log.say("flush burst...", YELLOW)
+    t0 = time.ticks_ms()
+    for _ in range(60):
+        comp.flush()
+    burst = time.ticks_diff(time.ticks_ms(), t0)
+    log.say("60 flushes in %dms" % burst, GREEN)
+    print("Moybyte sd: 60 post-session flushes in %dms (%.1fms each)"
+          % (burst, burst / 60.0))
+
+    log.say("rounds=%d bad=%d" % (rounds, bad), GREEN if not bad else RED)
+    print("Moybyte sd: rounds=%d bad=%d write_max=%dms read_max=%dms"
+          % (rounds, bad, worst_w, worst_r))
+    print("Moybyte sd smoke done -> REPL "
+          "(the card stays MOUNTED at /sd -- that is deliberate)")
+
+
+class _SdLog:
+    """A scrolling status list on the glass, so the SD stage is watchable
+    without a serial terminal. Repaints the whole list each time -- 20 lines of
+    8px text is nothing next to a 4KB SD write, and a partial-repaint scheme
+    here would be a second thing that could be wrong."""
+
+    def __init__(self, comp, canvas, keep=20):
+        self.comp = comp
+        self.canvas = canvas
+        self.keep = keep
+        self.rows = []
+
+    def say(self, msg, col=WHITE):
+        self.rows.append((msg, col))
+        del self.rows[:-self.keep]
+        c = self.canvas
+        c.cls(DARK)
+        c.print("SD SMOKE", 6, 4, YELLOW)
+        y = 18
+        for (text, colour) in self.rows:
+            c.print(text[:39], 6, y, colour)
+            y += 10
+        _present(self.comp, c)
+
+
 def _raw_str(r):
     """The last RAW GT911 sample, straight off the wire.
 

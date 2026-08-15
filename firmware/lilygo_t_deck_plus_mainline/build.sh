@@ -198,12 +198,15 @@ fi
 #    firmware/lilygo_t_deck_plus_micropython/native/ -- this build reads that
 #    tree and never writes to it. native/.staged/ is gitignored.
 #
-#    Stages 1-3 need two: moy_gfx (the RGB565 pixel kernel every draw verb runs
-#    through, plus the vendored libmoy raster under it) and moy_alloc (the
-#    off-gc-heap DMA allocator). moy_sd / moy_audio / moy_lua / moycore / moy_web
-#    land with their own stages.
+#    Which modules are here is a per-STAGE fact, so the list carries the stage:
+#      moy_gfx    (1) the RGB565 pixel kernel every draw verb runs through, plus
+#                     the vendored libmoy raster under it
+#      moy_alloc  (1) the off-gc-heap DMA allocator the layer/window buffers use
+#      moy_sd     (4) the SD card ATTACHED to the host moy_lcd already
+#                     initialised -- sdspi_host_init_device, never a bus re-init
+#    moy_audio / moy_lua / moycore / moy_web land with their own stages.
 # ---------------------------------------------------------------------------
-SHARED_NATIVE="${MOYBYTE_SHARED_NATIVE:-moy_gfx moy_alloc}"
+SHARED_NATIVE="${MOYBYTE_SHARED_NATIVE:-moy_gfx moy_alloc moy_sd}"
 rm -rf "${STAGED_NATIVE}"
 mkdir -p "${STAGED_NATIVE}"
 {

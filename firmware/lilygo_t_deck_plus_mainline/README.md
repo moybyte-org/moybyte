@@ -173,6 +173,50 @@ The last thing the smoke does is send `0x04`. Skipping that revert is what once
 left the keyboard streaming matrix bytes at the code editor, irreversibly,
 because nothing re-sends it.
 
+#### `MODE = "sd"` (stage 4)
+
+**The stage that hangs boards.** The card and the panel share one SPI host, and
+every way that goes wrong is silent: the board stops, USB stays enumerated but
+dead, no panic to read. So this smoke is built as a *bracket* — every phase
+prints before and after, and if the board wedges, the last serial line names
+the op that did it.
+
+| the last line you see | what wedged |
+|---|---|
+| `SD > sync` | the pre-op DMA drain |
+| `SD > op` | the SD transaction itself |
+| `SD < op` | **the next panel flush** — the shared-bus corruption this whole design exists to avoid. `SD = panel ok` is the line that says it did not happen |
+
+On the glass: a scrolling `SD SMOKE` status list. It checks that `moy_lcd` and
+`moybyte_sd` agree about the host id and CS pin (a drifted constant would be a
+hang with no message), mounts, prints the card size and `/sd` listing, and then
+runs **ten write / flush / read / flush rounds of 4KB**, verifying the bytes
+every round. One clean write proves nothing — bus and DMA corruption is
+cumulative, and the documented failure mode is "the write lands, then a *later*
+flush freezes". It finishes with a burst of 60 back-to-back flushes for the
+same reason.
+
+```
+Moybyte sd: sectors=NNNNNNN (NNNNMB) root=[...]
+SD > sync   (write 1/10)
+SD > op     (write 1/10)
+SD < op     (write 1/10) NNms
+SD = panel ok (write 1/10)
+...
+Moybyte sd: 60 post-session flushes in NNNms (N.Nms each)
+Moybyte sd: rounds=10 bad=0 write_max=NNms read_max=NNms
+```
+
+**With no card in the slot** the mount fails, and the smoke deliberately keeps
+going: it flushes the panel and reports `SD = panel ok after a failed mount`.
+That is a real check, not politeness — `moy_sd.init()` calls `sdspi_host_deinit()`
+on a failed attach, which is the one teardown in this design, and it must not
+poison the bus.
+
+The card is left **mounted** at `/sd` when the smoke returns. That is
+deliberate: `with_sd_live` attaches once and keeps the device resident for the
+session, because tearing it down between ops is what corrupts the bus.
+
 ---
 
 ## What is here
