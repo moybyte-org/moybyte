@@ -2,6 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## What belongs in this file (read before adding to it)
+
+**Decisions, not status.** A decision keeps its value forever — "the indexed
+canvas was A/B'd on P4 glass and RGB565 won (2026-08-05)", "the double game
+canvas was built, measured and REVERTED (`26e1f9f`)", "do NOT re-attempt in-loop
+serial on the T-Deck". Those are what stop the next session re-doing dead work,
+and they are historical BY NATURE; keep them, and keep their dates and commit
+hashes. **A status claim rots.** "Still needs on-hardware verification",
+"pending next flash", "not yet verified" are true for a week and then quietly
+lie — and a doc that lies is worse than one that is silent, because the reader
+acts on it. Status belongs in a GitHub issue, which has state; this file should
+say what IS, with a date, or point at the issue.
+
+That is not hypothetical. On 2026-08-15 this file said OTA "Still NEEDS
+ON-HARDWARE VERIFICATION" in the paragraph directly ABOVE the one recording the
+whole chain passing on glass on both boards, and an agent duly told the owner
+their T-Deck might need a migration flash it had taken two weeks earlier.
+
+Same rule for numbers: per-cart fps and frame budgets live in issue **#66**, P4
+numbers in **#58**. A snapshot pasted here goes stale exactly as this paragraph
+warns — one did, inside the sentence forbidding it.
+
 ## What this repo is
 
 Moybyte is an operating system for ESP32 boards: a console where the software is
@@ -14,7 +36,7 @@ Git history has it if you need it. `.moy` is the only cart format.
 
 - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
 - `firmware/lilygo_t_deck_plus_micropython/` — the **device port** of that same console (MicroPython).
-- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; on-glass verify of the two-worlds split pending next flash) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path — post-#159 (L2 cache 256KB) the **whole cart roster sits at the 60 cap** with headroom; app-window drags ~43fps (triple framebuffer + retained backdrop cache).
+- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; the two-worlds split is on-glass verified — `tests/test_p4_on_glass.py` boots to the desk, opens app windows and scrolls/flings them against the real pointer feed) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path — post-#159 (L2 cache 256KB) the **whole cart roster sits at the 60 cap** with headroom; app-window drags ~43fps (triple framebuffer + retained backdrop cache).
 - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
 The shipped shell is the **2026-07 shell** (everything-is-a-process: launcher / Player / Editor apps
@@ -623,7 +645,7 @@ to whoever called it.
   81–130ms per-pop "word-event logic spike" (probe-attributed on glass). The
   perf_capture-gated `PMEM save=<ms>` diag line shows the deferred cadence.
 - `runtime/font.py` — petme128 8×8 font, the ONE glyph source both backends rasterize (#62): the host draws it per-pixel, the device passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build; framebuf.text — same glyphs, no clip rect — is the no-gfx fallback).
-- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (host `canvas.py`; device `moy_gfx.scroll_rect` + `DeviceCanvas.scroll_rect`, staged to both boards but **NOT yet flashed/verified on glass**) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots; Settings still row-snaps, its pixel-smooth conversion is #113 Phase 5). The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws._cover_gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). Web transport: the `scr` op shifts the browser's retained buffer (never deduped to `{"same":1}` — replaying a shift double-applies), covers + the static wallpaper composite ship ONCE via `/assets` (`ws.cover_assets`, serial names), and the windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
+- **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots; Settings still row-snaps, its pixel-smooth conversion is #113 Phase 5). The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws._cover_gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). Web transport: the `scr` op shifts the browser's retained buffer (never deduped to `{"same":1}` — replaying a shift double-applies), covers + the static wallpaper composite ship ONCE via `/assets` (`ws.cover_assets`, serial names), and the windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
 - `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (injects `ws.lua_runtime` when lupa imports, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
 (The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/
