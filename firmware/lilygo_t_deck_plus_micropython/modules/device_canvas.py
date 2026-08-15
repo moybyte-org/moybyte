@@ -127,6 +127,31 @@ except ImportError:
 # indexes in Python, so it serves both. (The tuple stays for the other PAL565_WIRE uses.)
 _PAL565_WIRE_BUF = array("H", PAL565_WIRE)
 
+# MOY64 as RGB888, baked. runtime/palette.py builds this table with CPython's
+# `colorsys` at import time, so it cannot be staged to a board at all (verified
+# on P4 glass: `import palette` raises ImportError). The web head solved the
+# same problem by GENERATING a literal twin at build time; this is that twin,
+# inline, because 192 bytes do not justify a build step.
+#
+# It exists so `canvas.palette` can be READ, which SPEC.md 3.1 needs: a cart
+# ships its own 64-entry table, runtime/player.py saves the current one before
+# applying it and assigns it back on exit. Without a readable default there is
+# nothing to restore TO.
+#
+# tests/test_device_canvas_parity.py pins it equal to runtime.palette.MOY64, so
+# a re-vendor that moves the palette cannot leave this behind.
+MOY64_RGB = bytes.fromhex(
+    "0000001d2b537e2553008751ab52365f574fc2c3c7fff1e8ff004dffa300ffec2700e43629adff83769cff77a8ffccaa"
+    "e6a1a1e6b9a1e6d2a1aee6a1a1e6d1a1d1e6a1b4e6b7a1e6d8a1e6e6a1cae6a1b1a1e6e68c6b4da88d7966502eccbf9f"
+    "50734757382b857a6d9e936ae0582de0992dd2e02d30e02d2de08a2de0e02d8ae0512de0a72de0e02dc4e02d7871e02d"
+    "dae1f2afb6c7828899585d6be6dcd38c857e393d47292929662e2e66492e2e66552e55662e3e66402e66662e60662e45")
+
+
+def _rgb565(rgb):
+    """(r, g, b) -> one RGB565 word, in the same order PAL565 uses."""
+    r, g, b = rgb
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
 # Reverse of PAL565_WIRE, for pix()'s READ form: the framebuffer holds RGB565 but
 # the cart API speaks palette indices on both tiers (SPEC.md 1: "the canvas itself
 # is always indices"). Built once at import; the first index wins where two entries
@@ -463,6 +488,25 @@ class DeviceCanvas:
         # Native draw gates (#155): None until _install_draw_gates succeeds. Set
         # BEFORE reset_state, whose _sync_gate_* calls read them.
         self._gate_ctx = None
+        # The index -> RGB565 table this canvas resolves colour through. It IS
+        # the shared module buffer until a cart overrides the palette, so the
+        # normal case allocates nothing and costs one attribute load.
+        #
+        # It is per-instance because SPEC.md 3.1 lets a cart ship its own 64-entry
+        # RGB table, and runtime/player.py duly assigns `ws.canvas.palette = table`
+        # on start and restores it on exit -- except player.py is STAGED TO BOTH
+        # BOARDS and DeviceCanvas had no `palette` at all, so on device that
+        # assignment set an attribute nobody read. Verified on P4 glass
+        # 2026-08-15: hasattr(ws.canvas, "palette") was False, the assignment was
+        # accepted, and PAL565[8] stayed 0xf809. Cart palettes worked on the host
+        # and were inert on every other tier.
+        self._wire = _PAL565_WIRE_BUF
+        self._palette = None           # None = the stock MOY64 table
+        # Folded into _pal_state_id so a palette swap invalidates every bake
+        # keyed on _palgen. Identity normally ids as 0; without this, a cart
+        # that ships a palette but never calls pal() would id as 0 under BOTH
+        # tables and reuse sprite variants baked in the other one.
+        self._pal_epoch = 0
         self._wire_pal_arr = None      # #167 fill_spans palette cache (see _wire_pal)
         self._wire_pal_gen = -1
         self._gate_state = None
@@ -582,7 +626,7 @@ class DeviceCanvas:
             self._palt_single = -1
             gp = self._gate_pal           # gate table mirrors _pal_map: identity now
             if gp is not None:
-                gp[:] = _PAL565_WIRE_BUF  # C memcpy, not the 64-iteration rebuild
+                gp[:] = self._wire  # C memcpy, not the 64-iteration rebuild
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
@@ -628,7 +672,7 @@ class DeviceCanvas:
         pd = self._pal_delta
         td = self._palt_delta
         if pd == 0 and td == 0:
-            return 0
+            return self._pal_epoch      # 0 on the stock palette (the common case)
         if td == 0 and pd == 1 and self._pal_single >= 0:
             c = self._pal_single
             key = 0x10000 + (c << 6) + self._pal_map[c]
@@ -665,7 +709,7 @@ class DeviceCanvas:
                 pm[:] = _PAL_IDENTITY
                 self._pal_delta = 0
                 if gp is not None:
-                    gp[:] = _PAL565_WIRE_BUF
+                    gp[:] = self._wire
             self._pal_single = -1
         else:
             c = int(c0) & 63
@@ -674,7 +718,7 @@ class DeviceCanvas:
             if old != v:
                 pm[c] = v
                 if gp is not None:
-                    gp[c] = PAL565_WIRE[v]
+                    gp[c] = self._wire[v]
                 was = old != c
                 now = v != c
                 if was != now:                # identity-membership flipped at c
@@ -836,7 +880,7 @@ class DeviceCanvas:
         if pm is None:
             return
         for i in range(64):
-            pal[i] = PAL565_WIRE[pm[i]]
+            pal[i] = self._wire[pm[i]]
 
     def gate_counts(self):
         """(fills, texts, fill_us, text_us) drawn through the native gates since
@@ -854,10 +898,64 @@ class DeviceCanvas:
             st[_ST_T_FILL] = 0
             st[_ST_T_TEXT] = 0
 
+    @property
+    def palette(self):
+        """The 64-entry RGB table this canvas resolves colour through.
+
+        SPEC.md 3.1 lets a cart ship its own; runtime/player.py reads this to
+        save the current one before applying the cart's, and assigns it back on
+        exit. Built lazily from MOY64_RGB so the stock case costs nothing.
+        """
+        if self._palette is None:
+            m = MOY64_RGB
+            self._palette = [(m[i * 3], m[i * 3 + 1], m[i * 3 + 2])
+                             for i in range(64)]
+        return self._palette
+
+    @palette.setter
+    def palette(self, table):
+        """Swap the RGB table, rebuilding this canvas's wire LUT.
+
+        Before this existed the assignment was accepted and IGNORED on every
+        tier but the host -- DeviceCanvas had no `palette` at all, so a cart
+        palette was silently inert on both boards and in the browser (verified
+        on P4 glass 2026-08-15). The LUT is per-instance and copy-on-write: the
+        stock canvas keeps pointing at the shared module buffer.
+
+        KNOWN LIMIT, stated rather than papered over: bakes already attached to
+        an Image (`_rgb_i`, the paint-image path) are not re-done here, because
+        the canvas does not own those images. Variants keyed on `_palgen` DO
+        invalidate, via the epoch. In practice a cart's palette is applied
+        before its own images bake and restored as it exits, so the gap is a
+        system image drawn DURING a palette-swapped cart -- and the bar is
+        hidden while a game owns the screen.
+        """
+        if not table or len(table) != 64:
+            return
+        wire = array("H", bytearray(2 * 64))
+        canonical = PAL565_WIRE is PAL565
+        for i in range(64):
+            w = _rgb565(table[i])
+            # Match the wire order this build writes -- the T-Deck stores
+            # byte-swapped so its flush can skip a per-frame CPU swap.
+            wire[i] = w if canonical else (((w & 0xFF) << 8) | (w >> 8)) & 0xFFFF
+        self._wire = wire
+        self._palette = [tuple(c) for c in table]
+        # A new table means every pal-state id learned under the old one is a
+        # different colour now. Retire them and move the epoch forward so no id
+        # can alias across the swap.
+        self._pal_state_ids = None
+        self._pal_epoch = self._pal_state_next
+        self._pal_state_next += 1
+        self._palgen = self._pal_state_id()
+        self._wire_pal_gen = -1                # force the fill_spans LUT rebuild
+        if getattr(self, "_gate_pal", None) is not None:
+            self._sync_gate_pal()              # the C gate's table mirrors it
+
     def _col(self, c):
         # Resolve a draw index to RGB565 through the pal remap, so cls/pix/line/rect/
         # circ/circb/rectb all honour pal() for free.
-        return PAL565_WIRE[self._pal_map[c & 63]]
+        return self._wire[self._pal_map[c & 63]]
 
     def _fill(self, x, y, w, h, col):
         # Filled rect of a pre-resolved RGB565 colour, camera-offset and intersected
@@ -1129,7 +1227,7 @@ class DeviceCanvas:
                 self._wire_pal_arr = wp
             pm = self._pal_map
             for i in range(64):
-                wp[i] = PAL565_WIRE[pm[i]]
+                wp[i] = self._wire[pm[i]]
             self._wire_pal_gen = self._palgen
         return self._wire_pal_arr
 
@@ -1528,7 +1626,7 @@ class DeviceCanvas:
         w = img.w
         h = img.h
         buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
-        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_WIRE_BUF)
+        self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)
         img._rgb_i = buf
 
     def _spr_py(self, img, x, y, scale, flip=0):
@@ -1945,11 +2043,11 @@ class DeviceCanvas:
                                        # op -- if this is nonzero during play, some
                                        # cart is blitting a paint image every frame.
                 self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                       indices, iw, ih, _PAL565_WIRE_BUF)
+                                       indices, iw, ih, self._wire)
                 self._t_img_us += _ticks_diff(_ticks_us(), _t0)
             else:
                 self._gfx.blit_indices(self._buf, self._stride, self._bh, x, y,
-                                       indices, iw, ih, _PAL565_WIRE_BUF)
+                                       indices, iw, ih, self._wire)
             return
         d = memoryview(self._buf).cast("H")
         w = self.w

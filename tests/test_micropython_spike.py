@@ -1983,7 +1983,14 @@ def test_paint_image_assets_wired_device_and_carts():
     # reads it via the buffer protocol (a tuple crashes: object with buffer protocol required).
     # ... in the WIRE order (PAL565_WIRE: byte-swapped on the T-Deck SPI panel,
     # canonical on the P4's directly-scanned DPI framebuffer, #58).
-    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, _PAL565_WIRE_BUF)" in device_canvas
+    #
+    # It reads `self._wire` and not the module buffer directly: the table is
+    # per-canvas now so a cart can ship its own palette (SPEC.md 3.1), which
+    # used to be accepted and silently ignored on every tier but the host.
+    # `self._wire` IS `_PAL565_WIRE_BUF` until something overrides it, so the
+    # stock path still passes the same array('H') BUFFER form.
+    assert "self._gfx.blit_indices(buf, w, h, 0, 0, img.pix, w, h, self._wire)" in device_canvas
+    assert "self._wire = _PAL565_WIRE_BUF" in device_canvas
     assert '_PAL565_WIRE_BUF = array("H", PAL565_WIRE)' in device_canvas
     assert 'getattr(img, "_paint", False) and scale == 1 and flip == 0' in device_canvas
 

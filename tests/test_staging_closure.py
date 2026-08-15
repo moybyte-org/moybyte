@@ -125,12 +125,17 @@ NEVER_ON_A_BOARD = {
         "raster in frozen flash bought a preview nobody ever saw."),
     "palette": (
         "builds indices 16-63 with CPython's `colorsys` at IMPORT time, and "
-        "MicroPython has none -- confirmed absent from both boards' .build "
-        "trees and from micropython-lib. Staging it means a module that raises "
-        "on import, which reads as a missing FEATURE rather than a crash "
-        "because every caller is guarded. The web head needs the same table and "
-        "GENERATES a literal twin instead; a board that ever needs MOY64 should "
-        "do the same, never stage this file."),
+        "MicroPython has none. VERIFIED ON P4 GLASS 2026-08-15, on firmware "
+        "built before this file was unstaged: `import colorsys`, `import "
+        "palette` and `import canvas` all raise ImportError('no module named "
+        "colorsys'), and the consequence is visible one level up -- "
+        "wallpaper._ensure_preview() returns False and _static_preview() "
+        "returns None, so the Appearance screen's cart-wallpaper panel drew "
+        "its black fill and nothing else. Staging this means a module that "
+        "raises on import, which reads as a missing FEATURE rather than a "
+        "crash because every caller is guarded. The web head needs the same "
+        "table and GENERATES a literal twin instead; a board that ever needs "
+        "MOY64 should do the same, never stage this file."),
 }
 
 
