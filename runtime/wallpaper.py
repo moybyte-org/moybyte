@@ -324,13 +324,24 @@ class Wallpaper:
         guarded degradation ladder as draw(): My Art direct -> cart frame ->
         solid fill.
 
-        A cart wallpaper shows its COMPUTED preview -- one identical behavior
-        on every tier (host, web, both boards; no live/static policy fork):
-        rendered once per cart source through the preview runner (the cart
-        compiled a second time over an offscreen pure-Python Canvas -- never
-        the game canvas) and cached like a thumbnail (RAM memo + the
-        thumbs/wp*.mct sidecar). A STILL, so the appearance screen closes the
-        redraw gate like any static UI."""
+        A cart wallpaper shows its COMPUTED preview: rendered once per cart
+        source through the preview runner (the cart compiled a second time over
+        an offscreen pure-Python Canvas -- never the game canvas) and cached
+        like a thumbnail (RAM memo + the thumbs/wp*.mct sidecar). A STILL, so
+        the appearance screen closes the redraw gate like any static UI.
+
+        HOST AND WEB ONLY, and this docstring used to claim otherwise -- "one
+        identical behavior on every tier (host, web, both boards)" -- which was
+        never true for a single build. runtime/palette.py builds indices 16-63
+        with CPython's `colorsys` at import time and MicroPython has none, so on
+        a board `import palette` raised, `import canvas` raised with it, and
+        _ensure_preview returned False every time; the panel below has always
+        been the bare black fill. Neither board stages those two files any more
+        (2026-08-15, owner call: tapping a wallpaper applies it, so a second
+        raster in frozen flash bought a preview nobody ever saw), which makes
+        the degradation deliberate instead of accidental. A board that wants
+        this back needs an INDEXED raster there -- the preview is index-native
+        end to end, _Blit -> .mct -> spr -- not a re-import of this file."""
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect

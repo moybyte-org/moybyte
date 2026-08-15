@@ -98,22 +98,33 @@ PACKAGES = {"tdeck": {"moybyte"}, "p4": {"moybyte"}, "web": set()}
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
 # a pass -- and `test_no_known_gap_has_quietly_been_fixed` deletes the excuse the
 # moment it stops being true, so this cannot rot into a dumping ground.
-KNOWN_GAPS = {
-    ("tdeck", "palette"): (
-        "runtime/palette.py builds indices 16-63 with CPython's colorsys at "
-        "IMPORT time, and MicroPython has none (checked: absent from both "
-        "boards' .build trees and from micropython-lib). So `import palette` "
-        "raises, and with it `import canvas` -- whose only device consumer is "
-        "wallpaper._ensure_preview. The Appearance screen's cart-wallpaper "
-        "preview has therefore been a black rectangle on both boards, while "
-        "wallpaper.py:327 claims 'one identical behavior on every tier'. The "
-        "web head hit this and generates a literal twin; the boards stage the "
-        "raw file. Two fixes, and picking is a product call: share the web's "
-        "generator so previews start working on device (which makes the pure- "
-        "Python raster live there, and it would then want an indexed libmoy), "
-        "or stop staging canvas.py+palette.py to boards and accept previews as "
-        "host/web-only, reclaiming the flash."),
-    ("p4", "palette"): "see the tdeck entry -- identical cause, identical fix.",
+#
+# It is empty, and the first entry it ever held is the reason the table exists:
+# `palette -> colorsys` on both boards, which turned out not to be a staging slip
+# but a feature that had never worked, and whose fix was a product call rather
+# than a missing line. Resolved 2026-08-15 by removing canvas.py + palette.py
+# from both boards (see NEVER_ON_A_BOARD below).
+KNOWN_GAPS = {}
+
+# The mirror of GENERATED: modules that must NOT reach a board, by name, with
+# the reason. A denylist entry in a build script is easy to undo by accident --
+# somebody adds a module to a staging list and nothing objects -- so the claim
+# lives here too, where undoing it is a failing test rather than a silent
+# re-import of a file that cannot load.
+NEVER_ON_A_BOARD = {
+    "canvas": (
+        "the pure-Python indexed raster. Its only device consumer was "
+        "wallpaper._ensure_preview, and it could never import there anyway "
+        "(see `palette`). The boards draw through moy_gfx/libmoy; a second "
+        "raster in frozen flash bought a preview nobody ever saw."),
+    "palette": (
+        "builds indices 16-63 with CPython's `colorsys` at IMPORT time, and "
+        "MicroPython has none -- confirmed absent from both boards' .build "
+        "trees and from micropython-lib. Staging it means a module that raises "
+        "on import, which reads as a missing FEATURE rather than a crash "
+        "because every caller is guarded. The web head needs the same table and "
+        "GENERATES a literal twin instead; a board that ever needs MOY64 should "
+        "do the same, never stage this file."),
 }
 
 
@@ -356,6 +367,21 @@ def test_no_known_gap_has_quietly_been_fixed():
     stale = sorted(set(KNOWN_GAPS) - live)
     assert not stale, (
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
+
+
+@pytest.mark.parametrize("target", ("tdeck", "p4"))
+def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
+    """A module that RAISES on import is worse than one that is missing.
+
+    Every caller in this tree is guarded, so the failure surfaces as a feature
+    that quietly does not exist -- which is how the wallpaper preview stayed
+    black on both boards for as long as it has. Keeping the claim in a test as
+    well as in the build script means re-adding one of these is a red run and
+    not a silent re-import.
+    """
+    frozen = set(frozen_set(target))
+    for name, why in sorted(NEVER_ON_A_BOARD.items()):
+        assert name not in frozen, "%s freezes %s -- %s" % (target, name, why)
 
 
 @pytest.mark.parametrize("target", TARGETS)

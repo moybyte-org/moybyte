@@ -298,11 +298,19 @@ cp "${REPO_ROOT}/runtime/moy_carts.py" "${SCRIPT_DIR}/modules/moy_carts.py"
 cp "${REPO_ROOT}/runtime/moybuf.py" "${SCRIPT_DIR}/modules/moybuf.py"
 cp "${REPO_ROOT}/runtime/moy_fs.py" "${SCRIPT_DIR}/modules/moy_fs.py"
 cp "${REPO_ROOT}/runtime/moy_image.py" "${SCRIPT_DIR}/modules/moy_image.py"
-# The pure-Python indexed Canvas + palette: the Wallpaper preview runner needs
-# them on-device to COMPUTE the Appearance monitor's frame (once per cart
-# source, cached as a thumbs/wp*.mct sidecar -- the thumbnail model).
-cp "${REPO_ROOT}/runtime/canvas.py" "${SCRIPT_DIR}/modules/canvas.py"
-cp "${REPO_ROOT}/runtime/palette.py" "${SCRIPT_DIR}/modules/palette.py"
+# canvas.py + palette.py are DELIBERATELY NOT STAGED (2026-08-15). They were
+# here for the Wallpaper preview runner, which computes the Appearance monitor's
+# frame on an offscreen pure-Python Canvas -- except that never once worked on a
+# board. runtime/palette.py builds indices 16-63 with CPython's `colorsys` at
+# import time and MicroPython has none, so `import palette` raised, `import
+# canvas` raised with it, and wallpaper._ensure_preview took its `return False`
+# path every time. The preview has always been a black rectangle here; no
+# thumbs/wp*.mct sidecar can exist either, because writing one needs the Canvas
+# that cannot import. Owner call: the preview is not worth a second raster on
+# the device -- tapping a wallpaper applies it, which is the whole interaction.
+# So the two files stay host/web-only, the frozen image gets ~1,600 lines of
+# flash back, and the LAST consumer of the pure-Python raster is gone.
+# tests/test_staging_closure.py pins the absence.
 cp "${REPO_ROOT}/runtime/moy_journal.py" "${SCRIPT_DIR}/modules/moy_journal.py"
 cp "${REPO_ROOT}/runtime/op_history.py" "${SCRIPT_DIR}/modules/op_history.py"
 cp "${REPO_ROOT}/runtime/blocks.py" "${SCRIPT_DIR}/modules/blocks.py"
