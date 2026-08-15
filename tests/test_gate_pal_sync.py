@@ -28,8 +28,13 @@ UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
 
 DRIVER = r'''
 import sys
-sys.path.insert(0, @STAGE@)
+# STAGE must outrank MODULES: modules/ is gitignored and never cleaned, so it
+# still holds whatever a previous build staged there -- and this suite would
+# then test that stale copy instead of the runtime/ source it just staged.
+# (test_semantic_traces already orders them this way; this one did not, and it
+# is what made a fresh Image in runtime/moy_image.py invisible here.)
 sys.path.insert(0, @MODULES@)
+sys.path.insert(0, @STAGE@)
 
 import moy_gfx
 import device_canvas
@@ -118,6 +123,13 @@ def test_gate_pal_table_matches_full_rebuild(tmp_path):
     stage = tmp_path / "stage"
     stage.mkdir()
     shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
+    # device_canvas imports Image from moy_image (ONE definition, shared with the
+    # host canvas). The real build stages both of these out of runtime/ into
+    # modules/; this stage dir is where that is emulated, so they belong here
+    # rather than being reached for through a `runtime` package the device does
+    # not have.
+    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
+    shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
     src = (DRIVER
            .replace("@STAGE@", repr(str(stage)))
            .replace("@MODULES@", repr(str(TDECK / "modules"))))

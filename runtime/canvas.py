@@ -81,31 +81,14 @@ def tri_spans(x1, y1, x2, y2, x3, y3):
     return out
 
 
-class Image:
-    """A small indexed sprite. `pix` is a flat list/bytes of palette indices."""
-
-    def __init__(self, width, height, pix, transparent=None):
-        self.w = width
-        self.h = height
-        self.pix = pix
-        self.transparent = transparent
-
-    @classmethod
-    def from_ascii(cls, rows, mapping, transparent="."):
-        """Build from ['..##..', ...] using {char: index}; `transparent` char skipped."""
-        h = len(rows)
-        w = max(len(r) for r in rows) if rows else 0
-        t_index = -1
-        pix = []
-        for y in range(h):
-            row = rows[y]
-            for x in range(w):
-                ch = row[x] if x < len(row) else transparent
-                if ch == transparent:
-                    pix.append(t_index)
-                else:
-                    pix.append(mapping[ch] & 63)
-        return cls(w, h, pix, transparent=t_index)
+# Image lives in moy_image now -- ONE definition shared with device_canvas,
+# which carried its own byte-for-byte twin. Re-exported here because
+# `from canvas import Image` is what host_app, host_api and runtime/__init__
+# have always said, and those call sites are not what this change is about.
+try:
+    from .moy_image import Image        # noqa: F401
+except ImportError:  # pragma: no cover - the staged device/web tree: bare names
+    from moy_image import Image         # noqa: F401
 
 
 try:

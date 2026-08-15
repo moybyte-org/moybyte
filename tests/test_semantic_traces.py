@@ -488,6 +488,11 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # host's (which is what it used to do) meant the one suite that drives real
     # input through the real glue was testing the wrong tier's input class.
     shutil.copy(TDECK / "modules" / "moybyte" / "input.py", stage / "input.py")
+    # Same reasoning as the input class above: device_canvas takes Image from
+    # moy_image now (ONE definition, shared with the host canvas), and the real
+    # build stages it -- with its moy_fs leaf -- out of runtime/ into modules/.
+    shutil.copy(ROOT / "runtime" / "moy_image.py", stage / "moy_image.py")
+    shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),

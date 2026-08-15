@@ -257,24 +257,13 @@ _LAYER_POOL = {}
 MAP_AUTO_CACHE = False
 
 
-class Image:
-    def __init__(self, width, height, pix, transparent=-1):
-        self.w = width
-        self.h = height
-        self.pix = pix
-        self.transparent = transparent
-
-    @classmethod
-    def from_ascii(cls, rows, mapping, transparent="."):
-        h = len(rows)
-        w = max(len(r) for r in rows) if rows else 0
-        pix = []
-        for y in range(h):
-            row = rows[y]
-            for x in range(w):
-                ch = row[x] if x < len(row) else transparent
-                pix.append(-1 if ch == transparent else (mapping[ch] & 63))
-        return cls(w, h, pix, -1)
+# Image comes from moy_image now -- ONE definition, shared with the host canvas
+# that used to carry the other copy. Re-exported because device_api and the cart
+# namespace import it from here by name.
+try:
+    from moy_image import Image         # noqa: F401
+except ImportError:  # pragma: no cover - host tree: the package-relative lane
+    from runtime.moy_image import Image  # noqa: F401
 
 
 def _decode_moyimg(text):
