@@ -398,10 +398,17 @@ How it works:
   (`OtaUpdater`); the UI is the shared console's **Settings → UPDATE FW** screen,
   which drives the install one 32K chunk per frame with a progress bar.
 
-### One-time switch to OTA
+### One-time switch to OTA — DONE on this board
 
-Switching the partition layout means the **first** flash of an OTA build must be a
-full-image USB flash that also rewrites the partition table and clears `otadata`:
+**This T-Deck is already on the dual-OTA layout** (owner-confirmed 2026-08-15; it
+took a real OTA on 2026-08-02 — see the WiFi-download section below). So the
+step here is HISTORY for it, and an ordinary
+`make firmware-flash-lilygo-micropython` is what a dev flash needs.
+
+It still applies to a board that has never carried the OTA table — a fresh unit,
+or one recovered to a legacy single-app image. For those, the **first** flash of
+an OTA build must be a full-image USB flash that also rewrites the partition
+table and clears `otadata`:
 
 ```bash
 MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython
