@@ -52,11 +52,26 @@ def read_sources(shim, libmoy_names, libmoy_dir=None):
     Read rather than referenced so the cache key covers what was actually
     compiled, and so the build directory is self-contained (a failed build can
     be reproduced by hand from what is on disk).
+
+    `libmoy_dir` may be one directory or SEVERAL, searched in order: the Lua
+    binding compiles libmoy's raster, libmoy's Lua binding and the vendored Lua
+    itself, which live in three sibling `native/` trees. The files are copied
+    into one build directory either way, so a name that appears in two of them
+    would be ambiguous -- and is an error rather than a silent first-wins.
     """
-    libmoy_dir = libmoy_dir or LIBMOY
+    if libmoy_dir is None:
+        libmoy_dir = LIBMOY
+    dirs = [libmoy_dir] if isinstance(libmoy_dir, str) else list(libmoy_dir)
     out = {}
     for name in libmoy_names:
-        with open(os.path.join(libmoy_dir, name)) as fh:
+        found = [os.path.join(d, name) for d in dirs
+                 if os.path.isfile(os.path.join(d, name))]
+        if not found:
+            raise FileNotFoundError(name)
+        if len(found) > 1:
+            raise RuntimeError("%s is in %d source dirs: %s"
+                               % (name, len(found), ", ".join(found)))
+        with open(found[0]) as fh:
             out[name] = fh.read()
     with open(shim) as fh:
         out[os.path.basename(shim)] = fh.read()
@@ -79,21 +94,27 @@ def cache_key(compiler, sources, cflags):
 
 
 def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
-          libmoy_dir=None, verbose=False):
+          libmoy_dir=None, link_flags=None, verbose=False):
     """Compile (or reuse) `name`'s cached .so. None when there is no compiler.
 
     `compile_names` are the translation units handed to the compiler; it
     defaults to the shim plus every .c in `libmoy_names`, which is what all
     three callers want (the .h files are read for the cache key and for the
     include directory, but are not compiled).
+
+    `link_flags` go AFTER the sources, which is where a `-l` has to be: with
+    --as-needed (the default on most distros) a library named before the
+    objects that reference it is dropped from the link.
     """
     compiler = cc()
     if compiler is None:
         return None
     cflags = list(cflags if cflags is not None else BASE_CFLAGS)
+    link_flags = list(link_flags or ())
     sources = read_sources(shim, libmoy_names, libmoy_dir)
-    so_path = os.path.join(cache_dir,
-                           "%s-%s.so" % (name, cache_key(compiler, sources, cflags)))
+    so_path = os.path.join(
+        cache_dir,
+        "%s-%s.so" % (name, cache_key(compiler, sources, cflags + link_flags)))
     if os.path.exists(so_path):
         return so_path
     os.makedirs(cache_dir, exist_ok=True)
@@ -107,7 +128,8 @@ def build(name, shim, libmoy_names, cache_dir, cflags=None, compile_names=None,
                                                     if n.endswith(".c")]
     tmp = so_path + ".tmp"
     cmd = ([compiler] + cflags + ["-I", src_dir]
-           + [os.path.join(src_dir, n) for n in compile_names] + ["-o", tmp])
+           + [os.path.join(src_dir, n) for n in compile_names]
+           + ["-o", tmp] + link_flags)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError("%s build failed:\n%s" % (name, proc.stderr))

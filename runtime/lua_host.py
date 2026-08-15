@@ -52,6 +52,27 @@ def _moycore_available():
     return HostLuaRun if HostLuaRun.available() else None
 
 
+def canvas_target(canvas):
+    """(buf, wire, indexed) -- how libmoy draws into whichever canvas this is.
+
+    The host is mid-move from `runtime/canvas.py` (one byte of palette index a
+    pixel) to the boards' own `device_canvas.DeviceCanvas` (two bytes of
+    RGB565), and both are live in the tree while #161 lands, so the runtime asks
+    the canvas rather than assuming. The 565 side needs its WIRE table too:
+    libmoy resolves colour at draw time there, and the table is per-canvas --
+    byte-swapped on the T-Deck's panel, canonical elsewhere, and rewritten
+    outright by a cart's SPEC.md 3.1 palette.
+
+    Read off `_wire` rather than `device_canvas._PAL565_WIRE_BUF`, which is what
+    the device glue reads: the module constant is the STOCK table, so a cart
+    that shipped its own palette would draw through the wrong one.
+    """
+    buf = getattr(canvas, "_buf", None)          # DeviceCanvas: RGB565
+    if buf is not None:
+        return buf, getattr(canvas, "_wire", None), False
+    return canvas.buf, None, True                # runtime/canvas.py: indices
+
+
 class MoycoreHostRun:
     """A cart run under the boards' Lua -- the host's only Lua runtime."""
 
@@ -61,9 +82,11 @@ class MoycoreHostRun:
             raise RuntimeError("no host lua binding")
         canvas = ws.canvas
         project = getattr(ws, "project", None)
-        self._run = HostLuaRun(canvas.buf, canvas.w, canvas.h,
+        buf, wire, indexed = canvas_target(canvas)
+        self._run = HostLuaRun(buf, canvas.w, canvas.h,
                                getattr(project, "sheet", None),
-                               getattr(project, "tilemap", None))
+                               getattr(project, "tilemap", None),
+                               wire=wire, indexed=indexed)
         # The superset, registered on top of libmoy's table before the cart
         # runs -- see the device glue for why this is registration and not a
         # second runtime.

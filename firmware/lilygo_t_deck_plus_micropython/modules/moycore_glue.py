@@ -174,12 +174,19 @@ class MoycoreRun:
         # Read from the canvas rather than assumed, for the same reason
         # web_boot reports it to the page -- device_canvas picks canonical or
         # byte-swapped RGB565 from the panel it is talking to.
-        wire = None
-        try:
-            import device_canvas
-            wire = device_canvas._PAL565_WIRE_BUF
-        except Exception:  # noqa: BLE001 -- no table: libmoy uses the spec palette
-            wire = None
+        # THIS CANVAS's table, not the module constant. They are the same object
+        # until a cart ships its own palette (SPEC.md 3.1), at which point the
+        # canvas holds a private one -- and reading the constant here would draw
+        # every Lua verb in stock MOY64 while the Python verbs on the same canvas
+        # honoured the cart's. Cart palettes only started working on device at
+        # all in 096c492; this is the half of it the Lua path needs.
+        wire = getattr(canvas, "_wire", None)
+        if wire is None:
+            try:
+                import device_canvas
+                wire = device_canvas._PAL565_WIRE_BUF
+            except Exception:  # noqa: BLE001 -- no table: libmoy uses the spec palette
+                wire = None
 
         cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
         _moycore.run_begin(

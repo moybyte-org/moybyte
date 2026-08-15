@@ -15,6 +15,22 @@
  * console, the same snapshot-in/queue-out host callbacks -- because the two
  * must not drift. What differs is only how the host talks to it: plain C
  * signatures ctypes can call, and buffers the caller owns.
+ *
+ * THE PIXEL FORMAT IS RGB565, as it is on both boards (moycore's micropython.mk
+ * sets the same -DMOY_PIXEL_RGB565=1). A libmoy built for indices computes
+ * y*w+x over ONE byte per pixel; the same source built for direct colour
+ * computes it over two, and the two cannot share a library -- so a shim that
+ * was compiled the other way would write half-width rows of raw indices into a
+ * 565 framebuffer and there is nothing at runtime that would say so. The #error
+ * below is that check, moved to compile time.
+ *
+ * A canvas that is STILL INDEXED is bridged rather than refused (`indexed=1`):
+ * libmoy draws into a private 565 shadow whose wire table is the IDENTITY, so a
+ * "colour word" is literally the palette index, and the two buffers differ only
+ * in width -- widen in, narrow out, per frame, losslessly. That exists for the
+ * host's transition to the boards' canvas class (#161) and nothing else: when
+ * `runtime/host_app.py` hands over a DeviceCanvas, delete the bridge and the
+ * `indexed` argument with it.
  */
 
 #include <stdlib.h>
@@ -25,6 +41,10 @@
 #include "lauxlib.h"
 
 #include "moy.h"
+
+#ifndef MOY_PIXEL_RGB565
+#error "moyhost_lua.c is the RGB565 build -- compile with -DMOY_PIXEL_RGB565=1"
+#endif
 
 enum { SNAP_BTN = 0, SNAP_BTNP, SNAP_BTN_P1, SNAP_BTNP_P1, SNAP_PLAYERS,
        SNAP_TIME_MS, SNAP_TOUCH_X, SNAP_TOUCH_Y, SNAP_TOUCH_DOWN,
@@ -47,6 +67,10 @@ typedef struct {
                                 it, and ctypes arrays are plainer this way */
     int         aq_cap;
     int         has_sheet, has_map;
+    uint8_t    *idx;         /* the transitional INDEX buffer, or NULL when the
+                                caller's canvas is already RGB565 */
+    moy_pixel  *shadow;      /* the 565 buffer libmoy draws into when it is */
+    int         npix;
 } host_lua;
 
 static host_lua *CUR;        /* the callbacks take void*; one run at a time */
@@ -181,12 +205,61 @@ void hl_register(host_lua *r, const char *name, int idx)
     lua_setglobal(r->L, name);
 }
 
-host_lua *hl_new(uint8_t *pix, int w, int h, int32_t *snap,
-                 int32_t *aq, int aq_cap)
+/* -- the indexed bridge (transitional; see the header note) ----------------
+ *
+ * With an identity wire table every word libmoy stores is `store[pal[i]]`,
+ * i.e. the remapped INDEX -- the exact byte the indexed build would have
+ * written, and the exact byte `runtime/canvas.py` holds. So the two buffers are
+ * the same picture at two widths and the conversion is a widen and a narrow
+ * with no palette in it: nothing can be lost, and no reverse lookup can pick
+ * the wrong index when two palette entries share a colour. */
+static void hl_widen(host_lua *r)
 {
-    host_lua *r = (host_lua *)calloc(1, sizeof(host_lua));
+    int i;
+    if (!r->idx) return;
+    for (i = 0; i < r->npix; i++) r->shadow[i] = r->idx[i];
+}
+
+static void hl_narrow(host_lua *r)
+{
+    int i;
+    if (!r->idx) return;
+    /* & 63 for the same reason the indexed canvas masks: SPEC.md 2 has 64
+     * colours, so a wider word cannot be a legal index. */
+    for (i = 0; i < r->npix; i++) r->idx[i] = (uint8_t)(r->shadow[i] & 63);
+}
+
+/* `nbytes` is the caller's buffer size, and it is CHECKED rather than trusted:
+ * ctypes hands over a bare pointer, so a w/h that outruns the allocation is a
+ * heap overwrite with no Python-side trace. NULL back is the answer, which the
+ * binding turns into an ordinary exception.
+ *
+ * `wire` is the 64-entry index -> 16-bit word table (the boards pass their
+ * canvas's, byte-swapped or not); NULL means libmoy's canonical RGB565 of the
+ * SPEC.md 2.2 palette. Ignored when `indexed`, which owns its table. */
+host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
+                 const uint16_t *wire, int32_t *snap, int32_t *aq, int aq_cap)
+{
+    host_lua *r;
+    long npix = (long)w * (long)h;
+    int bpp = indexed ? 1 : (int)sizeof(moy_pixel);
+    if (w <= 0 || h <= 0 || npix > (long)(nbytes / bpp)) return NULL;
+    r = (host_lua *)calloc(1, sizeof(host_lua));
     if (!r) return NULL;
-    moy_canvas_init(&r->canvas, pix, w, h);
+    r->npix = (int)npix;
+    if (indexed) {
+        int i;
+        uint16_t ident[MOY_PALETTE];
+        r->idx = (uint8_t *)pix;
+        r->shadow = (moy_pixel *)calloc((size_t)npix, sizeof(moy_pixel));
+        if (!r->shadow) { free(r); return NULL; }
+        moy_canvas_init(&r->canvas, r->shadow, w, h);
+        for (i = 0; i < MOY_PALETTE; i++) ident[i] = (uint16_t)i;
+        moy_canvas_wire(&r->canvas, ident);
+    } else {
+        moy_canvas_init(&r->canvas, (moy_pixel *)pix, w, h);
+        if (wire) moy_canvas_wire(&r->canvas, wire);
+    }
     r->snap = snap; r->aq = aq; r->aq_cap = aq_cap;
     if (aq && aq_cap > 0) aq[0] = 0;
     r->con.canvas = &r->canvas;
@@ -199,25 +272,48 @@ host_lua *hl_new(uint8_t *pix, int w, int h, int32_t *snap,
     hs->touch = h_touch; hs->key = h_key; hs->keyp = h_keyp;
     hs->textmode = h_textmode; hs->quit = h_quit; hs->cfg = h_cfg;
     r->L = luaL_newstate();
-    if (!r->L) { free(r); return NULL; }
+    if (!r->L) { free(r->shadow); free(r); return NULL; }
     CUR = r;
-    if (moy_lua_open(r->L, &r->con) != 0) { lua_close(r->L); free(r); CUR = NULL; return NULL; }
+    if (moy_lua_open(r->L, &r->con) != 0) {
+        lua_close(r->L); free(r->shadow); free(r); CUR = NULL; return NULL;
+    }
     return r;
 }
 
-void hl_set_sheet(host_lua *r, uint8_t *pix)
+/* Both of these CHECK the buffer they are handed, for the same reason hl_new
+ * does: libmoy addresses a sheet with SPEC.md 3.2's fixed 128x256 geometry and
+ * a map with the w*h it is told, so anything shorter is an out-of-bounds READ
+ * on every sprite drawn. modmoycore.c raises on the short buffer; there is no
+ * exception to raise from here, and declining leaves the cart drawing nothing
+ * rather than reading whatever the allocator had there. */
+void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
 {
-    if (pix) { moy_sheet_init(&r->sheet, pix); r->con.sheet = &r->sheet; }
-    else r->con.sheet = NULL;
+    if (pix && nbytes >= MOY_SHEET_W * MOY_SHEET_H) {
+        moy_sheet_init(&r->sheet, pix);
+        r->con.sheet = &r->sheet;
+    } else {
+        r->con.sheet = NULL;
+    }
 }
 
-void hl_set_map(host_lua *r, uint8_t *cells, int w, int h)
+void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
 {
-    if (cells && w > 0 && h > 0) { moy_map_init(&r->map, cells, w, h); r->con.map = &r->map; }
-    else r->con.map = NULL;
+    if (cells && w > 0 && h > 0 && (long)w * (long)h <= (long)nbytes) {
+        moy_map_init(&r->map, cells, w, h);
+        r->con.map = &r->map;
+    } else {
+        r->con.map = NULL;
+    }
 }
 
-void hl_retarget(host_lua *r, uint8_t *pix) { r->canvas.pix = pix; }
+/* Point the run at another buffer of the SAME size -- a compositor that
+ * ping-pongs. The bridged case swaps the index buffer and keeps the shadow,
+ * which is the whole reason this is not a bare assignment any more. */
+void hl_retarget(host_lua *r, void *pix)
+{
+    if (r->idx) r->idx = (uint8_t *)pix;
+    else        r->canvas.pix = (moy_pixel *)pix;
+}
 
 /* Run one chunk. 0 on success; the message lands in err. */
 int hl_exec(host_lua *r, const char *src, int len, const char *name,
@@ -242,18 +338,34 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
 int hl_load(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
-    if (hl_exec(r, src, len, name, err, errlen) != 0) return 1;
-    g_tick_ms = hl_now_ms();              /* _init may call time(), below */
-    return moy_lua_init(r->L, err, (size_t)errlen);
+    int rc;
+    /* The chunk and _init are both allowed to draw (a title screen a cart never
+     * repaints is the standing case), so they get the same bridge a frame gets
+     * -- and the same single exit, so a chunk that draws and then errors still
+     * lands what it drew. */
+    hl_widen(r);
+    rc = hl_exec(r, src, len, name, err, errlen);
+    if (rc == 0) {
+        g_tick_ms = hl_now_ms();          /* _init may call time(), below */
+        rc = moy_lua_init(r->L, err, (size_t)errlen);
+    }
+    hl_narrow(r);
+    return rc;
 }
 
 int hl_tick(host_lua *r, float dt, char *err, int errlen)
 {
+    int rc;
     CUR = r;
     g_tick_ms = hl_now_ms();              /* h_time counts from here */
     moy_reset_state(&r->canvas);
-    if (moy_lua_update(r->L, dt, err, (size_t)errlen) != 0) return 1;
-    return moy_lua_draw(r->L, err, (size_t)errlen);
+    hl_widen(r);
+    /* ONE exit, so a cart that draws and THEN errors still lands its pixels --
+     * the crash-to-code panel is drawn over the frame the cart died on. */
+    rc = moy_lua_update(r->L, dt, err, (size_t)errlen);
+    if (rc == 0) rc = moy_lua_draw(r->L, err, (size_t)errlen);
+    hl_narrow(r);
+    return rc;
 }
 
 int hl_pmem_image(host_lua *r, int32_t *out, int n)
@@ -327,5 +439,6 @@ void hl_free(host_lua *r)
     if (!r) return;
     if (r->L) lua_close(r->L);
     if (CUR == r) CUR = NULL;
+    free(r->shadow);
     free(r);
 }

@@ -21,29 +21,43 @@ The shim it loads (`runtime/moyhost_lua.c`) is deliberately `modmoycore.c` with
 the MicroPython removed -- same console, same snapshot-in/queue-out host
 callbacks -- because a host and a device that disagree about what a verb does
 is the whole disease.
+
+PIXELS ARE RGB565 HERE, as they are on both boards: moycore's micropython.mk
+compiles libmoy `-DMOY_PIXEL_RGB565=1`, and this compiles the same source the
+same way. That is not a detail -- it changes sizeof(moy_pixel), so a library
+built the other way addresses `y*w+x` over one byte instead of two and writes
+half-width rows of raw palette indices into a direct-colour framebuffer. The
+shim `#error`s without the define; the caller supplies the 64-entry wire table
+the boards read off their canvas, because a 565 canvas resolves colour at DRAW
+time and libmoy has to be told what an index looks like.
+
+A canvas that is still INDEXED (`runtime/canvas.py`, which the host sim still
+builds while #161 lands) is bridged rather than refused -- see HostLuaRun.
 """
 
 import ctypes
-import hashlib
 import os
-import shutil
-import subprocess
+
+from . import native_build
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.normpath(os.path.join(_HERE, ".."))
+_ROOT = native_build.ROOT
 _NATIVE = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
                        "native")
-_LIBMOY = os.path.join(_NATIVE, "moy_gfx", "libmoy")
-_BINDING = os.path.join(_NATIVE, "moycore", "libmoy", "moy_lua.c")
-_LUA = os.path.join(_NATIVE, "moy_lua", "lua")
+_LIBMOY = native_build.LIBMOY                        # the raster + moy.h
+_BINDING_DIR = os.path.join(_NATIVE, "moycore", "libmoy")   # libmoy's Lua binding
+_LUA = os.path.join(_NATIVE, "moy_lua", "lua")       # the vendored VM
 _SHIM = os.path.join(_HERE, "moyhost_lua.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_lua")
 
-# MOY_WITH_LUA compiles libmoy's binding at all. The Lua sources carry their
-# own LUA_32BITS in luaconf.h, which is the point of using them rather than a
-# system Lua: the host then wraps its integers where the boards wrap theirs.
-_CFLAGS = ["-std=c99", "-O2", "-fPIC", "-shared", "-DMOY_WITH_LUA=1",
-           "-Wno-double-promotion", "-Wno-float-conversion"]
+# MOY_WITH_LUA compiles libmoy's binding at all; MOY_PIXEL_RGB565 is the boards'
+# pixel, above. The Lua sources carry their own LUA_32BITS in luaconf.h, which
+# is the point of using them rather than a system Lua: the host then wraps its
+# integers where the boards wrap theirs.
+_CFLAGS = native_build.BASE_CFLAGS + [
+    "-DMOY_WITH_LUA=1", "-DMOY_PIXEL_RGB565=1",
+    "-Wno-double-promotion", "-Wno-float-conversion",
+]
 
 # The sandbox's source set, matching the boards': the unused stdlibs -- and
 # linit.c, whose luaL_openlibs references all of them -- stay out entirely, so
@@ -51,65 +65,39 @@ _CFLAGS = ["-std=c99", "-O2", "-fPIC", "-shared", "-DMOY_WITH_LUA=1",
 _LUA_SKIP = ("linit.c", "liolib.c", "loslib.c", "loadlib.c", "ldblib.c",
              "lcorolib.c", "lutf8lib.c", "lua.c", "luac.c", "onelua.c")
 
+_RASTER = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
+
 _LIB = [None]
 
 
-def _cc():
-    return os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
+def _lua_names():
+    """Every vendored Lua file this compiles, sources and headers alike.
 
-
-def _lua_sources():
+    The headers are listed because `native_build` copies what it hashes into
+    one self-contained build directory -- and because hashing them is the point:
+    the module used to key its cache on the shim, the binding and moy.h, so a
+    re-vendored VM (or a changed luaconf.h, which is where LUA_32BITS lives)
+    kept serving the .so built from the previous drop.
+    """
     if not os.path.isdir(_LUA):
         return []
     return sorted(n for n in os.listdir(_LUA)
-                  if n.endswith(".c") and n not in _LUA_SKIP)
-
-
-def _key(cc):
-    h = hashlib.sha256()
-    for path in (_SHIM, _BINDING, os.path.join(_LIBMOY, "moy.h")):
-        try:
-            with open(path, "rb") as fh:
-                h.update(fh.read())
-        except OSError:
-            return None
-    h.update(" ".join(_CFLAGS).encode())
-    h.update(",".join(_lua_sources()).encode())
-    try:
-        ver = subprocess.run([cc, "--version"], capture_output=True, text=True,
-                             timeout=10).stdout.splitlines()[:1]
-        h.update((ver[0] if ver else "").encode())
-    except Exception:   # noqa: BLE001
-        pass
-    return h.hexdigest()[:16]
+                  if (n.endswith(".c") and n not in _LUA_SKIP)
+                  or n.endswith(".h"))
 
 
 def build(verbose=False):
     """Compile (or reuse) the cached .so; None when the pieces are absent."""
-    cc = _cc()
-    if cc is None or not os.path.isfile(_BINDING) or not _lua_sources():
+    lua = _lua_names()
+    if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
-    key = _key(cc)
-    if key is None:
-        return None
-    so_path = os.path.join(_CACHE, "moyhost_lua-%s.so" % key)
-    if os.path.exists(so_path):
-        return so_path
-    os.makedirs(_CACHE, exist_ok=True)
-    tmp = so_path + ".tmp"
-    srcs = [_SHIM, _BINDING,
-            os.path.join(_LIBMOY, "moy_canvas.c"),
-            os.path.join(_LIBMOY, "moy_sprite.c"),
-            os.path.join(_LIBMOY, "moy_data.c")]
-    srcs += [os.path.join(_LUA, n) for n in _lua_sources()]
-    cmd = [cc] + _CFLAGS + ["-I", _LIBMOY, "-I", _LUA] + srcs + ["-o", tmp, "-lm"]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError("moyhost_lua build failed:\n" + proc.stderr[-4000:])
-    os.replace(tmp, so_path)
-    if verbose:
-        print("moyhost_lua: built", os.path.relpath(so_path, _ROOT))
-    return so_path
+    names = list(_RASTER) + ["moy_lua.c"] + lua
+    return native_build.build(
+        "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
+        libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA),
+        # Lua's own math (pow/fmod/floor) -- a no-op against glibc >= 2.34,
+        # which folded libm into libc, and required everywhere older.
+        link_flags=["-lm"], verbose=verbose)
 
 
 _I, _P, _F, _C = ctypes.c_int, ctypes.c_void_p, ctypes.c_float, ctypes.c_char_p
@@ -125,10 +113,11 @@ def _lib():
             _LIB[0] = False
         else:
             d = ctypes.CDLL(path)
-            d.hl_new.argtypes = [_P, _I, _I, _P, _P, _I]
+            # (pix, nbytes, w, h, indexed, wire, snap, aq, aq_cap)
+            d.hl_new.argtypes = [_P, _I, _I, _I, _I, _P, _P, _P, _I]
             d.hl_new.restype = _P
-            d.hl_set_sheet.argtypes = [_P, _P]
-            d.hl_set_map.argtypes = [_P, _P, _I, _I]
+            d.hl_set_sheet.argtypes = [_P, _P, _I]
+            d.hl_set_map.argtypes = [_P, _P, _I, _I, _I]
             d.hl_retarget.argtypes = [_P, _P]
             d.hl_load.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_load.restype = _I
@@ -171,7 +160,29 @@ AQ_SFX, AQ_MUSIC, AQ_BEEP, AQ_MUSIC_STOP, AQ_SOUND_STOP, AQ_VOLUME = range(6)
 
 
 class HostLuaRun:
-    """One Lua cart run, in the same C the boards run."""
+    """One Lua cart run, in the same C the boards run.
+
+    `buf` is the canvas's framebuffer, borrowed and never copied. TWO layouts
+    are accepted and the difference is one argument:
+
+    * **RGB565** (`indexed=False`) -- what the boards, the browser and
+      `device_canvas.DeviceCanvas` hold: two bytes a pixel, colour resolved at
+      draw time through `wire`, a 64-entry index -> 16-bit word table read off
+      the canvas (`DeviceCanvas._wire`, which is byte-swapped on the T-Deck's
+      panel and canonical elsewhere, and which a cart's own SPEC.md 3.1 palette
+      rewrites). Omitting it leaves libmoy on the canonical 2.2 palette.
+    * **INDEXED** (`indexed=True`) -- `runtime/canvas.py`, one byte a pixel,
+      which the host sim still builds until #161 finishes handing it the
+      boards' canvas class. libmoy is compiled for direct colour and cannot
+      write into that buffer, so the shim keeps a 565 shadow with an IDENTITY
+      wire table: every word it stores IS the palette index, and the frame is
+      widened in and narrowed out. Lossless by construction rather than by a
+      reverse lookup, and deletable in one commit when the transition lands.
+
+    Left to itself the format is inferred from `len(buf)`, which is what the
+    binding's own tests (and any other direct caller) rely on; `lua_host.py`
+    passes it explicitly, from the canvas class it was handed.
+    """
 
     AUDIO_MAX = 32
 
@@ -179,20 +190,41 @@ class HostLuaRun:
     def available():
         return _lib() is not None
 
-    def __init__(self, buf, w, h, sheet=None, tilemap=None):
+    def __init__(self, buf, w, h, sheet=None, tilemap=None, wire=None,
+                 indexed=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host lua binding")
         self._d = d
         self.buf = buf
+        w, h = int(w), int(h)
+        if indexed is None:
+            indexed = len(buf) < w * h * 2
+        self.indexed = bool(indexed)
         self.snap = (ctypes.c_int32 * SNAP_LEN)()
         self.aq = (ctypes.c_int32 * (1 + AQ_SLOTS * self.AUDIO_MAX))()
         self._cbuf = (ctypes.c_char * len(buf)).from_buffer(buf)
-        self._r = d.hl_new(ctypes.cast(self._cbuf, _P), int(w), int(h),
+        # Copied rather than borrowed: moy_canvas_wire copies it anyway, the
+        # copy costs 64 assignments once per run, and it lets a caller hand
+        # over any 64-length sequence (device_canvas holds an array("H"), the
+        # module default is a tuple).
+        self._wire = None
+        if wire is not None and not self.indexed:
+            if len(wire) != 64:
+                raise ValueError("wire table must have 64 entries")
+            self._wire = (ctypes.c_uint16 * 64)(*(int(c) & 0xFFFF for c in wire))
+        self._r = d.hl_new(ctypes.cast(self._cbuf, _P), len(buf), w, h,
+                           1 if self.indexed else 0,
+                           None if self._wire is None else ctypes.cast(self._wire, _P),
                            ctypes.cast(self.snap, _P), ctypes.cast(self.aq, _P),
                            len(self.aq))
         if not self._r:
-            raise RuntimeError("host lua: could not open a VM")
+            # The C checks the buffer against w*h itself -- ctypes hands it a
+            # bare pointer, so an undersized canvas would otherwise be a heap
+            # overwrite with no Python-side trace.
+            raise RuntimeError(
+                "host lua: could not open a VM (canvas %dx%d needs %d bytes, "
+                "got %d)" % (w, h, w * h * (1 if self.indexed else 2), len(buf)))
         self.snap[SNAP_PLAYERS] = 1
         self._sheet_ref = self._map_ref = None
         if sheet is not None:
@@ -200,13 +232,13 @@ class HostLuaRun:
             if not isinstance(pix, bytearray):
                 pix = bytearray(pix)
             self._sheet_ref = (ctypes.c_char * len(pix)).from_buffer(pix)
-            d.hl_set_sheet(self._r, ctypes.cast(self._sheet_ref, _P))
+            d.hl_set_sheet(self._r, ctypes.cast(self._sheet_ref, _P), len(pix))
         if tilemap is not None:
             cells = tilemap.cells
             if not isinstance(cells, bytearray):
                 cells = bytearray(cells)
             self._map_ref = (ctypes.c_char * len(cells)).from_buffer(cells)
-            d.hl_set_map(self._r, ctypes.cast(self._map_ref, _P),
+            d.hl_set_map(self._r, ctypes.cast(self._map_ref, _P), len(cells),
                          int(tilemap.w), int(tilemap.h))
 
     # The dispatch callback's C signature; kept alive on the instance because
