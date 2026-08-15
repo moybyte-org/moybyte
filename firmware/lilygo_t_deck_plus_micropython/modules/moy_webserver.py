@@ -567,6 +567,27 @@ class WebServer:
         conn.sendall(b"%x\r\n" % len(data) + data + b"\r\n")
 
     def _send_file(self, conn, resp):
+        """Head, then the file, through the subclass's storage gate if it has one.
+
+        The gate matters on the T-Deck and nowhere else. Its SD card shares the
+        panel's SPI host, so an SD op may not overlap an in-flight panel DMA --
+        `moybyte_sd.with_sd_live` is reached through a wrapper that drains it
+        first (`comp.sync()`), and skipping that is the documented hard-hang:
+        the read lands, then the NEXT panel flush freezes the board with no
+        panic and nothing on serial.
+
+        This whole transfer is ONE blocking call rather than a per-frame pump,
+        so a single gate entry covers it -- the hazard is the first read racing
+        the DMA the last frame left in flight, not a thousand interleavings.
+        Boards without shared storage set no gate and pay nothing.
+        """
+        gate = getattr(self, "stream_gate", None)
+        if gate is not None:
+            gate(lambda: self._send_file_body(conn, resp))
+        else:
+            self._send_file_body(conn, resp)
+
+    def _send_file_body(self, conn, resp):
         """Head, then the file in CHUNK-sized pieces off a reused buffer.
 
         `readinto` and a memoryview slice, not `read(n)`: read() mints a fresh

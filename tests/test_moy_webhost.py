@@ -556,6 +556,53 @@ def test_every_board_injects_the_web_console(board, web_dir):
     assert web_dir in src, "%s does not pass its own web directory" % board
 
 
+class _Conn:
+    def __init__(self):
+        self.sent = bytearray()
+
+    def sendall(self, b):
+        self.sent += bytes(b)
+
+
+def test_asset_streaming_goes_through_the_storage_gate(tmp_path):
+    """The megabyte is the part that needs gating.
+
+    On the T-Deck the bundle lives on an SD card sharing the panel's SPI host,
+    and an SD op that overlaps an in-flight panel DMA is the documented hard
+    hang -- the read lands, then the next flush freezes the board silently. The
+    store walk was already gated; the ~1MB micropython.wasm was not, which is
+    the wrong way round.
+    """
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "worker.js").write_text("console.log(1)\n" * 200)
+    entered = []
+
+    def _gate(fn):
+        entered.append(1)
+        return fn()
+
+    host = wh.WebHost(str(tmp_path / "carts"), str(web), with_sd=_gate)
+    conn = _Conn()
+    host._send_file(conn, host._asset("worker.js"))
+    assert entered, "the asset stream bypassed the SD gate"
+    assert b"console.log(1)" in bytes(conn.sent)
+    assert b"200 OK" in bytes(conn.sent)
+
+
+def test_a_board_without_shared_storage_pays_no_gate(tmp_path):
+    """The P4's bundle is on internal flash and races nothing, so it must not
+    acquire a gate it does not need."""
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "worker.js").write_text("x")
+    host = wh.WebHost(str(tmp_path / "carts"), str(web))
+    assert host.stream_gate is None
+    conn = _Conn()
+    host._send_file(conn, host._asset("worker.js"))
+    assert bytes(conn.sent).endswith(b"x")
+
+
 def test_the_link_wait_is_shared_and_not_recopied_per_board():
     """It was a 25-line closure in the P4's run_desktop. Writing it per board is
     precisely how the T-Deck went without the feature, so the helper is shared

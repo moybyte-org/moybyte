@@ -235,6 +235,12 @@ class WebHost(WebServer):
         # the hard-constraints section of CLAUDE.md). The P4 has no SD and
         # passes None, which makes this a plain call-through.
         self._with_sd = with_sd or (lambda fn: fn())
+        # ...and the SAME gate guards asset STREAMING, which is where the bytes
+        # actually are: /sd/web/micropython.wasm is ~1MB off that shared bus,
+        # against a carts.json walk that is comparatively tiny. Gating only the
+        # store walk would have left the megabyte ungated. None on the P4, whose
+        # bundle is on internal flash and races nothing.
+        self.stream_gate = with_sd
 
     def start(self, ip=None):
         """Bring the link up, then listen. Sets `serving` only if BOTH worked.
