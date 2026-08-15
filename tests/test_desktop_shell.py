@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _ws(tmp_path):
     from runtime import host_app
@@ -76,7 +78,7 @@ def test_desktop_home_renders(tmp_path):
     assert ws.screen == "launcher"
     drv.frame(1 / 30)
     # Wallpaper backdrop + icon grid + status strip => many colors.
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
@@ -88,7 +90,7 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     buf = drv.rgb888()
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
@@ -145,7 +147,7 @@ def test_settings_screen_opens_and_renders(tmp_path):
     ws.open_settings()
     assert ws.screen == "settings"
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_status_strip_menu_opens_settings_from_home(tmp_path):
@@ -867,13 +869,13 @@ def test_boot_splash_holds_then_reveals_launcher(tmp_path):
     assert ws._splash_until is not None
     drv.frame(1 / 30)                                # paints the boot logo, no error
     assert ws._splash_until is not None             # still within the hold
-    assert len(set(drv.rgb888())) > 4               # Moy + wordmark => many colors
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4               # Moy + wordmark => many colors
 
     ws._splash_until = console._ticks_ms() - 1       # force the deadline into the past
     drv.frame(1 / 30)                                # this frame expires it...
     assert ws._splash_until is None
     drv.frame(1 / 30)                                # ...and the launcher renders after
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():

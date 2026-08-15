@@ -24,6 +24,8 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import audio  # noqa: E402
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _synth_available():
     try:
@@ -783,7 +785,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
 
     # A frame in the music view draws without error.
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
     # Tap NOTE+ on the edit pad -> the current step's pitch rises + bank goes dirty.
     p0 = me.cur_step()[0]
@@ -827,7 +829,7 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     ws.music_ui._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
     assert me.view == me.SONG_VIEW
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
     # SFX+ pad button (song view, row 0 col 1) bumps the slot's SFX id.
     v0 = me.cur_slot_value()
     r = C._mu_pad_rect(1, 0)
@@ -876,7 +878,7 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
 
     # A frame still draws cleanly with the extra pad rows + bottom buttons.
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
 
 def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
@@ -908,7 +910,7 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     assert len(me.bank.music) == n + 1 and me.track_idx == n
 
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
 
 def test_music_editor_ui_undo_redo_bottom_bar_buttons(tmp_path):

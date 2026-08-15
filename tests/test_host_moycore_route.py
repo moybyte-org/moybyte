@@ -15,6 +15,8 @@ import pytest
 
 from runtime import lua_host
 
+import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
+
 
 def test_a_superset_cart_is_not_routed_away_any_more():
     """The correction: ONE runtime.
@@ -109,10 +111,10 @@ def test_a_spec_only_cart_actually_runs_on_the_new_path(tmp_path):
     try:
         assert isinstance(run, lua_host.MoycoreHostRun), \
             "the cart did not run on the boards' Lua"
-        before = sum(1 for b in ws.canvas.buf if b)
+        before = probe.painted_pixels(ws.canvas)
         run.update(1 / 30.0)
         run.update(1 / 30.0)
-        after = sum(1 for b in ws.canvas.buf if b)
+        after = probe.painted_pixels(ws.canvas)
         assert after > before, "the C loop drew nothing into the host canvas"
     finally:
         run.close()

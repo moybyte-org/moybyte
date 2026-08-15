@@ -25,6 +25,8 @@ from runtime import console  # noqa: E402  (import after host_app for the alias)
 from runtime.canvas import Canvas, SpriteSheet  # noqa: E402
 from runtime.input import InputState  # noqa: E402
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 # -- a tiny in-memory Workstation fixture (no disk, no real cart) ------------
 
@@ -81,7 +83,7 @@ def test_all_display_types_render_without_error():
     cfg = {"n": 5, "spd": 50, "pick": "b", "who": 1}
     ws = _ws_with_cart(edit, cfg, sheet)
     _draw_once(ws)                          # must not raise
-    assert len(set(ws.canvas.buf)) > 1      # something was drawn
+    assert probe.drew_something(ws.canvas)  # something was drawn
 
     # The fullscreen Config panel (fix B/C: no GO/CODE/CLOSE button bar) fits all four
     # tall visual cards on one screen now -- the extra vertical room the removed buttons
@@ -270,7 +272,7 @@ def test_existing_seed_carts_still_render_their_cards(tmp_path):
         assert ws.menu_view == "cards"
         ws.input.begin_frame()
         ws.frame(1 / 30)                                # draws cards, no error
-        assert len(set(ws.canvas.buf)) > 1
+        assert probe.drew_something(ws.canvas)
         ws.go_home()
 
 
@@ -323,7 +325,7 @@ def test_bad_edit_field_renders_inline_error_others_still_work():
     rows = ws.cards_layer._card_layout()
     assert [r["error"] for r in rows] == [None, "min > max"]
     assert rows[1]["display"] is None                  # never reaches the real renderer
-    assert len(set(ws.canvas.buf)) > 1                  # something drew (the good card + "!")
+    assert probe.drew_something(ws.canvas)              # something drew (the good card + "!")
 
 
 def test_validate_field_catches_the_known_bad_shapes():

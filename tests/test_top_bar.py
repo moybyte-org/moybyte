@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _ws(tmp_path):
     from runtime import host_app
@@ -107,13 +109,13 @@ def test_bar_is_18px_on_both_screens(tmp_path):
     # Launcher bar renders.
     assert ws.screen == "launcher"
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
     # Running-cart bar renders.
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):

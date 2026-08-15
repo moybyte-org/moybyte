@@ -22,6 +22,8 @@ from runtime import block_editor_ui as BU        # noqa: E402
 from runtime import scene_editor_ui as SU        # noqa: E402
 from runtime import blocks as _blocks            # noqa: E402
 
+import canvas_probe as probe                     # noqa: E402  (pixel-width-agnostic probes)
+
 
 MAIN_SCENE = json.dumps([
     {"tag": "goal", "tile": 2, "x": 200, "y": 32},
@@ -272,8 +274,7 @@ def test_number_keypad_renders_on_system_canvas_in_workspace(tmp_path):
     from runtime import block_editor_ui as _bu
     x, y, w, h = _bu._BLK_NUM
     sc = ws.sys_canvas
-    painted = sum(1 for yy in range(y, y + h) for xx in range(x, x + w)
-                  if sc.buf[yy * sc.w + xx] != sc.buf[0])
+    painted = probe.painted_pixels_rect(sc, x, y, w, h)
     assert painted > 500, "the number keypad did not render on the system canvas"
 
 

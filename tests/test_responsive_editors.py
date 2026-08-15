@@ -21,6 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _open_first_cart(ws):
     ws.launcher.sel = 0
@@ -194,7 +196,7 @@ def test_code_editor_renders_without_error_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4                           # editor drew, not a flat fill
+    assert probe.distinct_pixels_in(buf, 3) > 4     # editor drew, not a flat fill
 
 
 def test_block_editor_renders_without_error_on_large_canvas(tmp_path):
@@ -206,7 +208,7 @@ def test_block_editor_renders_without_error_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +374,7 @@ def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_paint_editor_tap_paints_in_system_coords(tmp_path):
@@ -447,7 +449,7 @@ def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_map_editor_tap_paints_in_system_coords(tmp_path):
@@ -509,7 +511,7 @@ def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_music_editor_tap_works_in_system_coords(tmp_path):
@@ -562,7 +564,7 @@ def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_cards_editor_tap_steps_in_system_coords(tmp_path):

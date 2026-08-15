@@ -22,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _ws(tmp_path, **kw):
     from runtime import host_app
@@ -70,7 +72,7 @@ def test_distinct_320x240_system_canvas_renders(tmp_path):
     assert ws._viewport() == (0, 0, 1)             # no letterbox / scaling
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    assert len(set(ws.sys_canvas.buf)) > 4         # the desktop drew
+    assert probe.distinct_pixels(ws.sys_canvas) > 4    # the desktop drew
 
 
 def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
@@ -113,7 +115,8 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 640 * 480 * 3
-    assert len(set(buf)) > 4                       # wallpaper + grid + dock drew
+    # rgb888() is 3 bytes per pixel, so count COLOURS and not bytes here too.
+    assert probe.distinct_pixels_in(buf, 3) > 4    # wallpaper + grid + dock drew
 
 
 def test_dock_and_strip_scale_with_the_canvas(tmp_path):
@@ -173,11 +176,14 @@ def test_font_scale_resizes_text_live(tmp_path):
     sc = SystemCanvas(640, 480, font_scale=1)
     sc.cls(0)
     sc.print("HELLO", 10, 10, C.NAMES["white"], 1)
-    on1 = sum(1 for b in sc.buf if b == C.NAMES["white"])
+    # Count pixels that are not the cls background: the only thing drawn is the
+    # white text, so this IS the white count -- without asking whether a buffer
+    # cell holds a palette index (it did) or half of an RGB565 word (it will).
+    on1 = probe.painted_pixels(sc)
     sc.set_font_scale(2)
     sc.cls(0)
     sc.print("HELLO", 10, 10, C.NAMES["white"], 1)
-    on2 = sum(1 for b in sc.buf if b == C.NAMES["white"])
+    on2 = probe.painted_pixels(sc)
     assert on2 == on1 * 4                            # nearest-neighbor 2x = 4x pixels
 
 
@@ -224,7 +230,7 @@ def test_settings_font_row_renders(tmp_path):
     ws.open_settings()
     drv.frame(1 / 30)
     assert "font_scale" in [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
@@ -287,7 +293,7 @@ def test_font_scale_change_on_a_big_system_canvas_does_not_crash(tmp_path):
     assert ws.font_scale == 2
     assert ws.sys_canvas.font_scale == 2
     ws.frame(1 / 60.0)                                     # and it still draws
-    assert len(set(ws.sys_canvas.buf)) > 4
+    assert probe.distinct_pixels(ws.sys_canvas) > 4
 
 
 def test_a_larger_system_canvas_draws_and_composites_a_cart(tmp_path):
@@ -297,13 +303,13 @@ def test_a_larger_system_canvas_draws_and_composites_a_cart(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
     ws.frame(1 / 60.0)
-    assert len(set(ws.sys_canvas.buf)) > 4                 # the shell drew
+    assert probe.distinct_pixels(ws.sys_canvas) > 4        # the shell drew
     ws.launcher.sel = 0
     ws.open()
     for _ in range(3):
         ws.frame(1 / 60.0)
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)        # the cart's own surface
-    assert len(set(ws.sys_canvas.buf)) > 4                 # composited in
+    assert probe.distinct_pixels(ws.sys_canvas) > 4        # composited in
 
 
 def test_carts_api_unchanged_game_canvas_stays_320x240(tmp_path):

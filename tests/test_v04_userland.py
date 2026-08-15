@@ -12,6 +12,8 @@ from runtime import palette  # noqa: E402
 from runtime.canvas import Canvas, Image, SpriteSheet  # noqa: E402
 from runtime.editors import TileMap  # noqa: E402
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
@@ -228,7 +230,7 @@ def test_the_auto_batch_gate_matches_individual_spr_calls():
         cv_indiv.spr(sheet.tile_image(it[0], -1), it[1], it[2], 2, flip)
 
     assert cv_batch.buf == cv_indiv.buf
-    assert len(set(cv_batch.buf)) > 1        # sanity: it actually drew something
+    assert probe.drew_something(cv_batch)    # sanity: it actually drew something
 
 
 def test_the_batch_verbs_are_gone_from_the_cart_namespace():
@@ -396,7 +398,7 @@ def test_console_runs_wallpaper_and_config_drives_content(tmp_path):
     for _ in range(10):
         ws.frame(1 / 30)
     assert len(ws.ns["stars"]) == ws.config.get("star_count", 80)  # config drove it
-    assert len(set(ws.canvas.buf)) > 1                             # drew something
+    assert probe.drew_something(ws.canvas)                         # drew something
 
 
 def test_console_runs_game_cart_and_scores(tmp_path):
@@ -508,7 +510,7 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
         if ws.ns.get("won", 0.0) > 0.0:
             won = True
     assert most == coins and won            # collected every coin and won the round
-    assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
+    assert probe.drew_something(ws.canvas)  # the map() blit drew the ground
 
 
 def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
@@ -539,7 +541,7 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
         states.add(ws.ns["state"])
     assert best_score > 0                   # destroyed at least one enemy (scored)
     assert states != {0}                    # reached a win or game-over (round ended)
-    assert len(set(ws.canvas.buf)) > 3      # the map()/sprites drew the battlefield
+    assert probe.distinct_pixels(ws.canvas) > 3   # the map()/sprites drew the battlefield
 
 
 def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
@@ -600,7 +602,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)     # same surface as the device
     assert ws.launcher.items                            # seeded system carts
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 1                   # launcher renders
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # launcher renders
     drv.press("run")
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                       # opened a cart (plays)
@@ -622,7 +624,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
         drv.frame(1 / 30)
     assert ws.editor.lines[0].startswith("Z=9")         # typed into the real source
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 1                   # code editor renders
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # code editor renders
 
 
 def test_code_view_arrows_move_caret_and_scroll(tmp_path):
@@ -1246,7 +1248,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     cx = ws.map_ui.mapedit.cam_x
     cy = ws.map_ui.mapedit.cam_y
     assert ws.tilemap.mget(cx, cy) == ws.map_ui.mapedit.n
-    assert len(set(drv.rgb888())) > 1                    # the map view rendered
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                    # the map view rendered
 
 
 def test_host_console_map_erase_and_pan(tmp_path):

@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 
 def _ws(tmp_path):
     from runtime import host_app
@@ -136,7 +138,7 @@ def test_save_invalidates_bar_cache_and_bar_still_draws(tmp_path):
     assert ws.screen == "settings"
     drv.frame(1 / 30)
     from runtime import host_app as _h  # noqa: F401
-    assert len(set(drv.rgb888())) > 4                         # the Settings bar renders
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4                         # the Settings bar renders
 
 
 def test_close_auto_commits_the_icon_edit(tmp_path):

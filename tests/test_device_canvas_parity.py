@@ -40,6 +40,8 @@ from runtime import palette  # noqa: E402
 from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 DEV = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
 
 
@@ -1405,7 +1407,7 @@ def test_auto_batch_matches_immediate_on_host():
     assert a.buf == b.buf, (
         "auto-batch differs from immediate on host in %d px"
         % sum(1 for x, y in zip(a.buf, b.buf) if x != y))
-    assert len(set(b.buf)) > 1                # sanity: it actually drew something
+    assert probe.drew_something(b)            # sanity: it actually drew something
 
 
 def test_auto_batch_host_equals_device():

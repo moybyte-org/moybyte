@@ -25,6 +25,8 @@ import pytest
 
 from runtime.canvas import Canvas
 
+import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
+
 
 def _ws(tmp_path):
     from runtime import host_app
@@ -136,9 +138,9 @@ def test_the_shell_draws_clean_after_a_cart_that_never_reset(tmp_path):
     real frame. A leak here is what the kid sees -- a launcher drawn 20px left
     and clipped to a corner."""
     ws = _run_and_exit(tmp_path, "Dirty Py 2", DIRTY_PY)
-    before = sum(1 for b in ws.canvas.buf if b)
+    before = probe.painted_pixels(ws.canvas)
     ws.frame(1 / 60)
-    after = sum(1 for b in ws.canvas.buf if b)
+    after = probe.painted_pixels(ws.canvas)
     assert after > 0, "the shell painted nothing after the cart exited"
     del before
     _assert_canvas_is_clean(ws.canvas)

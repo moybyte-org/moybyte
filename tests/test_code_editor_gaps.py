@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
 DT = 1 / 30
 
 
@@ -472,7 +474,7 @@ def test_gutter_renders_without_error(tmp_path):
     drv.frame(DT)
     buf = ws.sys_canvas.to_rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4                        # drew content, not a flat fill
+    assert probe.distinct_pixels_in(buf, 3) > 4     # drew content, not a flat fill
 
 
 # ---------------------------------------------------------------------------
@@ -650,4 +652,4 @@ def test_completion_popup_renders_without_error(tmp_path):
     ws.code_layer._open_completion(ws.editor)
     drv.frame(DT)
     buf = ws.sys_canvas.to_rgb888()
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
