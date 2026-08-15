@@ -134,6 +134,7 @@ static uint32_t s_flushes;
 static uint32_t s_last_flush_us;
 static bool s_bus_up;
 static uint8_t s_madctl;
+static bool s_in_show;
 
 static void moy_lcd_check(esp_err_t err, const char *what) {
     if (err != ESP_OK) {
@@ -380,11 +381,22 @@ static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     if (n < 0 || n >= s_nfbs) {
         mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
     }
+    // The GIL is released below, so a second Python thread could re-enter and
+    // race the bounce slots and the completion counter. Nothing does today, but
+    // the input poller (#69) arrives one stage from now and this is the kind of
+    // corruption that reads as "the panel is flaky".
+    if (s_in_show) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_lcd: show() re-entered"));
+    }
     const uint8_t *src = s_fbs[n];
     int64_t t0 = esp_timer_get_time();
 
+    // Arming the window is also the recovery point after a timed-out flush left
+    // bands in flight: esp_lcd waits for the colour queue to drain before it
+    // sends any command, so the next show() cannot overlap the abandoned one.
     moy_lcd_arm_window();
     s_done = 0;
+    s_in_show = true;
 
     esp_err_t err = ESP_OK;
     bool timed_out = false;
@@ -420,6 +432,7 @@ static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
         timed_out = !moy_lcd_wait_done(queued, deadline);
     }
     MP_THREAD_GIL_ENTER();
+    s_in_show = false;
 
     moy_lcd_check(err, "tx_color");
     if (timed_out) {
