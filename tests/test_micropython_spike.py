@@ -1254,7 +1254,10 @@ def test_capped_stall_holds_state_and_never_kills_the_keyboard():
 def test_blit565_opaque_row_fast_lane():
     # #66 CHROMEBRK follow-up: key<0 blits (the cached top-bar strip stamp, paint
     # bakes) copy each clipped row with ONE memcpy instead of the per-pixel loop.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    # The loop lives in moy_gfx_kernels.c since the compositor was extracted --
+    # ONE copy, which the host binding links too.
+    c = (ROOT / "native" / "moy_gfx"
+         / "moy_gfx_kernels.c").read_text(encoding="utf-8")
     assert "OPAQUE fast lane" in c
 
 
@@ -3507,3 +3510,43 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     # still be caught here.
     assert "NOT_REGISTRABLE" in glue
     assert '"table",' in ext[ext.index("NOT_REGISTRABLE = frozenset(("):]
+
+
+def test_the_p4_perf_sampler_cannot_kill_the_frame_loop():
+    """A diagnostic must never be able to drop the board to the REPL.
+
+    The P4's 2-second PERF line reads a dozen Workstation internals -- draw /
+    flush / logic / render / chrome timings, the cart title -- and it lives
+    OUTSIDE the frame `try` that catches everything `ws.frame()` can raise. So
+    while those reads were bare attribute access, renaming any one of them in
+    the SHARED runtime/console.py ended the loop about two seconds after boot,
+    with a traceback naming the sampler instead of the rename. The T-Deck's
+    diag helpers (device_diag.py) have always been `try: ... except Exception`
+    for exactly this reason; this is that shape, on the other board.
+    """
+    from pathlib import Path
+
+    src = Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/"
+               "moy_runtime.py").read_text(encoding="utf-8")
+    i = src.index('print("PERF fps=')
+    block = src[src.rindex("if _ticks_diff", 0, i):i]
+    # CODE lines only. The first draft of this pin matched the word `try:`
+    # inside the comment that explains the guard, so deleting the guard left it
+    # green -- a pin that reads the prose about itself is not a pin.
+    code = [l.strip() for l in block.splitlines()
+            if l.strip() and not l.strip().startswith("#")]
+    assert "try:" in code, "the P4 PERF sample must be guarded"
+    tail = src[i:i + 2000]
+    assert "except Exception as _pf_exc:" in tail, \
+        "the P4 PERF sample must catch, so a renamed console attribute is a " \
+        "stale diag line and not a dead console"
+    # The timer state has to be reset OUTSIDE the guard, or a sampler that
+    # raises retries every frame and floods the serial it is measured over.
+    reset = tail[tail.index("except Exception"):]
+    assert reset.index("_pf_at = ") < reset.index("\n        # Frame pacing")
+    # ...and no bare `ws._<timing>` left in the line itself: the guard keeps the
+    # loop alive, getattr keeps the LINE alive (one renamed meter should cost
+    # one field, not the whole sample).
+    for name in ("_draw_ms", "_flush_ms", "_upd_ms", "_cart_ms", "_chrome_ms"):
+        assert "ws." + name not in tail, \
+            "PERF still reads ws.%s bare -- use getattr" % name

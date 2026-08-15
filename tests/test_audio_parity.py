@@ -31,6 +31,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..",
                                 "experiments", "audio_parity"))
 import audio_parity  # noqa: E402
 
+from unix_mp import require_unix_mp  # noqa: E402
+
 
 requires_cc = pytest.mark.skipif(
     not (os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")),
@@ -101,12 +103,14 @@ def test_native_module_matches_libmoy_when_a_unix_build_exists(work):
 
     libmoy is compiled into the native module, so the bar is bit-equality: a
     difference here is the shim mangling a verb, the bank's one JSON crossing, or
-    the render buffer -- never the synth. Skipped unless someone has built the
-    unix port with the usermod (building MicroPython is not this suite's job);
-    experiments/audio_parity/audio_parity.py prints the two commands."""
-    mp_exe = audio_parity.find_micropython()
-    if mp_exe is None:
-        pytest.skip("no ports/unix MicroPython built with the moy_audio usermod")
+    the render buffer -- never the synth. Needs the desktop MicroPython
+    `make unix-micropython` builds; its absence is loud, not a silent skip
+    (tests/unix_mp.py)."""
+    mp_exe = require_unix_mp(
+        "moy_audio",
+        why="Without it the module the boards actually load is never run: the "
+            "host binding is checked against libmoy, but the MicroPython "
+            "binding -- the one crossing a board makes -- is not.")
     exe = audio_parity.build_reference(work)
     bad = []
     for name, bank, commands in audio_parity.scenarios():

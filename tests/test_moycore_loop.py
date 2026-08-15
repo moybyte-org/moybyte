@@ -24,24 +24,23 @@ nothing would pass a naive smoke test:
     is what lets moybyte's superset (layers, view) ride one runtime instead of
     needing a second.
 
-Needs the unix dual-usermod build with moycore in it; skipped otherwise, like
-every other pin in this suite:
+Needs the desktop MicroPython with moycore compiled in:
 
-    cd firmware/lilygo_t_deck_plus_micropython/.build/usermods_luadraw
-    ln -sfn ../../native/moycore moycore     # beside moy_gfx and moy_lua
-    cd ../lvgl_micropython/lib/micropython/ports/unix
-    make VARIANT=standard BUILD=build-moycore USER_C_MODULES=<abs usermods_luadraw>
+    make unix-micropython
+
+Its absence is loud rather than a silent skip (tests/unix_mp.py), because the
+three regressions pinned at the end of this file -- the p8 shim's masked map
+walk, the SRAM-floor knob, the seeded rnd -- all shipped WITH moycore and each
+of them reads on glass as "moycore made the cart slower/stranger" with nothing
+pointing at a cause.
 """
 
 import os
 import subprocess
 
-import pytest
+from unix_mp import require_unix_mp
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MP = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", ".build",
-                  "lvgl_micropython", "lib", "micropython", "ports", "unix",
-                  "build-moycore", "micropython")
 
 DRIVER = r'''
 import sys
@@ -264,15 +263,18 @@ moycore.close()
 
 
 def _run():
+    exe = require_unix_mp(
+        "moycore",
+        why="Without it nothing checks that a Lua cart's whole frame runs in "
+            "C -- the claim every later stage rests on -- nor the three "
+            "regressions moycore shipped with.")
     src = DRIVER.replace("@RUNTIME@", os.path.join(ROOT, "runtime"))
-    p = subprocess.run([MP, "-c", src], capture_output=True, text=True,
+    p = subprocess.run([exe, "-c", src], capture_output=True, text=True,
                        timeout=180)
     assert p.returncode == 0, p.stdout + p.stderr
     return p.stdout
 
 
-@pytest.mark.skipif(not os.path.isfile(MP),
-                    reason="unix moycore build absent (see this module's docstring)")
 def test_a_lua_cart_frame_runs_entirely_in_c():
     out = _run()
     lines = [l.split() for l in out.splitlines() if l]

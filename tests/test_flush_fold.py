@@ -10,29 +10,29 @@ moy_alloc/machine/lcd_bus) and byte-compares reassembled bands against the
 reference composite across four geometries -- plus the disarm escape hatch
 (the deferred composite an overlay frame forces) and the one-shot latch.
 
-The unix build is the same one tests/test_lua_draw_direct.py documents;
-skipped when absent."""
+The unix build is `make unix-micropython`; its absence is loud, not silent
+(tests/unix_mp.py)."""
 
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
+from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
-UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix" / "build-moyluagfx" / "micropython")
 
 
 def test_fold_bands_match_the_composite():
-    if not UNIX_MP.exists():
-        pytest.skip("no ports/unix MicroPython built with moy_gfx+moy_lua "
-                    "(see test_lua_draw_direct.py for the two commands)")
+    exe = require_unix_mp(
+        "moy_gfx",
+        why="Without it the fold is checked only by the source-order pins "
+            "below, which cannot see a band that reassembles into the wrong "
+            "pixels.")
     out = subprocess.run(
-        [str(UNIX_MP), "-X", "heapsize=16m",
+        [exe, "-X", "heapsize=16m",
          str(ROOT / "tests" / "data_fold_driver.py"), str(TDECK / "modules")],
         capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr or out.stdout

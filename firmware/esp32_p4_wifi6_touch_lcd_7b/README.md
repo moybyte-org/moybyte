@@ -56,11 +56,21 @@ record:
   +2–5fps; full paints stay blocking (`blit_game(defer=not full)`) so chrome
   never races the DMA.
 
-`moy_runtime.run_ppa_smoke()` A/Bs the composite on glass. Perf follow-ups: the
-RENDER overlap (double game canvas + triple framebuffer) to lock 60 on the
-heaviest carts (Brick Siege 56, Letter Blitz 53); a PPA cover-crop for drags.
-Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311), OTA/web-view
-wiring.
+`moy_runtime.run_ppa_smoke()` A/Bs the composite on glass.
+
+**RENDER overlap is settled, not pending** — this list carried it as the next
+lever long after it had been decided on glass (2026-07-27). Half of it shipped:
+the **triple framebuffer**, `efcf5d1`. The other half, the **double game
+canvas**, was reverted the day it was built — `26e1f9f`, whose verdict survives
+as a NOTE at the defer site in `moy_runtime.py`, which is the copy to read
+before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
+the whole lever existed for. Why, with numbers:
+`docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
+
+Perf follow-ups still open: a PPA cover-crop for drags; the editor-tab /
+transition draw cost (dispatch-bound); the #113 Phase 5 Settings partial
+repaint. Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311),
+OTA/web-view wiring.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 
@@ -149,7 +159,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     and `run_desktop()` — constructs the shared `Workstation` with a distinct
     1024×600 system canvas + the fixed 320×240 off-screen game canvas and
     installs **`WindowedWM`** (#73's tier, on its intended hardware). Carts
-    live on the internal-flash VFS (`/moybyte/carts`); SD is optional here.
+    live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
+    boot; see the constraint below. SD is optional here.
   - Staged at build (canonical sources elsewhere), and **declared in
     `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
     whole shared console from `runtime/` as a **denylist** — everything crosses

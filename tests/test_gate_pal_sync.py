@@ -11,20 +11,18 @@ drives a seeded random walk over every mutating verb and re-derives the table
 after each step; a single divergent entry is a wrong colour on glass that
 pixel tests would only catch if they happened to draw through that index.
 
-Runs on the unix dual-usermod MicroPython (real moy_gfx gates); skipped
-without it -- see tests/test_lua_draw_direct.py for the build recipe.
+Runs on the desktop MicroPython `make unix-micropython` builds (real moy_gfx
+gates); its absence is loud rather than a silent skip -- tests/unix_mp.py.
 """
 
 import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
+from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
-UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix" / "build-moyluagfx" / "micropython")
 
 DRIVER = r'''
 import sys
@@ -117,9 +115,12 @@ print("OK ops=%d" % ops)
 '''
 
 
-@pytest.mark.skipif(not UNIX_MP.exists(),
-                    reason="unix dual-usermod MicroPython not built")
 def test_gate_pal_table_matches_full_rebuild(tmp_path):
+    exe = require_unix_mp(
+        "moy_gfx",
+        why="Without it nothing walks the incremental gate-pal table against "
+            "the cold rebuild, and a divergent entry is a wrong colour on "
+            "glass that pixel tests only catch by luck.")
     stage = tmp_path / "stage"
     stage.mkdir()
     shutil.copy(ROOT / "runtime" / "font.py", stage / "moy_font.py")
@@ -135,6 +136,6 @@ def test_gate_pal_table_matches_full_rebuild(tmp_path):
            .replace("@MODULES@", repr(str(TDECK / "modules"))))
     script = tmp_path / "driver.py"
     script.write_text(src)
-    out = subprocess.run([str(UNIX_MP), str(script)],
+    out = subprocess.run([exe, str(script)],
                          capture_output=True, text=True, timeout=120)
     assert "OK ops=4000" in out.stdout, out.stdout + out.stderr

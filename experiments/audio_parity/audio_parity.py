@@ -283,17 +283,16 @@ def render_native(mp_exe, workdir, name, bank, commands):
 
 
 def find_micropython():
-    """The unix-port binary built WITH the moy_audio usermod, if someone made
-    one. Returns None otherwise -- the native pass is then skipped, since
-    building MicroPython is not something a test run should do on its own."""
-    env = os.environ.get("MOYBYTE_MICROPYTHON")
-    if env and os.path.exists(env):
-        return env
-    cand = os.path.join(
-        _ROOT, "firmware", "lilygo_t_deck_plus_micropython", ".build",
-        "lvgl_micropython", "lib", "micropython", "ports", "unix",
-        "build-moyaudio", "micropython")
-    return cand if os.path.exists(cand) else None
+    """The desktop MicroPython built WITH the moy_audio usermod, if one exists.
+
+    Deliberately NOT its own path list: `make unix-micropython` builds that
+    binary and tests/unix_mp.py is the ONE place that knows where it lands, so
+    a copy here would be the thing that made this script report "no build" on a
+    machine whose test suite had just used one. (That module imports pytest
+    lazily, on purpose, so a plain script can share the lookup.)"""
+    sys.path.insert(0, os.path.join(_ROOT, "tests"))
+    from unix_mp import find_unix_mp
+    return find_unix_mp("moy_audio")
 
 
 # -- the Python engine -------------------------------------------------------

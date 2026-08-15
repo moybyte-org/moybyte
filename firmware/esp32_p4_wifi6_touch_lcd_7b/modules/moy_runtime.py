@@ -1198,28 +1198,43 @@ def run_desktop(fps_cap=60):
         _pf_n += 1
         _pf_busy += elapsed
         if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
-            # The meters follow Settings -> PERF DIAG live, so flipping it needs
-            # no reboot (T-Deck twin: the 3s diag tick in its run_desktop).
-            _live = bool(getattr(ws, "diag_live", False))
-            if ws.perf_capture != _live:
-                ws.perf_capture = _live
             _drawn = getattr(ws, "_frames_drawn", 0)
-            # home(wp/grid/bar): the LAUNCHER frame's section split (stashed by
-            # the shared launcher_layer under perf_capture) -- names where a
-            # slow desktop repaint goes; empty when the last frame wasn't the
-            # home screen.
-            _home = getattr(ws, "_pf_home", None)
-            print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                  "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
-                  % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
-                     _pf_busy // (_pf_n or 1),
-                     ws._draw_ms, ws._flush_ms, ws._upd_ms, ws._cart_ms,
-                     ws._chrome_ms,
-                     getattr(ws, "_pf_wm_restore", 0),   # drag backdrop restore ms
-                     getattr(ws, "_pf_wm_windows", 0),   # window-stack pass ms
-                     getattr(ws, "_pf_wm_stamp", 0),     # window content stamp ms
-                     (ws.cart or {}).get("title", "-"),
-                     (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
+            # GUARDED, like every diag helper on the T-Deck (device_diag.py's
+            # _diag_perf_sample and friends are `try: ... except Exception`).
+            # This block reads a dozen Workstation internals owned by the SHARED
+            # runtime/console.py and sits OUTSIDE the frame try, so while the
+            # reads were bare, renaming one of them there dropped this board to
+            # the REPL about two seconds after boot -- a measurement killing the
+            # loop it measures. PRINTED rather than swallowed (2s cadence, live
+            # serial) so a stale sampler says so; the timer state below resets
+            # either way, so a broken sample cannot become a per-frame retry.
+            try:
+                # The meters follow Settings -> PERF DIAG live, so flipping it
+                # needs no reboot (T-Deck twin: the 3s diag tick in its
+                # run_desktop).
+                _live = bool(getattr(ws, "diag_live", False))
+                if ws.perf_capture != _live:
+                    ws.perf_capture = _live
+                # home(wp/grid/bar): the LAUNCHER frame's section split (stashed
+                # by the shared launcher_layer under perf_capture) -- names where
+                # a slow desktop repaint goes; empty when the last frame wasn't
+                # the home screen.
+                _home = getattr(ws, "_pf_home", None)
+                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
+                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
+                      % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
+                         _pf_busy // (_pf_n or 1),
+                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
+                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
+                         getattr(ws, "_chrome_ms", 0),
+                         getattr(ws, "_pf_wm_restore", 0),  # drag backdrop restore ms
+                         getattr(ws, "_pf_wm_windows", 0),  # window-stack pass ms
+                         getattr(ws, "_pf_wm_stamp", 0),    # window content stamp ms
+                         (getattr(ws, "cart", None) or {}).get("title", "-"),
+                         (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
+            except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop
+                print("PERF sample failed: %s: %s"
+                      % (type(_pf_exc).__name__, _pf_exc))
             _pf_at = _ticks_ms() + 2000
             _pf_n = 0
             _pf_busy = 0

@@ -32,8 +32,8 @@ Traced float literals are deliberately binary-exact (0.25, 0.5): the boards
 build LUA_32BITS, so a literal like 0.1 crosses as float32 and differs from
 Python's double BY DESIGN -- that recorded gap must not fail the pin.
 
-Skipped unless the dual-usermod unix build exists (same build, same two
-commands as tests/test_lua_draw_direct.py's docstring).
+Runs on the desktop MicroPython `make unix-micropython` builds; its absence is
+loud rather than a silent skip -- tests/unix_mp.py.
 
 EXTENDED 2026-08-12 (before stage 2, per the plan's rule that a crossing
 extends the vocabulary FIRST): the twins now also exercise `cls()`'s default
@@ -58,14 +58,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
+from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
-UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix" / "build-moycore" / "micropython")
 
 DT = 0.03125          # 1/32: binary-exact, so LUA_32BITS floats carry it whole
 FRAMES = 24
@@ -470,10 +468,12 @@ print("DRIVER_DONE")
 
 
 def test_semantic_trace_lua_vs_python(tmp_path):
-    if not UNIX_MP.exists():
-        pytest.skip("no ports/unix MicroPython built with "
-                    "moy_gfx+moy_lua+moycore (see tests/test_moycore_loop.py's "
-                    "docstring for the two build commands)")
+    exe = require_unix_mp(
+        "moycore", "moy_gfx",
+        why="This is THE semantic pin between the two cart runtimes -- input "
+            "edges, state-verb ownership, audio order, pmem. Without it, "
+            "nothing at all compares them, and CLAUDE.md's rule is to run it "
+            "before crossing anything further.")
     stage = tmp_path / "stage"
     stage.mkdir()
     # moy_font is what build.sh stages from runtime/font.py -- the gate ctx
@@ -502,7 +502,7 @@ def test_semantic_trace_lua_vs_python(tmp_path):
                          ("@PY_CART@", PY_CART), ("@LUA_CART@", LUA_CART)):
         body = body.replace(token, repr(value))
     script.write_text(body)
-    out = subprocess.run([str(UNIX_MP), str(script)], capture_output=True,
+    out = subprocess.run([exe, str(script)], capture_output=True,
                          text=True, timeout=180)
     assert out.returncode == 0, out.stderr or out.stdout
     lines = out.stdout.strip().splitlines()
