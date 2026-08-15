@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: p4-web-push p4-web-stale setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy vendor-p8-import check-venv
+.PHONY: check-venv firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython firmware-stage-xiao-zero ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -419,6 +419,37 @@ firmware-monitor-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
+
+# T-Deck on MAINLINE MicroPython -- the P4's build strategy, applied to the S3
+# (firmware/lilygo_t_deck_plus_mainline/README.md). This does NOT replace
+# firmware-build-lilygo-micropython, which is what ships; it is the second,
+# LVGL-free build of the same board, currently at stage 1 (panel bring-up).
+#
+# There is NO BOOT BUTTON on a T-Deck. The trackball CLICK is GPIO0: hold the
+# trackball in while powering the board on, then release, to reach the ROM
+# loader. esptool's auto-reset does not sync over this board's native USB, hence
+# --before no_reset. (The P4's CH343 auto-resets fine, which is why its targets
+# above look simpler.)
+TDECK_MAINLINE_BIN ?= dist/tdeck_mainline/moybyte_tdeck.bin
+# otadata: a board that has taken an OTA is running ota_1, so a flash into ota_0
+# would look like it did nothing. Erasing otadata makes the bootloader fall back
+# to ota_0 -- the slot the merged image just wrote. Same reason as the P4's.
+TDECK_MAINLINE_OTADATA_OFFSET ?= 0x1d000
+TDECK_MAINLINE_OTADATA_SIZE ?= 0x2000
+
+firmware-build-tdeck-mainline:
+	firmware/lilygo_t_deck_plus_mainline/build.sh
+
+firmware-flash-tdeck-mainline:
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
+	@[ -z "$(TDECK_MAINLINE_OTADATA_OFFSET)" ] || $(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset erase_region $(TDECK_MAINLINE_OTADATA_OFFSET) $(TDECK_MAINLINE_OTADATA_SIZE)
+	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(TDECK_MAINLINE_BIN)
+
+firmware-monitor-tdeck-mainline:
+	$(REQUIRE_PORT)
+	$(REQUIRE_IDF)
+	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
 # MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
 # MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the

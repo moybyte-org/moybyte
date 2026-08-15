@@ -1,0 +1,11 @@
+.build/
+# Shared native modules staged from the fork tree by build.sh (canonical:
+# firmware/lilygo_t_deck_plus_micropython/native/).
+native/.staged/
+# modules/ mixes board-authored files (tracked, whitelisted below) with copies
+# staged at build time from runtime/ -- the canonical sources live there.
+modules/*
+!modules/boot.py
+!modules/main.py
+!modules/moybyte_shell.py
+!modules/tdeck_panel.py

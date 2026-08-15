@@ -1,0 +1,48 @@
+# Moybyte T-Deck board fragment (mainline build).
+#
+# Everything here is either a BOARD FACT (flash size/mode, partition table) or a
+# lever that was A/B'd on THIS board's glass and shipped in the fork build. The
+# fork's knobs that are NOT here are deliberate; see the README's "what the fork
+# tunes that this build does not (yet)" table.
+
+# 16MB flash. The generic S3 board assumes 4MB.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# DIO, not the generic board's QIO: the images this repo actually flashes to a
+# T-Deck are the dio ones (Makefile MPY_FLASH_MODE ?= dio), and the mode in the
+# image header is what the ROM bootloader uses.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# The dual-OTA partition table (#53). IDENTICAL to what the fork build's
+# --ota --flash-size=16 --partition-size=5242880 generates, offset for offset:
+# both boards in the field are on this table and a change costs every deployed
+# device a full-erase USB flash. CONFIG_PARTITION_TABLE_CUSTOM_FILENAME
+# resolves relative to ports/esp32, so build.sh stages the CSV there.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"
+
+# Rollback (#53): an app that never calls
+# esp32.Partition.mark_app_valid_cancel_rollback() is reverted by the
+# bootloader on the next boot, so a bad OTA self-heals. sdkconfig.base already
+# sets this upstream; restated here because build.sh's stale-sdkconfig guard
+# greps the GENERATED config for it -- an existing build dir silently keeps
+# whatever it was first configured with.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Cache geometry (#63, A/B'd on this board): the stock build runs the S3's
+# MINIMUM caches (16KB icache / 32KB dcache) while the VM reads frozen bytecode
+# from flash AND the gc heap from PSRAM through that one small dcache, with the
+# panel DMA streaming through the same path. Doubling both is worth ~2.5x on kid
+# float loops. Costs 48KB of internal SRAM.
+#
+# The LINE stays 32B. A first pass also widened lines to 64B and the hardware
+# answered with horizontal garbage bands on every screen -- the 64B coherency
+# granularity breaks the CPU<->GDMA handoff in the PSRAM flush path. Do not
+# re-widen without an on-hardware A/B.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y

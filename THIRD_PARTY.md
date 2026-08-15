@@ -28,6 +28,7 @@ separate question from what is committed.
 | Lua 5.4.7 (device VM) | `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
+| ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
@@ -102,7 +103,35 @@ The EK79007 MIPI-DSI controller driver for the Waveshare 7″ board (issue #58).
 - The board bring-up that *uses* the driver (`modmoy_dsi.c`,
   `micropython.cmake`, one level up) is Moybyte's own work.
 
-### 2.4 esptool-js — the website's board flasher
+### 2.4 ST7789 init register values — the T-Deck panel on mainline
+
+`firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c`
+(the `MOY_LCD_INIT` table and the MADCTL derivation above it)
+
+ESP-IDF's own ST7789 driver sends only `SLPOUT` / `MADCTL` / `COLMOD` and offers
+no hook to extend that, so the porch, gate/VCOM/power and gamma registers this
+panel needs have to be sent by us. Rather than re-derive them, the values are
+the ones already proven on this exact glass by the fork build.
+
+- **Upstream:** `api_drivers/common_api_drivers/display/st7789/_st7789_init.py`
+  in [`lvgl-micropython/lvgl_micropython`](https://github.com/lvgl-micropython/lvgl_micropython),
+  at the commit this repo already pins for the fork build,
+  `14ad6ce2c5555272398debeff77b69021ca7ddda`.
+- **Licence:** MIT, © 2024–2025 Kevin G. Schlosser. The same project is already
+  listed in §5 as a build-time upstream of the shipping T-Deck image; this is
+  the one place its source is *carried* rather than fetched.
+- **Modified: yes** — this is a transcription, not a copy. The Python file is a
+  method that calls `self.set_params()`; here it is a static C table sent with
+  `esp_lcd_panel_io_tx_param()`. Three deliberate differences, all noted at the
+  code: the entries `esp_lcd_panel_init()` already sends are dropped, the
+  I80-8-lane-only `RAMCTRL` byte-swap branch is dropped (this is an SPI panel),
+  and its `import lvgl` — present only for orientation constants — is resolved
+  into the single MADCTL byte `0x68` via `swap_xy` + `mirror`, so nothing here
+  depends on LVGL.
+- The panel module around the table (SPI bus, esp_lcd wiring, the framebuffers,
+  the banded SRAM-bounce flush) is Moybyte's own work.
+
+### 2.5 esptool-js — the website's board flasher
 
 `site/vendor/esptool-js/bundle.js`
 
@@ -320,7 +349,21 @@ under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
 | MicroPython v1.28.0 | <https://github.com/micropython/micropython> | MIT |
 | ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
-### 5.3 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
+### 5.3 LilyGO T-Deck Plus on mainline (`firmware/lilygo_t_deck_plus_mainline/build.sh`)
+
+The same board as §5.1, built the way §5.2 is. Note what is *not* in this list
+next to §5.1's: LVGL, its MicroPython binding, pycparser and the fork itself.
+
+| Project | Upstream | Licence |
+|---|---|---|
+| MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
+| Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
+| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+
+The ST7789 register values this build sends are carried in-tree and are covered
+by §2.4, not by this table.
+
+### 5.4 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
