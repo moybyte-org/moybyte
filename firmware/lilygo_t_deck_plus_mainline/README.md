@@ -9,9 +9,27 @@ target is what ships; nothing here touches it. This tree reads two things from
 it and writes nothing: the shared native modules under `native/` (single source
 of truth stays there) and two board-agnostic `.patch` files.
 
-**Status: stage 1 — panel bring-up, never flashed.** It compiles clean and the
-image is correct by inspection. Whether the ST7789 lights up is the one thing a
-compile cannot answer.
+**Status: stage 1 — panel bring-up, VERIFIED ON GLASS 2026-08-16.** Flashed to
+the owner's T-Deck and confirmed by eye: the eight colour bars and the checker
+came up on the first flash, no MADCTL adjustment needed. Read back over the
+REPL on the running board:
+
+    MicroPython v1.28.0 (MAINLINE, not the fork)   lvgl: absent
+    PANEL 320 x 240   byteswap True   MADCTL 0x68
+    full-screen bars() redraw + flush: 4811 us
+    image 1,704,976 B of the 5,242,880 B ota_0 slot
+
+So the ST7789 runs on mainline with no LVGL anywhere, which is the question
+this stage existed to answer. Stages 2-6 (touch, keyboard, SD, audio, the
+shared console) are still unwritten.
+
+One thing to carry forward, worth confirming at stage 6 rather than assuming:
+**the REPL answered over USB here.** On the fork's build the T-Deck's USB-CDC RX
+is dead under the desktop (see the main firmware README's constraint list), which
+is why that board has no serial test harness and why `p4_push_web.py` cannot
+reach it. This build was sitting at the REPL rather than running a frame loop, so
+it does not yet prove RX survives the desktop -- but if it does, the T-Deck gains
+the P4's whole on-glass test channel, and that is a bigger prize than the flash.
 
 ---
 
