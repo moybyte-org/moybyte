@@ -33,6 +33,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "moy.h"        /* built RGB565 here -- see the note above */
+
 /* ---- fill ------------------------------------------------------------- */
 
 /* modmoy_gfx.c's moy_gfx_fill_run, verbatim: align to 4 bytes so the 32-bit
@@ -188,4 +190,111 @@ int hg_copy_async(uint16_t *dst, size_t dcap, int dst_off,
 int hg_copy_wait(void)
 {
     return 1;       /* nothing was ever in flight */
+}
+
+/* ---- the libmoy bridge ------------------------------------------------ */
+/*
+ * The two verbs below are the ones that are NOT pure compositing: they draw
+ * sprites, and sprites are libmoy's. modmoy_gfx.c borrows a moy_canvas for the
+ * duration of one call rather than inverting either side's ownership, and this
+ * does the same thing with the same fields -- because "the same thing" is the
+ * entire requirement. The LUT arrives already folded through `pal` by the
+ * Python side (_wire_pal), which is exactly what libmoy's store[] is, so pal[]
+ * stays identity and no palette is rebuilt per call.
+ */
+
+static void hg_clip_rect(int dw, size_t cap, int *cx0, int *cy0,
+                         int *cx1, int *cy1)
+{
+    int max_rows = (int)(cap / (size_t)dw);
+    if (*cx0 < 0) *cx0 = 0;
+    if (*cy0 < 0) *cy0 = 0;
+    if (*cx1 > dw) *cx1 = dw;
+    if (*cy1 > max_rows) *cy1 = max_rows;
+}
+
+/* `h` is DERIVED from the buffer capacity rather than trusted, exactly as the
+ * device does it: a canvas whose h exceeds its buffer would let libmoy's own
+ * clamping write past the end. */
+static void hg_canvas(moy_canvas *c, uint16_t *dst, int dw, size_t cap,
+                      const uint16_t *lut, const uint8_t *palt,
+                      int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    c->pix = dst;
+    c->w = dw;
+    c->h = (int)(cap / (size_t)dw);
+    c->cam_x = cam_x;
+    c->cam_y = cam_y;
+    c->clip_x0 = cx0;
+    c->clip_y0 = cy0;
+    c->clip_x1 = cx1;
+    c->clip_y1 = cy1;
+    for (int i = 0; i < MOY_PALETTE; i++) {
+        c->pal[i] = (uint8_t)i;
+        c->store[i] = lut[i];
+        c->wire[i] = lut[i];
+    }
+    if (palt != NULL) memcpy(c->palt, palt, MOY_PALETTE);
+    else              memset(c->palt, 0, MOY_PALETTE);
+}
+
+/* libmoy addresses a sheet with SPEC.md 3.2's FIXED geometry, so anything else
+ * would read at the wrong stride or past the end. Silent, like the device's:
+ * a draw verb that throws mid-frame takes the cart down. */
+static int hg_is_moy_sheet(int w, int h, size_t len)
+{
+    return w == MOY_SHEET_W && h == MOY_SHEET_H &&
+           len >= (size_t)(MOY_SHEET_W * MOY_SHEET_H);
+}
+
+void hg_blit_batch(uint16_t *dst, size_t dcap, int dw, int dh,
+                   const int16_t *quads, int n_items,
+                   const uint8_t *sheet, size_t sheet_len,
+                   int sheetw, int sheeth,
+                   const uint16_t *lut, const uint8_t *palt,
+                   int key, int scale, int cam_x, int cam_y,
+                   int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || dh <= 0 || n_items <= 0) return;
+    if (scale < 1) scale = 1;
+    if (!hg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    hg_clip_rect(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    moy_canvas c;
+    moy_sheet sh;
+    /* ONE canvas for the whole batch -- which is the point of this verb. The
+     * camera goes in the CANVAS rather than being subtracted per item: moy_spr
+     * applies it, and its fast path hoists it out of the pixel loop. */
+    hg_canvas(&c, dst, dw, dcap, lut, palt, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&sh, (uint8_t *)sheet);
+    for (int i = 0; i < n_items; i++) {
+        const int16_t *it = quads + (size_t)i * 4u;   /* (tile, x, y, flip) */
+        /* moy_spr refuses an out-of-range tile itself (SPEC.md: a blank tile is
+         * legal, a bad id is not an error), so no guard is needed here. */
+        moy_spr(&c, &sh, it[0], it[1], it[2], key, scale, it[3]);
+    }
+}
+
+void hg_blit_map(uint16_t *dst, size_t dcap, int dw, int dsx, int dsy,
+                 const uint8_t *cells, size_t cells_len, int mw, int mh,
+                 int mx, int my, int rw, int rh,
+                 const uint8_t *sheet, size_t sheet_len, int sheetw, int sheeth,
+                 const uint16_t *lut, const uint8_t *palt,
+                 int ck, int scale, int cx0, int cy0, int cx1, int cy1)
+{
+    if (dw <= 0 || mw <= 0 || mh <= 0 || rw <= 0 || rh <= 0) return;
+    if ((size_t)(mw * mh) > cells_len) return;
+    if (!hg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
+    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return;
+    hg_clip_rect(dw, dcap, &cx0, &cy0, &cx1, &cy1);
+    moy_canvas c;
+    moy_sheet sh;
+    moy_map m;
+    /* Camera is ZERO here on purpose: the caller has already resolved the
+     * region's screen position into dsx/dsy (the destination may be a hidden
+     * cache layer rather than the framebuffer, where a camera would mean
+     * nothing), so applying one again would double the offset. */
+    hg_canvas(&c, dst, dw, dcap, lut, palt, 0, 0, cx0, cy0, cx1, cy1);
+    moy_sheet_init(&sh, (uint8_t *)sheet);
+    moy_map_init(&m, (uint8_t *)cells, mw, mh);
+    moy_map_draw(&c, &m, &sh, mx, my, rw, rh, dsx, dsy, ck, scale);
 }

@@ -55,7 +55,44 @@ scroll_rect(buf, 16, 0, 0, 16, 8, 0, -1)
 blit565(buf, 16, 8, 3, 2, src, 4, 4, -1, 0, 0, 16, 8)
 blit565(buf, 16, 8, 14, 6, src, 4, 4, 0x0002, 0, 0, 16, 8)
 blit565(buf, 16, 8, -1, -1, src, 4, 4, -1, 0, 0, 16, 8)
+blit_batch(buf, 16, 8, quads, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 0, 0, 16, 8)
+blit_batch(buf, 16, 8, quads, sheet, 128, 256, lut, palt, 7, 1, 2, 1, 0, 0, 16, 8)
+blit_map(buf, 16, 8, 0, 0, cells, 4, 4, 0, 0, 2, 2, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 16, 8)
+blit_map(buf, 16, 8, 3, 2, cells, 4, 4, 1, 1, 3, 3, sheet, 128, 256, lut, palt, 5, 1, 0, 0, 16, 8)
 """
+
+# Sheet/map fixtures, built identically on both sides. Tiles 0 and 1 are given
+# DIFFERENT solid colours and the map mixes them, because tile 0 is blank by
+# SPEC convention in a map and a fixture made only of it would compare two
+# empty framebuffers and call that agreement.
+FIXTURES = """
+sheet = bytearray(128 * 256)
+for _y in range(8):
+    for _x in range(8):
+        # Tile n lives at ((n % 16) * 8, (n // 16) * 8) in a 128-wide sheet.
+        # Every tile is ASYMMETRIC in both axes, which is not decoration: an
+        # earlier draft used solid tiles, and a mutation that dropped the
+        # per-quad FLIP entirely was invisible -- flipping a solid block gives
+        # back the same pixels. Diagonal halves make flip, and each axis of it,
+        # observable.
+        sheet[_y * 128 + _x] = 5 if _x < _y else 1              # tile 0
+        sheet[_y * 128 + 8 + _x] = 7 if _x < 4 else 3           # tile 1
+        sheet[_y * 128 + 16 + _x] = 9 if _y < 3 else 11         # tile 2
+lut = array.array("H", [(i * 0x0101) & 0xFFFF for i in range(64)])
+palt = bytearray(64)
+palt[9] = 1                     # index 9 transparent: exercises the palt path
+quads = array.array("h", [0] * 12)
+quads[4:8] = array.array("h", [0, 2, 3, 0])
+quads[8:12] = array.array("h", [1, 9, 1, 1])       # flip=1 on an asymmetric tile
+quads[0] = 12
+cells = bytearray([0, 1, 2, 1, 1, 0, 1, 2, 2, 1, 0, 1, 1, 2, 1, 0])
+"""
+
+
+def _fixtures():
+    ns = {"array": __import__("array"), "bytearray": bytearray, "range": range}
+    exec(FIXTURES, ns)                         # noqa: S102 -- fixed text
+    return {k: ns[k] for k in ("sheet", "lut", "palt", "quads", "cells")}
 
 
 def _run_ops(mod, buf, src):
@@ -70,13 +107,14 @@ def _run_ops(mod, buf, src):
     names the verb that broke.
     """
     shots = []
-    for line in OPS.strip().splitlines():
+    env = {"buf": buf, "src": src}
+    env.update(_fixtures())            # once: a fresh sheet per op would hide
+    for line in OPS.strip().splitlines():          # state carried between them
         line = line.strip()
         if not line:
             continue
         name, _, rest = line.partition("(")
-        args = eval("(" + rest.rstrip(), {},          # noqa: S307 -- fixed text
-                    {"buf": buf, "src": src})
+        args = eval("(" + rest.rstrip(), {}, env)     # noqa: S307 -- fixed text
         getattr(mod, name)(*args)
         shots.append("".join("%04x" % v for v in _px(buf)))
     return shots
@@ -147,13 +185,15 @@ def test_the_async_pair_refuses_so_callers_take_the_sync_path():
 
 
 DRIVER = r'''
-import sys, struct
+import sys, struct, array
 sys.path.insert(0, @MODULES@)
 import moy_gfx
 
 W, H = 16, 8
 buf = bytearray(W * H * 2)
 src = bytearray(struct.pack("<16H", *range(1, 17)))
+
+@FIXTURES@
 
 def _shot():
     print("SHOT " + "".join("%04x" % v
@@ -162,6 +202,8 @@ def _shot():
 def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
+def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
+def blit_map(*a): moy_gfx.blit_map(*a); _shot()
 
 @OPS@
 '''
@@ -177,6 +219,7 @@ def test_matches_the_native_moy_gfx(tmp_path):
     entire premise of running that class on the host.
     """
     src_body = DRIVER.replace("@MODULES@", repr(str(TDECK / "modules")))
+    src_body = src_body.replace("@FIXTURES@", FIXTURES.strip())
     src_body = src_body.replace("@OPS@", OPS.strip())
     script = tmp_path / "driver.py"
     script.write_text(src_body)

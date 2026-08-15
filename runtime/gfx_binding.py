@@ -32,11 +32,17 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _SHIM = os.path.join(_HERE, "moyhost_gfx.c")
 _CACHE = os.path.join(native_build.ROOT, ".build", "host_gfx")
 
-# RGB565, matching the boards: -DMOY_PIXEL_RGB565=1 is what makes a libmoy pixel
-# two bytes instead of one. The shim itself has no libmoy dependency yet (these
-# verbs are moy_gfx's own compositor), but the flag is set here so that adding
-# the sprite-backed verbs later cannot accidentally compile them indexed.
+# RGB565, matching the boards. This define is the whole difference between this
+# library and the indexed one next door: it makes a libmoy pixel two bytes
+# instead of one, changing sizeof(moy_pixel) and the layout of every struct.
+# Compiling the sprite verbs without it would produce a library that links and
+# then draws garbage.
 _CFLAGS = native_build.BASE_CFLAGS + ["-DMOY_PIXEL_RGB565=1"]
+
+# blit_batch and blit_map are not pure compositing -- they draw SPRITES, and
+# sprites are libmoy's. Same translation units the indexed binding compiles,
+# same vendored source, different pixel width.
+_LIBMOY = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
 
 _LIB = [None]
 
@@ -53,13 +59,16 @@ _SIGS = (
     ("hg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
     ("hg_copy_async", [_P, _Z, _I, _P, _Z, _I, _I], _I),
     ("hg_copy_wait", [], _I),
+    ("hg_blit_batch", [_P, _Z, _I, _I, _P, _I, _P, _Z, _I, _I, _P, _P,
+                       _I, _I, _I, _I, _I, _I, _I, _I], None),
+    ("hg_blit_map", [_P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I, _I, _I,
+                     _P, _Z, _I, _I, _P, _P, _I, _I, _I, _I, _I, _I], None),
 )
 
 
 def build(verbose=False):
-    return native_build.build("moyhost_gfx", _SHIM, (), _CACHE,
-                              cflags=_CFLAGS, compile_names=["moyhost_gfx.c"],
-                              verbose=verbose)
+    return native_build.build("moyhost_gfx", _SHIM, _LIBMOY, _CACHE,
+                              cflags=_CFLAGS, verbose=verbose)
 
 
 def _lib():
@@ -153,3 +162,67 @@ def copy_async(dst, dst_off, src, src_off, npix):
 
 def copy_wait():
     return True
+
+
+def _quads(items):
+    """(int16 quad buffer, count) from either shape device_canvas passes.
+
+    The native verb accepts an array("h") whose slot 0 is the write cursor, OR a
+    list of (tile, x, y[, flip]) tuples. Normalising the list form HERE rather
+    than in C keeps one path in the kernel -- the shape differs, the pixels must
+    not -- and the array form, which is the hot one, passes straight through
+    with no copy at all.
+    """
+    import array
+    if isinstance(items, array.array) and items.typecode == "h":
+        n = items[0]
+        if n < 4:
+            n = 4
+        if n > len(items):
+            n = len(items)
+        return items, (n - 4) // 4, 4
+    flat = array.array("h")
+    for it in items:
+        if len(it) < 3:
+            continue
+        flat.extend((it[0], it[1], it[2], it[3] if len(it) > 3 else 0))
+    return flat, len(flat) // 4, 0
+
+
+def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt,
+               key, scale, cam_x, cam_y, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    quads, n, off = _quads(items)
+    qarr, _ = _rbuf(memoryview(quads).cast("B"))
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().hg_blit_batch(
+        ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+        ctypes.c_void_p(ctypes.cast(qarr, _P).value + off * 2), int(n),
+        ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+        ctypes.cast(lutarr, _P),
+        ctypes.cast(ptarr, _P) if ptarr is not None else None,
+        int(key), int(scale), int(cam_x), int(cam_y),
+        int(cx0), int(cy0), int(cx1), int(cy1))
+
+
+def blit_map(dst, dw, dh, dsx, dsy, cells, mw, mh, mx, my, rw, rh,
+             sheet, sheetw, sheeth, lut, palt, ck, scale, cx0, cy0, cx1, cy1):
+    darr, dcap = _buf(dst)
+    carr, _ = _rbuf(cells)
+    sharr, _ = _rbuf(sheet)
+    lutarr, _ = _rbuf(memoryview(lut).cast("B"))
+    ptarr = None
+    if palt is not None:
+        ptarr, _ = _rbuf(palt)
+    _lib().hg_blit_map(
+        ctypes.cast(darr, _P), dcap, int(dw), int(dsx), int(dsy),
+        ctypes.cast(carr, _P), len(cells), int(mw), int(mh),
+        int(mx), int(my), int(rw), int(rh),
+        ctypes.cast(sharr, _P), len(sheet), int(sheetw), int(sheeth),
+        ctypes.cast(lutarr, _P),
+        ctypes.cast(ptarr, _P) if ptarr is not None else None,
+        int(ck), int(scale), int(cx0), int(cy0), int(cx1), int(cy1))
