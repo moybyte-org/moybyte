@@ -466,3 +466,101 @@ def test_an_asset_is_never_cached_by_default(tmp_path):
     assert "no-store" in FR("x", 1, "text/plain").head().decode()
     # ...and a caller with genuinely immutable assets can still opt in.
     assert "max-age=60" in FR("x", 1, "text/plain", max_age=60).head().decode()
+
+
+# -- the link wait, and the board parity it exists to protect -----------------
+
+
+class _Wifi:
+    """Just enough of the injected wifi service: status() -> (up, ssid, ip)."""
+
+    def __init__(self, up=False, ip="192.168.1.50"):
+        self.up = up
+        self.ip = ip
+        self.connects = 0
+
+    def status(self):
+        return (self.up, "net" if self.up else "", self.ip if self.up else "")
+
+
+def test_ensure_online_waits_for_a_link_that_arrives_late():
+    """The whole reason this helper exists: `connect()` gives up at 4s and a
+    saved network measured 1.5s slower than that, so a good network read as
+    "no wifi". Here autoconnect brings the link up and the IP comes back."""
+    w = _Wifi(up=False)
+
+    def _auto(wifi):
+        wifi.connects += 1
+        wifi.up = True                    # the link arrives during the wait
+
+    assert wh.ensure_online(w, _auto, wait_ms=50, step_ms=5) == "192.168.1.50"
+    assert w.connects == 1
+
+
+def test_ensure_online_reports_a_link_that_never_arrives():
+    w = _Wifi(up=False)
+    with pytest.raises(OSError):
+        wh.ensure_online(w, lambda wifi: None, wait_ms=10, step_ms=5)
+
+
+def test_ensure_online_without_a_wifi_service_is_an_error_not_a_crash():
+    with pytest.raises(OSError):
+        wh.ensure_online(None)
+
+
+def test_an_already_connected_board_neither_reconnects_nor_sleeps():
+    w = _Wifi(up=True)
+    called = []
+    assert wh.ensure_online(w, lambda wifi: called.append(1)) == "192.168.1.50"
+    assert not called, "a connected board was made to reconnect"
+
+
+def test_make_webhost_reads_the_wifi_service_lazily():
+    """`ws.wifi` is attached by wire_workstation_core, which has not run when a
+    board builds this -- so binding the service at construction time would
+    capture None forever."""
+    class _WS:
+        wifi = None
+
+    ws = _WS()
+    host = wh.make_webhost(ws, "/moy/carts", "/moy/web")
+    ws.wifi = _Wifi(up=True)              # attached AFTER construction
+    assert host._ensure_online() == "192.168.1.50"
+
+
+BOARDS = (
+    ("lilygo_t_deck_plus_micropython", "TDECK_WEB_DIR"),
+    ("esp32_p4_wifi6_touch_lcd_7b", "P4_WEB_DIR"),
+)
+
+
+@pytest.mark.parametrize("board,web_dir", BOARDS, ids=[b for b, _ in BOARDS])
+def test_every_board_injects_the_web_console(board, web_dir):
+    """THE PIN FOR THIS WHOLE CLASS OF BUG.
+
+    The web console shipped on the P4 with every shared piece already in place
+    -- moy_webhost, the Settings row, the console verbs, all staged from one
+    source -- and the T-Deck still did not have the feature, because the single
+    per-board injection was never written for it. Nothing failed: the row is
+    capability-gated on `ws.webhost`, so the board just quietly did not offer
+    it, and no test could tell the difference between "not wired" and "not
+    supported".
+
+    So the assertion is on the INJECTION, per board, by name. A new board that
+    stages every shared module and forgets this line fails here instead of
+    shipping a console that silently cannot be reached.
+    """
+    src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+    assert "make_webhost(" in src, "%s never builds a WebHost" % board
+    assert "ws.webhost" in src, "%s never attaches one to the console" % board
+    assert web_dir in src, "%s does not pass its own web directory" % board
+
+
+def test_the_link_wait_is_shared_and_not_recopied_per_board():
+    """It was a 25-line closure in the P4's run_desktop. Writing it per board is
+    precisely how the T-Deck went without the feature, so the helper is shared
+    and the boards must not grow private copies of it again."""
+    for board, _ in BOARDS:
+        src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
+        assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
+        assert "def _web_online" not in src, "%s re-grew a private link wait" % board

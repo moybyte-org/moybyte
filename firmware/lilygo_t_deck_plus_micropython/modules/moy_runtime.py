@@ -552,6 +552,32 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:
         print("Moybyte: reboot hook unavailable:", exc)
+    # WEB CONSOLE (moycore plan 3.4 pull half): serve the wasm console from this
+    # board. Constructed, NOT started -- injecting it only makes the Settings row
+    # appear, and the row is what brings the radio up.
+    #
+    # This board differs from the P4 in two ways that are both arguments, not
+    # code: the bundle lives on the SD card (/sd/web), and every read of it must
+    # go through the _with_sd_synced gate -- SD shares the panel's SPI host, so
+    # an op may not overlap an in-flight flush DMA (see the hard constraints).
+    # Streaming a ~1MB wasm therefore reads between frames, the same way the OTA
+    # download to SD already does.
+    #
+    # THE RISK THAT IS THIS BOARD'S ALONE, and the reason this is off until asked
+    # for: the WLAN stack reserves internal RAM the LCD DMA flush needs, which is
+    # why boot deliberately does not autoconnect (see the note below -- OSError
+    # 257 / ESP_ERR_NO_MEM froze the desktop). Turning this row on brings the
+    # radio up and takes that risk knowingly, exactly as UPDATE ONLINE does. The
+    # P4 has no such coexistence problem (separate C6 radio over SDIO), so this
+    # hazard must not be assumed to travel with the feature.
+    try:
+        from moy_webhost import make_webhost, TDECK_WEB_DIR
+
+        ws.webhost = make_webhost(ws, carts_root, TDECK_WEB_DIR,
+                                  autoconnect=autoconnect_wifi,
+                                  with_sd=_with_sd_synced)
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte: web console unavailable:", exc)
     # WiFi is deliberately NOT brought up at boot: the WLAN stack reserves internal RAM
     # the LCD DMA flush needs, so autoconnecting here starved the panel flush (OSError
     # 257 / ESP_ERR_NO_MEM) and froze the desktop. DeviceWifi is lazy now -- the radio

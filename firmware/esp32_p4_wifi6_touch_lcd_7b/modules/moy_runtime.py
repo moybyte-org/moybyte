@@ -742,35 +742,13 @@ def run_desktop(fps_cap=60):
     # which is what the row displays: 0.0.0.0 is the one address nobody can type
     # into a browser.
     try:
-        from moy_webhost import WebHost, P4_WEB_DIR
+        from moy_webhost import make_webhost, P4_WEB_DIR
 
-        def _web_online():
-            """Connect if needed, then WAIT for the link, then report the IP.
-
-            The wait is not optional and the reason is recorded in moy_ota's
-            ensure_online: `connect()` polls for 4s and gives up, and on this
-            board a saved network measured 1.5s SLOWER than that (the radio is
-            a separate C6 over SDIO, so cold association is slow). Without it a
-            perfectly good network reads as "no wifi" -- which is exactly what
-            this row did on its first try.
-            """
-            if ws.wifi is None:
-                raise OSError("no wifi service")
-            if not ws.wifi.status()[0]:
-                try:
-                    autoconnect_wifi(ws.wifi)
-                except Exception:  # noqa: BLE001 -- the wait below decides
-                    pass
-                for _ in range(48):            # 12s, moy_ota's ONLINE_WAIT_MS
-                    if ws.wifi.status()[0]:
-                        break
-                    time.sleep_ms(250)
-            st = ws.wifi.status()
-            if not st[0]:
-                raise OSError("no wifi")
-            return st[2]
-
-        ws.webhost = WebHost(carts_root, P4_WEB_DIR, ensure_online=_web_online)
+        # The link wait that used to be a closure here is moy_webhost.ensure_online
+        # now -- it was the same 25 lines the T-Deck needed, and writing it per
+        # board is how that board went without the feature entirely.
+        ws.webhost = make_webhost(ws, carts_root, P4_WEB_DIR,
+                                  autoconnect=autoconnect_wifi)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: web console unavailable:", exc)
     # The P4 presentation tier (#73/#58, two worlds #105): the DESK is home
