@@ -478,7 +478,7 @@ def sd(rounds=SD_ROUNDS):
     import moybyte_sd
 
     comp, canvas = _canvas()
-    log = _SdLog(comp, canvas)
+    log = _Log(comp, canvas, "SD SMOKE")
     comp.set_backlight(True)
 
     # The two modules each carry the bus facts, and they MUST agree: attaching
@@ -598,24 +598,166 @@ def sd(rounds=SD_ROUNDS):
           "(the card stays MOUNTED at /sd -- that is deliberate)")
 
 
-class _SdLog:
-    """A scrolling status list on the glass, so the SD stage is watchable
-    without a serial terminal. Repaints the whole list each time -- 20 lines of
-    8px text is nothing next to a 4KB SD write, and a partial-repaint scheme
-    here would be a second thing that could be wrong."""
+# ---------------------------------------------------------------------------
+# STAGE 5 -- I2S audio into the MAX98357 mono amp.
+# ---------------------------------------------------------------------------
 
-    def __init__(self, comp, canvas, keep=20):
+# An ascending phrase, as (Hz, seconds). Deliberately NOT a single tone: a
+# rising scale makes a wrong sample rate or a stuck oscillator audible, where
+# one steady beep sounds fine at any speed.
+_AUDIO_SCALE = ((262, 0.25), (330, 0.25), (392, 0.25), (523, 0.45))
+
+
+def audio():
+    """I2S bring-up -- and a measurement that works even if the amp is silent.
+
+    THE PROBLEM WITH TESTING AUDIO BY EAR. "I hear nothing" has at least four
+    causes -- no native module, no I2S channel, a synth producing silence, or an
+    amp that is not wired/powered -- and an ear cannot tell them apart. So this
+    smoke instruments the SEAM: `moy_audio.frames_out()` returns the frames the
+    I2S peripheral has actually ACCEPTED, which is the last thing measurable on
+    this side of the wire.
+
+      frames climbing at ~22050/s  -> the synth renders and the peripheral
+                                      consumes. Silence past this point is the
+                                      AMP or its wiring, not the firmware.
+      frames flat                  -> nothing is feeding I2S. The feeder line
+                                      above says which path was taken.
+      frames climbing at the WRONG rate -> the clock. Everything would play at
+                                      the wrong pitch, which by ear just sounds
+                                      like "a bit off".
+
+    That is the same rule the project learned the expensive way on the audio
+    seam: measure BOTH sides, and prefer a number to an ear.
+
+    The bank is `AudioBank.default()` -- the coin/jump/thud starter set every
+    empty cart gets -- so this needs no card and no cart.
+    """
+    from audio import AudioEngine
+    from device_audio import DeviceAudio, AUDIO_RATE, I2S_BCK, I2S_WS, I2S_DOUT
+
+    comp, canvas = _canvas()
+    log = _Log(comp, canvas, "AUDIO SMOKE", keep=18)
+    comp.set_backlight(True)
+
+    log.say("pins BCK=%d WS=%d DOUT=%d @%dHz"
+            % (I2S_BCK, I2S_WS, I2S_DOUT, AUDIO_RATE))
+    engine = AudioEngine()
+    dev = DeviceAudio(engine)
+    na = dev._na
+    if na is None:
+        log.say("moy_audio ABSENT -- silent by design", RED)
+        print("Moybyte audio: no native module in this image; nothing to measure")
+        print("Moybyte audio smoke done -> REPL")
+        return
+    feed = "core-1 task" if dev._core1 else ("legacy I2S" if dev.i2s else "NONE")
+    log.say("feed: %s" % feed, GREEN if feed != "NONE" else RED)
+    print("Moybyte audio: feed=%s rate=%d bank sfx=%d music=%d"
+          % (feed, AUDIO_RATE, len(engine.bank.sfx), len(engine.bank.music)))
+    try:
+        print("Moybyte audio: engine_sig=%s" % (na.engine_sig(),))
+    except Exception as exc:            # noqa: BLE001 -- diagnostic only
+        print("Moybyte audio: engine_sig unavailable: %s" % (exc,))
+
+    def _frames():
+        try:
+            return na.frames_out()[0]
+        except Exception:               # noqa: BLE001 -- older module
+            return -1
+
+    def _play(label, fn, secs):
+        """Run `fn`, hold for `secs`, and report the frames the peripheral took.
+
+        `dev.tick(dt)` is called every 20ms throughout: in core-1 mode it is
+        almost nothing, but in the legacy fallback it IS the feed, so a smoke
+        that skipped it would measure silence and blame the amp.
+        """
+        f0 = _frames()
+        t0 = time.ticks_ms()
+        fn()
+        t_end = time.ticks_add(t0, int(secs * 1000))
+        log.say("%s ..." % label, GREY)
+        i = 0
+        while time.ticks_diff(t_end, time.ticks_ms()) > 0:
+            dev.tick(0.02)
+            i += 1
+            if i % 5 == 0:      # ~10Hz: a live counter, not a repaint benchmark
+                log.say_replace("%s  frames+%d  active=%s"
+                                % (label, _frames() - f0, dev.is_active()), GREY)
+            time.sleep_ms(20)
+        ms = time.ticks_diff(time.ticks_ms(), t0)
+        got = _frames() - f0
+        hz = (got * 1000 // ms) if (ms and got >= 0) else -1
+        ok = hz > 0 and abs(hz - AUDIO_RATE) * 20 < AUDIO_RATE      # within 5%
+        log.say_replace("%-10s %6d frames %5dHz" % (label, got, hz),
+                        GREEN if ok else RED)
+        print("Moybyte audio: %-10s %dms frames=%d measured=%dHz (nominal %d)%s"
+              % (label, ms, got, hz, AUDIO_RATE, "" if ok else "  <-- OFF"))
+        return hz
+
+    rates = []
+    rates.append(_play("silence", lambda: None, 1.0))
+    for (hz, dur) in _AUDIO_SCALE:
+        _play("beep %d" % hz, lambda hz=hz, dur=dur: dev.beep(hz, dur), dur + 0.1)
+    for n in range(min(3, len(engine.bank.sfx))):
+        rates.append(_play("sfx %d" % n, lambda n=n: dev.sfx(n), 1.0))
+    if engine.bank.music:
+        rates.append(_play("music 0", lambda: dev.music(0, True), 5.0))
+        dev.music_stop()
+    # Volume is a real verb, not decoration: a master of 0 must SILENCE the amp
+    # while the peripheral keeps taking frames -- which is exactly the pair of
+    # facts the frames counter can show and an ear cannot.
+    dev.volume(0)
+    _play("vol 0", lambda: dev.sfx(0), 1.2)
+    dev.volume(7)
+    _play("vol 7", lambda: dev.sfx(0), 1.2)
+
+    good = [r for r in rates if r > 0]
+    if good and all(abs(r - AUDIO_RATE) * 20 < AUDIO_RATE for r in good):
+        log.say("I2S consuming at rate -- OK", GREEN)
+        print("Moybyte audio: VERDICT the peripheral consumes at the nominal "
+              "rate. If it was silent, look at the amp and its wiring, not here.")
+    else:
+        log.say("frame rate WRONG or flat", RED)
+        print("Moybyte audio: VERDICT frames_out did not advance at %dHz -- the "
+              "feed is the suspect, not the amp. feed=%s" % (AUDIO_RATE, feed))
+    print("Moybyte audio smoke done -> REPL (the core-1 task keeps running)")
+
+
+class _Log:
+    """A scrolling status list on the glass, so a stage is watchable without a
+    serial terminal in front of you.
+
+    Repaints the whole list every time. That is not laziness: 20 lines of 8px
+    text is nothing beside a 4KB SD write or an I2S block, and a partial-repaint
+    scheme here would be a second thing that could be wrong in a program whose
+    only job is to say what IS wrong.
+    """
+
+    def __init__(self, comp, canvas, title="SMOKE", keep=20):
         self.comp = comp
         self.canvas = canvas
+        self.title = title
         self.keep = keep
         self.rows = []
 
     def say(self, msg, col=WHITE):
         self.rows.append((msg, col))
         del self.rows[:-self.keep]
+        self.paint()
+
+    def say_replace(self, msg, col=WHITE):
+        """Overwrite the last row -- a live counter, not another line."""
+        if self.rows:
+            self.rows[-1] = (msg, col)
+        else:
+            self.rows.append((msg, col))
+        self.paint()
+
+    def paint(self):
         c = self.canvas
         c.cls(DARK)
-        c.print("SD SMOKE", 6, 4, YELLOW)
+        c.print(self.title, 6, 4, YELLOW)
         y = 18
         for (text, colour) in self.rows:
             c.print(text[:39], 6, y, colour)

@@ -24,5 +24,12 @@
 // the port's own SD support is deliberately NOT enabled.
 #define MICROPY_HW_ENABLE_SDCARD            (0)
 
-// The ES8311 codec (audio, staged in a later bring-up step) is I2S.
+// Audio is a MAX98357 mono I2S amp (BCK 7 / WS 5 / DOUT 6), driven by the
+// `moy_audio` usermod's core-1 feeder task. `machine.I2S` is on because
+// device_audio.py falls back to it when that task cannot be created -- the
+// usermod owns the peripheral otherwise, and two owners would clash.
+//
+// (An earlier revision of this line said ES8311. That is the P4's codec, not
+// this board's; the mistake was harmless because the pins live in
+// device_audio.py, but it is the kind of thing that gets copied.)
 #define MICROPY_PY_MACHINE_I2S              (1)

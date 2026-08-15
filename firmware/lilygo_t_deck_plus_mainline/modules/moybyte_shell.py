@@ -19,9 +19,9 @@ must never be the thing that spends a REPL the owner might still have had.
 
 # The mode this image boots. Set by hand as the port advances; stage 6 makes
 # "desktop" the default and the rest stay reachable from the REPL.
-MODE = "sd"
+MODE = "audio"
 
-MODES = ("panel", "touch", "keyboard", "sd", "desktop")
+MODES = ("panel", "touch", "keyboard", "sd", "audio", "desktop")
 
 
 def main():

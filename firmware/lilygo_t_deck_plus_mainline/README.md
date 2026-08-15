@@ -217,6 +217,38 @@ The card is left **mounted** at `/sd` when the smoke returns. That is
 deliberate: `with_sd_live` attaches once and keeps the device resident for the
 session, because tearing it down between ops is what corrupts the bus.
 
+#### `MODE = "audio"` (stage 5)
+
+A rising four-note phrase, the three starter SFX (coin / jump / thud), five
+seconds of music 0, then the same SFX at master volume 0 and 7.
+
+**But the verdict is a number, not the sound.** "I hear nothing" has at least
+four causes — no native module, no I2S channel, a synth producing silence, or
+an amp that is not wired — and an ear cannot tell them apart. So every step
+reports `moy_audio.frames_out()`, the frames the I2S peripheral has actually
+**accepted**, which is the last thing measurable on this side of the wire:
+
+```
+Moybyte audio: feed=core-1 task rate=22050 bank sfx=3 music=1
+Moybyte audio: beep 262    350ms frames=7717 measured=22048Hz (nominal 22050)
+Moybyte audio: VERDICT the peripheral consumes at the nominal rate.
+```
+
+| the number | what it means |
+|---|---|
+| ~22050 Hz | the synth renders and the peripheral consumes. Silence past this point is the **amp or its wiring**, not the firmware |
+| flat / `frames=0` | nothing is feeding I2S. The `feed=` line says which path was taken — `core-1 task`, `legacy I2S`, or `NONE` |
+| a *wrong* rate | the clock. By ear this is just "sounds a bit off"; by number it is unambiguous |
+| `moy_audio ABSENT` | the usermod is not in this image. That is silence **by design** (#97) — the Python fallback synth died with moycore stage 0 |
+
+The `vol 0` step is there for the same reason: master 0 must silence the amp
+while the peripheral **keeps** taking frames, which is exactly the pair of facts
+a counter can show and an ear cannot.
+
+The bank is `AudioBank.default()`, so this needs no card and no cart. The
+core-1 feeder task keeps running after the smoke returns — `moy_audio.audio_stop()`
+from the REPL stops it.
+
 ---
 
 ## What is here
