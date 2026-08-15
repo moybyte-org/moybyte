@@ -95,6 +95,46 @@ def test_a_malformed_table_is_ignored_rather_than_raising():
         assert list(cv.palette) == before
 
 
+def _ink(cv):
+    """The brightest word on the canvas -- the colour a verb just drew."""
+    return max(struct.unpack("<%dH" % (cv.w * cv.h), bytes(cv._buf)))
+
+
+def test_every_verb_resolves_through_the_same_table():
+    """The half of this fix I shipped without at first.
+
+    Colour resolution lives in several places: `_col` (cls/pix/line/circ), the
+    C gate's mirrored table, and the direct `PAL565_WIRE[...]` reads inside
+    rect/rectb/print and the sprite paths. The first commit converted `_col` and
+    the gate and left the rest on the module table, so `cls(8)` drew the cart's
+    colour and `rect(..., 8)` drew stock MOY64 -- on the same canvas, in the same
+    frame. Caught by review, not by a test, which is why there is one now.
+    """
+    verbs = {
+        "cls": lambda c: c.cls(8),
+        "rect": lambda c: (c.cls(0), c.rect(0, 0, 4, 4, 8)),
+        "rectb": lambda c: (c.cls(0), c.rectb(0, 0, 6, 6, 8)),
+        "circ": lambda c: (c.cls(0), c.circ(4, 4, 3, 8)),
+        "line": lambda c: (c.cls(0), c.line(0, 0, 7, 3, 8)),
+        "print": lambda c: (c.cls(0), c.print("A", 0, 0, 8)),
+    }
+    stock, cart = {}, {}
+    for name, draw in verbs.items():
+        cv = _canvas(16, 8)
+        draw(cv)
+        stock[name] = _ink(cv)
+        cv.palette = [(255, 0, 0)] * 64
+        draw(cv)
+        cart[name] = _ink(cv)
+    assert len(set(stock.values())) == 1, (
+        "verbs disagree on the STOCK palette: %s"
+        % {k: hex(v) for k, v in stock.items()})
+    assert len(set(cart.values())) == 1, (
+        "verbs disagree under a cart palette -- some still read the module "
+        "table: %s" % {k: hex(v) for k, v in cart.items()})
+    assert set(stock.values()) != set(cart.values()), "the swap changed nothing"
+
+
 def test_a_palette_swap_invalidates_pal_keyed_bakes():
     """Sprite variants are cached on (scale, flip, _palgen), and an identity pal
     map ids as 0. Without the epoch a cart that ships a palette but never calls

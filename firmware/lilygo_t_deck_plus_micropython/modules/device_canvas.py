@@ -152,6 +152,51 @@ def _rgb565(rgb):
     r, g, b = rgb
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
 
+
+def to_indices(buf, wire=None, strict=True):
+    """An RGB565 framebuffer back to one byte of palette INDEX per pixel.
+
+    EXACT, not approximate: MOY64's 64 entries resolve to 64 DISTINCT RGB565
+    words, so the reverse map is total. `tests/test_spec_conformance.py` proves
+    the round trip on all ten spec scenes -- every vendored golden hash comes
+    back identical through a 565 canvas.
+
+    It exists because several things downstream of a canvas are index-native and
+    should stay that way: the spec goldens (which are vendored and cannot be
+    re-recorded), the wallpaper preview's _Blit -> spr -> .mct sidecar chain
+    (whose validator checks len == w*h), and the cover/GIF exporters. Converting
+    at the boundary leaves all of them untouched; converting THEM to 565 would
+    change a persisted format.
+
+    `wire` defaults to the stock table. Pass a canvas's own `_wire` to read a
+    frame drawn under a cart palette -- with a private table the words are
+    different and the stock reverse map would not know them.
+
+    `strict` raises on a word no palette index produced. That should be
+    impossible for a frame drawn entirely through palette-resolved verbs, and
+    silently mapping it to index 0 would corrupt a hash or a saved thumbnail in
+    a way that reads as a raster bug. Pass False to get index 0 instead, for a
+    caller that knowingly blits raw 565 in (a paint image, a scaled composite).
+    """
+    if wire is None or wire is _PAL565_WIRE_BUF:
+        rev = _PAL565_INDEX
+    else:
+        rev = {}
+        for _i in range(len(wire) - 1, -1, -1):
+            rev[wire[_i]] = _i
+    words = memoryview(buf).cast("H")
+    out = bytearray(len(words))
+    for i in range(len(words)):
+        idx = rev.get(words[i])
+        if idx is None:
+            if strict:
+                raise ValueError(
+                    "pixel %d holds 0x%04X, which no palette index produces"
+                    % (i, words[i]))
+            idx = 0
+        out[i] = idx
+    return bytes(out)
+
 # Reverse of PAL565_WIRE, for pix()'s READ form: the framebuffer holds RGB565 but
 # the cart API speaks palette indices on both tiers (SPEC.md 1: "the canvas itself
 # is always indices"). Built once at import; the first index wins where two entries
@@ -1102,14 +1147,14 @@ class DeviceCanvas:
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
         self._fill(int(x), int(y), int(w), int(h),
-                   PAL565_WIRE[self._pal_map[c & 63]])
+                   self._wire[self._pal_map[c & 63]])
 
     def rectb(self, x, y, w, h, c):
         # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
         x = int(x); y = int(y); w = int(w); h = int(h)
-        col = PAL565_WIRE[self._pal_map[c & 63]]
+        col = self._wire[self._pal_map[c & 63]]
         self._fill(x, y, w, 1, col)
         self._fill(x, y + h - 1, w, 1, col)
         self._fill(x, y, 1, h, col)
@@ -1200,7 +1245,7 @@ class DeviceCanvas:
         fs = None if gfx is None else getattr(gfx, "fill_spans", None)
         if fs is not None:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
-            col = -1 if c < 0 else PAL565_WIRE[self._pal_map[c & 63]]
+            col = -1 if c < 0 else self._wire[self._pal_map[c & 63]]
             fs(self._buf, self._stride, self._bh, arr,
                -1 if n is None else n, ox, oy, col,
                None if col >= 0 else self._wire_pal(),
@@ -1383,7 +1428,7 @@ class DeviceCanvas:
                 p &= 63
                 if pt is not None and pt[p]:
                     continue
-                put(dx + i, ty, PAL565_WIRE[pal[p]])
+                put(dx + i, ty, self._wire[pal[p]])
 
     def tline(self, tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey=-1):
         # SPEC.md 6.1 tline (#167 shape B): exactly line()'s Bresenham pixels,
@@ -1453,7 +1498,7 @@ class DeviceCanvas:
                 p = pget((tid % scols) * 8 + (px & 7),
                          (tid // scols) * 8 + (py & 7))
                 if p != ck and (pt is None or not pt[p & 63]):
-                    put(x0, y0, PAL565_WIRE[pal[p & 63]])
+                    put(x0, y0, self._wire[pal[p & 63]])
             uu += du
             if uu >= tu:
                 uu -= tu
@@ -1571,7 +1616,7 @@ class DeviceCanvas:
         buf = _bake_buf(img, w * h * 2)   # #186: off-heap for off-heap images
         fb = framebuf.FrameBuffer(buf, w, h, framebuf.RGB565)
         fb.fill(_RGB_KEY)
-        pal = PAL565_WIRE
+        pal = self._wire
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -1632,7 +1677,7 @@ class DeviceCanvas:
     def _spr_py(self, img, x, y, scale, flip=0):
         # Per-pixel fallback when moy_gfx is absent (image built without it). Honours
         # camera (applied by the caller into x,y), clip, pal, palt, and flip.
-        pal = PAL565_WIRE
+        pal = self._wire
         pmap = self._pal_map
         palt = self._palt
         t = img.transparent
@@ -2012,7 +2057,7 @@ class DeviceCanvas:
             _prof = self._prof
             _t0 = _ticks_us() if _prof else 0
             self._gfx_text(self._buf, self._stride, self._bh, _text_bytes(s), int(x), int(y),
-                           PAL565_WIRE[self._pal_map[c & 63]],
+                           self._wire[self._pal_map[c & 63]],
                            _FONT8, _FONT8_FIRST, 1,
                            self._cam_x, self._cam_y,
                            self._clip_x0, self._clip_y0,
@@ -2053,7 +2098,7 @@ class DeviceCanvas:
         w = self.w
         h = self.h
         n = len(indices)
-        pn = len(PAL565_WIRE)
+        pn = len(self._wire)
         for row in range(ih):
             ty = y + row
             if ty < 0 or ty >= h:
@@ -2070,7 +2115,7 @@ class DeviceCanvas:
                 v = indices[si]
                 if v >= pn:
                     continue
-                d[drow + tx] = PAL565_WIRE[v]
+                d[drow + tx] = self._wire[v]
 
     # -- scroll layers (#54) -------------------------------------------------
 
