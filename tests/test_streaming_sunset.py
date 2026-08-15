@@ -66,7 +66,12 @@ def test_the_wasm_head_rasterizes_with_the_boards_kernel():
     assert "native/moy_gfx" in build           # the kernel is compiled in
     assert "device_canvas.py" in build         # ...and the boards' canvas staged
     canvas = _read("firmware", "web_runner", "web_canvas.py")
-    assert "from device_canvas import DeviceCanvas" in canvas
+    # The CLAIM is "the browser draws with the boards' own class", not "the
+    # import statement is spelled on one line" -- this pinned the latter and
+    # broke when the import grew a second name and wrapped.
+    assert "from device_canvas import" in canvas
+    assert "DeviceCanvas" in canvas
+    assert "class WebSystemCanvas(DeviceCanvas)" in canvas
     boot = _read("firmware", "web_runner", "web_boot.py")
     assert "web_canvas.make_canvas" in boot
     assert "def fb_addr" in boot               # pixels leave by address, not JSON

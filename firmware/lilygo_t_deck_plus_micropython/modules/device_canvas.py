@@ -2154,6 +2154,18 @@ class DeviceCanvas:
                                        # default 2 describes the ROOT ping-pong only) -- a
                                        # windowed surface blit-scrolling its win.buf must
                                        # measure against the LAST paint, not two back
+        # A cart palette (SPEC.md 3.1) belongs to the canvas TREE, not just its
+        # root. runtime/canvas.py's new_layer has always handed `self.palette` to
+        # the layer it builds and this did not, so a cart shipping its own table
+        # drew in its colours on the canvas and in stock MOY64 in every layer --
+        # on every tier, since this is the class all three run. Assigned through
+        # the property so the child rebuilds its wire LUT, retires its pal-state
+        # ids and syncs the C gate's mirror exactly as a direct swap would.
+        # Guarded on the WIRE table's identity, not on _palette: reading
+        # `.palette` anywhere populates that lazily, so testing it would drag
+        # every stock layer off the shared module table for nothing.
+        if self._wire is not _PAL565_WIRE_BUF:
+            lay.palette = self._palette
         # Layer lending (#63 leak fix): a pooled (moy_alloc-backed) buffer created for a
         # program (`owner`: "cart" via make_api, "wallpaper" via the wallpaper runner,
         # "_mapcache" for Fold 2's hidden cache) is recorded so reclaim_layers(owner)

@@ -27,7 +27,8 @@ calls per frame, not the pixels, is the shell's real budget here -- the same
 shape as the P4.
 """
 
-from device_canvas import DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST
+from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
+                           _PAL565_WIRE_BUF)
 
 try:
     import moy_gfx as _moy_gfx
@@ -151,6 +152,13 @@ class WebSystemCanvas(DeviceCanvas):
                               font_scale=self.font_scale)
         lay._nocache = True
         lay.RETAINED_FRAMES = 1
+        # ...and the cart's palette, if it has one. DeviceCanvas.new_layer does
+        # this; overriding new_layer means not inheriting it, so a layer would
+        # draw stock MOY64 while the surface it composites onto honoured the
+        # cart's table. Guarded on the WIRE table's identity rather than
+        # `_palette`, which the getter populates lazily.
+        if self._wire is not _PAL565_WIRE_BUF:
+            lay.palette = self._palette
         return lay
 
 

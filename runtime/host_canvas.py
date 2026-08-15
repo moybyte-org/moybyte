@@ -119,6 +119,16 @@ def install():
     """
     sys.modules.setdefault("moy_gfx", gfx_binding)
     sys.modules.setdefault("framebuf", _FramebufModule)
+    # `moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
+    # gates its native text op on being able to import it. That file is a
+    # gitignored build artefact, so on a clean checkout the host silently fell
+    # back to the Python rasterizer -- which is 15x slower (113us/call vs 7.6us)
+    # and, worse, reaches framebuf.text on the game tier, which has NO CLIP RECT
+    # and was measured drawing 252 pixels past a clip edge. Registering the
+    # canonical module under the staged name removes the split: whether the host
+    # clips its text stops depending on whether someone has built firmware here.
+    from . import font as _font_mod
+    sys.modules.setdefault("moy_font", _font_mod)
     if _TDECK_MODULES not in sys.path:
         # device_canvas and its device_util leaf live in the board tree, which
         # is their canonical home -- the boards stage FROM there, and so does
@@ -288,10 +298,13 @@ def _system_canvas_class():
                    self._cam_x, self._cam_y,
                    self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
                 return
-            # NO KERNEL TEXT OP, which on the host is the only case that runs:
-            # `runtime/moyhost_gfx.c` compiles libmoy's raster plus moybyte's
-            # compositing verbs, and text is neither, so `_gfx_text` is None and
-            # the branch above is for the day it isn't.
+            # NO KERNEL TEXT OP. `runtime/moyhost_gfx.c` HAS one now, so the
+            # branch above is live -- but `_gfx_text` also needs the petme128
+            # blob `moy_font`, which is a gitignored artefact a firmware build
+            # stages, so a clean checkout still arrives here. The two lanes are
+            # pixel-identical where they overlap (libmoy's compiled-in font and
+            # runtime/font.py agree byte for byte over printable ASCII, at fs 1
+            # and scaled); what the kernel adds is the clip rect below.
             #
             # So this rasterizes petme128 itself, for TWO reasons, and the
             # second is not optional. (1) Delegating at fs > 1 would render
@@ -336,6 +349,13 @@ def _system_canvas_class():
                                    font_scale=self.font_scale)
             lay._nocache = True          # a layer's own map() rasters directly
             lay.RETAINED_FRAMES = 1      # see the class note; ONE buffer
+            # ...and the cart's palette, if it has one. DeviceCanvas.new_layer
+            # does this, but overriding new_layer means not inheriting it: a
+            # layer would draw stock MOY64 while the surface it composites onto
+            # honoured the cart's table. Guarded on the WIRE table's identity
+            # rather than `_palette`, which the getter populates lazily.
+            if self._wire is not _PAL565_WIRE_BUF:
+                lay.palette = self._palette
             return lay
 
         def blit_cover(self, gc):
@@ -370,11 +390,16 @@ def _system_canvas_class():
             words = getattr(gc, "_buf", None)
             scaled = getattr(g, "blit565_scale", None) if g is not None else None
             if scaled is not None and words is not None:
-                # The P4/web path (one kernel call). Absent from the host
-                # binding today; probed so it is used the day it lands.
+                # The P4/web path, and now the host's too: ONE kernel call
+                # (`gfx_binding.blit565_scale`, pinned against the native module
+                # by tests/test_gfx_binding.py). It is pixel-identical to the
+                # loop below and 12.9ms -> 0.07ms on a 1024x600 desk, which is
+                # most of a frame's budget back on every wallpaper repaint.
                 scaled(self._buf, sw, sh, int(ox), int(oy),
                        words, gw, gh, int(scale))
                 return
+            # Still reached, and not as a fallback for a missing kernel: an
+            # INDEXED source has no `_buf` for the kernel to read. See _cover_py.
             self._cover_py(gc, ox, oy, scale)
 
         def _cover_py(self, gc, ox, oy, scale):

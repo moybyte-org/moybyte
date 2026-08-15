@@ -478,3 +478,51 @@ def test_the_class_is_importable_by_name():
     assert isinstance(host_canvas.make_system_canvas(4, 4), HostSystemCanvas)
     with pytest.raises(AttributeError):
         host_canvas.NoSuchCanvas
+
+
+# -- the three gaps found by review of this file's own first landing ----------
+
+
+def test_a_layer_inherits_the_cart_palette():
+    """DeviceCanvas.new_layer propagates it; OVERRIDING new_layer means not
+    inheriting that. Both this class and WebSystemCanvas define their own (to
+    carry font_scale), so both had to be told separately -- otherwise a layer
+    draws stock MOY64 while the surface it composites onto honours the cart's,
+    in the same frame."""
+    cv = host_canvas.make_system_canvas(16, 8)
+    cv.palette = [(255, 0, 0)] * 64
+    lay = cv.new_layer(8, 4)
+    cv.cls(8)
+    lay.cls(8)
+    assert bytes(lay._buf[:2]) == bytes(cv._buf[:2]), (
+        "the layer drew a different colour for index 8 than its parent")
+
+
+def test_a_stock_layer_still_shares_the_module_table():
+    """Copy-on-write, guarded on the WIRE table's identity and not `_palette`:
+    the getter populates that lazily, so testing it would drag every layer on a
+    stock console off the shared table for nothing."""
+    cv = host_canvas.make_system_canvas(16, 8)
+    assert cv.new_layer(8, 4)._wire is dc._PAL565_WIRE_BUF
+
+
+def test_the_game_tier_clips_its_text():
+    """`moy_font` is what build.sh stages runtime/font.py AS, and device_canvas
+    gates its native text op on importing it -- so on a clean checkout (that
+    file is a gitignored build artefact) the host fell back to framebuf.text,
+    which has NO clip rect and was measured drawing 252 pixels past an edge.
+    install() registers the canonical module under the staged name, so whether
+    host text clips no longer depends on whether firmware was built here.
+
+    On the GAME canvas specifically: HostSystemCanvas rasterizes its own scaled
+    text and was never affected, which is why this went unnoticed.
+    """
+    cv = host_canvas.make_canvas(64, 16)
+    assert cv._gfx_text is not None, "the native text op did not resolve"
+    cv.cls(0)
+    cv.clip(0, 0, 20, 16)
+    cv.print("ABCDEFGHIJ", 0, 4, 7)
+    bg = cv._buf[0:2]
+    past = sum(1 for y in range(16) for x in range(20, 64)
+               if cv._buf[(y * 64 + x) * 2:(y * 64 + x) * 2 + 2] != bg)
+    assert past == 0, "%d pixels drawn past the clip edge" % past

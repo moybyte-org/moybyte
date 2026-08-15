@@ -56,6 +56,7 @@ _SIGS = (
     ("hg_scroll_rect", [_P, _Z, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_blit565", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I,
                     _I, _I, _I, _I], None),
+    ("hg_blit565_scale", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _I], None),
     ("hg_blit_window", [_P, _Z, _I, _I, _P, _Z, _I, _I, _I], None),
     ("hg_copy_async", [_P, _Z, _I, _P, _Z, _I, _I], _I),
     ("hg_copy_wait", [], _I),
@@ -75,6 +76,8 @@ _SIGS = (
     ("hg_tri", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
                 _I], None),
     ("hg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
+    ("hg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _Z, _I, _I, _I, _I,
+                 _I, _I, _I, _I], None),
     ("hg_sspr", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
                  _P, _P, _I, _I, _I, _I, _I, _I, _I, _I], None),
     ("hg_tline", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _P, _Z, _I, _I,
@@ -160,6 +163,21 @@ def blit565(dst, dw, dh, dx, dy, src, sw, sh, key,
                       int(cx0), int(cy0),
                       int(dw) if cx1 is None else int(cx1),
                       int(dh) if cy1 is None else int(cy1))
+
+
+def blit565_scale(dst, dw, dh, dx, dy, src, sw, sh, scale):
+    """Integer-upscale an RGB565 source into dst at (dx, dy), which may be
+    negative -- the windowed composite primitive (game frame -> its window
+    viewport, wallpaper frame -> the full-desktop cover backdrop).
+
+    Its absence used to be silent and expensive: `HostSystemCanvas.blit_cover`
+    probes for this name and otherwise expands every row in Python."""
+    darr, dcap = _buf(dst)
+    sarr, scap = _rbuf(src)
+    _lib().hg_blit565_scale(ctypes.cast(darr, _P), dcap, int(dw), int(dh),
+                            int(dx), int(dy),
+                            ctypes.cast(sarr, _P), scap, int(sw), int(sh),
+                            int(scale))
 
 
 def blit_window(dst, dw, dh, src, src_w, sx, sy):
@@ -281,6 +299,31 @@ def blit_indices(dst, dw, dh, dx, dy, idx, iw, ih, pal):
                            int(dx), int(dy),
                            ctypes.cast(iarr, _P), len(imv), int(iw), int(ih),
                            ctypes.cast(parr, _P), len(pmv) // 2)
+
+
+def text(dst, dw, dh, s, x, y, color, font, first, scale,
+         cam_x, cam_y, cx0, cy0, cx1, cy1):
+    """petme128 in one call, with the camera and the clip rect honoured.
+
+    Sixteen positional arguments and no defaults, because the native op takes
+    exactly sixteen: a default here would let a call that TypeErrors on a board
+    quietly work on the host, which is the divergence this shim exists to
+    remove. `dh` is accepted and unused, like the native's (rows come from the
+    buffer capacity) -- dropping it from the signature would be the tidier order
+    the sspr note warns about.
+
+    A str is UTF-8-encoded, which is the buffer MicroPython would have taken
+    from it anyway; bytes pass straight through, so moy_lua's non-UTF-8 strings
+    draw the same glyphs here as on glass (device_canvas._text_bytes)."""
+    darr, dcap = _buf(dst)
+    sarr, _ = _rbuf(s.encode("utf-8") if isinstance(s, str) else s)
+    farr, _ = _rbuf(font)
+    _lib().hg_text(ctypes.cast(darr, _P), dcap, int(dw),
+                   ctypes.cast(sarr, _P), len(sarr),
+                   int(x), int(y), int(color) & 0xFFFF,
+                   ctypes.cast(farr, _P), len(farr), int(first), int(scale),
+                   int(cam_x), int(cam_y), int(cx0), int(cy0),
+                   int(cx1), int(cy1))
 
 
 def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh, dx, dy,

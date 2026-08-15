@@ -135,6 +135,46 @@ def test_every_verb_resolves_through_the_same_table():
     assert set(stock.values()) != set(cart.values()), "the swap changed nothing"
 
 
+def test_a_layer_inherits_the_cart_palette():
+    """The same omission one level down, and it survived the first fix.
+
+    `runtime/canvas.py`'s SystemCanvas.new_layer has always passed
+    `self.palette` into the layer it builds; `DeviceCanvas.new_layer` built a
+    bare canvas, so a cart with its own table drew in its colours on the canvas
+    and in stock MOY64 in every layer it made -- on ALL THREE tiers, this being
+    the class they share. A scroll cart (make_layer/draw_layer) renders its
+    whole world into one of these, so the wrong half is the visible half.
+    """
+    cv = _canvas(16, 8)
+    cv.cls(8)
+    stock = _word0(cv)
+    lay = cv.new_layer(16, 8)
+    lay.cls(8)
+    assert _word0(lay) == stock, "a stock canvas lent its layer the wrong table"
+
+    cv.palette = [(255, 0, 0)] * 64
+    cv.cls(8)
+    swapped = _word0(cv)
+    assert swapped != stock
+    lay = cv.new_layer(16, 8)
+    for draw in (lambda c: c.cls(8),
+                 lambda c: (c.cls(0), c.rect(0, 0, 4, 4, 8)),
+                 lambda c: (c.cls(0), c.print("A", 0, 0, 8))):
+        draw(lay)
+        assert _ink(lay) == swapped, "the layer drew stock MOY64 under a cart palette"
+    assert tuple(lay.palette[8]) == (255, 0, 0)
+
+
+def test_a_stock_canvas_still_lends_its_layer_the_shared_table():
+    """Copy-on-write, one level down: the inheritance above is guarded on the
+    WIRE table's identity and not on `_palette`, because reading `.palette`
+    anywhere populates that lazily -- guarding on it would hand every layer on
+    a stock console a private 64-entry LUT to make the same pixels."""
+    cv = _canvas()
+    assert cv.palette                       # populate _palette, as any reader does
+    assert cv.new_layer(4, 4)._wire is dc._PAL565_WIRE_BUF
+
+
 def test_a_palette_swap_invalidates_pal_keyed_bakes():
     """Sprite variants are cached on (scale, flip, _palgen), and an identity pal
     map ids as 0. Without the epoch a cart that ships a palette but never calls

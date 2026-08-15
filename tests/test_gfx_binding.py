@@ -69,6 +69,17 @@ blit_indices(buf, 16, 8, -2, 6, idx, 5, 4, pal565)
 sspr(buf, 16, 8, sheet, 128, 256, 0, 0, 8, 8, 2, 1, 11, 5, -1, 0, lut, palt, 0, 0, 0, 0, 16, 8)
 sspr(buf, 16, 8, sheet, 128, 256, 8, 0, 8, 8, 4, 2, 6, 3, 3, 1, lut, palt, 1, 1, 0, 0, 16, 8)
 tline(buf, 16, 8, cells, 4, 4, sheet, 128, 256, 0, 1, 15, 6, 0, 0, 65536, 32768, -1, lut, palt, 0, 0, 0, 0, 16, 8)
+blit565_scale(buf, 16, 8, 0, 0, src, 4, 4, 2)
+blit565_scale(buf, 16, 8, -4, -2, src, 4, 4, 3)
+blit565_scale(buf, 16, 8, 11, 5, src, 4, 4, 2)
+blit565_scale(buf, 16, 8, 3, 1, src, 4, 4, 1)
+blit565_scale(buf, 16, 8, 1, 2, src, 4, 4, 0)
+text(buf, 16, 8, msg, 0, 0, 0xf81f, font, 65, 1, 0, 0, 0, 0, 16, 8)
+text(buf, 16, 8, msg, -3, 1, 0x07e0, font, 65, 1, 0, 0, 0, 0, 16, 8)
+text(buf, 16, 8, msg, 4, 1, 0x8f1f, font, 65, 1, 2, 1, 3, 2, 12, 6)
+text(buf, 16, 8, msg, 0, 0, 0xffe0, font, 65, 2, 0, 0, 0, 0, 16, 8)
+text(buf, 16, 8, msg, -5, -3, 0x4a69, font, 65, 2, 1, -1, 2, 1, 14, 7)
+text(buf, 16, 8, msg, 2, 1, 0x9cd3, font, 65, 3, 0, 0, 1, 1, 15, 7)
 """
 
 # Sheet/map fixtures, built identically on both sides. Tiles 0 and 1 are given
@@ -98,6 +109,19 @@ quads[0] = 12
 cells = bytearray([0, 1, 2, 1, 1, 0, 1, 2, 2, 1, 0, 1, 1, 2, 1, 0])
 idx = bytearray([(_i * 7) % 64 for _i in range(5 * 4)])
 pal565 = array.array("H", [(0xF000 - i * 0x0123) & 0xFFFF for i in range(64)])
+# A synthetic petme128-LAYOUT font (8 bytes per glyph, column-major, LSB = top
+# row), not the real one: moy_font.py is a build artefact, and a fixture both
+# sides can BUILD cannot drift the way two staged copies of a blob can. Every
+# glyph is asymmetric in both axes for the same reason the sheet tiles are --
+# a mirror-image bug in the glyph walk has to be able to show.
+font = bytearray([1, 3, 7, 15, 31, 63, 127, 255,          # 0: left-thin, top-heavy
+                  255, 127, 63, 31, 15, 7, 3, 1,          # 1: its mirror in x
+                  128, 192, 224, 240, 248, 252, 254, 255,  # 2: bottom-heavy
+                  1, 0, 2, 0, 4, 0, 8, 0])                # 3: sparse
+# 'A'/'B'/'C' index glyphs 0/1/2 off first=65; '!' (33) is BELOW first, which is
+# the out-of-range case -- it must fall back to glyph 0, and glyph 0 is drawn
+# rather than blank so that fallback is observable.
+msg = b"AB!C"
 """
 
 
@@ -105,7 +129,7 @@ def _fixtures():
     ns = {"array": __import__("array"), "bytearray": bytearray, "range": range}
     exec(FIXTURES, ns)                         # noqa: S102 -- fixed text
     return {k: ns[k] for k in ("sheet", "lut", "palt", "quads", "cells",
-                               "idx", "pal565")}
+                               "idx", "pal565", "font", "msg")}
 
 
 def _run_ops(mod, buf, src):
@@ -215,6 +239,8 @@ def _shot():
 def fill_rect(*a): moy_gfx.fill_rect(*a); _shot()
 def scroll_rect(*a): moy_gfx.scroll_rect(*a); _shot()
 def blit565(*a): moy_gfx.blit565(*a); _shot()
+def blit565_scale(*a): moy_gfx.blit565_scale(*a); _shot()
+def text(*a): moy_gfx.text(*a); _shot()
 def blit_batch(*a): moy_gfx.blit_batch(*a); _shot()
 def blit_map(*a): moy_gfx.blit_map(*a); _shot()
 def line(*a): moy_gfx.line(*a); _shot()
