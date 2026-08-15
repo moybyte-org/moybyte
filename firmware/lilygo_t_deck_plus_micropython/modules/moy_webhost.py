@@ -283,7 +283,21 @@ class WebHost(WebServer):
         return None                      # -> 404 from the transport
 
     def _asset(self, name):
+        # A PRE-GZIPPED copy wins when it is there. The board does no
+        # compressing -- it serves `<name>.gz` verbatim and lets the browser
+        # inflate it, so the only cost is picking the file. Worth it because
+        # the wire is the expensive part here: the four assets are 1,155,953 B
+        # raw and 572,747 B gzipped, and on the T-Deck they stream off SD
+        # inside the DMA gate, so halving the bytes halves the window in which
+        # the console is handing its storage to the socket.
+        # Raw stays the fallback: `dist/` keeps both, because a plain static
+        # host (moybyte.com, tools/serve.py) sets no Content-Encoding, and a
+        # browser handed gzip bytes without that header sees garbage.
         full = self.web_dir + "/" + name
+        size = _file_size(full + ".gz")
+        if size is not None:
+            return FileResponse(full + ".gz", size, ASSETS[name],
+                                encoding="gzip")
         size = _file_size(full)
         if size is None:
             # A board with no web bundle copied to it. Say WHICH directory,

@@ -366,5 +366,19 @@ else
   cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi
+# A PRE-GZIPPED copy beside each asset, for the BOARDS. They serve `<name>.gz`
+# with `Content-Encoding: gzip` and never compress anything themselves, so the
+# wire cost halves (1,155,953 B -> ~572,747 B) and the browser does the
+# inflating. Both copies ship: a plain static host (moybyte.com, serve.py) sets
+# no Content-Encoding, and a browser handed gzip bytes without that header sees
+# garbage -- so raw has to stay the default and .gz has to be opt-in by a server
+# that knows to advertise it.
+# -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
+# the push tool's per-file compare stays meaningful.
+for f in index.html worker.js micropython.mjs micropython.wasm; do
+  if [ -f "${DIST_DIR}/${f}" ]; then
+    gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
+  fi
+done
 echo "== dist/ ready:"
 ls -la "${DIST_DIR}"

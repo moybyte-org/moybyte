@@ -157,6 +157,14 @@ def main(argv=None):
         if not FILES:
             sys.exit("no files in " + args.dist)
 
+    # Push the PRE-GZIPPED copy when the build made one: the board serves
+    # `<name>.gz` with Content-Encoding and never inflates anything, so this
+    # halves both the push and every later page load (1.13MB -> 0.56MB). Raw
+    # stays the fallback for a dist built before build.sh emitted .gz.
+    if not args.dir:
+        FILES = tuple((f + ".gz") if os.path.exists(
+            os.path.join(args.dist, f + ".gz")) else f for f in FILES)
+
     missing = [f for f in FILES if not os.path.exists(os.path.join(args.dist, f))]
     if missing:
         sys.exit("error: %s missing from %s\n  build it: cd firmware/web_runner "

@@ -167,21 +167,31 @@ class FileResponse:
 
     CHUNK = 1024
 
-    def __init__(self, path, size, content_type, max_age=0):
+    def __init__(self, path, size, content_type, max_age=0, encoding=None):
         self.path = path
         self.size = size
         self.content_type = content_type
         self.max_age = max_age
+        # `encoding` names a Content-Encoding the file is ALREADY stored in --
+        # the board never compresses anything. A pre-gzipped bundle halves the
+        # bytes on the wire (1,155,953 -> 572,747 for the four console assets)
+        # and the BROWSER inflates it, which it does for most of the web
+        # already. Content-Length stays the compressed length, which is what
+        # HTTP wants: it describes the body actually sent.
+        self.encoding = encoding
 
     def head(self):
         return ((
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: %s\r\n"
             "Content-Length: %d\r\n"
+            "%s"
             "Cache-Control: %s\r\n"
             "Access-Control-Allow-Origin: *\r\n"
             "Connection: close\r\n\r\n"
         ) % (self.content_type, self.size,
+             ("Content-Encoding: %s\r\n" % self.encoding) if self.encoding
+             else "",
              ("max-age=%d" % self.max_age) if self.max_age
              else "no-store")).encode("utf-8")
 
