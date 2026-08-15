@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy vendor-p8-import check-venv
+.PHONY: p4-web-push p4-web-stale setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy vendor-p8-import check-venv
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -353,6 +353,44 @@ firmware-flash-p4:
 	$(REQUIRE_ESPTOOL)
 	@[ -z "$(P4_OTADATA_OFFSET)" ] || $(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 --after no_reset erase_region $(P4_OTADATA_OFFSET) $(P4_OTADATA_SIZE)
 	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
+	@$(MAKE) --no-print-directory p4-web-push PORT=$(PORT) WEB_PUSH_OPTIONAL=1
+
+# The web console the BOARD serves (`/moy/web`, reached over WiFi) is a separate
+# copy of firmware/web_runner/dist -- it cannot ride the firmware image: the
+# bundle is ~1.13MB against ~1.04MB of app-partition headroom, and writing it
+# into the VFS tail at flash time would erase the kid's carts and files. So it
+# is pushed, and the ONLY question that matters is whether anyone remembers to.
+# Nobody did: on 2026-08-15 the board served a bundle old enough to still carry
+# the #43 desktop-blackout bug that had been fixed in dist hours earlier, and
+# nothing anywhere said so. Hence: the flash target pushes it (optional -- a
+# board with no WiFi must not fail a cable flash), and `p4-web-stale` is the
+# check you can run on its own. p4_push_web.py compares byte-for-byte per file,
+# so a re-push is idempotent and cheap; running it is the verification.
+p4-web-push:
+	$(REQUIRE_PORT)
+	@if [ ! -f firmware/web_runner/dist/micropython.wasm ]; then \
+	  echo "no firmware/web_runner/dist -- build it with firmware/web_runner/build.sh"; \
+	  [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; \
+	else \
+	  $(MAKE) --no-print-directory p4-web-stale; \
+	  $(PYTHON) tools/p4_push_web.py --port $(PORT) \
+	    || { echo "web-console push FAILED (board on WiFi? bundle unchanged on the board)"; \
+	         [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; }; \
+	fi
+
+# Is the built bundle older than the console sources it was built from? This is
+# the staleness the push cannot detect -- p4_push_web only compares dist against
+# the BOARD, so a dist that is itself behind `runtime/` pushes a stale bundle and
+# reports "all files match".
+p4-web-stale:
+	@newer=$$(find runtime firmware/web_runner -name '*.py' -newer firmware/web_runner/dist/micropython.wasm 2>/dev/null | head -5); \
+	if [ -n "$$newer" ]; then \
+	  echo "WARNING: firmware/web_runner/dist is OLDER than console sources, e.g."; \
+	  echo "$$newer" | sed 's/^/    /'; \
+	  echo "  rebuild it (firmware/web_runner/build.sh) or you will push a stale console."; \
+	else \
+	  echo "web bundle is newer than every runtime/ and web_runner/ source."; \
+	fi
 
 firmware-monitor-p4:
 	$(REQUIRE_PORT)
