@@ -19,7 +19,7 @@ must never be the thing that spends a REPL the owner might still have had.
 
 # The mode this image boots. Set by hand as the port advances; stage 6 makes
 # "desktop" the default and the rest stay reachable from the REPL.
-MODE = "audio"
+MODE = "desktop"
 
 MODES = ("panel", "touch", "keyboard", "sd", "audio", "desktop")
 

@@ -30,6 +30,21 @@ stages from here on. That is deliberate and it is explained in the file: the
 stage commits are bisect points, so consecutive images should differ by the
 subsystem under test and not also by a megabyte of frozen bytecode.
 
+### What it costs, against the build it replaces
+
+| | shipping fork build | this build |
+|---|---|---|
+| app image | 5,052,032 B | **3,564,304 B** |
+| headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
+
+Same console, same baked browser bundle (572,693 B), same partition table —
+**1.42 MB less image, 29% smaller.** LVGL, `lcd_bus`, `st7789`, `task_handler`,
+`rgb_bus`, `spi3wire` and the fork's `i2c` are simply not in it; the panel is
+one 556-line C file. Both builds stamp OTA board id `tdeck` against a
+byte-identical partition table, so a payload from either installs into the
+other's inactive slot — which is what makes the migration an OTA rather than a
+cable flash.
+
 ---
 
 ## Build and flash
@@ -249,6 +264,139 @@ The bank is `AudioBank.default()`, so this needs no card and no cart. The
 core-1 feeder task keeps running after the smoke returns — `moy_audio.audio_stop()`
 from the REPL stops it.
 
+#### `MODE = "desktop"` (stage 6) — the console
+
+The real thing: `moy_runtime.run_desktop()` over the shared boot spine
+(`runtime/device_boot.py`), the shared `console.Workstation`, carts on SD, Lua
+carts through `moycore`, OTA, and the browser console baked into the image.
+
+Boot is the same sequence the other two boards run, because it is the same
+code. What you should see:
+
+1. serial says `Moybyte boot: starting`, the panel lights on the **boot splash**
+   with a progress bar (a first boot writes every built-in cartridge to SD
+   before anything else composes — that wait is what the bar is for);
+2. `Moybyte boot: loading cartridges N/M` climbing;
+3. `Moybyte loaded N carts from SD`, then `lua runtime ON (moycore)`;
+4. the **launcher**, and `Moybyte first frame in NNNms`.
+
+Then it is the console: tap a cart to play it, hold BACKSPACE ~700ms to leave a
+game, the ≡ menu and Settings work, the Editor's seven tabs work.
+
+| what you see | what it means |
+|---|---|
+| splash, then `using built-in carts` | SD did not mount. Run `MODE = "sd"` — it will say why, in a bracket |
+| splash forever, no launcher | read the last `boot:` line; it names the step |
+| launcher, but no sound | stage 5 answers this with a number, not an ear |
+| `lua runtime ABSENT` | `moycore` is not in the image; Lua carts open the runtime-missing panel, which is the designed floor |
+
+---
+
+## The serial dev channel, and the RX question
+
+The T-Deck's shipping firmware has **no on-glass test harness** — no `state`, no
+`tap`, no `py` — where the P4 has all three (`tools/p4_autotest.py`,
+`tests/test_p4_on_glass.py`). The stated reason is that this board's USB-CDC RX
+is dead under the desktop. **That reason is wrong**, and the correction is the
+most valuable thing in this port.
+
+### What was recorded, and what is actually true
+
+`CLAUDE.md` says "this fork's USB-CDC stack has no at-arrival interrupt-char
+scan, so Ctrl-C/REPL/commands never arrive". The revert that established the
+lore (`4faf07a`) says "select.poll reports stdin ALWAYS-READY even when empty,
+so poll-then-readline becomes a blocking read that stalled the loop ~30s".
+
+The first claim is false and checkable. The shipping fork is MicroPython
+**v1.27.0**; this build is **v1.28.0**; and every file on the CDC receive path
+is byte-identical between them — MicroPython's `mp_usbd_cdc.c`, `mp_usbd.c`,
+`mp_usbd_runtime.c`, `interrupt_char.c`, `sys_stdio_mphal.c`, and the esp32
+port's `usb.c`, `uart.c` and `main.c`. Its `mphalport.c`, `vm.c` and
+`scheduler.c` differ only cosmetically, and both builds resolve to the same
+`MICROPY_HW_USB_CDC=1` / `USB_SERIAL_JTAG=0` / `UART_REPL=1`. The at-arrival
+scan **exists**:
+
+```c
+/* shared/tinyusb/mp_usbd_cdc.c, tud_cdc_rx_cb -- identical in both trees */
+if (data_char == mp_interrupt_char) {
+    stdin_ringbuf.iget = stdin_ringbuf.iput = 0;
+    mp_sched_keyboard_interrupt();
+}
+```
+
+and `tud_cdc_rx_cb` is linked into the shipping image. The same revert commit
+says so itself, three lines below the wrong diagnosis: *"without a reader in
+flight, **Ctrl-C drops to a live REPL**"*.
+
+So **rebuilding on mainline changes nothing about RX**, in either direction.
+What was really happening has two parts, and neither is a broken `poll`:
+
+1. **`sys.stdin.readline()` blocks per character.** `sys_stdio_mphal.c`'s
+   `stdio_read` loops on `mp_hal_stdin_rx_chr`, which never returns empty. So
+   ONE byte in the ring buffer makes `poll` *correctly* report ready, and then
+   `readline()` waits for a newline that may never come. That is the ~30s stall,
+   exactly.
+2. **Something was putting that byte there.** `MICROPY_HW_ENABLE_UART_REPL` is
+   on in both builds, and UART0's ISR feeds the *same* `stdin_ringbuf`. Noise on
+   a floating U0RXD (GPIO44, on this board's expansion header) is
+   indistinguishable from a typed character. This is a hypothesis, not a
+   measurement — see below for the one line that settles it.
+
+### What this build does instead
+
+`moy_runtime._SerialChannel` is armed by default (`SERIAL_CMDS = True`) and is
+built so that both mechanisms are survivable:
+
+* it registers **`select.POLLIN` only**. A bare `register(sys.stdin)` defaults
+  to `RD|WR`, and `mphalport.c` grants `POLL_WR` unconditionally — so a bare
+  registration is truthy on every call forever, which looks exactly like "poll
+  reports stdin always-ready";
+* it **never calls `readline()`**. It reads **one byte** with
+  `sys.stdin.read(1)`, only after poll reported `RD` (which the port sets only
+  when `ringbuf_peek() != -1`), accumulating until a newline. A byte read is a
+  byte consumed, so noise costs a bounded slice of a frame and can never park
+  the loop; a partial line past 96 chars is dropped;
+* it **counts what it swallowed**, and the diag tick prints
+  `SERIAL rx=N lines=N dropped=N partial=N`.
+
+That last line is the experiment. **`rx` climbing on an idle board with
+`lines=0` means something is injecting bytes into stdin** — mechanism 2, and
+the fix is `MICROPY_HW_ENABLE_UART_REPL (0)` in the board header, which takes
+UART0's ISR off the shared ring buffer. `rx=0` while the channel refuses
+commands means the CDC path itself, and the escalation is the S3's
+**USB-Serial/JTAG** peripheral, which fills the ring from a *true hardware ISR*
+(`usb_serial_jtag.c`) rather than a scheduled TinyUSB task — that is what the
+P4's UART behaves like, and it is why the P4's stdin commands work. On the S3
+it is mutually exclusive with CDC (`SOC_USB_OTG_PERIPH_NUM=1`).
+
+One caveat worth knowing: TinyUSB is pumped by the MicroPython scheduler, which
+the VM services at every bytecode branch. Ordinary Python loops are fine, but
+`@micropython.native` code and long native C calls do **not** check — so RX
+latency is bounded by the longest gap between VM branches, not by the poll
+cadence.
+
+### The commands
+
+Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
+
+| command | what it does |
+|---|---|
+| `state` | one-line JSON: screen / frames / cart / stack / settings scroll / wifi / app claims |
+| `tap <x> <y>` | a synthetic tap at canvas coords, through the real pointer feed |
+| `tap <name>` | tap a named bar button (any `ws.layout.<name>_btn` rect) |
+| `run [name]` | select the first cart whose title matches, and run it |
+| `diag 0\|1` | the diagnostic frame-eaters (`perf_capture` + the FPS chip) |
+| `skip 0\|1` | the #77 frameskip gate |
+| `gov 0\|1` | the #63 frame governor |
+| `mem` | a forced collect, then the live/free split |
+| `py <code>` | eval/exec one line against the LIVE console (`ws`, `wm`, `pointer` in scope) |
+| `quit` | leave the desktop for the REPL, cleanly |
+
+If this works on glass, `tools/p4_autotest.py`'s approach points straight at
+this board and the T-Deck gains the on-glass suite it has never had. If it does
+not, the `SERIAL rx=` counter says which of the two mechanisms is responsible,
+which is more than the previous attempt could say.
+
 ---
 
 ## What is here
@@ -353,7 +501,8 @@ with an A/B rather than inherited.
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
-| async flush + pump (#40/#43/#66) | on | **off** | see the compositor note above |
+| async flush + pump (#40/#43/#66) | on | **off** | see the compositor note above. This is the biggest single lever left here and the first thing to port once the console is confirmed on glass |
+| GDMA async layer copy (#54 St.2 / #63) | on | **off** | `device_canvas.LAYER_COPY_ASYNC` is tied to `moy_compositor.SRAM_BOUNCE_FLUSH`, which does not exist here, so it resolves False. The contention it guards against is genuinely gone (the panel DMA only ever reads internal SRAM in `moy_lcd`), so this is safe to turn on — measured at layer 7ms → 0.04ms there. Left off because it is a lever, and a lever gets an A/B |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---
@@ -377,9 +526,12 @@ the authority; what follows is how they land in *this* tree.
   are the S3's IOMUX-native FSPI pins, so everything routes through the GPIO
   matrix, which caps a write-only LCD at ~40 MHz. The board's wiring is the wall.
 - **The keyboard has two modes** (ASCII vs raw matrix, `0x03`/`0x04` over I2C
-  0x55) and the console flips between them per screen. That arrives with stage 3.
-- **Serial TX works during play; RX did not, under the fork.** Do not build an
-  in-loop serial command channel on this board without first proving RX arrives.
+  0x55) and the console flips between them per screen. `MODE = "keyboard"` is
+  the on-glass check, and the last thing it does is send the `0x04` revert.
+- **Serial TX works during play.** RX is the one constraint this port
+  *contests* rather than inherits — see "The serial dev channel, and the RX
+  question" above. The reason previously recorded for it is wrong on the facts,
+  and the channel here is built to survive what was actually happening.
 
 ---
 
@@ -388,14 +540,18 @@ the authority; what follows is how they land in *this* tree.
 Each is one commit. The commit message says what it adds and what to look for
 on glass, so a misbehaviour can be bisected by flashing the last good one.
 
-1. **Panel.** Mainline boots, ST7789 comes up, a test pattern lands.
-   **On glass 2026-08-16.**
-2. **Touch** (GT911, I2C0 @ 0x5D/0x14), plus `board.toml` and the whole shared
-   module tree. `MODE = "touch"`.
-3. **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) and the #69 poller thread.
-   `MODE = "keyboard"`.
-4. **SD** (`moy_sd` attach on the live host — the dangerous one).
-   `MODE = "sd"`.
-5. **Audio** (I2S / MAX98357 via `moy_audio`). `MODE = "audio"`.
-6. **The shared console**: `moy_runtime.run_desktop` over `runtime/device_boot.py`,
-   Lua carts, OTA, the web console blob. `MODE = "desktop"`.
+| # | what | mode | image | state |
+|---|---|---|---|---|
+| 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | 1,704,976 B | **on glass 2026-08-16** |
+| 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | compiles |
+| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | compiles |
+| 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | compiles |
+| 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | compiles |
+| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,304 B | compiles |
+
+Nothing after stage 1 has been on glass. Each row is one commit; its message
+says what to look for.
+
+The stage-6 figure includes the 572,693 B baked browser bundle. Build without
+one (no `firmware/web_runner/dist`) and the image is 2,991,488 B, with a
+warning — a bundle-less image serves a console only from storage.

@@ -282,7 +282,6 @@ def keyboard(phase_s=_KBD_PHASE_S):
     from moybyte.input import InputState, TDeckKeyboard, InputPoller
 
     comp, canvas = _canvas()
-    w, h = canvas.w, canvas.h
     inp = InputState()
     kbd = TDeckKeyboard(inp)
     # Watch the raw five bytes go past. Instance-level, like the touch smoke's

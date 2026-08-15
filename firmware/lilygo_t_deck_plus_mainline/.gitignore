@@ -16,3 +16,4 @@ modules/*
 !modules/moybyte_shell.py
 !modules/tdeck_panel.py
 !modules/tdeck_smoke.py
+!modules/moy_runtime.py
