@@ -1,8 +1,8 @@
 """A cart's draw state must not outlive the cart.
 
 `camera` / `clip` / `pal` / `palt` are per-cart state, and while a Lua cart runs
-the C side owns them (libmoy's `moy_canvas`, plus the host raster binding's own
-copy). When the run ends the shell paints the launcher through the SAME canvas.
+the C side owns them (libmoy's `moy_canvas`, inside the VM). When the run ends
+the shell paints the launcher through the SAME canvas.
 If any of that state survives, the console draws offset, clipped, or recoloured
 -- a whole-screen symptom with no obvious cause.
 
@@ -13,17 +13,16 @@ observe the exit-time read-back (the trace resets state per frame)."* The
 crossing shipped; the pin did not. This is it.
 
 Why it is asserted BEHAVIOURALLY (draw a pixel, look at it) rather than by
-reading `_cam_x` and friends: there are now up to three places the state can
-live -- the Python mirrors, the native raster binding's canvas
-(`Canvas._nr`, resynced by `reset_state`), and libmoy's own canvas inside a
-running moycore VM. A field check pins whichever one the test author happened
-to think of. A drawn pixel pins all of them at once, which is also what the kid
-actually experiences.
+reading `_cam_x` and friends: the state can live in more than one place -- the
+canvas's own Python fields, the device draw-gate's state array, and libmoy's
+canvas inside a running moycore VM. A field check pins whichever one the test
+author happened to think of. A drawn pixel pins all of them at once, which is
+also what the kid actually experiences.
 """
 
 import pytest
 
-from runtime.canvas import Canvas
+from runtime.host_canvas import make_canvas
 
 import canvas_probe as probe  # pixel-width-agnostic "it drew" probes
 
@@ -114,17 +113,18 @@ def test_a_lua_carts_draw_state_does_not_outlive_it(tmp_path):
     _assert_canvas_is_clean(ws.canvas)
 
 
-def test_reset_state_clears_the_native_raster_too_not_just_the_mirrors():
-    """`Canvas.reset_state` ends with `_nr_sync()`, and that line is the whole
-    reason a cart's camera does not leak into the shell on a host with the
-    binding built. Dropping it would leave the Python mirrors identity and the
-    C canvas offset -- the mirrors would say everything is fine.
+def test_reset_state_clears_every_copy_of_the_state_not_just_the_mirrors():
+    """The canvas-level half of the same claim, on the class every tier runs.
 
-    Skips itself when the binding is absent, so it tests the lane it names.
+    It used to name `Canvas._nr_sync()` -- the line that pushed state into the
+    indexed host raster binding, which could leave the Python mirrors identity
+    while the C canvas stayed offset. That binding and that canvas are deleted;
+    `DeviceCanvas` keeps camera/clip in its own fields and passes them per call,
+    with `_sync_gate_state` pushing the device's draw-gate array. So the claim
+    stays and stops naming one lane: after `reset_state`, a draw at the origin
+    lands at the origin, whichever copy a backend keeps.
     """
-    cv = Canvas(64, 48)
-    if getattr(cv, "_nr", None) is None:
-        pytest.skip("native raster binding not built")
+    cv = make_canvas(64, 48)
     cv.camera(20, 10)
     cv.clip(30, 30, 8, 8)
     cv.pal(9, 3)

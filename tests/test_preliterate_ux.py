@@ -22,7 +22,8 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import host_app  # noqa: E402  (registers the `editors` alias console needs)
 from runtime import console  # noqa: E402  (import after host_app for the alias)
-from runtime.canvas import Canvas, SpriteSheet  # noqa: E402
+from runtime.editors import SpriteSheet  # noqa: E402
+from runtime.host_canvas import make_system_canvas as Canvas  # noqa: E402
 from runtime.input import InputState  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)

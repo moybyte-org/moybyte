@@ -1,30 +1,41 @@
-"""Host == device pixel parity for the TIC-80 draw verbs (#11 cluster 2).
+"""The device canvas: its own invariants, and its KERNELS against each other.
 
-clip / camera / spr-flip / pal / palt all change PIXELS, so the only honest proof
-that the two backends agree is to render the SAME scene through both and compare
-the resulting buffers byte-for-byte. The host `runtime.canvas.Canvas` works in
-palette indices; the device `moy_runtime.DeviceCanvas` works in RGB565 over the
-native `moy_gfx` C kernel + `framebuf`.
+WHAT THIS FILE WAS. Host == device pixel parity for the TIC-80 draw verbs (#11
+cluster 2): the same scene rendered through `runtime.canvas.Canvas` (the host's
+indexed Python raster) and through `device_canvas.DeviceCanvas` (RGB565 over the
+`moy_gfx` C kernel), compared byte for byte. Two genuinely different programs,
+held together by a pin.
 
-This module makes `DeviceCanvas` runnable under CPython by injecting:
-  * a pure-Python `framebuf.FrameBuffer` stub (fill / fill_rect / pixel / line /
-    text / rect over an RGB565 bytearray), and
-  * a pure-Python `moy_gfx` stub that PORTS the C kernel logic (modmoy_gfx.c:
-    fill / fill_rect / blit565 / blit_map, including the new optional clip args)
-    line-for-line -- so this doubles as the cross-check of the C kernel against the
-    host rasterizer that #11 asks for. (The real C kernel is compiled into the
-    firmware and can't run here; keeping the Python port a faithful transcription is
-    what makes the parity meaningful, and is flagged UNVERIFIED-ON-DEVICE.)
+WHAT IT IS NOW, AND WHY THAT IS DIFFERENT. `runtime/canvas.py` is deleted: the
+host runs `DeviceCanvas` too (`runtime/host_canvas.py`). So BOTH sides of every
+comparison below are the same class, and everything that class does in Python --
+clipping, the camera, the auto-batch, the map cache, the sprite bakes -- is
+compared against itself. What still differs is the last mile, the kernel each
+canvas was handed:
 
-Host indices resolve to RGB565 via the SAME formula the device's PAL565 table was
-generated with (asserted equal in test_pal565_matches_host_palette), so a host
-buffer mapped through rgb565() is directly comparable to the device buffer.
+  * the "host" side runs `runtime/gfx_binding.py`: vendored libmoy compiled
+    `MOY_PIXEL_RGB565` and reached by ctypes. The same SOURCE the boards compile.
+  * the "device" side runs `_FakeGfx` below: a pure-Python transcription of
+    `native/moy_gfx/modmoy_gfx.c`, plus `_FB`, a transcription of
+    `framebuf.FrameBuffer` for the no-kernel lane.
 
-Text (`print`) joined the parity suite with #62: the device's native moy_gfx.text
-rasterizes the SAME petme128 glyph blob (runtime/font.py, staged as moy_font) the
-host draws from, with camera + clip + pal honoured in C. The no-gfx fallback
-(framebuf.text -- same glyphs, screen-bounds clip only) matches except under an
-active clip rect, so the fallback tests avoid clip().
+So read a failure here as "the compiled kernel and the transcription of it
+disagree", not as "host and device disagree". IT IS NOT THE STRONGEST CHECK OF
+THAT, and must not be mistaken for one: `tests/test_gfx_binding.py`'s
+`test_matches_the_native_moy_gfx` drives the same verbs through the REAL native
+module under a unix MicroPython build, and `tools/p4_conformance.py` runs the
+spec's carts on real glass. CLAUDE.md records why the distinction matters -- the
+board once failed `provisional_tline` against the golden while this suite was
+green, because a transcription can be right while the C is wrong.
+
+What is NOT a two-kernel comparison, and is the reason the file stays: the
+device canvas's own invariants -- the PAL565 table, the auto-batch coalescing,
+the map auto-cache and its opaque lane, the pal-tint bake cache, the layer pool,
+the spr_gate protocols. Those have no other home.
+
+`DeviceCanvas` runs under CPython here by injecting the two transcriptions above
+into `sys.modules`, plus `moy_font` (what build.sh stages runtime/font.py AS, so
+the native-text path activates).
 """
 
 import sys
@@ -36,9 +47,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import font as _host_font  # noqa: E402
+from runtime import host_canvas  # noqa: E402
 from runtime import palette  # noqa: E402
-from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
@@ -54,6 +66,20 @@ def rgb565(rgb):
 # Pure-Python moy_gfx -- a faithful transcription of native/moy_gfx/modmoy_gfx.c. #
 # --------------------------------------------------------------------------- #
 class _FakeGfx:
+    # SPEC.md 3.2's sheet geometry, which modmoy_gfx.c checks before EVERY
+    # sheet verb (`moy_gfx_is_moy_sheet`) and REFUSES: libmoy addresses a sheet
+    # as 128x256 whatever it was handed, so a shorter one is an out-of-bounds
+    # READ on every sprite. Transcribed here for the same reason the kernels
+    # are. A transcription that silently accepts what the C refuses turns a
+    # comparison into "one side drew and the other did not", which is how a
+    # wrong-shaped fixture reads as a raster bug -- it did, on the day the host
+    # canvas became the boards'.
+    SHEET_W, SHEET_H = 128, 256
+
+    @staticmethod
+    def _is_moy_sheet(w, h, length):
+        return (w == _FakeGfx.SHEET_W and h == _FakeGfx.SHEET_H
+                and length >= _FakeGfx.SHEET_W * _FakeGfx.SHEET_H)
     @staticmethod
     def fill(buf, npix, color):
         mv = memoryview(buf).cast("H")
@@ -185,6 +211,8 @@ class _FakeGfx:
     def blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
                  sheet, sheetw, sheeth, lut, palt, key, scale,
                  cx0=None, cy0=None, cx1=None, cy1=None):
+        if not _FakeGfx._is_moy_sheet(sheetw, sheeth, len(sheet)):
+            return
         # Transcribed from libmoy's moy_map_draw -> moy_spr (#97), which is what
         # the C now calls: the region walks cells, each non-empty one draws its
         # tile from the INDEX sheet resolved through `lut`, and a pixel is
@@ -257,6 +285,8 @@ class _FakeGfx:
     @staticmethod
     def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt, key,
                    scale, cam_x, cam_y, cx0, cy0, cx1, cy1):
+        if not _FakeGfx._is_moy_sheet(sheetw, sheeth, len(sheet)):
+            return
         # #43/#63: draw a run of sheet tiles in one call -- a faithful transcription
         # of moy_gfx_blit_batch, which now walks the INDEX sheet through libmoy's
         # moy_spr (#97) rather than copying from a pre-baked RGB565 atlas. Like the
@@ -493,6 +523,8 @@ class _FakeGfx:
     def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh,
              dx, dy, ddw, ddh, ck, flip, lut, palt, cam_x, cam_y,
              cx0, cy0, cx1, cy1):
+        if not _FakeGfx._is_moy_sheet(sheetw, sheeth, len(sheet)):
+            return
         # Faithful port of moy_gfx_sspr: index sheet + lut, colorkey on the RAW
         # index, palt after masking, out-of-range sheet reads sample 0.
         mv = memoryview(dst).cast("H")
@@ -533,6 +565,8 @@ class _FakeGfx:
     def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
               x0, y0, x1, y1, u, v, du, dv, ck, lut, palt,
               cam_x, cam_y, cx0, cy0, cx1, cy1):
+        if not _FakeGfx._is_moy_sheet(sheetw, sheeth, len(sheet)):
+            return
         # Faithful port of moy_gfx_tline: reduce once, wrap by conditional
         # subtract, id+1 cells, cursor advances for every walked pixel.
         mv = memoryview(dst).cast("H")
@@ -799,9 +833,20 @@ W, H = 64, 48
 
 
 def _host_rgb565(cv):
-    """Resolve a host indexed Canvas buffer to a flat list of RGB565 ints."""
-    pal = [rgb565(c) for c in cv.palette]
-    return [pal[i] for i in cv.buf]
+    """The host canvas's framebuffer as canonical little-endian RGB565 ints.
+
+    Identical to `_dev_rgb565` now, and deliberately still a separate function:
+    the two sides are the same CLASS but not the same kernel, and naming them
+    apart is what keeps a failure message pointing at which one drew.
+
+    The swap-back is not optional. Under CPython `moy_dsi` is absent, so
+    device_canvas picks the T-Deck's byte-SWAPPED `PAL565_SW` as its wire table
+    -- on both sides, which is why they compare equal either way, but comparing
+    canonical words is what makes a printed `host=0x…` readable against
+    `palette.MOY64`.
+    """
+    cv.flush_batch()
+    return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(cv._buf).cast("H")]
 
 
 def _dev_rgb565(dc):
@@ -816,8 +861,23 @@ def _dev_rgb565(dc):
     return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(dc._buf).cast("H")]
 
 
+def Canvas(w, h):
+    """The C-kernel side: `DeviceCanvas` over libmoy compiled for the host.
+
+    Named `Canvas` because that is what every test below calls it, and it is
+    still the "reference" half of each pair -- only the reference stopped being
+    a second raster and became the same raster over the real kernel.
+    """
+    return host_canvas.make_canvas(w, h)
+
+
 def _both(use_gfx=True):
-    """A fresh (host Canvas, device DeviceCanvas) pair of the same size."""
+    """A fresh (C-kernel canvas, transcription-kernel canvas) pair.
+
+    `use_gfx=False` drops the SECOND one to its `framebuf` lane (the no-moy_gfx
+    fallback a board takes when the usermod is absent), which is the only reason
+    that lane is exercised anywhere.
+    """
     m = _load_device_canvas()
     m._USE_GFX = use_gfx
     host = Canvas(W, H)
@@ -833,7 +893,8 @@ def _assert_same(host, dev, label=""):
         diff = sum(1 for x, y in zip(h, d) if x != y)
         first = next(i for i, (x, y) in enumerate(zip(h, d)) if x != y)
         raise AssertionError(
-            "%s: host != device in %d/%d px (first at %d,%d: host=%#06x dev=%#06x)"
+            "%s: the two kernels disagree in %d/%d px "
+            "(first at %d,%d: libmoy=%#06x transcription=%#06x)"
             % (label, diff, W * H, first % W, first // W, h[first], d[first]))
 
 
@@ -997,7 +1058,7 @@ def test_text_bytes_do_not_shift_what_follows():
     _assert_same(host, dev, "bytes advance")
     # Host against host, so compare index buffers directly (_assert_same is the
     # host-vs-device RGB565 comparison).
-    assert bytes(host.buf) == bytes(host2.buf), \
+    assert bytes(host._buf) == bytes(host2._buf), \
         "0xff should occupy exactly one blank cell, like a space"
 
 
@@ -1128,9 +1189,15 @@ def _tilemap_scene(c, sheet, tm):
 def test_map_camera_clip_matches_host():
     for gfx in (True, False):
         m, host, dev = _both(gfx)
-        # Build a small sheet + tilemap (host + device share editors.py classes).
-        sheet_h = SpriteSheet(4, 4)
-        sheet_d = m.SpriteSheet(4, 4)
+        # Build a sheet + tilemap (both sides share editors.py classes).
+        # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
+        # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
+        # NOTHING (`moy_gfx_is_moy_sheet` in modmoy_gfx.c, `hg_is_moy_sheet` in
+        # the host shim, `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
+        # has to be handed the shape a real cart has, or this compares two blank
+        # framebuffers and calls it agreement.
+        sheet_h = SpriteSheet(16, 32)
+        sheet_d = m.SpriteSheet(16, 32)
         for sh in (sheet_h, sheet_d):
             sh.tset(1, 0, 0, 8)
             sh.tset(1, 3, 3, 11)
@@ -1304,9 +1371,11 @@ def test_blit_strip_matches_host():
 # call. Prove it matches the host per-item reference (validates the stub).     #
 # --------------------------------------------------------------------------- #
 def _batch_sheets(m):
-    # A small 4x4 sheet with three asymmetric, non-blank tiles (so flip + z-order show).
-    sheet_h = SpriteSheet(4, 4)
-    sheet_d = m.SpriteSheet(4, 4)
+    # Three asymmetric, non-blank tiles (so flip + z-order show) on the SPEC.md 3.2
+    # sheet -- 16 x 32 tiles. libmoy's blit_batch refuses any other shape and draws
+    # nothing at all; the tile ids used here address the same pixels either way.
+    sheet_h = SpriteSheet(16, 32)
+    sheet_d = m.SpriteSheet(16, 32)
     for sh in (sheet_h, sheet_d):
         # tile 1: an L of colours in a corner (asymmetric -> flip is visible)
         sh.tset(1, 0, 0, 8); sh.tset(1, 1, 0, 9); sh.tset(1, 0, 1, 10); sh.tset(1, 7, 7, 12)
@@ -1397,16 +1466,16 @@ def _drive_sprite_scene(c, sheet, img, use_batch):
 
 def test_auto_batch_matches_immediate_on_host():
     # Batching invariance: the auto-batched scene == the same scene drawn immediately,
-    # pixel-for-pixel, on the host reference rasterizer.
+    # pixel-for-pixel, through the compiled kernel.
     m, _, _ = _both(True)
     sheet_h, _ = _batch_sheets(m)
     a = Canvas(W, H)
     b = Canvas(W, H)
     _drive_sprite_scene(a, sheet_h, _stray_image(Image.from_ascii), use_batch=False)
     _drive_sprite_scene(b, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
-    assert a.buf == b.buf, (
-        "auto-batch differs from immediate on host in %d px"
-        % sum(1 for x, y in zip(a.buf, b.buf) if x != y))
+    assert bytes(a._buf) == bytes(b._buf), (
+        "auto-batch differs from immediate on the C kernel in %d px"
+        % sum(1 for x, y in zip(_host_rgb565(a), _host_rgb565(b)) if x != y))
     assert probe.drew_something(b)            # sanity: it actually drew something
 
 
@@ -1766,8 +1835,8 @@ def _mapcache_world(m):
     # A sheet + a WIDER-THAN-SCREEN tilemap (a Hop-Quest-style scroller) with EMPTY cells
     # (transparency) AND a colorkey'd tile (index-0 holes under colorkey=0), so the cache's
     # KEYED composite is exercised, not just an opaque background copy.
-    sheet_h = SpriteSheet(4, 4)
-    sheet_d = m.SpriteSheet(4, 4)
+    sheet_h = SpriteSheet(16, 32)                    # the SPEC sheet; see _batch_sheets
+    sheet_d = m.SpriteSheet(16, 32)
     for sh in (sheet_h, sheet_d):
         for ly in range(8):                          # tile 1: a solid block (no holes)
             for lx in range(8):
@@ -1802,7 +1871,17 @@ def _map_cache_on(m, monkeypatch):
     # Fold 2 ships DEFAULT OFF on device (the hardware A/B verdict lives on the
     # MAP_AUTO_CACHE comment); the cache tests force it ON so the logic stays
     # pinned for a future native keyed-blit kernel / the P4 (#58).
+    #
+    # BOTH module objects, because there are two: `m` is the copy this file
+    # execs per pair, and `device_canvas` is the one `runtime/host_canvas.py`
+    # imported for the C-kernel side. Patching only `m` leaves that side with
+    # the cache OFF, so a "the cache kicked in" counter reads 0 and a
+    # cached-vs-direct comparison silently compares direct against direct.
     monkeypatch.setitem(m.DeviceCanvas.__init__.__globals__, "MAP_AUTO_CACHE", True)
+    import device_canvas as _dc_host
+    if _dc_host is not m:
+        monkeypatch.setitem(_dc_host.DeviceCanvas.__init__.__globals__,
+                            "MAP_AUTO_CACHE", True)
 
 
 def test_map_autocache_host_equals_device_across_camera_and_edits(monkeypatch):
@@ -1843,9 +1922,10 @@ def test_map_autocache_equals_direct_raster(monkeypatch):
             direct = Canvas(W, H)
             _play_map(cached, sh_h, tm_h, cam)
             _play_map(direct, sh_h, tm_h, cam, direct=True)
-            assert cached.buf == direct.buf, (
-                "host cache != direct gfx=%s cam=%s in %d px"
-                % (gfx, cam, sum(1 for a, b in zip(cached.buf, direct.buf) if a != b)))
+            assert bytes(cached._buf) == bytes(direct._buf), (
+                "C-kernel cache != direct gfx=%s cam=%s in %d px"
+                % (gfx, cam, sum(1 for a, b in zip(_host_rgb565(cached),
+                                                   _host_rgb565(direct)) if a != b)))
             # Device (RGB565).
             dc_cached = m.DeviceCanvas(_FakeComp(W, H))
             dc_direct = m.DeviceCanvas(_FakeComp(W, H))
@@ -2051,7 +2131,7 @@ def test_pix_read_is_camera_relative_on_both():
 # same pixels a third way.                                                    #
 # --------------------------------------------------------------------------- #
 def _sheet_and_map():
-    sh = SpriteSheet()
+    sh = SpriteSheet(16, 32)                          # the SPEC sheet; see _batch_sheets
     for y in range(8):
         for x in range(8):
             sh.tset(1, x, y, 8)                       # solid

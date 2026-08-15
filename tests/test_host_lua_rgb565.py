@@ -1,12 +1,13 @@
 """The host's Lua runs on the boards' PIXEL, not just their VM (#161).
 
 `runtime/lua_binding.py` compiles libmoy for CPython, and it used to compile it
-INDEXED: one byte a pixel, bound straight to `runtime/canvas.py`'s buffer. The
-host canvas is moving to the boards' own `DeviceCanvas`, which is RGB565 -- and
-`sizeof(moy_pixel)` is not a detail libmoy carries at runtime. A library built
-the other way computes `y*w+x` over the wrong stride: half-width rows of raw
-palette indices, written into a direct-colour framebuffer, with nothing
-anywhere reporting a problem. So the format is checked HERE, by drawing.
+INDEXED: one byte a pixel, bound straight to the buffer of `runtime/canvas.py`,
+the host's own raster. That file is deleted and the host canvas is the boards'
+`DeviceCanvas`, which is RGB565 -- and `sizeof(moy_pixel)` is not a detail
+libmoy carries at runtime. A library built the other way computes `y*w+x` over
+the wrong stride: half-width rows of raw palette indices, written into a
+direct-colour framebuffer, with nothing anywhere reporting a problem. So the
+format is checked HERE, by drawing.
 
 The check that matters is the one at the top: the same picture, drawn once by a
 Lua cart through libmoy's verb table and once by the canvas's own Python verbs,
@@ -181,20 +182,30 @@ def test_the_canvas_wire_table_is_what_a_draw_resolves_through():
     assert bytes(c._buf) != bytes(bytearray(8 * 4 * 2))
 
 
-# -- the transitional indexed lane -------------------------------------------
+# -- the indexed lane, which no tier ships any more ---------------------------
 #
-# Delete this section with the bridge, when runtime/host_app.py hands the
-# console a DeviceCanvas and runtime/canvas.py stops being a thing a cart can
-# be pointed at.
+# `HostLuaRun(indexed=True)` keeps a 565 SHADOW with an identity wire table and
+# narrows the frame back out on each tick. It existed for `runtime/canvas.py`,
+# the host's deleted indexed raster; the binding still offers it, so it is still
+# driven -- DIRECTLY, over a bare bytearray, rather than through a canvas class,
+# because there is no longer a canvas class that speaks it. Retiring the lane is
+# a separate call (it lives in moyhost_lua.c too); until then this is what keeps
+# it from rotting.
+
+class _IndexCanvas:
+    """The minimum `lua_host.canvas_target` calls indexed: `.buf`, `w`, `h`."""
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self.buf = bytearray(w * h)
+
 
 def test_an_indexed_canvas_draws_the_same_picture_one_byte_wide():
     """The bridge is a widen and a narrow, so the two lanes are the same frame
     at two widths: map the indices through the wire table and the buffers must
     be equal, pixel for pixel, for every verb above."""
-    from runtime.canvas import Canvas
     for name, lua, _py in CASES:
-        idx_canvas = Canvas(W, H)
-        idx = _run(idx_canvas, lua, SHEET, TILEMAP)
+        idx = _run(_IndexCanvas(W, H), lua, SHEET, TILEMAP)
         wide = _run(host_canvas.make_canvas(W, H), lua, SHEET, TILEMAP)
         expect = bytearray()
         for i in idx:
@@ -205,11 +216,10 @@ def test_an_indexed_canvas_draws_the_same_picture_one_byte_wide():
 
 def test_lua_host_reads_the_format_off_the_canvas_it_was_handed():
     """The one decision this file exists to pin: the runtime asks the canvas
-    rather than assuming, because both classes are live in the tree."""
-    from runtime.canvas import Canvas
+    rather than assuming what it was handed."""
     buf, wire, indexed = lua_host.canvas_target(host_canvas.make_canvas(8, 4))
     assert indexed is False and wire is not None and len(buf) == 8 * 4 * 2
-    buf, wire, indexed = lua_host.canvas_target(Canvas(8, 4))
+    buf, wire, indexed = lua_host.canvas_target(_IndexCanvas(8, 4))
     assert indexed is True and wire is None and len(buf) == 8 * 4
 
 

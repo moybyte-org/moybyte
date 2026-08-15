@@ -1,21 +1,28 @@
 """The host's SYSTEM canvas, on the boards' raster (#161).
 
-`runtime/canvas.py` is the second raster. `runtime/host_canvas.py` already runs
-`DeviceCanvas` on CPython; `HostSystemCanvas` is the rest of what the shared
-console asks a system SURFACE for, so the host can eventually run that one class
-and the second raster can be deleted:
+`runtime/host_canvas.py` runs `DeviceCanvas` on CPython; `HostSystemCanvas` is
+the rest of what the shared console asks a system SURFACE for:
 
   * font_scale text and font-scale-carrying layers (#39/#73),
   * `blit_cover`, the wallpaper's cover-crop composite,
   * `to_rgb888`, the readout pygame blits and the GIF export writes.
 
-The acceptance test is byte-identity: every scene below is drawn TWICE, once on
-the shipping `runtime.canvas.SystemCanvas` and once here, and the two readouts
-are compared byte for byte. That is what makes the swap a swap rather than a
-new look -- and it is the check that catches the one tempting way to write
-`to_rgb888` wrong (see `test_the_readout_is_not_a_bit_expansion`).
+WHAT THIS FILE USED TO BE, AND WHY IT IS SMALLER. Its acceptance test was
+byte-identity against `runtime/canvas.py`: every scene was drawn twice, once on
+the shipping indexed host raster and once here, and the two readouts compared
+byte for byte. That was the check that made swapping the host's canvas a swap
+rather than a new look. The swap landed and `runtime/canvas.py` is deleted, so
+those eight comparisons became `new == new` -- a suite that cannot fail. They
+are retired rather than re-pointed: what they asserted about the PIXELS is now
+`tests/test_spec_conformance.py`, which replays the spec's own traces through
+this exact canvas and hashes every frame against a golden nobody here can move.
 
-Everything here drives the REAL DeviceCanvas through the real host kernel, like
+What conformance does NOT reach is kept, and one of them is new. SPEC.md 6 fixes
+cart text at 8px, so scaled system text has no golden at all -- and the two
+lanes inside `HostSystemCanvas.print` (libmoy's kernel op, and the petme128
+fallback for a build with no `moy_font`) are pinned against each other here.
+
+Everything drives the REAL DeviceCanvas through the real host kernel, like
 tests/test_cart_palette.py. No canvas is faked, because a twin of the class
 under test proves nothing about the class under test.
 """
@@ -23,8 +30,8 @@ under test proves nothing about the class under test.
 import pytest
 
 from runtime import host_canvas
-from runtime.canvas import Image, SystemCanvas
 from runtime.editors import SpriteSheet, TileMap
+from runtime.moy_image import Image
 from runtime.palette import MOY64
 
 host_canvas.install()
@@ -34,10 +41,20 @@ from runtime.host_canvas import HostSystemCanvas                 # noqa: E402
 W, H = 96, 64
 
 
-def _pair(w=W, h=H, font_scale=1):
-    """(old host canvas, new host canvas) of the same size."""
-    return (SystemCanvas(w, h, font_scale=font_scale),
-            host_canvas.make_system_canvas(w, h, font_scale=font_scale))
+def _text_lanes(w=W, h=H, font_scale=1):
+    """(kernel-text canvas, fallback-text canvas) of the same size.
+
+    The second one has its native text op removed, which is the state of a
+    checkout where nobody has built firmware: `moy_font` is what build.sh stages
+    runtime/font.py AS, and `device_canvas` gates the kernel op on importing it.
+    install() registers the canonical module under that name so the host does
+    not depend on a build artefact -- but the fallback still has to draw the
+    same glyphs, or a clean tree renders text nobody has looked at.
+    """
+    a = host_canvas.make_system_canvas(w, h, font_scale=font_scale)
+    b = host_canvas.make_system_canvas(w, h, font_scale=font_scale)
+    b._gfx_text = None
+    return a, b
 
 
 def _same(old, new, label):
@@ -49,7 +66,7 @@ def _same(old, new, label):
         first = next(i // 3 for i in range(0, len(a), 3)
                      if a[i:i + 3] != b[i:i + 3])
         raise AssertionError(
-            "%s: %d/%d px differ (first at %d,%d: canvas.py=%s host_canvas=%s)"
+            "%s: %d/%d px differ (first at %d,%d: a=%s b=%s)"
             % (label, diff, old.w * old.h, first % old.w, first // old.w,
                a[first * 3:first * 3 + 3], b[first * 3:first * 3 + 3]))
 
@@ -151,82 +168,68 @@ def _sheet_and_map():
     return sheet, tilemap
 
 
-def test_primitives_read_back_identically():
-    old, new = _pair()
-    _primitives(old)
-    _primitives(new)
-    _same(old, new, "primitives")
+def test_the_two_text_lanes_draw_the_same_glyphs():
+    """libmoy's compiled-in petme128 against runtime/font.py, at every font
+    scale the shell offers.
+
+    These are two different programs drawing the same font, and only one of them
+    is exercised by a normal run: the C op. The Python lane is what a clean
+    checkout without a firmware build takes, and it is also the ONLY lane at
+    font scales above 1 on a kernel with no scaled text op -- so a drift here is
+    invisible until someone else's machine renders different chrome.
+
+    The scene deliberately includes camera, clip and pal, because the clip is
+    what bites: `DeviceCanvas`'s own no-kernel fallback is `framebuf.text`,
+    which has no clip rect at all, and this class rasterizes petme128 itself
+    rather than delegating to it for exactly that reason.
+    """
+    for fs in (1, 2, 3):
+        kernel, fallback = _text_lanes(font_scale=fs)
+        assert kernel._gfx_text is not None, "the native text op did not resolve"
+        _text(kernel)
+        _text(fallback)
+        _same(kernel, fallback, "text fs=%d" % fs)
 
 
-def test_camera_and_clip_read_back_identically():
-    old, new = _pair()
-    _camera_and_clip(old)
-    _camera_and_clip(new)
-    _same(old, new, "camera+clip")
+def test_the_scenes_the_conformance_goldens_now_own_still_draw():
+    """A smoke pass over the scenes the retired identity tests drew.
 
-
-def test_text_reads_back_identically():
-    old, new = _pair()
-    _text(old)
-    _text(new)
-    _same(old, new, "text")
-
-
-def test_sprites_read_back_identically():
-    """Sprites are the readout's hard case: this canvas bakes each variant to
-    RGB565 up front, so those words reached the buffer without passing through
-    the palette on the way in. They still have to come back out of it.
-
-    A fresh Image per canvas, not one shared: the bake caches on the Image, and
-    handing the same one to both would let the second canvas read the first's
-    pixels."""
-    old, new = _pair()
-    _sprites(old, Image.from_ascii(_sprite_rows(), _sprite_map()))
-    _sprites(new, Image.from_ascii(_sprite_rows(), _sprite_map()))
-    _same(old, new, "sprites")
-
-
-def test_paint_image_reads_back_identically():
+    They are no longer compared against a second raster -- `test_spec_conformance`
+    hashes this canvas's primitives, sprites, text, camera/clip/pal and map
+    against the spec's goldens, which is a stronger claim than agreeing with a
+    twin. What that suite does NOT touch is this SUBCLASS, its layers, or
+    `blit_indices`, so the scenes stay as a "these verbs still reach pixels
+    through a system surface" check.
+    """
+    c = host_canvas.make_system_canvas(W, H)
+    for scene in (_primitives, _camera_and_clip, _text):
+        c.cls(0)
+        scene(c)
+        assert len(set(memoryview(c._buf).cast("H"))) > 1, scene.__name__
+    c.cls(0)
+    _sprites(c, Image.from_ascii(_sprite_rows(), _sprite_map()))
+    assert len(set(memoryview(c._buf).cast("H"))) > 1, "sprites"
+    c.cls(0)
     iw, ih = 20, 12
-    idx = bytearray((r * 5 + c * 3) % 63 for r in range(ih) for c in range(iw))
-    old, new = _pair()
-    _paint_image(old, idx, iw, ih)
-    _paint_image(new, idx, iw, ih)
-    _same(old, new, "blit_indices")
+    _paint_image(c, bytearray((r * 5 + q * 3) % 63
+                              for r in range(ih) for q in range(iw)), iw, ih)
+    assert len(set(memoryview(c._buf).cast("H"))) > 1, "blit_indices"
+    c.cls(0)
+    _tiles(c, *_sheet_and_map())
+    assert len(set(memoryview(c._buf).cast("H"))) > 1, "map"
 
 
-def test_tilemap_reads_back_identically():
-    old, new = _pair()
-    _tiles(old, *_sheet_and_map())
-    _tiles(new, *_sheet_and_map())
-    _same(old, new, "map")
-
-
-def test_scaled_text_reads_back_identically():
-    """The #39 system font, which is the whole reason this class exists. The
-    host kernel has no text op, so the scaled path here is petme128 blocks --
-    and it has to land on the same pixels runtime/canvas.py puts down, or every
-    label on a big desktop shifts on the day the canvas is swapped."""
-    for fs in (2, 3):
-        old, new = _pair(font_scale=fs)
-        for c in (old, new):
-            c.cls(0)
-            c.print("Aa Bb 123", 3, 3, 12)
-            c.print("clip me", W - 20, 30, 7)
-        _same(old, new, "scaled text fs=%d" % fs)
-
-
-def test_a_layers_readout_is_identical_too():
+def test_a_layer_is_read_back_through_the_same_path():
     """Layers are surfaces: the WM's window buffers and the bar's strip cache
-    are read back through this same path."""
-    old, new = _pair()
-    lold = old.new_layer(40, 24)
-    lnew = new.new_layer(40, 24)
-    for lay in (lold, lnew):
-        lay.cls(4)
-        lay.rect(2, 2, 20, 10, 9)
-        lay.print("hi", 3, 14, 7)
-    _same(lold, lnew, "layer")
+    are read back through `to_rgb888` too."""
+    lay = host_canvas.make_system_canvas(W, H).new_layer(40, 24)
+    lay.cls(4)
+    lay.rect(2, 2, 20, 10, 9)
+    lay.print("hi", 3, 14, 7)
+    out = lay.to_rgb888()
+    assert len(out) == 40 * 24 * 3
+    assert out[:3] == bytes(MOY64[4])                 # the cls colour, resolved
+    assert out[(2 * 40 + 2) * 3:(2 * 40 + 2) * 3 + 3] == bytes(MOY64[9])
 
 
 # --------------------------------------------------------------------------- #
@@ -289,8 +292,8 @@ def test_a_word_no_palette_index_produced_still_reads_as_a_colour():
 def test_the_readout_is_the_viewport_not_the_buffer():
     """A viewport canvas (#155) draws into a sub-rect of a wider buffer, and
     `w`/`h` are the LOGICAL surface -- so a w*h*3 readout has to walk rows by
-    stride. (runtime/canvas.py's version dumps the whole buffer instead; the two
-    agree on every full-surface canvas, which is every canvas that is read.)"""
+    stride. (The deleted indexed raster dumped the whole buffer instead; the two
+    agreed on every full-surface canvas, which is every canvas that is read.)"""
     c = host_canvas.make_system_canvas(16, 8)
     c.cls(0)
     c.set_viewport(4, 2, 6, 3)
@@ -419,21 +422,32 @@ def test_blit_cover_at_scale_one_is_the_frame_itself():
     assert bytes(sc._buf) == bytes(gc._buf)
 
 
-def test_blit_cover_takes_the_indexed_game_canvas_too():
-    """The migration case, and the only one that runs until runtime/canvas.py is
-    deleted: the system surface is this class while the GAME canvas -- which is
-    what the wallpaper cart draws its frame on -- is still an indexed
-    `Canvas`. A 565-only blit_cover dies on `gc._buf` at the first desktop
-    frame, which is the whole desktop, not a cosmetic bug."""
-    gc = SystemCanvas(320, 240)                  # indices, not 565
-    gc.cls(1)
+class _IndexSource:
+    """The smallest thing `blit_cover` accepts that is NOT a DeviceCanvas: a
+    surface publishing palette INDICES as `.buf`. Nothing in the tree ships one
+    since `runtime/canvas.py` was deleted, which is precisely why the branch
+    needs a caller here -- an untested fallback is a fallback that has rotted by
+    the time something needs it."""
+
+    def __init__(self, w, h, fill):
+        self.w, self.h = w, h
+        self.buf = bytearray([fill]) * (w * h)
+
+    def rect(self, x, y, w, h, c):
+        for yy in range(y, y + h):
+            self.buf[yy * self.w + x:yy * self.w + x + w] = bytes([c]) * w
+
+
+def test_blit_cover_takes_an_indexed_source_too():
+    """`blit_cover`'s `_cover_py` lane resolves an index source through THIS
+    canvas's table, and must land the same pixels the 565 source does -- so a
+    backend that hands over indices composites identically."""
+    gc = _IndexSource(320, 240, 1)
     gc.rect(0, 0, 320, 120, 8)
     sc = host_canvas.make_system_canvas(1024, 600)
     sc.cls(0)
     sc.blit_cover(gc)
 
-    # Same pixels the 565 source produces, so a wallpaper looks identical
-    # before and after the game canvas is swapped.
     twin = host_canvas.make_canvas(320, 240)
     twin.cls(1)
     twin.rect(0, 0, 320, 120, 8)

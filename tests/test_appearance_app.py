@@ -108,10 +108,10 @@ def test_my_art_image_thumbnail_and_live_preview_draw(tmp_path):
     thumb = ws.artwork.thumbnail(120, 72)
     assert (thumb.w, thumb.h) == (120, 72)
     assert set(thumb.pix) == {3, 22}
-    before = bytes(ws.sys_canvas.buf)
+    before = bytes(ws.sys_canvas._buf)
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    assert bytes(ws.sys_canvas.buf) == before  # static image preview is redraw-free when idle
+    assert bytes(ws.sys_canvas._buf) == before  # static preview is redraw-free when idle
 
 
 def test_desktop_appearance_window_rebuilds_responsive_context(tmp_path):
@@ -142,20 +142,21 @@ def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
     ws.select_wallpaper("moy_night", persist=False)
     app._set_mode("carts")
     ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
-    buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     # The computed 320x240 still centers in 500x380: bars around, frame inside.
-    assert buf[22 * w + 12] == 0 and buf[200 * w + 12] == 0        # left/top bars
-    assert any(buf[200 * w + xx] != 0 for xx in range(110, 420))   # frame content
+    # pix() reads back a palette INDEX on every tier, so 0 still means black.
+    assert sc.pix(12, 22) == 0 and sc.pix(12, 200) == 0             # left/top bars
+    assert any(sc.pix(xx, 200) != 0 for xx in range(110, 420))      # frame content
 
 
 def test_fill_and_image_previews_fill_or_fit_the_screen(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
     ws.select_wallpaper("fill:indigo", persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 100, 80), 0)
-    buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     from runtime import console as C
     indigo = C.NAMES["indigo"]
-    assert buf[0] == indigo and buf[79 * w + 99] == indigo   # a fill floods the screen
+    assert sc.pix(0, 0) == indigo and sc.pix(99, 79) == indigo  # a fill floods it
 
 
 def test_theme_preview_draws_mock_windows(tmp_path):
@@ -169,10 +170,10 @@ def test_theme_preview_draws_mock_windows(tmp_path):
     ws.frame(1 / 30)
     th = ws.theme_colors
     x, y, w, h = app.layout.field
-    buf, cw = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     field_px = set()
     for yy in range(y, y + h, 7):
-        field_px.update(buf[yy * cw + x: yy * cw + x + w])
+        field_px.update(sc.pix(xx, yy) for xx in range(x, x + w))
     assert th["title"] in field_px               # the active window's strip
     assert th["accent"] in field_px              # the OK button
     assert th["panel"] in field_px               # the window bodies
@@ -197,11 +198,11 @@ def test_small_tier_monitor_shows_whole_my_art_image(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)
     sx, sy, sw, sh = app.layout.screen
-    buf, cw = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     # 512x300 aspect-fit in the 4:3 screen -> full width, letterbox bars: the
     # top band (22) AND the bottom band (3) are both visible, bars are black.
     mid_x = sx + sw // 2
-    col = [buf[yy * cw + mid_x] for yy in range(sy, sy + sh)]
+    col = [sc.pix(mid_x, yy) for yy in range(sy, sy + sh)]
     assert 22 in col and 3 in col              # the WHOLE image, both halves
     assert col[0] == 0 and col[-1] == 0        # letterbox bars
 
@@ -216,8 +217,8 @@ def test_small_tier_stays_narrow_with_compact_theme_mock(tmp_path):
     ws.frame(1 / 30)                             # compact mock draws without error
     th = ws.theme_colors
     x, y, w, h = app.layout.field
-    buf, cw = ws.sys_canvas.buf, ws.sys_canvas.w
-    row = bytes(buf[(y + 2) * cw + x:(y + 2) * cw + x + w])
+    sc = ws.sys_canvas
+    row = {sc.pix(xx, y + 2) for xx in range(x, x + w)}
     assert th["edge"] in row or th.get("desktop", th["panel"]) in row
 
 
@@ -227,9 +228,9 @@ def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
     ws.select_wallpaper("moy_night", persist=False)
     ws.canvas.cls(9)                              # stand-in for a game's frame
-    before = bytes(ws.canvas.buf)
+    before = bytes(ws.canvas._buf)
     ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 480, 360), 1 / 30)
-    assert bytes(ws.canvas.buf) == before
+    assert bytes(ws.canvas._buf) == before
 
 
 def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
@@ -241,20 +242,19 @@ def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
     ws = host_app.build_workstation(carts)
     ws.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
-    buf, w = ws.sys_canvas.buf, ws.sys_canvas.w
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
-    assert buf[67 * w + 86] != 0               # the rendered still landed
+    assert ws.sys_canvas.pix(86, 67) != 0      # the rendered still landed
     side = Path(carts) / "moy_night.moy" / "thumbs" / "wp152x114.mct"
     assert side.exists()                       # ...and persisted as a sidecar
 
-    # A fresh session with NO runner (an old device build without the staged
-    # Canvas) still shows the frame -- straight from the sidecar.
+    # A fresh session with NO runner (a board, which has no offscreen canvas
+    # factory) still shows the frame -- straight from the sidecar.
     ws2 = host_app.build_workstation(carts)
     ws2.wallpaper._ensure_preview = lambda: False
     ws2.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
-    assert ws2.sys_canvas.buf[67 * ws2.sys_canvas.w + 86] != 0
+    assert ws2.sys_canvas.pix(86, 67) != 0
 
 
 def test_static_preview_recomputes_when_the_source_changes(tmp_path):
@@ -275,7 +275,7 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
     scr = ws2.sys_canvas
-    assert all(scr.buf[yy * scr.w + xx] == 0
+    assert all(scr.pix(xx, yy) == 0
                for yy in range(12, 122, 13) for xx in range(12, 160, 17))
 
 

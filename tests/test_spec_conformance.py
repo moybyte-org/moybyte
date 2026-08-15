@@ -6,8 +6,9 @@
 Moybyte is the reference console, so it should be able to make that claim about
 itself in its own test run rather than from a sibling checkout. The suite is
 vendored (see spec_conformance/UPSTREAM.md for why); this replays each scene's
-recorded verb trace through `runtime.canvas.Canvas` and compares the SHA-256 of
-the resulting index framebuffer to the golden hash.
+recorded verb trace through the host's canvas -- `device_canvas.DeviceCanvas`
+over a `HostCompositor`, the same class both boards and the browser run -- and
+compares the SHA-256 of the resulting index framebuffer to the golden hash.
 
 WHAT A FAILURE HERE MEANS. Not "a test broke" -- the frames were rendered by
 moycore and independently confirmed by two other implementations, so a mismatch
@@ -15,11 +16,11 @@ is moybyte disagreeing with the spec about what a verb draws. That is either a
 regression or a spec change to follow, and `hashes.json`'s provenance field is
 what makes it arguable rather than a coin toss.
 
-WHAT IT DOES NOT REACH. This is the host raster only. The device draws the same
-scenes through the C `moy_gfx` kernel into an RGB565 framebuffer, which is a
-different program; `tests/test_device_canvas_parity.py` ties it to this one, and
-`tools/p4_conformance.py` runs these very carts on a board over serial, which is
-the only check that touches the real kernel and the real panel.
+WHAT IT DOES NOT REACH. The kernel under this canvas is `runtime/gfx_binding`:
+libmoy compiled RGB565 and reached by ctypes -- the same SOURCE the boards
+compile, but not the same binary, not MicroPython, and not a panel.
+`tools/p4_conformance.py` runs these very carts on a board over serial, and is
+the only check that touches the real kernel and the real glass.
 """
 
 import hashlib
@@ -28,8 +29,8 @@ import os
 
 import pytest
 
-from runtime import canvas as canvas_mod
 from runtime import editors_sheet
+from runtime import host_canvas
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     "spec_conformance")
@@ -151,7 +152,10 @@ def _index_frame(c):
     A word no palette index produced has no honest index to become. That should
     be impossible in a trace replay (every verb here resolves through the
     palette), so it RAISES rather than mapping to 0 -- a silent 0 would move
-    the hash and look like a raster bug.
+    the hash and look like a raster bug. (`device_canvas.to_indices` is the
+    shipped version of this conversion and is strict for the same reason; the
+    loop stays open-coded here so the assertion messages can say WHICH pixel and
+    WHY, which is what makes a golden mismatch arguable.)
     """
     buf = getattr(c, "buf", None)
     if buf is not None and len(buf) == W * H:
@@ -184,7 +188,7 @@ def render(scene, canvas=None):
     with open(os.path.join(HERE, "traces", scene + ".json")) as fh:
         calls = json.load(fh)
     sheet, tilemap = _build_assets(scene)
-    c = canvas if canvas is not None else canvas_mod.Canvas(W, H)
+    c = canvas if canvas is not None else host_canvas.make_canvas(W, H)
     replay(calls, c, sheet, tilemap)
     flush = getattr(c, "flush_batch", None)
     if flush is not None:

@@ -37,7 +37,7 @@ public cart vocabulary for no gain.
 
 ### The indexed-canvas portability contract (why the canvas is "indexed")
 
-The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` is meant to run on the host (`runtime/canvas.py`) and on the device (`moy_compositor`, indices → RGB565), and eventually a Lua VM. When adding drawing features, add them to **both** backends and keep the API identical.
+The `.moy` canvas works in **palette indices** (the `MOY64` palette) with a plain-function drawing API (`cls/pset/line/rect/rectfill/circ/circfill/spr/print`) — no dependency on `framebuf`, LVGL, or even Python. This is deliberate: the *same* `.moy` runs on the host, on both boards and in the browser. **There is now ONE canvas class on every tier** — `device_canvas.DeviceCanvas`, RGB565 with the palette resolved at draw time; the host builds it on CPython through `runtime/host_canvas.py` (the host's own indexed raster, runtime/canvas.py, was deleted 2026-08-15 — git history has it). So a drawing feature is added ONCE, in that class + the `moy_gfx`/libmoy kernel under it.
 
 ### Graphics is conformance-checked, and the indexed canvas was MEASURED AND DECLINED
 
@@ -112,7 +112,7 @@ REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
 `tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded
-verb traces through `runtime/canvas.py` and hashes each frame against the
+verb traces through the host's canvas (`runtime/host_canvas.py` → `DeviceCanvas`) and hashes each frame against the
 golden — all ten scenes including the provisional 3D ones, in ~0.1s, on every
 `make test`. It exists because the suite previously only checked this repo from
 *outside* it (moy-spec's `conformance/parity.py --ref`, and `tools/p4_conformance.py`

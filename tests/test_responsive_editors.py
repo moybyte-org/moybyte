@@ -63,9 +63,9 @@ def _ws_distinct_320(tmp_path):
     system-canvas path (vs. the shared-object degradation). Both must render pixel-
     identically -- that's the byte-for-byte degradation guarantee."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(320, 240, font_scale=1)
+    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
     ws.pointer = host_app.console.Pointer(320, 240)
     ws.input.pointer = ws.pointer
@@ -83,7 +83,7 @@ def _render_editor(ws, view):
     _enter(ws, view)
     _quiesce(ws)
     ws.frame(1 / 30)
-    return bytes(ws.sys_canvas.buf)
+    return bytes(ws.sys_canvas._buf)
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +115,7 @@ def test_block_menu_320x240_is_byte_identical(tmp_path):
         ws.block_ui._blk_open_categories()          # open the modal insert menu
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -318,7 +318,7 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
         ws._open_paint()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -410,7 +410,7 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
         ws._open_map()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -481,7 +481,7 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
         ws._open_music()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -597,5 +597,5 @@ def test_theme_editor_320x240_is_byte_identical(tmp_path):
         ws.open_theme()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]

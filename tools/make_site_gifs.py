@@ -40,6 +40,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from runtime import host_app            # noqa: E402
+from runtime import host_canvas         # noqa: E402  (the 565 -> index readout)
 from runtime import bar_layer as BAR    # noqa: E402  (the bar's lent-zone rect)
 from runtime import editor_app as EDA   # noqa: E402  (the Editor's tab ladder)
 from runtime import palette             # noqa: E402  (MOY64 -> the exact GIF palette)
@@ -116,10 +117,11 @@ class Recorder:
         self.drv._down = down
         self.drv.frame(self.dt)
         cv = self.drv.current_canvas()
-        cv.flush_batch()
-        # Record INDICES, not RGB: the console is an indexed surface, so the GIF
-        # can carry the MOY64 palette verbatim and skip quantization entirely.
-        self.frames.append((cv.w, cv.h, bytes(cv.buf)))
+        # Record INDICES, not RGB: every pixel the console draws came from the
+        # MOY64 table, so the GIF can carry that palette verbatim and skip
+        # quantization entirely. The canvas stores RGB565; indices_of is the
+        # exact reduction back (and flushes the sprite batch on the way).
+        self.frames.append((cv.w, cv.h, host_canvas.indices_of(cv)))
 
     def settle(self, n):
         for _ in range(n):

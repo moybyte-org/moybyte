@@ -87,10 +87,10 @@ def test_frozen_frame_matches_live_render(tmp_path):
     drv.pan(1, 0)
     drv.frame(0.0)                    # frozen paint (content stamped from buf)
     drv.pan(0, 0)
-    frozen = bytes(ws.sys_canvas.buf)
+    frozen = bytes(ws.sys_canvas._buf)
     ws._dirty = True
     drv.frame(0.0)                    # live re-render, identical pointer state
-    live = bytes(ws.sys_canvas.buf)
+    live = bytes(ws.sys_canvas._buf)
     assert frozen == live
 
 

@@ -29,10 +29,10 @@ HOW THE FORMAT IS DETECTED (in order; first answer wins)
    VIEWPORT canvas (#155) keeps the whole parent buffer behind a smaller w/h, so
    a modulo test there can land on the wrong multiple and answer confidently
    with a lie.
-3. Attribute shape, which settles the two classes that exist today: the indexed
-   `runtime.canvas.Canvas` publishes its buffer as `.buf`, while the boards'
-   `device_canvas.DeviceCanvas` keeps its RGB565 framebuffer private as `._buf`
-   and has no `.buf` at all.
+3. Attribute shape: a canvas publishing an indexed buffer calls it `.buf`, while
+   `device_canvas.DeviceCanvas` -- which every tier now runs, the host included
+   since `runtime/canvas.py` was deleted -- keeps its RGB565 framebuffer private
+   as `._buf` and has no `.buf` at all.
 
 RGB565 words are read native-endian. Endianness cannot change any count here --
 byte-pair to word is a bijection either way -- and no caller compares a pixel
@@ -44,6 +44,38 @@ pixel width explicitly, for buffers that are not canvases at all: `rgb888()` /
 """
 
 from collections import Counter
+
+
+# --- naming a colour --------------------------------------------------------
+
+def word_of(index, cv=None):
+    """The value one pixel of MOY64 palette `index` holds in the buffer.
+
+    The replacement for a literal palette index in an assertion:
+    `cv.buf[y * w + x] == 8` only ever meant "that pixel is orange" because the
+    buffer stored indices. It stores RGB565 words now, so the index has to be
+    resolved the way the canvas resolves it -- through the canvas's OWN wire
+    table, since a cart palette (SPEC.md 3.1) rewrites it and the stock table
+    would then name a colour that is not on screen.
+
+    Prefer `cv.pix(x, y)` where the coordinates are handy: that reads back an
+    INDEX on every tier (through the same reverse LUT) and carries camera and
+    viewport, so an assertion written that way says what it means with no
+    conversion at all. This is for the cases that must look at the raw buffer --
+    whole-surface `set(...)` checks, row slices, `Counter` histograms.
+    """
+    wire = getattr(cv, "_wire", None) if cv is not None else None
+    if wire is None:
+        from runtime.host_canvas import install
+        install()                          # puts device_canvas on sys.path
+        from device_canvas import PAL565_WIRE
+        wire = PAL565_WIRE                 # the stock table, in this build's byte order
+    return wire[int(index) & 63]
+
+
+def words_of(indices, cv=None):
+    """`word_of` over a sequence -- for `set(pixels(cv)) == words_of({6, 7})`."""
+    return {word_of(i, cv) for i in indices}
 
 
 # --- format detection ------------------------------------------------------

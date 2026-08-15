@@ -23,15 +23,15 @@ class _RotatingCanvas:
     advance; the next target holds the paint from N presents ago)."""
 
     def __init__(self, n):
-        from runtime.canvas import Canvas
+        from runtime.host_canvas import make_canvas as Canvas
         self.RETAINED_FRAMES = n
         self.w, self.h = W, H
         self._bufs = [Canvas(W, H) for _ in range(n)]
         self._back = 0
 
     @property
-    def buf(self):
-        return self._bufs[self._back].buf
+    def _buf(self):
+        return self._bufs[self._back]._buf
 
     def rect(self, *a):
         self._bufs[self._back].rect(*a)
@@ -76,7 +76,7 @@ def _shift_or_full(cv, region, frame_no):
 
 def _run(k):
     from runtime.ui import ScrollRegion
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     cv = _RotatingCanvas(k)
     region = ScrollRegion()
     region.set((0, 0, W, H), 400)
@@ -96,7 +96,7 @@ def _run(k):
         shifts += (kind == "shift")
         ref.cls(0)
         _full_paint(ref, region.offset)
-        assert bytes(cv.buf) == bytes(ref.buf), \
+        assert bytes(cv._buf) == bytes(ref._buf), \
             "k=%d frame=%d (%s) diverged from the full repaint" % (frame, d, kind)
         cv.present()
         frame += 1

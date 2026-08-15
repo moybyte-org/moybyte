@@ -1,6 +1,12 @@
-"""Tests for the v0.4 userland: the indexed canvas, the shared SpriteSheet /
-CodeEditor cores, the `.moy` store (moy_carts), and the shared console run on the
-host via host_app -- the same console code the device runs."""
+"""Tests for the userland: the canvas, the shared SpriteSheet / CodeEditor
+cores, the `.moy` store (moy_carts), and the shared console run on the host via
+host_app -- the same console code the device runs.
+
+The canvas here is `runtime.host_canvas.make_canvas`, i.e. the BOARDS'
+`device_canvas.DeviceCanvas` over a host compositor: one raster, three
+architectures. Its buffer is RGB565, so a pixel is two bytes and never a palette
+index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
+at the canvas's real pixel width."""
 
 import sys
 from pathlib import Path
@@ -9,8 +15,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import palette  # noqa: E402
-from runtime.canvas import Canvas, Image, SpriteSheet  # noqa: E402
-from runtime.editors import TileMap  # noqa: E402
+from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.host_canvas import make_canvas as Canvas  # noqa: E402
+from runtime.host_canvas import make_system_canvas as SysCanvas  # noqa: E402
+from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
@@ -47,9 +55,13 @@ def test_palette_has_64_valid_colors():
 # -- canvas ----------------------------------------------------------------
 
 def test_canvas_cls_pix_and_rgb_resolution():
-    cv = Canvas(20, 10)
+    # A SYSTEM canvas, because `to_rgb888` is part of the system-surface contract
+    # (HostSystemCanvas) rather than of the raster: only the host has a screen to
+    # hand to pygame or a GIF. At font_scale 1 it draws byte-identically to the
+    # plain game canvas, so nothing else about this test changes.
+    cv = SysCanvas(20, 10)
     cv.cls(1)
-    assert set(cv.buf) == {1}
+    assert set(probe.pixels(cv)) == probe.words_of({1}, cv)
     cv.pix(5, 5, 7)             # three args writes
     assert cv.pix(5, 5) == 7    # two args reads (TIC-80)
     cv.pix(-1, 0, 8)  # off-canvas is a no-op
@@ -133,7 +145,12 @@ def test_tilemap_clamps_tile_id_to_byte():
 def test_canvas_map_blits_tiles_at_scale():
     cv = Canvas(40, 40)
     cv.cls(0)
-    sheet = SpriteSheet()
+    # SPEC.md 3.2's sheet: 16 x 32 tiles. NOT the SpriteSheet default (16 x 16) --
+    # libmoy's sheet verbs (map/blit_map, spr_batch/blit_batch, sspr, tline) refuse
+    # a sheet that is not exactly 128 x 256 and draw NOTHING, on both boards and now
+    # on the host. The old pure-Python host raster accepted any size, which is how a
+    # test could pass here and have drawn nothing on glass.
+    sheet = SpriteSheet(16, 32)
     sheet.tset(7, 0, 0, 8)                   # tile 7: a single red pixel at its (0,0)
     sheet.tset(7, 7, 7, 9)                   # ... and green at (7,7)
     tm = TileMap(2, 2)
@@ -151,7 +168,7 @@ def test_map_mget_mset_via_make_api():
     from runtime import host_app
     cv = Canvas(40, 40)
     cv.cls(0)
-    sheet = SpriteSheet()
+    sheet = SpriteSheet(16, 32)          # the spec sheet -- see map's note above
     sheet.tset(3, 0, 0, 11)
     tm = TileMap(3, 3)
 
@@ -191,19 +208,19 @@ def test_make_layer_and_draw_layer_via_make_api():
 
     cv.cls(0)
     api["draw_layer"](bg, 0, 0)              # window at world x=0 -> all left half (8)
-    assert set(cv.buf) == {8}
+    assert set(probe.pixels(cv)) == probe.words_of({8}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, 20, 0)            # window at world x=20 -> all right half (11)
-    assert set(cv.buf) == {11}
+    assert set(probe.pixels(cv)) == probe.words_of({11}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, 999, 0)          # past the edge -> clamped to x=20 -> 11
-    assert set(cv.buf) == {11}
+    assert set(probe.pixels(cv)) == probe.words_of({11}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, -5, 0)           # negative -> clamped to x=0 -> 8
-    assert set(cv.buf) == {8}
+    assert set(probe.pixels(cv)) == probe.words_of({8}, cv)
 
 
 def test_the_auto_batch_gate_matches_individual_spr_calls():
@@ -212,7 +229,7 @@ def test_the_auto_batch_gate_matches_individual_spr_calls():
     # its pixels still have to equal the per-item reference -- that equality is the
     # whole promise of "just write the loop". Build two canvases, draw a few tiles (one
     # flipped) through each path, and assert the buffers are identical.
-    sheet = SpriteSheet()
+    sheet = SpriteSheet(16, 32)               # the spec sheet -- blit_batch gates on it
     sheet.tset(1, 0, 0, 8)                    # tile 1: red at (0,0)
     sheet.tset(1, 7, 0, 9)                    # ... and green at (7,0) (asymmetric -> flip shows)
     sheet.tset(2, 3, 3, 11)                   # tile 2: a centre pixel
@@ -229,7 +246,7 @@ def test_the_auto_batch_gate_matches_individual_spr_calls():
         flip = it[3] if len(it) > 3 else 0
         cv_indiv.spr(sheet.tile_image(it[0], -1), it[1], it[2], 2, flip)
 
-    assert cv_batch.buf == cv_indiv.buf
+    assert probe.buffer_of(cv_batch) == probe.buffer_of(cv_indiv)
     assert probe.drew_something(cv_batch)    # sanity: it actually drew something
 
 
@@ -984,7 +1001,7 @@ def test_map_size_stamp_renders_identical_to_spr_multitile():
     # spr(n, x, y, w=2, h=2) -- map() over the stamped cells vs one spr() of the
     # same tile span at the same pixel origin.
     from runtime.editors import MapEditor
-    sheet = SpriteSheet()
+    sheet = SpriteSheet(16, 32)              # the spec sheet -- map() gates on it
     for t, c in ((7, 1), (8, 2), (7 + 16, 3), (8 + 16, 4)):
         for py in range(8):
             for px in range(8):
@@ -1586,23 +1603,23 @@ def test_background_declares_color_and_image_backdrops():
     white = palette.color("white")
     api["background"](red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red and cv.buf[47 * 64 + 63] == red
+    assert cv.pix(0, 0) == red and cv.pix(63, 47) == red
     cv.rect(0, 0, 8, 8, white)                    # an actor scribbles the frame...
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red, "the color backdrop must reclaim the frame"
+    assert cv.pix(0, 0) == red, "the color backdrop must reclaim the frame"
     # An Image backdrop bakes to a hidden layer once and restores by window copy.
     img = api["image"](["##", "##"], {"#": white})
     api["background"](img)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == white, "the image pixels land at (0,0)"
+    assert cv.pix(0, 0) == white, "the image pixels land at (0,0)"
     cv.rect(0, 0, 4, 4, red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == white, "the image backdrop must reclaim the frame"
+    assert cv.pix(0, 0) == white, "the image backdrop must reclaim the frame"
     # background() clears the declaration -> the restore is a no-op.
     api["background"]()
     cv.rect(0, 0, 4, 4, red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red, "a cleared declaration must not repaint"
+    assert cv.pix(0, 0) == red, "a cleared declaration must not repaint"
 
 
 def test_player_restores_declared_background_each_frame(tmp_path):
@@ -1625,9 +1642,9 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     ws.player.tick(1 / 30)
     red = palette.color("red")
     white = palette.color("white")
-    assert ws.canvas.buf[0] == white              # the actor drew over the backdrop
-    assert ws.canvas.buf[100 * 320 + 100] == red  # backdrop painted with NO cls in the cart
-    ws.canvas.buf[100 * 320 + 100] = white        # scribble...
+    assert ws.canvas.pix(0, 0) == white           # the actor drew over the backdrop
+    assert ws.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
+    ws.canvas.pix(100, 100, white)                # scribble...
     ws.player.tick(1 / 30)
-    assert ws.canvas.buf[100 * 320 + 100] == red, (
+    assert ws.canvas.pix(100, 100) == red, (
         "the declared background must reclaim the frame before each tick")

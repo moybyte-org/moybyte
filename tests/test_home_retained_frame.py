@@ -76,11 +76,11 @@ def test_stamped_frame_matches_live_render(tmp_path):
     ws.go_home()
     _quiesce(ws)
     drv.frame(0.0)                                   # the stamped re-entry
-    stamped = bytes(ws.sys_canvas.buf)
+    stamped = bytes(ws.sys_canvas._buf)
     ws.launcher_layer._lib_key = None                # force the live path
     ws._dirty = True
     drv.frame(0.0)
-    live = bytes(ws.sys_canvas.buf)
+    live = bytes(ws.sys_canvas._buf)
     assert stamped == live
 
 

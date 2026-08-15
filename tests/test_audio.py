@@ -230,7 +230,7 @@ class _Input:
 
 def test_make_api_exposes_audio_and_drives_engine():
     from runtime import host_app
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     fake = host_app.FakeAudio(eng)
     api = host_app.make_api(Canvas(32, 32), _Input(), {}, None, fake)
@@ -308,7 +308,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path):
     # A Workstation with no make_audio injected falls back to _SilentAudio so a
     # cart's sfx()/beep() are harmless no-ops (and make_api stays callable).
     from runtime import console, moy_carts
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     from runtime.input import InputState
     from runtime import host_app
     root = str(tmp_path / "carts")

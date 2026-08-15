@@ -162,11 +162,12 @@ def test_desktop_paint_reflows_and_wallpaper_maps_512x300_exactly_2x(tmp_path):
     assert ws.artwork.set_wallpaper()
     ws.wallpaper.draw(0)
     src = app.doc.pix
-    out = ws.sys_canvas.buf
+    out = ws.sys_canvas
     # 512x300 -> exact nearest-neighbor 2x on the 1024x600 host system canvas.
+    # pix() reads a palette INDEX back, which is what the document stores.
     for x, y in ((0, 0), (10, 10), (255, 149), (511, 299)):
         c = src[y * 512 + x]
         dx, dy = x * 2, y * 2
-        assert out[dy * 1024 + dx] == c
-        assert out[dy * 1024 + dx + 1] == c
-        assert out[(dy + 1) * 1024 + dx] == c
+        assert out.pix(dx, dy) == c
+        assert out.pix(dx + 1, dy) == c
+        assert out.pix(dx, dy + 1) == c

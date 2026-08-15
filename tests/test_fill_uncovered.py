@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import ui as _ui                     # noqa: E402
-from runtime.canvas import Canvas                 # noqa: E402
+from runtime.host_canvas import make_canvas as Canvas   # noqa: E402
 
 
 def _both(inner, outer, w=200, h=120, col=7):
@@ -30,7 +30,7 @@ def _both(inner, outer, w=200, h=120, col=7):
     b.cls(0)
     b.rect(*(tuple(outer) + (col,)))
     _ui.fill_uncovered(b, inner, outer, col)
-    return bytes(a.buf), bytes(b.buf)
+    return bytes(a._buf), bytes(b._buf)
 
 
 def test_matches_the_two_fill_version_for_the_real_editor_geometry():

@@ -9,7 +9,8 @@ the old parallel SDK.
 **Source of truth (keep this doc in sync with them):** the API namespace is built by
 `make_api()` in `runtime/host_app.py` (host reference) and the identical
 `make_api()` in `firmware/lilygo_t_deck_plus_micropython/modules/moy_runtime.py`
-(device). The drawing ops live in `runtime/canvas.py`; the palette in
+(device). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
+it through `runtime/host_canvas.py`); the palette in
 `runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
@@ -594,7 +595,7 @@ device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
 palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
 code. **A cart authored once runs on every tier** (Zero /
 Player / One). When you add a drawing
-feature, add it to **both** `runtime/canvas.py` and the device path and keep the name
+feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name
 identical.
 
 **Fuller example:** `system_carts/star_catcher.moy/main.py` (a complete game — sprites,

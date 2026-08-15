@@ -48,6 +48,67 @@ def _quiesce(ws):
 
 
 # ---------------------------------------------------------------------------
+# The game composite belongs to its WINDOW
+# ---------------------------------------------------------------------------
+
+def test_a_game_window_does_not_black_out_the_desk(tmp_path):
+    """`blit_game` means two different things and this tier wants the quiet one.
+
+    The shared `DeviceCanvas.blit_game` is the T-Deck's, where the canvas IS the
+    glass: it paints four black LETTERBOX bands over everything outside the game
+    rect, and `FullscreenStackWM.composite_game` depends on that (it probes for
+    the verb and returns, so its own bezel fill never runs). Here the same call
+    places a cart inside a WINDOW, and those bands cover the desk, the icon
+    column, the OS bar and every other window.
+
+    It is not hypothetical: the host inherited that method the day its canvas
+    became the boards' (`runtime/canvas.py` deleted, 2026-08-15) and the desktop
+    went black behind the first game window opened on it. The P4 never felt it
+    because `P4SystemCanvas.blit_game` overrides the bands away and that board
+    only runs this WM; the host runs both tiers, so `build_workstation` tells
+    the canvas which meaning it serves.
+    """
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open()                                    # a cart, in a player WINDOW
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.cart_error is None, ws.cart_error
+    win = ws.wm._wins["desktop"]
+    assert win is not None and win.w < ws.sys_canvas.w
+
+    sc = ws.sys_canvas
+    # Sample the desk WELL clear of the window: bands span the full width and
+    # the full height, so any of these catches them.
+    outside = [(2, sc.h - 3), (sc.w - 3, sc.h - 3), (2, win.y + win.h // 2),
+               (sc.w - 3, win.y + win.h // 2)]
+    for x, y in outside:
+        assert ws.wm._win_at(x, y) is None, (x, y)   # really outside every window
+    assert any(sc.pix(x, y) != 0 for x, y in outside), \
+        "the game composite letterboxed the whole desktop black"
+
+
+def test_the_fullscreen_tier_still_gets_its_letterbox(tmp_path):
+    """The other half of the same contract, so fixing one does not lose the
+    other: on the fullscreen tier `composite_game` returns straight after the
+    native call, so `blit_game` is the ONLY thing that paints the bezel."""
+    from runtime import wm as WM
+    ws = _ws(tmp_path, sys_size=(960, 600), windowed=False)
+    drv = _drv(ws)
+    _quiesce(ws)
+    ws.open()
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.cart_error is None, ws.cart_error
+    ox, oy, _scale = ws.wm.viewport()
+    assert ox > 0 and oy > 0                     # there IS a letterbox here
+    assert ws.sys_canvas.pix(0, 0) == WM._VIEWPORT_BEZEL
+
+
+# ---------------------------------------------------------------------------
 # Install + degradation
 # ---------------------------------------------------------------------------
 
@@ -391,13 +452,13 @@ def test_drag_backdrop_cache_matches_live_render(tmp_path):
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
     assert ws.wm._backdrop_valid
-    cached = bytes(ws.sys_canvas.buf)
+    cached = bytes(ws.sys_canvas._buf)
     # Force a live re-render of the identical frame (cache off), no window move.
     ws.wm._backdrop_valid = False
     ws._dirty = True
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
-    live = bytes(ws.sys_canvas.buf)
+    live = bytes(ws.sys_canvas._buf)
     assert cached == live
 
 
@@ -911,8 +972,9 @@ def test_union_restore_matches_full_restore_while_moving(tmp_path):
         for i in range(5):
             drv.touch_drag(hx + i * 17, hy + i * 9)
             drv.frame(0.0)
-            skip = 60 * ws.sys_canvas.w      # exclude the bar strip (live clock)
-            frames.append(bytes(ws.sys_canvas.buf[skip:]))
+            # 60 rows of PIXELS, two bytes each: exclude the bar strip (live clock)
+            skip = 60 * ws.sys_canvas.w * 2
+            frames.append(bytes(ws.sys_canvas._buf[skip:]))
         return frames
 
     a = run(True)
@@ -932,16 +994,17 @@ def test_live_resize_body_follows_grip(tmp_path):
     ow, oh = win.w, win.h
     assert (cw, ch) != (ow, oh)              # the rubber actually grew
     assert win.w == ow and win.h == oh       # no mid-gesture relayout
-    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
-    # Focused border drawn at the RUBBER corner, not the old one.
-    corner = buf[(win.y + ch - 1) * W + (win.x + cw - 1)]
-    assert corner == _BORDER_TOP
+    sc = ws.sys_canvas
+    # Focused border drawn at the RUBBER corner, not the old one. pix() reads a
+    # palette INDEX back (the buffer holds RGB565), so a theme token compares
+    # directly.
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) == _BORDER_TOP
     # A grown-area probe (beyond the old width, inside the new content rect)
     # shows the panel field fill -- the content crop anchored top-left.
     px = win.x + ow + 10
     py = win.y + win.title_h + 20
     assert px < win.x + cw - 1
-    assert buf[py * W + px] == ws.theme_colors["panel"]
+    assert sc.pix(px, py) == ws.theme_colors["panel"]
     # Release applies the REAL resize (the existing apply-on-release contract).
     drv.touch_up()
     drv.frame(0.0)
@@ -957,13 +1020,13 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
     win, cw, ch = _engage_resize(ws, drv)
-    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     # The accent outline is drawn at the rubber rect...
     accent = ws.theme_colors["accent"]
-    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] == accent
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) == accent
     # ... and the body was NOT drawn at the rubber size (the border at the
     # rubber corner would be _BORDER_TOP under live-body).
-    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] != _BORDER_TOP
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) != _BORDER_TOP
 
 
 # ---------------------------------------------------------------------------
@@ -1142,10 +1205,10 @@ def test_skipping_is_pixel_identical_to_a_full_repaint(tmp_path):
         drv.frame(1 / 30)
 
     full(); full()
-    reference = bytes(ws.sys_canvas.buf)
+    reference = bytes(ws.sys_canvas._buf)
     ws.mark_dirty()
     drv.frame(1 / 30)                    # a frame free to skip settled windows
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_moving_a_window_voids_the_skip(tmp_path):
@@ -1262,10 +1325,10 @@ def test_chrome_freeze_is_pixel_identical(tmp_path):
         drv.frame(1 / 30)
 
     full(); full()
-    reference = bytes(ws.sys_canvas.buf)
+    reference = bytes(ws.sys_canvas._buf)
     ws.mark_dirty()
     drv.frame(1 / 30)                     # a frame free to freeze the chrome
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_taskbar_chips_freeze_and_refresh_on_focus_change(tmp_path):
@@ -1333,7 +1396,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
     for _ in range(30):
         ws_boot.mark_dirty()
         drv_boot.frame(1 / 30)
-    reference = bytes(ws_boot.sys_canvas.buf)
+    reference = bytes(ws_boot.sys_canvas._buf)
 
     ws = _ws(tmp_path, font_scale=2)
     drv = _drv(ws)
@@ -1352,7 +1415,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
         ws.mark_dirty()
         drv.frame(1 / 30)
 
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
@@ -1423,7 +1486,7 @@ def test_direct_render_matches_the_stamp_path_pixel_for_pixel(tmp_path):
         if not direct:
             ws.wm._direct_render = lambda win, dt: False   # force the stamp
         _scroll_frames(ws, drv)
-        return bytes(ws.sys_canvas.buf)
+        return bytes(ws.sys_canvas._buf)
 
     assert run(True, "a") == run(False, "b")
 
@@ -1450,7 +1513,7 @@ def test_direct_render_leaves_no_viewport_installed(tmp_path):
     _scroll_frames(ws, drv)
     root = ws.wm._root_canvas
     assert (root._ox, root._oy) == (0, 0)
-    assert (root.w, root.h) == (root._stride, len(root.buf) // root._stride)
+    assert (root.w, root.h) == (root._stride, len(root._buf) // 2 // root._stride)
 
 
 # -- the desk cache is keyed on the desk, not on gesturing (#155) -------------
@@ -1578,7 +1641,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
     for _ in range(6):
         ws._dirty = True
         drv.frame(1 / 30)
-    base = bytes(ws.sys_canvas.buf)
+    base = bytes(ws.sys_canvas._buf)
     ws.open_settings()
     for _ in range(4):
         drv.frame(1 / 30)
@@ -1587,7 +1650,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
     ws.wm._close_window("settings")
     for _ in range(4):
         drv.frame(1 / 30)
-    after = bytes(ws.sys_canvas.buf)
+    after = bytes(ws.sys_canvas._buf)
     x, y, w, h = region
     stride = ws.sys_canvas.w
     bar = lay.status_h + 2

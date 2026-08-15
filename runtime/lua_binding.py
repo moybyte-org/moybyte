@@ -9,7 +9,7 @@ and device integers wrapped at 2^31 where the host's did not.
 This closed it by giving CPython the same program the boards run: libmoy's
 binding of the spec verb table over the same vendored Lua 5.4, compiled with
 the same `LUA_32BITS`, reached by ctypes. Same build-and-cache shape as
-`audio_binding` and `raster_binding`.
+`audio_binding` and `gfx_binding`.
 
 lupa was DELETED on 2026-08-14 once this was the only sane lane, so absence is
 no longer graceful in the old sense: no compiler means `available()` is False
@@ -31,8 +31,8 @@ shim `#error`s without the define; the caller supplies the 64-entry wire table
 the boards read off their canvas, because a 565 canvas resolves colour at DRAW
 time and libmoy has to be told what an index looks like.
 
-A canvas that is still INDEXED (`runtime/canvas.py`, which the host sim still
-builds while #161 lands) is bridged rather than refused -- see HostLuaRun.
+An INDEXED canvas (one byte a pixel) is bridged rather than refused -- see
+HostLuaRun. No tier ships one since `runtime/canvas.py` was deleted.
 """
 
 import ctypes
@@ -171,13 +171,18 @@ class HostLuaRun:
       the canvas (`DeviceCanvas._wire`, which is byte-swapped on the T-Deck's
       panel and canonical elsewhere, and which a cart's own SPEC.md 3.1 palette
       rewrites). Omitting it leaves libmoy on the canonical 2.2 palette.
-    * **INDEXED** (`indexed=True`) -- `runtime/canvas.py`, one byte a pixel,
-      which the host sim still builds until #161 finishes handing it the
-      boards' canvas class. libmoy is compiled for direct colour and cannot
-      write into that buffer, so the shim keeps a 565 shadow with an IDENTITY
-      wire table: every word it stores IS the palette index, and the frame is
-      widened in and narrowed out. Lossless by construction rather than by a
-      reverse lookup, and deletable in one commit when the transition lands.
+    * **INDEXED** (`indexed=True`) -- one byte a pixel. libmoy is compiled for
+      direct colour and cannot write into that buffer, so the shim keeps a 565
+      shadow with an IDENTITY wire table: every word it stores IS the palette
+      index, and the frame is widened in and narrowed out. Lossless by
+      construction rather than by a reverse lookup.
+
+      NOTHING IN THE TREE PASSES THIS ANY MORE. It existed for the host's
+      `runtime/canvas.py`, which was deleted 2026-08-15 when the sim moved onto
+      the boards' canvas class; every tier is RGB565 now. Kept because it is the
+      binding's own generic contract (and `len(buf)`-inferred, so a direct
+      caller can still hand over an index buffer), not because a runtime uses
+      it -- retiring it is a separate call, with `moyhost_lua.c`'s shadow.
 
     Left to itself the format is inferred from `len(buf)`, which is what the
     binding's own tests (and any other direct caller) rely on; `lua_host.py`

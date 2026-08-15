@@ -18,9 +18,9 @@ try:
 except ImportError:                    # host / package import
     from runtime import palette
 try:
-    from canvas import Image
+    from moy_image import Image        # ONE Image, shared with device_canvas
 except ImportError:                    # host / package import
-    from runtime.canvas import Image
+    from runtime.moy_image import Image
 
 PAN_SPEED = 6            # px/frame the arrow-keys-as-trackball nudge the cursor
 

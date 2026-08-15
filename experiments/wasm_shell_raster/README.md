@@ -4,8 +4,8 @@ Prices the two candidate substrates for a wasm-side SHELL raster at desktop
 size (1024×600), with real frame numbers, against the plan's gate: *"both
 options price out unplayable → the sunset has no completion path."*
 
-- **Option (a)**: `runtime/canvas.py` (the host sim's pure-Python indexed
-  canvas) interpreted by the REAL dist wasm MicroPython
+- **Option (a)**: the host sim's pure-Python indexed canvas (runtime/canvas.py
+  at the time; deleted 2026-08-15) interpreted by the REAL dist wasm MicroPython
   (`firmware/web_runner/dist/`).
 - **Option (b)**: the vendored libmoy C kernels
   (`firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/`, indexed
@@ -46,9 +46,11 @@ node bench_wasm.mjs                                       # option (a): real dis
 ./build.sh                                                # option (b): emcc -O2/-O3 + node
 ```
 
-`bench_wasm.mjs` stages the CURRENT `runtime/canvas.py` into `/modules`
+`bench_wasm.mjs` stages the pure-Python indexed canvas into `/modules`
 (shadowing the frozen copy, like a `--stage-only` dev dist); its
-font/palette/editors imports resolve to the frozen twins.
+font/palette/editors imports resolve to the frozen twins. **It no longer runs
+as written**: option (a)'s subject was deleted with the host raster, so this
+directory is a record of the measurement, not a live bench.
 
 ## Numbers (2026-08-12)
 

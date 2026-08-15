@@ -30,8 +30,12 @@ sys.path.insert(0, str(ROOT))
 
 def _ref_scroll(src, w, h, rect, dx, dy):
     """Naive reference: every rect pixel whose source is also inside the rect
-    takes it; everything else (exposed strips, outside the rect) is unchanged."""
-    out = bytearray(src)
+    takes it; everything else (exposed strips, outside the rect) is unchanged.
+
+    Takes and returns a list of PIXEL values, not bytes -- a pixel is a 16-bit
+    RGB565 word now, and packing one into a bytearray element would silently
+    truncate it to the low half."""
+    out = list(src)
     x0, y0 = max(0, rect[0]), max(0, rect[1])
     x1, y1 = min(w, rect[0] + rect[2]), min(h, rect[1] + rect[3])
     for y in range(y0, y1):
@@ -39,16 +43,31 @@ def _ref_scroll(src, w, h, rect, dx, dy):
             sx, sy = x - dx, y - dy
             if x0 <= sx < x1 and y0 <= sy < y1:
                 out[y * w + x] = src[sy * w + sx]
-    return bytes(out)
+    return out
 
 
 def _noisy_canvas(w=40, h=30, seed=7):
-    from runtime.canvas import Canvas
+    """A canvas of random PIXELS, so a shift that drops or duplicates one shows.
 
-    cv = Canvas(w, h)
+    The noise is written straight into the RGB565 framebuffer as arbitrary
+    words: `scroll_rect` moves bytes and never resolves a colour, so the
+    reference below can compare pixel VALUES without any of them having to be a
+    palette entry -- and random 16-bit words are a stricter fixture than 64
+    indices, because two distinct pixels are far less likely to collide.
+    """
+    from runtime.host_canvas import make_canvas
+
+    cv = make_canvas(w, h)
     rnd = random.Random(seed)
-    cv.buf[:] = bytes(rnd.randrange(64) for _ in range(w * h))
+    mv = memoryview(cv._buf).cast("H")
+    for i in range(w * h):
+        mv[i] = rnd.randrange(0x10000)
     return cv
+
+
+def _pix(cv):
+    """The canvas as a flat list of pixel values, for `_ref_scroll`."""
+    return list(memoryview(cv._buf).cast("H"))
 
 
 def test_scroll_rect_matches_reference_every_direction():
@@ -56,34 +75,34 @@ def test_scroll_rect_matches_reference_every_direction():
     for dx, dy in ((3, 0), (-5, 0), (0, 2), (0, -4), (6, 3), (-2, -7),
                    (24, 0), (0, 19)):
         cv = _noisy_canvas()
-        before = bytes(cv.buf)
+        before = _pix(cv)
         cv.scroll_rect(rect[0], rect[1], rect[2], rect[3], dx, dy)
-        assert bytes(cv.buf) == _ref_scroll(before, cv.w, cv.h, rect, dx, dy), \
+        assert _pix(cv) == _ref_scroll(before, cv.w, cv.h, rect, dx, dy), \
             (dx, dy)
 
 
 def test_scroll_rect_zero_shift_is_a_noop():
     cv = _noisy_canvas()
-    before = bytes(cv.buf)
+    before = bytes(cv._buf)
     cv.scroll_rect(5, 4, 25, 20, 0, 0)
-    assert bytes(cv.buf) == before
+    assert bytes(cv._buf) == before
 
 
 def test_scroll_rect_clamps_offcanvas_rects():
     for rect in ((-10, -10, 30, 25), (25, 20, 30, 30), (0, 0, 999, 999)):
         for dx, dy in ((4, 0), (0, -3), (-2, 5)):
             cv = _noisy_canvas(seed=11)
-            before = bytes(cv.buf)
+            before = _pix(cv)
             cv.scroll_rect(rect[0], rect[1], rect[2], rect[3], dx, dy)
-            assert bytes(cv.buf) == _ref_scroll(before, cv.w, cv.h, rect,
-                                                dx, dy), (rect, dx, dy)
+            assert _pix(cv) == _ref_scroll(before, cv.w, cv.h, rect,
+                                           dx, dy), (rect, dx, dy)
 
 
 def test_scroll_rect_whole_shift_away_is_a_noop():
     cv = _noisy_canvas()
-    before = bytes(cv.buf)
+    before = bytes(cv._buf)
     cv.scroll_rect(5, 4, 25, 20, 25, 0)     # |dx| >= rw: nothing survives
-    assert bytes(cv.buf) == before
+    assert bytes(cv._buf) == before
 
 
 # -- ScrollRegion's paint ring ----------------------------------------------
@@ -219,7 +238,7 @@ def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
     drv.touch_drag(lastx, cy)                 # one more eligible blit frame
     drv.frame(1 / 30)
     assert calls[0] > n_blit
-    partial = bytes(ws.sys_canvas.buf)
+    partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
     # Force the FULL path for the identical state and compare the pixels.
     ws.launcher_layer._full_streak = 0
@@ -228,8 +247,8 @@ def test_shelf_blit_frame_is_pixel_faithful(tmp_path):
     drv.touch_drag(lastx, cy)                 # same pos: scroll unchanged
     drv.frame(1 / 30)
     assert ws.launcher.scroll == scroll
-    full = bytes(ws.sys_canvas.buf)
-    row = ws.sys_canvas.w * ws.layout.status_h    # compare below the bar (the
+    full = bytes(ws.sys_canvas._buf)
+    row = ws.sys_canvas.w * ws.layout.status_h * 2  # compare below the bar (the
     assert full[row:] == partial[row:]            # clock may tick between)
     drv.touch_up()
     drv.frame(1 / 30)
@@ -298,7 +317,7 @@ def test_picker_blit_frame_is_pixel_faithful(tmp_path):
     lastx = _drag_frames(drv, cx, cy, 7)
     assert ws.picker.dragging
     assert calls[0] > 0
-    partial = bytes(ws.sys_canvas.buf)
+    partial = bytes(ws.sys_canvas._buf)
     scroll = ws.picker.scroll
     ws.editor_picker._full_streak = 0
     ws.picker._region.invalidate()
@@ -306,7 +325,7 @@ def test_picker_blit_frame_is_pixel_faithful(tmp_path):
     drv.touch_drag(lastx, cy)
     drv.frame(1 / 30)
     assert ws.picker.scroll == scroll
-    full = bytes(ws.sys_canvas.buf)
+    full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * ws.layout.status_h
     assert full[row:] == partial[row:]
     drv.touch_up()

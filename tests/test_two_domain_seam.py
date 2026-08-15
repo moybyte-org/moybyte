@@ -52,11 +52,11 @@ def test_default_build_shares_one_canvas(tmp_path):
 
 def _ws_distinct_320(tmp_path):
     """A console with a DISTINCT 320x240 system canvas (forced -- build_workstation
-    shares one canvas at the default size, so we attach a SystemCanvas by hand)."""
+    shares one canvas at the default size, so we attach a system canvas by hand)."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(320, 240, font_scale=1)
+    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
     ws.pointer = host_app.console.Pointer(320, 240)
     ws.input.pointer = ws.pointer
@@ -91,7 +91,7 @@ def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
     ws.pointer.visible = False
     ws.ach.toast = None
     ws.frame(1 / 30)
-    assert bytes(ws.sys_canvas.buf) == bytes(ws.canvas.buf)
+    assert bytes(ws.sys_canvas._buf) == bytes(ws.canvas._buf)
 
 
 # ---------------------------------------------------------------------------
@@ -146,11 +146,11 @@ def test_running_cart_is_a_centered_integer_viewport(tmp_path):
     # The bezel corner (outside the viewport) is the solid bezel color.
     # (_VIEWPORT_BEZEL moved to wm.py with the viewport composite -- Stage 6.)
     from runtime import wm as WM
-    assert ws.sys_canvas.buf[0] == WM._VIEWPORT_BEZEL
+    # pix() reads the palette INDEX back, which is what _VIEWPORT_BEZEL is.
+    assert ws.sys_canvas.pix(0, 0) == WM._VIEWPORT_BEZEL
     # A pixel inside the viewport differs from the bezel for a drawing cart.
-    cx = (oy + 1) * 960 + (ox + 1)
     # (Not asserting a specific color -- just that the viewport area was written.)
-    assert isinstance(ws.sys_canvas.buf[cx], int)
+    assert isinstance(ws.sys_canvas.pix(ox + 1, oy + 1), int)
 
 
 # ---------------------------------------------------------------------------
@@ -171,9 +171,9 @@ def test_font_scale_cycles_through_1_2_3(tmp_path):
 def test_font_scale_resizes_text_live(tmp_path):
     """Raising the font scale enlarges petme128 on the system canvas: the same string
     covers more set pixels at 2x than at 1x."""
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     from runtime import console as C
-    sc = SystemCanvas(640, 480, font_scale=1)
+    sc = make_system_canvas(640, 480, font_scale=1)
     sc.cls(0)
     sc.print("HELLO", 10, 10, C.NAMES["white"], 1)
     # Count pixels that are not the cls background: the only thing drawn is the
@@ -188,16 +188,20 @@ def test_font_scale_resizes_text_live(tmp_path):
 
 
 def test_font_scale_1x_is_identical_to_plain_canvas(tmp_path):
-    """A SystemCanvas at scale 1 renders text byte-identical to the plain game Canvas
-    (the degradation guarantee at the pixel level for text)."""
-    from runtime.canvas import Canvas, SystemCanvas
+    """A system canvas at scale 1 renders text byte-identical to the plain GAME
+    canvas (the degradation guarantee at the pixel level for text).
+
+    Both are `DeviceCanvas` now -- the difference is the HostSystemCanvas
+    subclass, whose `print` takes its own scaled lane above font_scale 1. This
+    pins that the lane it takes AT 1 is still the base class's."""
+    from runtime.host_canvas import make_canvas, make_system_canvas
     from runtime import console as C
-    plain = Canvas(320, 240)
-    sysc = SystemCanvas(320, 240, font_scale=1)
+    plain = make_canvas(320, 240)
+    sysc = make_system_canvas(320, 240, font_scale=1)
     for cv in (plain, sysc):
         cv.cls(3)
         cv.print("moybyte 0.4!", 5, 7, C.NAMES["yellow"], 1)
-    assert bytes(plain.buf) == bytes(sysc.buf)
+    assert bytes(plain._buf) == bytes(sysc._buf)
 
 
 def test_font_scale_persists_across_reboot(tmp_path):
@@ -260,15 +264,15 @@ def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):
     corrupt (resize) the system buffer -- the composite clips. build_workstation also
     clamps a too-small --size up to the game size, so this is belt-and-suspenders."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     from runtime import console
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(300, 200, font_scale=1)   # forced sub-game canvas
+    ws._sys_canvas = make_system_canvas(300, 200, font_scale=1)  # forced sub-game
     ws._relayout()
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                                        # composites a running cart
-    assert len(ws.sys_canvas.buf) == 300 * 200             # buffer NOT resized/corrupt
+    assert len(ws.sys_canvas._buf) == 300 * 200 * 2        # buffer NOT resized/corrupt
 
 
 def test_build_workstation_clamps_too_small_size(tmp_path):

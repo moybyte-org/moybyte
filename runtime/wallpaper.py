@@ -339,9 +339,15 @@ class Wallpaper:
         been the bare black fill. Neither board stages those two files any more
         (2026-08-15, owner call: tapping a wallpaper applies it, so a second
         raster in frozen flash bought a preview nobody ever saw), which makes
-        the degradation deliberate instead of accidental. A board that wants
-        this back needs an INDEXED raster there -- the preview is index-native
-        end to end, _Blit -> .mct -> spr -- not a re-import of this file."""
+        the degradation deliberate instead of accidental.
+
+        That gate is now the OFFSCREEN CANVAS FACTORY rather than the raster:
+        `runtime/canvas.py` is gone and the preview renders on the same
+        `DeviceCanvas` the boards run, so nothing about the pixels stops a board
+        doing this -- only `_ensure_preview`'s import, which finds neither
+        host_canvas nor web_canvas there. Re-enabling it is a product decision
+        (a 320x240 RGB565 scratch surface plus a whole cart run in interpreted
+        Python), not a missing file."""
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
@@ -376,25 +382,33 @@ class Wallpaper:
 
     def _ensure_preview(self):
         """Compile the current wallpaper cart into the preview runner (once per
-        selection; clear() invalidates). False when there's no cart, no host
-        Canvas (device build), or the compile fails."""
+        selection; clear() invalidates). False when there's no cart, no offscreen
+        canvas factory (a BOARD build -- see draw_preview), or the compile fails.
+
+        The factory is imported rather than injected because its ABSENCE is the
+        tier gate: `host_canvas` exists only in the host package, `web_canvas`
+        only in the wasm head's staged tree, and a board has neither -- which is
+        exactly the set of tiers this preview has ever run on. (It used to gate
+        on `import canvas`, the deleted second raster; the surface below is a
+        565 `DeviceCanvas` on all three, reduced back to indices in
+        _render_static.)"""
         cart = self._wp_cart
         if cart is None:
             return False
         if self._pv_draw is not None and self._pv_for is cart:
             return True
         try:
-            from canvas import Canvas
+            from runtime.host_canvas import make_canvas
         except ImportError:
             try:
-                from runtime.canvas import Canvas
+                from web_canvas import make_canvas
             except ImportError:
-                return False            # no host canvas on this build
+                return False            # a board: no offscreen canvas factory
         ws = self.ws
         try:
             pv = self._pv_canvas
             if pv is None:
-                pv = Canvas(ws.canvas.w, ws.canvas.h)
+                pv = make_canvas(ws.canvas.w, ws.canvas.h)
                 self._pv_canvas = pv
             else:
                 rl = getattr(pv, "reclaim_layers", None)
@@ -513,14 +527,41 @@ class Wallpaper:
             fb = getattr(pv, "flush_batch", None)
             if fb is not None:
                 fb()
+            pix = self._preview_indices(pv)
+            if pix is None:
+                return None
             if (vw, vh) == (pv.w, pv.h):
-                return bytes(pv.buf)
-            return self._sample(pv.buf, pv.w, pv.h, vw, vh)
+                return bytes(pix)
+            return self._sample(pix, pv.w, pv.h, vw, vh)
         except Exception as exc:  # noqa: BLE001 -- a broken cart has no preview
             print("Moybyte wallpaper preview error:", _err_text(exc))
             self._pv_ns = self._pv_update = self._pv_draw = None
             self._pv_for = None
             return None
+
+    @staticmethod
+    def _preview_indices(pv):
+        """The preview frame as ONE PALETTE INDEX PER BYTE.
+
+        This is the boundary the format conversion belongs at, and the reason it
+        is a boundary at all: everything downstream of here is index-native and
+        stays that way -- `_sample`, the `_Blit` it feeds, `spr()`, and the
+        `thumbs/wp<w>x<h>.mct` sidecar, whose validator checks `len == w * h`
+        (moy_image.load_wallpaper_preview). Converting THOSE to 565 would change
+        a persisted on-disk format for nothing.
+
+        The reduction is EXACT -- MOY64's 64 entries resolve to 64 distinct 565
+        words -- but it runs `strict=False`: a wallpaper is arbitrary cart code,
+        and a single unmappable word (a cart that blits raw 565 in) should cost
+        that pixel, not the whole preview."""
+        buf = getattr(pv, "_buf", None)
+        if buf is None:                          # an indexed canvas, if one ever returns
+            return bytes(pv.buf)
+        try:
+            from device_canvas import to_indices
+        except ImportError:                      # pragma: no cover
+            return None
+        return to_indices(buf, getattr(pv, "_wire", None), False)
 
     @staticmethod
     def _sample(pix, gw, gh, vw, vh):
@@ -543,11 +584,15 @@ class Wallpaper:
         _backdrop_blit computes for a real framebuffer. Returns True when a
         bracket was opened (the caller must close it).
 
-        No-op on every other tier: a raster game canvas has `buf` and keeps the
-        composite path, and the 320x240 tiers share one canvas object."""
+        No-op on every other tier: a raster game canvas keeps the composite
+        path, and the 320x240 tiers share one canvas object. A raster publishes
+        its framebuffer either as `buf` (palette indices) or as `_buf` (RGB565,
+        which every tier's canvas is since runtime/canvas.py was deleted) -- ask
+        for BOTH, or a 565 canvas reads as command-only and gets bracketed."""
         sc = ws.sys_canvas
         gc = ws.canvas
-        if sc is gc or getattr(gc, "buf", None) is not None:
+        if sc is gc or getattr(gc, "buf", None) is not None \
+                or getattr(gc, "_buf", None) is not None:
             return False
         view = getattr(sc, "view", None)
         if view is None:

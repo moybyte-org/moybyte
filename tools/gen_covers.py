@@ -24,7 +24,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from runtime import host_app, moy_carts  # noqa: E402
+from runtime import host_app, host_canvas, moy_carts  # noqa: E402
 
 FRAMES = 80           # ~2.5s of play: the scene develops, nobody has died yet
 COVER_TYPES = ("game", "story")
@@ -76,7 +76,9 @@ def gen_cover(slug):
             print("skip (crashed during capture):", slug, ws.cart_error)
             return False
         cv = ws.canvas                       # the fixed 320x240 GAME canvas
-        blob = moy_carts.encode_moyimg(cv.w, cv.h, bytes(cv.buf))
+        # .moyimg is a MOY64 INDEX bitmap (1 byte/pixel); the canvas is RGB565.
+        # indices_of is the exact reduction back -- see runtime/host_canvas.py.
+        blob = moy_carts.encode_moyimg(cv.w, cv.h, host_canvas.indices_of(cv))
         img_dir = os.path.join(src_dir, "images")
         os.makedirs(img_dir, exist_ok=True)
         out = os.path.join(img_dir, moy_carts.COVER_IMAGE + moy_carts.IMAGE_EXT)

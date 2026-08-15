@@ -126,12 +126,12 @@ def test_cart_that_raises_in_draw_shows_error_panel(tmp_path):
     # paint an error panel. The exception must never escape ws.frame().
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    raise ValueError('kaboom')\n")
     assert ws.screen == "desktop"
-    blank = list(ws.canvas.buf)
+    blank = bytes(ws.canvas._buf)
     for _ in range(5):
         ws.frame(1 / 30)                  # must not raise
     assert ws.cart_error is not None
     assert "kaboom" in ws.cart_error and "ValueError" in ws.cart_error
-    assert ws.canvas.buf != blank         # the panel drew something
+    assert bytes(ws.canvas._buf) != blank  # the panel drew something
     # The editor stays reachable so the kid can fix the cart.
     ws._open_menu()
     assert ws.screen == "menu"

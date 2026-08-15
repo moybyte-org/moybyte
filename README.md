@@ -315,7 +315,8 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) — features want an issue first, and
 every commit needs a DCO sign-off (`git commit -s`). Then read `CLAUDE.md`.
 
 The one rule that trips people up: **host == device.** A change to the drawing
-API must land in both backends (`runtime/canvas.py` and the device modules) with
+API lands in the ONE canvas class every tier runs (`device_canvas.DeviceCanvas`,
+built for the host by `runtime/host_canvas.py`) with
 an identical API, or the "one cart, every tier" contract breaks.
 
 ## License

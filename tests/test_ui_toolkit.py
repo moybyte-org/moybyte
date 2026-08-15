@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from runtime import ui
-from runtime.canvas import SystemCanvas
+from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.chrome import theme_colors
 
 

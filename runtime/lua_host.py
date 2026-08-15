@@ -55,11 +55,12 @@ def _moycore_available():
 def canvas_target(canvas):
     """(buf, wire, indexed) -- how libmoy draws into whichever canvas this is.
 
-    The host is mid-move from `runtime/canvas.py` (one byte of palette index a
-    pixel) to the boards' own `device_canvas.DeviceCanvas` (two bytes of
-    RGB565), and both are live in the tree while #161 lands, so the runtime asks
-    the canvas rather than assuming. The 565 side needs its WIRE table too:
-    libmoy resolves colour at draw time there, and the table is per-canvas --
+    Every tier draws on `device_canvas.DeviceCanvas` now (two bytes of RGB565),
+    including the host -- `runtime/canvas.py`, the indexed host raster this used
+    to have to straddle, was deleted 2026-08-15. The probe stays because it is
+    how the runtime asks a canvas what it is rather than assuming, and libmoy's
+    binding still accepts either. The 565 side needs its WIRE table too: libmoy
+    resolves colour at draw time there, and the table is per-canvas --
     byte-swapped on the T-Deck's panel, canonical elsewhere, and rewritten
     outright by a cart's SPEC.md 3.1 palette.
 
@@ -70,7 +71,7 @@ def canvas_target(canvas):
     buf = getattr(canvas, "_buf", None)          # DeviceCanvas: RGB565
     if buf is not None:
         return buf, getattr(canvas, "_wire", None), False
-    return canvas.buf, None, True                # runtime/canvas.py: indices
+    return canvas.buf, None, True                # an indexed canvas: no tier ships one
 
 
 class MoycoreHostRun:

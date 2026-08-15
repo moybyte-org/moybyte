@@ -249,9 +249,9 @@ def _system_canvas_class():
         because only the host has a screen to hand to pygame or a GIF -- an
         RGB888 readout.
 
-        Its purpose is to make `runtime/canvas.py` deletable: everything the
-        host's `SystemCanvas` does and `DeviceCanvas` does not, does it here,
-        over the raster all three tiers already share.
+        Its purpose was to make `runtime/canvas.py` deletable -- which it now
+        is, and is: everything the host's `SystemCanvas` did and `DeviceCanvas`
+        does not, is done here, over the raster all three tiers share.
         """
 
         # NOT the class default 2. That describes the P4's DPI buffer rotation;
@@ -358,6 +358,60 @@ def _system_canvas_class():
                 lay.palette = self._palette
             return lay
 
+        # Does `blit_game` also paint the LETTERBOX around the composite?
+        #
+        # `DeviceCanvas.blit_game` is the T-Deck's, and the T-Deck's canvas IS
+        # the glass: it fills four black bands over everything outside the game
+        # rect, because on that tier everything outside the game rect IS
+        # letterbox. `FullscreenStackWM.composite_game` relies on exactly that --
+        # it probes for the verb and RETURNS, so the `sc.cls(_VIEWPORT_BEZEL)`
+        # below the probe never runs on a canvas that has one.
+        #
+        # The windowed tier means the opposite by the same call.
+        # `WindowedWM._blit_game` passes a WINDOW's content origin, and paints
+        # the play world's own bezel itself (behind a stale-by-N latch, so it
+        # does not refill the screen every frame). Bands there cover the desk,
+        # its icons, the OS bar and every other window -- which is what the host
+        # started doing the moment it inherited this method: a black desktop
+        # with one game window floating on it.
+        #
+        # The P4 has the same split and does not feel it, because it only ever
+        # runs the windowed WM and its `P4SystemCanvas.blit_game` override
+        # paints no bands. The host runs BOTH tiers, so one inherited meaning
+        # cannot serve it -- `build_workstation` clears this when it installs
+        # WindowedWM. (`WebSystemCanvas` inherits the T-Deck's unchanged and
+        # runs the windowed WM: same defect, on the wasm head, unfixed here.)
+        letterbox_composite = True
+
+        def blit_game(self, gc, ox, oy, scale, defer=False, src=None):
+            if self.letterbox_composite:
+                return DeviceCanvas.blit_game(self, gc, ox, oy, scale, defer,
+                                              src)
+            # CLIP the bands away rather than re-implementing the composite:
+            # the base method's bezel fills go through `_fill`, which intersects
+            # with the clip rect, while the composite itself is one
+            # `blit565_scale` writing exactly the destination rect. So a clip to
+            # that rect drops the four fills and leaves every drawn pixel
+            # untouched -- one meaning of the verb, expressed as a restriction
+            # of the other, instead of a second copy to keep in step.
+            gw, gh = gc.w, gc.h
+            vw, vh = (src[2], src[3]) if src is not None else (gw, gh)
+            # FLUSH FIRST. The base method flushes any pending sprite run of its
+            # own, and under the narrowed clip below that run would be emitted
+            # clipped to the game rect -- silently dropping chrome sprites
+            # queued before the composite.
+            self.flush_batch()
+            keep = (self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+            self._clip_x0 = max(keep[0], self._ox + int(ox))
+            self._clip_y0 = max(keep[1], self._oy + int(oy))
+            self._clip_x1 = min(keep[2], self._ox + int(ox) + vw * int(scale))
+            self._clip_y1 = min(keep[3], self._oy + int(oy) + vh * int(scale))
+            try:
+                DeviceCanvas.blit_game(self, gc, ox, oy, scale, defer, src)
+            finally:
+                (self._clip_x0, self._clip_y0,
+                 self._clip_x1, self._clip_y1) = keep
+
         def blit_cover(self, gc):
             """wallpaper._backdrop_blit's raster path: the smallest integer
             upscale of the 320x240 wallpaper frame that COVERS the whole
@@ -372,8 +426,7 @@ def _system_canvas_class():
             drawn nothing -- a black desk with correct chrome on top, which is
             exactly what the wasm head's first build produced.
 
-            `gc` is the GAME canvas, and on the host it may still be an indexed
-            `runtime.canvas.Canvas` -- see `_cover_py`.
+            `gc` is the GAME canvas -- a `DeviceCanvas` on every tier now.
             """
             gw, gh = gc.w, gc.h
             if gw <= 0 or gh <= 0:
@@ -398,8 +451,9 @@ def _system_canvas_class():
                 scaled(self._buf, sw, sh, int(ox), int(oy),
                        words, gw, gh, int(scale))
                 return
-            # Still reached, and not as a fallback for a missing kernel: an
-            # INDEXED source has no `_buf` for the kernel to read. See _cover_py.
+            # Reached only on a build with no `blit565_scale` (an older kernel),
+            # or for a source that publishes palette INDICES rather than 565.
+            # See _cover_py.
             self._cover_py(gc, ox, oy, scale)
 
         def _cover_py(self, gc, ox, oy, scale):
@@ -409,15 +463,11 @@ def _system_canvas_class():
             # inner loop. Deliberately a twin of that code rather than a new
             # idea, so the two stay readable against each other.
             #
-            # An INDEXED source is the migration case, and it is the only case
-            # that runs until runtime/canvas.py is gone: the host's game canvas
-            # (and therefore the wallpaper's frame) is still a `Canvas` of
-            # palette indices while this class holds the system surface. Without
-            # it the first wiring of a HostSystemCanvas into build_workstation
-            # dies on `gc._buf` at the first desktop frame. It resolves through
-            # THIS canvas's table, which is what the index path it replaces does
-            # -- there the indices are copied raw and the destination's palette
-            # resolves them later. Delete this branch with canvas.py.
+            # The INDEXED branch resolves through THIS canvas's table, which is
+            # what the index path it mirrors does -- there the indices are copied
+            # raw and the destination's palette resolves them later. No canvas in
+            # the tree publishes `.buf` any more, so it is a contract, not a lane
+            # anything currently takes.
             words = getattr(gc, "_buf", None)
             src = memoryview(words).cast("H") if words is not None else None
             idx = None if src is not None else gc.buf
@@ -452,8 +502,8 @@ def _system_canvas_class():
 
         def to_rgb888(self):
             """The surface as w*h*3 row-major RGB bytes -- what pygame blits and
-            what the GIF export writes. Byte-identical to `Canvas.to_rgb888()`,
-            which is the acceptance test for replacing it.
+            what the GIF export writes. Byte-identical to the deleted
+            `Canvas.to_rgb888()`, which was the acceptance test for replacing it.
 
             Word -> palette INDEX -> RGB, never a 5/6/5 bit-expansion. The
             expansion looks right (it is what every "convert 565" snippet does)
@@ -513,6 +563,38 @@ def __getattr__(name):
     if name == "HostSystemCanvas":
         return _system_canvas_class()
     raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
+def indices_of(cv, strict=True):
+    """A canvas's LOGICAL surface as one MOY64 palette-index byte per pixel.
+
+    The readout for the tools that persist a FRAME as index data -- the cover
+    baker (`tools/gen_covers.py` -> `.moyimg`) and the site GIF recorder, whose
+    output carries the MOY64 palette verbatim and skips quantization entirely.
+    Both used to read `cv.buf` directly, which was only ever a readout because
+    the host raster happened to store indices; now the exact reduction is named,
+    and it is `device_canvas.to_indices` (see it for why the map is total).
+
+    Viewport-aware for the same reason `to_rgb888` is: a canvas drawing into a
+    sub-rect of a wider buffer still reads out as the surface it presents.
+    """
+    install()
+    from device_canvas import to_indices              # noqa: E402 -- after install
+    fb = getattr(cv, "flush_batch", None)
+    if fb is not None:
+        fb()                                          # complete queued sprites (#63)
+    buf = cv._buf
+    wire = getattr(cv, "_wire", None)
+    w, h = cv.w, cv.h
+    stride = getattr(cv, "_stride", w)
+    ox = getattr(cv, "_ox", 0)
+    oy = getattr(cv, "_oy", 0)
+    if ox == 0 and oy == 0 and stride == w:
+        return to_indices(buf, wire, strict)
+    return b"".join(
+        to_indices(buf[((oy + row) * stride + ox) * 2:
+                       ((oy + row) * stride + ox + w) * 2], wire, strict)
+        for row in range(h))
 
 
 def make_system_canvas(w, h, font_scale=1):

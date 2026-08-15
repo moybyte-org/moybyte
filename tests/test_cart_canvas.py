@@ -136,9 +136,10 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     ws.ach.toast = None                  # the first-play achievement toast is
     for _ in range(3):                   # wall-clock timed -- clear, don't wait
         drv.frame(DT)
-    buf = stock.buf
-    assert buf[56 * 320 + 96] == 60                   # cart (0, 0)
-    assert buf[(56 + 127) * 320 + 96 + 127] == 61     # cart (127, 127)
+    # pix() reads a palette INDEX back on every tier, so the cart's own colour
+    # numbers are what the assertion names.
+    assert stock.pix(96, 56) == 60                    # cart (0, 0)
+    assert stock.pix(96 + 127, 56 + 127) == 61        # cart (127, 127)
     # Run death restores the boot raster and the shared-canvas degradation.
     ws.player.release_world()
     assert ws.canvas is stock
@@ -156,11 +157,12 @@ def test_view_scales_and_maps_touch(tmp_path):
     # Touch mapping is the inverse: the viewport's top-left is cart (0, 4).
     assert ws.wm.game_xy(32, 0) == (0, 4)
     assert ws.wm.game_xy(32 + 255, 239) == (127, 123)
-    buf = ws.sys_canvas.buf
-    assert buf[0 * 320 + 32] == 62                    # cart (0, 4) -> dest (32, 0)
-    assert buf[0 * 320 + 31] == 0                     # pillar stays bezel
+    sc = ws.sys_canvas
+    assert sc.pix(32, 0) == 62                        # cart (0, 4) -> dest (32, 0)
+    assert sc.pix(31, 0) == 0                         # pillar stays bezel
     # cart row 0 lies outside the view: its marker must never reach the glass.
-    assert 63 not in bytes(buf)
+    import canvas_probe as probe
+    assert probe.word_of(63, sc) not in set(probe.pixels(sc))
 
 
 def test_out_of_set_canvas_is_refused_by_name(tmp_path):

@@ -25,7 +25,8 @@ code) and **host glue**.
 |---|---|
 | `palette.py` | **(shared-ish)** `MOY64` 64-color palette (PICO-8 base 16 + ramp), name↔index |
 | `font.py` | **(host)** petme128 8×8 font extracted byte-for-byte from framebuf, so host text is pixel-identical to the device |
-| `canvas.py` | **(host)** `Canvas` — indexed surface (320×240 in the console), TIC-80 API (`cls/pix/line/rect/rectb/circ/circb/spr/map/print` — `rect`/`circ` filled, `rectb`/`circb` outlines; `map` blits a tilemap region, native one-call `moy_gfx.blit_map` on device), `print` uses `font.py`, `to_rgb888()`; `Image` sprites |
+| `host_canvas.py` | **(host-only)** the BOARDS' canvas class, on CPython. There is no host raster: `make_canvas(w, h)` / `make_system_canvas(w, h, font_scale)` build a `device_canvas.DeviceCanvas` (RGB565, TIC-80 API — `cls/pix/line/rect/rectb/circ/circb/spr/map/print`, `rect`/`circ` filled, `rectb`/`circb` outlines) over a `HostCompositor` (one buffer, no flush), plus the `HostSystemCanvas` subclass that adds the system-surface contract (`font_scale` text, font-scale layers, `blit_cover`, `to_rgb888`) and `indices_of(cv)` for the cover/GIF exporters. `install()` registers `moy_gfx`→`gfx_binding` and a `framebuf` shim so `device_canvas` imports unchanged. (The second raster, an indexed pure-Python canvas, was deleted 2026-08-15 — git history has it.) |
+| `gfx_binding.py` | **(host-only)** `moy_gfx` for CPython: builds + ctypes-loads vendored libmoy compiled `MOY_PIXEL_RGB565` beside `moyhost_gfx.c` (cached under `.build/host_gfx/`). Signatures match the native module exactly; pinned per-verb by `tests/test_gfx_binding.py` |
 | `editors.py` (+ `editors_base/_code/_sheet/_paint_map/_block/_music/_scene.py`) | **(shared, staged to device)** the editor cores, split per editor with `editors.py` as the re-exporting umbrella (`from editors import X` unchanged): `editors_base` = `UndoStack`/`KeyEdge`/`UndoRedoMixin`; `CodeEditor`; `_SheetSprite`/`SpriteSheet` (8×8 tiles + `__gfx__` hex)/`IconSheet`/`TileMap` (`w×h` tile-id grid over a sheet + `map.moymap` hex, `mget`/`mset`, #32); `PaintEditor`+`MapEditor`; `BlockRow`+`BlockEditor`; `MusicEditor`; `SceneEditor` (#85 Stage 2: placed-actor rows + place/select/move/z-order/props over full-snapshot undo) |
 | `audio.py` | **(shared, staged to device)** sound data model (`SFX`/`MusicTrack`/`AudioBank`) + `AudioEngine` — on the host a driver over vendored libmoy via `audio_binding.py` (`render()` → PCM; silence without a C compiler), on the device the bank/model holder only (playback = native `moy_audio`). The Python twin synth died with moycore stage 0 (#97). Backends (host `FakeAudio`/SDL, device I2S) consume `render()`. See `docs/audio_design_v04.md` (#16) |
 | `audio_binding.py` | **(host-only)** builds + loads the ctypes `.so` over the double-widened vendored libmoy audio (`moyhost_audio.c` shim; cached under `.build/host_audio/`, keyed by source+compiler hash; built by `make setup`, lazily otherwise). Pinned by `tests/test_audio_parity.py` |
@@ -80,12 +81,12 @@ Content + tooling:
   catalog column left, preview right. IMAGES/CARTS preview in a little MONITOR whose screen
   shows the FULL wallpaper (a second compile of the cart on an offscreen canvas, blitted as one
   spr so the web tiers render it; fills/My Art draw direct); THEMES previews mock WM windows in
-  the selected token set. A cart's preview is a COMPUTED STILL, identical on every tier (no
-  host/device policy fork — the owner's anti-drift call): one render per cart source on the
-  pure-Python `canvas.py` (staged to both boards), persisted as a `thumbs/wp<w>x<h>.mct`
+  the selected token set. A cart's preview is a COMPUTED STILL: one render per cart source on
+  an offscreen canvas, reduced back to MOY64 indices and persisted as a `thumbs/wp<w>x<h>.mct`
   sidecar stamped with `cover_sig(src)` (the thumbnail model — an edit recomputes, a re-seed
   regenerates; no prebaked assets), so the appearance screen closes the redraw gate like any
-  static UI.
+  static UI. HOST + WEB only: the gate is the offscreen canvas FACTORY (`host_canvas` /
+  `web_canvas`), which a board has neither of — see `wallpaper.draw_preview` for the history.
   `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
   one crash-safe `notes.json` beside `artwork.moyimg`.

@@ -16,9 +16,10 @@ quarter:
 
   * `runtime/palette.py` imports CPython's `colorsys` at module scope. The web
     runner hit this and solved it by GENERATING a literal twin
-    (web_runner/build.sh, "which needs CPython colorsys"). Both boards stage the
+    (web_runner/build.sh, "which needs CPython colorsys"). Both boards staged the
     raw file, so `import palette` -- and therefore `import canvas`, its only
-    device consumer -- cannot succeed there.
+    device consumer -- could not succeed there. (Neither file reaches a board
+    now, and `runtime/canvas.py` is deleted outright.)
 
 The shape of the defect is always the same: an import that fails on device
 turns into a MISSING FEATURE rather than a crash, because the callers are
@@ -28,9 +29,9 @@ and never from `modules/` on disk, which is precisely where the staleness hides.
 
 The rule is deliberately weak enough not to be noisy: for each import site, at
 least ONE branch of its try/except-ImportError ladder must resolve. That accepts
-both ladder orderings -- `canvas.py` puts the host lane in `try` and the device
-lane in `except`, `moy_webserver.py` does the opposite -- while still failing
-when no branch can possibly work.
+both ladder orderings -- `wallpaper.py` puts the host lane in `try` and the
+device lane in `except`, `moy_webserver.py` does the opposite -- while still
+failing when no branch can possibly work.
 """
 
 import ast
@@ -73,16 +74,16 @@ NATIVE = {
 # and not global, because `host_api` is genuinely the WEB head's cart API
 # (web_boot.py imports it by name) while being meaningless on a board.
 HOST_ONLY = {
-    "tdeck": {"host_app", "host_api", "lua_host", "raster_binding",
+    "tdeck": {"host_app", "host_api", "lua_host",
               "audio_binding", "lua_binding", "simulate_desktop"},
-    "p4": {"host_app", "host_api", "lua_host", "raster_binding",
+    "p4": {"host_app", "host_api", "lua_host",
            "audio_binding", "lua_binding", "simulate_desktop"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
     # half of the very module device_canvas imports.
     "web": {"host_app", "lua_host", "simulate_desktop",
-            "raster_binding", "audio_binding", "lua_binding",
+            "audio_binding", "lua_binding",
             "gfx_binding", "native_build", "host_canvas"},
 }
 
@@ -119,10 +120,12 @@ KNOWN_GAPS = {}
 # re-import of a file that cannot load.
 NEVER_ON_A_BOARD = {
     "canvas": (
-        "the pure-Python indexed raster. Its only device consumer was "
-        "wallpaper._ensure_preview, and it could never import there anyway "
-        "(see `palette`). The boards draw through moy_gfx/libmoy; a second "
-        "raster in frozen flash bought a preview nobody ever saw."),
+        "the pure-Python indexed raster, DELETED 2026-08-15 -- the host draws "
+        "on device_canvas.DeviceCanvas like everything else, so the file this "
+        "names does not exist to stage. Its only device consumer had been "
+        "wallpaper._ensure_preview, which could never import it there anyway "
+        "(see `palette`). Kept as a tripwire: a second raster in frozen flash "
+        "bought a preview nobody ever saw, and should not come back."),
     "palette": (
         "builds indices 16-63 with CPython's `colorsys` at IMPORT time, and "
         "MicroPython has none. VERIFIED ON P4 GLASS 2026-08-15, on firmware "

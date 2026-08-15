@@ -179,7 +179,7 @@ def test_unknown_vendor_extension_still_refused(tmp_path):
 
 def test_cart_cannot_read_the_hosts_exit_button(tmp_path):
     from runtime import host_app
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     from runtime.input import InputState
     inp = InputState()
     api = host_app.make_api(Canvas(320, 240), inp, {})

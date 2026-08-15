@@ -1,11 +1,12 @@
 """Compile a C shim against vendored sources, cached by content hash.
 
-Three host bindings need exactly this -- audio (`moyhost_audio.c`), the indexed
-raster (`moyhost_raster.c`) and the RGB565 compositor (`moyhost_gfx.c`) -- and
-the first two had grown their own copy of it. That is the same duplication this
-module exists to help retire from the canvases, so it is not repeated a third
-time: the differences between the three are a source list, a shim, some flags
-and a cache directory, which are arguments.
+Three host bindings need exactly this -- audio (`moyhost_audio.c`), the RGB565
+compositor (`moyhost_gfx.c`) and Lua (`moyhost_lua.c`) -- and two of them had
+grown their own copy of it. That is the same duplication this module exists to
+help retire from the canvases, so it is not repeated a third time: the
+differences between the three are a source list, a shim, some flags and a cache
+directory, which are arguments. (A fourth, `moyhost_raster.c`, was libmoy built
+INDEXED for the deleted host raster; it went with `runtime/canvas.py`.)
 
 The cache key is the CONTENT of every source plus the flags plus the compiler's
 version string, not a timestamp. That matters because the vendored libmoy

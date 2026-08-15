@@ -136,11 +136,12 @@ The end-state stack, across every head:
   upcall/state-mirror seams, and the `LUA_32BITS` host-parity hole.
 - **Alive, deliberately:** the Python cart/shell verb surface (`make_api` +
   the DeviceCanvas/compositor glue) — the ONE accepted duplication (§3.5),
-  pinned by the semantic traces. `runtime/canvas.py` survives only as the
-  compositor/extension layer: v6 and earlier said "two raster
-  implementations is the end state — not one"; the §3.5 directive REVERSED
-  that, and the host raster binds vendored libmoy (the stage-0 ctypes
-  pattern) with the conformance goldens re-pointed at the binding.
+  pinned by the semantic traces. The host's own raster is GONE: v6 and
+  earlier said "two raster implementations is the end state — not one"; the
+  §3.5 directive REVERSED that, and stage 5 went one step further than the
+  binding it planned — see §6 stage 5. `runtime/host_canvas.py` builds
+  `device_canvas.DeviceCanvas` on CPython over `runtime/gfx_binding.py`
+  (vendored libmoy compiled RGB565), and runtime/canvas.py is deleted.
 
 ## 2. Document map (what this absorbs, supersedes, defers to)
 
@@ -271,7 +272,8 @@ console, windowed desktop included, and moycore's raster per §7's own split
 covers the CART canvas plus console extensions, not shell pixels — while
 moy_gfx is deliberately compiled OUT of the wasm build. So completing the
 sunset requires a wasm-side SHELL raster + framebuffer present path that no
-stage previously named: either `runtime/canvas.py` interpreted at desktop
+stage previously named: either runtime/canvas.py (the host's indexed raster,
+since deleted) interpreted at desktop
 sizes (which reverses the runner's founding "the wasm never rasterizes a
 pixel" premise and needs a measured perf verdict before it is believed) or
 moy_gfx-in-wasm (currently excluded by build design). Stage 4 therefore
@@ -397,19 +399,22 @@ order, each rung deleting a parallel implementation:
    existed and was never taken. It matches calls now, and the test
    asserts both directions.
 5. **Host raster binds libmoy** (NEW scope this directive adds; reverses
-   v6's "two rasters is the end state") — `runtime/canvas.py` shrinks to
-   the compositor/extension layer, conformance goldens re-point at the
-   binding. **The BINDING is built and PROVEN (2026-08-12 night):**
-   `runtime/raster_binding.py` compiles the vendored canvas/sprite/data
-   sources INDEXED — so a libmoy pixel is one byte holding a palette
-   index, byte-for-byte what `Canvas.buf` already is, and the C draws
-   into the bytearray Python owns with no conversion — and
-   `tests/test_host_raster_binding.py` replays the spec's own traces
-   through it: **all 10 conformance scenes pixel-identical to the same
-   goldens the Python raster matches**, provisional 3D included. What
-   remains is the swap itself: canvas.py's verbs delegating to it while
-   its viewport/layers/batching/blit_strip/scroll_rect half stays
-   Python. The risk of that swap is now bounded by a passing oracle
+   v6's "two rasters is the end state") — **SHIPPED 2026-08-15, and it
+   went further than this item asked.** The plan here was for
+   runtime/canvas.py to keep its viewport/layers/batching half and
+   delegate its verbs to an INDEXED libmoy binding
+   (runtime/raster_binding.py, whose oracle
+   tests/test_host_raster_binding.py had already replayed all 10
+   conformance scenes pixel-identically). What landed instead is the
+   whole file's DELETION: the host builds
+   `device_canvas.DeviceCanvas` — the class both boards and the browser
+   run — through `runtime/host_canvas.py` over
+   `runtime/gfx_binding.py` (the same vendored libmoy compiled RGB565
+   instead of indexed). So the compositor/extension half is not a
+   surviving Python layer either; it is the board class's. The indexed
+   binding and its oracle are deleted with the raster they were built
+   for; `tests/test_spec_conformance.py` now replays the traces through
+   the 565 canvas and matches the same goldens. The risk was bounded by
    rather than by review.
 
 What remains after rung 5 is exactly one duplication, accepted by the same
@@ -541,7 +546,7 @@ lane (the maintainability case is THIS table, kept honest):
 | batch protocol (`begin_batch`/`flush_batch` upcalls, token, order rule) | **dead since 1a** — flush moved into C | pixel goldens + the trace harness's interleaved spr/primitive frames (the named "order-rule test" was only ever a source grep + a zero-pixel flush; the harness is the behavioral pin) |
 | camera/clip/pal Python-authoritative mirrors | **ownership flips** to moycore during a run; shell reads back at exit | state-verb traces — which do NOT yet observe the exit-time read-back (the trace resets state per frame); extend before this crossing |
 | `DeviceCanvas` Python methods + #155 gates | **survive** — Python carts and chrome | device↔host parity as today |
-| `runtime/canvas.py` host raster | **survives** — host shell + Python carts | `test_spec_conformance` goldens |
+| runtime/canvas.py host raster | **DELETED 2026-08-15** — superseded by `device_canvas.DeviceCanvas` on CPython (`runtime/host_canvas.py`), so the shell and Python carts draw on the boards' class | `test_spec_conformance` goldens, now replayed through that canvas |
 | TeeCanvas / device webserver frame push | **die now** — §3.2 sunset | grep-tests pinning absence |
 | DrawRecorder / RecordingLayer / CommandCanvas / page replayer | **die at stage 4** — they are the wasm head's substrate until it re-rasters (§3.2 sequencing) | n/a until then |
 | lupa host runner | **dies** when the host embeds moycore's VM (§3.1) | host==device Lua parity, now exact |
@@ -729,7 +734,7 @@ cache" was DEAD CONFIGURATION (the review caught it): `MAP_AUTO_CACHE`
 ships False with a losing hardware verdict (T-Deck 2026-07-07, 4.3–5.7ms
 direct vs 13.4ms cached), so the shipped device lane is direct `blit_map`
 and the crossing carries no cache constraint (the HOST's gen-keyed map
-cache lives in `runtime/canvas.py`, which survives regardless); state-verb
+cache lives in `DeviceCanvas.map`, which survives regardless); state-verb
 ownership; input snapshot; audio queue; the odd-shape decision — which
 ships WITH a real odd-form A/B, since today's matrix covers hot shapes only.
 
@@ -761,11 +766,11 @@ synthesizes bands from it exactly as today.
 
 **Stage 4 — the wasm head. SHIPPED 2026-08-12.** It opened with the
 feasibility spike §3.2 required: price the wasm shell raster
-(`runtime/canvas.py` at desktop sizes vs moy_gfx-in-wasm) with real frame
+(runtime/canvas.py at desktop sizes vs moy_gfx-in-wasm) with real frame
 numbers, since the cart canvas was moycore-covered and the SHELL was the
 unpriced half. **The spike REPORTED** (`experiments/wasm_shell_raster/` —
 MEASURED, real dist wasm VM + emcc-built vendored libmoy, node, 1024×600):
-option (a), `runtime/canvas.py` interpreted in the shipped wasm MicroPython,
+option (a), runtime/canvas.py interpreted in the shipped wasm MicroPython,
 priced MARGINAL — desk repaint 37ms median / editor repaint 49ms (vs 6.5/8.4ms
 under CPython); option (b), the vendored libmoy kernels compiled to wasm,
 priced TRIVIAL — 0.04–0.1ms per full repaint + 0.42ms indexed→RGBA present,

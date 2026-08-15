@@ -175,10 +175,19 @@ def test_motion_depth_compiles_and_runs():
 # -- looks (show/hide/size/say via draw_scene) --------------------------------
 
 def _rec_api(scene_rows):
-    from runtime import host_app, input as inp, canvas as canv
+    from runtime import host_app, host_canvas, input as inp
+    from runtime.moy_image import Image
+    host_canvas.install()
+    from device_canvas import DeviceCanvas
     calls = []
 
-    class Rec(canv.Canvas):
+    class Rec(DeviceCanvas):
+        # A real canvas with the draw verbs recorded: draw_scene's dispatch is
+        # what is under test, not its pixels. Built over a HostCompositor so it
+        # is the same class the console runs, one layer of overrides thick.
+        def __init__(self, w, h):
+            DeviceCanvas.__init__(self, host_canvas.HostCompositor(w, h))
+
         def spr_tile(self, sheet, n, x, y, ck, scale, flip):
             calls.append(("spr", n, scale, flip))
 
@@ -199,7 +208,7 @@ def _rec_api(scene_rows):
         count = 16
 
         def tile_image(self, n, transparent=-1):
-            return canv.Image(8, 8, [n] * 64, transparent)
+            return Image(8, 8, [n] * 64, transparent)
 
         def tile_span_image(self, *a):
             return None

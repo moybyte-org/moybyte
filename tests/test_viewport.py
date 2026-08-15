@@ -8,6 +8,11 @@ costs 27ms against a measured 91MB/s ceiling.
 
 Everything outside the viewport must be untouched: a window's content clearing
 itself must not wipe the desktop it is drawing on.
+
+The canvas is the boards' own (`device_canvas.DeviceCanvas` over a host
+compositor), so a pixel is an RGB565 WORD, not a palette index: buffer
+comparisons go through `_buf`, and the out-of-viewport sentinel is a word rather
+than a colour.
 """
 
 import sys
@@ -19,10 +24,25 @@ sys.path.insert(0, str(ROOT / "runtime"))
 
 import pytest                                            # noqa: E402
 
-from runtime.canvas import Canvas                        # noqa: E402
+import canvas_probe as probe                             # noqa: E402
+from runtime.host_canvas import make_canvas as Canvas    # noqa: E402
 
 VX, VY, VW, VH = 37, 23, 120, 80          # a deliberately unaligned viewport
 BW, BH = 240, 160
+
+# An "untouched" marker for the pixels outside the viewport. A WORD, not a
+# palette index -- and deliberately one no MOY64 entry produces, so a verb that
+# wrote here could not accidentally reproduce it.
+SENTINEL = 0x2A2A
+
+
+def _prefill(cv):
+    cv._buf[:] = b"\x2a" * len(cv._buf)
+
+
+def _word(cv, x, y):
+    """The raw framebuffer word at BUFFER (x, y) -- not surface-local."""
+    return memoryview(cv._buf).cast("H")[y * cv._stride + x]
 
 
 def _paint(cv, w, h):
@@ -80,36 +100,34 @@ def test_drawing_through_a_viewport_equals_draw_then_copy():
     direct = _viewport_canvas()
     _paint(direct, VW, VH)
 
-    assert bytes(direct.buf) == bytes(staged.buf)
+    assert bytes(direct._buf) == bytes(staged._buf)
 
 
 def test_nothing_outside_the_viewport_is_touched():
     """cls() means "my surface", not "the whole framebuffer"."""
     cv = Canvas(BW, BH)
-    for i in range(len(cv.buf)):
-        cv.buf[i] = 42
+    _prefill(cv)
     cv.set_viewport(VX, VY, VW, VH)
     _paint(cv, VW, VH)
     for y in range(BH):
         for x in range(BW):
             inside = VX <= x < VX + VW and VY <= y < VY + VH
             if not inside:
-                assert cv.buf[y * BW + x] == 42, (x, y)
+                assert _word(cv, x, y) == SENTINEL, (x, y)
 
 
 def test_scroll_rect_shifts_inside_the_viewport_only():
     """#113's shift is surface-local and must not drag in neighbouring pixels."""
     cv = Canvas(BW, BH)
-    for i in range(len(cv.buf)):
-        cv.buf[i] = 42
+    _prefill(cv)
     cv.set_viewport(VX, VY, VW, VH)
     cv.cls(0)
     cv.rect(0, 0, 20, VH, 9)                 # a bar at the surface's left edge
     cv.scroll_rect(0, 0, VW, VH, 30, 0)      # shift it right by 30
     row = VY + VH // 2
-    assert cv.buf[row * BW + VX + 40] == 9   # moved
-    assert cv.buf[row * BW + VX - 1] == 42   # the pixel outside is untouched
-    assert cv.buf[row * BW + VX + VW] == 42
+    assert cv.pix(40, VH // 2) == 9                       # moved (surface-local)
+    assert _word(cv, VX - 1, row) == SENTINEL             # outside is untouched
+    assert _word(cv, VX + VW, row) == SENTINEL
 
 
 def test_clear_viewport_restores_the_whole_surface():
@@ -117,7 +135,7 @@ def test_clear_viewport_restores_the_whole_surface():
     cv.clear_viewport()
     assert (cv.w, cv.h, cv._ox, cv._oy) == (BW, BH, 0, 0)
     cv.cls(6)
-    assert set(cv.buf) == {6}
+    assert set(probe.pixels(cv)) == probe.words_of({6}, cv)
 
 
 def test_camera_reports_the_callers_value_not_the_offset():
@@ -135,7 +153,7 @@ def test_a_full_surface_canvas_is_bit_for_bit_unchanged():
     _paint(plain, VW, VH)
     again = Canvas(VW, VH)
     _paint(again, VW, VH)
-    assert bytes(plain.buf) == bytes(again.buf)
+    assert bytes(plain._buf) == bytes(again._buf)
     assert (plain._ox, plain._oy, plain._stride) == (0, 0, VW)
 
 
@@ -155,4 +173,4 @@ def test_equivalence_holds_at_the_edges(vx, vy, vw, vh):
     direct.cls(0)
     direct.set_viewport(vx, vy, vw, vh)
     _paint(direct, vw, vh)
-    assert bytes(direct.buf) == bytes(staged.buf)
+    assert bytes(direct._buf) == bytes(staged._buf)

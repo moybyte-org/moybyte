@@ -3065,11 +3065,14 @@ def test_editor_cores_are_shared_single_source():
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    canvas = Path("runtime/canvas.py").read_text(encoding="utf-8")
+    # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds
+    # `device_canvas.DeviceCanvas` on CPython), so "the host does not redefine the
+    # cores" is checked where a redefinition could still be written.
+    host_canvas = Path("runtime/host_canvas.py").read_text(encoding="utf-8")
     # Neither backend redefines the shared cores.
     for cls in ("class CodeEditor", "class SpriteSheet", "class PaintEditor"):
         assert cls not in runtime, "device redefines " + cls
-    assert "class SpriteSheet:" not in canvas, "host canvas redefines SpriteSheet"
+        assert cls not in host_canvas, "host canvas redefines " + cls
     # build.sh stages the canonical files into modules/ so the device freezes them.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     for name in ("editors", "editors_base", "editors_code", "editors_sheet",

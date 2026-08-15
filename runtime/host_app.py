@@ -77,7 +77,11 @@ sys.modules.setdefault("players", _players)   # console.py does `from players im
 from . import console  # noqa: E402  (after the editors/audio aliases above)
 from . import moy_carts  # noqa: E402  (shared .moy store; host-clean)
 from . import palette  # noqa: E402
-from .canvas import Canvas, Image, SystemCanvas  # noqa: E402
+# The RASTER is the boards' (`device_canvas.DeviceCanvas`, RGB565), reached
+# through the two factories in host_canvas.py. There is no host-only canvas
+# class any more -- runtime/canvas.py, the second raster, is deleted.
+from . import host_canvas  # noqa: E402
+from .moy_image import Image  # noqa: E402,F401  (re-exported: host_app.Image)
 # The pure-Python cart-API backend (make_api + ConsoleDriver + the fake services),
 # extracted to host_api.py so non-CPython targets can freeze it (#151 web runner);
 # re-exported here so host_app.make_api / .ConsoleDriver / ... are unchanged for
@@ -249,7 +253,6 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_carts.scan(carts_dir)
-    canvas = Canvas(WIDTH, HEIGHT)               # the fixed 320x240 GAME canvas
     sw, sh = sys_size if sys_size else (WIDTH, HEIGHT)
     # The system canvas must be at least the game size -- the game is composited into
     # it as a viewport, so a smaller panel makes no sense (and would letterbox into
@@ -258,14 +261,23 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     sh = max(HEIGHT, int(sh))
     if (sw, sh) == (WIDTH, HEIGHT) and int(font_scale) <= 1:
         sys_canvas = None                        # share one canvas -> identical to today
+        # The SHARED-canvas tier (the T-Deck's arrangement): one surface is both
+        # the game raster AND the glass, so it must carry the system-surface
+        # contract -- `to_rgb888` for pygame/GIF readout, and `blit_cover`/
+        # `set_font_scale` for the moment a cart declares a smaller raster and
+        # console.bind_run_canvas PROMOTES this canvas to system canvas. At
+        # font_scale 1 a HostSystemCanvas draws byte-identically to the plain
+        # game canvas, so this costs nothing but the extra verbs.
+        canvas = host_canvas.make_system_canvas(WIDTH, HEIGHT)
     else:
-        sys_canvas = SystemCanvas(sw, sh, font_scale=font_scale)
+        canvas = host_canvas.make_canvas(WIDTH, HEIGHT)   # the fixed 320x240 GAME canvas
+        sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
                              sys_canvas=sys_canvas, font_scale=font_scale)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
-    ws.make_game_canvas = lambda w, h: Canvas(w, h)
+    ws.make_game_canvas = lambda w, h: host_canvas.make_canvas(w, h)
     # ONE Lua runtime on the host, and it is the boards' (#67 rung 4 / plan 6.9):
     # runtime/lua_binding -- libmoy's own binding over the same vendored 5.4 the
     # firmware compiles, LUA_32BITS and all. A "lua" cart with no native module
@@ -310,6 +322,13 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     # the first frame. Only meaningful with a distinct (big) system canvas.
     if windowed and ws._sys_canvas is not None:
         from runtime.wm_windowed import WindowedWM
+        # A windowed composite must NOT letterbox: `blit_game` is asked to put a
+        # cart inside a WINDOW here, and the fullscreen meaning of the same verb
+        # (fill everything outside the game rect black) would paint over the
+        # desk, its icons, the bar and every other window. See
+        # HostSystemCanvas.letterbox_composite -- the tier is chosen here, so
+        # this is where the canvas is told which meaning it serves.
+        ws._sys_canvas.letterbox_composite = False
         ws.wm = WindowedWM(ws)
         ws.open_desk()                 # two worlds (#105): boot onto the DESK
     return ws

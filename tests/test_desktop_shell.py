@@ -96,13 +96,13 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
 def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     """With zero wallpaper carts installed, the built-in solid fills are still
     selectable so there is always a valid backdrop (zero-cart fallback)."""
-    from runtime import console, moy_carts, host_app
+    from runtime import console, moy_carts, host_app, host_canvas
     # A store with only a non-wallpaper cart.
     carts_dir = str(tmp_path / "carts")
     moy_carts.ensure_dirs(carts_dir)
     moy_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
     carts = moy_carts.scan(carts_dir)
-    canvas = host_app.Canvas(320, 240)
+    canvas = host_canvas.make_system_canvas(320, 240)
     inp = host_app.InputState()
     ws = console.Workstation(host_app._NullComp(), canvas, inp, carts)
     ws.make_api = host_app.make_api
@@ -792,12 +792,11 @@ def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
     black = C.NAMES["black"]
     # Sample a column at the far right of the strip, above the pips' glyph rows but
     # within the band: the backing fill must be present (not raw wallpaper).
-    y = 0
-    assert sc.buf[y * sc.w + 1] == black
+    assert sc.pix(1, 0) == black
     # The wallpaper's safe area (just below the strip) is NOT plain black -- the
     # animated backdrop visibly occupies the rows beneath the strip.
     below = lay.status_h + 2
-    band = set(sc.buf[below * sc.w:below * sc.w + sc.w])
+    band = {sc.pix(xx, below) for xx in range(sc.w)}
     assert len(band) >= 1   # rendered without error; backdrop occupies below-strip rows
 
 
