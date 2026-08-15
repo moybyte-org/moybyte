@@ -39,9 +39,24 @@ duplication this module deletes for a smaller one.
 
 ## Testing
 
-`tests/test_moycore_loop.py`, against the unix dual-usermod build:
+`tests/test_moycore_loop.py` and `tests/test_semantic_traces.py` drive this
+module through a real MicroPython VM on the desktop. That binary is a `make`
+target now:
 
-    cd firmware/lilygo_t_deck_plus_micropython/.build/usermods_luadraw
-    ln -sfn ../../native/moycore moycore        # beside moy_gfx and moy_lua
-    cd ../lvgl_micropython/lib/micropython/ports/unix
-    make VARIANT=standard BUILD=build-moycore USER_C_MODULES=<abs usermods_luadraw>
+    make unix-micropython
+
+It clones a pinned micropython, symlinks every native module that ships a
+Makefile fragment (`moy_gfx`, `moy_lua`, `moycore`, `moy_audio`) into one
+usermods tree, and builds `ports/unix` — about fifteen seconds cold, under a
+second warm, into `.build/unix_micropython/…/build-moybyte/micropython`. CI
+runs it on every push.
+
+The target exists because the recipe used to live HERE, as prose, and prose is
+not a build: the compiled-vs-compiled parity check
+(`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx`, the only place
+two independently compiled rasters are compared) pointed at a hand-built
+artifact nothing produced, so it passed on one machine and silently skipped
+everywhere else. Tests that need the binary say so loudly when it is absent
+rather than vanishing from the run.
+
+`MOYBYTE_MICROPYTHON=/path/to/micropython` points them at a different build.

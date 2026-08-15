@@ -136,9 +136,15 @@ test:
 # prevent. Hence a real target, and a CI step that runs it.
 #
 # ~15s from cold (2s clone, 4s submodules, 2s mpy-cross, 5s compile on 12
-# cores) and under a second warm, which is why there is no cache to go stale.
-# MICROPY_PY_SSL=0 drops the only submodule the standard variant would
-# otherwise need (mbedtls) and nothing here speaks TLS.
+# cores) and under a second warm, which is why there is no cache to go stale --
+# a cache MISS that silently skipped the check is the failure being fixed here,
+# so the cheapest honest answer is to always build.
+#
+# The two overrides trim the standard variant's system dependencies down to a
+# compiler, because a build that needs more than that on some machine turns
+# back into a build that does not happen. MICROPY_PY_SSL=0 drops the only
+# submodule it would otherwise want (mbedtls); MICROPY_PY_FFI=0 drops libffi.
+# Nothing on either side of a raster/VM parity check speaks TLS or ctypes.
 UNIX_MP_TAG ?= v1.28.0
 UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
@@ -166,7 +172,7 @@ unix-micropython:
 	    ln -sfn $(abspath $(UNIX_MP_NATIVE))/$$m $(UNIX_MP_USERMODS)/$$m; done
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
-	    VARIANT=standard MICROPY_PY_SSL=0 BUILD=build-moybyte \
+	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 
