@@ -43,8 +43,8 @@ from device_audio import make_audio
 from device_canvas import DeviceCanvas, _LayerComp
 from device_api import make_api
 from device_diag import (_diag_flush, _diag_perf_sample, _diag_hitch,
-                         _diag_drawbrk, _diag_loop, _diag_i2cstat, _diag_pump,
-                         HITCH_MS)
+                         _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat,
+                         _diag_pump, HITCH_MS)
 
 # --- #69 the input-poller thread ---------------------------------------------
 #
@@ -132,10 +132,23 @@ def run_desktop(fps_cap=60):
     panel bring-up at the top, the input trio, the SD/panel bus gate, and the
     serial channel.
     """
+    import tdeck_panel
     from tdeck_panel import TDeckCompositor, set_backlight
     from moybyte.input import InputState, TDeckKeyboard, InputPoller
     import moybyte_sd
     import moy_carts
+
+    # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
+    # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
+    # construction below or it reaches nothing. It is an assignment rather than
+    # an edit because `device_canvas.py` is staged from the fork tree and is not
+    # this port's to change: there it reads the flag from
+    # `moy_compositor.SRAM_BOUNCE_FLUSH`, and `tdeck_panel` is that module here.
+    # Read the block beside the constant for why the 2026-07-03 verdict against
+    # this lever does not apply to `moy_lcd`, and for which carts it can and
+    # cannot move.
+    import device_canvas
+    device_canvas.LAYER_COPY_ASYNC = tdeck_panel.LAYER_COPY_ASYNC
 
     comp = TDeckCompositor(nfbs=2)
     canvas = DeviceCanvas(comp)
@@ -468,6 +481,16 @@ def run_desktop(fps_cap=60):
                 pass
             _diag_perf_sample(diag, ws)
             _diag_drawbrk(diag, ws)
+            # DRAWBRK says how much of the frame is `render`; this says WHICH
+            # native op render is. Two of its buckets are the only instruments
+            # this port has for the two things that separate it from the fork:
+            # `layer=` is the draw_layer window copy, i.e. what the async layer
+            # copy above is meant to take to ~0 on a full-screen-layer cart, and
+            # `fill=` is the cls bucket, which is what a colour `background()`
+            # actually costs (a 153,600 B PSRAM write -- Brick Siege's whole
+            # `bg=`). Both are already measured every frame under perf capture;
+            # until now nothing printed them.
+            _diag_draw2(diag, ws)
             _diag_loop(diag, ws, _acc)
             for _i in range(12):
                 _acc[_i] = 0

@@ -546,8 +546,53 @@ three places that all needed it:
 *Why ~45 fps and not the fork's 51–54:* the two builds' `draw=` differ by ~3 ms
 independently of the flush (26–27 fps at `flush=17` implies ~20 ms of draw,
 against the fork's ~17). The overlap makes the frame `max(render, transfer)`, so
-what is left is a render-side gap — the `LAYER_COPY_ASYNC` row in the table
-below is the first suspect.
+what is left is a render-side gap. **The next section names it.**
+
+### The render-side gap is the PSRAM clock, and it is arithmetic
+
+The overlap landed (owner's board, 2026-08-16): `flush=` **16.8–20.2 → 2–4 ms**,
+and the `PUMP` line appeared reading `pump=3.25 idle=1.93 gaps=1 feed=15.87
+bands=5 fold=0`. On the Bench cart the mainline then sits at or above the fork on
+every phase. What did not close is one cart-side number. Same cart (Brick Siege),
+same night, each board's own `DRAWBRK`:
+
+```
+fork      logic=1.50  render=11.79 (bg=4.06)  audio=0.17  chrome=3.53   -> 51-54 fps
+mainline  logic=2.00  render=13.92 (bg=5.99)  audio=0.17  chrome=3.54   -> ~40 fps
+```
+
+Chrome is identical, flush is identical, and **`bg=` accounts for the whole of
+`render=`**: 11.79 − 4.06 = 7.73 against 13.92 − 5.99 = 7.93. The non-backdrop
+render is the same on both builds to within 0.2 ms. So there is exactly one
+number to explain, and it is not a lever — it is the bus.
+
+`bg=` is the **declared-backdrop restore** (#172): `background()`'s per-frame
+repaint, run by `Player.tick` before the cart's `_draw`. Brick Siege declares
+`background(col("dark_blue"))`, a COLOUR — so its restore is `canvas.cls()`, i.e.
+`moy_gfx.fill` writing 153,600 B into the PSRAM framebuffer, and nothing else.
+Now price it:
+
+| | fork | this build |
+|---|---|---|
+| `CONFIG_SPIRAM_SPEED` | **120** MHz octal | **80** MHz octal |
+| `bg=` (153,600 B fill) | 4.06 ms | 5.99 ms |
+| implied write rate | 37.8 MB/s | 25.6 MB/s |
+| ratio | | **1.475×**, against a clock ratio of **1.5×** |
+
+Cache geometry is identical between the two builds (32 KB icache / 64 KB dcache /
+32 B line — checked in the generated `sdkconfig`, not assumed), the fill kernel
+is the same staged `moy_gfx` source at the same `-O3`, and the CPU is 240 MHz on
+both. The PSRAM clock is the only systematic difference left, and it predicts the
+measurement to 1.5%.
+
+**So the residual is the 120 MHz MSPI row in the lever table below, not the layer
+copy** — and that row is a deliberate, well-argued "off" (an experimental IDF
+feature whose failure mode is random faults ~20 °C away from boot temperature,
+which also needs the fork's vendor-gate retune patch to be safe). It is a real
+lever with a real risk, not an oversight; it is simply where the ~2 ms lives.
+Two consequences worth stating plainly: any cart whose backdrop is a colour
+`background()` or a `cls()` carries the same ~1.5× tax on that fill, and no
+amount of overlap machinery can remove it, because the CPU is the thing waiting.
 
 ### `modules/tdeck_panel.py` — the compositor
 
@@ -600,10 +645,10 @@ with an A/B rather than inherited.
 | lever | fork | here | why |
 |---|---|---|---|
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
-| flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up |
+| flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up. **This is where the remaining cart-side gap lives** — Brick Siege's whole `bg=` difference is a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is the one lever left that would close it, and turning it on is a risk decision, not a perf decision |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
 | async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
-| GDMA async layer copy (#54 St.2 / #63) | on | **off** | `device_canvas.LAYER_COPY_ASYNC` is tied to `moy_compositor.SRAM_BOUNCE_FLUSH`, and that module is not staged here, so it resolves False. **The stated reason for that used to be "there is no SRAM bounce here", and since the flush split that is simply untrue** — the bounce is in `moy_lcd`, and the PSRAM contention the lever guards against was never present anyway (the panel DMA only ever reads internal SRAM). So this is now the RANKED next lever, not a deferred one: it measured layer 7ms → 0.04ms on the fork, and the ~3 ms of render the mainline carries over the fork is the right size for it. It needs a decision about where the flag comes from, because `device_canvas.py` belongs to the shipping tree and must not be edited from here — setting `device_canvas.LAYER_COPY_ASYNC = True` before the first canvas is constructed is the no-edit route |
+| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and layer_test (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura / letter_blitz / platformer / open_machine, where the fork measured 7 ms → 0.04 ms |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---
@@ -683,11 +728,25 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
 | 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
-| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,592 B | **compiles; NOT on glass** |
+| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,592 B | **on glass 2026-08-16** — `flush=` 16.8–20.2 → 2–4 ms, `PUMP` line present |
+| 8 | **The async layer copy** + the `DRAW2` line | `desktop` | — | **compiles; NOT on glass** |
 
-### Reading the next flash (stage 7)
+### What stage 7 measured
 
-Nothing below has been on hardware. Turn `diag 1` on and read three lines:
+Owner's board, 2026-08-16. The overlap landed:
+
+```
+flush=     16.8-20.2ms  ->  2-4ms          (fork: 2.1)
+PUMP       absent       ->  pump=3.25 idle=1.93 gaps=1 feed=15.87 bands=5 fold=0
+```
+
+On the Bench cart the mainline is now at or above the fork on every phase (idle
+55.5 vs 58.8, draw 50.0 vs 52.6, silent 55.5 vs 55.5, sound 52.6 vs 55.5). What
+did not close is the cart-side `bg=`, and "the render-side gap is the PSRAM
+clock" above is the arithmetic for it.
+
+The three lines that made that readable, kept here because they are what any
+future flush change is read against:
 
 * **`raw(... flush=N)`** in `DRAWBRK`/`HITCH` — the whole point. **16.8–20.2 → 2–5 ms**
   is success. Still ~17 means `flush()` is not taking the async path at all
@@ -705,9 +764,9 @@ Nothing below has been on hardware. Turn `diag 1` on and read three lines:
   verdict on the third slot was "closed the gap, bought no fps" — read
   `moy_compositor.BOUNCE_SLOTS` before repeating it). A `pump=` near the whole
   transfer would mean the no-acquire patch is not in the image after all.
-* **fps** — Brick Siege **26–27 → ~45** is the expected shape; 51–54 would mean
-  the render side matched the fork too, which it did not before. Sky Run 30,
-  Celeste 20–24, Letter Blitz 21–33, Brick Siege Lua 27 should all move with it.
+* **fps** — Brick Siege **26–27 → ~45** was the expected shape, and ~40 is what
+  it did; the missing few are the `bg=` fill, priced above. Sky Run 30,
+  Celeste 20–24, Letter Blitz 21–33, Brick Siege Lua 27 all moved with it.
 
 If the serial dev channel is alive on this board (see the RX section — that is
 its own open question), the cheapest check needs no diag tick and no hitch:
@@ -731,6 +790,53 @@ or a band-shaped seam** (the ping-pong or a slot being refilled under a live DMA
 hang inside an SD session** (`SD > op` as the last serial line), which would mean
 a flush outlived a `sync()`. `moy_lcd.pump_stats()[6]` counts flush timeouts;
 it should stay 0.
+
+### Reading the next flash (stage 8) — the async layer copy
+
+Not on hardware. Two things changed: `LAYER_COPY_ASYNC` is on, and the loop now
+prints a **`DRAW2`** line every diag tick, which is the only instrument this port
+has ever had for either half of the question:
+
+```
+DRAW2 layer=N.NNms batch=N.NNms map=N.NNms text=N.NNms fill=N.NNms gated(fill=N text=N)
+```
+
+**Pick the right carts, because most of the roster provably cannot move.**
+
+| cart | what it does | expect |
+|---|---|---|
+| **sakura** | `make_layer(W, H)` + `draw_layer(lay, 0, 0)` — the exact predicted shape | `DRAW2 layer=` **~7 ms → ~0.0x ms**. This is the whole test |
+| **Letter Blitz** | screen-wide `_bg` layer, re-painted only when a brick or the mood changes | `layer=` ~0 on most frames, a full-cost frame whenever `_bg` is rebuilt (a layer edited this frame is a deliberate forced miss) |
+| **Platformer**, **Open Machine** | screen-wide layer / `background(image)` | same shape as sakura |
+| **Sky Run** | layer is **800 px wide** — `_arm_layer_pred` refuses `layer.w != self.w` | **no change, and that is correct.** A change here would mean the arming guard is wrong |
+| **Brick Siege** | no layer at all; `background(col(...))` is a `cls()` | **no change.** Its cost is `DRAW2 fill=`, and that is the PSRAM-clock row |
+
+**What says it went wrong, not just flat.**
+
+* **`lw=N` in `HITCH`** — cumulative `copy_wait` trips: the bounded spin in
+  `moy_gfx_copy_wait` gave up before the GDMA said done. Pixels stay correct (the
+  sync `blit_window` rewrites the same bytes from the same source), so this is a
+  performance signal, not a corruption one — but a climbing `lw=` means the copy
+  is finishing *later* than the cart's `_update`, i.e. the overlap is being paid
+  for and not collected. **`lw=0` and staying 0 is the healthy reading.** A few
+  trips at a cart's first frames are the prediction warming up; a number that
+  climbs every hitch line means the copy is contending, and the flag comes off.
+* **`PUMP idle=` / `gaps=` rising on a layer cart, against the stage-7 baseline
+  of `idle=1.93 gaps=1`.** This is the one risk this board carries that the fork
+  does not carry as sharply: the GDMA copy is a full-throttle PSRAM↔PSRAM blit
+  running in the same window as the pump's five 30 KB PSRAM→SRAM band memcpys,
+  and this build's PSRAM runs at **80 MHz, not the fork's 120**. If `idle` rises
+  by more than `layer=` fell, the lever is a wash or worse. Read the two together
+  or the reading is meaningless.
+* **A stale or torn backdrop** — a frame showing the *previous* content under
+  fresh sprites. That would be a cache-coherency fault on the DMA destination
+  (IDF 5.5.1 invalidates the aligned body and stashes the unaligned edges, so it
+  should not happen), and it is the one failure here that is a correctness bug
+  rather than a speed one. `LAYER_COPY_ASYNC = False` and reflash.
+
+The two flags are independent on purpose: `ASYNC_FLUSH` moves the panel
+transfer, `LAYER_COPY_ASYNC` moves the layer restore. Flip one at a time and any
+glass symptom attributes itself.
 
 The stage-6 figure includes the 572,693 B baked browser bundle. Build on a tree
 with no `firmware/web_runner/dist` and the image is about 573 KB smaller, with

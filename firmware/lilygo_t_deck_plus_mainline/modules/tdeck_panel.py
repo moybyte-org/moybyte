@@ -69,6 +69,53 @@ HEIGHT = 240
 # out in one reflash.
 ASYNC_FLUSH = True
 
+# The ASYNC LAYER COPY (#54 Stage 2 / #63), declared here and applied by
+# `moy_runtime.run_desktop`.
+#
+# It lives in THIS module because the fact it rests on is the compositor's, not
+# the canvas's: on the fork build `device_canvas` reads it as
+# `moy_compositor.SRAM_BOUNCE_FLUSH`, and `tdeck_panel` is that module's twin
+# here. `device_canvas.py` is STAGED from the fork tree and must not be edited
+# from this port, so run_desktop assigns `device_canvas.LAYER_COPY_ASYNC` from
+# this constant BEFORE the first DeviceCanvas exists (`_async_ok` is latched in
+# __init__; a later assignment would reach nothing).
+#
+# WHAT IT DOES. A cart that stamps a pre-rendered full-screen layer every frame
+# -- `draw_layer(lay, 0, 0)`, and the Image form of `background()` -- pays a
+# 153,600 B PSRAM->PSRAM copy inside its _draw. With this on, `DeviceCanvas`
+# PREDICTS that restore from the previous frame and kicks it on the GDMA engine
+# in `sync_back`, which runs before the cart's _update -- so by the time _draw
+# asks for the layer the copy has already run alongside the kid's Python, and
+# `blit_window_from` only waits out the tail. Measured 7 ms -> 0.04 ms on the
+# fork (sakura). A misprediction is harmless: it paints a background the sync
+# path then fully overwrites, and a layer EDITED this frame is a forced miss.
+#
+# WHY IT IS SAFE HERE, and why the reason it was off expired. The 2026-07-03
+# hardware verdict against it was one specific thing: a second GDMA engine
+# blitting PSRAM at full throttle, run against a panel DMA reading PSRAM
+# DIRECTLY, starved the SPI FIFO and clocked out horizontal garbage bands. That
+# target does not exist in `moy_lcd`: the panel DMA only ever reads the two
+# INTERNAL SRAM bounce slots, it has done so since the first line of this port,
+# and it does so on BOTH flush paths -- `show()` is `kick`+`drain`, so setting
+# ASYNC_FLUSH = False does not bring the contention back either. The
+# precondition is unconditional on this board, which is why this flag is not
+# gated on `self._async`.
+#
+# WHAT IT CANNOT DO, so a flat reading is not a mystery. `_arm_layer_pred` only
+# arms the prediction when the copy is ONE contiguous memcpy: `cam_x == 0` and
+# the layer EXACTLY screen-wide. So the scroll carts, whose layers are wider
+# than the screen (Sky Run at 800 px, layer_test at 512), keep the synchronous
+# `blit_window` and are untouched by this flag; and Brick Siege has no layer at
+# all -- its `background(col("dark_blue"))` is a `cls()`, a PSRAM fill -- so it
+# cannot move by a microsecond. The carts that CAN move are the ones with a
+# screen-wide `make_layer(W, H)` restored at (0, 0): sakura, letter_blitz,
+# platformer, open_machine.
+#
+# TO REVERT: LAYER_COPY_ASYNC = False. One flag and one reflash, exactly like
+# ASYNC_FLUSH above, and the two are independent -- so a torn or stale frame can
+# be attributed to the flush or to the copy by flipping one at a time.
+LAYER_COPY_ASYNC = True
+
 # Soft-timer pump period. 2 ms is the fork's shipped value, arrived at on
 # hardware: a band is ~3 ms of transfer, so a 2 ms feeder stays ahead of the two
 # buffered slots. Timer 3 of the S3's four (2 groups x 2); nothing else in this
