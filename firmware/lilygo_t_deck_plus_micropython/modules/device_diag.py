@@ -480,23 +480,35 @@ def _diag_webhost(diag, ws):
         return
     try:
         sock = getattr(wh, "sock", None)
-        # Only speak up once the owner has switched the row on -- an untouched
-        # console should not narrate a feature it is not running.
-        if sock is None and not getattr(wh, "serving", False) \
-                and not getattr(wh, "error", None):
-            return
+        # ALWAYS print, including when the row is off. The first version
+        # returned early in exactly that case, and then "is it off, or is the
+        # diagnostic not running?" became the question the diagnostic existed to
+        # answer -- silence reads as "nothing to report" and cost a round trip.
+        # INTERNAL SRAM, not the GC heap. The first version of this line printed
+        # `gc.mem_free()` and reported 6045k while nothing could connect -- that
+        # is the MicroPython heap in PSRAM, which is not the pool lwIP and the
+        # WLAN stack allocate from, so it was reassuring and irrelevant. The
+        # documented S3 hazard is precisely internal-RAM contention between the
+        # WLAN stack and the LCD DMA (ESP_ERR_NO_MEM / 257, which is why WiFi is
+        # not brought up at boot on this board), and a listening TCP PCB comes
+        # out of that same internal pool. ICMP does not, which is exactly the
+        # shape observed: pings answered, every TCP port refused.
         try:
-            import gc as _gc
-            free = _gc.mem_free()
+            import esp32 as _esp32
+            free = sum(r[1] for r in _esp32.idf_heap_info(_esp32.HEAP_DATA))
         except Exception:
-            free = -1
+            try:
+                import gc as _gc
+                free = _gc.mem_free()
+            except Exception:
+                free = -1
         url = ""
         try:
             url = wh.url() or ""
         except Exception:
             url = "?"
         diag.log("WEBHOST",
-                 "sock=%s serving=%s err=%s url=%s free=%dk"
+                 "sock=%s serving=%s err=%s url=%s sram=%dk"
                  % ("none" if sock is None else "open",
                     bool(getattr(wh, "serving", False)),
                     getattr(wh, "error", None) or "-",
