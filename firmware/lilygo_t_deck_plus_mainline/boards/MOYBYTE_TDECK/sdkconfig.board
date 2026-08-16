@@ -143,10 +143,18 @@ CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
 # host is draining. Recovery needed esptool --before default_reset, which does
 # work on this board even with the app wedged.
 #
-# So the diagnosis stands and the remedy does not: RX is dead because USB is a
-# SECONDARY console, but simply promoting it trades a dead input for a dead
-# board. A working fix has to make the console non-blocking too, or leave the
-# console alone and give the dev channel its own USB-Serial-JTAG reader rather
-# than going through stdin. See #201.
-# CONFIG_ESP_CONSOLE_UART_DEFAULT=
-# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# RESOLVED 2026-08-16, and the two halves explain each other. That hang happened
+# while MICROPY_HW_ESP_USB_SERIAL_JTAG was still 0 (USBDEV was on), so
+# MicroPython had NO tx path of its own and mp_hal_stdout_tx_strn fell through to
+# IDF's primary console -- which blocks. With USBDEV off (see mpconfigboard.h)
+# MicroPython uses its own usb_serial_jtag_tx_strn instead: an absent host costs
+# one 200ms timeout, then terminal_connected latches false and every later write
+# returns immediately. Non-blocking by construction.
+#
+# So neither change works alone -- promoting the console alone hangs the board,
+# linking the ISR alone leaves the console secondary and input-only-in-theory --
+# and that is why each was measured as a failure on its own. They ship together.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

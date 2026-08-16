@@ -37,11 +37,12 @@
 // failure mode of picking wrong is silent in one direction only.
 #define MICROPY_HW_ENABLE_USBDEV            (0)
 
-// UART REPL stays on: the board exposes TX/RX on the header, it costs nothing,
-// and it shares the same stdin_ringbuf. If SERIAL rx= ever CLIMBS on an idle
-// board, U0RXD is floating and picking up noise -- turn this off, that is the
-// documented remedy.
-#define MICROPY_HW_ENABLE_UART_REPL         (1)
+// UART REPL OFF. It shares stdin_ringbuf with the USB path, and U0RXD is an
+// exposed header pin with nothing attached -- which is where the single stray
+// byte behind every `SERIAL rx=1` came from. Leaving it on makes a received
+// byte's ORIGIN ambiguous exactly while the USB path is being debugged. Turn it
+// back on to drive the board over the header pins.
+#define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
 // GT911 touch controller (0x5D/0x14) share it. device_input.py passes these
