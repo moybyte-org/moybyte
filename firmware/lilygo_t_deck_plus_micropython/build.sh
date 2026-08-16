@@ -435,6 +435,36 @@ case "${EXTMEM_SPEED}" in
     ;;
 esac
 
+# REPL=jtag also has to move the IDF CONSOLE, and THIS is the copy that matters:
+# the GENERIC board path (BOARD_CONFIG=generic -> ESP32_GENERIC_S3-SPIRAM_OCT) is
+# what this build actually uses. The LilyGo-TDeck custom-board branch below has
+# its own copy and never runs here -- which is why setting it there looked
+# applied and changed nothing.
+#
+# --enable-jtag-repl only sets MICROPY_HW_ESP_USB_SERIAL_JTAG, which LINKS
+# usb_serial_jtag_init() -- and that calls esp_intr_alloc() inside an
+# ESP_ERROR_CHECK. These are Kconfig CHOICE symbols, so leaving UART_DEFAULT=y in
+# place keeps UART primary and JTAG merely SECONDARY; a secondary console still
+# claims the peripheral's interrupt, the alloc fails, and the check ABORTS THE
+# BOOT. Silently -- the panic goes to the primary console on UART0, a header pin
+# with nothing attached. Measured 2026-08-16: that image says NOTHING over USB
+# and is indistinguishable from a bad flash.
+sed -i \
+  -e '/^CONFIG_ESP_CONSOLE_UART_DEFAULT=/d' \
+  -e '/^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=/d' \
+  -e '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=/d' \
+  -e '/^CONFIG_ESP_CONSOLE_SECONDARY_NONE=/d' \
+  "${SDKCONFIG_SPIRAM_OCT}"
+if [ "${REPL_MODE}" = "jtag" ]; then
+  for opt in \
+    'CONFIG_ESP_CONSOLE_UART_DEFAULT=' \
+    'CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=' \
+    'CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y' \
+    'CONFIG_ESP_CONSOLE_SECONDARY_NONE=y'; do
+    printf '%s\n' "${opt}" >> "${SDKCONFIG_SPIRAM_OCT}"
+  done
+fi
+
 case "${BOARD_CONFIG}" in
   generic)
     MPY_BUILD_DIR="${UPSTREAM_DIR}/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT"
@@ -671,17 +701,32 @@ case "${BOARD_CONFIG}" in
         -e 's/^#define MICROPY_HW_USB_CDC .*/#define MICROPY_HW_USB_CDC                  (0)/' \
         -e 's/^#define MICROPY_HW_ESP_USB_SERIAL_JTAG .*/#define MICROPY_HW_ESP_USB_SERIAL_JTAG      (1)/' \
         "${TDECK_H}"
-      if ! grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y' "${TDECK_SDKCONFIG}"; then
-        printf '\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\n' >> "${TDECK_SDKCONFIG}"
-      fi
+      # All FOUR, not just the last. These are Kconfig CHOICE symbols: appending
+      # USB_SERIAL_JTAG=y while UART_DEFAULT=y is still there leaves UART primary
+      # and JTAG merely SECONDARY -- and a secondary console still claims the
+      # peripheral's interrupt, so MicroPython's usb_serial_jtag_init() fails its
+      # esp_intr_alloc inside an ESP_ERROR_CHECK and ABORTS THE BOOT. Silently:
+      # the panic goes to the primary console on UART0, a header pin with nothing
+      # attached. Measured 2026-08-16 -- that build says NOTHING over USB and
+      # reads exactly like a bad flash.
+      sed -i \
+        -e '/^CONFIG_ESP_CONSOLE_UART_DEFAULT=/d' \
+        -e '/^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=/d' \
+        -e '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=/d' \
+        -e '/^CONFIG_ESP_CONSOLE_SECONDARY_NONE=/d' \
+        "${TDECK_SDKCONFIG}"
+      printf '\nCONFIG_ESP_CONSOLE_UART_DEFAULT=\nCONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=\nCONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y\nCONFIG_ESP_CONSOLE_SECONDARY_NONE=y\n' >> "${TDECK_SDKCONFIG}"
     else
       sed -i \
         -e 's/^#define MICROPY_HW_USB_CDC .*/#define MICROPY_HW_USB_CDC                  (1)/' \
         -e 's/^#define MICROPY_HW_ESP_USB_SERIAL_JTAG .*/#define MICROPY_HW_ESP_USB_SERIAL_JTAG      (0)/' \
         "${TDECK_H}"
-      if grep -q '^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y' "${TDECK_SDKCONFIG}"; then
-        sed -i '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y/d' "${TDECK_SDKCONFIG}"
-      fi
+      sed -i \
+        -e '/^CONFIG_ESP_CONSOLE_UART_DEFAULT=$/d' \
+        -e '/^CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=$/d' \
+        -e '/^CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y/d' \
+        -e '/^CONFIG_ESP_CONSOLE_SECONDARY_NONE=y/d' \
+        "${TDECK_SDKCONFIG}"
     fi
     sed -i "s|^FROZEN_MANIFEST = .*|FROZEN_MANIFEST = \"${MANIFEST}\"|" "${TDECK_TOML}"
     BUILD_COMMAND=(

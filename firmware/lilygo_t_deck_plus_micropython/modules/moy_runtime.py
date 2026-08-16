@@ -24,6 +24,7 @@ from console import NAMES, Pointer, Workstation, _cursor_delta, wire_workstation
 # live there now; everything this board does that the P4 does not (trackball,
 # the I2C poller thread, the SD/panel bus gate, the diag ring, HITCH/LOOP
 # accounting) stays here, because it is hardware and not an oversight.
+from dev_channel import DevChannel   # shared with the mainline port
 from device_boot import DeviceBoot, FramePump, OtaHealth
 from carts_data import CARTS  # build-time generated from system_carts/ (tools/gen_device_carts.py)
 # Leaf tick + diag helpers (extracted to device_util.py so every device cluster can
@@ -293,6 +294,10 @@ def run_perf_bench(handler):
     print("BENCH done -- returning to REPL")
 
 
+# The shared serial dev channel. See runtime/dev_channel.py. Only reachable on a
+# build with a live stdin (MOYBYTE_REPL=jtag); harmless otherwise.
+SERIAL_CMDS = True
+
 def run_desktop(handler, prefetched=None, fps_cap=60):
     """Boot the workstation on the device: launcher + carts + keyboard.
 
@@ -542,6 +547,16 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
     # REPL, or by pulling the card). perf_capture makes ws.frame() record
     # the flush/draw split each frame WITHOUT drawing the on-screen HUD, so the perf
     # sampler below can read steady numbers. Guarded import: no diag -> plain loop.
+    # The shared serial dev channel (runtime/dev_channel.py), the same one the
+    # mainline port drives. It is only USEFUL on a build whose stdin is alive --
+    # `MOYBYTE_REPL=jtag`, which routes the console through the S3's
+    # USB-Serial/JTAG peripheral and links MicroPython's ISR. On the default
+    # cdc_uart build nothing ever arrives, `rx=` stays 0, and the channel costs
+    # a poll(0) per frame that returns immediately.
+    #
+    # No IdleBlank on this board yet, so `power` declines rather than pretending.
+    serial = DevChannel(ws, pointer, set_backlight, None) if SERIAL_CMDS else None
+
     try:
         import moybyte_diag as diag
     except Exception:
@@ -688,6 +703,12 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
             pointer.place(tp[0], tp[1])
             if tp[2]:                           # press edge = tap = click
                 click = True
+        if serial is not None:
+            if serial.poll(ws):
+                click = serial.click or click
+            if serial.quit:
+                print("Moybyte desktop: serial quit -> REPL")
+                return
         pointer.click = click
         pointer.tick(now)                       # auto-hide the idle trackball cursor
         _t_inp = _ticks_diff(_ticks_ms(), _t0)  # trackball + touch + pointer (HITCH v2)
