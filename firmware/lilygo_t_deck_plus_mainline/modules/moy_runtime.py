@@ -43,7 +43,8 @@ from device_audio import make_audio
 from device_canvas import DeviceCanvas, _LayerComp
 from device_api import make_api
 from device_diag import (_diag_flush, _diag_perf_sample, _diag_hitch,
-                         _diag_drawbrk, _diag_loop, _diag_i2cstat, HITCH_MS)
+                         _diag_drawbrk, _diag_loop, _diag_i2cstat, _diag_pump,
+                         HITCH_MS)
 
 # --- #69 the input-poller thread ---------------------------------------------
 #
@@ -450,6 +451,14 @@ def run_desktop(fps_cap=60):
             _diag_loop(diag, ws, _acc)
             for _i in range(12):
                 _acc[_i] = 0
+            # #66 lever 4: the bounce-feed pacing of the flush overlap. This is
+            # the ONE line that says whether a disappointing fps is the bus or
+            # the feeder -- idle/gaps ~ 0 means the bands go out as fast as the
+            # SPI takes them and the ceiling is real transfer time. It prints
+            # nothing unless comp.bounce_flush, so a serialized build is silent
+            # rather than lying, and the LINE APPEARING is itself the first
+            # proof the overlap is live in an image.
+            _diag_pump(diag, comp)
             _diag_i2cstat(diag, keyboard, touch)
             if serial is not None:
                 serial.report(diag)

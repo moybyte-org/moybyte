@@ -28,15 +28,24 @@ audio and the shared console all came up; carts run, with sound. The port works.
 What it was NOT was fast: it ran at roughly **half the fork's frame rate**, and
 the whole of the difference was one number --
 
-    fork      raw(... flush=2.1)   PUMP pump=3.79 idle=0.00 gaps=0 feed=10.67 bands=5
-    mainline  raw(... flush=16.8 to 20.2)   PUMP pump=0.0
+    fork      HITCH ... pump=3.8 ... raw(... flush=2.1)
+              PUMP pump=3.79 idle=0.00 gaps=0 feed=10.67 bands=5 fold=0
+    mainline  HITCH ... pump=0.0 ... raw(... flush=16.8 to 20.2)
+              (no PUMP line at all)
 
     Brick Siege 26-27 fps (fork 51-54) | Brick Siege Lua 27 | Celeste 20-24
     Sky Run 30 | Letter Blitz 21-33
 
 -- because the flush was blocking and paid the whole 153,600 B transfer inside
-the frame. **That is fixed as of this commit and is the one thing here that has
-NOT been on glass**; see "the compositor" below for what to watch.
+the frame. Worth being precise about which line said what, because the two
+`pump=` fields look alike and are not the same instrument: the `0.0` is
+**HITCH's** `pump=%.1f`, and this build emitted **no `PUMP` line whatever** --
+`_diag_pump` returns early unless `comp.bounce_flush`, and the loop here did not
+even import it. Both are fixed below, so **the `PUMP` line appearing at all is
+the first proof the overlap is in an image.**
+
+**The flush is fixed as of this commit and is the one thing here that has NOT
+been on glass**; see "the compositor" below for what to watch.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration the other two boards use, and the whole shared console
@@ -48,7 +57,7 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 
 | | shipping fork build | this build |
 |---|---|---|
-| app image | 5,052,032 B | **3,566,400 B** |
+| app image | 5,052,032 B | **3,566,416 B** |
 | headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
 
 Same console, same baked browser bundle (572,693 B), same partition table —
@@ -602,6 +611,18 @@ the authority; what follows is how they land in *this* tree.
   the moment the flush started outliving its call. The continuation bands
   deliberately do **not** hold the SPI bus lock (that is the no-acquire patch),
   so nothing but `sync()` keeps an SD transaction off a live panel DMA.
+  **One exception, and it is not ours:** `DeviceBoot.load_carts` opens ONE
+  `with_sd_live` session around the whole seed+scan and repaints the progress
+  bar *inside* it (`DeviceBoot.note` → `comp.flush()`, once per cart), so a
+  first boot genuinely interleaves panel bands with SD writes. `CLAUDE.md`
+  states the no-flush-in-session rule absolutely, and **the shipping fork build
+  has been violating it in this exact place for as long as it has had the async
+  flush** — `moy_runtime` passes a bare `with_sd_live`, not the synced wrapper,
+  and it works on glass. So this build matching it is not a new risk; before
+  this commit the mainline was merely *safer* than what ships, because its
+  blocking flush could not overlap anything. If a first boot wedges with
+  `SD > op` as the last serial line, this is the first place to look, and
+  `ASYNC_FLUSH = False` is the test.
 - **Do not re-create a `Pin` on `TFT_CS` (12) or `SD_CS` (39) once a driver owns
   them.** `moy_lcd.init()` parks them high *before* the bus exists, which is what
   the fork's `tdeck_board.init_board_pins` does; it is reconfiguring them
@@ -632,7 +653,7 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
 | 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
-| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,400 B | **compiles; NOT on glass** |
+| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,416 B | **compiles; NOT on glass** |
 
 ### Reading the next flash (stage 7)
 
@@ -642,8 +663,11 @@ Nothing below has been on hardware. Turn `diag 1` on and read three lines:
   is success. Still ~17 means `flush()` is not taking the async path at all
   (`ASYNC_FLUSH`, or `moy_lcd.kick` missing, or `nfbs == 1`), and the PUMP line
   will be absent to match.
-* **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`** — real numbers instead of
-  `pump=0.0`. Expect `pump≈3–4 ms` (five 30 KB PSRAM→SRAM memcpys), `bands=5`,
+* **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`** — a line that did not
+  exist before, printed every 3 s diag tick. Its mere presence says
+  `comp.bounce_flush` is on, i.e. the split path is running; its absence says it
+  is not, and there is no point reading anything else.
+  Expect `pump≈3–4 ms` (five 30 KB PSRAM→SRAM memcpys), `bands=5`,
   `fold=0` (the #190 fold is not ported). **`idle`/`gaps` are the diagnosis if
   fps disappoints**: `idle≈0 gaps=0` like the fork means the feeders keep up and
   what remains is real transfer time; `idle=2–6 ms` means bands are being fed
