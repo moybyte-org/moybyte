@@ -623,6 +623,25 @@ the authority; what follows is how they land in *this* tree.
   blocking flush could not overlap anything. If a first boot wedges with
   `SD > op` as the last serial line, this is the first place to look, and
   `ASYNC_FLUSH = False` is the test.
+  A second, narrower one: `Workstation._cover_prefetch_tick` reads a cover blob
+  off `/sd` on idle frames through a bare `store.load_image`, not through
+  `ws._with_sd`, so it takes no `sync()` either. It is gated on **three**
+  consecutive quiet frames, which at the frame cap is ~50 ms after the last
+  kick — long after the 2 ms pump has finished the frame — so it is very hard to
+  hit, and again it is what the fork already does.
+  Worth being honest about the size of this risk rather than repeating the
+  folklore: what `CLAUDE.md` records as having actually hung boards is
+  `sdspi_host_deinit` between ops and re-creating a `Pin` on `TFT_CS` —
+  *teardown*, not concurrency. Two devices transacting on one host is what
+  `spi_master`'s bus lock is for, and it is what the fork has relied on for
+  months. And interleaving is *architecturally* fine on SPI: every band is its
+  own transaction with CS released at the end, so a card transfer slotted
+  between two bands is latched by the card alone, and the ST7789 — mid-RAMWR
+  with its CS high — ignores it. What the no-acquire patch really changes is
+  that the panel no longer *excludes* the card for the duration of a frame:
+  ordering becomes per-transaction arbitration by the bus lock instead of a held
+  lock. `sync()` is how exclusion is restored where this project's rule wants
+  it, and it is cheap, so the places that already call it should keep doing so.
 - **Do not re-create a `Pin` on `TFT_CS` (12) or `SD_CS` (39) once a driver owns
   them.** `moy_lcd.init()` parks them high *before* the bus exists, which is what
   the fork's `tdeck_board.init_board_pins` does; it is reconfiguring them
