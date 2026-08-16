@@ -84,3 +84,32 @@ CONFIG_SPIRAM_SPEED_80M=
 CONFIG_SPIRAM_SPEED_120M=y
 CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
 CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
+
+# USB-Serial-JTAG as the PRIMARY console, so serial INPUT works (#201).
+#
+# The board previously left the IDF default: UART0 primary, USB-Serial-JTAG
+# SECONDARY. A secondary console is OUTPUT ONLY -- Espressif's own Kconfig help
+# says so: "This secondary output currently only supports non-blocking mode
+# without using REPL. If you want to output in blocking mode with REPL or input
+# through this secondary port, please change the primary config to this port."
+#
+# That is the whole reason typed input never arrived on this board: TX flowed
+# over USB (secondary, output-only) while INPUT was taken from the primary,
+# UART0 -- whose RX is GPIO44 on the expansion header, unconnected and floating.
+# Hence a single stray byte in 150 seconds (`SERIAL rx=1 lines=0 partial=1`) and
+# a host write() that timed out having transferred ZERO bytes: nothing on the
+# device was ever reading that endpoint.
+#
+# It is NOT micropython#18581 (CDC-init-at-REPL), which is what this was first
+# diagnosed as -- TinyUSB is not even linked into this image (`tusb_init` and
+# `tud_cdc_rx_cb` are both absent from the elf). No TinyUSB is needed: the S3's
+# USB-Serial-JTAG peripheral is bidirectional on its own once it is primary.
+#
+# The same misconfiguration is why the SHIPPING FORK has no serial harness
+# either, and why CLAUDE.md carried a wrong explanation for it for months.
+#
+# UART REPL stays on (mpconfigboard.h) -- it costs nothing and keeps the header
+# pins usable with a USB-UART adapter, which is how the P4 has always worked
+# (its CH343 is exactly that, soldered on).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
