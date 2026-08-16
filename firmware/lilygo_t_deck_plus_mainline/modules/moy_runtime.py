@@ -33,7 +33,7 @@ from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
 # written per board -- boot splash, cart seed+scan, the Lua runtime probe, the
 # OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
 # there. Everything below that is not one of those is hardware.
-from device_boot import DeviceBoot, FramePump, OtaHealth
+from device_boot import DeviceBoot, FramePump, IdleBlank, OtaHealth
 from carts_data import CARTS          # generated from system_carts/ at build time
 from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
                          sram_census)
@@ -107,6 +107,12 @@ MOY_INPUT_POLLER = True
 # S3's USB-Serial/JTAG peripheral fills the ring from a TRUE hardware ISR
 # (usb_serial_jtag.c) -- that is what the P4's UART behaves like, and on the S3
 # it is mutually exclusive with CDC.
+# Idle screen blank (shared with the P4 via device_boot.IdleBlank). Overridable
+# before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`) and at
+# runtime over the dev channel (`power <secs>`, `power off`). Same 5 minutes the
+# P4 ships, so the two boards behave alike unless a board has a reason not to.
+POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
+
 SERIAL_CMDS = True
 SERIAL_LINE_MAX = 96        # a partial line longer than this is noise; drop it
 SERIAL_BYTES_PER_FRAME = 64  # bounded drain: noise cannot own the frame
@@ -164,6 +170,9 @@ def run_desktop(fps_cap=60):
     # cartridge is written to SD before anything composes. The splash is how
     # that wait becomes legible, on the glass and on the wire.
     boot = DeviceBoot(canvas, comp, set_backlight, "Moybyte")
+    # Shared with the P4 (#58) -- see IdleBlank for the three behaviours a
+    # per-board copy got wrong. `power <secs>` retunes it; 0 disables.
+    idle = IdleBlank(set_backlight, POWER_SAVE_MS)
     boot.note("starting")
 
     inp = InputState()
@@ -330,6 +339,8 @@ def run_desktop(fps_cap=60):
 
     serial = _SerialChannel(ws, pointer) if SERIAL_CMDS else None
     if serial is not None:
+        serial.idle = idle      # `power` reports LIVE state, not its request
+    if serial is not None:
         _diag_log("boot", "serial dev channel %s"
                   % ("armed" if serial.armed else "unavailable"), diag)
 
@@ -392,6 +403,12 @@ def run_desktop(fps_cap=60):
             if serial.quit:
                 print("Moybyte desktop: serial quit -> REPL")
                 return
+        # Idle screen blank, after EVERY input source has been read and before
+        # the pointer reaches the console -- that ordering is what lets the
+        # waking touch be swallowed instead of pressing what it landed on.
+        click = idle.tick(now, (tp is not None) or nx or ny or click
+                          or bool(getattr(inp, "last_key", None)),
+                          ws, pointer, click)
         pointer.click = click
         pointer.tick(now)
         _t_inp = _ticks_diff(_ticks_ms(), _t0)
@@ -564,6 +581,12 @@ class _SerialChannel:
       skip 0|1        the #77 frameskip gate
       gov 0|1         the #63 frame governor
       mem             a forced collect + the live/free split
+      bl 0|1          panel backlight. The board keeps RENDERING either way, so
+                      a dark screen is a fine way to bench unattended.
+      vol <0-7>       master audio level; 0 is silent
+      power <secs>    idle screen-blank timeout (0 disables); `power off` blanks
+                      now. Shared with the P4 -- the board keeps RENDERING while
+                      dark, so an unattended bench run still produces frames.
       py <code>       eval/exec one line against the LIVE console
       quit            leave the desktop for the REPL
     """
@@ -576,6 +599,7 @@ class _SerialChannel:
         self.rx = 0             # bytes swallowed -- the "is something injecting?" number
         self.lines = 0          # complete commands dispatched
         self.dropped = 0        # over-long partial lines thrown away
+        self.idle = None        # the loop's IdleBlank, for live reporting
         self.armed = False
         self._poll = None
         self._stdin = None
@@ -734,6 +758,49 @@ class _SerialChannel:
             gc.collect()
             print("REMOTE mem live=%dk free=%dk"
                   % (gc.mem_alloc() // 1024, gc.mem_free() // 1024))
+            return
+        if cmd == "bl":
+            on = not (len(parts) == 2 and parts[1] == "0")
+            import tdeck_panel
+            tdeck_panel.set_backlight(on)
+            # Keep IdleBlank's model honest, or `power` reports asleep=True over
+            # a lit panel and the next idle tick declines to blank it.
+            if self.idle is not None:
+                if on:
+                    self.idle.wake(_ticks_ms())
+                else:
+                    self.idle.asleep = True
+            print("REMOTE bl %s" % ("on" if on else "off"))
+            return
+        if cmd == "vol":
+            lvl = int(parts[1]) if len(parts) == 2 else 0
+            # ws.audio exists only while a cart holds the backend -- at the
+            # launcher it is None, which is not an error worth a traceback.
+            au = getattr(ws, "audio", None)
+            if au is None:
+                print("REMOTE vol: no audio backend (no cart running)")
+                return
+            au.volume(lvl)
+            print("REMOTE vol %d" % lvl)
+            return
+        if cmd == "power":
+            # Act on the IdleBlank DIRECTLY rather than parking a request for the
+            # loop to apply. The deferred version reported the value it had not
+            # applied yet, so `power 0` answered "timeout=8s" -- twice, in two
+            # different shapes, before the plumbing itself was the bug.
+            idle = self.idle
+            if idle is None:
+                print("REMOTE power: no idle blank on this build")
+                return
+            if len(parts) == 2 and parts[1] == "off":
+                idle.blank()
+                print("REMOTE power off")
+                return
+            if len(parts) == 2:
+                idle.timeout_ms = int(parts[1]) * 1000
+                idle.wake(_ticks_ms())
+            print("REMOTE power timeout=%ds asleep=%s"
+                  % (idle.timeout_ms // 1000, idle.asleep))
             return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]
