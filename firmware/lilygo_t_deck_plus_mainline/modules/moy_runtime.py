@@ -9,13 +9,13 @@ that is genuinely this board's hardware, and one thing that is new.
 WHAT DIFFERS FROM THE FORK BUILD'S `moy_runtime.py`, which drives the same glass:
 
   * the panel. There, a Python `moy_compositor.Compositor` drives `lcd_bus`
-    band by band and owns the whole async/bounce/pump machine. Here
-    `tdeck_panel.TDeckCompositor` wraps `moy_lcd.show()`, one C call that does
-    the banding, the internal-SRAM bounce and the completion fence itself.
+    band by band and owns the bounce buffers, the completion counter and the
+    pacing stats. Here that whole machine is `moy_lcd`, one C module that also
+    owns the SPI host, and `tdeck_panel.TDeckCompositor` is the thin ping-pong
+    over its kick/pump/drain split. The STRATEGY is the same one, including the
+    overlap: `flush()` queues the first bands and returns, the rest are fed
+    while this loop renders the next frame, and `comp.sync()` is a real fence.
   * no LVGL, so no `handler.deinit()` takeover and no `tdeck_display`.
-  * the flush is BLOCKING, so `comp.sync()` is a no-op and there is no
-    `pump_if_pending`. The fork's overlap is a real ~2x on this board and is the
-    first lever to port once this boots; it is not part of proving it boots.
   * a SERIAL DEV CHANNEL, which that board does not have. See below -- it is
     the most consequential difference and the one most likely to be doubted.
 
@@ -204,10 +204,10 @@ def run_desktop(fps_cap=60):
     def _with_sd_synced(fn):
         """Every SD session on this board, with the panel drained first.
 
-        `comp.sync()` is a no-op while the flush is blocking, and it is called
-        anyway: the moment the async flush lands (the first perf lever to port)
-        an SD op could otherwise overlap an in-flight panel DMA on the shared
-        host, which is the documented way to hang this board.
+        `comp.sync()` is load-bearing now that the flush overlaps: a frame's
+        bands can still be in flight when this is called, and an SD op that
+        overlaps a panel DMA on the shared host is the documented way to hang
+        this board. It drains; it is not a formality.
 
         The BRACKET is the diagnostic (#183). An editor commit can wedge this
         board with nothing on serial, so each phase says its name and whichever

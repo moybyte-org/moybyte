@@ -107,9 +107,15 @@ def panel(frames=6):
     for _ in range(frames):
         comp.flush()
         time.sleep_ms(120)
+    # flush() RETURNS with the frame still going out (the #66 overlap), so the
+    # last one has to be fenced before its span is readable -- otherwise this
+    # prints the frame before it. `us` is the wall transfer time either way: the
+    # overlap hides it behind render, it does not make the bus faster.
+    comp.sync()
     n, us = comp.stats()
     print("Moybyte panel: flushes=%d last=%dus (%.1f fps ceiling)"
           % (n, us, 1000000.0 / us if us else 0.0))
+    print("Moybyte panel: pump %s" % (comp.bounce_stats(),))
     print("Moybyte panel smoke done -> REPL "
           "(moy_lcd.set_madctl(0x28|0x68|0xA8|0xE8) if the image is turned)")
 
@@ -585,6 +591,7 @@ def sd(rounds=SD_ROUNDS):
     t0 = time.ticks_ms()
     for _ in range(60):
         comp.flush()
+    comp.sync()          # the 60th is still going out -- time all of it
     burst = time.ticks_diff(time.ticks_ms(), t0)
     log.say("60 flushes in %dms" % burst, GREEN)
     print("Moybyte sd: 60 post-session flushes in %dms (%.1fms each)"

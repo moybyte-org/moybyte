@@ -20,9 +20,23 @@ the running board:
     image 1,704,976 B of the 5,242,880 B ota_0 slot
 
 So the ST7789 runs on mainline with no LVGL anywhere, which is the question that
-stage existed to answer. **Stages 2-6 are written and compile; none of them has
-been on glass.** Each stage is one commit, and the commit message says what to
-look for -- flash the last good one to bisect.
+stage existed to answer. Each stage is one commit, and the commit message says
+what to look for -- flash the last good one to bisect.
+
+**ALL SIX STAGES ARE ON GLASS (owner, 2026-08-16).** Panel, touch, keyboard, SD,
+audio and the shared console all came up; carts run, with sound. The port works.
+What it was NOT was fast: it ran at roughly **half the fork's frame rate**, and
+the whole of the difference was one number --
+
+    fork      raw(... flush=2.1)   PUMP pump=3.79 idle=0.00 gaps=0 feed=10.67 bands=5
+    mainline  raw(... flush=16.8 to 20.2)   PUMP pump=0.0
+
+    Brick Siege 26-27 fps (fork 51-54) | Brick Siege Lua 27 | Celeste 20-24
+    Sky Run 30 | Letter Blitz 21-33
+
+-- because the flush was blocking and paid the whole 153,600 B transfer inside
+the frame. **That is fixed as of this commit and is the one thing here that has
+NOT been on glass**; see "the compositor" below for what to watch.
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration the other two boards use, and the whole shared console
@@ -34,13 +48,13 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 
 | | shipping fork build | this build |
 |---|---|---|
-| app image | 5,052,032 B | **3,564,672 B** |
+| app image | 5,052,032 B | **3,566,400 B** |
 | headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
 
 Same console, same baked browser bundle (572,693 B), same partition table —
 **1.42 MB less image, 29% smaller.** LVGL, `lcd_bus`, `st7789`, `task_handler`,
 `rgb_bus`, `spi3wire` and the fork's `i2c` are simply not in it; the panel is
-one 556-line C file. Both builds stamp OTA board id `tdeck` against a
+one 837-line C file. Both builds stamp OTA board id `tdeck` against a
 byte-identical partition table, so a payload from either installs into the
 other's inactive slot — which is what makes the migration an OTA rather than a
 cable flash.
@@ -102,8 +116,15 @@ Moybyte panel: init
 Moybyte panel: 320x240 nfbs=2 madctl=0x68 gfx=True
 Moybyte panel: backlight ON -- expect 8 colour bars over a checker
 Moybyte panel: flushes=8 last=NNNNNus (NN.N fps ceiling)
+Moybyte panel: pump (NNNN, N, N, NNNN, 5)
 Moybyte panel smoke done -> REPL
 ```
+
+`last=` is the WALL transfer span, kick to fully out, and the overlap does not
+shrink it — the bus moves 153,600 B at whatever rate it moves them. What the
+overlap changes is how much of that the CPU waits for, which is the console's
+`flush=` and `bounce_stats()[…]`. The smoke fences with `comp.sync()` before
+reading, because `flush()` now returns with the frame still going out.
 
 | what you see | what it means |
 |---|---|
@@ -114,7 +135,7 @@ Moybyte panel smoke done -> REPL
 | bars appear with wrong colours | red/blue swapped = the BGR bit; washed out = a gamma command was rejected |
 | rows sheared diagonally | stride — a `WIDTH`/`row_bytes` mistake |
 | a seam every 48 rows | the flush banding — a continuation band sent a command |
-| flicker or tearing | the ping-pong; try `TDeckCompositor(nfbs=1)` |
+| flicker or tearing | the ping-pong, or the #66 flush overlap refilling a bounce slot under a live DMA. `ASYNC_FLUSH = False` in `tdeck_panel.py` is the one-flag revert that tells the two apart; `TDeckCompositor(nfbs=1)` disables both |
 | `flush timed out` | `on_color_trans_done` never fired — the completion fence, not the panel |
 
 #### `MODE = "touch"` (stage 2)
@@ -433,7 +454,7 @@ and never pruned — which is why a new board module has to be whitelisted in
 
 The P4 scans a PSRAM framebuffer continuously (MIPI-DSI, DPI mode, no per-frame
 transfer). The T-Deck has to PUSH 320×240 RGB565 down SPI every frame, so the
-work LVGL and `lcd_bus` used to do has to live somewhere. It lives in one 500-line
+work LVGL and `lcd_bus` used to do has to live somewhere. It lives in one 837-line
 C file, and three things in it are load-bearing:
 
 **IDF's own ST7789 driver is not enough.** `esp_lcd_panel_init()` sends exactly
@@ -458,20 +479,80 @@ what "a full-screen flush must be a single `tx_color`" is really about: it is
 re-issuing a command mid-stream that glitches rows at the command→data boundary,
 and esp_lcd blocks on a drained queue before any command.
 
+**The flush OVERLAPS the next frame's render** (ported 2026-08-16, not yet on
+glass — see below). 320×240×2 = 153,600 B is ~17 ms on this bus, and paid
+synchronously it caps the loop near 58 fps before a pixel is drawn. That is
+exactly what the first console build measured against the fork on the same
+glass:
+
+| | fork | mainline, before | mainline, after |
+|---|---|---|---|
+| `flush=` | 2.1 ms | 16.8–20.2 ms | **expected ~2–5 ms** |
+| `PUMP` | `pump=3.79 idle=0.00 gaps=0 feed=10.67 bands=5` | `pump=0.0` (not running) | expected fork-shaped |
+| Brick Siege | 51–54 fps | 26–27 fps | expected ~45 fps (see below) |
+
+So `moy_lcd`'s one blocking `show()` is now a three-verb split, and it is the
+fork's strategy, not a new one:
+
+* **`kick(n)`** arms the window, resets the band bookkeeping, copies + queues the
+  first `BOUNCE_SLOTS` bands (~6.8 ms of transfer buffered) and **returns**;
+* **`pump()`** copies + queues every band whose bounce slot has since freed —
+  ~0.8 ms each, and non-blocking *only because* of the no-acquire patch below;
+* **`drain()`** finishes feeding and waits out the tail. It runs at the top of
+  the next `flush()`, where the render that just happened has already hidden
+  most of it, and before every SD op.
+
+`show(n)` survives as `kick` + `drain` in one call: the bring-up smokes want one
+number and no ping-pong reasoning.
+
+**Two feeders call `pump()`, and both are needed.** A 2 ms `machine.Timer`
+(esp32 timers schedule through `mp_sched`, so the callback lands between
+bytecodes — the only feeder during a cart's long Python `_update`), and the
+`pump_if_pending` poke `DeviceCanvas` makes after each big native draw op (the
+soft timer **cannot** fire while the interpreter sits inside one 15 ms C fill;
+that measured as `PUMP idle=2-6ms` of starved SPI on the fork). On a gated
+canvas `moy_gfx`'s own draw context upcalls it every `GATE_PUMP_EVERY` ops.
+
+Both are optimisations of *when* bands are fed. If the timer never starts and
+every poke is missed, `drain()` feeds them all and the flush is simply
+serialised again — the pre-overlap cost, **never a glitch**: the front buffer is
+immutable while it ships, so the bands are tear-free by construction.
+
+`sync()` is consequently **real now**, not a formality. The card shares this SPI
+host, and the continuation bands deliberately do not hold the bus lock, so an SD
+op overlapping an in-flight flush is the documented way to hang this board.
+`run_desktop._with_sd_synced` already called it; it now drains.
+
+*Why ~45 fps and not the fork's 51–54:* the two builds' `draw=` differ by ~3 ms
+independently of the flush (26–27 fps at `flush=17` implies ~20 ms of draw,
+against the fork's ~17). The overlap makes the frame `max(render, transfer)`, so
+what is left is a render-side gap — the `LAYER_COPY_ASYNC` row in the table
+below is the first suspect.
+
 ### `modules/tdeck_panel.py` — the compositor
 
 `TDeckCompositor` implements the same small interface `DeviceCanvas.__init__`
 and `moy_runtime.run_desktop` already call — `size` / `framebuffer` /
 `back_buffer` / `gfx` / `flush` / `sync` — the one `p4_display.P4Compositor` and
-`moy_compositor.Compositor` both implement. No new seam is invented
+`moy_compositor.Compositor` both implement, plus the two the diag layer probes
+for with `getattr` (`pump_if_pending`, `bounce_stats`). No new seam is invented
 (`docs/backend_contract_v1.md` L8: strategy stays the backend's).
 
-**The flush is blocking**, so `sync()` is a no-op and there is no
-`pump_if_pending` (DeviceCanvas looks that one up with `getattr` and degrades
-cleanly; the P4 has none either). The fork's overlap — async completion callback,
-soft-timer pump, draw-verb poke — is a real ~2× on this board and is the first
-thing to port once the console boots. It is a performance lever layered on a
-working panel, not part of proving the panel works.
+It is thin on purpose: the ping-pong, the timer and the stats forwarding, over
+`moy_lcd`'s kick/pump/drain. Where the fork's compositor owns the bounce
+buffers, the completion counter and the pacing arithmetic in Python, all of that
+is C here, so a band never crosses the boundary.
+
+**`ASYNC_FLUSH = False` is the one-flag fallback.** It restores the blocking
+`moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang
+gets attributed to the overlap in a single reflash.
+
+**What is NOT ported, deliberately:** the #190 flush-bounce scale fold, which
+*synthesises* each band for a small-canvas game rather than copying the root
+framebuffer. It needs `moy_gfx` kernels writing into the bounce slots, i.e. the
+slots handed back to Python, and it is a separate lever with its own A/B.
+`fold_supported` is absent, `DeviceCanvas.blit_game` takes its ordinary root
+composite path, and the PUMP line prints `fold=0`. Nothing degrades.
 
 ---
 
@@ -483,7 +564,7 @@ working panel, not part of proving the panel works.
 |---|---|---|
 | **REPR_C unboxed floats** (#66) | guarded `sed` on MicroPython's own `mpconfigport.h` (in the cloned upstream under `.build/`, not a file of ours) — its `MICROPY_OBJ_REPR` line, and the build **fails loudly** if the line has changed shape. A sed rather than the fork's context diff, so it survives the line moving between MicroPython releases. Verified in the built tree. | None strictly — but it is free, it changes object layout so it must be settled early, and every image here was compiled and linked with it |
 | **I2C GIL release** (#69) | a small in-place Python edit that brackets `i2c_master_cmd_begin` with `MP_THREAD_GIL_EXIT/ENTER`. Result is byte-identical to the fork's patched file. Exits non-zero if the call site is not found. | **Stage 3.** It is what makes the poller THREAD worth having: without it a C3 clock-stretch stall holds the GIL and freezes the whole VM no matter which thread issued the read. Stage 2 reads I2C on the main thread and cannot tell the difference |
-| **esp_lcd `tx_color` no-acquire** (#66) | the fork's `.patch` file, applied to the ESP-IDF tree (idempotent; the shared checkout usually has it already from the fork build) | **None yet.** `moy_lcd.show()` fences on its own completion counter rather than relying on `spi_device_acquire_bus` happening to serialize the bands, so without the patch the flush is merely serialized. The patch is what lets it *overlap* later |
+| **esp_lcd `tx_color` no-acquire** (#66) | the fork's `.patch` file, applied to the ESP-IDF tree (idempotent; the shared checkout usually has it already from the fork build) | **The overlap.** Without it every continuation band calls `spi_device_acquire_bus`, which waits for the device's in-flight DMA — so `pump()` would block on the previous band and the flush would be serialized again, just spelled differently. Confirmed compiled in: `panel_io_spi_tx_color` branches on the sign of `lcd_cmd` around both the acquire and the release |
 
 A fourth rides along, the same one the P4 build reuses: **native-code-free**
 (#66), which lets a cart-compile miss reclaim the `@micropython.native` exec
@@ -501,8 +582,8 @@ with an A/B rather than inherited.
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
-| async flush + pump (#40/#43/#66) | on | **off** | see the compositor note above. This is the biggest single lever left here and the first thing to port once the console is confirmed on glass |
-| GDMA async layer copy (#54 St.2 / #63) | on | **off** | `device_canvas.LAYER_COPY_ASYNC` is tied to `moy_compositor.SRAM_BOUNCE_FLUSH`, which does not exist here, so it resolves False. The contention it guards against is genuinely gone (the panel DMA only ever reads internal SRAM in `moy_lcd`), so this is safe to turn on — measured at layer 7ms → 0.04ms there. Left off because it is a lever, and a lever gets an A/B |
+| async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
+| GDMA async layer copy (#54 St.2 / #63) | on | **off** | `device_canvas.LAYER_COPY_ASYNC` is tied to `moy_compositor.SRAM_BOUNCE_FLUSH`, and that module is not staged here, so it resolves False. **The stated reason for that used to be "there is no SRAM bounce here", and since the flush split that is simply untrue** — the bounce is in `moy_lcd`, and the PSRAM contention the lever guards against was never present anyway (the panel DMA only ever reads internal SRAM). So this is now the RANKED next lever, not a deferred one: it measured layer 7ms → 0.04ms on the fork, and the ~3 ms of render the mainline carries over the fork is the right size for it. It needs a decision about where the flag comes from, because `device_canvas.py` belongs to the shipping tree and must not be edited from here — setting `device_canvas.LAYER_COPY_ASYNC = True` before the first canvas is constructed is the no-edit route |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---
@@ -517,7 +598,10 @@ the authority; what follows is how they land in *this* tree.
   attaches to the already-initialised host through `moy_sd`
   (`sdspi_host_init_device`, no bus re-init), never `machine.SDCard`; no SD
   device may be torn down between ops; and no panel flush may overlap an SD
-  session — which is why `sync()` must exist even though it is a no-op today.
+  session — which is why `sync()` exists, and why it stopped being a formality
+  the moment the flush started outliving its call. The continuation bands
+  deliberately do **not** hold the SPI bus lock (that is the no-acquire patch),
+  so nothing but `sync()` keeps an SD transaction off a live panel DMA.
 - **Do not re-create a `Pin` on `TFT_CS` (12) or `SD_CS` (39) once a driver owns
   them.** `moy_lcd.init()` parks them high *before* the bus exists, which is what
   the fork's `tdeck_board.init_board_pins` does; it is reconfiguring them
@@ -543,14 +627,40 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | # | what | mode | image | state |
 |---|---|---|---|---|
 | 1 | **Panel** — mainline boots, ST7789 comes up, a test pattern lands | `panel` | 1,704,976 B | **on glass 2026-08-16** |
-| 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | compiles |
-| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | compiles |
-| 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | compiles |
-| 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | compiles |
-| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | compiles |
+| 2 | **Touch** (GT911, I2C0 @ 0x5D/0x14) + `board.toml` + the whole shared module tree | `touch` | 2,207,232 B | **on glass 2026-08-16** |
+| 3 | **Keyboard** (ESP32-C3 @ I2C0 0x55, both modes) + the #69 poller A/B | `keyboard` | 2,210,016 B | **on glass 2026-08-16** |
+| 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
+| 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
+| 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
+| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,400 B | **compiles; NOT on glass** |
 
-Nothing after stage 1 has been on glass. Each row is one commit; its message
-says what to look for.
+### Reading the next flash (stage 7)
+
+Nothing below has been on hardware. Turn `diag 1` on and read three lines:
+
+* **`raw(... flush=N)`** in `DRAWBRK`/`HITCH` — the whole point. **16.8–20.2 → 2–5 ms**
+  is success. Still ~17 means `flush()` is not taking the async path at all
+  (`ASYNC_FLUSH`, or `moy_lcd.kick` missing, or `nfbs == 1`), and the PUMP line
+  will be absent to match.
+* **`PUMP pump=… idle=… gaps=… feed=… bands=5 fold=0`** — real numbers instead of
+  `pump=0.0`. Expect `pump≈3–4 ms` (five 30 KB PSRAM→SRAM memcpys), `bands=5`,
+  `fold=0` (the #190 fold is not ported). **`idle`/`gaps` are the diagnosis if
+  fps disappoints**: `idle≈0 gaps=0` like the fork means the feeders keep up and
+  what remains is real transfer time; `idle=2–6 ms` means bands are being fed
+  late and the lever is the pump period or a third bounce slot (the fork's
+  verdict on the third slot was "closed the gap, bought no fps" — read
+  `moy_compositor.BOUNCE_SLOTS` before repeating it). A `pump=` near the whole
+  transfer would mean the no-acquire patch is not in the image after all.
+* **fps** — Brick Siege **26–27 → ~45** is the expected shape; 51–54 would mean
+  the render side matched the fork too, which it did not before. Sky Run 30,
+  Celeste 20–24, Letter Blitz 21–33, Brick Siege Lua 27 should all move with it.
+
+And two things that would say the overlap is *wrong* rather than slow: **tearing
+or a band-shaped seam** (the ping-pong or a slot being refilled under a live DMA
+— set `ASYNC_FLUSH = False` and reflash to confirm the attribution), and **a
+hang inside an SD session** (`SD > op` as the last serial line), which would mean
+a flush outlived a `sync()`. `moy_lcd.pump_stats()[6]` counts flush timeouts;
+it should stay 0.
 
 The stage-6 figure includes the 572,693 B baked browser bundle. Build on a tree
 with no `firmware/web_runner/dist` and the image is about 573 KB smaller, with
