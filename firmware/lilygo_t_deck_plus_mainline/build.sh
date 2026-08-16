@@ -172,11 +172,15 @@ fi
 #     transactions -- so every banded flush blocks on the previous band's DMA.
 #     Confirmed still present on IDF master: no esp_lcd_spi_flags_t controls it.
 #
-#     STAGE 1 DOES NOT DEPEND ON THIS. moy_lcd.show() fences on its own
-#     completion counter, so with the patch absent it is merely serialized, and
-#     with it present it is ready to overlap. It is applied here because the
-#     patch file exists and is idempotent, and because the fork build applies it
-#     to the same shared IDF checkout anyway.
+#     THE FLUSH OVERLAP DEPENDS ON THIS, as of the kick/pump/drain split. It
+#     used to be optional here ("show() fences on its own completion counter, so
+#     without the patch it is merely serialized") and that is no longer true:
+#     without it, every band queued by moy_lcd_pump would first wait out the
+#     previous band's DMA, INSIDE the interpreter -- in a 2ms timer callback and
+#     in moy_gfx's draw gate, ~3ms a time. That is plausibly slower than the
+#     blocking flush it replaced. The build has no way to check this at runtime,
+#     so the on-glass tell is a PUMP line whose pump= is near the whole transfer
+#     (~14ms) instead of ~3-4ms.
 ESP_LCD_SPI_C="${IDF_DIR}/components/esp_lcd/spi/esp_lcd_panel_io_spi.c"
 if [ -f "${ESP_LCD_SPI_C}" ] && ! grep -q "Moybyte #66" "${ESP_LCD_SPI_C}"; then
   echo "== applying esp_lcd tx_color no-acquire patch (#66)"

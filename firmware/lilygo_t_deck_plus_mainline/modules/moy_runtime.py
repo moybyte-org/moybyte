@@ -409,6 +409,26 @@ def run_desktop(fps_cap=60):
             _sd_traced[0] = False
             print("SD = panel ok")
 
+        # THE IDLE-BAND DRAIN (#40/#66). The overlapped flush RETURNS with bands
+        # still queued, and `console.frame()`'s redraw gate returns BEFORE
+        # comp.flush() on a frame that changes nothing -- so a UI that goes quiet
+        # right after a paint leaves the last frame partly on the glass, with the
+        # 2ms pump timer as the only thing that finishes it. That is a real
+        # dependency on a feeder whose constructor is allowed to fail (see
+        # tdeck_panel): if the timer never started, the bottom of the screen
+        # would sit stale until the next repaint. So when THIS frame did not
+        # draw, drain. It fires once per idle stretch (the drain zeroes the band
+        # state) and is a no-op the rest of the time.
+        #
+        # `device_boot`'s docstring names this as one of the genuinely
+        # board-specific steps that stay in run_desktop; it is the fork's
+        # moy_runtime line, and it was missing here.
+        if getattr(ws, "_frames_drawn", 0) == _frames_before:
+            try:
+                comp.sync()
+            except Exception:  # noqa: BLE001 -- an idle tidy-up must never throw
+                pass
+
         if diag is not None:
             _ce = getattr(ws, "cart_error", None)
             if _ce is not None and _ce != _prev_cart_err:

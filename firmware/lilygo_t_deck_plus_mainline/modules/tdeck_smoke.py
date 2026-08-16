@@ -99,6 +99,10 @@ def panel(frames=6):
         moy_lcd.bars(i)
     for _ in range(moy_lcd.nfbs()):
         comp.flush()
+    # The comment above is only true with a fence under it: flush() returns with
+    # the frame still going out, so lighting here would light the bottom of a
+    # buffer of power-on noise for the ~10ms the pump takes to finish it.
+    comp.sync()
     comp.set_backlight(True)
     print("Moybyte panel: backlight ON -- expect 8 colour bars over a checker")
 

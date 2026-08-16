@@ -527,10 +527,21 @@ every poke is missed, `drain()` feeds them all and the flush is simply
 serialised again — the pre-overlap cost, **never a glitch**: the front buffer is
 immutable while it ships, so the bands are tear-free by construction.
 
-`sync()` is consequently **real now**, not a formality. The card shares this SPI
-host, and the continuation bands deliberately do not hold the bus lock, so an SD
-op overlapping an in-flight flush is the documented way to hang this board.
-`run_desktop._with_sd_synced` already called it; it now drains.
+`sync()` is consequently **real now**, not a formality, and it is called from
+three places that all needed it:
+
+* `run_desktop._with_sd_synced`, before every SD session — the card shares this
+  SPI host and the continuation bands deliberately do not hold the bus lock;
+* **the idle-band drain** in the desktop loop — `console.frame()`'s redraw gate
+  returns *before* `comp.flush()` on a frame that changes nothing, so a UI that
+  goes quiet one frame after a paint would leave that frame partly on the glass
+  with the 2 ms timer as the only thing finishing it. This is the fork's line
+  (`device_boot`'s docstring even names it as a step that stays per-board) and
+  it was missing here;
+* **before the first backlight**, in `DeviceBoot.note` and `tdeck_smoke.panel`.
+  #45 turns the backlight on only once a frame has been composed *and flushed* —
+  but with an overlapping flush, "flushed" stopped meaning "on the glass", and
+  the bottom of the first frame would have been lit as power-on GRAM noise.
 
 *Why ~45 fps and not the fork's 51–54:* the two builds' `draw=` differ by ~3 ms
 independently of the flush (26–27 fps at `flush=17` implies ~20 ms of draw,
@@ -707,9 +718,12 @@ echo "py __import__('moy_lcd').pump_stats()" > /dev/ttyACM0
 ```
 
 The second is the raw C tuple, `(pump, idle, gaps, feed, bands, blocked,
-timeouts)`. **`blocked` is the one that answers the whole question**: it is the
-µs the CPU actually spent inside `kick`+`drain` for the last frame, i.e. the
-same quantity as `flush=`, straight from the driver. `timeouts` must be 0.
+timeouts, errs)`. **`blocked` is the one that answers the whole question**: it
+is the µs the CPU actually spent inside `kick`+`drain` for the last frame, i.e.
+the same quantity as `flush=`, straight from the driver. `timeouts` and `errs`
+must both be 0 — `errs` exists because a `tx_color` failure inside a `drain`
+cannot be raised (a drain must not throw into the frame loop), so the counter is
+the only place it would ever be visible.
 
 And two things that would say the overlap is *wrong* rather than slow: **tearing
 or a band-shaped seam** (the ping-pong or a slot being refilled under a live DMA

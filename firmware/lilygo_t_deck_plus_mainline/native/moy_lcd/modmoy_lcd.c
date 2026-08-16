@@ -137,6 +137,20 @@
 #define MOY_LCD_MAX_FBS      3
 #define MOY_LCD_FLUSH_TIMEOUT_US 500000  // a full frame is ~20ms; this is a bug fence
 
+// A BAND MUST BE ONE DMA CHUNK, and the margin is only 6.7%. esp_lcd caps a
+// transfer at MIN(max_transfer_sz, SPI_LL_DMA_MAX_BIT_LEN/8), and the S3's
+// SPI_LL_DMA_MAX_BIT_LEN is 1<<18 -- so 32768 B. At 52 rows or more each band
+// splits in two, and three things break QUIETLY: esp_lcd sets en_trans_done_cb
+// only on the LAST chunk (so s_done still counts bands, which hides it), the
+// first chunk carries SPI_TRANS_CS_KEEP_ACTIVE, and num_trans_inflight doubles
+// to 10 == trans_queue_depth, at which point tx_color takes its recycle branch
+// and BLOCKS on spi_device_get_trans_result(portMAX_DELAY). The pump would stop
+// being non-blocking with nothing to show for it but lost fps. The comment
+// above invites tuning this number; the assert is what makes that safe.
+_Static_assert(MOY_LCD_BAND_BYTES <= 32768,
+               "a band must fit one SPI DMA transaction (S3: 32768 B) or the "
+               "pump silently becomes blocking -- see the note above");
+
 // ST7789 command bytes used directly (the ones esp_lcd's driver does not send).
 #define CMD_NORON     0x13
 #define CMD_CASET     0x2A
@@ -182,6 +196,7 @@ static bool s_in_pump;                 // reentrancy guard (timer fire inside a 
 static esp_err_t s_tx_err;             // a queue failure, reported by the next drain
 static int64_t s_flush_t0;             // kick -> fully-out span, for stats()
 static uint32_t s_timeouts;
+static uint32_t s_tx_errs;             // queue failures since boot (pump_stats)
 
 // Feed PACING for the frame in flight, latched into the *_last pair at the next
 // kick (the frame is complete by then -- drain ran first). This is the data the
@@ -298,6 +313,17 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     mp_arg_parse_all(n_args, pos, kw, MP_ARRAY_SIZE(allowed), allowed, args);
 
     if (s_panel != NULL) {
+        // Already up -- a second compositor, or a SOFT RESET, which wipes the
+        // Python side but not these statics. Clear the band bookkeeping: the
+        // DMA is long finished (a soft reset kills the pump timer), but a
+        // leftover s_bnc_total would make the next flush's drain re-feed a dead
+        // frame's bands into a window that no longer describes them.
+        s_bnc_total = 0;
+        s_bnc_next = 0;
+        s_bnc_src = NULL;
+        s_done = 0;
+        s_target = 0;
+        s_tx_err = ESP_OK;
         return mp_const_none;
     }
     int nfbs = args[0].u_int;
@@ -474,7 +500,13 @@ static int moy_lcd_bands(void) {
 // native draw ops; releasing and reacquiring per call would cost more than it
 // could ever hand to the poller thread, whose stalls are 20-60 ms anyway.
 static void moy_lcd_pump_locked(void) {
-    if (s_in_pump || s_bnc_total == 0 || s_bnc_next >= s_bnc_total) {
+    // s_tx_err is part of the guard, not just bookkeeping. Without it a timer
+    // fire landing in drain's GIL-released wait could queue bands AFTER drain
+    // had captured s_target, so drain would zero s_bnc_total with a transfer
+    // genuinely in flight -- pending() would read False and sync() would become
+    // a no-op over live DMA, which is the SD hazard exactly. Cleared at the kick.
+    if (s_in_pump || s_bnc_total == 0 || s_bnc_next >= s_bnc_total
+            || s_tx_err != ESP_OK) {
         return;
     }
     s_in_pump = true;
@@ -504,7 +536,12 @@ static void moy_lcd_pump_locked(void) {
         esp_err_t err = esp_lcd_panel_io_tx_color(s_io, (k == 0) ? CMD_RAMWR : -1,
                                                   slot, nbytes);
         if (err != ESP_OK) {
-            s_tx_err = err;     // the next drain reports it; do not raise in a timer
+            // Do not raise: this can run in a timer callback and in an ISR-
+            // adjacent draw gate. Latch it (which also disarms the pump above),
+            // count it, and let kick() surface it as an exception on the frame
+            // that can actually report one.
+            s_tx_err = err;
+            s_tx_errs++;
             break;
         }
         s_target++;
@@ -539,6 +576,12 @@ static void moy_lcd_kick_locked(int n) {
     s_idle_n = 0;
     s_feed_us = -1;
     s_block_us = 0;
+    // A new frame starts on a clean error slate -- the previous one's latched
+    // error has done its jobs by now (it disarmed the pump and stopped drain's
+    // feed loop, and it is counted in s_tx_errs). Leaving it set would keep the
+    // pump permanently disarmed. Errors raised by the caller below are this
+    // kick's own, which is the frame they belong to.
+    s_tx_err = ESP_OK;
 
     uint32_t b0 = (uint32_t)esp_timer_get_time();
     moy_lcd_arm_window();
@@ -599,7 +642,13 @@ static bool moy_lcd_drain_locked(void) {
     s_bnc_src = NULL;
     if (clean) {
         s_flushes++;
-        s_last_flush_us = (uint32_t)(esp_timer_get_time() - s_flush_t0);
+        // kick -> LAST COMPLETION, taken from the ISR's own stamp, not from the
+        // clock now. Under the overlap this function is reached a whole frame
+        // after the bytes finished, so `now - s_flush_t0` would fold in however
+        // long the caller took to come back and ask: tdeck_smoke.panel() sleeps
+        // 120ms between flushes and would have reported the transfer as 120ms,
+        // i.e. an "8.3 fps ceiling" for a panel that had not changed.
+        s_last_flush_us = s_done_us - (uint32_t)s_flush_t0;
     } else if (!ok) {
         s_timeouts++;
     }
@@ -784,8 +833,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_stats_obj, moy_lcd_stats);
 //   feed    kick -> last band queued
 //   blocked us the CPU actually spent inside kick+drain -- what the overlap is
 //           supposed to drive toward ~2 ms from ~17
+//   timeouts / errs  both must stay 0. A queue error that happens during a
+//           drain cannot be raised (drain must not throw into the frame loop),
+//           so `errs` is the only place it is visible at all.
 static mp_obj_t moy_lcd_pump_stats(void) {
-    mp_obj_t t[7] = {
+    mp_obj_t t[8] = {
         mp_obj_new_int_from_uint(s_pump_last_us),
         mp_obj_new_int_from_uint(s_idle_last_us),
         mp_obj_new_int_from_uint(s_idle_last_n),
@@ -793,8 +845,9 @@ static mp_obj_t moy_lcd_pump_stats(void) {
         MP_OBJ_NEW_SMALL_INT(moy_lcd_bands()),
         mp_obj_new_int_from_uint(s_block_last_us),
         mp_obj_new_int_from_uint(s_timeouts),
+        mp_obj_new_int_from_uint(s_tx_errs),
     };
-    return mp_obj_new_tuple(7, t);
+    return mp_obj_new_tuple(8, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pump_stats_obj, moy_lcd_pump_stats);
 
