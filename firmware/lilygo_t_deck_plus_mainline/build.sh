@@ -197,6 +197,26 @@ if ! grep -q "moybyte_native_code_free" "${MPCONFIGPORT_H}"; then
   patch -d "${MPY_DIR}" -p1 < "${PATCH_DIR}/esp32_native_code_free.patch"
 fi
 
+# 3f) PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by
+#     this board's 120MHz octal MSPI setting, not optional alongside it: IDF
+#     only starts the retune for verified flash vendor IDs (0xC8/0x20) and
+#     otherwise returns ESP_ERR_NOT_SUPPORTED from a SECONDARY
+#     ESP_SYSTEM_INIT_FN -- which aborts the boot. The board then flashes
+#     cleanly, says NOTHING on serial and never reaches the console, which
+#     reads exactly like a PSRAM timing failure and is not one (measured here
+#     2026-08-16). The patch relaxes the vendor gate to warn-and-run and turns
+#     the task's other brick path -- an abort() when the scanned points share no
+#     temperature range -- into "stop adjusting", degrading to the un-mitigated
+#     build rather than a dead one.
+#
+#     If you ever set MOYBYTE_EXTMEM_SPEED=stock (80/80) in sdkconfig.board,
+#     this patch is inert, not wrong: nothing calls the retune at 80MHz.
+MSPI_TUNING_C="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
+if [ -f "${MSPI_TUNING_C}" ] && ! grep -q "Moybyte #169" "${MSPI_TUNING_C}"; then
+  echo "== applying PSRAM temperature-retune vendor-gate patch (#169)"
+  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_psram_temp_retune_any_vendor.patch"
+fi
+
 # ---------------------------------------------------------------------------
 # 4) Stage the SHARED native modules. Their single source of truth stays
 #    firmware/lilygo_t_deck_plus_micropython/native/ -- this build reads that

@@ -77,6 +77,29 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 # exactly what a first attempt here did (the generated sdkconfig still read
 # SPEED=80 after a clean build). All five together, matching the fork's `fast`
 # profile, or none of them.
+# External MSPI speed: octal flash + octal PSRAM at 120MHz. This is the SAME
+# flag set the shipping fork applies (its build.sh MOYBYTE_EXTMEM_SPEED=fast) --
+# keep the two together rather than deriving this one from Kconfig again.
+#
+# Flash and PSRAM move TOGETHER: at 240MHz core, ESP-IDF 5.5.1 ships no MSPI
+# timing table for PSRAM-120 with flash-80, and says so as a compile error
+# naming the 240M/120M table. Do not set a FLASHMODE here -- the fork sets none,
+# the octal variant decides it.
+#
+# THIS REQUIRES esp_psram_temp_retune_any_vendor.patch (#169), applied by
+# build.sh. IDF only starts the temperature retune for verified flash vendor IDs
+# (0xC8/0x20) and otherwise returns ESP_ERR_NOT_SUPPORTED from a SECONDARY
+# ESP_SYSTEM_INIT_FN -- which ABORTS THE BOOT. Enabling the retune without the
+# patch gives a board that flashes cleanly, says nothing on serial and never
+# reaches the console; that was measured here on 2026-08-16 and read for an hour
+# as a PSRAM timing problem, which it is not.
+#
+# Do NOT read the generated sdkconfig's STRINGS to check this landed:
+#   CONFIG_ESPTOOLPY_FLASHFREQ_120M=y   <- the choice, what matters
+#   CONFIG_ESPTOOLPY_FLASHFREQ="80m"    <- correct, and stays 80m
+# The flash image header can only encode 80/40/26/20MHz and must stay ROM
+# readable, so 120M is applied at runtime by the MSPI tuning code. Reading the
+# string is what made this look like a setting that would not apply, twice.
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=
 CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
@@ -111,5 +134,19 @@ CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
 # UART REPL stays on (mpconfigboard.h) -- it costs nothing and keeps the header
 # pins usable with a USB-UART adapter, which is how the P4 has always worked
 # (its CH343 is exactly that, soldered on).
-CONFIG_ESP_CONSOLE_UART_DEFAULT=
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# REVERTED 2026-08-16 AFTER FLASHING IT: making USB-Serial-JTAG the PRIMARY
+# console fixed RX at the USB level -- a host write() went from timing out at 0
+# bytes to being ACCEPTED -- and then the board emitted NOTHING and stopped
+# booting. The primary console is BLOCKING (the same Kconfig help that says the
+# secondary cannot take input says the primary is the one that supports
+# "blocking mode with REPL"), so the desktop hangs on its first print when no
+# host is draining. Recovery needed esptool --before default_reset, which does
+# work on this board even with the app wedged.
+#
+# So the diagnosis stands and the remedy does not: RX is dead because USB is a
+# SECONDARY console, but simply promoting it trades a dead input for a dead
+# board. A working fix has to make the console non-blocking too, or leave the
+# console alone and give the dev channel its own USB-Serial-JTAG reader rather
+# than going through stdin. See #201.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT=
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
