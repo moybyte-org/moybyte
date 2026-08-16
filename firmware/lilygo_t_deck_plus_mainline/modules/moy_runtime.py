@@ -43,7 +43,7 @@ from device_audio import make_audio
 from device_canvas import DeviceCanvas, _LayerComp
 from device_api import make_api
 from device_diag import (_diag_flush, _diag_perf_sample, _diag_hitch,
-                         _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat,
+                         _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
 
 # --- #69 the input-poller thread ---------------------------------------------
@@ -520,6 +520,10 @@ def run_desktop(fps_cap=60):
             # proof the overlap is live in an image.
             _diag_pump(diag, comp)
             _diag_i2cstat(diag, keyboard, touch)
+            # The web console's SOCKET state. Without it, "serving but nobody
+            # connected" and "never started" look identical from the outside --
+            # which is how a bound-but-unpolled socket read as a network fault.
+            _diag_webhost(diag, ws)
             if serial is not None:
                 serial.report(diag)
             _t_diag = _ticks_diff(_ticks_ms(), _tnow)
@@ -537,10 +541,26 @@ def run_desktop(fps_cap=60):
             _flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t_sd = _diag_flush(diag, ws)
 
+        # Serve the web console. It is created above but nothing drove it, so the
+        # socket bound (the board answers a ping, the port is open) and no request
+        # was ever accepted -- indistinguishable from a network problem, and
+        # exactly the defect the fork carried until 607850d. Timed, so `web=` in
+        # LOOP/HITCH stops being a constant and starts answering "is the transfer
+        # what stalled this frame".
+        _t_web = 0
+        _wh = getattr(ws, "webhost", None)
+        if _wh is not None and getattr(_wh, "serving", False):
+            _t_w0 = _ticks_ms()
+            try:
+                _wh.poll()
+            except Exception as _wexc:  # noqa: BLE001 -- never break a frame
+                print("WEB ERR %s: %s" % (type(_wexc).__name__, _wexc))
+            _t_web = _ticks_diff(_ticks_ms(), _t_w0)
+
         elapsed = _ticks_diff(_ticks_ms(), now)
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws,
-                        _t_diag, _t_sd, 0, _t_hi, _t_hp)
+                        _t_diag, _t_sd, _t_web, _t_hi, _t_hp)
         _t_sleep = pump.pace(ws, elapsed)
         # Accumulated BEFORE the sleep, so `frame` is work and `sleep` is carried
         # separately -- a paced loop must not read as a slow one.
@@ -550,6 +570,7 @@ def run_desktop(fps_cap=60):
         _acc[3] += _t_inp
         _acc[4] += _t_sb
         _acc[5] += _t_ws
+        _acc[6] += _t_web
         _acc[7] += _t_diag
         _acc[8] += _t_sd
         _acc[9] += _t_sleep
