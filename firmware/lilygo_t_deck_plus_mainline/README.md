@@ -57,7 +57,7 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 
 | | shipping fork build | this build |
 |---|---|---|
-| app image | 5,052,032 B | **3,566,416 B** |
+| app image | 5,052,032 B | **3,566,592 B** |
 | headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
 
 Same console, same baked browser bundle (572,693 B), same partition table —
@@ -683,7 +683,7 @@ on glass, so a misbehaviour can be bisected by flashing the last good one.
 | 4 | **SD** — `moy_sd` attach on the live host, the dangerous one | `sd` | 2,238,144 B | **on glass 2026-08-16** |
 | 5 | **Audio** — I2S into the MAX98357 via `moy_audio` | `audio` | 2,251,856 B | **on glass 2026-08-16** |
 | 6 | **The console** — `run_desktop` over `device_boot`, Lua carts, OTA, the baked web console, the serial dev channel | `desktop` | 3,564,672 B | **on glass 2026-08-16** — worked, at ~half the fork's fps |
-| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,416 B | **compiles; NOT on glass** |
+| 7 | **The flush overlap** — `moy_lcd` kick/pump/drain, the 2 ms pump timer, a real `sync()` | `desktop` | 3,566,592 B | **compiles; NOT on glass** |
 
 ### Reading the next flash (stage 7)
 
