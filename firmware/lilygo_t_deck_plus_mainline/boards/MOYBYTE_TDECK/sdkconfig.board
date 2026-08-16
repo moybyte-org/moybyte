@@ -46,3 +46,41 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 CONFIG_ESP32S3_DATA_CACHE_32KB=
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
+
+# PSRAM at 120MHz, matching the fork. THIS IS THE PORT'S LAST MEASURED GAP and
+# it was not a code difference at all: the mainline board set no SPIRAM speed, so
+# it took the 80MHz default while the shipping fork has run 120M OCT for months.
+#
+# Measured on the owner's board, same cart, same night, after the flush overlap
+# had already landed:
+#
+#     render= minus bg=   fork 7.73ms   mainline 7.93ms   (matches to 0.2ms)
+#     bg= (a 153,600 B PSRAM fill)   4.06ms   vs   5.99ms
+#     implied write rate  37.8 MB/s   vs   25.6 MB/s   = 1.475x
+#     clock ratio         120 / 80                     = 1.5x
+#
+# Everything else was already equal -- same cache geometry (checked in the
+# generated sdkconfig, not assumed), same staged kernel at the same -O3, 240MHz
+# on both. The ~2ms lives in the MSPI clock and nowhere else, and the `logic=`
+# tax (1.50 -> 2.00) is the same clock on the PSRAM-resident gc heap.
+#
+# 120M is ESP-IDF "experimental" and temperature-sensitive, so this is a risk
+# decision rather than free -- but it is the SAME risk the shipping fork has
+# carried on this exact hardware, so matching it is the conservative choice for a
+# replacement build, not a new gamble. If the panel ever shows garbage bands or
+# the board wedges under sustained load, this is the first line to revert; note
+# the cache LINE above stays 32B for a related and separately-learned reason.
+# 120M is not one flag. It is Kconfig-gated behind IDF_EXPERIMENTAL_FEATURES,
+# it requires the FLASH at 120M too, and the S3's 120M PSRAM timing DRIFTS WITH
+# TEMPERATURE -- so the fork also enables the temperature-sensor retune on a 5s
+# interval. Setting SPIRAM_SPEED_120M alone silently leaves you at 80M, which is
+# exactly what a first attempt here did (the generated sdkconfig still read
+# SPEED=80 after a clean build). All five together, matching the fork's `fast`
+# profile, or none of them.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=
+CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPIRAM_SPEED_80M=
+CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
+CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
