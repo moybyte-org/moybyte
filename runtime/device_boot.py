@@ -365,3 +365,86 @@ class FramePump:
         if self.debt > 2 * fms:
             self.debt = 2 * fms                 # unpayable: just run flat out
         return 0
+
+
+class IdleBlank:
+    """Blank the panel backlight after a spell with no input, restore it on the next.
+
+    ONE implementation for both boards. The P4 shipped this first (#58) and the
+    T-Deck grew a hand-rolled second copy on 2026-08-16 that got three things
+    wrong -- all three are behaviours, not details, and all three are why this is
+    shared rather than re-typed per board:
+
+      1. The touch that WAKES the screen must not also press what it landed on,
+         or a wake tap launches a cart.
+      2. `ws._dirty` has to be set on wake. The panel may still hold a frame from
+         before the blank and the partial-paint machinery will happily leave it
+         there.
+      3. An EXPLICIT blank has to outrank activity. `power off` arrives on the
+         serial channel, which is itself activity, so without this it wakes again
+         in the very same iteration.
+
+    Drives the backlight and nothing else: the board keeps RENDERING while dark,
+    so an unattended bench run still produces the frames it is measuring.
+
+    `set_backlight` is injected because the two boards reach their panel
+    differently, and `ws` is passed per-tick rather than held so this owns no
+    console reference.
+    """
+
+    def __init__(self, set_backlight, timeout_ms=300000):
+        self._set = set_backlight
+        self.timeout_ms = timeout_ms   # 0 disables
+        self.asleep = False
+        self.force = False             # an explicit blank is pending
+        self._idle_at = 0
+
+    def wake(self, now):
+        self._idle_at = now
+        return self._resume() if self.asleep else False
+
+    def _resume(self):
+        self.asleep = False
+        self._set(True)
+        return True
+
+    def blank(self):
+        """Ask for a blank at the next tick, outranking that tick's activity."""
+        self.force = True
+
+    def tick(self, now, active, ws, pointer=None, click=False):
+        """Returns the (possibly cleared) click for this frame.
+
+        Call after EVERY input source has been read and before the pointer is
+        handed to the console -- that ordering is what lets the waking touch be
+        swallowed.
+        """
+        if self.force:
+            self.force = False
+            self._idle_at = now
+            if not self.asleep:
+                self.asleep = True
+                self._set(False)
+            ws._psave_asleep = True
+            return click
+        if active:
+            self._idle_at = now
+            if self.asleep:
+                self._resume()
+                ws._psave_asleep = False
+                ws._dirty = True            # (2)
+                if pointer is not None:     # (1)
+                    pointer.down = False
+                return False
+            return click
+        if (self.timeout_ms and not self.asleep
+                and _ticks_diff(now, self._idle_at) >= self.timeout_ms):
+            self.asleep = True
+            self._set(False)
+            ws._psave_asleep = True
+            # Say so. The panel going dark is indistinguishable from a hang or a
+            # dead backlight otherwise, and this is the one event here nobody
+            # can see happen.
+            print("Moybyte power save: screen off (idle %ds)"
+                  % (self.timeout_ms // 1000))
+        return click
