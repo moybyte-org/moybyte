@@ -131,6 +131,16 @@ class DeviceBoot:
             draw_splash(self.canvas, frac=frac, status=msg)
             self.comp.flush()
             if not self.lit:
+                # #45, and it needs a FENCE, not just an ordering. On a backend
+                # whose flush overlaps (the T-Deck's banded SRAM-bounce push,
+                # which returns with most of the frame still going out) the
+                # backlight would come on over rows the panel has not been
+                # written yet -- i.e. over the ST7789's power-on GRAM noise,
+                # which is the single thing this gate exists to prevent. Once
+                # per boot, on the first light only.
+                _sync = getattr(self.comp, "sync", None)
+                if _sync is not None:
+                    _sync()
                 if self.set_backlight is not None:
                     self.set_backlight(True)
                 self.lit = True

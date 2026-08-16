@@ -54,9 +54,14 @@ from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+# The SAME board as TDECK, built on mainline MicroPython instead of the
+# lvgl_micropython fork. It is a separate target here rather than an assumed
+# copy: it stages from TWO sources (runtime/ and the fork build's modules/),
+# and the second one is exactly where a shared-tree assumption would go wrong.
+TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 WEB = ROOT / "firmware" / "web_runner"
-BOARD_DIR = {"tdeck": TDECK, "p4": P4}
+BOARD_DIR = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -76,6 +81,10 @@ NATIVE = {
     "tdeck": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
               "moycore", "lvgl", "lcd_bus", "st7789", "task_handler",
               "spi3wire", "i2c", "rgb_bus"},
+    # The same shared usermods, plus this board's own panel backend -- and
+    # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
+    "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
+                       "moycore", "moy_web", "moy_lcd"},
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_dsi", "moy_ppa",
            "moy_ble_hid"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
@@ -97,6 +106,9 @@ HOST_ONLY = {
     "tdeck": {"host_app", "host_api", "host_canvas", "lua_host", "input",
               "audio_binding", "lua_binding", "gfx_binding", "native_build",
               "simulate_desktop"},
+    "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
+                       "input", "audio_binding", "lua_binding", "gfx_binding",
+                       "native_build", "simulate_desktop"},
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
            "audio_binding", "lua_binding", "gfx_binding", "native_build",
            "simulate_desktop"},
@@ -114,6 +126,7 @@ HOST_ONLY = {
 # leaving them out would report every importer of them as broken.
 GENERATED = {
     "tdeck": {"carts_data", "_ota_build"},
+    "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
@@ -121,7 +134,8 @@ GENERATED = {
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
-PACKAGES = {"tdeck": {"moybyte"}, "p4": {"moybyte"}, "web": set()}
+PACKAGES = {"tdeck": {"moybyte"}, "tdeck-mainline": {"moybyte"},
+            "p4": {"moybyte"}, "web": set()}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -367,7 +381,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck", "p4", "web")
+TARGETS = ("tdeck", "tdeck-mainline", "p4", "web")
 
 
 def _unresolved(target):
@@ -418,7 +432,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-@pytest.mark.parametrize("target", ("tdeck", "p4"))
+@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
 def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
     """A module that RAISES on import is worse than one that is missing.
 
@@ -465,7 +479,7 @@ def _kinds(target):
     return out
 
 
-@pytest.mark.parametrize("target", ("tdeck", "p4"))
+@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
 def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     declared = _kinds(target)
     # HOST_ONLY carries names that are not runtime modules at all
@@ -483,7 +497,7 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
             "longer exists -- that is what makes it a tripwire" % (target, name))
 
 
-@pytest.mark.parametrize("target", ("tdeck", "p4"))
+@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
 def test_every_board_toml_denial_is_explained_and_classified(target):
     """#161: the prose rationale moves WITH the data. An unexplained denial is
     the state this phase existed to leave behind -- a staging list whose
@@ -525,6 +539,54 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (
         "the P4 denies modules the S3 stages: %s" % sorted(p4 - tdeck))
+
+
+def test_the_two_tdeck_builds_stage_the_same_shared_console():
+    """One board, two build systems, and they must not become two consoles.
+
+    `firmware/lilygo_t_deck_plus_mainline` is the SAME physical T-Deck as
+    `firmware/lilygo_t_deck_plus_micropython`, rebuilt on mainline MicroPython.
+    Same glass, same 320x240 tier, same `wm.FullscreenStackWM` -- so their
+    shared-module DENIALS must agree exactly. A difference here is either a
+    module one build forgot or a tier claim nobody wrote down, and both are
+    worth failing over while the two targets coexist.
+
+    Their DEVICE staging is deliberately not compared: the fork build keeps its
+    device modules as tracked files in its own `modules/`, while the mainline
+    build stages the same files FROM there through board.toml -- one tree, two
+    routes to it, which is the arrangement that lets them share a console at all.
+    """
+    fork = board_config.denials(TDECK)
+    mainline = board_config.denials(TDECK_MAINLINE)
+    assert set(fork) == set(mainline), (
+        "the two T-Deck builds deny different shared modules -- fork only: %s; "
+        "mainline only: %s"
+        % (sorted(set(fork) - set(mainline)), sorted(set(mainline) - set(fork))))
+    kinds_differ = sorted(n for n in fork
+                          if fork[n].get("kind") != mainline[n].get("kind"))
+    assert not kinds_differ, (
+        "the two T-Deck builds classify the same denial differently: %s"
+        % kinds_differ)
+
+
+def test_the_mainline_tdeck_stages_no_module_that_needs_the_fork():
+    """The three modules the mainline build must never pick up.
+
+    `tdeck_display.py`, `moy_compositor.py` and `moy_canvas.py` all drive
+    `lcd_bus`/`lvgl`, which do not exist in a mainline image; `moy_runtime.py`
+    and `moybyte_shell.py` are the fork build's own boot spine and would SHADOW
+    the mainline board's authored ones, since both trees freeze into one flat
+    namespace. That is why `[modules.device]` in the board file is an ALLOWLIST
+    and has to stay one -- a denylist over a board tree picks all five up the
+    moment somebody adds a file.
+    """
+    staged = set(board_config.staged_modules(TDECK_MAINLINE, ROOT))
+    forbidden = {"tdeck_display.py", "moy_compositor.py", "moy_canvas.py",
+                 "moy_runtime.py", "moybyte_shell.py"}
+    leaked = sorted(staged & forbidden)
+    assert not leaked, (
+        "the mainline T-Deck stages fork-only modules from the fork's board "
+        "tree: %s" % leaked)
 
 
 def test_the_frozen_set_is_derived_from_the_declaration():

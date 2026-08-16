@@ -2132,6 +2132,53 @@ def test_async_layer_copy_wired():
     assert "LAYER_COPY_ASYNC and self._gfx is not None" in device_canvas
 
 
+def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
+    """#54 St.2 on the mainline port, where the flag has to come from elsewhere.
+
+    `device_canvas.py` reads `LAYER_COPY_ASYNC` from `moy_compositor`, which the
+    mainline build does not stage (its compositor is `tdeck_panel` over the C
+    `moy_lcd`), so the import guard resolves it False. That file is STAGED from
+    the fork tree and is not the mainline's to edit, so the flag is declared in
+    `tdeck_panel` -- the module that plays `moy_compositor`'s part there, and the
+    module that owns the fact the lever rests on -- and `run_desktop` assigns it
+    across.
+
+    The thing worth pinning is the ORDER. `DeviceCanvas.__init__` latches
+    `_async_ok` from the module global, so an assignment that drifts BELOW the
+    construction reaches nothing at all: the lever would be off, the flag would
+    read True, and no diag line would contradict either. That is a silent
+    failure with a green grep, which is exactly the shape a test is for.
+
+    Only the two TRACKED board files are read -- the mainline's `modules/` is
+    gitignored apart from its board-authored files, so a fresh checkout has no
+    staged `device_canvas.py` to look at.
+    """
+    mainline = _REPO / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
+    panel = (mainline / "tdeck_panel.py").read_text(encoding="utf-8")
+    runtime = (mainline / "moy_runtime.py").read_text(encoding="utf-8")
+
+    # Declared in the compositor module, as a plain module constant, so the
+    # revert is one flag exactly like ASYNC_FLUSH beside it.
+    assert "\nLAYER_COPY_ASYNC = True\n" in panel
+    assert "\nASYNC_FLUSH = True\n" in panel
+
+    # ... and applied onto the staged module, never edited into it.
+    assign = "device_canvas.LAYER_COPY_ASYNC = tdeck_panel.LAYER_COPY_ASYNC"
+    assert assign in runtime
+    assert "import device_canvas" in runtime
+
+    # THE ORDER. Both live in run_desktop, and the assignment must precede the
+    # first DeviceCanvas.
+    build = "canvas = DeviceCanvas(comp)"
+    assert build in runtime
+    assert runtime.index("def run_desktop") < runtime.index(assign) < runtime.index(build)
+
+    # DRAW2 is the only line that names `layer=` (the copy this lever removes)
+    # and `fill=` (what a colour background() actually costs). Without it the
+    # lever has no instrument on this board.
+    assert "_diag_draw2" in runtime
+
+
 def test_sram_bounce_flush_wired():
     # #66: the SRAM-bounce flush needs three cooperating pieces -- the esp_lcd
     # no-acquire patch (continuation tx_color must be queue-only or every band

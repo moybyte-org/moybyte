@@ -28,8 +28,9 @@ from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
-BOARDS = {"tdeck": TDECK, "p4": P4}
+BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -136,7 +137,7 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
         "must be impossible, since modules/ holds the board's own sources too")
     assert (dest / "console.py").exists() and (dest / "moy_font.py").exists()
     assert not (dest / "font.py").exists(), "font.py must stage RENAMED only"
-    if board == "tdeck":
+    if board.startswith("tdeck"):
         assert not (dest / "wm_windowed.py").exists()
     on_disk = {p.name for p in dest.glob("*.py")} - {"carts_data.py",
                                                      "moy_runtime.py"}
@@ -174,3 +175,14 @@ def test_the_board_identity_matches_the_ota_stamp():
     tdeck_id = board_config.load(TDECK)["board"]["ota"]
     assert 'BOARD = "%s"' % tdeck_id in ota
     assert p4_id != tdeck_id
+
+    # The mainline T-Deck stamps the SAME id, and that is the correct answer
+    # rather than a copy-paste: it produces an app-partition image for the same
+    # Xtensa board on a byte-identical partition table, so an OTA payload from
+    # either build installs into the other's inactive slot. A distinct id would
+    # mean a board could not move between the two builds, which is exactly the
+    # migration this port exists to make possible.
+    ml_sh = (TDECK_MAINLINE / "build.sh").read_text(encoding="utf-8")
+    ml_id = board_config.load(TDECK_MAINLINE)["board"]["ota"]
+    assert 'BOARD = "%s"' % ml_id in ml_sh
+    assert ml_id == tdeck_id

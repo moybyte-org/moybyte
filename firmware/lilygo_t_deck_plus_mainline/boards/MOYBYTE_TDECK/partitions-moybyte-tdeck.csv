@@ -1,0 +1,21 @@
+# Moybyte T-Deck partition table -- 16MB flash, dual-OTA (#53).
+#
+# This is a TRANSCRIPTION, not a design: it is byte-for-byte the table the fork
+# build generates from `--ota --flash-size=16 --partition-size=5242880`, taken
+# from a real build's .build/lvgl_micropython/build/partitions.csv. Both boards
+# in the field are on it and have taken OTA updates against it, so a change here
+# costs every deployed device a full-erase USB flash. Do not "tidy" the offsets:
+# nvs is 0x14000 (not the mainline default's 0x6000), which is why otadata lands
+# at 0x1D000 and ota_0 at 0x20000.
+#
+# Slot sizes went 4MB -> 4.5MB (2026-07-27, #168, the app crossed 4MB) -> 5MB
+# (2026-07-29, so the next growth spurt does not cost another table change).
+# build.sh prints the remaining headroom on every build; watch it.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x14000,
+otadata,  data, ota,     0x1D000,  0x2000,
+phy_init, data, phy,     0x1F000,  0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x500000,
+ota_1,    app,  ota_1,   0x520000, 0x500000,
+vfs,      data, fat,     0xA20000, 0x5E0000,
