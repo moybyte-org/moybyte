@@ -648,7 +648,7 @@ with an A/B rather than inherited.
 | flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up. **This is where the remaining cart-side gap lives** — Brick Siege's whole `bg=` difference is a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is the one lever left that would close it, and turning it on is a risk decision, not a perf decision |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
 | async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
-| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and layer_test (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura / letter_blitz / platformer / open_machine, where the fork measured 7 ms → 0.04 ms |
+| GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and layer_test (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
 | PSRAM-direct DMA (`spi_master` patch, #43) | on | **off** | the SRAM-bounce path makes it unnecessary and it is the riskier of the two |
 
 ---
@@ -807,9 +807,14 @@ DRAW2 layer=N.NNms batch=N.NNms map=N.NNms text=N.NNms fill=N.NNms gated(fill=N 
 |---|---|---|
 | **sakura** | `make_layer(W, H)` + `draw_layer(lay, 0, 0)` — the exact predicted shape | `DRAW2 layer=` **~7 ms → ~0.0x ms**. This is the whole test |
 | **Letter Blitz** | screen-wide `_bg` layer, re-painted only when a brick or the mood changes | `layer=` ~0 on most frames, a full-cost frame whenever `_bg` is rebuilt (a layer edited this frame is a deliberate forced miss) |
-| **Platformer**, **Open Machine** | screen-wide layer / `background(image)` | same shape as sakura |
+| **Platformer** | screen-wide layer built once per run, stamped at (0, 0) | same shape as sakura |
 | **Sky Run** | layer is **800 px wide** — `_arm_layer_pred` refuses `layer.w != self.w` | **no change, and that is correct.** A change here would mean the arming guard is wrong |
 | **Brick Siege** | no layer at all; `background(col(...))` is a `cls()` | **no change.** Its cost is `DRAW2 fill=`, and that is the PSRAM-clock row |
+
+Three carts, and that is the whole list on the shipped roster: every
+`background()` in `system_carts` takes a COLOUR — including Open Machine's
+`background(field)`, whose `field` is a `col()` — so the Image form, the other
+shape this arms for, has nothing exercising it here.
 
 **What says it went wrong, not just flat.**
 

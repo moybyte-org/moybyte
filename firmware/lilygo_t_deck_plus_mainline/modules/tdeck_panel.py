@@ -107,9 +107,12 @@ ASYNC_FLUSH = True
 # than the screen (Sky Run at 800 px, layer_test at 512), keep the synchronous
 # `blit_window` and are untouched by this flag; and Brick Siege has no layer at
 # all -- its `background(col("dark_blue"))` is a `cls()`, a PSRAM fill -- so it
-# cannot move by a microsecond. The carts that CAN move are the ones with a
-# screen-wide `make_layer(W, H)` restored at (0, 0): sakura, letter_blitz,
-# platformer, open_machine.
+# cannot move by a microsecond. On the shipped roster the carts that CAN move
+# are exactly three, the ones with a screen-wide `make_layer(W, H)` restored at
+# (0, 0): sakura, letter_blitz and platformer. Every `background()` in
+# system_carts takes a COLOUR (open_machine's `background(field)` included --
+# `field` is a `col()`), so the Image form, which bakes a full-screen layer and
+# is the other shape this arms for, has no cart exercising it here.
 #
 # TO REVERT: LAYER_COPY_ASYNC = False. One flag and one reflash, exactly like
 # ASYNC_FLUSH above, and the two are independent -- so a torn or stale frame can
