@@ -6,11 +6,41 @@
 #endif
 #define MICROPY_HW_MCU_NAME                 "ESP32S3"
 
-// The T-Deck's USB-C is the S3's NATIVE USB (OTG), so TinyUSB CDC is the REPL
-// (the port turns MICROPY_PY_TINYUSB on for the S3, which makes
-// MICROPY_HW_USB_CDC default to 1 and USB-Serial/JTAG default to 0). UART REPL
-// stays on as well -- the board exposes TX/RX on the header and it costs
-// nothing. This mirrors the fork build's MOYBYTE_REPL=cdc_uart default.
+// USB: the S3's USB-Serial/JTAG peripheral, NOT TinyUSB CDC. This is what makes
+// serial RX work under the desktop, and it is the whole reason the board has a
+// dev channel at all.
+//
+// The obvious setting is the wrong one. The T-Deck's USB-C is the S3's native
+// USB, so CDC looks right, and the port defaults there (MICROPY_HW_ENABLE_USBDEV
+// = SOC_USB_OTG_SUPPORTED). But MicroPython only calls tusb_init() when the REPL
+// is reached (micropython#18581, a v1.27 regression) and this console never
+// returns to the REPL -- so CDC never comes up. Meanwhile
+// MICROPY_HW_USB_CDC = MICROPY_HW_ENABLE_USBDEV forces
+// MICROPY_HW_ESP_USB_SERIAL_JTAG to 0 on the S3 (SOC_USB_OTG_PERIPH_NUM == 1),
+// which drops usb_serial_jtag_init() and its ISR from the build entirely.
+//
+// The result is a board with NO stdin at all: measured 2026-08-16, the image
+// carried tud_cdc_rx_cb but no tusb_init and no usb_serial_jtag_isr_handler,
+// stdin came from uart_stdout_init on U0RXD -- a header pin with nothing
+// attached -- and a host write() to the enumerated 303a:1001 interface was
+// accepted and then went nowhere (SERIAL rx= never moved off a single stray
+// byte). Output worked the whole time, because ESP-IDF's SECONDARY console is
+// output-only.
+//
+// Turning USBDEV off inverts both gates: USB-Serial/JTAG links in, and mp_task
+// installs its ISR BEFORE any Python runs, so RX does not depend on reaching a
+// REPL. TX is safe -- usb_serial_jtag_tx_strn gives an absent host 200ms once,
+// then latches terminal_connected = false and returns immediately.
+//
+// Do not "restore" this to CDC without checking `nm` for usb_serial_jtag_isr_handler
+// and tusb_init: the two mechanisms are mutually exclusive on this chip, and the
+// failure mode of picking wrong is silent in one direction only.
+#define MICROPY_HW_ENABLE_USBDEV            (0)
+
+// UART REPL stays on: the board exposes TX/RX on the header, it costs nothing,
+// and it shares the same stdin_ringbuf. If SERIAL rx= ever CLIMBS on an idle
+// board, U0RXD is floating and picking up noise -- turn this off, that is the
+// documented remedy.
 #define MICROPY_HW_ENABLE_UART_REPL         (1)
 
 // I2C0 is the T-Deck's peripheral bus: the ESP32-C3 keyboard (0x55) and the
