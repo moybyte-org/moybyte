@@ -871,9 +871,33 @@ def run_desktop(handler, prefetched=None, fps_cap=60):
                 and _ticks_diff(_tnow, _diag_flush_at) >= 0):
             _diag_flush_at = _tnow + (20000 if ws.cart is not None else 5000)
             _t_sd = _diag_flush(diag, ws)
-        # The web bucket stays in the diag/LOOP format (parsers key on it) but
-        # reads 0 since the streaming web view died (2026-08 sunset).
+        # SERVICE THE WEB CONSOLE. This read a hardcoded 0 from the 2026-08
+        # streaming sunset until 2026-08-16, and when the web console was wired
+        # to this board (#29) the loop step was never restored -- so the
+        # listener bound, SYNs queued into its backlog of one, and nothing ever
+        # called accept(). On glass that looked like a dead server while the
+        # board honestly reported `sock=open serving=True`: port 8080 TIMED OUT
+        # (queued, never drained) while a closed port on the same board REFUSED
+        # in the same second, which is the fingerprint of a listener nobody is
+        # servicing. The P4 has had this call since its own web console landed,
+        # which is why that board served and this one did not.
+        #
+        # Same placement reasoning as the P4's: one non-blocking accept/serve
+        # per frame at the frame TAIL. It costs a poll on an idle listener and a
+        # whole asset transfer when a browser is loading -- which will visibly
+        # stall the desktop, and on a single-threaded board that is the honest
+        # behaviour rather than a bug. Guarded: a request must never break a
+        # frame. Timed, so `web=` in LOOP/HITCH stops being a constant and
+        # starts answering "is the transfer what stalled this frame".
         _t_web = 0
+        _wh = getattr(ws, "webhost", None)
+        if _wh is not None and getattr(_wh, "serving", False):
+            _t_w0 = _ticks_ms()
+            try:
+                _wh.poll()
+            except Exception as _wexc:  # noqa: BLE001 -- never break a frame
+                print("WEB ERR %s: %s" % (type(_wexc).__name__, _wexc))
+            _t_web = _ticks_diff(_ticks_ms(), _t_w0)
         elapsed = _ticks_diff(_ticks_ms(), now)
         # Hitch logger (#66): any frame past HITCH_MS gets a HITCH line naming the
         # measured stages -- kbd (I2C keyboard poll), inp (trackball+touch+pointer),

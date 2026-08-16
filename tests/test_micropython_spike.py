@@ -3550,3 +3550,34 @@ def test_the_p4_perf_sampler_cannot_kill_the_frame_loop():
     for name in ("_draw_ms", "_flush_ms", "_upd_ms", "_cart_ms", "_chrome_ms"):
         assert "ws." + name not in tail, \
             "PERF still reads ws.%s bare -- use getattr" % name
+
+
+def test_both_boards_service_the_web_console_every_frame():
+    """A bound listener nobody accepts on is indistinguishable from a dead one.
+
+    Found on T-Deck glass 2026-08-16. `make_webhost` was wired to this board in
+    #29, but the frame loop's web step had been a hardcoded `_t_web = 0` since
+    the 2026-08 streaming sunset and nobody restored the poll. So the socket
+    bound, `serving` read True, the row showed a correct address -- and every
+    SYN sat in the listener's backlog of one until it timed out. The board was
+    telling the truth the whole time; nothing was draining the queue.
+
+    The tell that named it, worth keeping because it generalises: on the same
+    board in the same second, port 8080 TIMED OUT while a closed port REFUSED.
+    A refusal means no listener; a timeout means a listener nobody services.
+
+    The P4 had this call from the day its own web console landed, which is why
+    that board served and this one never did -- so this asserts it for BOTH,
+    not for whichever one someone remembers.
+    """
+    for rel in ("firmware/lilygo_t_deck_plus_micropython/modules/moy_runtime.py",
+                "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
+        src = (_REPO / rel).read_text(encoding="utf-8")
+        assert ".poll()" in src and "webhost" in src, rel
+        # the poll must be reachable from the webhost, not merely present
+        assert any(
+            "poll()" in ln
+            for ln in src.splitlines()
+            if "_wh" in ln or "webhost" in ln), (
+            "%s never polls ws.webhost -- a bound listener with no accept() "
+            "times out instead of refusing, which reads as a dead server" % rel)
