@@ -62,9 +62,11 @@ WIDTH = 320
 HEIGHT = 240
 
 # The overlap. False -> flush() is one blocking moy_lcd.show(), byte-for-byte the
-# pre-#66 path, and sync()/pump_if_pending become no-ops. This is the one-flag
-# fallback if the panel tears, glitches or hangs: the failure mode of an async
-# flush is a torn frame, and this is how it gets ruled out in one reflash.
+# pre-#66 path; `pump_if_pending` is then not defined at all (DeviceCanvas
+# getattrs it and degrades) and sync() is a drain that always finds nothing.
+# This is the one-flag fallback if the panel tears, glitches or hangs: the
+# failure mode of an async flush is a torn frame, and this is how it gets ruled
+# out in one reflash.
 ASYNC_FLUSH = True
 
 # Soft-timer pump period. 2 ms is the fork's shipped value, arrived at on

@@ -679,6 +679,19 @@ Nothing below has been on hardware. Turn `diag 1` on and read three lines:
   the render side matched the fork too, which it did not before. Sky Run 30,
   Celeste 20–24, Letter Blitz 21–33, Brick Siege Lua 27 should all move with it.
 
+If the serial dev channel is alive on this board (see the RX section — that is
+its own open question), the cheapest check needs no diag tick and no hitch:
+
+```
+echo 'py ws.comp.bounce_stats()' > /dev/ttyACM0        # (pump, idle, gaps, feed, bands)
+echo "py __import__('moy_lcd').pump_stats()" > /dev/ttyACM0
+```
+
+The second is the raw C tuple, `(pump, idle, gaps, feed, bands, blocked,
+timeouts)`. **`blocked` is the one that answers the whole question**: it is the
+µs the CPU actually spent inside `kick`+`drain` for the last frame, i.e. the
+same quantity as `flush=`, straight from the driver. `timeouts` must be 0.
+
 And two things that would say the overlap is *wrong* rather than slow: **tearing
 or a band-shaped seam** (the ping-pong or a slot being refilled under a live DMA
 — set `ASYNC_FLUSH = False` and reflash to confirm the attribution), and **a
