@@ -3,9 +3,9 @@
 history via the shared editors_base discipline."""
 
 try:
-    from op_history import History
+    from op_history import History, OpHistoryMixin
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History
+    from runtime.op_history import History, OpHistoryMixin
 
 
 _BLK_UNDO_MAX = 40
@@ -67,7 +67,7 @@ class BlockRow:
         self.is_else = is_else    # the if_else divider (a non-deletable label row)
 
 
-class BlockEditor(object):
+class BlockEditor(OpHistoryMixin):
     """The structured-outline block program + a cursor over its flattened script
     (issue #29 Part 2). Pure logic -- no rendering, no I/O -- so it backs both the
     host console and the frozen device console. The `blocks` module (Part 1) is the
@@ -291,33 +291,17 @@ class BlockEditor(object):
         return (self._pending_pre is not None
                 and self._pending_pre != self.program)
 
-    # -- undo / redo (over the shared #111 op-history) -----------------------
-    # The #88 bar (ws.undo/redo) and the host Ctrl+Z (block_editor_ui) both drive
-    # these; each seals any open edit first so a just-made edit is undo's target.
+    # undo/redo are OpHistoryMixin's over self._hist (#111). The #88 bar
+    # (ws.undo/redo) and the host Ctrl+Z (block_editor_ui) both drive them.
 
-    @property
-    def _undo(self):
-        return self._hist._undo          # the op undo stack (tests inspect its depth)
-
-    @property
-    def _redo(self):
-        return self._hist._redo
+    def _hist_before(self):
+        # Seal any open edit first, so a just-made edit is the step's target.
+        self._seal_pending()
 
     def can_undo(self):
+        # ...which is also why an UN-sealed changed edit must light the bar's
+        # UNDO without the side effect of sealing (the dim-state read path).
         return self._hist.can_undo() or self._pending_changed()
-
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last edit; True iff a step was taken."""
-        self._seal_pending()
-        return self._hist.undo() is not None
-
-    def redo(self):
-        """Re-apply the last undone edit; True iff a step was taken."""
-        self._seal_pending()
-        return self._hist.redo() is not None
 
     def _after_history(self):
         """Shared undo/redo tail: a restored program is a fresh tree, so any marked

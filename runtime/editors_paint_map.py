@@ -11,9 +11,9 @@ commit embeds in its journal line (`History.flush()`), and the #88 bar UNDO/REDO
 icons walk it before falling back to the coarse whole-commit journal (#111)."""
 
 try:
-    from op_history import History
+    from op_history import History, OpHistoryMixin
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History
+    from runtime.op_history import History, OpHistoryMixin
 
 try:                                              # binascii = MicroPython + CPython
     import ubinascii as _binascii
@@ -171,7 +171,7 @@ class _PaintOps:
             i += 3
 
 
-class PaintEditor:
+class PaintEditor(OpHistoryMixin):
     """Pixel-paint state over a SpriteSheet tile: current sprite + paint color +
     sprite size. The shell maps taps on the zoomed grid/palette to these calls.
 
@@ -371,29 +371,7 @@ class PaintEditor:
             if post != pre[2]:
                 self._push_diff(pre[0], pre[1], pre[2], post)
 
-    # -- undo / redo (over the shared #111 op-history) -----------------------
-
-    @property
-    def _undo(self):
-        return self._hist._undo          # the op undo stack (tests inspect its depth)
-
-    @property
-    def _redo(self):
-        return self._hist._redo
-
-    def can_undo(self):
-        return self._hist.can_undo()
-
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last recorded edit; True iff a step was taken."""
-        return self._hist.undo() is not None
-
-    def redo(self):
-        """Re-apply the last undone edit; True iff a step was taken."""
-        return self._hist.redo() is not None
+    # undo/redo/can_* are OpHistoryMixin's over self._hist (#111).
 
     # -- bucket fill (#90) ---------------------------------------------------
 
@@ -655,7 +633,7 @@ class _MapOps:
         tm.gen += 1
 
 
-class MapEditor:
+class MapEditor(OpHistoryMixin):
     """Tile-placement state over a TileMap + its SpriteSheet -- the map analogue
     of PaintEditor (#32). PaintEditor places palette indices onto a sprite tile;
     this places sprite ids onto map cells. Pure logic: the shell maps taps on the
@@ -762,36 +740,14 @@ class MapEditor:
         if self._rec is not None and new != prev:
             self._rec.append((idx, prev, new))
 
-    # -- undo / redo (over the shared #111 op-history) -----------------------
-    # The _MapOps codec (module top) replays a delta/snapshot either way; undo/redo
-    # here just close any open batch first (an in-flight gesture can't be
-    # half-undone) and drive the History.
+    # undo/redo/can_* are OpHistoryMixin's over self._hist (#111); the _MapOps
+    # codec (module top) replays a delta/snapshot either way.
 
-    @property
-    def _undo(self):
-        return self._hist._undo          # the op undo stack (tests inspect it)
-
-    @property
-    def _redo(self):
-        return self._hist._redo
-
-    def can_undo(self):
-        return self._hist.can_undo()
-
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last recorded gesture; True iff a step was taken."""
+    def _hist_before(self):
+        # An in-flight gesture can't be half-undone: close any open batch so it
+        # becomes the step's target.
         if self._rec:
             self.end_edit()
-        return self._hist.undo() is not None
-
-    def redo(self):
-        """Re-apply the last undone gesture; True iff a step was taken."""
-        if self._rec:
-            self.end_edit()
-        return self._hist.redo() is not None
 
     def clear_history(self):
         """Drop the undo/redo stacks (a structural change -- a map resize -- makes

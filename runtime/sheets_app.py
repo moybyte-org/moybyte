@@ -187,6 +187,7 @@ class SheetsAppLayer(ListShellApp):
 
     id = "sheets"
     domain = "system"
+    RENAME_MAX = MAX_NAME
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Sheets"
     APP_PERM = "sheets"
@@ -640,7 +641,7 @@ class SheetsAppLayer(ListShellApp):
                 self.status = hit[1].upper()
             return True
         if self.mode == "rename":
-            self._typed_name(inp)
+            self._typed_rename(inp)
             return True
         if self.mode == "attach":
             # the ATTACH target rows -- the shared list nav (A opens a target)
@@ -665,8 +666,8 @@ class SheetsAppLayer(ListShellApp):
     def _typed_keys(self, inp):
         if self.sheet is None:
             return
-        k = inp.last_key
-        if k and k != self._ekey_prev:
+        k = self._edge_key(inp)
+        if k:
             if k == 0x1A:                        # Ctrl+Z: undo (#111, code_layer parity)
                 self._undo()
             elif k == 0x19:                      # Ctrl+Y: redo
@@ -697,19 +698,7 @@ class SheetsAppLayer(ListShellApp):
                 elif 0x20 <= k <= 0x7E:          # a keystroke starts a fresh entry
                     self._begin_edit("")
                     self.edit_buf = chr(k)
-        self._ekey_prev = k
 
-    def _typed_name(self, inp):
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
-            self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
-            self.rename_text += chr(k)
-        self.ws._dirty = True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

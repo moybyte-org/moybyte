@@ -439,7 +439,7 @@ class _IndexSource:
 
 
 def test_blit_cover_takes_an_indexed_source_too():
-    """`blit_cover`'s `_cover_py` lane resolves an index source through THIS
+    """`blit_cover`'s `_cover_fallback` lane resolves an index source through THIS
     canvas's table, and must land the same pixels the 565 source does -- so a
     backend that hands over indices composites identically."""
     gc = _IndexSource(320, 240, 1)

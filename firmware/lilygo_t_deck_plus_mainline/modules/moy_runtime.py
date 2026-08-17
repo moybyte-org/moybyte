@@ -28,7 +28,8 @@ from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
 # written per board -- boot splash, cart seed+scan, the Lua runtime probe, the
 # OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
 # there. Everything below that is not one of those is hardware.
-from device_boot import DeviceBoot, FrameLoop, FramePump, IdleBlank, OtaHealth
+from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
+                         OtaHealth, apply_touch, poll_webhost)
 from carts_data import CARTS          # generated from system_carts/ at build time
 from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
                          sram_census)
@@ -354,19 +355,11 @@ def run_desktop(fps_cap=60):
             dy = _cursor_delta(ny)
             if dx or dy:
                 pointer.move(dx, dy)
-        tp = touch.poll()
-        pointer.down = tp is not None
-        # Touch.poll holds a held finger's last point across the frames the GT911
-        # produced no fresh sample for (#74), so `down` is a real LEVEL and a drag
-        # survives them; `fresh` marks the repeats so kinetic scrolling doesn't
-        # measure finger speed against a sample the hardware never took.
-        pointer.fresh = getattr(touch, "fresh", True)
-        if tp is not None:
-            pointer.place(tp[0], tp[1])
-            if tp[2]:
-                click = True
+        touched, tclick = apply_touch(touch, pointer)
+        if tclick:
+            click = True
         _t["inp"] = _ticks_diff(_ticks_ms(), _t0)
-        return click, ((tp is not None) or nx or ny or click
+        return click, (touched or nx or ny or click
                        or bool(getattr(inp, "last_key", None)))
 
     def _present():
@@ -464,15 +457,7 @@ def run_desktop(fps_cap=60):
         # nobody accepts on is indistinguishable from a network fault). Timed,
         # so `web=` in LOOP/HITCH answers "is the transfer what stalled this
         # frame".
-        _t["web"] = 0
-        _wh = getattr(ws, "webhost", None)
-        if _wh is not None and getattr(_wh, "serving", False):
-            _t_w0 = _ticks_ms()
-            try:
-                _wh.poll()
-            except Exception as _wexc:  # noqa: BLE001 -- never break a frame
-                print("WEB ERR %s: %s" % (type(_wexc).__name__, _wexc))
-            _t["web"] = _ticks_diff(_ticks_ms(), _t_w0)
+        _t["web"] = poll_webhost(ws)
 
     def _account(now, elapsed, sleep_ms):
         if diag is not None and elapsed >= HITCH_MS:

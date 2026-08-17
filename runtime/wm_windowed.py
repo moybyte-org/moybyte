@@ -954,7 +954,7 @@ class WindowedWM(FullscreenStackWM):
             return
         self._sync_windows()
         ws = self.ws
-        overlays = []
+        overlays = self._overlay_layers(sig)   # the shared sig ladder (wm.py)
         # The GAME-domain perf HUD is deliberately NOT in this stack. It draws on
         # the 320x240 game canvas, and on this tier that canvas reaches the screen
         # two different ways: a raster backend composites its pixels, but a
@@ -966,23 +966,7 @@ class WindowedWM(FullscreenStackWM):
         # drawn inside _draw_player_window, between the cart's draw and the
         # composite -- same pixels on a raster tier, correctly placed on a
         # recording one.
-        pre = []
-        if sig & 4:
-            overlays.append(ws._confetti_layer)
-        if sig & 8:
-            overlays.append(ws._ach_layer)
-        if sig & 16:
-            overlays.append(ws._egg_layer)
-        if sig & 32:
-            overlays.append(ws._toast_layer)
-        if sig & 64:
-            overlays.append(ws._sysmenu_layer)
-        if sig & 128:
-            overlays.append(ws._about_layer)
-        if sig & 256:
-            overlays.append(ws._notice_layer)
-        overlays.append(ws._cursor_layer)
-        base = [self._backdrop_layer] + pre + [self._win_layer]
+        base = [self._backdrop_layer, self._win_layer]
         draw_base = [ws._splash_layer] if (sig & 1) else base
         self._cache_overlay = overlays
         self._cache_visible = base + overlays

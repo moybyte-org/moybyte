@@ -13,15 +13,14 @@ Usage:
 Default out is the session scratchpad path the task specifies."""
 
 import os
-import struct
 import sys
-import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 # console.py uses bare `editors`/`audio`/`blocks` names (its frozen device names);
 # host_app registers those aliases, so import it first.
+from tools import pngwrite  # noqa: E402
 from runtime import host_app  # noqa: F401,E402
 from runtime import console as C  # noqa: E402
 from runtime.palette import _BASE16  # noqa: E402
@@ -89,22 +88,8 @@ def _draw_text(px, w, x, y, text, color):
 
 
 def _write_png(path, px, w, h):
-    raw = bytearray()
-    for row in px:
-        raw.append(0)                          # filter type 0
-        for (r, g, b) in row:
-            raw += bytes((r, g, b))
-
-    def chunk(tag, data):
-        c = struct.pack(">I", len(data)) + tag + data
-        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-
-    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)   # 8-bit RGB
-    with open(path, "wb") as f:
-        f.write(b"\x89PNG\r\n\x1a\n")
-        f.write(chunk(b"IHDR", ihdr))
-        f.write(chunk(b"IDAT", zlib.compress(bytes(raw), 9)))
-        f.write(chunk(b"IEND", b""))
+    rows = [b"".join(bytes(p) for p in row) for row in px]
+    pngwrite.write_png(path, rows, w, h)
 
 
 def _ascii_dump(sheet):

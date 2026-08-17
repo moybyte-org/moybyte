@@ -13,6 +13,10 @@
 #   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR MPY_TAG DIST_DIR MODULES_DIR
 # Every function says what else it reads.
 
+# Parallelism for every make below (MOYBYTE_BUILD_JOBS overrides -- CI runners
+# report more CPUs than they schedule).
+BUILD_JOBS="${MOYBYTE_BUILD_JOBS:-$(nproc)}"
+
 # Sets BUILD_PYTHON: the venv python when there is one (same interpreter the
 # tests run), else the system python3. tools/board_config.py is stdlib-only ON
 # PURPOSE (see its docstring): a board must be buildable on nothing but the
@@ -231,4 +235,31 @@ moybyte_app_size_guard() {
   elif [ "${headroom}" -lt "${warn_bytes}" ]; then
     echo "Moybyte WARNING (#168): under $(( warn_bytes / 1024 ))KB of OTA-slot headroom left -- trim the image or plan the next table change" >&2
   fi
+}
+
+# The build + collect step -- identical on both boards down to the artifact
+# names. Builds mpy-cross, then the port (both -j BUILD_JOBS), then copies the
+# two images out and runs the #168 size guard:
+#   ${DIST_DIR}/<stem>.bin      bootloader + table + app merged (cable flash;
+#                               the offset differs per board -- $3 is the note)
+#   ${DIST_DIR}/<stem>_app.bin  the APP partition image, what an OTA writes
+#                               into the inactive slot. Handing the merged
+#                               image to esp32.Partition would write a
+#                               bootloader into an app slot.
+# Reads: MPY_DIR BOARD BOARD_DIR SCRIPT_DIR MANIFEST DIST_DIR BUILD_JOBS.
+# Leaves the cwd in ports/esp32 (both scripts end here).
+moybyte_build_and_collect() {
+  local csv="$1" stem="$2" flash_note="$3"
+  make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
+  cd "${MPY_DIR}/ports/esp32"
+  make submodules BOARD_DIR="${BOARD_DIR}"
+  make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
+    USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
+    FROZEN_MANIFEST="${MANIFEST}"
+  local bout="build-${BOARD}"
+  cp "${bout}/firmware.bin" "${DIST_DIR}/${stem}.bin"
+  cp "${bout}/micropython.bin" "${DIST_DIR}/${stem}_app.bin"
+  moybyte_app_size_guard "${csv}" "${DIST_DIR}/${stem}_app.bin"
+  echo "OK -> ${DIST_DIR}/${stem}.bin (${flash_note})"
+  echo "OK -> ${DIST_DIR}/${stem}_app.bin (OTA payload, app partition)"
 }

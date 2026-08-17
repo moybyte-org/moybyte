@@ -211,17 +211,15 @@ class FullscreenStackWM:
             return
         self._rebuild(self.ws._content_layer(), sig)
 
-    def _rebuild(self, content, sig):
-        """Build the overlay list once, then the visible/reversed/draw lists off it, and
-        cache them with the key that produced them. This is the ONLY place the per-change
-        stack lists are allocated -- the Stage-6c guardrail test asserts it is NOT reached
-        on repeat static frames (the memo returns the cached objects instead)."""
+    def _overlay_layers(self, sig):
+        """The sig-bit -> overlay-layer ladder BOTH tiers share (bits 4..256,
+        cursor appended last so it sits above everything). One copy: a new
+        overlay layer (like #53's notice banner) registers here ONCE and
+        reaches the windowed WM's stack too -- the two _rebuild bodies used to
+        carry twin ladders that had to be edited in step. Returns a fresh list
+        the caller may extend. The GAME-domain perf HUD (bit 2) is per-tier."""
         ws = self.ws
         overlays = []
-        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
-        # running cart, before the composite), so it must precede any system overlay.
-        if sig & 2:
-            overlays.append(ws._perf_layer)
         if sig & 4:
             overlays.append(ws._confetti_layer)
         if sig & 8:
@@ -236,7 +234,21 @@ class FullscreenStackWM:
             overlays.append(ws._about_layer)
         if sig & 256:
             overlays.append(ws._notice_layer)
-        overlays.append(ws._cursor_layer)          # cursor last -> above everything
+        overlays.append(ws._cursor_layer)
+        return overlays
+
+    def _rebuild(self, content, sig):
+        """Build the overlay list once, then the visible/reversed/draw lists off it, and
+        cache them with the key that produced them. This is the ONLY place the per-change
+        stack lists are allocated -- the Stage-6c guardrail test asserts it is NOT reached
+        on repeat static frames (the memo returns the cached objects instead)."""
+        ws = self.ws
+        overlays = self._overlay_layers(sig)
+        # Perf HUD first: it's GAME-domain (drawn on the 320x240 canvas right after the
+        # running cart, before the composite), so it must precede any system overlay.
+        # (The windowed tier deliberately leaves it out -- see its _rebuild.)
+        if sig & 2:
+            overlays.insert(0, ws._perf_layer)
         # The boot logo is a draw-time takeover of the content slot (input still routes to
         # the content underneath -- so _cache_visible keeps `content`, only the draw slot
         # swaps in the splash).

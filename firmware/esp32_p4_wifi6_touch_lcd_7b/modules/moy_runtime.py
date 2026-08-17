@@ -39,12 +39,12 @@ from console import Pointer, Workstation, wire_workstation_core
 # the serial dev channel (runtime/dev_channel.py, one vocabulary for every
 # board -- this file adds only the P4-only extras: bt/union/cache). What stays
 # here is hardware: the DPI scan-out, the PPA composite, BLE HID.
-from device_boot import DeviceBoot, FrameLoop, FramePump, IdleBlank, OtaHealth
+from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
+                         OtaHealth, apply_touch, poll_webhost)
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
-from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
-                           _ST_FONT_SCALE, _COMPACT_MIN_PX)
+from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
 
 GAME_W, GAME_H = 320, 240
@@ -64,10 +64,11 @@ CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
 
-class P4SystemCanvas(DeviceCanvas):
-    """The P4 SYSTEM canvas: DeviceCanvas over the DSI framebuffer + the system-
-    surface contract (#39/#73) -- font_scale text, font-scale layers, and the
-    native game/wallpaper composite hooks the shared WM/wallpaper probe for."""
+class P4SystemCanvas(SystemCanvas):
+    """The P4 SYSTEM canvas: the shared system-surface contract (#39/#73 --
+    font_scale text, font-scale layers, blit_cover: ONE body in device_canvas'
+    SystemCanvas) over the DSI framebuffer, plus what only this board has:
+    the PPA hardware-composite hooks the shared WM probes for."""
 
     # Hardware PPA (pixel accelerator) module, set by enable_ppa() once at boot;
     # a class attribute so the one system canvas AND its layers share it, and a
@@ -89,12 +90,7 @@ class P4SystemCanvas(DeviceCanvas):
         return False
 
     def __init__(self, comp, font_scale=1):
-        # BEFORE the base __init__: its _install_draw_gates (#155) seeds the C
-        # gate's state array from font_scale, and the native print gate renders
-        # at that scale. Setting it afterwards would gate every system surface
-        # at 1x until the next set_font_scale.
-        self.font_scale = max(1, int(font_scale))
-        DeviceCanvas.__init__(self, comp)
+        SystemCanvas.__init__(self, comp, font_scale=font_scale)
         # The root's staleness horizon = the panel's ACTUAL buffer rotation
         # (3 with the #58 render-overlap triple buffer, 2 on an older moy_dsi
         # build, 1 in the single-buffer degrade). Every partial-paint streak
@@ -102,36 +98,6 @@ class P4SystemCanvas(DeviceCanvas):
         n = len(getattr(comp, "_fbs", ()) or ())
         if n:
             self.RETAINED_FRAMES = n
-
-    def set_font_scale(self, scale):
-        self.font_scale = max(1, int(scale))
-        st = self._gate_state
-        if st is not None:
-            st[_ST_FONT_SCALE] = self.font_scale
-
-    def print(self, s, x, y, c, scale=1):
-        # SystemCanvas.print (#39): petme128 at font_scale via the native text
-        # kernel's scale arg. The legacy per-call `scale` arg stays ignored,
-        # exactly like the host. framebuf fallback can't scale -- but a P4 build
-        # always carries moy_gfx, so that path only ever renders 1x.
-        fs = self.font_scale
-        if fs <= 1 or self._gfx_text is None:
-            DeviceCanvas.print(self, s, x, y, c)
-            return
-        self.flush_batch()
-        # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
-        # two diverge the moment a viewport is set (#155) -- which is exactly
-        # what wm_windowed._direct_render does to paint a window's content in
-        # place. Passing the window's logical size as the stride makes every
-        # glyph row step by the window width instead of 1024, so scaled text
-        # walks diagonally out of its rect. Both twins of this call already got
-        # it right (device_canvas.DeviceCanvas.print, host_canvas SystemCanvas);
-        # this copy was the drifted one.
-        self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
-                       self._col(c), _FONT8, _FONT8_FIRST, fs,
-                       self._cam_x, self._cam_y,
-                       self._clip_x0, self._clip_y0,
-                       self._clip_x1, self._clip_y1)
 
     # Below this many pixels a CPU fill wins outright: the rect is cache-resident
     # and the PPA's ~60us submit cost dominates. Measured on glass 2026-07-26 --
@@ -160,38 +126,13 @@ class P4SystemCanvas(DeviceCanvas):
             P4SystemCanvas._ppa = None
             return False
 
-    def new_layer(self, w, h, owner=None):
-        # Font-scale-carrying layers (mirrors host SystemCanvas.new_layer): the
-        # windowed WM's window buffers and the bar cache print through these, so
-        # they must scale like the surface they composite onto. Same body as
-        # DeviceCanvas.new_layer with the subclass constructed instead -- including
-        # its size gate on the COMPACT FIRST pre-collect, which matters MORE here:
-        # a collect on the P4 desk is ~55ms (mark scales with the live set), and
-        # this override is the one the bar's 1024x18 strip cache reaches, twice per
-        # gesture. See DeviceCanvas.new_layer for the full note.
-        if int(w) * int(h) >= _COMPACT_MIN_PX:
-            try:
-                import gc
-                gc.collect()
-            except Exception:  # noqa: BLE001
-                pass
-        lay = P4SystemCanvas(_LayerComp(int(w), int(h), self._gfx),
-                             font_scale=self.font_scale)
-        lay._nocache = True
-        # #113: ONE persistent buffer, so a blit-scrolling surface must measure
-        # against the LAST paint. The class default 2 describes the ROOT DPI
-        # ping-pong only. This line exists in DeviceCanvas.new_layer and was
-        # LOST when this subclass copied its body -- with the ring armed, a
-        # picker drag then shifted by ~twice the real delta and ghosted a second
-        # copy of every card (owner-reported on glass 2026-07-25).
-        lay.RETAINED_FRAMES = 1
-        comp = lay._comp
-        if owner is not None and comp.pooled:
-            lent = self._lent_layers
-            if lent is None:
-                lent = self._lent_layers = {}
-            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
-        return lay
+    # new_layer is DeviceCanvas.new_layer's one body (the SystemCanvas
+    # _make_layer hook constructs this class); its COMPACT-FIRST pre-collect
+    # matters MORE here -- a collect on the P4 desk is ~55ms and the bar's
+    # 1024x18 strip cache builds layers twice per gesture -- and the copy this
+    # class used to carry had lost the cart-palette rider AND (2026-07-25, on
+    # glass) once the RETAINED_FRAMES = 1 pin: a picker drag shifted by ~twice
+    # the real delta and ghosted every card. That is why there is no copy.
 
     # -- the native composite hooks (probed via getattr by the shared code) ----
 
@@ -307,27 +248,9 @@ class P4SystemCanvas(DeviceCanvas):
                                      layer._buf, layer.w, layer.h)
         return True
 
-    def blit_cover(self, gc):
-        """wallpaper._backdrop_blit's device path (#58): the smallest integer
-        upscale of the 320x240 wallpaper frame that COVERS the whole desktop,
-        centered + cropped (dx/dy <= 0). The crop overflows the picture, which
-        the PPA can't do (it has no clip), so this stays on the CPU kernel --
-        it's a launcher-only backdrop (drag frames restore from the cache via
-        blit_copy, which IS the PPA), not a per-frame hot path."""
-        gw, gh = gc.w, gc.h
-        sw, sh = self.w, self.h
-        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
-        ox = (sw - gw * scale) // 2
-        oy = (sh - gh * scale) // 2
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
-        self.flush_batch()
-        g = self._gfx
-        if g is None:
-            return
-        g.blit565_scale(self._buf, self.w, self.h, int(ox), int(oy),
-                        gc._buf, gc.w, gc.h, int(scale))
+    # blit_cover is SystemCanvas's shared body -- CPU kernel by design: the
+    # cover-crop overflows the picture, which the PPA can't do (no clip), and
+    # it's a launcher-only backdrop, not a per-frame hot path.
 
 
 # Loading the carts is DeviceBoot.load_carts now (#161 Phase 4): the seed +
@@ -725,21 +648,8 @@ def run_desktop(fps_cap=60):
         except Exception as exc:  # noqa: BLE001 -- keyboard must fail touch-only
             print("Moybyte P4 BLE keyboard poll failed:", exc)
         inp.begin_frame()
-        click = False
-        tp = touch.poll()
-        pointer.down = tp is not None
-        # Touch.poll holds a held finger's last point across the passes the
-        # GT911 produced no fresh buffer for, so `down` above is a real LEVEL
-        # and a drag survives them; `fresh` marks those repeats so kinetic
-        # scrolling (#113) doesn't measure finger speed against a sample the
-        # hardware never took.
-        pointer.fresh = getattr(touch, "fresh", True)
-        if tp is not None:
-            pointer.place(tp[0], tp[1])
-            if tp[2]:
-                click = True
-        return click, ((tp is not None) or bool(inp._held)
-                       or bool(inp.last_key))
+        touched, click = apply_touch(touch, pointer)
+        return click, (touched or bool(inp._held) or bool(inp.last_key))
 
     def _present():
         # Present the PREVIOUS quiet game frame now (its async composite has
@@ -756,18 +666,7 @@ def run_desktop(fps_cap=60):
         gc.collect()
 
     def _tail(now):
-        _wh = ws.webhost
-        if _wh is not None and _wh.serving:
-            # One non-blocking accept/serve per frame (plan 3.4 pull half).
-            # Costs a poll on a non-blocking listener when nobody is connected,
-            # and a whole 1MB asset transfer when someone is -- which is why it
-            # sits HERE, at the frame tail, outside every timing bracket: a
-            # browser loading the console will visibly stall the desktop, and
-            # that is the honest behaviour for a single-threaded board.
-            try:
-                _wh.poll()
-            except Exception as exc:  # noqa: BLE001 -- never break a frame
-                print("WEB ERR %s: %s" % (type(exc).__name__, exc))
+        poll_webhost(ws)               # see the helper for why the frame TAIL
 
     def _account(now, elapsed, sleep_ms):
         _pf["n"] += 1

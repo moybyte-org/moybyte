@@ -2143,6 +2143,16 @@ class DeviceCanvas:
 
     # -- scroll layers (#54) -------------------------------------------------
 
+    def _make_layer(self, comp):
+        # new_layer's construction hook. SystemCanvas overrides it so a system
+        # surface's layers are system surfaces too (they carry font_scale);
+        # everything ELSE about a layer -- the COMPACT-FIRST pre-collect,
+        # _nocache, RETAINED_FRAMES = 1, the cart-palette rider, pooling --
+        # lives once, in new_layer below. The three tiers' system canvases
+        # each used to copy that whole body to change this one line, and two
+        # of the copies drifted (the P4's lost the palette rider).
+        return DeviceCanvas(comp)
+
     def new_layer(self, w, h, owner=None):
         # A blank, wider RGB565 off-screen canvas the cart pre-renders a level into
         # ONCE, then window-copies per frame (draw_layer -> blit_window_from). Built
@@ -2172,7 +2182,7 @@ class DeviceCanvas:
                 gc.collect()
             except Exception:  # noqa: BLE001 -- gc is always present; never block a layer alloc
                 pass
-        lay = DeviceCanvas(_LayerComp(int(w), int(h), self._gfx))
+        lay = self._make_layer(_LayerComp(int(w), int(h), self._gfx))
         lay._nocache = True            # #63: a layer's own map() rasters directly (no nesting)
         lay.RETAINED_FRAMES = 1        # #113: a layer is ONE persistent buffer (the class
                                        # default 2 describes the ROOT ping-pong only) -- a
@@ -2461,6 +2471,126 @@ class DeviceCanvas:
             s0 = ((ty - dy) * w + (tx0 - dx)) * 2
             d0 = (ty * w + tx0) * 2
             buf[d0:d0 + cw] = buf[s0:s0 + cw]
+
+
+class SystemCanvas(DeviceCanvas):
+    """DeviceCanvas + the system-surface contract (#39/#73): what the shared
+    console asks a SYSTEM surface for beyond the raster -- font_scale text (the
+    settings-chosen size, through the native text kernel's scale arg), layers
+    that carry that scale (the WM's window buffers and the bar's strip cache
+    print through them), and the wallpaper's cover-crop composite.
+
+    ONE body for the three tiers that subclass it. HostSystemCanvas
+    (runtime/host_canvas.py), WebSystemCanvas (firmware/web_runner) and
+    P4SystemCanvas (the P4's moy_runtime) each carried a hand-copy of these
+    methods, and two of the copies drifted on their own: the P4's print passed
+    the window's logical size as the kernel stride (scaled text walked
+    diagonally out of its rect under a viewport) and its new_layer lost the
+    cart-palette rider (the cart's colours on the surface, stock MOY64 in its
+    layers). What stays per-tier is hardware and host I/O: the P4's PPA
+    composite hooks, the host's RGB888 readout and its no-kernel petme128
+    raster (the _print_fallback/_cover_fallback hooks below).
+
+    RETAINED_FRAMES is deliberately NOT overridden here: the host and web
+    compositors hold ONE persistent buffer and pin it to 1 themselves; the P4
+    root reads its actual DPI buffer rotation at construction. Layers are
+    always 1, via new_layer's one body."""
+
+    def __init__(self, comp, font_scale=1):
+        # BEFORE the base __init__: _install_draw_gates (#155) seeds the C
+        # gate's state array from font_scale, and the native print gate renders
+        # at that scale. Set afterwards, every system surface would gate at 1x
+        # until the next set_font_scale.
+        self.font_scale = max(1, int(font_scale))
+        DeviceCanvas.__init__(self, comp)
+
+    def set_font_scale(self, scale):
+        # Called UNGUARDED from console.py (the settings row and the font-scale
+        # relayout), so its absence is a boot crash, not a degradation. The
+        # gate array is None on a kernel with no make_draw_ctx; the guard is
+        # what keeps this correct on a build that does gate.
+        self.font_scale = max(1, int(scale))
+        st = self._gate_state
+        if st is not None:
+            st[_ST_FONT_SCALE] = self.font_scale
+
+    def print(self, s, x, y, c, scale=1):
+        # petme128 at font_scale. The legacy per-call `scale` arg stays IGNORED
+        # on every tier (SPEC.md 6: cart text is always 8px; system-UI scaling
+        # is the #39 font_scale path, not this argument).
+        fs = self.font_scale
+        gt = self._gfx_text
+        if gt is None:
+            self._print_fallback(s, x, y, c)
+            return
+        if fs <= 1:
+            DeviceCanvas.print(self, s, x, y, c)
+            return
+        self.flush_batch()             # a non-spr primitive breaks the batch
+        # _stride/_bh, NOT w/h: the kernel wants the BUFFER geometry, and the
+        # two diverge the moment a viewport is set (#155) -- which is exactly
+        # what wm_windowed._direct_render does to paint a window's content in
+        # place. Passing the logical size as the stride makes every glyph row
+        # step by the window width instead of the buffer's, so scaled text
+        # walks diagonally out of its rect.
+        gt(self._buf, self._stride, self._bh, str(s), int(x), int(y),
+           self._col(c), _FONT8, _FONT8_FIRST, fs,
+           self._cam_x, self._cam_y,
+           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def _print_fallback(self, s, x, y, c):
+        # No kernel text op at all. The host overrides this with its own
+        # clip-carrying petme128 raster (a clean checkout without a firmware
+        # build lands there, and framebuf.text has no clip rect); a board build
+        # always carries moy_gfx, so on device this only ever renders 1x.
+        DeviceCanvas.print(self, s, x, y, c)
+
+    def _make_layer(self, comp):
+        # A system surface's layers are system surfaces too: bar_layer,
+        # launcher_layer, wm_windowed and host_api all print into layers, and a
+        # bare DeviceCanvas layer would silently drop back to 8px text on a
+        # scaled desktop.
+        return type(self)(comp, font_scale=self.font_scale)
+
+    def blit_cover(self, gc):
+        """wallpaper._backdrop_blit's raster path: the smallest integer upscale
+        of the wallpaper's game-canvas frame that COVERS the whole surface,
+        centered + cropped (ox/oy <= 0) -- full-bleed, not a letterboxed
+        rectangle floating in black.
+
+        Not optional on a 565 system canvas, and its absence is SILENT:
+        `_backdrop_blit` probes for this method and otherwise falls back to
+        expanding a palette-INDEX buffer this canvas does not have, drawing
+        nothing -- a black desk with correct chrome on top (the wasm head's
+        first build shipped exactly that). The crop overflows the picture,
+        which the P4's PPA cannot do (it has no clip), so every tier keeps
+        this on the CPU kernel."""
+        gw, gh = gc.w, gc.h
+        if gw <= 0 or gh <= 0:
+            return
+        sw, sh = self.w, self.h
+        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
+        ox = (sw - gw * scale) // 2
+        oy = (sh - gh * scale) // 2
+        fb = getattr(gc, "flush_batch", None)
+        if fb is not None:
+            fb()
+        self.flush_batch()
+        g = self._gfx
+        words = getattr(gc, "_buf", None)
+        scaled = getattr(g, "blit565_scale", None) if g is not None else None
+        if scaled is not None and words is not None:
+            scaled(self._buf, sw, sh, int(ox), int(oy),
+                   words, gw, gh, int(scale))
+            return
+        self._cover_fallback(gc, ox, oy, scale)
+
+    def _cover_fallback(self, gc, ox, oy, scale):
+        # No blit565_scale (an older kernel), or a source publishing palette
+        # indices instead of 565 words. The host overrides this with a Python
+        # row-copy twin (see host_canvas); a board build always has the kernel,
+        # so on device an unreachable source draws nothing.
+        return
 
 
 class _LayerComp:

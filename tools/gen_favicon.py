@@ -10,7 +10,7 @@ header draw from. Generating the favicon from it rather than checking in a
 hand-drawn PNG means the browser tab and the console cannot disagree about what
 the mascot looks like, and `tests/test_favicon.py` fails if they drift.
 
-The PNG is written by hand (zlib + four chunks) rather than with pillow: this is
+The PNG is written by hand (tools/pngwrite.py) rather than with pillow: this is
 ~200 bytes of a format whose 16x16 RGBA case is a dozen lines, and the
 alternative is making a build artifact depend on an optional dev dependency.
 """
@@ -19,15 +19,14 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
 import os
-import struct
 import sys
-import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "runtime"))
+
+from tools import pngwrite  # noqa: E402
 
 PAGE = os.path.join(ROOT, "firmware", "web_runner", "page_core.html")
 MARK_A = '<link rel=icon href="'
@@ -67,16 +66,7 @@ def _stretch(row, scale):
 
 
 def png(rows, size):
-    def chunk(tag, data):
-        c = tag + data
-        return (struct.pack(">I", len(data)) + c
-                + struct.pack(">I", binascii.crc32(c) & 0xFFFFFFFF))
-
-    raw = b"".join(b"\x00" + r for r in rows)        # filter 0 per scanline
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(raw, 9))
-            + chunk(b"IEND", b""))
+    return pngwrite.png_bytes(rows, size, size, pngwrite.RGBA)
 
 
 def data_uri(scale=2):

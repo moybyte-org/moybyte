@@ -142,7 +142,7 @@ def test_rename_moves_the_file(tmp_path):
     app._begin_rename()
     assert app.mode == "rename"
     app.rename_text = "my_story"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.mode == "edit"
     assert app.doc_name == "my_story"
     assert "my_story" in moy_carts.list_files("docs", carts)

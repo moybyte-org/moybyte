@@ -149,7 +149,7 @@ def test_rename_moves_the_file(tmp_path):
     old = app.sheet_name
     app._begin_rename()
     app.rename_text = "budget"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "budget"
     assert "budget" in moy_carts.list_files("tables", carts)
     assert old not in moy_carts.list_files("tables", carts)
@@ -245,7 +245,7 @@ def test_attach_sheet_lands_the_table_in_the_target_cart(tmp_path):
     # the game reads it back through table('wave').
     app._begin_rename()
     app.rename_text = "wave"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "wave"
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "1\n")
@@ -476,7 +476,7 @@ def test_attach_unaffected_by_op_history(tmp_path):
     app._new_sheet()
     app._begin_rename()
     app.rename_text = "wave2"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "wave2"
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "1\n")

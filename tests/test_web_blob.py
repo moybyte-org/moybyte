@@ -382,11 +382,17 @@ def test_an_image_too_big_for_its_slot_fails_the_build(name, path):
     -- an image esptool refuses and no board can take over OTA. It fails now,
     on both boards (the P4 had no guard at all).
     """
-    # The guard is ONE implementation in the shared build lib now
-    # (moybyte_app_size_guard, 2026-08-17); each board must still CALL it.
+    # The guard is ONE implementation in the shared build lib
+    # (moybyte_app_size_guard, 2026-08-17), and since 2026-08-18 each board
+    # reaches it through the shared build+collect step -- so the pin is that
+    # the board runs that step, and that the step runs the guard.
     sh = (path / "build.sh").read_text()
-    assert "moybyte_app_size_guard" in sh, "%s does not measure its slot" % name
+    assert "moybyte_build_and_collect" in sh, \
+        "%s does not run the shared build+collect step" % name
     lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
+    collect_body = lib.partition("moybyte_build_and_collect() {")[2]
+    assert "moybyte_app_size_guard" in collect_body.partition("\n}")[0], \
+        "the shared build+collect step no longer measures the slot"
     # The OVERFLOW branch only -- everything from `headroom < 0` to the `elif`
     # that merely warns about a thin margin.
     head, _, rest = lib.partition('"${headroom}" -lt 0 ]; then')

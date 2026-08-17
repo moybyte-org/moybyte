@@ -1,63 +1,11 @@
-"""Unit tests for the shared editor history primitives (UndoStack + KeyEdge).
+"""Unit tests for the shared editor keystroke edge detector (KeyEdge).
 
-These back the four in-editor undo/redo stacks (#90-#93) and the five Ctrl+Z/Y
-edge trackers (#89-#93); the per-editor behavior is covered by the editor test
-suites -- this file pins the shared discipline itself."""
+It backs the five Ctrl+Z/Y edge trackers (#89-#93); per-editor undo/redo
+behavior is covered by the editor test suites over the #111 op-history core.
+(The UndoStack half this file also pinned was deleted 2026-08-18 with its
+class -- no editor had used it since #111.)"""
 
-from runtime.editors import UndoStack, KeyEdge
-
-
-# -- UndoStack ---------------------------------------------------------------
-
-def test_push_bounds_and_forks_history():
-    st = UndoStack(3)
-    for v in ("a", "b", "c", "d"):
-        st.push(v)
-    assert st.undo == ["b", "c", "d"]          # oldest trimmed at the bound
-    assert not st.can_redo()
-
-
-def test_take_undo_with_capture_reverse():
-    # Paint/Blocks shape: reverse captures the CURRENT state (here a counter).
-    st = UndoStack(8)
-    st.push("e0")
-    now = {"v": "live"}
-    popped = st.take_undo(lambda _e: now["v"])
-    assert popped == "e0"
-    assert st.can_redo() and st.redo == ["live"]
-    assert not st.can_undo()
-
-
-def test_take_undo_moves_same_entry_when_reverse_none():
-    # Map shape: the SAME rec moves across (deltas replay both ways).
-    st = UndoStack(8)
-    st.push("rec")
-    assert st.take_undo() == "rec"
-    assert st.redo == ["rec"] and st.undo == []
-    assert st.take_redo() == "rec"
-    assert st.undo == ["rec"] and st.redo == []
-
-
-def test_reverse_returning_none_skips_the_push():
-    # Music shape: a stale object yields None -> nothing stashed on the far side.
-    st = UndoStack(8)
-    st.push("s0")
-    assert st.take_undo(lambda _e: None) == "s0"
-    assert st.undo == [] and st.redo == []     # popped, but no reverse stored
-
-
-def test_take_on_empty_returns_none():
-    st = UndoStack(4)
-    assert st.take_undo() is None
-    assert st.take_redo(lambda _e: "x") is None
-
-
-def test_clear_drops_both_stacks():
-    st = UndoStack(4)
-    st.push("a")
-    st.take_undo()                              # -> one on redo
-    st.clear()
-    assert not st.can_undo() and not st.can_redo()
+from runtime.editors import KeyEdge
 
 
 # -- KeyEdge -----------------------------------------------------------------

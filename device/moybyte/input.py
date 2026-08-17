@@ -1,6 +1,3 @@
-import time
-
-
 BUTTONS = (
     "up",
     "down",
@@ -616,29 +613,9 @@ class InputPoller:
         self._stop = True
 
 
-def _sleep_ms(ms):
-    try:
-        time.sleep_ms(ms)
-    except AttributeError:
-        time.sleep(ms / 1000.0)
-
-
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(end_ms, start_ms):
-    try:
-        return time.ticks_diff(end_ms, start_ms)
-    except AttributeError:
-        return end_ms - start_ms
-
-
-def _ticks_us():
-    try:
-        return time.ticks_us()
-    except AttributeError:
-        return int(time.time() * 1000000)
+# Clock shims: ONE body, runtime/ticks.py, re-exported by the device tier's
+# leaf module (this file carried its own copy until 2026-08-18).
+try:
+    from device_util import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us
+except ImportError:  # host, loaded by path outside pytest's device finder
+    from runtime.ticks import _sleep_ms, _ticks_ms, _ticks_diff, _ticks_us

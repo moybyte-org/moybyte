@@ -117,22 +117,10 @@ SUPPORTED_EXTENSIONS = (
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from widgets import _err_text
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
+    from runtime.widgets import _err_text
 
 
 def _safe_len(obj):

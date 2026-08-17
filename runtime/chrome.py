@@ -27,9 +27,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, IconSheet
 
 try:
-    from widgets import _Blit, _in
+    from widgets import _Blit, _in, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _Blit, _in
+    from runtime.widgets import _Blit, _in, _err_text
 
 # The shared petme128 glyph source (#62) -- the Library shelf's display type
 # (_print_scaled) rasterizes it through plain rect blocks so it renders identically
@@ -70,20 +70,6 @@ try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
 except ImportError:                     # host: the runtime package
     from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
 
 
 def _from_ascii(rows, mapping, transparent="."):

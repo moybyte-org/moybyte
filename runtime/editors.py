@@ -5,7 +5,8 @@ each was already independent, sharing only the editors_base history discipline)
 and are re-imported + re-exported here under their original names, so every
 consumer and test keeps `from editors import X` / `editors.X`:
 
-  editors_base      -- UndoStack / KeyEdge / UndoRedoMixin (the history leaf)
+  editors_base      -- KeyEdge (the input leaf; its pre-#111 UndoStack/
+                       UndoRedoMixin pair was deleted 2026-08-18, unused)
   editors_code      -- CodeEditor (editable text buffer + cursor, #3)
   editors_sheet     -- _SheetSprite / SpriteSheet / IconSheet / TileMap
   editors_paint_map -- PaintEditor (#4) + MapEditor (#32)
@@ -19,7 +20,7 @@ device port (the build stages each into the firmware `modules/` tree; keep
 every module dependency-free so the set freezes cleanly on both)."""
 
 try:
-    from editors_base import UndoStack, KeyEdge, UndoRedoMixin
+    from editors_base import KeyEdge
     from editors_code import CodeEditor
     from editors_sheet import _SheetSprite, SpriteSheet, IconSheet, TileMap
     from editors_paint_map import PaintEditor, MapEditor
@@ -31,7 +32,7 @@ try:
                                _ME_UNDO_MAX, _me_clamp, MusicEditor)
     from editors_scene import SceneEditor
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editors_base import UndoStack, KeyEdge, UndoRedoMixin
+    from runtime.editors_base import KeyEdge
     from runtime.editors_code import CodeEditor
     from runtime.editors_sheet import _SheetSprite, SpriteSheet, IconSheet, TileMap
     from runtime.editors_paint_map import PaintEditor, MapEditor

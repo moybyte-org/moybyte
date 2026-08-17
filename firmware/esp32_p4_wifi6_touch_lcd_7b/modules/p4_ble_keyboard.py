@@ -23,7 +23,6 @@ editors keep their existing edge detector.  Every radio/storage operation is
 best-effort; a missing/broken Bluetooth stack leaves the P4 touch-only.
 """
 
-import time
 
 try:
     from micropython import const
@@ -71,18 +70,12 @@ _ADV_DIRECT_IND = const(0x01)
 _STORE_VERSION = const(2)
 
 
-def _ticks_ms():
-    fn = getattr(time, "ticks_ms", None)
-    if fn is not None:
-        return fn()
-    return int(time.monotonic() * 1000)
-
-
-def _ticks_diff(a, b):
-    fn = getattr(time, "ticks_diff", None)
-    if fn is not None:
-        return fn(a, b)
-    return a - b
+# Clock shims: ONE body, runtime/ticks.py, via the device tier's leaf module
+# (this file carried its own getattr-flavoured variant until 2026-08-18).
+try:
+    from device_util import _ticks_ms, _ticks_diff
+except ImportError:  # loaded by path outside pytest's device finder
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 def _adv_fields(payload):

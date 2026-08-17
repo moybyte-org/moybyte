@@ -589,7 +589,8 @@ def test_the_spine_imports_no_board_module():
     """
     src = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
-    allowed = {"console", "runtime", "chrome", "moycore_glue", "time", "gc"}
+    allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
+               "time", "gc"}
     seen = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

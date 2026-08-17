@@ -35,7 +35,6 @@ DIST_DIR="${REPO_ROOT}/dist/tdeck_mainline"
 PATCH_DIR="${REPO_ROOT}/patches"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 MANIFEST="${BUILD_DIR}/moybyte_tdeck_manifest.py"
-BUILD_JOBS="${MOYBYTE_BUILD_JOBS:-$(nproc)}"
 
 # shellcheck source=../../tools/esp32_build_lib.sh
 source "${REPO_ROOT}/tools/esp32_build_lib.sh"
@@ -194,28 +193,10 @@ moybyte_partition_and_sdkconfig_guard \
   'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
 
 # ---------------------------------------------------------------------------
-# 5) Build.
+# 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
+#    #168 size guard -- moybyte_app_size_guard runs in there). The merged
+#    image cable-flashes at 0x0 (the S3's bootloader offset; the P4's is
+#    0x2000).
 # ---------------------------------------------------------------------------
-make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
-
-cd "${MPY_DIR}/ports/esp32"
-make submodules BOARD_DIR="${BOARD_DIR}"
-make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
-  USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
-  FROZEN_MANIFEST="${MANIFEST}"
-
-# ---------------------------------------------------------------------------
-# 6) Collect images + the #168 size guard.
-#    firmware.bin is bootloader + table + app merged for a cable flash at 0x0
-#    (the S3's bootloader offset; the P4's is 0x2000). micropython.bin is the
-#    APP partition image -- what an OTA writes into the inactive slot. Handing
-#    firmware.bin to esp32.Partition would write a bootloader into an app slot.
-# ---------------------------------------------------------------------------
-BOUT="build-${BOARD}"
-cp "${BOUT}/firmware.bin" "${DIST_DIR}/moybyte_tdeck.bin"
-cp "${BOUT}/micropython.bin" "${DIST_DIR}/moybyte_tdeck_app.bin"
-moybyte_app_size_guard "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
-  "${DIST_DIR}/moybyte_tdeck_app.bin"
-
-echo "OK -> ${DIST_DIR}/moybyte_tdeck.bin (full image, cable flash at 0x0)"
-echo "OK -> ${DIST_DIR}/moybyte_tdeck_app.bin (OTA payload, app partition)"
+moybyte_build_and_collect "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
+  moybyte_tdeck "full image, cable flash at 0x0"

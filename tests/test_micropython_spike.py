@@ -325,8 +325,11 @@ def test_micropython_touch_and_idle_cursor():
     assert "REG_STATUS = gt911.REG_STATUS" in device_input
     assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
-    assert "tp = touch.poll()" in runtime
-    assert "pointer.place(tp[0], tp[1])" in runtime
+    # The poll->pointer application is device_boot.apply_touch (2026-08-18).
+    assert "apply_touch(touch, pointer)" in runtime
+    _boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
+    assert "tp = touch.poll()" in _boot
+    assert "pointer.place(tp[0], tp[1])" in _boot
 
     # Cursor auto-hide + the Pointer are a shared support widget now (widgets.py).
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -1185,7 +1188,12 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     # A missed finger-up must never wedge the pointer down forever.
     assert "missed release: never wedge the pointer" in core
     assert "return self._hp.hold()" in inp
-    assert "pointer.fresh = getattr(touch, \"fresh\", True)" in runtime
+    # The sample->pointer application is device_boot.apply_touch since
+    # 2026-08-18 (both boards' poll_inputs hooks carried it verbatim); the
+    # board must route through it and the ONE copy must carry the fresh mark.
+    assert "apply_touch(touch, pointer)" in runtime
+    boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
+    assert "pointer.fresh = getattr(touch, \"fresh\", True)" in boot
 
 
 def test_native_blit_map_wired_for_tilemaps():
@@ -2119,10 +2127,10 @@ def test_music_editor_wired_into_device_shell():
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
 
-    # The editor CORE is a single shared class (not redefined on the device).
-    # #111 phase 4: MusicEditor moved off UndoRedoMixin onto the shared
-    # op-history core (History/_MusicOps) -- see test_op_history_wiring.py.
-    assert "class MusicEditor:" in editors
+    # The editor CORE is a single shared class (not redefined on the device),
+    # on the #111 op-history core (History/_MusicOps + the OpHistoryMixin
+    # facade) -- see test_op_history_wiring.py.
+    assert "class MusicEditor(OpHistoryMixin):" in editors
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
@@ -2433,7 +2441,7 @@ def test_editor_cores_are_shared_single_source():
     # stages it into the frozen modules tree -- no duplicated class definitions.
     editors = _editors_src()
     for cls in ("class CodeEditor:", "class SpriteSheet:",
-                "class PaintEditor:"):     # #111: undo now on the op-history core
+                "class PaintEditor(OpHistoryMixin):"):   # #111 op-history core
         assert cls in editors, cls
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
@@ -2796,27 +2804,34 @@ def test_moycore_hardware_learned_constraints_pinned():
     assert "__moy_map_masked" in mod and "__moy_map_flags" in mod
 
 
-def test_every_new_layer_pins_retained_frames_to_one():
+def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
     """(#113) A layer/window buffer is ONE persistent surface, so a blit-
     scrolling caller must measure against the LAST paint -- RETAINED_FRAMES = 1.
-    The class default is 2 because it describes the ROOT ping-pong (the P4's DPI
-    double buffer), so EVERY new_layer factory has to override it.
+    The class default is 2 because it describes the ROOT ping-pong (the P4's
+    DPI double buffer), so the new_layer factory has to override it.
 
-    P4SystemCanvas.new_layer copies DeviceCanvas.new_layer's body, and the
-    override was lost in that copy: once the paint ring actually armed on the
-    desktop tier, a picker drag shifted by ~twice the real delta and ghosted a
-    duplicate of every card (owner-reported on glass, 2026-07-25). This grep
-    pins the override at every factory so the divergence can't come back."""
+    "The factory", singular: P4SystemCanvas.new_layer used to COPY
+    DeviceCanvas.new_layer's body (to construct its own class), and the
+    override was lost in that copy -- once the paint ring armed on the desktop
+    tier, a picker drag shifted by ~twice the real delta and ghosted a
+    duplicate of every card (owner-reported on glass, 2026-07-25). The copy
+    lost the cart-palette rider the same way. The fix is structural now: the
+    subclasses supply only the `_make_layer` construction hook, so this pins
+    (a) the one body still sets RETAINED_FRAMES = 1 and (b) no tier has grown
+    a copy of it back."""
     from pathlib import Path
 
-    for mod in (Path("device/device_canvas.py"),
-                Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py")):
-        src = mod.read_text(encoding="utf-8")
-        i = src.find("def new_layer(")
-        assert i > 0, "no new_layer factory in " + mod.name
-        body = src[i:i + 2400]
-        assert "RETAINED_FRAMES = 1" in body, \
-            mod.name + ": new_layer must pin RETAINED_FRAMES = 1 (#113)"
+    src = Path("device/device_canvas.py").read_text(encoding="utf-8")
+    i = src.find("def new_layer(")
+    assert i > 0, "no new_layer factory in device_canvas.py"
+    body = src[i:i + 2400]
+    assert "RETAINED_FRAMES = 1" in body, \
+        "new_layer must pin RETAINED_FRAMES = 1 (#113)"
+    for mod in (Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"),
+                Path("firmware/web_runner/web_canvas.py"),
+                Path("runtime/host_canvas.py")):
+        assert "def new_layer(" not in mod.read_text(encoding="utf-8"), \
+            mod.name + ": grew a new_layer copy back; use the _make_layer hook"
 
 
 def test_lua_table_verb_never_clobbers_the_table_library():
@@ -2908,14 +2923,15 @@ def test_both_boards_service_the_web_console_every_frame():
     that board served and this one never did -- so this asserts it for BOTH,
     not for whichever one someone remembers.
     """
+    # The drain is ONE helper since 2026-08-18 (device_boot.poll_webhost);
+    # each board's frame tail must still CALL it, and the helper must still
+    # actually poll -- the failure this pins was exactly a tail that stopped
+    # calling.
+    boot = (_REPO / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    assert "wh.poll()" in boot.partition("def poll_webhost(")[2]
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = (_REPO / rel).read_text(encoding="utf-8")
-        assert ".poll()" in src and "webhost" in src, rel
-        # the poll must be reachable from the webhost, not merely present
-        assert any(
-            "poll()" in ln
-            for ln in src.splitlines()
-            if "_wh" in ln or "webhost" in ln), (
+        assert "poll_webhost(ws)" in src, (
             "%s never polls ws.webhost -- a bound listener with no accept() "
             "times out instead of refusing, which reads as a dead server" % rel)

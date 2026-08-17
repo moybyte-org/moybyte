@@ -33,16 +33,12 @@ try:
 except Exception:  # noqa: BLE001 -- host / CPython
     import socket
 
+# Clock shims: ONE body, runtime/ticks.py (frozen flat as `ticks` on device --
+# this module carried its own monotonic()-flavoured variant until 2026-08-18).
 try:
-    from utime import ticks_ms, ticks_diff
-except Exception:  # noqa: BLE001 -- host / CPython: provide ms-based shims
-    import time as _time
-
-    def ticks_ms():
-        return int(_time.monotonic() * 1000)
-
-    def ticks_diff(a, b):
-        return a - b
+    from ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
+except ImportError:  # host / CPython: the runtime package
+    from runtime.ticks import _ticks_ms as ticks_ms, _ticks_diff as ticks_diff
 
 try:
     import web_view_ws as _ws                  # frozen top-level (device)

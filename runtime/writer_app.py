@@ -137,6 +137,7 @@ class WriterAppLayer(ListShellApp):
 
     id = "writer"
     domain = "system"
+    RENAME_MAX = MAX_NAME
     TITLE = "WRITER"
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Writer"
@@ -438,7 +439,7 @@ class WriterAppLayer(ListShellApp):
                 self.status = hit[1].upper()
             return True
         if self.mode == "rename":
-            self._typed_name(inp)
+            self._typed_rename(inp)
             return True
         self._typed_keys(inp)
         return True
@@ -499,17 +500,6 @@ class WriterAppLayer(ListShellApp):
             if k in (0x0D, 0x0A) or (0x20 <= k <= 0x7E and chr(k) in _BURST_BREAK):
                 self._close_burst()           # Enter/punctuation is a burst edge
 
-    def _typed_name(self, inp):
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
-            self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
-            self.rename_text += chr(k)
-        self.ws._dirty = True
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

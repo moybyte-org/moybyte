@@ -11,17 +11,17 @@ a cycle MicroPython's frozen loader tolerates far worse than CPython. Pulling th
 into a leaf lets every extracted device module import *down* the DAG, never back into
 core (same reason block_editor_ui injects NAMES instead of importing console back).
 
-The tick trio is RE-EXPORTED from the shared `runtime/ticks.py` (one body,
-2026-08-17 -- this module used to carry its own copy, one of nine in the tree),
-so the device tier's import surface (`from device_util import _ticks_ms`) is
-unchanged; `moybyte_diag` is imported lazily + fully guarded so its absence is
-a no-op.
+The tick trio (+ `_sleep_ms`) is RE-EXPORTED from the shared `runtime/ticks.py`
+(one body, 2026-08-17 -- this module used to carry its own copy, one of nine in
+the tree), so the device tier's import surface (`from device_util import
+_ticks_ms`) is unchanged; `moybyte_diag` is imported lazily + fully guarded so
+its absence is a no-op.
 """
 
 try:                                    # device: ticks is frozen flat
-    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff, _sleep_ms
 except ImportError:                     # host: the runtime package
-    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff, _sleep_ms
 
 
 def sram_census(stage):

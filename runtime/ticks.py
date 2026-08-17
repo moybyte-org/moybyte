@@ -40,3 +40,12 @@ def _ticks_diff(a, b):
         return time.ticks_diff(a, b)
     except AttributeError:
         return a - b
+
+
+def _sleep_ms(ms):
+    # The trio's sleeping sibling: MicroPython's sleep_ms, host-shimmed the
+    # same way (device_boot's pace step, the input poller's period).
+    try:
+        time.sleep_ms(ms)
+    except AttributeError:
+        time.sleep(ms / 1000.0)

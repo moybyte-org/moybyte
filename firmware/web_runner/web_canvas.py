@@ -28,8 +28,7 @@ calls per frame, not the pixels, is the shell's real budget here -- the same
 shape as the P4.
 """
 
-from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
-                           _PAL565_WIRE_BUF)
+from device_canvas import SystemCanvas
 
 try:
     import moy_gfx as _moy_gfx
@@ -71,11 +70,11 @@ class WebCompositor:
         return _moy_gfx
 
 
-class WebSystemCanvas(DeviceCanvas):
-    """DeviceCanvas + the system-surface contract (#39/#73): font_scale text and
-    font-scale-carrying layers. The twin of `P4SystemCanvas` minus the hardware
-    -- that board is the closest analogue, since it also drives a big system
-    canvas with a separate 320x240 game canvas under the windowed WM.
+class WebSystemCanvas(SystemCanvas):
+    """The system-surface contract (#39/#73) over `WebCompositor` -- and since
+    the SystemCanvas unification, nothing but this pin: the font_scale text,
+    the font-scale layers and `blit_cover` are the ONE shared body in
+    device_canvas.py, the same file the boards freeze.
 
     RETAINED_FRAMES is 1, not the class default 2: this compositor holds ONE
     persistent buffer, so a partial-repaint or scroll-as-blit surface must
@@ -85,82 +84,6 @@ class WebSystemCanvas(DeviceCanvas):
     """
 
     RETAINED_FRAMES = 1
-
-    def __init__(self, comp, font_scale=1):
-        # BEFORE the base __init__, which seeds the native draw gate's state
-        # array from font_scale -- set afterwards, every system surface would
-        # gate at 1x until the next set_font_scale.
-        self.font_scale = max(1, int(font_scale))
-        DeviceCanvas.__init__(self, comp)
-
-    def set_font_scale(self, scale):
-        self.font_scale = max(1, int(scale))
-        st = self._gate_state
-        if st is not None:
-            from device_canvas import _ST_FONT_SCALE
-            st[_ST_FONT_SCALE] = self.font_scale
-
-    def print(self, s, x, y, c, scale=1):
-        # petme128 at font_scale through the native text kernel's scale arg; the
-        # legacy per-call `scale` stays ignored exactly as on the host and the
-        # boards (SPEC.md 6: cart text is always 8px).
-        fs = self.font_scale
-        if fs <= 1 or self._gfx_text is None:
-            DeviceCanvas.print(self, s, x, y, c)
-            return
-        self.flush_batch()
-        self._gfx_text(self._buf, self._stride, self._bh, str(s), int(x), int(y),
-                       self._col(c), _FONT8, _FONT8_FIRST, fs,
-                       self._cam_x, self._cam_y,
-                       self._clip_x0, self._clip_y0,
-                       self._clip_x1, self._clip_y1)
-
-    def blit_cover(self, gc):
-        """wallpaper._backdrop_blit's raster path: the smallest integer upscale
-        of the 320x240 wallpaper frame that COVERS the whole desktop, centered
-        and cropped (ox/oy <= 0), which is what makes the backdrop full-bleed
-        instead of a letterboxed rectangle floating in black.
-
-        Not optional on this canvas, and its absence is silent: `_backdrop_blit`
-        probes for it and otherwise falls back to expanding the wallpaper's
-        palette-INDEX buffer in Python. A 565 canvas has no index buffer, so
-        that path finds `buf` missing and returns having drawn nothing -- a
-        black desk with correct chrome on top, which is exactly what the first
-        run of this build produced.
-        """
-        gw, gh = gc.w, gc.h
-        sw, sh = self.w, self.h
-        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
-        ox = (sw - gw * scale) // 2
-        oy = (sh - gh * scale) // 2
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
-        self.flush_batch()
-        g = self._gfx
-        if g is None:
-            return
-        g.blit565_scale(self._buf, self.w, self.h, int(ox), int(oy),
-                        gc._buf, gc.w, gc.h, int(scale))
-
-    def new_layer(self, w, h, owner=None):
-        # Font-scale-carrying layers, like the host's SystemCanvas.new_layer:
-        # the WM's per-window content buffers and the bar's strip cache print
-        # through these, so they must scale like the surface they composite
-        # onto. No PSRAM pooling or pre-collect here -- `owner` is accepted and
-        # ignored so the shared callers need no branch.
-        lay = WebSystemCanvas(_LayerComp(int(w), int(h), self._gfx),
-                              font_scale=self.font_scale)
-        lay._nocache = True
-        lay.RETAINED_FRAMES = 1
-        # ...and the cart's palette, if it has one. DeviceCanvas.new_layer does
-        # this; overriding new_layer means not inheriting it, so a layer would
-        # draw stock MOY64 while the surface it composites onto honoured the
-        # cart's table. Guarded on the WIRE table's identity rather than
-        # `_palette`, which the getter populates lazily.
-        if self._wire is not _PAL565_WIRE_BUF:
-            lay.palette = self._palette
-        return lay
 
 
 def make_canvas(w, h, font_scale=1):

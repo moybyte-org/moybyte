@@ -87,6 +87,7 @@ class FilesLayout(ListShellLayout):
 
 class FilesAppLayer(ListShellApp):
     id = "files"
+    RENAME_MAX = MAX_NAME     # 20 here -- narrower than the base's 24
     domain = "system"
     TITLE = "FILES"
     APP_TITLE = "Files"
@@ -320,7 +321,7 @@ class FilesAppLayer(ListShellApp):
 
     def handle_input(self, inp):
         if self.mode == "rename":
-            self._typed_keys(inp)
+            self._typed_rename(inp)
             return True
         if self.mode in ("trash", "game", "used"):
             if self._rows:
@@ -339,17 +340,6 @@ class FilesAppLayer(ListShellApp):
             self._back()
         return True
 
-    def _typed_keys(self, inp):
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
-            self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
-            self.rename_text += chr(k)
-        self.ws._dirty = True
 
     def _back(self):
         if self.mode == "kinds":

@@ -73,9 +73,9 @@ def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     assert app.mode == "rename"
     app.rename_text = ""
     for ch in "castle":
-        app._typed_keys(_FakeInp(ord(ch)))
-        app._typed_keys(_FakeInp(0))
-    app._typed_keys(_FakeInp(0x0D))
+        app._typed_rename(_FakeInp(ord(ch)))
+        app._typed_rename(_FakeInp(0))
+    app._typed_rename(_FakeInp(0x0D))
     assert app.mode == "grid"
     assert "castle" in app.grid.names
     assert "dragon_2" not in app.grid.names

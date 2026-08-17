@@ -75,8 +75,9 @@ def test_the_wasm_head_rasterizes_with_the_boards_kernel():
     # import statement is spelled on one line" -- this pinned the latter and
     # broke when the import grew a second name and wrapped.
     assert "from device_canvas import" in canvas
-    assert "DeviceCanvas" in canvas
-    assert "class WebSystemCanvas(DeviceCanvas)" in canvas
+    # Since the SystemCanvas unification the browser's system surface IS the
+    # boards' shared class, subclassed only to pin RETAINED_FRAMES.
+    assert "class WebSystemCanvas(SystemCanvas)" in canvas
     boot = _read("firmware", "web_runner", "web_boot.py")
     assert "web_canvas.make_canvas" in boot
     assert "def fb_addr" in boot               # pixels leave by address, not JSON

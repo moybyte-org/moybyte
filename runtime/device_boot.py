@@ -59,8 +59,10 @@ except ImportError:  # pragma: no cover - host package lane
 
 try:
     from chrome import _ticks_ms, _ticks_diff
+    from ticks import _sleep_ms
 except ImportError:  # pragma: no cover - host package lane
     from runtime.chrome import _ticks_ms, _ticks_diff
+    from runtime.ticks import _sleep_ms
 
 
 class DeviceBoot:
@@ -494,14 +496,42 @@ class IdleBlank:
         return click
 
 
-def _sleep_ms(ms):
-    """MicroPython's sleep_ms, with the host shim the tick helpers get for
-    free -- FrameLoop is host-executed by tests/test_device_boot.py."""
-    import time
+def apply_touch(touch, pointer):
+    """One GT911 sample -> the shared pointer, the same way on every board
+    (#202 Phase C; both poll_inputs hooks carried this verbatim).
+
+    Touch.poll holds a held finger's last point across the passes the GT911
+    produced no fresh buffer for (#74), so `pointer.down` is a real LEVEL and
+    a drag survives them; `fresh` marks those repeats so kinetic scrolling
+    (#113) doesn't measure finger speed against a sample the hardware never
+    took. Returns (touched, clicked) for the hook's click/active summary."""
+    tp = touch.poll()
+    pointer.down = tp is not None
+    pointer.fresh = getattr(touch, "fresh", True)
+    if tp is None:
+        return False, False
+    pointer.place(tp[0], tp[1])
+    return True, bool(tp[2])
+
+
+def poll_webhost(ws):
+    """One non-blocking webhost accept/serve per frame (plan 3.4 pull half).
+
+    Costs a poll on a non-blocking listener when nobody is connected, and a
+    whole asset transfer when someone is -- which is why the boards call this
+    at the frame TAIL, outside every timing bracket: a browser loading the
+    console will visibly stall the desktop, and that is the honest behaviour
+    for a single-threaded board. Never breaks a frame. Returns elapsed ms
+    (0 when idle/absent) so the T-Deck's HITCH line can carry web=."""
+    wh = getattr(ws, "webhost", None)
+    if wh is None or not getattr(wh, "serving", False):
+        return 0
+    t0 = _ticks_ms()
     try:
-        time.sleep_ms(ms)
-    except AttributeError:
-        time.sleep(ms / 1000.0)
+        wh.poll()
+    except Exception as exc:  # noqa: BLE001 -- never break a frame
+        print("WEB ERR %s: %s" % (type(exc).__name__, exc))
+    return _ticks_diff(_ticks_ms(), t0)
 
 
 class FrameLoop:

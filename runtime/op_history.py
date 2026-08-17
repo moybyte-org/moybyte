@@ -346,3 +346,56 @@ class History(object):
             return
         self._undo.extend(ops)
         self._since_keyframe += len(ops)
+
+
+class OpHistoryMixin:
+    """The undo/redo FACADE shared by the History-keeping editor cores
+    (Paint/Map #90/#91, Scene #85, Music #92, Blocks #93): the can_undo/
+    can_redo delegates, the `_undo`/`_redo` op-stack proxies tests inspect,
+    and the one undo()/redo() skeleton -- each returns True iff a step was
+    taken. Five hand-copies of these dozen lines lived in the core modules
+    (and had begun to vary in whether redo closed an open gesture).
+
+    A core sets `self._hist` (a History) in __init__ and overrides:
+      * _hist_before()     -- close/seal any open gesture so a just-made edit
+                              is the step's target (Map's open batch, Scene's
+                              open drag, Blocks' pending seal); default no-op.
+      * _hist_after_step() -- runs after a TAKEN step (Music re-stamps
+                              AudioBank.rev so parsed copies reload).
+    """
+
+    @property
+    def _undo(self):
+        return self._hist._undo
+
+    @property
+    def _redo(self):
+        return self._hist._redo
+
+    def can_undo(self):
+        return self._hist.can_undo()
+
+    def can_redo(self):
+        return self._hist.can_redo()
+
+    def _hist_before(self):
+        pass
+
+    def _hist_after_step(self):
+        pass
+
+    def undo(self):
+        """Revert the last recorded edit; True iff a step was taken."""
+        self._hist_before()
+        took = self._hist.undo() is not None
+        if took:
+            self._hist_after_step()
+        return took
+
+    def redo(self):
+        """Re-apply the last undone edit; True iff a step was taken."""
+        self._hist_before()
+        took = self._hist.redo() is not None
+        if took:
+            self._hist_after_step()
+        return took

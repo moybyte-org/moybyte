@@ -479,8 +479,8 @@ class StorybookAppLayer(ListShellApp):
         ed = self.editor
         if ed is None or self.read_only:
             return
-        k = inp.last_key
-        if k and k != self._ekey_prev:
+        k = self._edge_key(inp)
+        if k:
             block = False
             if k in (0x0D, 0x0A) and len(ed.lines) >= MAX_TEXT_LINES:
                 block = True                       # a page holds 4 lines of words
@@ -491,7 +491,6 @@ class StorybookAppLayer(ListShellApp):
             elif ed.key(k):
                 self._deck_dirty = True
                 self.status = "PAGE " + str(self.page_i + 1)
-        self._ekey_prev = k
 
     def handle_pointer(self, px, py, click):
         ws = self.ws

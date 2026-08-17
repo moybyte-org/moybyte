@@ -23,28 +23,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio, _Blit
+    from widgets import Pmem, _SilentAudio, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _Blit
+    from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
 try:
     from moy_image import cover_sig, load_wallpaper_preview, save_wallpaper_preview
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (cover_sig, load_wallpaper_preview,
                                    save_wallpaper_preview)
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
 
 
 class Wallpaper:
