@@ -55,71 +55,28 @@ MOY_INPUT_POLLER = True
 
 # --- the serial dev channel ---------------------------------------------------
 #
-# THE LORE SAYS THIS CANNOT WORK ON THIS BOARD. The lore is half right, and the
-# half that is wrong cost the project a test harness, so the reasoning is here
-# rather than in a commit message.
-#
-# What was recorded (CLAUDE.md, and the revert 4faf07a): "this fork's USB-CDC
-# stack has no at-arrival interrupt-char scan, so Ctrl-C/commands never arrive",
-# and "select.poll reports stdin ALWAYS-READY even when empty, so poll-then-
-# readline becomes a blocking read that stalled the loop ~30s".
-#
-# The first clause is FALSE, and checkably so. The shipping fork is MicroPython
-# v1.27.0 and this build is v1.28.0, and every file on the CDC receive path --
-# shared/tinyusb/mp_usbd_cdc.c, mp_usbd.c, shared/runtime/interrupt_char.c,
-# sys_stdio_mphal.c, ports/esp32/usb.c, uart.c, main.c -- is byte-identical
-# between them. `tud_cdc_rx_cb` does scan for the interrupt char at arrival
-# (mp_usbd_cdc.c: `if (data_char == mp_interrupt_char) { ...
-# mp_sched_keyboard_interrupt(); }`) and is linked into the shipping image. The
-# same revert commit says so out loud in its own summary: "without a reader in
-# flight, Ctrl-C drops to a live REPL".
-#
-# The second clause is a REAL observation with a different cause. Two mechanisms
-# explain it, and neither is a broken poll:
-#
-#   1. `sys.stdin.readline()` blocks PER CHARACTER (sys_stdio_mphal.c's
-#      stdio_read loops on mp_hal_stdin_rx_chr, which never returns empty). So
-#      ONE byte in the ring buffer makes poll correctly report ready, and then
-#      readline waits for a newline that may never come. That is the ~30s stall,
-#      exactly.
-#   2. Something was putting that byte there. `MICROPY_HW_ENABLE_UART_REPL` is
-#      on, and UART0's ISR feeds the SAME `stdin_ringbuf` -- so noise on a
-#      floating U0RXD (GPIO44, exposed on this board's expansion header) is
-#      indistinguishable from a typed character.
-#
-# So this channel is built to survive both. It NEVER calls readline: it reads
-# ONE BYTE at a time with `sys.stdin.read(1)`, only ever after `poll(0)` said
-# MP_STREAM_POLL_RD (which mphalport.c sets only when `ringbuf_peek() != -1`),
-# accumulating until a newline. A byte read is a byte consumed, so noise costs a
-# bounded few bytes per frame and can never park the loop; a partial line is
-# dropped when it grows past LINE_MAX. And it COUNTS what it swallowed, so the
-# PERF line reports `rx=` -- if bytes stream in and no command ever completes,
-# that number says "something is injecting into stdin" instead of leaving a
-# mystery hang.
+# ONE implementation for every board: `dev_channel.DevChannel` (staged from
+# runtime/), which reads stdin one byte at a time after poll(0) -- NEVER
+# readline, which blocks per character -- and disarms itself, out loud, if
+# kilobytes arrive without a single complete command. Its module docstring
+# carries the reader's design; what is THIS board's alone is mechanism 2 of the
+# original stall: `MICROPY_HW_ENABLE_UART_REPL` would put UART0's ISR on the
+# same stdin ring buffer, so noise on the floating U0RXD (GPIO44, exposed on
+# the expansion header) reads exactly like typed input. The board header keeps
+# UART_REPL off (#201); if `SERIAL rx=` ever climbs on an idle board, that is
+# the mechanism to suspect. (The full history of why RX was thought impossible
+# here -- and why the fork's never worked -- is in CLAUDE.md's RX section and
+# git history at 4faf07a/24ccb0b.)
 #
 # Set False to remove the channel entirely (the loop is then byte-identical to
-# one without it). If `rx=` climbs on an idle board, mechanism 2 is real: build
-# with `MICROPY_HW_ENABLE_UART_REPL (0)` in the board header, which takes UART0's
-# ISR off the shared ring buffer. If RX turns out to be genuinely unusable, the
-# S3's USB-Serial/JTAG peripheral fills the ring from a TRUE hardware ISR
-# (usb_serial_jtag.c) -- that is what the P4's UART behaves like, and on the S3
-# it is mutually exclusive with CDC.
+# one without it).
+SERIAL_CMDS = True
+
 # Idle screen blank (shared with the P4 via device_boot.IdleBlank). Overridable
 # before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`) and at
 # runtime over the dev channel (`power <secs>`, `power off`). Same 5 minutes the
 # P4 ships, so the two boards behave alike unless a board has a reason not to.
 POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
-
-SERIAL_CMDS = True
-SERIAL_LINE_MAX = 96        # a partial line longer than this is noise; drop it
-SERIAL_BYTES_PER_FRAME = 64  # bounded drain: noise cannot own the frame
-# Bytes that may arrive without EVER completing a command before the channel
-# gives up on itself. A real operator types a line within a few dozen bytes;
-# four kilobytes of newline-free traffic is a byte SOURCE, not a person. Rather
-# than spend a slice of every frame chewing it forever, the channel disarms and
-# says so once -- turning a permanent drag on the desktop into one serial line
-# naming the condition. Re-arm from the REPL by re-entering run_desktop.
-SERIAL_NOISE_LIMIT = 4096
 
 # #183: print a phase bracket around every SD session. This board has no REPL to
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic --
@@ -334,14 +291,23 @@ def run_desktop(fps_cap=60):
     import gc
     gc.collect()        # defrag after the heavy boot so the flush bounce has SRAM
 
-    serial = _SerialChannel(ws, pointer) if SERIAL_CMDS else None
-    if serial is not None:
-        serial.idle = idle      # `power` reports LIVE state, not its request
-    if serial is not None:
+    # `state`'s psave field reports the LIVE timeout; the dev channel's `power`
+    # retune keeps it current from here on.
+    ws._psave_ms = POWER_SAVE_MS
+
+    serial = None
+    if SERIAL_CMDS:
+        from dev_channel import DevChannel
+        # env: the loop objects `py` probes reach beyond ws/wm/pointer -- the
+        # same names the P4 exposes, minus its game canvas.
+        serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
+                            env={"comp": comp, "boot": boot})
         _diag_log("boot", "serial dev channel %s"
                   % ("armed" if serial.armed else "unavailable"), diag)
 
     pump = FramePump(boot, _ota, fps_cap)
+    if serial is not None:
+        serial.env["pump"] = pump   # created just above; same py-scope as the P4
     _backlight_on = boot.lit
     _diag_at = _ticks_ms() + 3000
     _flush_at = _ticks_ms() + 5000
@@ -394,16 +360,20 @@ def run_desktop(fps_cap=60):
             pointer.place(tp[0], tp[1])
             if tp[2]:
                 click = True
+        _serial_ran = False
         if serial is not None:
-            if serial.poll(ws):
-                click = serial.click or click
+            _serial_ran = serial.poll(ws)
+            click = serial.click or click
             if serial.quit:
                 print("Moybyte desktop: serial quit -> REPL")
                 return
         # Idle screen blank, after EVERY input source has been read and before
         # the pointer reaches the console -- that ordering is what lets the
-        # waking touch be swallowed instead of pressing what it landed on.
+        # waking touch be swallowed instead of pressing what it landed on. A
+        # dev command (or a scripted swipe frame) counts as activity, so an
+        # unattended harness session never fights the blank.
         click = idle.tick(now, (tp is not None) or nx or ny or click
+                          or _serial_ran
                           or bool(getattr(inp, "last_key", None)),
                           ws, pointer, click)
         pointer.click = click
@@ -576,305 +546,3 @@ def run_desktop(fps_cap=60):
         if _t_sleep:
             time.sleep_ms(_t_sleep)
 
-
-class _SerialChannel:
-    """Line commands over USB-CDC stdin, read one byte at a time.
-
-    See SERIAL_CMDS above for why this exists at all and why the byte-at-a-time
-    reader is not fussiness. In one sentence: `poll()` is trustworthy (the esp32
-    port sets MP_STREAM_POLL_RD only when the stdin ring buffer is non-empty),
-    `readline()` is not (it blocks per character until a newline that noise will
-    never supply), so this reads exactly the bytes poll promised and no more.
-
-    The command set is the P4's, minus what this board does not have (no
-    windows, no BLE, no PPA) and minus `swipe`/`drag`, which want a windowed
-    desktop to gesture at. `tools/p4_autotest.py`'s approach -- drive the
-    console over serial, assert against `state` -- points at this directly.
-
-      state           one-line JSON: screen / frames / cart / wifi / scroll
-      tap <x> <y>     a synthetic tap at canvas coords
-      tap <name>      tap a named bar button (any ws.layout.<name>_btn rect)
-      run [name]      select the first cart whose title matches, and run it
-      diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
-      skip 0|1        the #77 frameskip gate
-      gov 0|1         the #63 frame governor
-      mem             a forced collect + the live/free split
-      bl 0|1          panel backlight. The board keeps RENDERING either way, so
-                      a dark screen is a fine way to bench unattended.
-      vol <0-7>       master audio level; 0 is silent
-      power <secs>    idle screen-blank timeout (0 disables); `power off` blanks
-                      now. Shared with the P4 -- the board keeps RENDERING while
-                      dark, so an unattended bench run still produces frames.
-      py <code>       eval/exec one line against the LIVE console
-      quit            leave the desktop for the REPL
-    """
-
-    def __init__(self, ws, pointer):
-        self.pointer = pointer
-        self.click = False
-        self.quit = False       # `quit` asked for the REPL; run_desktop returns
-        self.buf = ""
-        self.rx = 0             # bytes swallowed -- the "is something injecting?" number
-        self.lines = 0          # complete commands dispatched
-        self.dropped = 0        # over-long partial lines thrown away
-        self.idle = None        # the loop's IdleBlank, for live reporting
-        self.armed = False
-        self._poll = None
-        self._stdin = None
-        try:
-            import select
-            import sys
-            self._stdin = sys.stdin
-            self._poll = select.poll()
-            # POLLIN and nothing else. A bare register() defaults to RD|WR, and
-            # mphalport.c grants POLL_WR unconditionally -- so a bare
-            # registration is truthy on EVERY call, forever, which looks exactly
-            # like "poll reports stdin always-ready".
-            self._poll.register(self._stdin, select.POLLIN)
-            self.armed = True
-        except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
-            print("Moybyte serial channel unavailable:", exc)
-
-    def poll(self, ws):
-        """Drain up to SERIAL_BYTES_PER_FRAME bytes and run any complete lines.
-
-        Returns True when a command ran (the caller treats that as activity).
-        The drain is BOUNDED so that a stuck byte source costs a fixed slice of
-        one frame rather than the frame.
-        """
-        if not self.armed:
-            return False
-        self.click = False
-        ran = False
-        for _ in range(SERIAL_BYTES_PER_FRAME):
-            if not self._poll.poll(0):
-                break
-            try:
-                ch = self._stdin.read(1)
-            except Exception:  # noqa: BLE001 -- a dead stdin disarms the channel
-                self.armed = False
-                return ran
-            if not ch:
-                break
-            self.rx += 1
-            if ch in ("\n", "\r"):
-                line = self.buf.strip()
-                self.buf = ""
-                if line:
-                    self.lines += 1
-                    ran = True
-                    try:
-                        self.run(ws, line)
-                    except Exception as exc:  # noqa: BLE001 -- never kill the loop
-                        print("REMOTE ERR %s: %s" % (type(exc).__name__, exc))
-            else:
-                self.buf += ch
-                if len(self.buf) > SERIAL_LINE_MAX:
-                    # Not a command -- a byte source with no newline in it. Drop
-                    # the partial rather than growing a string forever.
-                    self.dropped += 1
-                    self.buf = ""
-        if self.lines == 0 and self.rx >= SERIAL_NOISE_LIMIT:
-            # Kilobytes in, not one command out. That is a byte SOURCE (UART0's
-            # ISR shares this ring buffer -- a floating U0RXD reads exactly like
-            # this), and chewing it costs a slice of every frame forever. Stop,
-            # once, out loud: a named condition beats a permanent slow desktop.
-            self.armed = False
-            print("Moybyte serial channel DISARMED: %d bytes arrived and not one "
-                  "complete command. Something is injecting into stdin -- most "
-                  "likely UART0 (U0RXD/GPIO44 floats on the expansion header) "
-                  "feeding the same ring buffer. Rebuild with "
-                  "MICROPY_HW_ENABLE_UART_REPL (0) to take its ISR off it."
-                  % self.rx)
-        return ran
-
-    def report(self, diag):
-        """One SERIAL line per diag tick, and it is the channel's self-diagnosis:
-        `rx` climbing while `lines` stays 0 means something is injecting bytes
-        into stdin that are not commands -- UART0's ISR shares this ring buffer,
-        so a floating U0RXD (GPIO44, on the expansion header) reads exactly like
-        this. That is a fact, printed, instead of a hang to be puzzled over."""
-        _diag_log("SERIAL", "rx=%d lines=%d dropped=%d partial=%d"
-                  % (self.rx, self.lines, self.dropped, len(self.buf)), diag)
-
-    def run(self, ws, line):
-        parts = line.split()
-        cmd = parts[0]
-        if cmd == "quit":
-            # A FLAG, not a raised KeyboardInterrupt. MicroPython derives that
-            # one from BaseException, so it would sail past every `except
-            # Exception` between here and the top -- including the frame's --
-            # and leave the panel mid-flush. run_desktop returns cleanly instead.
-            print("REMOTE quit -> REPL")
-            self.quit = True
-            return
-        if cmd == "state":
-            import json
-            print("STATE %s" % json.dumps(_remote_state(ws)))
-            return
-        if cmd == "tap":
-            r = None
-            if len(parts) == 3:
-                try:
-                    r = (int(parts[1]), int(parts[2]))
-                except ValueError:
-                    r = None
-            elif len(parts) == 2:
-                rect = getattr(ws.layout, parts[1] + "_btn", None)
-                if rect:
-                    r = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
-            if r is None:
-                print("REMOTE ? %s" % line)
-                return
-            self.pointer.place(r[0], r[1])
-            self.pointer.down = True     # released next frame (touch reads None)
-            self.click = True
-            print("REMOTE tap %d %d" % r)
-            return
-        if cmd == "run":
-            name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
-            items = getattr(ws.launcher, "items", [])
-            for i in range(len(items)):
-                it = items[i]
-                if not it.get("path"):
-                    continue
-                if not name or name in str(it.get("title") or "").lower():
-                    ws.launcher.sel = i
-                    ws.launch_selected()
-                    print("REMOTE run %s" % it.get("title"))
-                    return
-            print("REMOTE run: no cart match")
-            return
-        if cmd == "diag":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            # Through set_diag_live, not around it: the 3s diag tick re-syncs
-            # perf_capture FROM diag_live, so poking perf_capture alone would be
-            # silently undone. persist=False -- a serial A/B must not rewrite the
-            # kid's system.json.
-            try:
-                ws.set_diag_live(on, persist=False)
-            except Exception:  # noqa: BLE001 -- older console: flag only
-                ws.diag_live = on
-            ws.perf_capture = on
-            ws.show_fps = on
-            ws._dirty = True
-            print("REMOTE diag %s" % ("on" if on else "off"))
-            return
-        if cmd == "skip":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            ws.set_frameskip(on, persist=False)
-            print("REMOTE skip %s" % ("on" if on else "off"))
-            return
-        if cmd == "gov":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            import console as _console_mod
-            _console_mod.FPS_GOVERNOR = on
-            print("REMOTE gov %s" % ("on" if on else "off"))
-            return
-        if cmd == "mem":
-            import gc
-            gc.collect()
-            print("REMOTE mem live=%dk free=%dk"
-                  % (gc.mem_alloc() // 1024, gc.mem_free() // 1024))
-            return
-        if cmd == "bl":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            import tdeck_panel
-            tdeck_panel.set_backlight(on)
-            # Keep IdleBlank's model honest, or `power` reports asleep=True over
-            # a lit panel and the next idle tick declines to blank it.
-            if self.idle is not None:
-                if on:
-                    self.idle.wake(_ticks_ms())
-                else:
-                    self.idle.asleep = True
-            print("REMOTE bl %s" % ("on" if on else "off"))
-            return
-        if cmd == "vol":
-            lvl = int(parts[1]) if len(parts) == 2 else 0
-            # ws.audio exists only while a cart holds the backend -- at the
-            # launcher it is None, which is not an error worth a traceback.
-            au = getattr(ws, "audio", None)
-            if au is None:
-                print("REMOTE vol: no audio backend (no cart running)")
-                return
-            au.volume(lvl)
-            print("REMOTE vol %d" % lvl)
-            return
-        if cmd == "power":
-            # Act on the IdleBlank DIRECTLY rather than parking a request for the
-            # loop to apply. The deferred version reported the value it had not
-            # applied yet, so `power 0` answered "timeout=8s" -- twice, in two
-            # different shapes, before the plumbing itself was the bug.
-            idle = self.idle
-            if idle is None:
-                print("REMOTE power: no idle blank on this build")
-                return
-            if len(parts) == 2 and parts[1] == "off":
-                idle.blank()
-                print("REMOTE power off")
-                return
-            if len(parts) == 2:
-                idle.timeout_ms = int(parts[1]) * 1000
-                idle.wake(_ticks_ms())
-            print("REMOTE power timeout=%ds asleep=%s"
-                  % (idle.timeout_ms // 1000, idle.asleep))
-            return
-        if cmd == "py" and len(parts) > 1:
-            code = line.split(None, 1)[1]
-            env = {"ws": ws, "wm": ws.wm, "pointer": self.pointer}
-            try:
-                try:
-                    print("PY %r" % (eval(code, env),))
-                except SyntaxError:
-                    exec(code, env)       # noqa: S102 -- dev-board serial only
-                    print("PY ok")
-            except Exception as exc:  # noqa: BLE001
-                print("PY ERR %s: %s" % (type(exc).__name__, exc))
-            return
-        print("REMOTE ? %s" % line)
-
-
-def _remote_state(ws):
-    """One-line JSON snapshot for the `state` command -- the assertion source an
-    on-glass harness reads instead of pixels. Every field best-effort: a broken
-    subsystem reads as an error string, never a crash that kills the loop."""
-    st = {}
-    try:
-        st["screen"] = ws.screen
-        st["frames"] = getattr(ws, "_frames_drawn", None)
-        st["cart"] = (getattr(ws, "cart", None) or {}).get("title")
-        st["cart_error"] = getattr(ws, "cart_error", None)
-        st["diag"] = bool(getattr(ws, "diag_live", False))
-        st["costs"] = dict(getattr(ws, "costs", {}) or {})
-        # The process back-stack, which on this tier IS the whole window
-        # model: `ws.screen` is only a read-only projection of its top.
-        st["stack"] = list(getattr(ws.wm, "_stack", ()) or ())
-    except Exception as exc:  # noqa: BLE001
-        st["ws_err"] = str(exc)
-    try:
-        sl = ws.settings_layer
-        sr = sl.scroll
-        st["settings"] = {
-            "set_top": sl.set_top, "sel": sl.set_msel,
-            "rows": len(sl._settings_rows()),
-            "offset": None if sr is None else sr.offset,
-            "wifi_view": bool(sl.wifi_view),
-        }
-    except Exception as exc:  # noqa: BLE001
-        st["settings_err"] = str(exc)
-    try:
-        st["wifi"] = list(ws.wifi.status()) if ws.wifi is not None else None
-    except Exception as exc:  # noqa: BLE001
-        st["wifi_err"] = str(exc)
-    try:
-        # Look system-app carts up by TITLE, never folder name: the device seeds
-        # from the title slug and the host store copies the source folder, and
-        # assuming either name is what broke `is_app` on the P4's glass.
-        claims = {}
-        for _app, _text in getattr(ws, "_apps", ()):
-            claims[_app.id] = sum(1 for c in ws._all_carts if _app.is_app(c))
-        st["app_claims"] = claims
-    except Exception as exc:  # noqa: BLE001
-        st["app_err"] = str(exc)
-    return st

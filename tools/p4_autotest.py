@@ -32,16 +32,23 @@ BOOT_BANNER = "desktop running"
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
-    def __init__(self, port, log=None, timeout=0.2):
+    def __init__(self, port, log=None, timeout=0.2, dtr=False, rts=False):
         self.log = log if log is not None else (lambda s: None)
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = BAUD
         self.ser.timeout = timeout
-        # dtr/rts LOW before open: opening must never glitch the CH343's
-        # auto-reset circuit (reset is explicit, below).
-        self.ser.dtr = False
-        self.ser.rts = False
+        # The line state AT OPEN is board-specific and load-bearing:
+        #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
+        #     glitches the auto-reset circuit (reset is explicit, below).
+        #   T-Deck (USB-Serial/JTAG, on the SoC): the OPPOSITE -- an open with
+        #     both lines LOW is a CHIP RESET (rst:0x15 USB_UART_CHIP_RESET,
+        #     measured 2026-08-17), after which the USB device re-enumerates
+        #     under the open handle and every read returns nothing forever.
+        #     Opening with both HIGH (pyserial's default, what miniterm does)
+        #     attaches to the running console cleanly.
+        self.ser.dtr = dtr
+        self.ser.rts = rts
         self.ser.open()
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)

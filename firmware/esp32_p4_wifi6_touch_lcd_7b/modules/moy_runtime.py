@@ -35,10 +35,11 @@ from console import Pointer, Workstation, wire_workstation_core
 # canonical: runtime/device_boot.py; board.toml stages it like every other
 # shared module). The steps that used to be written twice -- boot splash, cart
 # seed+scan, the Lua runtime probe, the OTA verdict + rollback confirm, the
-# frame cadence -- live there now; everything this board does that the S3 does
-# not (the DPI scan-out, the PPA composite, BLE HID, the serial dev channel,
-# the idle screen blank) stays here, because it is hardware and not an oversight.
-from device_boot import DeviceBoot, FramePump, OtaHealth
+# frame cadence -- live there now, as do the idle screen blank (IdleBlank) and
+# the serial dev channel (runtime/dev_channel.py, one vocabulary for every
+# board -- this file adds only the P4-only extras: bt/union/cache). What stays
+# here is hardware: the DPI scan-out, the PPA composite, BLE HID.
+from device_boot import DeviceBoot, FramePump, IdleBlank, OtaHealth
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -478,99 +479,6 @@ def run_ppa_smoke(scale=2, iters=60):
     print("PPA SMOKE done -> REPL")
 
 
-def _remote_state(ws):
-    """One-line JSON snapshot for the serial `state` command -- the on-glass
-    test harness's introspection half (tools/p4_autotest.py parses it). Every
-    field is best-effort: a broken subsystem reads as null, never a crash."""
-    st = {}
-    try:
-        st["screen"] = ws.screen
-        st["frames"] = getattr(ws, "_frames_drawn", None)
-        # Idle screen blank (#58): the harness has to be able to tell a blanked
-        # panel from a hung one -- they look identical from the host end.
-        st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
-                       getattr(ws, "_psave_ms", POWER_SAVE_MS) // 1000]
-        # Expensive-event counters (ws.note_cost): cache builds + storage reads.
-        # A cache that is silently missing shows up here as a count that tracks the
-        # frame count -- which is how the 2026-07-26 bar-strip thrash would have
-        # announced itself instead of taking a day to corner.
-        st["costs"] = dict(getattr(ws, "costs", {}) or {})
-        wm = ws.wm
-        desk = getattr(wm, "desk_open", None)
-        st["desk"] = bool(desk()) if desk is not None else None
-        st["order"] = list(getattr(wm, "_order", ()) or ())
-        st["focus"] = getattr(wm, "_focus", None)
-        wins = {}
-        for k in st["order"]:
-            win = wm._wins.get(k)
-            if win is not None:
-                wins[k] = [win.x, win.y, win.w, win.h, win.title_h,
-                           win.kind, bool(win.minimized)]
-        st["wins"] = wins
-        # #113: a window buffer is ONE retained surface -- 2 here means a
-        # blit-scroll would measure against the wrong paint and ghost.
-        st["win_retained"] = dict(
-            (k, getattr(wm._wins[k].buf, "RETAINED_FRAMES", None))
-            for k in st["order"]
-            if wm._wins.get(k) is not None and wm._wins[k].buf is not None)
-    except Exception as exc:  # noqa: BLE001
-        st["wm_err"] = str(exc)
-    try:
-        sl = ws.settings_layer
-        sr = sl.scroll
-        st["settings"] = {
-            "set_top": sl.set_top, "sel": sl.set_msel,
-            "rows": len(sl._settings_rows()),
-            "offset": None if sr is None else sr.offset,
-            "view": None if sr is None else list(sr.view),
-            "content": None if sr is None else sr.content,
-            "wifi_view": bool(sl.wifi_view), "bt_view": bool(sl.bt_view),
-        }
-        win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
-        if win is not None and win.ctx is not None:
-            lay = win.ctx.layout
-            st["settings"]["lay"] = [lay.set_x, lay.set_row_y0,
-                                     lay.set_w, lay.set_row_h]
-    except Exception as exc:  # noqa: BLE001
-        st["settings_err"] = str(exc)
-    try:
-        if ws.wifi is not None:
-            st["wifi"] = list(ws.wifi.status())
-        else:
-            st["wifi"] = None
-    except Exception as exc:  # noqa: BLE001
-        st["wifi_err"] = str(exc)
-    try:
-        # Look the app cart up by TITLE, never by folder name: the device seeds
-        # from the title slug (appearance.moy) while the host store copies the
-        # source folder (theme_picker.moy) -- assuming either name is what broke
-        # is_app in the first place (on-glass 2026-07-25).
-        app = getattr(ws, "appearance_app", None)
-        cart = None
-        for c in ws._all_carts:
-            if c.get("title") == "Appearance":
-                cart = c
-                break
-        if cart is None:
-            st["appearance_cart"] = None
-        else:
-            st["appearance_cart"] = {
-                "title": cart.get("title"), "version": cart.get("version"),
-                "path": cart.get("path"),
-                "perms": list(cart.get("permissions") or ()),
-                "is_app": bool(app.is_app(cart)) if app is not None else None,
-            }
-        # Every registered system app's claim, so a harness run catches the
-        # whole class rather than just Appearance.
-        claims = {}
-        for _app, _text in getattr(ws, "_apps", ()):
-            claims[_app.id] = sum(1 for c in ws._all_carts if _app.is_app(c))
-        st["app_claims"] = claims
-    except Exception as exc:  # noqa: BLE001
-        st["appearance_err"] = str(exc)
-    return st
-
-
 # Idle screen blank (#58): milliseconds of NO INPUT before the panel goes dark,
 # so the board can sit plugged in for days without a lit screen. 0 disables it.
 # Overridable before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`)
@@ -715,22 +623,62 @@ def run_desktop(fps_cap=60):
     ws.open_desk()
     keyboard.start()               # failure is touch-only, never a boot failure
 
-    # Remote input over serial (#58 dev affordance): the CH343 REPL stays alive
-    # under the desktop (no USB starvation on this board), so complete LINES piped
-    # into the port drive the UI while the glass is watched:
-    #   tap <x> <y>   synthetic tap at system-canvas coords
-    #   tap sysmenu   tap a named bar button (any ws.layout.<name>_btn rect:
-    #                 sysmenu / wifi / batt / context_x)
+    # The serial dev channel (#58/#156): ONE implementation for every board --
+    # `dev_channel.DevChannel`, staged from runtime/ (state / tap / run / open /
+    # swipe / drag / diag / skip / gov / power / py / web / quit; the CH343 REPL
+    # stays alive under the desktop, so complete lines piped into the port
+    # drive the UI while the glass is watched). Ctrl-C still interrupts as
+    # before. This board's EXTRAS -- commands only its hardware or tier has:
     #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
-    #   quit          leave the desktop for the REPL
-    # Ctrl-C still interrupts as before (handled below the stdin read).
+    #   union 0|1   A/B the dirty-union gesture restore (pairs with `drag`)
+    #   cache 0|1   A/B the drag backdrop cache
+    idle = IdleBlank(set_backlight, POWER_SAVE_MS)
+    ws._psave_ms = POWER_SAVE_MS   # `state` reports the LIVE timeout
+
+    def _bt_cmd(ws, parts, line):
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "scan":
+            print("REMOTE bt scan ->", keyboard.scan())
+        elif action == "forget":
+            keyboard.forget()
+            print("REMOTE bt forgot keyboard + local bonds")
+        elif action == "status":
+            print("REMOTE bt status state=%s name=%s passkey=%s "
+                  "protocol=%s interval_ms=%s notify=%s fast=%s "
+                  "dsi_underruns=%s error=%s"
+                  % (keyboard.status()[0], keyboard.status()[1],
+                     keyboard.status()[2], keyboard.protocol,
+                     keyboard._conn_interval_ms, keyboard._notify_count,
+                     keyboard.fast_status(), comp.underruns(),
+                     keyboard.error))
+        elif action == "trace":
+            on = not (len(parts) > 2 and parts[2] == "0")
+            print("REMOTE bt trace ->", keyboard.trace(on))
+        else:
+            print("REMOTE bt ? %s" % line)
+
+    def _union_cmd(ws, parts, line):
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.wm._union_disabled = not on
+        print("REMOTE union %s" % ("on" if on else "off"))
+
+    def _cache_cmd(ws, parts, line):
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.wm._backdrop_disabled = not on
+        print("REMOTE cache %s" % ("on" if on else "off"))
+
     try:
-        import sys
-        import select
-        _sin = select.poll()
-        _sin.register(sys.stdin, select.POLLIN)
-    except Exception:  # noqa: BLE001 -- remote input is optional sugar
-        _sin = None
+        from dev_channel import DevChannel
+        # env: what the `py` probe hook can reach beyond ws/wm/pointer --
+        # `pump.debt` and `boot.lit`/`boot.done` are the shared spine's only
+        # on-glass witnesses (pump joins the env right after it is created).
+        serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
+                            extra={"bt": _bt_cmd, "union": _union_cmd,
+                                   "cache": _cache_cmd},
+                            env={"comp": comp, "game": game, "boot": boot})
+    except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
+        print("Moybyte P4 serial channel unavailable:", exc)
+        serial = None
 
     import gc
     gc.collect()
@@ -751,15 +699,11 @@ def run_desktop(fps_cap=60):
     # first-frame/OTA housekeeping, and the cadence + pacing debt. Everything
     # BETWEEN its head and its tail is this board's own hardware.
     pump = FramePump(boot, _ota, fps_cap)
+    if serial is not None:
+        serial.env["pump"] = pump   # created just above; see the env note
     # Dark until the first composed frame (#45) -- unless the splash already
     # composed one, in which case the panel is lit and stays lit.
     _backlight_on = boot.lit
-    _ps_ms = POWER_SAVE_MS         # idle blank timeout (serial `power` retunes)
-    _asleep = False                # panel blanked by the idle timer
-    _ps_force = False              # serial `power off`: blank on the next frame
-    _idle_at = _ticks_ms()         # last frame that saw real input
-    _drag_script = None            # remote `drag` playback state (see below)
-    _swipe_script = None           # remote `swipe` playback state (see below)
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
     # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
@@ -790,7 +734,6 @@ def run_desktop(fps_cap=60):
             print("Moybyte P4 BLE keyboard poll failed:", exc)
         inp.begin_frame()
         click = False
-        _serial_cmd = False        # a dev command counts as activity (wakes it)
         tp = touch.poll()
         pointer.down = tp is not None
         # Touch.poll holds a held finger's last point across the passes the GT911
@@ -805,348 +748,24 @@ def run_desktop(fps_cap=60):
             pointer.place(tp[0], tp[1])
             if tp[2]:
                 click = True
-        if _sin is not None and _sin.poll(0):
-            line = ""
-            try:
-                line = sys.stdin.readline().strip()
-            except Exception:  # noqa: BLE001
-                pass
-            parts = line.split() if line else []
-            _serial_cmd = bool(parts)
-            if parts and parts[0] == "quit":
-                print("REMOTE quit -> REPL")
+        _serial_ran = False
+        if serial is not None:
+            # Commands + the swipe/drag playbacks run inside poll() -- one
+            # vocabulary, one reader, per dev_channel's module docstring. A
+            # scripted frame counts as activity exactly as a typed command.
+            _serial_ran = serial.poll(ws)
+            click = serial.click or click
+            if serial.quit:
                 return
-            if parts and parts[0] == "bt":
-                action = parts[1] if len(parts) > 1 else "status"
-                if action == "scan":
-                    print("REMOTE bt scan ->", keyboard.scan())
-                elif action == "forget":
-                    keyboard.forget()
-                    print("REMOTE bt forgot keyboard + local bonds")
-                elif action == "status":
-                    print("REMOTE bt status state=%s name=%s passkey=%s "
-                          "protocol=%s interval_ms=%s notify=%s fast=%s "
-                          "dsi_underruns=%s error=%s"
-                          % (keyboard.status()[0], keyboard.status()[1],
-                             keyboard.status()[2], keyboard.protocol,
-                             keyboard._conn_interval_ms, keyboard._notify_count,
-                             keyboard.fast_status(), comp.underruns(),
-                             keyboard.error))
-                elif action == "trace":
-                    on = not (len(parts) > 2 and parts[2] == "0")
-                    print("REMOTE bt trace ->", keyboard.trace(on))
-                else:
-                    print("REMOTE bt ? %s" % line)
-            if parts and parts[0] == "tap":
-                r = None
-                if len(parts) == 3:
-                    try:
-                        r = (int(parts[1]), int(parts[2]))
-                    except ValueError:
-                        r = None
-                elif len(parts) == 2:
-                    rect = getattr(ws.layout, parts[1] + "_btn", None)
-                    if rect:
-                        r = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
-                if r is not None:
-                    pointer.place(r[0], r[1])
-                    pointer.down = True   # released next frame (touch reads None)
-                    click = True
-                    print("REMOTE tap %d %d" % r)
-                else:
-                    print("REMOTE ? %s" % line)
-            if parts and parts[0] == "run":
-                # `run <name>`: select the first cart whose title matches and RUN
-                # it (the launcher tap path) -- deterministic game launch without
-                # tile-hunting, for measuring the play + game-window-drag paths.
-                name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
-                items = getattr(ws.launcher, "items", [])
-                idx = None
-                for i in range(len(items)):
-                    it = items[i]
-                    if not it.get("path"):
-                        continue
-                    t = str(it.get("title") or "").lower()
-                    if not name:
-                        idx = i
-                        break
-                    if name in t:
-                        idx = i
-                        break
-                if idx is not None:
-                    ws.launcher.sel = idx
-                    ws.launch_selected()
-                    print("REMOTE run %s" % items[idx].get("title"))
-                else:
-                    print("REMOTE run: no cart match")
-            if parts and parts[0] == "diag":
-                # `diag 0|1`: toggle the diagnostic frame-eaters (perf_capture +
-                # the on-screen FPS chip) to measure the TRUE shipping fps. The
-                # fps= field of the PERF line reads _frames_drawn either way, so
-                # it stays valid with perf_capture off (only the ms EMAs go
-                # stale). Default follows Settings -> PERF DIAG (i.e. OFF on a
-                # shipped console), so a measurement session says `diag 1`.
-                on = not (len(parts) == 2 and parts[1] == "0")
-                # Through set_diag_live, not around it: the sampler below
-                # re-syncs perf_capture from diag_live every ~2s (the T-Deck's
-                # 3s diag tick does the same), so poking perf_capture alone
-                # would be silently undone two seconds later. persist=False --
-                # a serial A/B must not rewrite the kid's system.json.
-                try:
-                    ws.set_diag_live(on, persist=False)
-                except Exception:  # noqa: BLE001 -- older console: flag only
-                    ws.diag_live = on
-                ws.perf_capture = on
-                ws.show_fps = on
-                ws._dirty = True
-                print("REMOTE diag %s" % ("on" if on else "off"))
-            if parts and parts[0] == "skip":
-                # `skip 0|1`: A/B the #77 frameskip gate (logic full-rate, render
-                # halved) without walking to Settings. persist=False: a serial A/B
-                # must not rewrite the kid's system.json.
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.set_frameskip(on, persist=False)
-                print("REMOTE skip %s" % ("on" if on else "off"))
-            if parts and parts[0] == "gov":
-                # `gov 0|1`: A/B the frame governor (#63 SNES rule) on glass --
-                # a GAME locks to its manifest fps (default 30) with the freed
-                # headroom absorbing GC/render spikes. frame_cap_fps() re-reads
-                # the module global every loop, so this takes effect immediately;
-                # the shipped default stays OFF (owner measurement mode).
-                on = not (len(parts) == 2 and parts[1] == "0")
-                import console as _console_mod
-                _console_mod.FPS_GOVERNOR = on
-                print("REMOTE gov %s" % ("on" if on else "off"))
-            if parts and parts[0] == "union":
-                # `union 0|1`: A/B the dirty-union gesture restore (#58; 1=on,
-                # 0=full-screen restore) -- pairs with `drag [frames]`.
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.wm._union_disabled = not on
-                print("REMOTE union %s" % ("on" if on else "off"))
-            if parts and parts[0] == "cache":
-                # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.wm._backdrop_disabled = not on
-                print("REMOTE cache %s" % ("on" if on else "off"))
-            if parts and parts[0] == "power":
-                # `power`            -- report
-                # `power <seconds>`  -- retune the idle blank (0 disables)
-                # `power off`        -- blank NOW, without waiting out the timer
-                #                      (the board README wants exactly this
-                #                      reading to split SoC vs backlight draw)
-                # `power on`         -- wake now
-                _arg = parts[1] if len(parts) > 1 else ""
-                if _arg == "off":
-                    _ps_force = True
-                elif _arg == "on":
-                    _idle_at = now
-                    if _asleep:
-                        _asleep = False
-                        set_backlight(True)
-                        _backlight_on = True
-                        ws._psave_asleep = False
-                        ws._dirty = True
-                elif _arg:
-                    try:
-                        _ps_ms = max(0, int(_arg)) * 1000
-                        ws._psave_ms = _ps_ms
-                        _idle_at = now
-                    except ValueError:
-                        print("REMOTE power ? %s" % line)
-                print("REMOTE power timeout=%ds asleep=%s idle=%ds"
-                      % (_ps_ms // 1000, _asleep,
-                         _ticks_diff(now, _idle_at) // 1000))
-            if parts and parts[0] == "open":
-                # `open settings|picker`: pop an app window deterministically (no
-                # tile-hunting) so a drag can be measured against a known window.
-                # `open appearance` reports open_app's claim result (a False is
-                # the silent no-op the on-glass harness needs to SEE); `open
-                # wifi` deep-links Settings -> the wifi panel.
-                what = parts[1] if len(parts) > 1 else ""
-                if what == "appearance":
-                    ok = ws.open_app(ws.appearance_app)
-                    print("REMOTE open appearance -> %s" % ok)
-                elif what == "wifi":
-                    ws.open_settings()
-                    ws.settings_layer.open_wifi()
-                    print("REMOTE open wifi")
-                else:
-                    fn = {"settings": getattr(ws, "open_settings", None),
-                          "picker": getattr(ws, "open_picker", None)}.get(what)
-                    if fn is not None:
-                        fn()
-                        print("REMOTE open %s" % what)
-                    else:
-                        print("REMOTE open ? %s" % line)
-            if parts and parts[0] == "py" and len(parts) > 1:
-                # `py <code>`: eval/exec one line against the LIVE console (ws /
-                # wm / pointer in scope) between frames -- the harness's probe
-                # hook (attach counters, read gesture state, monkeypatch a
-                # surface under test). Dev-board serial only, like every
-                # command here.
-                _code = line.split(None, 1)[1]
-                # `boot` and `pump` are in scope because the shared spine (#161
-                # Phase 4/5) is the half of this loop with no other on-glass
-                # witness: `pump.debt` is the #77 pacing debt this board gained
-                # with the extraction, and `boot.lit`/`boot.done` are the splash
-                # hand-over. A lever nobody can read from the harness is how the
-                # debt came to exist on one board only.
-                _env = {"ws": ws, "wm": ws.wm, "pointer": pointer,
-                        "comp": comp, "game": game,
-                        "boot": boot, "pump": pump}
-                try:
-                    try:
-                        print("PY %r" % (eval(_code, _env),))
-                    except SyntaxError:
-                        exec(_code, _env)
-                        print("PY ok")
-                except Exception as exc:  # noqa: BLE001
-                    print("PY ERR %s: %s" % (type(exc).__name__, exc))
-            if parts and parts[0] == "web":
-                # `web [port]`: serve the wasm console FROM this board (plan
-                # 3.4 pull half, moy_webhost). Prints the url to open. A dev
-                # command rather than a Settings row for now, because the
-                # endpoint is unsecured -- see moy_webhost's module docstring.
-                try:
-                    if ws.webhost is None:
-                        print("WEB no service")
-                    else:
-                        if not ws.webhost.serving:
-                            ws.toggle_webhost()
-                        print("WEB %s %s" % (ws.webhost.url(),
-                                             ws.webhost.error or ""))
-                except Exception as exc:  # noqa: BLE001
-                    print("WEB ERR %s: %s" % (type(exc).__name__, exc))
-            if parts and parts[0] == "state":
-                # `state`: one-line JSON snapshot (world/windows/settings scroll/
-                # wifi/cart claims) -- the harness's assertion source.
-                try:
-                    import json as _json
-                    print("STATE %s" % _json.dumps(_remote_state(ws)))
-                except Exception as exc:  # noqa: BLE001
-                    print("STATE {\"err\": \"%s\"}" % exc)
-            if parts and parts[0] == "swipe" and len(parts) >= 5:
-                # `swipe x0 y0 x1 y1 [frames]`: a synthetic touch gesture fed
-                # through the SAME pointer path as the glass (press edge at the
-                # start point, interpolated held move, release at the end), so
-                # the harness can exercise scroll/drag/fling on any surface.
-                try:
-                    _swipe_script = {"i": 0,
-                                     "x0": int(parts[1]), "y0": int(parts[2]),
-                                     "x1": int(parts[3]), "y1": int(parts[4]),
-                                     "n": max(2, int(parts[5]))
-                                     if len(parts) > 5 else 20}
-                    print("REMOTE swipe %d,%d -> %d,%d frames=%d"
-                          % (_swipe_script["x0"], _swipe_script["y0"],
-                             _swipe_script["x1"], _swipe_script["y1"],
-                             _swipe_script["n"]))
-                except ValueError:
-                    _swipe_script = None
-                    print("REMOTE swipe ? %s" % line)
-            if parts and parts[0] == "drag":
-                # `drag [frames]`: grab the TOP window's title strip and oscillate
-                # it for `frames` frames (default 120), so the PERF sampler reports
-                # DRAG-time fps -- the backdrop-cache lever's target. No window open
-                # -> a no-op note.
-                order = getattr(ws.wm, "_order", None) or []
-                if order:
-                    win = ws.wm._wins[order[-1]]
-                    n = 120
-                    step = 6
-                    if len(parts) >= 2:
-                        try:
-                            n = max(8, int(parts[1]))
-                        except ValueError:
-                            pass
-                    if len(parts) >= 3:
-                        try:
-                            step = max(1, int(parts[2]))  # px/frame amplitude scale
-                        except ValueError:
-                            pass
-                    _drag_script = {"i": 0, "n": n, "step": step,
-                                    "cx": win.x + 30,
-                                    "cy": win.y + max(6, win.title_h // 2)}
-                    print("REMOTE drag win=%s cx=%d cy=%d frames=%d step=%d"
-                          % (order[-1], _drag_script["cx"], _drag_script["cy"],
-                             n, step))
-                else:
-                    print("REMOTE drag: no window open")
-        if _drag_script is not None:
-            s = _drag_script
-            i = s["i"]
-            if i >= s["n"]:
-                pointer.down = False
-                _drag_script = None
-                print("REMOTE drag done")
-            else:
-                # Triangle wave around the grab point: continuous movement so the
-                # drag stays engaged and every frame is dirty (the drag path).
-                t = i % 40
-                tri = t if t < 20 else 40 - t          # 0..20..0
-                off = 0 if i == 0 else (tri - 10) * s["step"]  # amplitude = step*10
-                pointer.place(s["cx"] + off, s["cy"])
-                pointer.down = True
-                pointer.fresh = True    # a scripted sample every frame, by
-                                        # construction -- and it must outrank
-                                        # whatever touch.poll left behind
-                click = (i == 0)                        # frame 0 arms the drag
-                s["i"] = i + 1
-        if _swipe_script is not None:
-            s = _swipe_script
-            i = s["i"]
-            n = s["n"]
-            if i > n:
-                _swipe_script = None
-                print("REMOTE swipe done")
-            else:
-                # i==0 press edge at the start, i in 1..n-1 held interpolation,
-                # i==n the release sample at the end point (down=False so the
-                # gesture machines see a real release, fling velocity intact).
-                f = min(i, n - 1) / (n - 1)
-                x = s["x0"] + int((s["x1"] - s["x0"]) * f)
-                y = s["y0"] + int((s["y1"] - s["y0"]) * f)
-                pointer.place(x, y)
-                pointer.down = i < n
-                pointer.fresh = True    # scripted: every frame is a real sample
-                click = (i == 0)
-                s["i"] = i + 1
         # -- idle screen blank (#58) -------------------------------------------
-        # Placed after EVERY input source has been read (touch, BLE keys, the
-        # serial dev channel) and before the pointer is handed to the console,
-        # which is what lets the waking touch be swallowed below.
-        _active = (tp is not None or bool(inp._held) or inp.last_key
-                   or _serial_cmd)
-        if _ps_force:
-            # `power off` arrives ON the serial channel, which is itself
-            # activity -- so an explicit blank has to outrank _active or it
-            # would wake again in the very same iteration.
-            _ps_force = False
-            _asleep = True
-            _idle_at = now
-            set_backlight(False)
-            _backlight_on = False
-            ws._psave_asleep = True
-        elif _active:
-            _idle_at = now
-            if _asleep:
-                _asleep = False
-                set_backlight(True)
-                _backlight_on = True
-                ws._psave_asleep = False
-                # The panel may hold a frame from before the blank, and the
-                # partial-paint machinery would happily leave it there.
-                ws._dirty = True
-                # The touch that WAKES the screen must not also press whatever
-                # it landed on -- otherwise a wake tap launches a cart.
-                pointer.down = False
-                click = False
-        elif (_ps_ms and not _asleep
-                and _ticks_diff(now, _idle_at) >= _ps_ms):
-            _asleep = True
-            set_backlight(False)
-            _backlight_on = False
-            ws._psave_asleep = True
-            print("Moybyte P4 power save: screen off (idle %ds)" % (_ps_ms // 1000))
+        # IdleBlank (device_boot, shared with the T-Deck -- this board shipped
+        # the behaviour first and ran its own inline copy until 2026-08-17).
+        # Ticked after EVERY input source has been read and before the pointer
+        # is handed to the console, which is what lets the waking touch be
+        # swallowed instead of pressing whatever it landed on.
+        click = idle.tick(now, (tp is not None) or bool(inp._held)
+                          or bool(inp.last_key) or _serial_ran,
+                          ws, pointer, click)
         pointer.click = click
         pointer.tick(now)
         # Present the PREVIOUS quiet game frame now (its async composite has been
@@ -1166,11 +785,12 @@ def run_desktop(fps_cap=60):
         except Exception as exc:   # noqa: BLE001 -- one bad frame must not brick the boot
             print("Moybyte P4 frame error:", exc)
             gc.collect()
-        # First composed frame lights the panel (#45). `not _asleep` is load
-        # bearing: without it this fires the frame after the idle blank -- the
-        # blank clears _backlight_on and frames keep being drawn -- and the
-        # screen comes straight back on.
-        if not _backlight_on and not _asleep \
+        # First composed frame lights the panel (#45). `not idle.asleep` is
+        # load bearing: without it this fires the frame after the idle blank --
+        # frames keep being drawn while dark -- and the screen comes straight
+        # back on. (IdleBlank owns the light from the wake side; this latch is
+        # only the BOOT hand-over.)
+        if not _backlight_on and not idle.asleep \
                 and getattr(ws, "_frames_drawn", 0) > 0:
             set_backlight(True)
             _backlight_on = True
@@ -1180,7 +800,7 @@ def run_desktop(fps_cap=60):
         # -- and the OTA rollback confirm fires now that frames are really going
         # out. Both are self-disarming; both run AFTER the backlight gate above,
         # which stays here because on this board the idle screen blank owns the
-        # panel light too (hence its `not _asleep` guard).
+        # panel light too (hence its `not idle.asleep` guard).
         pump.tail(ws)
         _wh = ws.webhost
         if _wh is not None and _wh.serving:

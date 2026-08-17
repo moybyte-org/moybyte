@@ -230,6 +230,11 @@ NOT_A_SERVICE = {
                              "console's achievement toasts (gamification for "
                              "the kid console, not for a cart player). An "
                              "override of shared behaviour, not a backend",
+    "_psave_ms": "per-board state, not a capability: the idle-blank timeout "
+                 "mirrored onto ws so the dev channel's `state` reports the "
+                 "LIVE value (dev_channel._remote_state's psave field). Both "
+                 "boards set it beside their IdleBlank; the host and web have "
+                 "no panel to blank",
 }
 
 
