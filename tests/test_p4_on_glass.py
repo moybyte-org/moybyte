@@ -527,18 +527,27 @@ def test_the_console_serves_the_image_when_storage_has_none(board):
 def test_a_cart_runs_and_exits(board):
     """The 2026-08-17 blind-spot closer, same as the T-Deck suite's: a staged
     regression once broke every cart start while this suite stayed green,
-    because nothing here ran one. Launch, assert ticking, exit via the
-    cart-quit flag; the desk survives the round trip."""
+    because nothing here ran one. Launch, assert it started clean, exit.
+
+    tools/p4_perf.py's idiom, exactly: ws.exit() first to clear whatever the
+    tour above left open (Settings + the picker windows -- a `run` from that
+    state opens the cart under the picker's project arrangement, where the
+    first draft's cart-quit exit did not pop), then run, then ws.exit() out.
+    The T-Deck suite's twin keeps the cart-quit path, so the kid-facing quit()
+    flag stays pinned on one board while this one pins the launch itself."""
+    for _ in range(3):                       # close settings/picker leftovers
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
     line = board.cmd("run star", wait_for="REMOTE run")
     assert line is not None and "no cart match" not in line, line
-    board.drain(2.0)
+    board.drain(2.5)
     st = board.state()
     assert st.get("cart"), "the cart never started: %r" % st
     assert not st.get("cart_error"), st["cart_error"]
     f0 = st["frames"]
     board.drain(1.0)
     assert board.state()["frames"] > f0, "the cart is not ticking"
-    board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+    board.cmd("py ws.exit()", wait_for="PY")
     board.drain(1.5)
     st = board.state()
-    assert not st.get("cart"), "quit did not pop to the caller: %r" % st
+    assert not st.get("cart"), "exit did not end the run: %r" % st

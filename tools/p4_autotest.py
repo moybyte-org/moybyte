@@ -58,6 +58,37 @@ class P4Board:
 
     # -- plumbing ---------------------------------------------------------
 
+    # UART boards have NO FLOW CONTROL: the P4's CH343 feeds a ~256-byte
+    # stdin ring that the console drains once per ~20ms frame, so a long line
+    # written in one burst (115200 baud = ~11.5 bytes/ms) overflows the ring
+    # mid-line and arrives corrupted -- measured 2026-08-17: 768-byte `py`
+    # lines failed 3/3 in one write and passed 3/3 sliced at 128B/20ms. The
+    # old device readline masked this by blocking mid-frame and draining
+    # continuously; the shared dev channel drains per frame, so the WRITER
+    # must respect the ring. Short lines (a burst under the ring size) go out
+    # in one write. USB boards (T-Deck) have host-side backpressure and never
+    # need this, but the pacing costs them nothing on short commands.
+    # 96B/40ms, not the 128B/20ms that first measured clean: under PERF DIAG
+    # the loop drops toward ~25fps (40ms frames), and two 128B slices landing
+    # inside one frame gap total 256B -- exactly the ring, zero margin. The
+    # suite's longest line (a 512-char junk-signature probe) failed right
+    # there. 96B per 40ms keeps the worst in-window arrival under half a ring
+    # at any loop rate the console actually runs.
+    PACE_SLICE = 96            # bytes per write burst (ring/2 - headroom)
+    PACE_GAP_S = 0.04          # a diag-slowed frame period between bursts
+
+    def _write_line(self, text):
+        data = text.encode() + b"\n"
+        if len(data) <= self.PACE_SLICE:
+            self.ser.write(data)
+            self.ser.flush()
+            return
+        for i in range(0, len(data), self.PACE_SLICE):
+            self.ser.write(data[i:i + self.PACE_SLICE])
+            self.ser.flush()
+            time.sleep(self.PACE_GAP_S)
+
+
     def _pump(self):
         chunk = self.ser.read(4096)
         if not chunk:
@@ -102,15 +133,13 @@ class P4Board:
         assignment or an exec of an already-uploaded buffer; the one place that
         was not -- pyexec's `ws._up += part` -- is now an indexed store for
         exactly this reason. Pass retry=False for anything that accumulates."""
-        self.ser.write(text.encode() + b"\n")
-        self.ser.flush()
+        self._write_line(text)
         if wait_for is None:
             wait_for = "REMOTE"
         line = self.wait_line(wait_for, timeout)
         if line is None and retry:
             self.log("no reply; resending: " + text[:60])
-            self.ser.write(text.encode() + b"\n")
-            self.ser.flush()
+            self._write_line(text)
             line = self.wait_line(wait_for, timeout)
         return line
 
@@ -131,8 +160,7 @@ class P4Board:
 
     def state(self, timeout=8.0):
         """The `state` snapshot as a dict (see moy_runtime._remote_state)."""
-        self.ser.write(b"state\n")
-        self.ser.flush()
+        self._write_line("state")
         line = self.wait_line("STATE ", timeout)
         if line is None:
             raise RuntimeError("no STATE reply")
