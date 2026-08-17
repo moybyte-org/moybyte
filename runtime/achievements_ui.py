@@ -28,21 +28,12 @@ tap-goal constants and every method body are kept byte-for-byte identical to the
 pre-extraction versions (each aliases NAMES / ACHIEVEMENTS from the injected
 values), so the eggs + drawing are unchanged (host == device).
 """
-import time
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 class AchievementsUI:

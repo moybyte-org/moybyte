@@ -19,7 +19,6 @@ code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
 """
 
-import time
 from array import array
 
 try:
@@ -67,29 +66,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_us():
-    """Microsecond clock (#172/#184). The per-layer draw + pointer splits divide a
-    single-digit-ms cost across a handful of layers, where _ticks_ms's 1ms floor
-    would quantize most of it to zero. Same MicroPython-or-host shape as
-    _ticks_ms; _ticks_diff works on either (ticks_us wraps the same way)."""
-    try:
-        return time.ticks_us()
-    except AttributeError:
-        return int(time.perf_counter() * 1000000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 
 def _err_text(exc):

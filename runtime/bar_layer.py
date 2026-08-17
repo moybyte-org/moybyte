@@ -75,18 +75,10 @@ _DOCK_LABEL = {"home": "HOME", "code": "CODE", "paint": "DRAW",
                "map": "MAP", "run": "RUN", "settings": "SET"}
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 class BarLayer:

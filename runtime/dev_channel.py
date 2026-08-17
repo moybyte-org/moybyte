@@ -29,16 +29,15 @@ so rather than raising -- a board without a backlight hook should decline `bl`,
 not traceback into the frame loop.
 """
 
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms
 try:                       # device (device_util is staged from device/)
-    from device_util import _ticks_ms, _diag_log
-except ImportError:        # host / test -- no device tier on the path, and the
-    import time            # fallback stays self-contained so importing this
-                           # module never drags the console in behind it
+    from device_util import _diag_log
+except ImportError:        # host / test -- no diag ring; print is it
 
-    def _ticks_ms():
-        return int(time.monotonic() * 1000)
-
-    def _diag_log(tag, msg, diag):  # the host has no diag ring; print is it
+    def _diag_log(tag, msg, diag):
         print("Moybyte", tag, msg)
 
 # A partial line longer than this is noise; drop it. NOT sized for a human:

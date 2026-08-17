@@ -30,21 +30,12 @@ reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds)
 foundational-helper duplication BlockEditorUI's layout constants use), so the
 method bodies stay byte-for-byte identical to the pre-extraction versions.
 """
-import time
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 class UpdateUI:

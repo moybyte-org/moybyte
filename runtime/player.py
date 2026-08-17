@@ -49,7 +49,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import _CODE_LH
 
-import time
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
 # (MicroPython on device / unix; never host CPython), every top-level def in a
@@ -116,27 +115,10 @@ SUPPORTED_EXTENSIONS = (
 )
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_us():
-    """Microseconds. The DRAWBRK/CHROMEBRK phase brackets run on THIS clock, not
-    ticks_ms -- see the note in Player.tick's perf block."""
-    try:
-        return time.ticks_us()
-    except AttributeError:
-        return int(time.time() * 1000000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 
 def _err_text(exc):

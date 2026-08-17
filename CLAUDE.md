@@ -637,8 +637,9 @@ to whoever called it.
   long after it should have been, and while it was there it silently ran every
   layer cart.
   What moycore registers ON TOP of libmoy's table is a **deny list, not an allow
-  list** (`moycore_glue.LIBMOY_VERBS` + `NOT_REGISTRABLE`, twinned in
-  `runtime/lua_host.py`): what is stable and enumerable is what libmoy OWNS, and
+  list** (`LIBMOY_VERBS` + `NOT_REGISTRABLE` — ONE definition in
+  `runtime/lua_ext.py`, imported by both `moycore_glue` and `lua_host`; they
+  were twinned copies once, and are not now): what is stable and enumerable is what libmoy OWNS, and
   an allow list silently drops any moybyte verb nobody remembered to add — which
   it did. Object-valued verbs (`make_layer`/`draw_layer`/`image`) are never
   registry entries at all: a trampoline marshals scalars and a Layer comes back
