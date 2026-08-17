@@ -228,6 +228,28 @@ which is what makes pixel parity a fact rather than a hope."""
 
 # ---------------------------------------------------------------------------
 
+[flash]
+# Read by tools/board_flash.py (Phase A of the board-port kit, #202): the
+# facts a cable flash needs, beside the board they describe. The merged image
+# flashes at the S3's bootloader offset 0x0; otadata (0x1d000 on THIS table --
+# the P4's sits at 0xd000, and confusing the two is a one-digit slip someone
+# has already made) is erased first so the bootloader boots ota_0, the slot
+# the flash just wrote, instead of a stale ota_1 left by a prior OTA.
+# `before = "usb_reset"`: measured 2026-08-17 -- default_reset write-times-out
+# against a wedged USB-Serial/JTAG node while usb_reset connects, in every
+# state tried.
+image          = "dist/tdeck_mainline/moybyte_tdeck.bin"
+offset         = "0x0"
+baud           = 460800
+otadata_offset = "0x1d000"
+otadata_size   = "0x2000"
+before         = "usb_reset"
+
+[monitor]
+baud = 115200
+
+# ---------------------------------------------------------------------------
+
 [native]
 dest = "native/.staged"
 

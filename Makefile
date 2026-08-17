@@ -338,10 +338,13 @@ firmware-flash-lilygo-micropython-no-reset:
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
+# The canonical cable flash: facts (chip/offset/baud/otadata/reset strategy)
+# come from the board's board.toml [flash] section via tools/board_flash.py
+# (#202 Phase A) -- the Makefile no longer restates any of them.
 firmware-flash-tdeck-mainline:
 	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/lilygo_t_deck_plus_mainline --port $(PORT)
 
 firmware-flash-lilygo-micropython-full: firmware-flash-tdeck-mainline	## alias (fork-era name)
 
@@ -357,16 +360,16 @@ firmware-run-lilygo-micropython:
 
 firmware-monitor-tdeck-mainline:
 	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/lilygo_t_deck_plus_mainline --port $(PORT)
 
 firmware-monitor-lilygo-micropython: firmware-monitor-tdeck-mainline	## alias (fork-era name)
 
 # ESP32-P4 (Waveshare 7B, #58): mainline-MicroPython build via the board dir's
 # build.sh -> dist/p4/moybyte_p4.bin, flashed at 0x2000 (the P4's app offset).
 # Serial = CH343 (no native-takeover starvation, REPL stays alive), so plain
-# esptool auto-reset works; esptool comes from the project venv.
-P4_BIN ?= dist/p4/moybyte_p4.bin
+# esptool auto-reset works; esptool comes from the project venv. The image
+# path and every other flash fact live in the board's board.toml [flash].
 
 firmware-build-p4:
 	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
@@ -377,14 +380,14 @@ firmware-build-p4:
 # image lands in the slot otadata is not pointing at. Clearing otadata makes the
 # bootloader fall back to ota_0, which is what was just written. The T-Deck has
 # always done this (#53); the P4 needed it the moment it could OTA at all.
-# Override P4_OTADATA_OFFSET= (empty) to skip, e.g. for a non-OTA image.
-P4_OTADATA_OFFSET ?= 0xd000
-P4_OTADATA_SIZE ?= 0x2000
+# The flash facts (chip/offset/baud/otadata region) live in the board's
+# board.toml [flash] section, read by tools/board_flash.py (#202 Phase A) --
+# including the otadata-first erase whose rationale the paragraph above
+# records. The 0xd000-vs-0x1d000 per-board difference lives THERE now.
 firmware-flash-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_ESPTOOL)
-	@[ -z "$(P4_OTADATA_OFFSET)" ] || $(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 --after no_reset erase_region $(P4_OTADATA_OFFSET) $(P4_OTADATA_SIZE)
-	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
+	$(PYTHON) tools/board_flash.py flash firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
 	@$(MAKE) --no-print-directory p4-web-push PORT=$(PORT) WEB_PUSH_OPTIONAL=1
 
 # The web console the BOARD serves (`/moy/web`, reached over WiFi) RIDES THE
@@ -428,7 +431,7 @@ p4-web-stale:
 firmware-monitor-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
-	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
+	$(PYTHON) tools/board_flash.py monitor firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
 
 # T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
 # CLICK is GPIO0: hold the trackball in while powering the board on, then

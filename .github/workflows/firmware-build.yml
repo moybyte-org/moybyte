@@ -50,7 +50,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [tdeck, p4]
+        # The per-board facts every step below parameterizes on (#202 Phase A):
+        # adding a board = adding a row (dir + make target); no later step
+        # names a board. `patches/**` (repo root) rides every key because both
+        # builds apply shared patches under one-shot marker guards.
+        include:
+          - board: tdeck
+            dir: firmware/lilygo_t_deck_plus_mainline
+            make_target: firmware-build-tdeck-mainline
+          - board: p4
+            dir: firmware/esp32_p4_wifi6_touch_lcd_7b
+            make_target: firmware-build-p4
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
     # branch build does both boards; a dispatch honours the choice.
     env:
@@ -172,27 +182,21 @@ jobs:
       # same reason there is deliberately NO restore-keys here: a partial-key
       # fallback could restore a stale-patched tree that the marker then skips. Exact
       # key only -- any build.sh/patch change forces one clean (uncached) rebuild.
-      - name: Cache T-Deck build tree (esp-idf + micropython clones)
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
+      # ONE cache step for any board (the paths/keys come from the matrix row).
+      # The key hashes everything that determines the cached tree's patched
+      # state: the board's build.sh + its own patches dir (empty on boards
+      # without one), the SHARED patches/, and the shared build spine + stager
+      # (tools/esp32_build_lib.sh / board_config.py) that build.sh now runs
+      # through -- a lib edit must bust the cache exactly as a build.sh edit
+      # does, or a restored tree silently keeps the old patch under its marker.
+      - name: Cache board build tree (esp-idf + micropython clones)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: |
-            firmware/lilygo_t_deck_plus_mainline/.build
-            !firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/esp32/build-*
-          key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_mainline/build.sh', 'patches/**') }}
-
-      - name: Cache ESP32-P4 build tree (esp-idf + micropython clones)
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
-        uses: actions/cache@v4
-        with:
-          path: |
-            firmware/esp32_p4_wifi6_touch_lcd_7b/.build
-            !firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython/ports/esp32/build-*
-          # patches/** (repo root) is in this key too: the P4 build applies the
-          # shared esp32_native_code_free.patch under the same one-shot marker
-          # guard, so a change to it must bust this cache exactly as a board
-          # patch does -- a restored tree carries the OLD patch and skips it.
-          key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**', 'patches/**') }}
+            ${{ matrix.dir }}/.build
+            !${{ matrix.dir }}/.build/micropython/ports/esp32/build-*
+          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py') }}
 
       # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
       # emsdk + a micropython checkout, both pinned by web_runner/build.sh).
@@ -219,29 +223,23 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: firmware/web_runner/build.sh
 
-      - name: Build T-Deck (S3) firmware
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
+      # ONE build step for any board. The cold-cache double build is belt and
+      # braces: the shared spine clones esp-idf BEFORE the patch ladder runs,
+      # so a single pass should already be fully patched -- but a second pass
+      # on a cache miss is nearly free under ccache and guarantees it, on
+      # every board uniformly.
+      - name: Build ${{ matrix.board }} firmware
+        if: steps.gate.outputs.run == 'true'
         run: |
-          # A from-scratch .build fetches esp-idf DURING the first pass, so the
-          # port's esp_lcd/IDF patches only land on the second run -> build twice
-          # (ccache makes the second pass fast) so the shipped image is patched.
-          # But when the `.build` cache above restored esp-idf, the patch lands on
-          # the FIRST pass, so the second full build is unnecessary -- skip it.
-          # NB: check esp-idf presence BEFORE the first build (the first build
-          # fetches it, so it always exists afterwards).
-          IDF=firmware/lilygo_t_deck_plus_mainline/.build/esp-idf/export.sh
+          IDF=${{ matrix.dir }}/.build/esp-idf/export.sh
           if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
-          make firmware-build-lilygo-micropython
+          make ${{ matrix.make_target }}
           if [ "$WARM" = "0" ]; then
-            echo "== cold .build: esp-idf was fetched mid-build, running a second (patched) pass"
-            make firmware-build-lilygo-micropython
+            echo "== cold .build: esp-idf was fetched this pass -- second (guaranteed-patched) pass"
+            make ${{ matrix.make_target }}
           else
-            echo "== warm .build cache: esp-idf present up front, single pass is patched -- skipping second build"
+            echo "== warm .build cache: single pass is patched"
           fi
-
-      - name: Build ESP32-P4 firmware
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
-        run: make firmware-build-p4
 
       - name: Collect images
         if: steps.gate.outputs.run == 'true'

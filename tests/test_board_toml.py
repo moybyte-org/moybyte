@@ -255,3 +255,51 @@ def test_the_p4_denies_exactly_its_missing_hardware():
     changed -- update board.toml first, this pin second."""
     assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_sd"]
     assert board_config.native_denials(TDECK) == {}
+
+
+# -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_flash_facts_are_declared_and_shaped(board):
+    """Every board declares its cable-flash facts; tools/board_flash.py reads
+    them and the Makefile targets are two lines. The shapes matter: offsets are
+    hex strings an esptool command takes verbatim, the image path is
+    repo-relative, and the otadata pair exists because skipping that erase on
+    an OTA'd board makes a flash look like it did nothing."""
+    cfg = board_config.load(BOARDS[board])
+    fl = cfg.get("flash")
+    assert fl, "%s has no [flash] section" % board
+    for key in ("image", "offset", "baud", "otadata_offset", "otadata_size"):
+        assert key in fl, "%s [flash] lacks %s" % (board, key)
+    int(str(fl["offset"]), 16)
+    int(str(fl["otadata_offset"]), 16)
+    int(str(fl["otadata_size"]), 16)
+    assert not str(fl["image"]).startswith("/")
+    assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
+
+
+def test_the_two_boards_otadata_offsets_differ_as_their_tables_do():
+    """The per-board fact this section exists for: the T-Deck's otadata sits at
+    0x1d000 and the P4's at 0xd000 -- one transposed digit apart, and erasing
+    the wrong one on the other board has already happened once by hand
+    (2026-08-17, the day this became data)."""
+    t = board_config.load(TDECK)["flash"]["otadata_offset"]
+    p = board_config.load(P4)["flash"]["otadata_offset"]
+    assert (t, p) == ("0x1d000", "0xd000")
+
+
+def test_makefile_flashes_via_the_declaration():
+    """Both halves, as ever: the canonical flash/monitor targets must CALL
+    tools/board_flash.py, and must no longer restate any flash fact (a chip, a
+    bare offset, a baud) beside the declaration."""
+    mk = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert mk.count("tools/board_flash.py flash") >= 2
+    assert mk.count("tools/board_flash.py monitor") >= 2
+    # The canonical targets carry no inline esptool write_flash of their own --
+    # the legacy lilygo variants (parts flash / full-erase / no-reset) keep
+    # theirs and are the deliberate exceptions.
+    for target in ("firmware-flash-tdeck-mainline:", "firmware-flash-p4:"):
+        body = mk.split(target, 1)[1].split("\n\n", 1)[0]
+        assert "write_flash" not in body, "%s restates flash facts" % target
+        assert "board_flash.py" in body

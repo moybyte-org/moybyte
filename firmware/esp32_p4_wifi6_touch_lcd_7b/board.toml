@@ -182,6 +182,24 @@ rasterizes from the same bytes the host draws from."""
 
 # ---------------------------------------------------------------------------
 
+[flash]
+# Read by tools/board_flash.py (Phase A of the board-port kit, #202). The
+# merged image flashes at 0x2000 (the P4's bootloader offset); otadata is at
+# 0xd000 on THIS table (NOT the T-Deck's 0x1d000) and is erased first so a
+# board that has taken an OTA boots the slot the cable flash just wrote.
+# No `before`: the CH343 is an external USB-UART and esptool's default reset
+# is reliable on it.
+image          = "dist/p4/moybyte_p4.bin"
+offset         = "0x2000"
+baud           = 921600
+otadata_offset = "0xd000"
+otadata_size   = "0x2000"
+
+[monitor]
+baud = 115200
+
+# ---------------------------------------------------------------------------
+
 [native]
 dest = "native/.staged"
 
