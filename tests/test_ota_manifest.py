@@ -91,7 +91,7 @@ def test_publish_mode_stages_channel_dir(tmp_path):
 
 def _load_moy_ota():
     import importlib.util
-    p = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    p = ROOT / "device" / "moy_ota.py"
     spec = importlib.util.spec_from_file_location("moy_ota", p)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)

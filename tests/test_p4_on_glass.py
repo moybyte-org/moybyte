@@ -268,7 +268,7 @@ def _extract_verifier():
     import ast
     import textwrap
 
-    path = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    path = ROOT / "device" / "moy_ota.py"
     src = path.read_text(encoding="utf-8")
     tree = ast.parse(src)
 

@@ -40,7 +40,7 @@ import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 # What `make unix-micropython` builds: mainline MicroPython's unix port with
 # every native module that ships a Makefile fragment (moy_gfx, moy_lua, moycore,

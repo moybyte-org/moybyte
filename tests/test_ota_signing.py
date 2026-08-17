@@ -75,7 +75,7 @@ def sign_with_test_key(manifest, n=TEST_N, d=TEST_D):
 
 
 def _load_moy_ota():
-    p = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    p = ROOT / "device" / "moy_ota.py"
     spec = importlib.util.spec_from_file_location("moy_ota_signing", p)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)

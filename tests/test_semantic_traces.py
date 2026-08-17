@@ -63,7 +63,7 @@ from unix_mp import require_unix_mp
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 DT = 0.03125          # 1/32: binary-exact, so LUA_32BITS floats carry it whole
 FRAMES = 24

@@ -214,7 +214,7 @@ def main(argv=None):
         print("2. Give it to CI:\n")
         print("     gh secret set %s < %s\n" % (ENV_KEY, args.out))
         print("3. Bake the public half into the firmware -- replace\n"
-              "   OTA_PUBLIC_KEYS in firmware/lilygo_t_deck_plus_micropython/"
+              "   OTA_PUBLIC_KEYS in firmware/lilygo_t_deck_plus_mainline/"
               "modules/moy_ota.py with:\n")
         print(key_constant(n, e))
         print("\n   Boards already in the field trust the key in the image they\n"

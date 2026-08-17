@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
 

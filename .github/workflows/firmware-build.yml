@@ -155,9 +155,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            firmware/lilygo_t_deck_plus_micropython/.build
-            !firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/micropython/ports/esp32/build-*
-          key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_micropython/build.sh', 'firmware/lilygo_t_deck_plus_micropython/patches/**') }}
+            firmware/lilygo_t_deck_plus_mainline/.build
+            !firmware/lilygo_t_deck_plus_mainline/.build/lvgl_micropython/lib/micropython/ports/esp32/build-*
+          key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_mainline/build.sh', 'patches/**') }}
 
       - name: Cache ESP32-P4 build tree (esp-idf + micropython clones)
         if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
@@ -203,7 +203,7 @@ jobs:
           # the FIRST pass, so the second full build is unnecessary -- skip it.
           # NB: check esp-idf presence BEFORE the first build (the first build
           # fetches it, so it always exists afterwards).
-          IDF=firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/esp-idf/export.sh
+          IDF=firmware/lilygo_t_deck_plus_mainline/.build/esp-idf/export.sh
           if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
           make firmware-build-lilygo-micropython
           if [ "$WARM" = "0" ]; then
@@ -237,7 +237,7 @@ jobs:
           # that board and fell back to the committed FIRMWARE_VERSION, so every
           # P4 on beta was offered the same install forever, which is the exact
           # failure the paragraph above exists to prevent.
-          cp firmware/lilygo_t_deck_plus_micropython/dist/current/ota_build.json out/ 2>/dev/null || true
+          cp firmware/lilygo_t_deck_plus_mainline/dist/current/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that

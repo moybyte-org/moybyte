@@ -73,7 +73,7 @@ from runtime.moy_image import Image  # noqa: E402
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
-DEV = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+DEV = ROOT / "device"
 
 
 def rgb565(rgb):

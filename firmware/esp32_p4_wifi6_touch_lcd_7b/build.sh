@@ -18,7 +18,9 @@ BOARD="MOYBYTE_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 PATCH_DIR="${SCRIPT_DIR}/patches"
 DIST_DIR="${REPO_ROOT}/dist/p4"
-TDECK_DIR="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython"
+# The device tier and the shared C modules are repo-root trees now
+# (`device/`, `native/`), not a sibling board's directory.
+DEVICE_DIR="${REPO_ROOT}/device"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 MANIFEST="${BUILD_DIR}/moybyte_p4_manifest.py"
 BUILD_PYTHON="${MOYBYTE_BUILD_PYTHON:-}"
@@ -53,7 +55,7 @@ fi
 # 2) ESP-IDF v5.5.1: reuse the T-Deck build's checkout when present (same
 #    version, saves a 500MB clone); otherwise clone our own into .build/.
 if [ -z "${IDF_DIR:-}" ]; then
-  TDECK_IDF="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/esp-idf"
+  TDECK_IDF="${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf"
   if [ -f "${TDECK_IDF}/export.sh" ]; then
     IDF_DIR="${TDECK_IDF}"
   else
@@ -117,14 +119,14 @@ fi
 #      (MICROPY_EMIT_RV32=1), so edit->PLAY sessions would hit the same cliff,
 #      just later (bigger internal pool). One shared patch file; the moy_gfx
 #      weak-symbol binding goes strong once this is applied.
-NATIVE_FREE_PATCH="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/patches/esp32_native_code_free.patch"
+NATIVE_FREE_PATCH="${REPO_ROOT}/patches/esp32_native_code_free.patch"
 if ! grep -q "moybyte_native_code_free" "${MPY_DIR}/ports/esp32/mpconfigport.h"; then
   echo "== applying native-code-free patch (#66)"
   patch -d "${MPY_DIR}" -p1 < "${NATIVE_FREE_PATCH}"
 fi
 
 # 2c) Stage the shared NATIVE modules from the T-Deck tree (single source of
-#     truth: firmware/lilygo_t_deck_plus_micropython/native/). moy_gfx is the
+#     truth: native/). moy_gfx is the
 #     VM-neutral RGB565 pixel kernel every draw verb runs through; moy_alloc is
 #     the off-gc-heap PSRAM allocator the layer/window buffers use. Both are
 #     plain-C usermods (the S3-specific pieces are include-guarded), so they
@@ -133,16 +135,16 @@ fi
 STAGED_NATIVE="${SCRIPT_DIR}/native/.staged"
 rm -rf "${STAGED_NATIVE}"
 mkdir -p "${STAGED_NATIVE}"
-cp -r "${TDECK_DIR}/native/moy_gfx" "${STAGED_NATIVE}/moy_gfx"
-cp -r "${TDECK_DIR}/native/moy_alloc" "${STAGED_NATIVE}/moy_alloc"
+cp -r "${REPO_ROOT}/native/moy_gfx" "${STAGED_NATIVE}/moy_gfx"
+cp -r "${REPO_ROOT}/native/moy_alloc" "${STAGED_NATIVE}/moy_alloc"
 # moy_lua (#67 Phase 1): the Lua cart VM + bridge -- plain C (vendored Lua 5.4
 # + py/ API), compiles unchanged on RISC-V; the PSRAM lua_Alloc uses the same
 # heap_caps the S3 does. The glue rides device_api.py (staged below).
-cp -r "${TDECK_DIR}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
+cp -r "${REPO_ROOT}/native/moy_lua" "${STAGED_NATIVE}/moy_lua"
 # moycore (stage 2): libmoy's own Lua binding + the C frame loop. Requires the
 # two above -- it compiles neither a raster nor a VM, and reaches theirs by
 # sibling include path.
-cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
+cp -r "${REPO_ROOT}/native/moycore" "${STAGED_NATIVE}/moycore"
 # moy_web: the BROWSER CONSOLE baked into the image. This board serves the wasm
 # console over WiFi (moy_webhost) and, until 2026-08-15, only from a copy
 # pushed to /moy/web -- which drifts silently and needs a human to remember.
@@ -152,8 +154,8 @@ cp -r "${TDECK_DIR}/native/moycore" "${STAGED_NATIVE}/moycore"
 # table + a loud warning; under CI (or MOYBYTE_REQUIRE_WEB_BUNDLE=1) it is a
 # hard failure, because a PUBLISHED image with no console is the whole bug.
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_web_blob.py" \
-  --out "${TDECK_DIR}/native/moy_web/moy_web_blob.gen.c"
-cp -r "${TDECK_DIR}/native/moy_web" "${STAGED_NATIVE}/moy_web"
+  --out "${REPO_ROOT}/native/moy_web/moy_web_blob.gen.c"
+cp -r "${REPO_ROOT}/native/moy_web" "${STAGED_NATIVE}/moy_web"
 
 # 2d) Stage the shared PYTHON modules (#58 console staging, #161 Phase 3).
 #     WHAT crosses and WHY is declared in board.toml, not here. Two sources,
@@ -190,7 +192,7 @@ if [ -n "${MOYBYTE_OTA_VERSION:-}" ]; then
 elif [ "${OTA_CHANNEL}" = "unstable" ]; then
   OTA_VERSION="$(date +%s)"                       # monotonic per-build beta version
 else
-  OTA_VERSION="$(grep -oE 'FIRMWARE_VERSION = [0-9]+' "${TDECK_DIR}/modules/moy_ota.py" | head -1 | grep -oE '[0-9]+')"
+  OTA_VERSION="$(grep -oE 'FIRMWARE_VERSION = [0-9]+' "${REPO_ROOT}/device/moy_ota.py" | head -1 | grep -oE '[0-9]+')"
   OTA_VERSION="${OTA_VERSION:-1}"
 fi
 if [ "${OTA_CHANNEL}" = "unstable" ]; then
@@ -198,7 +200,7 @@ if [ "${OTA_CHANNEL}" = "unstable" ]; then
 else
   # The human release name (FIRMWARE_NAME, set by `make release NAME=`), NOT the
   # ordering counter -- "0.6" is what the update screen and the manifest show.
-  OTA_NAME="$(grep -oE '^FIRMWARE_NAME = "[^"]*"' "${TDECK_DIR}/modules/moy_ota.py" | head -1 | cut -d'"' -f2)"
+  OTA_NAME="$(grep -oE '^FIRMWARE_NAME = "[^"]*"' "${REPO_ROOT}/device/moy_ota.py" | head -1 | cut -d'"' -f2)"
   OTA_LABEL="${OTA_NAME:-v${OTA_VERSION}}"
 fi
 cat > "${MODULES_DIR}/_ota_build.py" <<EOF

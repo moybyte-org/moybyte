@@ -37,8 +37,7 @@ from . import gfx_binding
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, ".."))
-_TDECK_MODULES = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                              "modules")
+_TDECK_MODULES = os.path.join(_ROOT, "device")
 
 RGB565 = 1          # framebuf.RGB565's value; device_canvas passes it through
 

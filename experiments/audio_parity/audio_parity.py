@@ -55,8 +55,7 @@ import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
-_LIBMOY = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                       "native", "moy_audio", "libmoy")
+_LIBMOY = os.path.join(_ROOT, "native", "moy_audio", "libmoy")
 
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -463,7 +462,7 @@ def run_parity(verbose=False, only=None):
         if mp_exe is None:
             if verbose:
                 print("no unix-port build with the usermod -- skipped. Build one:\n"
-                      "  ln -s $PWD/firmware/lilygo_t_deck_plus_micropython/native"
+                      "  ln -s $PWD/native"
                       "/moy_audio /tmp/usermods/moy_audio\n"
                       "  make -C <micropython>/ports/unix VARIANT=standard "
                       "BUILD=build-moyaudio USER_C_MODULES=/tmp/usermods\n")

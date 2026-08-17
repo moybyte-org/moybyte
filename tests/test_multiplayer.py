@@ -162,7 +162,7 @@ def test_make_api_host_and_device_players_net_surface_match():
     import importlib
     from runtime import host_app
 
-    modules_dir = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    modules_dir = ROOT / "device"
     sys.path.insert(0, str(modules_dir))
     try:
         for _stale in ("device_util", "device_canvas", "device_api"):

@@ -14,7 +14,7 @@ PORT="${1:-$(ls /dev/ttyACM* 2>/dev/null | head -1)}"
 [ -n "$PORT" ] || { echo "no serial port found; pass one, e.g. stage.sh /dev/ttyACM0" >&2; exit 1; }
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SHARED="$HERE/../lilygo_t_deck_plus_micropython/modules"
+SHARED="$HERE/../lilygo_t_deck_plus_mainline/modules"
 REPO="$(cd "$HERE/../.." && pwd)"
 MPREMOTE="${MPREMOTE:-$REPO/.venv/bin/python -m mpremote}"
 

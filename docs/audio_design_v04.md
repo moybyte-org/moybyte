@@ -18,7 +18,7 @@
 > **#97 (2026-08-06) — the SYNTH is no longer ours.** SPEC.md §8.3 pins
 > synthesis to PICO-8's measured output (zepto8/fake-08), and moy-spec's own C
 > implementation of it, **libmoy**, is now vendored into
-> `firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/` and
+> `native/moy_audio/libmoy/` and
 > **compiled into** the T-Deck and the web runner. `native/moy_audio` is a thin
 > binding over its public API: libmoy owns the bank, both sequencers and the
 > mixer, and MicroPython only forwards the six §8.2 verbs. §2.5 and §5 below

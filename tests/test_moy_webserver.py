@@ -22,7 +22,7 @@ import time
 
 # Import the device module straight off the firmware modules tree (CPython-ok).
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODULES = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", "modules")
+MODULES = os.path.join(ROOT, "device")
 if MODULES not in sys.path:
     sys.path.insert(0, MODULES)
 

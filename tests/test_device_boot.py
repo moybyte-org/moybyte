@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
 
 from runtime import device_boot  # noqa: E402
@@ -534,7 +534,7 @@ BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py"}
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
     src = BOARDS[board].read_text(encoding="utf-8")
-    assert "from device_boot import DeviceBoot, FramePump, OtaHealth" in src
+    assert "from device_boot import DeviceBoot, FramePump" in src
     # The staged name is flat (`device_boot`), never the host package path --
     # there is no `runtime` package on a board.
     assert "from runtime.device_boot" not in src

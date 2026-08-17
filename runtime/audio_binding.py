@@ -39,8 +39,7 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, ".."))
-_LIBMOY = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                       "native", "moy_audio", "libmoy")
+_LIBMOY = os.path.join(_ROOT, "native", "moy_audio", "libmoy")
 _SHIM = os.path.join(_HERE, "moyhost_audio.c")
 _CACHE = os.path.join(_ROOT, ".build", "host_audio")
 

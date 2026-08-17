@@ -26,9 +26,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
-MODULE = TDECK / "native" / "moy_web"
+MODULE = ROOT / "native" / "moy_web"
 
 sys.path.insert(0, str(TDECK / "modules"))
 sys.path.insert(0, str(ROOT / "tools"))
@@ -329,7 +329,7 @@ def test_the_native_module_hands_out_a_read_only_view():
 
 
 BOARDS = (
-    ("lilygo_t_deck_plus_micropython", TDECK),
+    ("lilygo_t_deck_plus_mainline", TDECK),
     ("esp32_p4_wifi6_touch_lcd_7b", P4),
 )
 

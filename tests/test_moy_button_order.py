@@ -37,7 +37,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-MOY_H = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "native"
+MOY_H = (ROOT / "native"
          / "moy_gfx" / "libmoy" / "moy.h")
 
 
@@ -64,7 +64,7 @@ def _device_input_module():
     it is the whole point -- the tier this test exists for is the one the suite
     otherwise only ever greps.
     """
-    path = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    path = (ROOT / "device"
             / "moybyte" / "input.py")
     spec = importlib.util.spec_from_file_location("_dev_input_for_test", path)
     mod = importlib.util.module_from_spec(spec)
@@ -135,7 +135,7 @@ def test_every_snapshot_filler_sources_the_order_from_lua_ext():
     written and diverge later, which is precisely what happened.
     """
     for rel in ("runtime/lua_host.py",
-                "firmware/lilygo_t_deck_plus_micropython/modules/"
+                "device/"
                 "moycore_glue.py"):
         src = (ROOT / rel).read_text(encoding="utf-8")
         assert "MOY_BUTTONS" in src, rel

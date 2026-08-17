@@ -27,7 +27,7 @@ import subprocess
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-NATIVE = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython", "native")
+NATIVE = os.path.join(ROOT, "native")
 MANIFEST = os.path.join(NATIVE, "libmoy_vendor.json")
 
 

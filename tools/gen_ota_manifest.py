@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FW_DIR = REPO_ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+FW_DIR = REPO_ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 DEFAULT_BIN = FW_DIR / "dist" / "moybyte_micropython_tdeck.bin"
 MOY_OTA = FW_DIR / "modules" / "moy_ota.py"
 OTA_BUILD_JSON = FW_DIR / "dist" / "current" / "ota_build.json"  # stamped by build.sh

@@ -8,7 +8,7 @@ options price out unplayable → the sunset has no completion path."*
   at the time; deleted 2026-08-15) interpreted by the REAL dist wasm MicroPython
   (`firmware/web_runner/dist/`).
 - **Option (b)**: the vendored libmoy C kernels
-  (`firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/`, indexed
+  (`native/moy_gfx/libmoy/`, indexed
   8-bit pixel build — the default) compiled to wasm with the web runner's own
   emsdk.
 

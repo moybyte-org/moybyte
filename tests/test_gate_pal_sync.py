@@ -22,7 +22,7 @@ from pathlib import Path
 from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 DRIVER = r'''
 import sys

@@ -5,7 +5,7 @@
 #   moy_lcd          -- board-authored, lives here. The T-Deck's panel backend,
 #                       the twin of the P4's moy_dsi.
 #   .staged/*        -- the SHARED native modules, copied by build.sh from
-#                       firmware/lilygo_t_deck_plus_micropython/native/, which
+#                       native/, which
 #                       stays their single source of truth. Same arrangement the
 #                       P4 build uses; .staged/ is gitignored.
 #

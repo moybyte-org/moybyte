@@ -19,7 +19,7 @@ native modules (`moy_gfx`/`moy_sd`/`moy_alloc`) — it's pure Python.
 
 ## Why this port is different from the T-Deck
 
-The T-Deck firmware (`firmware/lilygo_t_deck_plus_micropython/`) is a **custom
+The T-Deck firmware (`firmware/lilygo_t_deck_plus_mainline/`) is a **custom
 lvgl_micropython build** (ESP-IDF 5.5, native C modules, frozen modules). The Zero
 deliberately does **not** need that. It runs **stock MicroPython** + pushed `.py`
 files, so the dev loop is `mpremote cp` with no build step.

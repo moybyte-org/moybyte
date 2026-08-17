@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TDECK = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython")
+TDECK = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline")
 
 
 def _read(*rel):
@@ -85,8 +85,7 @@ def test_host_web_console_is_gone():
 
 def test_device_webview_controller_is_gone():
     assert not os.path.exists(os.path.join(TDECK, "modules", "device_webview.py"))
-    runtime_src = _read("firmware", "lilygo_t_deck_plus_micropython",
-                        "modules", "moy_runtime.py")
+    runtime_src = _read("firmware", "lilygo_t_deck_plus_mainline", "modules", "moy_runtime.py")
     assert "device_webview" not in runtime_src.replace(
         "# 2026-08 streaming sunset (docs/moycore_plan_2026-08.md 3.2): device_webview.py,", "")
     assert "WebView(" not in runtime_src
@@ -95,8 +94,7 @@ def test_device_webview_controller_is_gone():
 
 def test_device_webserver_is_transport_core_only():
     # Load-bearing patterns, not prose (the module header narrates the sunset).
-    src = _read("firmware", "lilygo_t_deck_plus_micropython",
-                "modules", "moy_webserver.py")
+    src = _read("device", "moy_webserver.py")
     for dead in ("_wv.TeeCanvas", "_wv.DrawRecorder", "_wv.ServedState",
                  "_wv.SurfaceDelta", "_wv.WsClientState", "def _push_frame",
                  "def recording_wanted", "def stream_mode", "def begin_frame",
@@ -134,10 +132,8 @@ def test_lua_glue_has_no_tee_sniff():
     # runtime went with the deletion of LuaCartRun -- so the claim is now
     # about the one that replaced it.
     root = Path(__file__).resolve().parent.parent
-    assert not (root / "firmware" / "lilygo_t_deck_plus_micropython"
-                / "modules" / "moy_lua_glue.py").exists()
-    src = _read("firmware", "lilygo_t_deck_plus_micropython",
-                "modules", "moycore_glue.py")
+    assert not (root / "device" / "moy_lua_glue.py").exists()
+    src = _read("device", "moycore_glue.py")
     assert 'getattr(canvas, "_r"' not in src
     assert "is_tee" not in src
 
@@ -157,7 +153,7 @@ def test_boards_no_longer_freeze_the_recording_stack():
     from tools.board_config import staged_modules
 
     root = Path(__file__).resolve().parent.parent
-    for board in ("lilygo_t_deck_plus_micropython",
+    for board in ("lilygo_t_deck_plus_mainline",
                   "esp32_p4_wifi6_touch_lcd_7b"):
         staged = staged_modules(root / "firmware" / board, root)
         assert "web_view_ws.py" in staged, board          # framing survives

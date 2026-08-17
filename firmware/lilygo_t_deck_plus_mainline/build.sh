@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Moybyte T-Deck on MAINLINE MicroPython -- one build strategy for both boards.
 #
-# The shipping T-Deck target (firmware/lilygo_t_deck_plus_micropython/) builds on
+# The shipping T-Deck target (firmware/lilygo_t_deck_plus_mainline/) builds on
 # the lvgl_micropython FORK: it clones the fork, stages our native modules into
 # its ext_mod tree, drives its make.py wrapper, and edits a dozen of its files by
 # sed. This target builds the SAME console the way the P4 does -- mainline
@@ -31,7 +31,7 @@ MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_TDECK"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
 DIST_DIR="${REPO_ROOT}/dist/tdeck_mainline"
-FORK_DIR="${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython"
+FORK_DIR="${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline"
 PATCH_DIR="${FORK_DIR}/patches"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 STAGED_NATIVE="${SCRIPT_DIR}/native/.staged"
@@ -219,7 +219,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # 4) Stage the SHARED native modules. Their single source of truth stays
-#    firmware/lilygo_t_deck_plus_micropython/native/ -- this build reads that
+#    native/ -- this build reads that
 #    tree and never writes to it. native/.staged/ is gitignored.
 #
 #    Which modules are here is a per-STAGE fact, so the list carries the stage:

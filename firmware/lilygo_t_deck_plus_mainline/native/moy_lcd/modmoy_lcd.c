@@ -104,7 +104,7 @@
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 
-// ---- board facts (firmware/lilygo_t_deck_plus_micropython/modules/tdeck_*.py)
+// ---- board facts (device/tdeck_*.py)
 #define MOY_LCD_W            320
 #define MOY_LCD_H            240
 #define MOY_LCD_FB_BYTES     (MOY_LCD_W * MOY_LCD_H * 2)

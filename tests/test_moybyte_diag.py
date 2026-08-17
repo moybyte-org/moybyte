@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 
-DIAG_SRC = Path("firmware/lilygo_t_deck_plus_micropython/modules/moybyte_diag.py")
+DIAG_SRC = Path("device/moybyte_diag.py")
 
 
 @pytest.fixture

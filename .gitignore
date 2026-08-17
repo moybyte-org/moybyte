@@ -11,9 +11,9 @@ docs/issues/
 *.kc8
 .pio/
 firmware/**/.pio/
-firmware/lilygo_t_deck_plus_micropython/.build
+firmware/lilygo_t_deck_plus_mainline/.build
 firmware/esp32_p4_wifi6_touch_lcd_7b/.build
-firmware/lilygo_t_deck_plus_micropython/dist/
+firmware/lilygo_t_deck_plus_mainline/dist/
 /dist/
 # The two boards' staged modules/ trees are ignored by PATTERN, in each board's
 # own .gitignore -- not by a list here. This used to be a hand-maintained
@@ -40,7 +40,7 @@ firmware/web_runner/dist/
 # carries absolute .incbin paths and a digest of build output -- and because a
 # build that writes into a TRACKED file would leave the tree dirty, which
 # `make release` refuses.
-firmware/lilygo_t_deck_plus_micropython/native/moy_web/moy_web_blob.gen.c
+native/moy_web/moy_web_blob.gen.c
 # The toolchain (emsdk + a micropython checkout, ~2GB). No trailing slash:
 # a shared toolchain is often a SYMLINK to another checkout's copy, and a
 # `.build/` pattern matches directories only -- which is how one got

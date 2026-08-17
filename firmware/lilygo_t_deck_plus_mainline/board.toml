@@ -2,7 +2,7 @@
 #  ======================================================================
 #
 #  The THIRD board file (#161 Phase 3), and the one that has a twin: this is
-#  the same physical board as `firmware/lilygo_t_deck_plus_micropython/`, built
+#  the same physical board as `firmware/lilygo_t_deck_plus_mainline/`, built
 #  the P4's way -- mainline MicroPython + an out-of-tree board definition +
 #  USER_C_MODULES -- instead of on the lvgl_micropython fork. So its
 #  `[modules.shared]` section is IDENTICAL to that board's, deny for deny, and
@@ -230,7 +230,7 @@ which is what makes pixel parity a fact rather than a hope."""
 # ---------------------------------------------------------------------------
 
 [modules.device]
-source   = "firmware/lilygo_t_deck_plus_micropython/modules"
+source   = "device"
 strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist -- the same

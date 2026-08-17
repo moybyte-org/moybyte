@@ -189,7 +189,7 @@ STAMP = {"channel": "unstable", "version": 1754161200, "label": "beta 2026-08-02
 
 
 def _load_moy_ota():
-    return _load("firmware/lilygo_t_deck_plus_micropython/modules/moy_ota.py",
+    return _load("device/moy_ota.py",
                  "_moy_ota_device")
 
 
@@ -328,7 +328,7 @@ def test_the_workflows_keep_the_branches_apart():
     # Collecting only the T-Deck's published a P4 beta whose manifest said
     # "unstable" over an image stamped "stable v2" -- so a P4 on the beta
     # channel was offered that same install on every check, forever.
-    for board, path in (("tdeck", "firmware/lilygo_t_deck_plus_micropython/dist/current"),
+    for board, path in (("tdeck", "firmware/lilygo_t_deck_plus_mainline/dist/current"),
                         ("p4", "dist/p4")):
         assert "cp %s/%s out/" % (path, publish.OTA_STAMP) in wf, board
 

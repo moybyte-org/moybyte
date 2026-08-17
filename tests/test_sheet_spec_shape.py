@@ -232,7 +232,7 @@ def test_the_cross_cart_shared_sheet_is_spec_shaped():
 def test_libmoy_and_the_c_gate_pin_the_same_shape():
     # If libmoy's sheet geometry ever moves upstream, this is what says so -- the
     # Python side is a mirror of moy.h, not an independent choice.
-    moy_h = (ROOT / "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx"
+    moy_h = (ROOT / "native/moy_gfx"
              / "libmoy/moy.h").read_text(encoding="utf-8")
     got = dict(re.findall(r"#define\s+(MOY_SHEET_COLS|MOY_SHEET_ROWS)\s+(\d+)", moy_h))
     assert got == {"MOY_SHEET_COLS": str(SHEET_COLS), "MOY_SHEET_ROWS": str(SHEET_ROWS)}
@@ -245,7 +245,7 @@ def test_both_c_twins_still_gate_every_sheet_reading_verb():
     # the CALL SITES -- each sheet-reading verb marshals its own arguments and
     # has to remember to ask -- and losing the gate on one tier is how that stays
     # undetectable.
-    dev = (ROOT / "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx"
+    dev = (ROOT / "native/moy_gfx"
            / "modmoy_gfx.c").read_text(encoding="utf-8")
     host = (ROOT / "runtime/moyhost_gfx.c").read_text(encoding="utf-8")
     # blit_map, blit_batch, sspr, tline -- plus set_batch_src on the device, which

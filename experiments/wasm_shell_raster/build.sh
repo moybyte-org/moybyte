@@ -9,7 +9,7 @@
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$HERE/../.."
-LIBMOY="$REPO/firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy"
+LIBMOY="$REPO/native/moy_gfx/libmoy"
 EMSDK="$REPO/firmware/web_runner/.build/emsdk"
 
 source "$EMSDK/emsdk_env.sh" >/dev/null 2>&1

@@ -27,7 +27,7 @@ import pytest
 from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4}

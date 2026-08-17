@@ -44,7 +44,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 # Where `make unix-micropython` puts the desktop MicroPython with the native
 # usermods compiled in. The second candidate is the hand-built tree the recipe

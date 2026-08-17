@@ -70,7 +70,7 @@ def test_host_and_device_make_api_keysets_match_except_wifi():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
-    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_runtime.py"
+    fw = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules" / "moy_runtime.py"
     spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)
@@ -286,7 +286,7 @@ def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
 def _device_wifi_class():
     """The device DeviceWifi loaded under CPython (like the make_api test)."""
     import importlib.util
-    fw = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    fw = (ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
           / "device_wifi.py")
     for name in ("device_util",):
         if name not in sys.modules:

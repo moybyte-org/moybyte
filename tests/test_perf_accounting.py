@@ -128,7 +128,7 @@ def test_the_bar_bracket_uses_the_microsecond_clock():
 def test_the_device_diag_prints_the_stack_bucket():
     """CHROMEBRK is how any of this reaches glass; a five-tuple printed through
     a four-field format silently drops the new bucket."""
-    src = _src("firmware/lilygo_t_deck_plus_micropython/modules/device_diag.py")
+    src = _src("device/device_diag.py")
     assert "stk=%.2f other=%.2f" in src
     assert "if len(c) < 5:" in src, \
         "the older-console fallback is what keeps this line crash-free"

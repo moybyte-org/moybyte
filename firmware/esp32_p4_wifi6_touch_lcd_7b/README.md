@@ -131,7 +131,7 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 - `native/micropython.cmake` — the `USER_C_MODULES` entry point: `moy_dsi` +
   the shared `moy_gfx`/`moy_alloc` staged from the T-Deck tree into
   `native/.staged/` by build.sh (single source of truth stays in
-  `firmware/lilygo_t_deck_plus_micropython/native/`; both are plain-C usermods
+  `native/`; both are plain-C usermods
   whose S3-only pieces are include-guarded, so they compile unchanged on the
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
   integer-upscale composite the windowed presentation needs. `moy_web` is

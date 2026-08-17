@@ -53,7 +53,7 @@ import pytest
 from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 # The SAME board as TDECK, built on mainline MicroPython instead of the
 # lvgl_micropython fork. It is a separate target here rather than an assumed
 # copy: it stages from TWO sources (runtime/ and the fork build's modules/),
@@ -61,7 +61,7 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
 TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 WEB = ROOT / "firmware" / "web_runner"
-BOARD_DIR = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4}
+BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -78,9 +78,6 @@ MICROPYTHON_BUILTINS = {
 
 # Native usermods compiled into a given target (USER_C_MODULES / ext_mod).
 NATIVE = {
-    "tdeck": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
-              "moycore", "lvgl", "lcd_bus", "st7789", "task_handler",
-              "spi3wire", "i2c", "rgb_bus"},
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
@@ -103,9 +100,6 @@ NATIVE = {
 # for: two statements of one truth are only worth having if something compares
 # them.
 HOST_ONLY = {
-    "tdeck": {"host_app", "host_api", "host_canvas", "lua_host", "input",
-              "audio_binding", "lua_binding", "gfx_binding", "native_build",
-              "simulate_desktop"},
     "tdeck-mainline": {"host_app", "host_api", "host_canvas", "lua_host",
                        "input", "audio_binding", "lua_binding", "gfx_binding",
                        "native_build", "simulate_desktop"},
@@ -125,7 +119,6 @@ HOST_ONLY = {
 # staged by a `cp`, so the extraction cannot see them -- but they are real, and
 # leaving them out would report every importer of them as broken.
 GENERATED = {
-    "tdeck": {"carts_data", "_ota_build"},
     "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
@@ -134,7 +127,7 @@ GENERATED = {
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
-PACKAGES = {"tdeck": {"moybyte"}, "tdeck-mainline": {"moybyte"},
+PACKAGES = {"tdeck-mainline": {"moybyte"},
             "p4": {"moybyte"}, "web": set()}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
@@ -381,7 +374,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck", "tdeck-mainline", "p4", "web")
+TARGETS = ("tdeck-mainline", "p4", "web")
 
 
 def _unresolved(target):
@@ -432,7 +425,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
 def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
     """A module that RAISES on import is worse than one that is missing.
 
@@ -479,7 +472,7 @@ def _kinds(target):
     return out
 
 
-@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
 def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     declared = _kinds(target)
     # HOST_ONLY carries names that are not runtime modules at all
@@ -497,7 +490,7 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
             "longer exists -- that is what makes it a tripwire" % (target, name))
 
 
-@pytest.mark.parametrize("target", ("tdeck", "tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
 def test_every_board_toml_denial_is_explained_and_classified(target):
     """#161: the prose rationale moves WITH the data. An unexplained denial is
     the state this phase existed to leave behind -- a staging list whose
@@ -545,7 +538,7 @@ def test_the_two_tdeck_builds_stage_the_same_shared_console():
     """One board, two build systems, and they must not become two consoles.
 
     `firmware/lilygo_t_deck_plus_mainline` is the SAME physical T-Deck as
-    `firmware/lilygo_t_deck_plus_micropython`, rebuilt on mainline MicroPython.
+    `firmware/lilygo_t_deck_plus_mainline`, rebuilt on mainline MicroPython.
     Same glass, same 320x240 tier, same `wm.FullscreenStackWM` -- so their
     shared-module DENIALS must agree exactly. A difference here is either a
     module one build forgot or a tier claim nobody wrote down, and both are

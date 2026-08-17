@@ -393,7 +393,7 @@ def test_build_scripts_stage_the_new_modules():
     # script contain this string".
     from tools.board_config import staged_modules
 
-    for board in ("lilygo_t_deck_plus_micropython",
+    for board in ("lilygo_t_deck_plus_mainline",
                   "esp32_p4_wifi6_touch_lcd_7b"):
         staged = staged_modules(ROOT / "firmware" / board, ROOT)
         assert "scene_editor_ui.py" in staged, board

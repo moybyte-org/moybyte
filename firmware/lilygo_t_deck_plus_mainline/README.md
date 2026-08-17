@@ -4,7 +4,7 @@ This is the LilyGO T-Deck Plus built **the way the P4 is built**: mainline
 MicroPython + an out-of-tree board definition + `USER_C_MODULES`. It exists so
 the project has ONE build strategy instead of two.
 
-It does **not** replace `firmware/lilygo_t_deck_plus_micropython/` yet. That
+It does **not** replace `firmware/lilygo_t_deck_plus_mainline/` yet. That
 target is what ships; nothing here touches it. This tree reads two things from
 it and writes nothing: the shared native modules under `native/` (single source
 of truth stays there) and two board-agnostic `.patch` files.

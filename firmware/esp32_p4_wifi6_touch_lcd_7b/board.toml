@@ -181,7 +181,7 @@ rasterizes from the same bytes the host draws from."""
 # ---------------------------------------------------------------------------
 
 [modules.device]
-source   = "firmware/lilygo_t_deck_plus_micropython/modules"
+source   = "device"
 strategy = "allowlist"
 why = """
 The second staging source, and the one that must STAY an allowlist.

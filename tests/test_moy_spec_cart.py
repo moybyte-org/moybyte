@@ -199,7 +199,7 @@ def test_device_cart_buttons_match_host():
     """host_api and device_api must agree on the cart-visible button set."""
     import re
     from runtime import host_api
-    src = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    src = (ROOT / "device"
            / "device_api.py").read_text()
     m = re.search(r"^CART_BUTTONS = \(([^)]*)\)", src, re.M)
     assert m, "device_api lost its CART_BUTTONS"
@@ -240,7 +240,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
         def __getattr__(self, name):
             return lambda *a, **k: 0
 
-    modules_dir = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+    modules_dir = ROOT / "device"
     sys.path.insert(0, str(modules_dir))
     try:
         for stale in ("device_util", "device_canvas", "device_api"):

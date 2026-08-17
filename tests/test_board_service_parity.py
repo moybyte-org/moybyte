@@ -61,7 +61,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # (wiring source, the function that wires it). Each target boots the SAME shared
 # console; these are the four places that decide what it can do.
 TARGETS = {
-    "tdeck": ("firmware/lilygo_t_deck_plus_micropython/modules/moy_runtime.py",
+    "tdeck": ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
               "run_desktop"),
     "p4": ("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
            "run_desktop"),
@@ -269,10 +269,17 @@ def _func(path, name):
     raise AssertionError("%s has no %s()" % (path, name))
 
 
+# The workstation reaches a closure under whatever name that closure's
+# parameter has. The T-Deck's `_before_slim` calls it `_ws`, so matching only
+# "ws" read its `_with_sd`/`updater` injections as MISSING -- a service the
+# board demonstrably attaches, reported as absent.
+_WS_NAMES = ("ws", "_ws")
+
+
 def _is_ws_attr(node):
     return (isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
-            and node.value.id == "ws")
+            and node.value.id in _WS_NAMES)
 
 
 def _boot_assignments(fn):

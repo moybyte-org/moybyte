@@ -41,7 +41,7 @@ def cells(s):
 def _device_canvas_module():
     """device_canvas.py's module-level helpers, loaded without the firmware
     tree's import environment (they depend on nothing but builtins)."""
-    path = ROOT / "firmware/lilygo_t_deck_plus_micropython/modules/device_canvas.py"
+    path = ROOT / "device/device_canvas.py"
     src = path.read_text(encoding="utf-8")
     # Take just the two helpers, by their exact extent: importing the module
     # needs the device's framebuf / moy_gfx / device_util, none of which exist

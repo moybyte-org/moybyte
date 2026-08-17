@@ -46,8 +46,7 @@ MANIFEST = os.path.join(TOOLS, "p8_import_vendor.json")
 VENDORED = os.path.join(TOOLS, "p8_import.py")
 DRIVER = os.path.join(TOOLS, "import_p8.py")
 LIBMOY_AUDIO = os.path.join(
-    ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-    "native", "moy_audio", "libmoy", "moy_audio.c")
+    ROOT, "native", "moy_audio", "libmoy", "moy_audio.c")
 
 
 def _sha256(path):

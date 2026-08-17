@@ -1,6 +1,0 @@
-{
-  "channels": {
-    "stable":   "http://192.168.1.50:8000/stable/latest.json",
-    "unstable": "http://192.168.1.50:8000/unstable/latest.json"
-  }
-}

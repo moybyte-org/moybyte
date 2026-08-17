@@ -44,8 +44,7 @@ ROOT = os.path.normpath(os.path.join(_HERE, ".."))
 
 # The vendored libmoy every host binding compiles against. One copy, in the
 # T-Deck's native tree, which is its canonical home for the boards too.
-LIBMOY = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                      "native", "moy_gfx", "libmoy")
+LIBMOY = os.path.join(ROOT, "native", "moy_gfx", "libmoy")
 
 # -O2, and NOT -O3: these have to agree with the conformance goldens pixel for
 # pixel, and the raster is integer throughout, so there is nothing a more

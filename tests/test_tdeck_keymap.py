@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 VENDOR_KBD = (ROOT / "firmware" / "lilygo_t_deck_plus_reference" / "examples"
               / "Keyboard_ESP32C3" / "Keyboard_ESP32C3.ino")
 

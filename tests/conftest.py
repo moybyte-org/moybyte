@@ -2,7 +2,7 @@
 resolve to the canonical runtime/ source, never a build-staged copy.
 
 Several test files put the firmware staging tree
-(firmware/lilygo_t_deck_plus_micropython/modules) on sys.path to import the
+(device) on sys.path to import the
 AUTHORED device modules (moy_webserver, device canvas parity, diag, ...). That
 same directory also holds BUILD-STAGED copies of the shared runtime/ sources
 (console.py, editors.py, web_view.py, web_view_page.py, ... -- gitignored,
@@ -86,7 +86,7 @@ class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
 # copy can never shadow the source of truth.
 _DEVICE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "firmware", "lilygo_t_deck_plus_micropython", "modules")
+    "device")
 # `_ota_build` is EXCLUDED: build.sh writes it (gitignored) with this machine's
 # last build channel/version/label, and moy_ota imports it when present. Resolving
 # it here made the suite read differently on a machine that had built firmware than

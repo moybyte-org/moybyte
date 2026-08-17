@@ -44,8 +44,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MOY_OTA = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                       "modules", "moy_ota.py")
+MOY_OTA = os.path.join(ROOT, "device", "moy_ota.py")
 DEV = "dev"
 MAIN = "master"
 VERSION_RE = re.compile(r"^(FIRMWARE_VERSION\s*=\s*)(\d+)(.*)$", re.MULTILINE)

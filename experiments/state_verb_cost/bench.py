@@ -25,7 +25,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
            / "ports" / "unix" / "build-moyluagfx" / "micropython")
 

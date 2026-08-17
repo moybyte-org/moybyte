@@ -106,7 +106,7 @@ def test_s3_build_does_not_stage_the_leaf():
     # set rather than of build.sh's text.
     from tools.board_config import staged_modules, denials
 
-    board = os.path.join(_REPO, "firmware", "lilygo_t_deck_plus_micropython")
+    board = os.path.join(_REPO, "firmware", "lilygo_t_deck_plus_mainline")
     assert "surface.py" not in staged_modules(board, _REPO), (
         "the S3 is the fullscreen-stack tier and the surface leaf must stay off it")
     assert denials(board)["surface.py"]["kind"] == "tier", (

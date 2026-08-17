@@ -42,8 +42,7 @@ from . import native_build
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = native_build.ROOT
-_NATIVE = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                       "native")
+_NATIVE = os.path.join(_ROOT, "native")
 _LIBMOY = native_build.LIBMOY                        # the raster + moy.h
 _BINDING_DIR = os.path.join(_NATIVE, "moycore", "libmoy")   # libmoy's Lua binding
 _LUA = os.path.join(_NATIVE, "moy_lua", "lua")       # the vendored VM

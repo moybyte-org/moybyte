@@ -25,7 +25,7 @@ separate question from what is committed.
 
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
-| Lua 5.4.7 (device VM) | `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
+| Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
@@ -44,7 +44,7 @@ Development and optional dependencies that are *not* redistributed are in §6.
 
 ### 2.1 Lua 5.4 — the cart VM
 
-`firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/`
+`native/moy_lua/lua/`
 
 The `moy_lua` native module (issue #67) embeds a complete Lua interpreter so a
 cart can declare `"runtime": "lua"`. The same directory is staged into the
@@ -54,9 +54,9 @@ targets.
 - **Upstream:** Lua 5.4.7 — <https://www.lua.org/>, tarball
   <https://www.lua.org/ftp/lua-5.4.7.tar.gz> (the `src/` directory).
 - **Licence:** MIT. Copyright © 1994–2024 Lua.org, PUC-Rio.
-  Full text: [`.../moy_lua/lua/COPYRIGHT`](firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/COPYRIGHT).
+  Full text: [`.../moy_lua/lua/COPYRIGHT`](native/moy_lua/lua/COPYRIGHT).
 - **Modified: yes.** Two changes, both listed in
-  [`.../moy_lua/lua/MODIFICATIONS.md`](firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/MODIFICATIONS.md):
+  [`.../moy_lua/lua/MODIFICATIONS.md`](native/moy_lua/lua/MODIFICATIONS.md):
   a `#pragma GCC optimize("O2")` block added to 32 `.c` files, and
   `LUA_32BITS` flipped from `0` to `1` in `luaconf.h`. Nothing else differs
   from upstream; the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` /
@@ -263,7 +263,7 @@ The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
 `docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
-`firmware/lilygo_t_deck_plus_micropython/modules/tdeck_board.py` /
+`firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` /
 `tdeck_display.py`. (The transcription originally landed in the `.moyproj`
 SDK's `moybyte_cli/boards.py` as `BOARD_PROFILES`, with its own `sources` list;
 that SDK was deleted on 2026-07-31 and git history has it. The board doc is the
@@ -305,7 +305,7 @@ published format, protocol or behaviour; none contains third-party code.
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
 - **WebSocket, RFC 6455** (`runtime/web_view_ws.py`,
-  `firmware/lilygo_t_deck_plus_micropython/modules/moy_webserver.py`) —
+  `device/moy_webserver.py`) —
   handshake and framing written from the RFC.
   `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
   standard library.
@@ -330,7 +330,7 @@ channels: the rolling `firmware-latest` release (both boards' images, replaced
 per board as they are rebuilt) and the website itself, which serves its own copy
 under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
 
-### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_micropython/build.sh`)
+### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_mainline/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -386,7 +386,7 @@ hand-written 8-opcode benchmark cores, not derived from any emulator.
 
 ### 6.5 Patches we apply to upstream sources
 
-`firmware/lilygo_t_deck_plus_micropython/patches/*.patch` and
+`patches/*.patch` and
 `firmware/esp32_p4_wifi6_touch_lcd_7b/patches/*.patch` are Moybyte-authored
 diffs against MicroPython and ESP-IDF (I²C GIL release, `MICROPY_OBJ_REPR_C`
 floats, native-code arena reclaim, T-Deck early board init, SPI PSRAM TX DMA,

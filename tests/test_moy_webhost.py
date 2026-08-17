@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-MODULES = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+MODULES = ROOT / "device"
 sys.path.insert(0, str(MODULES))
 
 import moy_webhost as wh                                       # noqa: E402
@@ -754,7 +754,7 @@ def test_make_webhost_reads_the_wifi_service_lazily():
 
 
 BOARDS = (
-    ("lilygo_t_deck_plus_micropython", "TDECK_WEB_DIR"),
+    ("lilygo_t_deck_plus_mainline", "TDECK_WEB_DIR"),
     ("esp32_p4_wifi6_touch_lcd_7b", "P4_WEB_DIR"),
 )
 

@@ -4,7 +4,7 @@ PYTHON ?= $(VENV)/bin/python
 MONITOR_SECONDS ?= 12
 LOG ?= /tmp/moybyte_lilygo_serial.log
 IDF_PYTHON ?= $(HOME)/.espressif/python_env/idf5.5_py3.10_env/bin/python
-MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_micropython
+MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_mainline
 MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT
 MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-app.bin
 MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-full-dio-0x0.bin
@@ -150,7 +150,7 @@ UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
 UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
 UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
-UNIX_MP_NATIVE := firmware/lilygo_t_deck_plus_micropython/native
+UNIX_MP_NATIVE := native
 # Every native module that ships a Makefile fragment. moy_alloc/moy_sd have
 # none (ESP-IDF only) and are skipped by the port's own discovery anyway.
 # moy_web is here so the BAKED web console is exercised as code on a real
@@ -250,7 +250,7 @@ vendor-p8-import:
 	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
 
 firmware-build-lilygo-micropython:
-	bash firmware/lilygo_t_deck_plus_micropython/build.sh
+	bash firmware/lilygo_t_deck_plus_mainline/build.sh
 
 # OTA (#53 Phase 3): emit dist/latest.json from the built image (auto size + sha256 +
 # version read from moy_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;

@@ -48,10 +48,10 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TDECK_MODULES = os.path.join(
-    ROOT, "firmware", "lilygo_t_deck_plus_micropython", "modules")
+    ROOT, "device")
 DEFAULT_DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
 DEFAULT_OUT = os.path.join(
-    ROOT, "firmware", "lilygo_t_deck_plus_micropython", "native", "moy_web",
+    ROOT, "native", "moy_web",
     "moy_web_blob.gen.c")
 
 

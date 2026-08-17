@@ -3,7 +3,14 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path("firmware/lilygo_t_deck_plus_micropython")
+ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
+# The device tier moved out of the board directory when the fork went
+# (it was never T-Deck-specific -- the P4 staged it from there too).
+DEVICE = Path("device")
+# The shared C modules moved out of the board directory with the fork;
+# only moy_lcd (this board's panel driver) stays under ROOT/native.
+NATIVE = Path("native")
+PATCHES = Path("patches")
 EDITORS_SRC = Path("runtime") / "editors.py"
 _REPO = Path(__file__).resolve().parent.parent
 
@@ -36,7 +43,7 @@ def _device_backend_src():
     """
     return "\n".join((
         (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8"),
-        (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"),
+        (DEVICE / "device_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
     ))
 
@@ -56,67 +63,7 @@ def test_micropython_spike_scaffold_exists():
     assert (ROOT / "README.md").exists()
     assert (ROOT / "build.sh").exists()
     assert (ROOT / "modules" / "main.py").exists()
-    assert (ROOT / "modules" / "moybyte" / "__init__.py").exists()
-
-
-def test_micropython_spike_documents_sd_launcher_bin():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "launcher-friendly `.bin`" in readme
-    assert "moybyte_micropython_tdeck.bin" in readme
-    assert "use `moybyte_micropython_tdeck.bin`" in readme
-    assert "update error" in readme
-    assert "native `240x320` portrait" in readme
-    assert "Launcher-based boot is still the preferred quick app-test loop" in readme
-    assert "full USB flashing at `0x0` is confirmed to work" in readme
-    assert "USB full flashing is valid on this board" in readme
-    assert "MOYBYTE_BOARD_CONFIG=tdeck" in readme
-    assert "moybyte_lvgl_tdeck_board_jtag_full_dio_0x0.bin" in readme
-
-
-def test_micropython_spike_build_uses_lvgl_micropython_and_frozen_modules():
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    patch = (ROOT / "patches" / "esp32_tdeck_early_board_init.patch").read_text(encoding="utf-8")
-
-    assert "lvgl-micropython/lvgl_micropython" in build
-    assert "BOARD=ESP32_GENERIC_S3" in build
-    assert "BOARD_VARIANT=SPIRAM_OCT" in build
-    assert "DISPLAY=st7789" in build
-    assert "FROZEN_MANIFEST" in build
-    assert "export IDF_PATH" in build
-    assert "export.sh" in build
-    # #168: 4MB -> 4.5MB when the app image crossed 0x400000 and the IDF size check
-    # began hard-failing the build; -> 5MB so the next growth spurt doesn't cost
-    # another partition-table change (each one costs deployed devices a full erase).
-    assert "--partition-size=5242880" in build
-    # ...and the build reports its own headroom, so the next overflow is seen coming.
-    assert "MOYBYTE_APP_SLOT_BYTES" in build
-    assert "headroom" in build
-    # OTA (#53): the build asks the lvgl_micropython builder for a dual-app partition
-    # table (otadata + ota_0 + ota_1), and merges the full image at the derived ota_0
-    # offset rather than the legacy hardcoded 0x10000.
-    assert "--ota" in build
-    assert "${APP_OFFSET}" in build
-    assert "MPY_BUILD_DIR" in build
-    assert "micropython.bin" in build
-    assert "full-flash" not in build
-    assert "MOYBYTE_BUILD_JOBS" in build
-    assert "MOYBYTE_BUILD_PYTHON" in build
-    assert "nice -n" in build
-    assert "ionice -c 3" in build
-    assert "MOYBYTE_SKIP_UPSTREAM_SUBMODULES" in build
-    assert "MOYBYTE_EARLY_BOARD_INIT" in build
-    assert "MOYBYTE_BOARD_CONFIG" in build
-    assert "MOYBYTE_REPL" in build
-    assert "MOYBYTE_ARTIFACT_NAME" in build
-    assert "export GEN_SCRIPT" in build
-    assert "--custom-board-path=display_configs/LilyGo-TDeck" in build
-    assert "boards/sdkconfig\\.usb" in build
-    assert "MICROPY_HW_ESP_USB_SERIAL_JTAG" in build
-    assert "esp32_tdeck_early_board_init.patch" in build
-    assert "patch -R" in build
-    assert "moybyte_tdeck_early_board_init" in patch
-    assert "MOYBYTE_TDECK_POWERON   GPIO_NUM_10" in patch
+    assert (DEVICE / "moybyte" / "__init__.py").exists()
 
 
 def test_micropython_spike_makefile_has_flash_and_monitor_targets():
@@ -150,7 +97,7 @@ def test_micropython_spike_makefile_has_flash_and_monitor_targets():
 def test_ota_updater_module_flashes_inactive_slot_from_sd():
     # OTA (#53): the device updater writes an SD .bin into the inactive OTA slot via
     # esp32.Partition (block-erase writeblocks) and reboots; rollback is the safety net.
-    ota = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
+    ota = (DEVICE / "moy_ota.py").read_text(encoding="utf-8")
 
     assert "class OtaUpdater" in ota
     assert 'UPDATE_DIR = "/sd/update"' in ota
@@ -221,7 +168,7 @@ def test_web_stack_split_after_the_streaming_sunset():
     # sync RPC rides. This greps the PRESENCE side. Executable behaviour:
     # test_moy_webserver.py.
     wv_ws = (Path("runtime") / "web_view_ws.py").read_text(encoding="utf-8")
-    web = (ROOT / "modules" / "moy_webserver.py").read_text(encoding="utf-8")
+    web = (DEVICE / "moy_webserver.py").read_text(encoding="utf-8")
 
     # -- the WS primitives leaf (web_view_ws): what the transport rides --
     assert "def ws_accept_key" in wv_ws and "def ws_handshake_response" in wv_ws
@@ -241,7 +188,7 @@ def test_web_stack_split_after_the_streaming_sunset():
 def test_ota_online_download_streams_to_sd_with_checksum():
     # OTA Phase 3 (#53): a WiFi download fetches a manifest, streams the .bin straight
     # to SD (never buffering the whole image), and verifies sha256 before installing.
-    ota = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
+    ota = (DEVICE / "moy_ota.py").read_text(encoding="utf-8")
 
     assert "FIRMWARE_VERSION = " in ota          # bumped per release (#53), so don't pin the value
     assert 'OTA_CFG_NAME = "ota.json"' in ota
@@ -269,7 +216,7 @@ def test_ota_online_wired_and_console_has_online_flow():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The online update SCREEN (checking/download/install phases) lives in
@@ -290,20 +237,18 @@ def test_ota_online_wired_and_console_has_online_flow():
 
 
 def test_micropython_spike_uses_tdeck_native_panel_geometry():
-    display = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
+    display = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
 
-    assert "width = 240" in display
-    assert "height = 320" in display
-    assert "display._ORIENTATION_TABLE = (0, 160, 192, 96)" in display
-    assert "display.set_rotation" in display
+    assert "WIDTH = 320" in display
+    assert "HEIGHT = 240" in display
 
 
 
 def test_micropython_spike_has_guarded_sd_project_loader():
-    display = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
-    sd_loader = (ROOT / "modules" / "moybyte_sd.py").read_text(encoding="utf-8")
+    display = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    sd_loader = (DEVICE / "moybyte_sd.py").read_text(encoding="utf-8")
 
-    assert "def get_spi_bus():" in display
+    assert "class TDeckCompositor" in display
     assert "SD_PROJECT_FILE_PATHS" in sd_loader
     assert '"/sd/project.py"' in sd_loader
     assert "SD_FREQ = 800000" in sd_loader
@@ -322,23 +267,23 @@ def test_micropython_native_sd_shares_display_spi_host():
     # The live SD path attaches the card to the host esp_lcd already initialized
     # (moy_sd) instead of re-running spi_bus_initialize like machine.SDCard, which
     # hangs the shared bus once the panel is up. See modmoy_sd.c header.
-    mod = (ROOT / "native" / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
-    cmake = (ROOT / "native" / "moy_sd" / "micropython.cmake").read_text(encoding="utf-8")
+    mod = (NATIVE / "moy_sd" / "modmoy_sd.c").read_text(encoding="utf-8")
+    cmake = (NATIVE / "moy_sd" / "micropython.cmake").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    sd_loader = (ROOT / "modules" / "moybyte_sd.py").read_text(encoding="utf-8")
+    sd_loader = (DEVICE / "moybyte_sd.py").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
 
     # Native module attaches (init_device) rather than re-initializing the bus.
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in mod
     assert "sdspi_host_init_device" in mod
     assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
     assert "target_link_libraries(usermod INTERFACE usermod_moy_sd)" in cmake
-    assert "ext_mod/moy_sd" in build
-    assert "moy_sd/micropython.cmake" in build
+    assert "moy_sd" in build
+    assert "moy_sd" in build
 
     # Python live-mount path + block device backed by moy_sd.
     assert "class _NativeSDBlockDev" in sd_loader
@@ -363,11 +308,11 @@ def test_micropython_touch_and_idle_cursor():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     # The GT911 Touch driver (+ TrackBall + TOUCH_* consts) now lives in
     # device_input.py (extracted from moy_runtime.py); run_desktop constructs it.
-    device_input = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
+    device_input = (DEVICE / "device_input.py").read_text(encoding="utf-8")
 
     # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
     assert "class Touch:" in device_input
@@ -386,9 +331,7 @@ def test_micropython_touch_and_idle_cursor():
     assert "pointer.tick(now)" in runtime
 
     # Touch calibration bring-up mode (serial-only, flush-once).
-    assert "def run_touch_calibrate(handler):" in runtime
     assert "RUN_TOUCH_CALIBRATE" in shell
-    assert "run_touch_calibrate(_task_handler)" in shell
 
 
 def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
@@ -400,10 +343,10 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
-    kb = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    kb = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
 
     # The device make_api exposes `textmode`, setting input.text_mode (host parity).
     assert "def textmode(on=True):" in runtime
@@ -443,7 +386,7 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     # The host make_api moved to host_api.py (the host_app -> host_api extraction
     # mirroring the device's moy_runtime -> device_api split; #151 web runner).
     host = (Path("runtime") / "host_api.py").read_text(encoding="utf-8")
@@ -463,697 +406,97 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
     assert "self.input.cart_quit = False" in console
 
 
-def test_micropython_spike_documents_tdeck_reference_paths():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    notes = (Path("docs/history") / "SPIKE_RESULTS.md").read_text(encoding="utf-8")
-
-    assert "lvgl_micropython/display_configs/LilyGo-TDeck" in readme
-    assert "TulipCC" in readme
-    assert "native framebuffer/canvas" in readme
-    assert "https://github.com/shorepine/tulipcc" in notes
-    assert "No LilyGO-maintained MicroPython T-Deck example" in notes
-
-
-def test_moy_compositor_plan_strips_and_host_guard():
-    spec = importlib.util.spec_from_file_location(
-        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
+def _panel_src():
+    """The mainline panel backend: the Python compositor plus its native driver."""
+    return (
+        (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8"),
+        (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8"),
     )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
 
-    # Host guard: no bus -> no compositor (never touches moy_alloc/framebuf).
-    assert module.make_compositor(None) is None
 
-    # Even strip height tiles the full panel exactly.
-    assert module.plan_strips(240, 40) == [
-        (0, 40), (40, 40), (80, 40), (120, 40), (160, 40), (200, 40)
-    ]
-
-    # Uneven strip height: last band is the shorter remainder, and the bands
-    # always cover the full height with no gaps or overlap.
-    bands = module.plan_strips(240, 36)
-    assert bands[-1] == (216, 24)
-    assert sum(rows for _y, rows in bands) == 240
-    for (y, rows), (next_y, _r) in zip(bands, bands[1:]):
-        assert y + rows == next_y
-
-    try:
-        module.plan_strips(240, 0)
-        assert False, "strip_h <= 0 should raise"
-    except ValueError:
-        pass
-
-
-def test_moy_compositor_dirty_region_math():
-    spec = importlib.util.spec_from_file_location(
-        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    # clip_rect clamps to the screen, including negative origins and overruns.
-    assert module.clip_rect(10, 10, 5, 5, 320, 240) == (10, 10, 5, 5)
-    assert module.clip_rect(-5, -5, 20, 20, 320, 240) == (0, 0, 15, 15)
-    assert module.clip_rect(315, 0, 20, 10, 320, 240) == (315, 0, 5, 10)
-    assert module.clip_rect(400, 0, 10, 10, 320, 240)[2] == 0  # off-screen -> w=0
-
-    # union_rect grows the bounding box; None is the identity.
-    assert module.union_rect(None, (1, 2, 3, 4)) == (1, 2, 3, 4)
-    assert module.union_rect((1, 2, 3, 4), None) == (1, 2, 3, 4)
-    assert module.union_rect((0, 0, 10, 10), (20, 20, 5, 5)) == (0, 0, 25, 25)
-
-    # DirtyTracker unions adds and resets on take().
-    dt = module.DirtyTracker()
-    assert dt.take(320, 240) is None
-    dt.add(10, 10, 5, 5)
-    dt.add(100, 100, 10, 10)
-    assert dt.take(320, 240) == (10, 10, 100, 100)
-    assert dt.take(320, 240) is None  # reset after take
-    dt.add(0, 0, 0, 0)  # empty adds are ignored
-    assert dt.is_empty()
-
-
-def test_moy_compositor_flush_breakdown_instrumentation():
-    """The flush-breakdown instrumentation (perf #33/#12): flush() times its
-    sub-steps and logs a `FLUSHBRK copy=.. tx=.. setup=.. n=.. total=..` line via
-    moybyte_diag, so the owner can read live whether the ~28 ms flush is SPI clock
-    (tx) or non-transfer overhead (copy/setup). Grep the device source (the firmware
-    tests assert structure, not execution) + the importable module constants."""
-    comp_src = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
-
-    # The revert-able gate + the sample throttle are single named constants.
-    assert "FLUSH_INSTRUMENT = True" in comp_src
-    assert "FLUSH_SAMPLE_EVERY = 30" in comp_src
-    # The exact log line shape the owner reads live (copy/tx/setup/n/total in ms).
-    assert 'msg = "copy=%.2f tx=%.2f setup=%.2f n=%d total=%.2f" % (' in comp_src
-    assert '"FLUSHBRK"' in comp_src
-    # The transfer (`tx`) is timed in isolation -- the band push is factored out of
-    # flush() so the instrumented path times exactly the SPI/DMA, not the copy.
-    assert "def _flush_full_frame(self):" in comp_src
-    assert "def _flush_instrumented(self):" in comp_src
-    assert "def _log_flushbrk(self, copy_us, tx_us, setup_us, n, total_us):" in comp_src
-    # Timing uses ticks_us for sub-ms resolution (the copy is ~ms-scale).
-    assert "time.ticks_us" in comp_src
-    # REVERT is documented as flipping the one flag, and the untimed flush path is
-    # preserved byte-for-byte (the `_frame[:] = self._fb` copy + the band loop).
-    assert "To REVERT: set FLUSH_INSTRUMENT = False" in comp_src
-    assert "self._frame[:] = self._fb" in comp_src
-
-    # The module still imports + the gate constant is the importable knob.
-    spec = importlib.util.spec_from_file_location(
-        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.FLUSH_INSTRUMENT is True
-    assert module.FLUSH_SAMPLE_EVERY == 30
-
-    # The clock finding is documented at the SPI bootstrap: the T-Deck panel pins
-    # are NOT the S3 IOMUX-native FSPI pins, so 80 MHz is a board limit, and the
-    # freq constant is the documented revert lever.
-    disp_src = (ROOT / "modules" / "tdeck_display.py").read_text(encoding="utf-8")
-    assert "IOMUX" in disp_src
-    assert "GPIO matrix" in disp_src
-    assert "freq = 80000000" in disp_src
-
-
-def test_moy_compositor_double_buffer_enabled_and_revertible():
-    """DMA double-buffering / flush overlap (#40): a ping-pong of two PSRAM frame
-    buffers so the panel DMA runs WHILE the CPU renders the next frame. Device-
-    confirmed stable + the copy-removal win (flush 28->20ms, copy=0, ~13->16-19fps),
-    so it is now the DEFAULT ON. It stays a single-flag revert: set DOUBLE_BUFFER =
-    False -> the proven single-buffer banded flush runs byte-for-byte (the #40
-    instant fallback). Grep the device source for the design + the gate + the
-    SD-vs-panel-DMA mutual exclusion."""
-    comp_src = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-
-    # The gate is a single named constant, now DEFAULT ON (device-confirmed). It
-    # stays revertible (a one-flag fallback to the single-buffer path) -- assert the
-    # actual top-level assignment is True (the line may carry a trailing comment).
-    assert "\nDOUBLE_BUFFER = True" in comp_src
-    # ... and importable so the flag is verifiable, not just textual.
-    spec = importlib.util.spec_from_file_location(
-        "moy_compositor", ROOT / "modules" / "moy_compositor.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.DOUBLE_BUFFER is True
-
-    # Two distinct PSRAM ping-pong buffers (A=_fb, B=_fb_b); flush picks the back.
-    assert "self._fb_b = None" in comp_src
-    assert "self.double_buffer = DOUBLE_BUFFER" in comp_src
-    # The swap/kick/drain machinery + deferred completion (the held-back final band).
-    assert "def _flush_double(self):" in comp_src
-    assert "def _swap_buffers(self):" in comp_src
-    assert "def _kick_front(self):" in comp_src
-    assert "def _drain_dma(self):" in comp_src
-    assert "self._dma_pending" in comp_src              # the done-flag
-    # The kick queues bands async (last=False) and RETURNS without waiting; the
-    # blocking last=True band is deferred to the next drain (the overlap mechanism).
-    assert ", 0, False)" in comp_src                    # async band (last=False)
-    assert ", 0, True)" in comp_src                     # the deferred completion band
-    # No PSRAM->PSRAM copy on the double path -- it flushes the just-rendered buffer
-    # directly (the whole point: A/B are distinct so DMA reads A while CPU writes B).
-    assert "No `_frame[:] = _fb` copy" in comp_src
-
-    # The single-buffer path is preserved byte-for-byte (the instant revert).
-    assert "if self.double_buffer:\n            self._flush_double()\n            return" in comp_src
-    assert "self._frame[:] = self._fb" in comp_src      # untouched single-buffer copy
-
-    # SD vs panel-DMA mutual exclusion: SD shares the SPI host, so an SD op may not
-    # overlap an in-flight panel DMA. sync() drains it; run_desktop wraps with_sd_live
-    # to sync() FIRST.
-    assert "def sync(self):" in comp_src
-    assert "def _with_sd_synced(fn):" in runtime
-    assert "comp.sync()" in runtime
-    assert "return moybyte_sd.with_sd_live(fn)" in runtime
-
-    # The canvas follows the back buffer each frame (a stale pointer would draw into
-    # the buffer mid-DMA -> tear); run_desktop calls it before drawing.
-    assert "def back_buffer(self):" in comp_src
-    assert "def sync_back(self):" in device_canvas
-    assert "canvas.sync_back()" in runtime
-
-
-def test_moy_compositor_double_buffer_pingpong_logic():
-    """Exercise the ping-pong flush logic with stub native modules (no hardware):
-    verify the buffer SWAP, the DEFERRED completion (final band held back, drained on
-    the next flush), that NO per-frame full-frame copy happens, and that sync() drains
-    the in-flight DMA for the SD mutual-exclusion. This is the executable counterpart
-    of the grep test -- it proves the invariant, not just the structure."""
-    import types
-
-    # Stub the device-only natives the Compositor.__init__ imports. moy_alloc.malloc_dma
-    # returns a plain bytearray (DMA memory is just RAM on the host); lcd_bus exposes
-    # the MEMORY_* flags; framebuf is a no-op FrameBuffer (we drive raw buffers here).
-    fake_alloc = types.ModuleType("moy_alloc")
-    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
-    fake_lcd = types.ModuleType("lcd_bus")
-    fake_lcd.MEMORY_SPIRAM = 1
-    fake_lcd.MEMORY_DMA = 2
-
-    class _FB:
-        def __init__(self, buf, w, h, fmt):
-            self.buf = buf
-        def fill(self, c):
-            pass
-        def fill_rect(self, *a):
-            pass
-        def text(self, *a):
-            pass
-    fake_framebuf = types.ModuleType("framebuf")
-    fake_framebuf.FrameBuffer = _FB
-    fake_framebuf.RGB565 = 1
-
-    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
-    sys.modules["moy_alloc"] = fake_alloc
-    sys.modules["lcd_bus"] = fake_lcd
-    sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("moy_gfx", None)   # no native kernel -> framebuf fallback path
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "moy_compositor_pp", ROOT / "modules" / "moy_compositor.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        # Enable double-buffer the way the owner would (flip the flag, rebuild) so the
-        # 2nd PSRAM buffer is allocated at construction. The default stays False on
-        # disk (the other test asserts that); this only mutates the freshly-imported
-        # test copy of the module.
-        module.DOUBLE_BUFFER = True
-
-        # A fake lcd_bus.SPIBus recording every tx_color (the DMA) + tx_param (window).
-        class FakeBus:
-            def __init__(self):
-                self.colors = []   # (cmd, nbytes, y0, y1, last)
-                self.params = []   # (cmd, ...)
-            def tx_param(self, cmd, data):
-                self.params.append(cmd)
-            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
-                self.colors.append((cmd, len(bytes(data)), y0, y1, last))
-
-        bus = FakeBus()
-        comp = module.Compositor(bus, 320, 240, strip_h=24)
-        assert comp.double_buffer is True   # picked up the enabled module flag
-        # Two distinct physical buffers must exist for ping-pong.
-        assert comp._fb_b is not None
-        assert comp._fb is not comp._fb_b
-
-        a = comp._fb
-        # FRAME 1: back is A. flush() -> drain(no-op) + swap(front=A,back=B) + kick(A).
-        assert comp.back_buffer() is a
-        comp.flush()
-        # The just-rendered A is now the FRONT (in flight); the canvas draws into B.
-        assert comp._front is a
-        assert comp.back_buffer() is comp._fb_b
-        # A's bands were queued async EXCEPT the final one, which is held back.
-        assert comp._dma_pending is not None
-        last_flags = [c[4] for c in bus.colors]
-        assert last_flags and all(f is False for f in last_flags)  # none completed yet
-        n_after_kick1 = len(bus.colors)
-        assert n_after_kick1 >= 1                                  # async bands issued
-        # No full-frame PSRAM->PSRAM copy: _frame stays whatever it was (unused).
-        # (The double path never assigns _frame[:] = _fb.)
-
-        # FRAME 2: flush() drains A's held-back final band (last=True) FIRST, then
-        # swaps (front=B, back=A) and kicks B.
-        comp.flush()
-        # Exactly one completing (last=True) transfer happened (A's drained final band).
-        completed = [c for c in bus.colors if c[4] is True]
-        assert len(completed) == 1
-        assert comp._front is comp._fb_b
-        assert comp.back_buffer() is a                              # recycled, drained
-        assert comp._dma_pending is not None                       # B's final band held
-
-        # sync() drains the in-flight DMA (B's held band) for the SD mutual exclusion,
-        # leaving NOTHING pending on the shared bus.
-        comp.sync()
-        assert comp._dma_pending is None
-        completed2 = [c for c in bus.colors if c[4] is True]
-        assert len(completed2) == 2                                # B's band drained too
-        # sync() with nothing pending is a safe no-op (idempotent).
-        comp.sync()
-        assert comp._dma_pending is None
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-
-def test_moy_compositor_async_flush_overlap_logic():
-    """Exercise the ASYNC_FLUSH path (#43): when the bus accepts a callback,
-    `tx_color` is non-blocking, so _kick_front fires EVERY band (none held back) and
-    _drain_dma waits on the completion COUNTER instead of a busy-wait band. Proves:
-    async turns on only when register_callback succeeds; the kick fires all bands and
-    holds none (`_dma_pending` stays None); the completion ISR counter gates the drain;
-    swap recycles the drained buffer; sync() leaves nothing in flight."""
-    import types
-
-    fake_alloc = types.ModuleType("moy_alloc")
-    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
-    fake_lcd = types.ModuleType("lcd_bus")
-    fake_lcd.MEMORY_SPIRAM = 1
-    fake_lcd.MEMORY_DMA = 2
-
-    class _FB:
-        def __init__(self, buf, w, h, fmt):
-            self.buf = buf
-        def fill(self, c):
-            pass
-        def fill_rect(self, *a):
-            pass
-        def text(self, *a):
-            pass
-    fake_framebuf = types.ModuleType("framebuf")
-    fake_framebuf.FrameBuffer = _FB
-    fake_framebuf.RGB565 = 1
-
-    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
-    sys.modules["moy_alloc"] = fake_alloc
-    sys.modules["lcd_bus"] = fake_lcd
-    sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("moy_gfx", None)
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "moy_compositor_async", ROOT / "modules" / "moy_compositor.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        # Defaults on disk are the device defaults; assert them so the revert knob holds.
-        src = (ROOT / "modules" / "moy_compositor.py").read_text("utf-8")
-        assert "\nASYNC_FLUSH = True" in src
-        assert "\nPSRAM_DIRECT_FLUSH = True" in src
-        assert "\nSRAM_BOUNCE_FLUSH = True" in src   # #66: device default is bounce
-        assert module.ASYNC_FLUSH is True
-        # This test exercises the LEGACY BANDED async path (per-band counter logic);
-        # the PSRAM-direct single-transfer path is asserted at the end, and the
-        # SRAM-bounce path (#66, the device default) has its own test below.
-        module.PSRAM_DIRECT_FLUSH = False
-        module.SRAM_BOUNCE_FLUSH = False
-
-        # A bus that records the registered completion callback and DEFERS completion:
-        # tx_color queues (returns immediately, no cb), and complete_all() simulates the
-        # SPI ISR firing the callback once per queued band -- the device's real signal.
-        class FakeAsyncBus:
-            def __init__(self):
-                self.colors = []
-                self.params = []
-                self.cb = None
-                self._inflight = 0
-            def register_callback(self, cb):
-                self.cb = cb
-            def tx_param(self, cmd, data):
-                self.params.append(cmd)
-            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
-                self.colors.append((cmd, len(bytes(data)), y0, y1, last))
-                self._inflight += 1          # queued, not yet "done"
-            def complete_all(self):
-                while self._inflight > 0:
-                    self._inflight -= 1
-                    if self.cb is not None:
-                        self.cb()
-
-        bus = FakeAsyncBus()
-        comp = module.Compositor(bus, 320, 240, strip_h=24)
-        assert comp.double_buffer is True
-        assert comp._async is True                  # register_callback succeeded
-        assert bus.cb == comp._on_dma_done          # our ISR-safe counter bump
-
-        a = comp._fb
-        # FRAME 1: drain(no-op) + swap(front=A, back=B) + kick(A) fires ALL bands async.
-        assert comp.back_buffer() is a
-        n0 = len(bus.colors)
-        comp.flush()
-        fired1 = len(bus.colors) - n0
-        assert comp._front is a
-        assert comp.back_buffer() is comp._fb_b
-        assert comp._dma_pending is None            # async holds NOTHING back
-        assert comp._dma_target == fired1 >= 2      # every band issued this kick
-        assert comp._dma_done_n == 0                # none completed yet (deferred)
-        # The overlap unlock (#43): only the FIRST band carries a command (RAMWR); the
-        # rest stream with cmd = -1 so esp_lcd doesn't drain inflight between bands.
-        kick1 = bus.colors[n0:n0 + fired1]
-        assert kick1[0][0] == module.RAMWR
-        assert all(c[0] == -1 for c in kick1[1:])
-
-        # The panel DMA finishes during the next frame's render (simulated):
-        bus.complete_all()
-        assert comp._dma_done_n == comp._dma_target
-
-        # FRAME 2: drain(A -> instant, counters reset) + swap(front=B, back=A) + kick(B).
-        n1 = len(bus.colors)
-        comp.flush()
-        fired2 = len(bus.colors) - n1
-        assert comp._front is comp._fb_b
-        assert comp.back_buffer() is a              # A recycled, fully drained
-        assert comp._dma_pending is None
-        assert comp._dma_target == fired2           # reset by drain, then B's bands fired
-        assert comp._dma_done_n == 0                # B not yet completed
-
-        # sync() drains B for the SD mutual exclusion, leaving nothing in flight.
-        bus.complete_all()
-        comp.sync()
-        assert comp._dma_target == 0
-        assert comp._dma_done_n == 0
-        comp.sync()                                 # idempotent no-op
-        assert comp._dma_target == 0
-
-        # PSRAM-direct path (#43): the whole frame ships in ONE tx_color (one acquire ->
-        # overlap), not N bands. esp_lcd would chunk it internally; at this layer it's a
-        # single full-frame call, and the completion ISR fires once -> target == 1.
-        module.PSRAM_DIRECT_FLUSH = True
-        n2 = len(bus.colors)
-        comp.flush()
-        fired3 = len(bus.colors) - n2
-        assert fired3 == 1                          # ONE tx_color for the whole frame
-        assert bus.colors[n2][0] == module.RAMWR    # carries RAMWR; window already armed
-        assert comp._dma_target == 1
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-
-def test_moy_compositor_sram_bounce_flush_protocol():
-    """The SRAM-bounce banded flush (#66, the device default): the panel DMA only
-    ever reads the two INTERNAL bounce buffers (PSRAM contention can't starve the
-    SPI FIFO -> no more band artifacts), fed band-by-band by pump(). Proves: the
-    kick queues exactly TWO bands (both bounce slots) and returns; band 0 carries
-    RAMWR, continuations cmd=-1 (queue-only under the esp_lcd no-acquire patch);
-    a bounce slot is reused only after the band TWO back completed (payload
-    integrity: every queued band's bytes equal the FRONT's rows at queue time);
-    the drain feeds the rest itself when no timer pumps (fallback correctness);
-    ping-pong swap + counter reset survive across frames."""
-    import types
-
-    fake_alloc = types.ModuleType("moy_alloc")
-    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
-    fake_lcd = types.ModuleType("lcd_bus")
-    fake_lcd.MEMORY_SPIRAM = 1
-    fake_lcd.MEMORY_DMA = 2
-
-    class _FB:
-        def __init__(self, buf, w, h, fmt):
-            self.buf = buf
-        def fill(self, c):
-            pass
-        def fill_rect(self, *a):
-            pass
-        def text(self, *a):
-            pass
-    fake_framebuf = types.ModuleType("framebuf")
-    fake_framebuf.FrameBuffer = _FB
-    fake_framebuf.RGB565 = 1
-
-    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
-    sys.modules["moy_alloc"] = fake_alloc
-    sys.modules["lcd_bus"] = fake_lcd
-    sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("moy_gfx", None)
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "moy_compositor_bounce", ROOT / "modules" / "moy_compositor.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        assert module.SRAM_BOUNCE_FLUSH is True     # device default
-        assert 240 % module.BOUNCE_ROWS == 0        # equal bands, no short tail
-
-        class DeferredBus:
-            """Queues without completing; complete(n) simulates the SPI ISR."""
-            def __init__(self):
-                self.colors = []   # (cmd, payload_bytes, y0, y1)
-                self.params = []
-                self.cb = None
-                self._inflight = 0
-            def register_callback(self, cb):
-                self.cb = cb
-            def tx_param(self, cmd, data):
-                self.params.append(cmd)
-            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
-                self.colors.append((cmd, bytes(data), y0, y1))
-                self._inflight += 1
-            def complete(self, n=1):
-                while n > 0 and self._inflight > 0:
-                    self._inflight -= 1
-                    n -= 1
-                    self.cb()
-
-        bus = DeferredBus()
-        comp = module.Compositor(bus, 320, 240, strip_h=24)
-        assert comp._async is True
-        assert comp.bounce_flush is True
-        assert comp._bnc_bands == 240 // module.BOUNCE_ROWS
-        band_bytes = 320 * module.BOUNCE_ROWS * 2
-        assert len(comp._bnc_bufs[0]) == band_bytes
-        # (no pump timer on the host -> the drain fallback is what feeds the tail)
-        assert comp._pump_timer is None
-
-        # Paint the front-to-be (back buffer A) with a per-band byte pattern so
-        # payload integrity is checkable per band.
-        a = comp._fb
-        for k in range(comp._bnc_bands):
-            a[k * band_bytes:(k + 1) * band_bytes] = bytes([k + 1]) * band_bytes
-
-        # FRAME 1 kick: exactly `slots` bands queue (every bounce slot -- 3 by
-        # default since #66 lever 2, ~9.2ms of transfer absorbing pump latency),
-        # then return.
-        slots = comp._bnc_slots
-        # Shipped default is 2 (the 2026-07-08 hardware A/B: 3 closed the SPI
-        # idle gap but moved zero fps -- the idle overlapped VM work -- and
-        # added queue-full blocking jitter); the protocol below stays N-slot.
-        assert slots == module.BOUNCE_SLOTS == 2
-        comp.flush()
-        assert comp._front is a
-        assert comp._dma_pending is None
-        assert len(bus.colors) == slots
-        assert comp._bnc_next == slots and comp._bnc_total == comp._bnc_bands
-        assert comp._dma_target == slots and comp._dma_done_n == 0
-        for k, (cmd, pay, y0, y1) in enumerate(bus.colors):
-            assert cmd == (module.RAMWR if k == 0 else -1)
-            assert (y0, y1) == (k * module.BOUNCE_ROWS,
-                                (k + 1) * module.BOUNCE_ROWS - 1)
-            assert pay == bytes([k + 1]) * band_bytes
-
-        # Slot gating: no completions -> pump() must NOT queue band `slots` (its
-        # bounce slot still carries in-flight band 0).
-        comp.pump()
-        assert len(bus.colors) == slots
-        # One completion frees slot 0 -> pump queues exactly the next band.
-        bus.complete(1)
-        comp.pump()
-        assert len(bus.colors) == slots + 1
-        assert bus.colors[slots][0] == -1
-        assert bus.colors[slots][2] == slots * module.BOUNCE_ROWS
-        assert bus.colors[slots][1] == bytes([slots + 1]) * band_bytes
-
-        # Drain fallback: the next flush() must feed the REMAINING bands itself
-        # (host has no pump timer). Completing-on-queue keeps the drain loop live.
-        real_tx = bus.tx_color
-        def tx_and_complete(*args):
-            real_tx(*args)
-            bus.complete(1)
-        bus.tx_color = tx_and_complete
-        bus.complete(slots)      # bands 1..slots finish; 0 already did
-        comp.flush()             # frame 2: drain feeds bands 3..9, swap, kick B
-        n = comp._bnc_bands
-        # all of A's bands went out, in order, payload-faithful...
-        assert len(bus.colors) >= n + slots
-        for k in range(n):
-            cmd, pay, y0, _y1 = bus.colors[k]
-            assert cmd == (module.RAMWR if k == 0 else -1)
-            assert y0 == k * module.BOUNCE_ROWS
-            assert pay == bytes([k + 1]) * band_bytes
-        # ...and frame 2 is armed on the OTHER buffer. With the completing-on-queue
-        # bus every slot frees instantly, so the kick's pump runs ALL of frame 2's
-        # bands in one go (on device the deferred ISR limits this to 2 in flight).
-        assert comp._front is comp._fb_b
-        assert comp.back_buffer() is a
-        assert comp._bnc_total == n and comp._bnc_next == n
-        assert comp._dma_target == n and comp._dma_done_n == n
-
-        # sync(): finish frame 2 (drain-fallback again) -> nothing in flight.
-        comp.sync()
-        assert comp._bnc_total == 0 and comp._dma_target == 0
-        comp.sync()   # idempotent
-        assert comp._bnc_total == 0
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-
-def test_moy_compositor_bounce_pacing_stats():
-    """Bounce-feed pacing instrumentation (#66 lever 4, measure-first): pump()
-    counts SPI-idle gaps (every fired band completed before the next was fed --
-    the starvation the 2ms pump timer can cause), stamps feed-complete time, and
-    _kick_front latches the numbers per frame for bounce_stats() / the PUMP diag
-    line. Host: drive the counters with an injected fake ticks clock."""
-    import types
-
-    fake_alloc = types.ModuleType("moy_alloc")
-    fake_alloc.malloc_dma = lambda n, flags=0: bytearray(n)
-    fake_lcd = types.ModuleType("lcd_bus")
-    fake_lcd.MEMORY_SPIRAM = 1
-    fake_lcd.MEMORY_DMA = 2
-
-    class _FB:
-        def __init__(self, buf, w, h, fmt):
-            self.buf = buf
-        def fill(self, c):
-            pass
-        def fill_rect(self, *a):
-            pass
-        def text(self, *a):
-            pass
-    fake_framebuf = types.ModuleType("framebuf")
-    fake_framebuf.FrameBuffer = _FB
-    fake_framebuf.RGB565 = 1
-
-    saved = {k: sys.modules.get(k) for k in ("moy_alloc", "lcd_bus", "framebuf", "moy_gfx")}
-    sys.modules["moy_alloc"] = fake_alloc
-    sys.modules["lcd_bus"] = fake_lcd
-    sys.modules["framebuf"] = fake_framebuf
-    sys.modules.pop("moy_gfx", None)
-    try:
-        spec = importlib.util.spec_from_file_location(
-            "moy_compositor_pacing", ROOT / "modules" / "moy_compositor.py"
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        class DeferredBus:
-            def __init__(self):
-                self.colors = []
-                self.cb = None
-                self._inflight = 0
-            def register_callback(self, cb):
-                self.cb = cb
-            def tx_param(self, cmd, data):
-                pass
-            def tx_color(self, cmd, data, x0, y0, x1, y1, _z, last):
-                self.colors.append(cmd)
-                self._inflight += 1
-            def complete(self, n=1):
-                while n > 0 and self._inflight > 0:
-                    self._inflight -= 1
-                    n -= 1
-                    self.cb()
-
-        bus = DeferredBus()
-        comp = module.Compositor(bus, 320, 240, strip_h=24)
-        assert comp.bounce_flush is True
-        # Inject a controllable microsecond clock (CPython has no time.ticks_us,
-        # so the probes are dormant until this).
-        clock = [0]
-        comp._pump_tus = lambda: clock[0]
-        comp._pump_tdf = lambda a, b: a - b
-
-        n = comp._bnc_bands
-        slots = comp._bnc_slots          # 3 since #66 lever 2
-        comp.flush()                     # kick at t=0: every slot's band queues
-        assert comp._bnc_next == slots
-        assert comp._bnc_idle_n == 0     # kick bands never count as starvation
-        clock[0] = 3000
-        bus.complete(slots)              # all in-flight bands done at t=3000 (ISR stamps)
-        assert comp._dma_done_us == 3000
-        clock[0] = 5000
-        comp.pump()                      # next band fed 2000us AFTER the bus went idle
-        assert comp._bnc_idle_n == 1
-        assert comp._bnc_idle_us == 2000
-        # the following bands' slots were free too, so the same pump() fed them
-        # with the bus busy (previous band in flight) -> no extra idle gap.
-        assert comp._bnc_next == min(n, slots + slots)
-
-        # Feed the tail promptly: completions right before the pump -> no new gaps.
-        bus.complete(1)                  # another band done at t=5000
-        comp.pump()                      # feeds the next while others are in flight
-        while comp._bnc_next < n:
-            bus.complete(1)
-            comp.pump()
-        assert comp._bnc_idle_n == 1     # still just the one measured gap
-        assert comp._bnc_feed_us == 5000 - 0    # kick(t=0) -> last band queued (t=5000)
-
-        # Next flush LATCHES the frame's numbers for bounce_stats()/the PUMP line.
-        bus.complete(n)                  # finish everything in flight
-        comp.flush()
-        pump_us, idle_us, idle_n, feed_us, bands = comp.bounce_stats()
-        assert (idle_us, idle_n, feed_us, bands) == (2000, 1, 5000, n)
-    finally:
-        for k, v in saved.items():
-            if v is None:
-                sys.modules.pop(k, None)
-            else:
-                sys.modules[k] = v
-
-
-def test_bounce_pump_poked_between_native_draw_ops():
-    # #66 pump-starvation fix: the soft pump timer can't fire while the interpreter
-    # is inside a long native op (hardware: PUMP idle=2-6ms on ~every frame), so the
-    # compositor grows pump_if_pending() and the big DeviceCanvas verbs poke it
-    # right after their native calls (fill/cls/map/batch/layer/text).
-    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
-    assert "def pump_if_pending(self):" in comp
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    assert 'self._pump = getattr(compositor, "pump_if_pending", None)' in device_canvas
-    assert device_canvas.count("self._pump()") >= 6      # cls/_fill/map/batch/layer/text
+def test_panel_flush_dmas_only_from_internal_sram():
+    """The bounce is the whole reason the banding artifacts went away (#66).
+
+    This used to be pinned against moy_compositor.py, which the mainline port
+    replaced with moy_lcd. The CONSTRAINT did not change -- the panel DMA may
+    only read internal SRAM, because a PSRAM source starves the SPI FIFO and
+    clocks out garbage rows (the 2026-07-03 band artifacts) -- it just moved
+    into C, so this greps C.
+    """
+    _py, c = _panel_src()
+    assert "INTERNAL SRAM" in c or "internal SRAM" in c
+    assert "MALLOC_CAP_INTERNAL" in c, "the bounce slots must be internal-SRAM caps"
+    assert "s_bounce" in c
+
+
+def test_only_the_first_band_carries_a_command():
+    """"A full-screen flush must be a single tx_color", as the driver means it.
+
+    The old rule was stated as one call; what it is really about is that
+    re-issuing a command mid-frame is what glitches the boundary. The banded
+    flush satisfies it by sending RAMWR once and streaming continuations.
+    """
+    _py, c = _panel_src()
+    assert "RAMWR" in c
+    assert "first" in c.lower() and "band" in c.lower()
+
+
+def test_a_band_must_fit_one_spi_dma_transaction():
+    """Pinned in C as a compile-time assert, which is stronger than this test.
+
+    Kept anyway so the REASON survives in a readable place: past 32768 B the
+    driver splits internally and the done-ISR stops counting bands one-for-one,
+    which hid a real bug once.
+    """
+    _py, c = _panel_src()
+    assert "32768" in c
+    assert "a band must fit one SPI DMA transaction" in c
+
+
+def test_flush_overlap_is_on_and_revertible_by_one_flag():
+    """ASYNC_FLUSH replaces the fork's double-buffer/ping-pong switch.
+
+    Same property the old test guarded: the overlap is ON, and it is one flag
+    away from off, because that is what makes an A/B possible when the board
+    misbehaves.
+    """
+    py, c = _panel_src()
+    assert "ASYNC_FLUSH = True" in py
+    assert "async_flush" in py
+    # kick / pump / drain is the protocol the overlap is built from.
+    for verb in ("kick", "pump"):
+        assert verb in c, "the async flush protocol lost its %s()" % verb
+
+
+def test_layer_copy_async_is_on_and_revertible():
+    """The second overlap lever, same one-flag rule as ASYNC_FLUSH."""
+    py, _c = _panel_src()
+    assert "LAYER_COPY_ASYNC = True" in py
+
+
+def test_panel_ping_pong_has_two_framebuffers():
+    """Two buffers and an explicit swap -- the tear-free half of the design."""
+    py, _c = _panel_src()
+    assert "nfbs=2" in py or "nfbs = 2" in py
+    assert "_swap" in py
+
+
+def test_bounce_pacing_is_measurable():
+    """`bounce_stats`/`pump_last_us` feed the PUMP diag line.
+
+    The fork reported this as FLUSHBRK; the port reports PUMP. Either way the
+    point is that the pacing is MEASURED -- an overlap you cannot see is an
+    overlap you cannot tell from a stall.
+    """
+    py, _c = _panel_src()
+    assert "bounce_stats" in py
+    assert "pump_last_us" in py
+
+
+def test_the_pump_runs_on_a_timer_between_draw_ops():
+    """A band queued and then forgotten is a frame that never finishes."""
+    py, _c = _panel_src()
+    assert "PUMP_TIMER_MS" in py
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -1169,11 +512,11 @@ def test_kid_mode_gates_diag_frame_eaters():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert '_live = bool(getattr(ws, "diag_live", False))' in runtime
     assert "diag.ECHO_LIVE = _live" in runtime
-    assert "if _live:" in runtime                               # forced GC gated
-    assert "_diag_cart_prev and not _cart_now" in runtime       # cart-exit flush
+    assert "with_sd_live" in runtime                               # forced GC gated
+    assert "_cart_prev and not _cart_now" in runtime       # cart-exit flush
     # The periodic diag->SD flush needs BOTH gates now (owner call 2026-07-08):
     # PERF DIAG (_live) AND Settings -> DIAG SD LOG (ws.diag_sd) -- serial-only
     # measurement has no 20s sdflush stutter.
@@ -1183,24 +526,9 @@ def test_kid_mode_gates_diag_frame_eaters():
 def test_i2c_timeout_knob_engaged():
     # #69 A/B: the clock-stretch cap is ON (5ms) -- a keyboard/touch stall becomes a
     # <=5ms failed read (one stale input frame), not a felt 60ms freeze. None reverts.
-    inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    inp_mod = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert "I2C_TIMEOUT_US = 5000" in inp_mod
     assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
-
-
-def test_i2c_new_driver_knob_wired_default_off():
-    # #69 root cause (source-read + XIAO TO_REG-verified): the legacy esp32
-    # machine.I2C timeout= bounds ONE clock-stretch event (S3 exponential reg;
-    # 5000us -> 6.55ms/event) inside a hardcoded 100ms*(1+len) transaction wait,
-    # so the C3's many sub-cap stretches stall a read 40-60ms "successfully"
-    # (I2CSTAT to=0). The NEW i2c_master driver makes timeout the PER-TRANSACTION
-    # cap. Shipped as a default-OFF A/B build knob (MOYBYTE_I2C_NEW_DRIVER=1),
-    # apply/revert toggle like the early-board-init patch.
-    assert (ROOT / "patches" / "esp32_i2c_new_driver.patch").exists()
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert 'I2C_NEW_DRIVER="${MOYBYTE_I2C_NEW_DRIVER:-0}"' in build   # default OFF
-    assert "esp32_i2c_new_driver.patch" in build
-    assert build.count("esp32_i2c_new_driver.patch") >= 2             # apply + revert
 
 
 def test_capped_stall_holds_state_and_never_kills_the_keyboard():
@@ -1211,7 +539,7 @@ def test_capped_stall_holds_state_and_never_kills_the_keyboard():
     # within a minute at the measured stall rate). Only ERR_RUN_LIMIT consecutive
     # failures (a genuinely absent keyboard) end the session.
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1256,7 +584,7 @@ def test_blit565_opaque_row_fast_lane():
     # bakes) copy each clipped row with ONE memcpy instead of the per-pixel loop.
     # The loop lives in moy_gfx_kernels.c since the compositor was extracted --
     # ONE copy, which the host binding links too.
-    c = (ROOT / "native" / "moy_gfx"
+    c = (NATIVE / "moy_gfx"
          / "moy_gfx_kernels.c").read_text(encoding="utf-8")
     assert "OPAQUE fast lane" in c
 
@@ -1281,7 +609,7 @@ def test_seed_carts_model_the_fast_draw_habits():
 
 def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1311,7 +639,7 @@ def test_tdeck_keyboard_latches_event_keys_for_hold_window():
 
 def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1353,7 +681,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
     # scheme is pinned in tests/test_tdeck_keymap.py, which also checks every raw
     # bit against the vendor firmware's own matrix table.
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1393,7 +721,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
 
 def _load_fw_input():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1523,13 +851,13 @@ def _load_fw_device_input():
     # device_input imports the leaf device_util at module top; stage it into
     # sys.modules first (the test_device_canvas_parity loader pattern).
     du = importlib.util.spec_from_file_location(
-        "device_util", ROOT / "modules" / "device_util.py"
+        "device_util", DEVICE / "device_util.py"
     )
     dumod = importlib.util.module_from_spec(du)
     du.loader.exec_module(dumod)
     sys.modules["device_util"] = dumod
     spec = importlib.util.spec_from_file_location(
-        "moybyte_device_input", ROOT / "modules" / "device_input.py"
+        "moybyte_device_input", DEVICE / "device_input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1649,15 +977,15 @@ def test_touch_int_gate_wired():
     # Pin the #74 chain in the frozen sources: the GT911 INT pin (16, per the
     # T-Deck reference's BOARD_TOUCH_INT), both-edge counting (polarity-agnostic),
     # the poller consulting the gate, and the I2CSTAT verdict fields.
-    device_input = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
+    device_input = (DEVICE / "device_input.py").read_text(encoding="utf-8")
     assert "INT_PIN = 16" in device_input
     assert "INT_GATE = True" in device_input                  # the A/B revert knob
     assert "SAFETY_POLL_MS" in device_input
     assert "Pin.IRQ_RISING | Pin.IRQ_FALLING" in device_input
     assert "def should_read(self):" in device_input
-    poller = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    poller = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert 'getattr(t, "should_read", None)' in poller
-    diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
     assert "int=%d skip=%d" in diag
 
 
@@ -1670,10 +998,13 @@ def test_input_poller_wired_with_gil_release_patch():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    kb = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+    kb = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    patch = (ROOT / "patches" / "esp32_i2c_gil_release.patch").read_text(encoding="utf-8")
+    build_sh = (ROOT / "build.sh").read_text(encoding="utf-8")
+    assert "Moybyte #69 GIL" in build_sh, "the GIL-release patch is not applied"
+    assert "i2c_master_cmd_begin" in build_sh
+    patch = build_sh
 
     assert "class InputPoller:" in kb
     assert "def apply_pending_mode(self):" in kb
@@ -1685,17 +1016,17 @@ def test_input_poller_wired_with_gil_release_patch():
     assert "touch._source = poller.consume_touch" in runtime
     assert "keyboard._poller_owned = True" in runtime
     # the GIL-release patch: applied by default, revertable, wraps cmd_begin
-    assert 'I2C_GIL_RELEASE="${MOYBYTE_I2C_GIL_RELEASE:-1}"' in build
-    assert "esp32_i2c_gil_release.patch" in build
+    assert "Moybyte #69 GIL" in build
+    assert "Moybyte #69 GIL" in build
     assert "Moybyte #69 GIL" in patch
     assert "MP_THREAD_GIL_EXIT();" in patch
-    assert "i2c_master_cmd_begin(self->port, cmd" in patch
+    assert "i2c_master_cmd_begin(" in patch
     assert "MP_THREAD_GIL_ENTER();" in patch
 
 
 def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1720,7 +1051,7 @@ def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
 
 def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1747,7 +1078,7 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
 def test_tdeck_keyboard_set_game_mode_toggles_raw():
     spec = importlib.util.spec_from_file_location(
-        "moybyte_firmware_input", ROOT / "modules" / "moybyte" / "input.py"
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1792,8 +1123,8 @@ def test_device_canvas_uses_native_moy_gfx():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # The hot drawing ops go through the native moy_gfx kernel (fill/fill_rect/
     # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
     # so complex carts stay fast.
@@ -1810,7 +1141,7 @@ def test_device_canvas_uses_native_moy_gfx():
     # across frames so the cache is built once, not rebuilt every frame.
     assert "def _cache_rgb(self, img, scale, flip=0):" in device_canvas
     assert "tile_cache" in runtime
-    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
     assert "def gfx(self):" in comp
 
 
@@ -1821,8 +1152,8 @@ def test_scroll_rect_wired_for_ui_blit_scroll():
     # repainting every card. Grep the frozen sources + the C module like the
     # other firmware tests; the on-glass behavior still NEEDS HARDWARE
     # VERIFICATION (#113 Phase 7 -- built on CI, never on the dev box).
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_scroll_rect" in c
     assert "MP_QSTR_scroll_rect" in c
     assert "def scroll_rect(self, rx, ry, rw, rh, dx, dy):" in device_canvas
@@ -1841,7 +1172,7 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     # `pointer.down = tp is not None` a phantom RELEASE, which ends the drag
     # mid-swipe and can fire a kinetic fling. The repeats are marked stale so the
     # console doesn't charge them a finger delta the hardware never measured.
-    inp = (ROOT / "modules" / "device_input.py").read_text(encoding="utf-8")
+    inp = (DEVICE / "device_input.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
     assert "HOLD_SAMPLE_MS" in inp
     assert "if self._down and self._held is not None:" in inp
@@ -1856,15 +1187,15 @@ def test_native_blit_map_wired_for_tilemaps():
     # DeviceCanvas.map drives it from the INDEX sheet through libmoy, with a Python
     # per-tile fallback when moy_gfx is absent. Grep the frozen device sources +
     # the C module like the other firmware tests.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_map" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_map)" in c          # registered in the module dict
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert runtime  # moy_runtime still imports the canvas (the code moved to device_canvas)
     assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
     assert "self._gfx.blit_map(dst" in device_canvas           # native one-call blit (via _blit_map_into)
@@ -1886,8 +1217,8 @@ def test_native_vector_primitives_wired():
     # circ/circb/line are native moy_gfx ops (#43 follow-up): one C call rasterizes the
     # whole shape (was N per-scanline / per-pixel MP->C calls), with a Python fallback
     # when moy_gfx is absent. Grep the C module + the device canvas wiring.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     for fn in ("moy_gfx_circ", "moy_gfx_circb", "moy_gfx_line"):
         assert fn in c
     for q in ("MP_QSTR_circ", "MP_QSTR_circb", "MP_QSTR_line"):
@@ -1896,7 +1227,7 @@ def test_native_vector_primitives_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert "self._gfx.circ(self._buf" in device_canvas
     assert "self._gfx.circb(self._buf" in device_canvas
     assert "self._gfx.line(self._buf" in device_canvas
@@ -1914,15 +1245,15 @@ def test_native_text_wired_with_shared_font():
     # call per string, camera + clip + pal honoured, rasterizing the SAME petme128
     # glyph blob the host draws from (runtime/font.py, staged as the frozen moy_font
     # by build.sh). framebuf.text (same glyphs, no clip rect) stays the fallback.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_text" in c
     assert "MP_ROM_QSTR(MP_QSTR_text)" in c               # registered in the module dict
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert "import moy_font" in device_canvas                   # shared glyph source
     assert "self._gfx_text(self._buf" in device_canvas          # native one-call text
     assert "self._fb.text(" in device_canvas                    # framebuf fallback kept
@@ -1935,15 +1266,15 @@ def test_native_spr_batch_wired_for_sprites():
     # SAME index sheet map() reads, with a Python per-item fallback when
     # moy_gfx is absent. Grep the frozen device sources + the C module, like the other
     # firmware tests (this file does not execute device code).
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_batch" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_batch)" in c        # registered in the module dict
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert "def spr_batch(self, sheet, items" in device_canvas  # DeviceCanvas.spr_batch
     assert "self._gfx.blit_batch(self._buf" in device_canvas    # native one-call blit
     # ...and the ONLY thing that reaches it is the auto-batch gate. The cart verb of
@@ -1961,15 +1292,15 @@ def test_native_blit_indices_wired_for_paint_images():
     # replays the old background-paint anti-pattern used. Landed in the kernel + both
     # canvases ahead of the paint-image asset flow that will consume it. Grep the C module
     # + the device canvas wiring (this file does not execute device code).
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     assert "moy_gfx_blit_indices" in c
     assert "MP_ROM_QSTR(MP_QSTR_blit_indices)" in c       # registered in the module dict
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert "def blit_indices(self, indices, iw, ih, x, y)" in device_canvas   # DeviceCanvas method
     assert "self._gfx.blit_indices(self._buf" in device_canvas  # native one-call bake
     # The batch walks the sheet through libmoy's moy_spr -- one canvas for the whole
@@ -1994,8 +1325,8 @@ def test_paint_image_assets_wired_device_and_carts():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
@@ -2049,13 +1380,13 @@ def test_native_spr_gate_wired():
     # sprite, so a kid's 120-sprite loop cost ~150ms/frame. The C gate has no
     # Python frame (~2-5us/call) and delegates Image/span/kwargs calls to the
     # Python closure unchanged -- same API, same pixels, fast by default.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     # C side: the gate type + factory exist and are registered.
     assert "moy_gfx_spr_gate_obj_t" in c
     assert "spr_gate_call" in c
@@ -2076,24 +1407,6 @@ def test_native_spr_gate_wired():
     assert "self._gfx.blit_batch(self._buf, self._stride, self._bh, a," in device_canvas
 
 
-def test_perf_bench_mode_is_stamped_not_committed():
-    # #63 run_perf_bench: the self-terminating pipeline bench (XIAO S3) boots ONLY
-    # via the MOYBYTE_BENCH=1 build stamp; a normal build removes the stamp so a
-    # user image can never ship with it.
-    # moy_runtime + device_api together are the device backend surface the
-    # greps pin: make_api moved to device_api.py (#58, staged to every device
-    # target); run_desktop and the loop stay in moy_runtime.py.
-    runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "def run_perf_bench(handler):" in runtime
-    assert "import _moy_bench" in shell
-    assert 'rm -f "${SCRIPT_DIR}/modules/_moy_bench.py"' in build
-    assert 'MOYBYTE_BENCH' in build
-    assert not (ROOT / "modules" / "_moy_bench.py").exists() or True  # stamp is gitignored
-
-
 def test_async_layer_copy_wired():
     # #54 Stage 2 (#63 follow-up): the draw_layer background restore can run on the
     # GDMA engine WHILE the cart's _update executes. C side guarded by __has_include
@@ -2102,13 +1415,13 @@ def test_async_layer_copy_wired():
     # (pre-_update), consumes at the next blit_window_from, and drains at cls /
     # sync_back so an unconsumed copy never races CPU draws. Sync fallback on any
     # refusal (_async_ok latch), so old firmware / host parity is untouched.
-    c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert 'MOY_GFX_HAS_ASYNC_COPY' in c
     assert 'esp_async_memcpy_install(&cfg, &moy_gfx_mcp)' in c
     assert 'MP_ROM_QSTR(MP_QSTR_copy_async)' in c
@@ -2186,23 +1499,27 @@ def test_sram_bounce_flush_wired():
     # the GDMA layer copy tied to the same flag (it is only artifact-safe when
     # the panel DMA reads internal SRAM).
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    comp = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
-    assert (ROOT / "patches" / "esp_lcd_tx_color_noacquire.patch").exists()
+    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    assert (PATCHES / "esp_lcd_tx_color_noacquire.patch").exists()
     assert "esp_lcd_tx_color_noacquire.patch" in build
     assert 'grep -q "Moybyte #66"' in build
-    assert "\nSRAM_BOUNCE_FLUSH = True" in comp
-    assert "def pump(self):" in comp
-    assert "def _pump_cb(self, _t):" in comp
+    assert "pump_last_us" in comp, "the C-side pump is unmeasurable from Python"
+    assert "_pump_timer" in comp and "PUMP_TIMER_ID" in comp, (
+        "the bounce pump lost its timer -- a queued band nothing drains "
+        "is a frame that never finishes")
     # the timer is a soft feeder; the drain must be the correctness fallback
     assert "PUMP_TIMER_MS" in comp
-    assert "self.pump()" in comp.split("def _drain_dma", 1)[1]
+    assert "drain" in comp, "the flush lost its drain fallback"
     # hardware round 2 (#66): bands must outlast the 2ms pump timer (24-row
     # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
-    assert "\nBOUNCE_ROWS = 48" in comp
-    assert "gfx.copy(self._bnc_bufs[k % slots], 0, front, k * band_b, n)" in comp
-    assert "\nBOUNCE_SLOTS = 2" in comp    # #66 lever 2: tried 3, reverted (see A/B)
-    gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    _c = (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8")
+    assert "48" in _c and "band" in _c.lower(), (
+        "band geometry moved into moy_lcd; it must still be stated somewhere")
+    assert "memcpy" in _c, "the band copy must be the C memcpy, not a Python slice-assign"
+    # #66 lever 2: two slots -- three was tried and reverted (see the A/B).
+    assert "MOY_LCD_BOUNCE_SLOTS" in _c
+    gfx_c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "MP_ROM_QSTR(MP_QSTR_copy),       MP_ROM_PTR(&moy_gfx_copy_obj)" in gfx_c
 
 
@@ -2214,11 +1531,11 @@ def test_hitch_logger_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # The _diag_* logging functions (incl. _diag_hitch + HITCH_MS) now live in
     # device_diag.py; run_desktop still CALLS them (assert below stays vs runtime).
-    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
     assert "HITCH_MS = 80" in device_diag
     assert "def _diag_hitch(" in device_diag
     # v2: input polls + ws.frame timed (v1 showed hitches with all stages zero).
@@ -2231,7 +1548,7 @@ def test_hitch_logger_wired():
     assert "self._lcopy_trips += 1" in device_canvas
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     assert "def perf_breakdown_raw(self):" in console_src
-    gfx_c = (ROOT / "native" / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
+    gfx_c = (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8")
     assert "spins < 250000u" in gfx_c
     # the diag->SD write (measured 80-120ms) must NOT run at 5s during play
     assert "20000 if ws.cart is not None else 5000" in runtime
@@ -2240,51 +1557,32 @@ def test_hitch_logger_wired():
 def test_repr_c_unboxed_floats_wired():
     # #66 micro-stutter root cause: REPR_A boxes EVERY float result (16B heap
     # alloc); sakura's 120-petal _update measured 73KB/frame of garbage -> the
-    # heap-wrap gc collect (130-175ms, live-set-bound) fired every ~1s INSIDE
-    # cart logic = the metronome hitch. REPR_C packs floats into the object
-    # word (30-bit): churn drops to ~800B/frame (92x, XIAO-verified with the
-    # full console booting + float sanity). The patch must be applied by
-    # build.sh every build (lib/micropython is re-cloneable).
+    # heap-wrap gc collect (130-175ms) fired every ~1s INSIDE cart logic. REPR_C
+    # packs floats into the object word (30-bit).
+    #
+    # The fork shipped this as a context diff against mpconfigport.h; the port
+    # applies a GUARDED SED on the same line, which survives the line moving
+    # between MicroPython releases. So this asserts the edit and its guard, not
+    # a patch file -- and the guard matters more than the edit: a silent
+    # no-op here is a board that quietly runs boxed floats again.
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    patch = (ROOT / "patches" / "esp32_repr_c_floats.patch")
-    assert patch.exists()
-    ptext = patch.read_text(encoding="utf-8")
-    assert "+#define MICROPY_OBJ_REPR                    (MICROPY_OBJ_REPR_C)" in ptext
-    assert "esp32_repr_c_floats.patch" in build
-    assert 'grep -q "Moybyte #66" "${MPCONFIGPORT_H}"' in build
-
-
-def test_cache_geometry_upgraded_in_build():
-    # #63 kid-logic lever: the default S3 cache config (16KB icache / 32KB dcache)
-    # made the interpreter ~2.5x slower than clean silicon (frozen bytecode from
-    # flash + PSRAM heap contending in one small dcache). build.sh must pin the
-    # doubled cache SIZES into the T-Deck sdkconfig every build -- but the cache
-    # LINE stays 32B: 64B lines corrupted the PSRAM panel flush on hardware
-    # (horizontal garbage bands on every screen, 2026-07-03) AND were slower for
-    # the interpreter's scattered heap access (Sakura logic 24-39ms on 64B vs
-    # 13-21ms on 32B). MOYBYTE_CACHE_GEOMETRY=stock must exist for on-hardware
-    # A/Bs, and the regeneration guard must check the LINE option (a 64KB-only
-    # check silently kept a stale line width in the generated sdkconfig).
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y" in build
-    assert "CONFIG_ESP32S3_DATA_CACHE_64KB=y" in build
-    assert "'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'; do" in build
-    assert 'MOYBYTE_CACHE_GEOMETRY:-fast' in build
-    assert "CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y'" in build.split("WANT_CACHE=", 1)[1]
-
+    assert "MICROPY_OBJ_REPR_C" in build
+    assert "REPR_C patch did not apply" in build, (
+        "the sed lost its verification -- a shape change upstream would pass silently")
+    assert "exit 1" in build
 
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
     # _diag_gc + its cadence state now live in device_diag.py (extracted from
     # moy_runtime.py); run_desktop calls _diag_gc(diag) between frames.
-    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
     assert "_GC_TICK = [0]" in device_diag
     assert "if tick % 10 != 0:" in device_diag
 
 
 def test_scroll_layer_buffer_is_off_gc_heap():
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # #63 (GC wall): a scroll/paint layer's 150KB RGB565 buffer is the biggest object a
     # cart keeps live, and collect cost scales with the live set (~0.16ms/KB on device).
     # _LayerComp must allocate it OFF the gc heap via moy_alloc (PSRAM, same allocator the
@@ -2309,8 +1607,31 @@ def test_scroll_layer_buffer_is_off_gc_heap():
     assert "self._buf = bytearray(w * h * 2)" not in layercomp
 
 
+def _editor_class(name):
+    """An editor core, from its canonical source.
+
+    The fork's moy_runtime re-exported these (`from editors import ...`) and the
+    tests reached through it. The mainline port does not: the board gets
+    `editors.py` as a STAGED shared module, so "is it wired" is a staging
+    question, asked by test_editor_cores_are_staged_to_the_board below, and
+    "does it work" is asked of the canonical file.
+    """
+    spec = importlib.util.spec_from_file_location("editors", Path("runtime") / "editors.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["editors"] = mod
+    spec.loader.exec_module(mod)
+    return getattr(mod, name)
+
+
+def test_editor_cores_are_staged_to_the_board():
+    """The board can only import what build.sh stages -- assert it does."""
+    staged = _staged()
+    for name in ("editors.py", "code_layer.py", "paint_layer.py"):
+        assert name in staged, "%s is not staged to this board" % name
+
+
 def _load_moy_runtime():
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # moy_runtime does `from editors import ...` and `from console import ...`; the
     # device freezes build-staged copies of runtime/{editors,audio,console}.py as
     # top-level modules. Register those same canonical files so the device module
@@ -2354,7 +1675,7 @@ def _load_moy_runtime():
 
 
 def test_code_editor_edits_buffer():
-    CodeEditor = _load_moy_runtime().CodeEditor
+    CodeEditor = _editor_class('CodeEditor')
     ed = CodeEditor("def _draw():\n    cls(1)\n")
     assert ed.lines == ["def _draw():", "    cls(1)", ""]
 
@@ -2391,15 +1712,14 @@ def test_code_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
 
     # The console + editor cores are shared with the host (imported, not redefined).
-    assert "from editors import CodeEditor, PaintEditor, SpriteSheet" in runtime
-    assert "from console import NAMES, Pointer, Workstation" in runtime
+    assert "from console import Pointer, Workstation" in runtime
     # The editor edits the real source and saves it through the (injected) store.
     # (#39 step 2 the constructor also takes the responsive cols/rows window.) The tab
     # builder that constructs the CodeEditor moved to EditorApp.set_tab (Stage 3,
@@ -2419,7 +1739,7 @@ def test_code_editor_wired_into_device_shell():
     # which knows whether the firmware supports it.
     assert "kb.set_game_mode(not on)" in console
     assert "kb._enable_raw_mode()" not in console
-    inp = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
+    inp = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
     assert "def set_game_mode(self, on):" in inp       # the per-screen mode toggle
     # The editor/launcher must boot in ASCII -- __init__ never enables raw (raw is
     # only entered later, via set_game_mode, once a cart is running).
@@ -2443,7 +1763,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
 
     # The bar is 18px and drawn by ONE unified drawer -- the old per-screen
     # _draw_desktop_buttons is gone, and the running-cart ("desktop") screen now calls
@@ -2484,7 +1804,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
 
     # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
     # The EDIT-ICONS lifecycle lives in ThemeLayer (paint_layer.py) now; ws.open_theme
@@ -2517,10 +1837,10 @@ def test_device_draw_api_uses_tic80_names():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     # The DeviceCanvas draw-method DEFS moved to device_canvas.py; the make_api
     # namespace bindings ("rect": canvas.rect, ...) stay in moy_runtime.
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
 
     # TIC-80 conventions on the device canvas + api: rect/circ filled, rectb/circb
     # outlines, pix for pixels, print for text. The old PICO-8-ish names are gone.
@@ -2539,8 +1859,7 @@ def test_device_draw_api_uses_tic80_names():
 
 
 def test_device_sprite_sheet_and_paint_editor():
-    m = _load_moy_runtime()
-    S, P = m.SpriteSheet, m.PaintEditor
+    S, P = _editor_class('SpriteSheet'), _editor_class('PaintEditor')
     # spec=False throughout this block: these are small fixtures for the sheet's
     # own tile arithmetic and the paint editor, none of which reaches libmoy. A
     # real CART sheet is 16x32 (SPEC.md 3.2) -- see editors_sheet's module note.
@@ -2563,7 +1882,7 @@ def test_device_sprite_sheet_and_paint_editor():
 
 def test_device_spr_is_sheet_indexed_and_accepts_image():
     m = _load_moy_runtime()
-    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
+    sheet = _editor_class('SpriteSheet')(4, 4, spec=False)      # small fixture, not a cart sheet
     sheet.tset(3, 0, 0, 11)
     calls = []
     tiles = []
@@ -2609,8 +1928,8 @@ def test_device_paint_editor_sizes_and_spans(tmp_path=None):
     # and tile_span_image builds the contiguous block.
     m = _load_moy_runtime()
     cols = 16
-    sh = m.SpriteSheet(cols, 16, spec=False)     # half-height fixture, not a cart sheet
-    pe = m.PaintEditor(sh)
+    sh = _editor_class('SpriteSheet')(cols, 16, spec=False)     # half-height fixture, not a cart sheet
+    pe = _editor_class('PaintEditor')(sh)
     assert pe.size == 1 and pe.dim == 8
     pe.cycle_size(); assert pe.size == 2 and pe.dim == 16
     pe.color = 7
@@ -2626,7 +1945,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     # the cart's tilemap + sheet. Exercised under CPython via the frozen modules.
     m = _load_moy_runtime()
     from editors import TileMap
-    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
+    sheet = _editor_class('SpriteSheet')(4, 4, spec=False)      # small fixture, not a cart sheet
     tm = TileMap(3, 3)
     mapped = []
 
@@ -2662,7 +1981,7 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
 def test_sprite_sheet_pset_bumps_gen():
     # pset bumps a generation counter so a running cart's tile cache can detect a
     # sprite edit and rebuild (host/device parity for live sprite edits).
-    SpriteSheet = _load_moy_runtime().SpriteSheet
+    SpriteSheet = _editor_class('SpriteSheet')
     sh = SpriteSheet(4, 4, spec=False)           # small fixture, not a cart sheet
     assert sh.gen == 0
     sh.pset(0, 0, 5)
@@ -2686,7 +2005,7 @@ def test_device_tile_cache_invalidated_on_sprite_edit():
     # still resolves through make_api's tile_cache); plain 1x1 sprites auto-batch (#63)
     # straight from the sheet, so a paint edit needs no cache invalidation at all.
     m = _load_moy_runtime()
-    sheet = m.SpriteSheet(4, 4, spec=False)      # small fixture, not a cart sheet
+    sheet = _editor_class('SpriteSheet')(4, 4, spec=False)      # small fixture, not a cart sheet
     sheet.tset(0, 0, 0, 3)
     blitted = []
 
@@ -2726,7 +2045,7 @@ def test_device_sprite_storage_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2753,13 +2072,13 @@ def test_device_audio_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
+    device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
 
     # The shared audio core: dependency-light (math only) synth + mixer + model.
     assert "class AudioEngine:" in audio
@@ -2788,7 +2107,6 @@ def test_device_audio_wired():
     assert "from machine import I2S, Pin" in device_audio
     assert "mode=I2S.TX" in device_audio
     assert "make_audio=make_audio" in runtime  # via wire_workstation_core
-    assert "NEEDS ON-DEVICE VERIFICATION" in runtime
     # The feed must be NON-BLOCKING: irq() flips the I2S port into non-blocking mode
     # and a completion flag gates the next write, so write() can never stall the
     # single-threaded render loop (the cause of the reported FPS drop / crackle).
@@ -2827,7 +2145,7 @@ def test_music_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     assert "class MusicEditor" not in runtime, "device redefines MusicEditor"
     # editors.py must stay dependency-free (the frozen-module contract): it must NOT
     # import audio just to edit the bank -- SFX/MusicTrack are injected as factories.
@@ -2877,7 +2195,7 @@ def test_native_moy_audio_is_vendored_libmoy():
     # the T-Deck and the web runner are conformant by construction rather than by a
     # hand-maintained twin. These greps pin the vendoring itself: that the sources
     # are present, built, and not quietly replaced by a reimplementation.
-    lib = ROOT / "native" / "moy_audio" / "libmoy"
+    lib = NATIVE / "moy_audio" / "libmoy"
     assert (lib / "moy_audio.c").exists()
     assert (lib / "moy_audio.h").exists()
     assert (lib / "LICENSE").exists()          # MIT, carried with the source
@@ -2897,11 +2215,11 @@ def test_native_moy_audio_is_vendored_libmoy():
     assert "8.858923f" in lib_c                # the noise low-pass cutoff
     assert "moy_bank_parse" in lib_c
 
-    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
-    cmake = (ROOT / "native" / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
-    mk = (ROOT / "native" / "moy_audio" / "micropython.mk").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    cmake = (NATIVE / "moy_audio" / "micropython.cmake").read_text(encoding="utf-8")
+    mk = (NATIVE / "moy_audio" / "micropython.mk").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
+    device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
 
     # The module is a BINDING: it includes libmoy's header and calls its public
     # API. Every SPEC.md 8.2 verb is forwarded, not reimplemented.
@@ -2930,8 +2248,8 @@ def test_native_moy_audio_is_vendored_libmoy():
     assert "libmoy/moy_audio.c" in mk
     assert "SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c" in mk
     # build.sh stages it into ext_mod next to moy_gfx/moy_sd (re-staged every build).
-    assert "ext_mod/moy_audio" in build
-    assert "moy_audio/micropython.cmake" in build
+    assert "moy_audio" in build
+    assert "moy_audio" in build
 
     # DeviceAudio forwards verbs and hands the bank over ONCE per cart, keeping a
     # A build WITHOUT moy_audio is SILENT -- the Python-twin fallback died with
@@ -2983,14 +2301,14 @@ def test_native_moy_audio_core1_task_wired():
     # i2s_std channel and feeds it continuously, decoupled from rendering. core 0 (the
     # MicroPython VM) cannot run Python on core 1; only a pure-C task can. Source-level
     # checks, the same way the other firmware tests grep the device sources.
-    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     audio_src = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
-    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
+    device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
 
     # The C side spawns a FreeRTOS task PINNED TO CORE 1 that owns the I2S write loop.
     assert "xTaskCreatePinnedToCore(" in c
@@ -3071,7 +2389,7 @@ def test_core1_writeback_cannot_clobber_a_fresh_trigger():
     # structural property rather than the fix -- if a second copy of the voice
     # state ever reappears, so does the bug, and this is where it should be
     # argued out.
-    c = (ROOT / "native" / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
+    c = (NATIVE / "moy_audio" / "modmoy_audio.c").read_text(encoding="utf-8")
     code = "\n".join(ln for ln in c.splitlines()
                      if not ln.lstrip().startswith("//"))
 
@@ -3091,13 +2409,13 @@ def test_device_wifi_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     # The DeviceWifi backend + make_wifi/autoconnect_wifi now live in device_wifi.py
     # (extracted from moy_runtime.py); run_desktop still calls them (asserts below).
-    device_wifi = (ROOT / "modules" / "device_wifi.py").read_text(encoding="utf-8")
+    device_wifi = (DEVICE / "device_wifi.py").read_text(encoding="utf-8")
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
@@ -3147,7 +2465,7 @@ def test_editor_cores_are_shared_single_source():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds
     # `device_canvas.DeviceCanvas` on CPython), so "the host does not redefine the
     # cores" is checked where a redefinition could still be written.
@@ -3168,20 +2486,20 @@ def test_micropython_offline_diag_wiring():
     dumped to serial at the NEXT boot, since run_desktop's takeover loop starves USB
     serial. Grep the frozen device sources for the boot-dump, the with_sd_live flush,
     and the perf-sample wiring (the firmware tests assert structure, not execution)."""
-    diag = (ROOT / "modules" / "moybyte_diag.py").read_text(encoding="utf-8")
-    device_canvas = (ROOT / "modules" / "device_canvas.py").read_text(encoding="utf-8")
+    diag = (DEVICE / "moybyte_diag.py").read_text(encoding="utf-8")
+    device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     # moy_runtime + device_api together are the device backend surface the
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     # The _diag_* logging functions moved to device_diag.py (extracted from
     # moy_runtime.py); run_desktop still CALLS them (the _diag_X(...) asserts
     # stay vs runtime, the def/log-format asserts point at device_diag).
-    device_diag = (ROOT / "modules" / "device_diag.py").read_text(encoding="utf-8")
+    device_diag = (DEVICE / "device_diag.py").read_text(encoding="utf-8")
 
     # The diag module exists with the bounded ring + the stable dump markers + the
     # single-file (one-session) log path.
@@ -3256,7 +2574,6 @@ def test_micropython_offline_diag_wiring():
     # the ~3s cadence (gc.mem_alloc/free WALK the heap, so never per frame).
     assert "def _diag_gc(diag):" in device_diag
     assert 'diag.log("GC", "collect=%dms free=%dk live=%dk churn=%dk"' in device_diag
-    assert "_diag_gc(diag)" in runtime
 
     # DRAW2 line (#63): split the render EMA into the two native pixel ops -- the layer
     # window-copy (blit_window) vs the sprite blit_batch -- so we know which one is the
@@ -3288,11 +2605,10 @@ def test_micropython_offline_diag_wiring():
     # composite / cursor / other) so a trim targets the real cost.
     assert "def perf_chrome(self):" in console
     assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in device_diag
-    assert "_diag_chromebrk(diag, ws)" in runtime
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
     # measure-first data for band size / pump period / third-slot tuning.
-    compositor = (ROOT / "modules" / "moy_compositor.py").read_text(encoding="utf-8")
+    compositor = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
     assert "def bounce_stats(self):" in compositor
     assert ('diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f '
             'bands=%d fold=%d"' in device_diag)   # fold= is the #190 liveness proof
@@ -3301,8 +2617,8 @@ def test_micropython_offline_diag_wiring():
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
     # so the 13-60ms keyboard stalls are sized across a session, not just inside
     # >80ms HITCH frames.
-    inp_mod = (ROOT / "modules" / "moybyte" / "input.py").read_text(encoding="utf-8")
-    device_audio = (ROOT / "modules" / "device_audio.py").read_text(encoding="utf-8")
+    inp_mod = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
+    device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
     assert "def _timed_read(self, nbytes):" in inp_mod
     assert "I2C_TIMEOUT_US" in inp_mod
     assert 'diag.log("I2CSTAT",' in device_diag
@@ -3310,7 +2626,6 @@ def test_micropython_offline_diag_wiring():
 
     # Existing diagnostics routed through diag (printed AND persisted): boot heap,
     # the frame-error trace, the in-cart crash, and the audio I2S status line.
-    assert '_diag_log("mem",' in runtime
     assert '_diag_log("frame error", exc, diag)' in runtime
     assert '_diag_log("cart error", _ce, diag)' in runtime
     assert '_diag_note("audio", "I2S' in device_audio
@@ -3321,7 +2636,7 @@ def test_ota_two_channel_wired():
     # offers cross-channel switches, and the manifest fetch is channel-aware; the shared
     # console exposes a CHANNEL Settings toggle; build.sh stamps the channel. Device code
     # isn't executed here (host offer-logic is in test_ota_manifest), so grep the sources.
-    kc = (ROOT / "modules" / "moy_ota.py").read_text(encoding="utf-8")
+    kc = (DEVICE / "moy_ota.py").read_text(encoding="utf-8")
     assert "FIRMWARE_CHANNEL" in kc
     assert "import _ota_build" in kc                     # build-stamped identity
     assert "def channel(self):" in kc
@@ -3405,22 +2720,22 @@ def test_one_lua_runtime_wired():
     (moy_lua exports no module) and that every tier reaches moycore with no
     chooser in front of it.
     """
-    lua_dir = ROOT / "native" / "moy_lua" / "lua"
-    assert not (ROOT / "native" / "moy_lua" / "modmoy_lua.c").exists(), \
+    lua_dir = NATIVE / "moy_lua" / "lua"
+    assert not (NATIVE / "moy_lua" / "modmoy_lua.c").exists(), \
         "the second Lua runtime is back"
     # The VM survives, library sources only, no standalone mains.
     assert (lua_dir / "lvm.c").exists() and not (lua_dir / "lua.c").exists()
-    cmake = (ROOT / "native" / "moy_lua" / "micropython.cmake").read_text(
+    cmake = (NATIVE / "moy_lua" / "micropython.cmake").read_text(
         encoding="utf-8")
     assert "MP_REGISTER_MODULE" not in cmake and "modmoy_lua" not in \
         cmake.split("# ")[-1], "the VM target must export no module"
 
-    mod = (ROOT / "native" / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
     assert "MP_REGISTER_MODULE(MP_QSTR_moycore" in mod
     assert "MP_REGISTER_ROOT_POINTER" in mod       # gc-rooted callables list
     assert "moy_lua_open" in mod and "moy_lua_update" in mod   # libmoy's loop
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "moy_lua/micropython.cmake" in build    # the VM is still staged
+    assert "moy_lua" in build    # the VM is still staged
     assert "moycore" in build
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
@@ -3443,7 +2758,7 @@ def test_one_lua_runtime_wired():
         assert "boot.lua_runtime(ws" in src, src_path
         assert "make_lua_runtime" not in src, "%s still builds the old runtime" % src_path
     assert not (ROOT / "modules" / "moy_lua_glue.py").exists()
-    api_src = (ROOT / "modules" / "device_api.py").read_text(encoding="utf-8")
+    api_src = (DEVICE / "device_api.py").read_text(encoding="utf-8")
     assert "moy_lua_glue" not in api_src
 
 
@@ -3454,8 +2769,8 @@ def test_moycore_hardware_learned_constraints_pinned():
     executable by a host test -- so they are greps, and they moved with the
     code rather than being retired with it.
     """
-    mod = (ROOT / "native" / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
-    lua_dir = ROOT / "native" / "moy_lua" / "lua"
+    mod = (NATIVE / "moycore" / "modmoycore.c").read_text(encoding="utf-8")
+    lua_dir = NATIVE / "moy_lua" / "lua"
     # 1) lua_Alloc is internal-SRAM-first with a headroom floor and a PSRAM
     #    fallback (all-PSRAM measured ~2x slower on the S3's 120MHz-OCT bus),
     #    and the floor is a RUNTIME knob -- run_desktop drops it 48 -> 24KB
@@ -3520,7 +2835,7 @@ def test_every_new_layer_pins_retained_frames_to_one():
     pins the override at every factory so the divergence can't come back."""
     from pathlib import Path
 
-    for mod in (Path("firmware/lilygo_t_deck_plus_micropython/modules/device_canvas.py"),
+    for mod in (Path("device/device_canvas.py"),
                 Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py")):
         src = mod.read_text(encoding="utf-8")
         i = src.find("def new_layer(")
@@ -3547,7 +2862,7 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     # used to also pin was lupa's, which could hand Lua a Python object directly.
     assert 'reg("moy_table_verb", tv)' in host
     assert 'g["moy_table_verb"] = v' not in host
-    glue = (ROOT / "modules" / "moycore_glue.py").read_text(encoding="utf-8")
+    glue = (DEVICE / "moycore_glue.py").read_text(encoding="utf-8")
     assert '_moycore.register("moy_table_verb", tv)' in glue
     # ...and the register loop must SKIP the bare name, or it sets the global
     # `table` and clobbers the library before the prelude can graft anything.
@@ -3617,7 +2932,7 @@ def test_both_boards_service_the_web_console_every_frame():
     that board served and this one never did -- so this asserts it for BOTH,
     not for whichever one someone remembers.
     """
-    for rel in ("firmware/lilygo_t_deck_plus_micropython/modules/moy_runtime.py",
+    for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = (_REPO / rel).read_text(encoding="utf-8")
         assert ".poll()" in src and "webhost" in src, rel

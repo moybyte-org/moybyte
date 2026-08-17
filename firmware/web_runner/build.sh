@@ -141,7 +141,7 @@ PYEOF
   USERMODS_DIR="${BUILD_DIR}/usermods"
   rm -rf "${USERMODS_DIR}"
   mkdir -p "${USERMODS_DIR}"
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_lua" \
+  cp -r "${REPO_ROOT}/native/moy_lua" \
         "${USERMODS_DIR}/moy_lua"
   cp "${SCRIPT_DIR}/moy_lua_micropython.mk" "${USERMODS_DIR}/moy_lua/micropython.mk"
 
@@ -150,7 +150,7 @@ PYEOF
   # implementation rather than a twin of it. Same source of truth as the T-Deck,
   # and unlike moy_lua it ships its OWN micropython.mk, so there is no fragment
   # for this script to supply.
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_audio" \
+  cp -r "${REPO_ROOT}/native/moy_audio" \
         "${USERMODS_DIR}/moy_audio"
 
   # moy_gfx usermod (moycore stage 4): the RASTER. The browser stopped being the
@@ -165,7 +165,7 @@ PYEOF
   # as-is -- no runner-specific fragment, unlike moy_lua. The one clang
   # accommodation it needs is a warning suppression that has to outrank the
   # port's -Wall, so it lives in the Makefile patch above, not here.
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_gfx" \
+  cp -r "${REPO_ROOT}/native/moy_gfx" \
         "${USERMODS_DIR}/moy_gfx"
 
   # moycore usermod (stage 2/3): the cart's WHOLE frame in C. The browser was
@@ -182,7 +182,7 @@ PYEOF
   # 5.4. Both are staged directly above, so the sibling layout the boards get
   # from ext_mod/ holds here too. The board allocator it prefers is
   # __has_include-guarded on esp_heap_caps.h and compiles down to realloc.
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moycore" \
+  cp -r "${REPO_ROOT}/native/moycore" \
         "${USERMODS_DIR}/moycore"
 
 fi
@@ -225,7 +225,7 @@ cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
 #     that works and what stays board-only.
 #   device_util   -- ticks helpers device_canvas imports
 for f in moycore_glue.py device_canvas.py device_util.py; do
-  cp "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/modules/${f}" \
+  cp "${REPO_ROOT}/device/${f}" \
      "${STAGE_DIR}/modules/${f}"
 done
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
