@@ -1689,13 +1689,15 @@ def _load_moy_runtime():
         sys.modules[name] = mod
 
     # moy_runtime now also does `from device_util import ...` / `from device_wifi
-    # import ...` -- device-only modules authored directly in modules/ (NOT staged
-    # from runtime/). Register them from modules/ so the device module execs under
-    # CPython (device_util first: device_wifi imports it).
+    # import ...` -- device-only modules authored in the shared device/ tree at
+    # the repo root (staged into modules/ at build; the staged copies are
+    # gitignored, so a fresh checkout has none). Register them from device/ so
+    # the device module execs under CPython (device_util first: device_wifi
+    # imports it).
     for dname in ("device_util", "device_wifi", "device_input", "device_diag",
                   "device_audio", "device_canvas", "device_api"):
         ds = importlib.util.spec_from_file_location(
-            dname, ROOT / "modules" / (dname + ".py"))
+            dname, DEVICE / (dname + ".py"))
         dmod = importlib.util.module_from_spec(ds)
         ds.loader.exec_module(dmod)
         sys.modules[dname] = dmod

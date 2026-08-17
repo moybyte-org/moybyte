@@ -63,7 +63,6 @@ from unix_mp import require_unix_mp
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 DT = 0.03125          # 1/32: binary-exact, so LUA_32BITS floats carry it whole
 FRAMES = 24
@@ -276,12 +275,14 @@ end
 # test (plain .replace -- the driver body is full of literal % operators).
 DRIVER = r'''
 import sys
-# MODULES first, then STAGE on top of it -- so the files this test stages fresh
-# from runtime/ WIN over whatever a previous build left in modules/. The other
-# order shipped, and it meant the suite silently ran yesterday's staged copy of
-# lua_ext/input/moy_font: a change to runtime/ could be green here and different
-# on a board, which is the one thing this file exists to rule out.
-sys.path.insert(0, @MODULES@)
+# The SOURCE trees, not a board's staged modules/ dir (gitignored build
+# output: absent on a fresh checkout, stale on a warm one -- and running
+# yesterday's staged copy is the one thing this file exists to rule out).
+# RUNTIME carries the shared console files (editors_sheet/widgets), DEVICE the
+# device tier on top of it, and STAGE outranks both with the files the build
+# stages under their frozen names (lua_ext/input/moy_font/moy_image/moy_fs).
+sys.path.insert(0, @RUNTIME@)
+sys.path.insert(0, @DEVICE@)
 sys.path.insert(0, @STAGE@)
 import hashlib
 
@@ -487,7 +488,7 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     # BOARDS' one, because this harness models a device build. Staging the
     # host's (which is what it used to do) meant the one suite that drives real
     # input through the real glue was testing the wrong tier's input class.
-    shutil.copy(TDECK / "modules" / "moybyte" / "input.py", stage / "input.py")
+    shutil.copy(ROOT / "device" / "moybyte" / "input.py", stage / "input.py")
     # Same reasoning as the input class above: device_canvas takes Image from
     # moy_image now (ONE definition, shared with the host canvas), and the real
     # build stages it -- with its moy_fs leaf -- out of runtime/ into modules/.
@@ -496,7 +497,8 @@ def test_semantic_trace_lua_vs_python(tmp_path):
     script = tmp_path / "driver.py"
     body = DRIVER
     for token, value in (("@STAGE@", str(stage)),
-                         ("@MODULES@", str(TDECK / "modules")),
+                         ("@DEVICE@", str(ROOT / "device")),
+                         ("@RUNTIME@", str(ROOT / "runtime")),
                          ("@DT@", DT), ("@FRAMES@", FRAMES),
                          ("@HELD@", HELD),
                          ("@PY_CART@", PY_CART), ("@LUA_CART@", LUA_CART)):

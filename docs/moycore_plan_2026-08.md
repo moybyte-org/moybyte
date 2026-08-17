@@ -749,7 +749,7 @@ dual-usermod binary. `tests/test_moycore_loop.py` pins it: a cart loads,
 comes back as `sfx(3)` in the queue and a held button as `sfx(5, 2)`, pmem
 lands at 41+4 dirty, and a raising `_update` returns `bad:1: boom` — text
 with the line number, which is what crash-to-code needs.
-`modules/moycore_glue.py` is the Python half (snapshot refresh, queue drain
+`device/moycore_glue.py` is the Python half (snapshot refresh, queue drain
 through the SAME `make_api` closures so sfx semantics stay in one place,
 pmem write-back, a `supports()` source scan that routes superset carts to
 `LuaCartRun`). **What is NOT done: nothing calls it.** `Player` still takes

@@ -22,15 +22,21 @@ from pathlib import Path
 from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
+# The shared device tier at the repo root -- the board's modules/ dir only
+# holds gitignored build-staged copies, absent on a fresh checkout (which is
+# also why pointing here can never pick up a stale staged file).
+DEVICE = ROOT / "device"
 
 DRIVER = r'''
 import sys
-# STAGE must outrank MODULES: modules/ is gitignored and never cleaned, so it
-# still holds whatever a previous build staged there -- and this suite would
-# then test that stale copy instead of the runtime/ source it just staged.
-# (test_semantic_traces already orders them this way; this one did not, and it
-# is what made a fresh Image in runtime/moy_image.py invisible here.)
+# The SOURCE trees, not a board's staged modules/ dir (gitignored build output:
+# absent on a fresh checkout, stale on a warm one). RUNTIME is there for the
+# flat frozen names device_util reaches for (ticks); DEVICE carries the device
+# tier on top of it; STAGE outranks both with the files the build stages under
+# DIFFERENT names (moy_font/moy_image/moy_fs) -- staged fresh from runtime/,
+# which is what keeps this suite testing the source rather than whatever a
+# previous build left behind.
+sys.path.insert(0, @RUNTIME@)
 sys.path.insert(0, @MODULES@)
 sys.path.insert(0, @STAGE@)
 
@@ -133,7 +139,8 @@ def test_gate_pal_table_matches_full_rebuild(tmp_path):
     shutil.copy(ROOT / "runtime" / "moy_fs.py", stage / "moy_fs.py")
     src = (DRIVER
            .replace("@STAGE@", repr(str(stage)))
-           .replace("@MODULES@", repr(str(TDECK / "modules"))))
+           .replace("@MODULES@", repr(str(DEVICE)))
+           .replace("@RUNTIME@", repr(str(ROOT / "runtime"))))
     script = tmp_path / "driver.py"
     script.write_text(src)
     out = subprocess.run([exe, str(script)],

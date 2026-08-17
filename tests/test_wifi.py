@@ -286,8 +286,9 @@ def test_wifi_manager_cart_password_entry_for_locked_net(tmp_path):
 def _device_wifi_class():
     """The device DeviceWifi loaded under CPython (like the make_api test)."""
     import importlib.util
-    fw = (ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
-          / "device_wifi.py")
+    # The shared device tier at the repo root -- the board's modules/ dir only
+    # holds gitignored build-staged copies, absent on a fresh checkout.
+    fw = ROOT / "device" / "device_wifi.py"
     for name in ("device_util",):
         if name not in sys.modules:
             s = importlib.util.spec_from_file_location(

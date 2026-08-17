@@ -31,8 +31,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from p4_autotest import P4Board            # noqa: E402
-import p4_conformance as PC                 # noqa: E402
+# The board-facing imports (p4_autotest -> pyserial, the `device` extra that
+# `make setup` deliberately does not install) live in main(), not here: the
+# pmem-layout helpers below are imported by tests/test_bench_pmem_report.py,
+# which must collect on a runner with no serial stack at all.
 
 
 # PMEM REPORT LAYOUT v1 -- the carts' side of this is the comment block in
@@ -200,6 +202,9 @@ def main(argv=None):
             after = json.load(f)
         diff(before, after)
         return 0
+
+    from p4_autotest import P4Board
+    import p4_conformance as PC
 
     log = print if a.verbose else (lambda *x: None)
     board = P4Board(a.port, log=(lambda s: log("  | " + s[:120])),

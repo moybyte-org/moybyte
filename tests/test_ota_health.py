@@ -30,10 +30,13 @@ sys.path.insert(0, str(ROOT))
 
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
+# moy_ota lives in the shared device tier at the repo root (the boards' modules/
+# dirs only hold gitignored build-staged copies -- absent on a fresh checkout).
+DEVICE = ROOT / "device"
 
 
 def _load_moy_ota():
-    spec = importlib.util.spec_from_file_location("moy_ota_health", TDECK / "moy_ota.py")
+    spec = importlib.util.spec_from_file_location("moy_ota_health", DEVICE / "moy_ota.py")
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m

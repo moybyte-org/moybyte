@@ -31,13 +31,14 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 VENDOR_KBD = (ROOT / "firmware" / "lilygo_t_deck_plus_reference" / "examples"
               / "Keyboard_ESP32C3" / "Keyboard_ESP32C3.ino")
 
 
 def _input_module():
-    path = TDECK / "modules" / "moybyte" / "input.py"
+    # The shared device tier at the repo root -- the board's modules/ dir only
+    # holds gitignored build-staged copies, absent on a fresh checkout.
+    path = ROOT / "device" / "moybyte" / "input.py"
     spec = importlib.util.spec_from_file_location("_tdeck_input_for_test", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

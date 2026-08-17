@@ -44,7 +44,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
+# The shared device tier at the repo root -- the boards' modules/ dirs only
+# hold gitignored build-staged copies, absent on a fresh checkout.
+DEVICE = ROOT / "device"
 
 # Where `make unix-micropython` puts the desktop MicroPython with the native
 # usermods compiled in. One candidate -- the hand-built fork-tree fallback that
@@ -462,7 +464,7 @@ def test_the_binding_is_available_when_a_compiler_is():
 # Reading the CALL SITES rather than a hand-kept list is the whole point: a verb
 # added to device_canvas and forgotten here fails on the day it is added.
 
-_CANVAS = TDECK / "modules" / "device_canvas.py"
+_CANVAS = DEVICE / "device_canvas.py"
 
 # `getattr(gfx, "name", ...)` / `getattr(self._gfx, "name", ...)` -- probed, so
 # the canvas has a fallback and the binding need not carry it.
@@ -642,7 +644,7 @@ def test_matches_the_native_moy_gfx(tmp_path):
     why `make unix-micropython` exists to produce the binary it needs.
     """
     exe = _require_unix_mp()
-    src_body = DRIVER.replace("@MODULES@", repr(str(TDECK / "modules")))
+    src_body = DRIVER.replace("@MODULES@", repr(str(DEVICE)))
     src_body = src_body.replace("@ARENA_ROWS@", str(ARENA_ROWS))
     src_body = src_body.replace("@FIXTURES@", FIXTURES.strip())
     src_body = src_body.replace("@OPS@", OPS.strip())
