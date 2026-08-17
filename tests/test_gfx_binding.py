@@ -47,15 +47,12 @@ ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 # Where `make unix-micropython` puts the desktop MicroPython with the native
-# usermods compiled in. The second candidate is the hand-built tree the recipe
-# in native/moycore/README.md produces, kept so a machine that already has one
-# does not rebuild; `MOYBYTE_MICROPYTHON` overrides both (the same variable
-# experiments/audio_parity/audio_parity.py reads).
+# usermods compiled in. One candidate -- the hand-built fork-tree fallback that
+# used to sit beside it died with the fork (2026-08-17); `MOYBYTE_MICROPYTHON`
+# overrides (the same variable experiments/audio_parity/audio_parity.py reads).
 UNIX_MP_CANDIDATES = (
     ROOT / ".build" / "unix_micropython" / "micropython" / "ports" / "unix"
     / "build-moybyte" / "micropython",
-    TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-    / "ports" / "unix" / "build-moyluagfx" / "micropython",
 )
 
 from runtime import gfx_binding as g                             # noqa: E402

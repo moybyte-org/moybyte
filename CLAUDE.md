@@ -161,11 +161,16 @@ things not to undo in that op script: its framebuffer is a `memoryview` into a
 larger **patterned** arena (without it a capacity guard that fails to clamp
 writes past the end on BOTH sides and reads as agreement), and its clamp ops aim
 ONE pixel past each edge, because a mutant that clamps at `max_rows + 1`
-survives any large overhang. Five other suites still point at their own
-hand-built binaries and skip the same way (`test_flush_fold`,
-`test_gate_pal_sync`, `test_semantic_traces`, `test_moycore_loop`,
-`test_audio_parity`'s native case) — all five pass against this one binary and
-want the same candidate-path line; do NOT instead symlink into
+survives any large overhang. Every suite that drives the real native modules
+resolves the binary through ONE shared lookup, `tests/unix_mp.py`
+(`require_unix_mp`, probing the binary for the modules the suite needs;
+`MOYBYTE_MICROPYTHON` overrides) — `test_gate_pal_sync`, `test_semantic_traces`,
+`test_moycore_loop`, `test_audio_parity`'s native case and `test_gfx_binding`
+all ride it, none carries its own path, and absence WARNS locally / FAILS under
+`CI`/`MOYBYTE_REQUIRE_UNIX_MP` instead of silently skipping. (This line used to
+say five suites "still point at their own hand-built binaries" for days after
+the unification landed — the 2026-08-17 sweep verified all five run, 19 passed
+0 skipped.) Do NOT symlink into
 `firmware/lilygo_t_deck_plus_mainline/.build/micropython/`, which `build.sh` git-clones into.
 
 ### Audio is VENDORED from moy-spec, not implemented here (#97)

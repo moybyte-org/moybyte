@@ -18,6 +18,7 @@ ints. Run:
     .venv/bin/python experiments/state_verb_cost/bench.py
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -26,8 +27,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
-UNIX_MP = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix" / "build-moyluagfx" / "micropython")
+# `make unix-micropython` builds this (the fork tree this once pointed at was
+# deleted 2026-08-17); MOYBYTE_MICROPYTHON overrides, as everywhere else.
+UNIX_MP = Path(os.environ.get("MOYBYTE_MICROPYTHON")
+               or (ROOT / ".build" / "unix_micropython" / "micropython"
+                   / "ports" / "unix" / "build-moybyte" / "micropython"))
 
 DRIVER = r'''
 import sys

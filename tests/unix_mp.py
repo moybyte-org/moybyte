@@ -40,7 +40,6 @@ import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 
 # What `make unix-micropython` builds: mainline MicroPython's unix port with
 # every native module that ships a Makefile fragment (moy_gfx, moy_lua, moycore,
@@ -51,21 +50,10 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 CANONICAL = (ROOT / ".build" / "unix_micropython" / "micropython" / "ports"
              / "unix" / "build-moybyte" / "micropython")
 
-# The hand-built trees that predate the target, one per suite that needed one.
-# Kept as fallbacks so a machine that already has them does not have to rebuild
-# -- they are only ever USED when they satisfy the probe. Nothing creates them
-# any more, and nothing should: cloning into that lvgl_micropython directory is
-# how build.sh sets up the T-Deck firmware build, so a stray tree there is a
-# firmware build that fails on a fresh machine.
-_LEGACY = (TDECK / ".build" / "lvgl_micropython" / "lib" / "micropython"
-           / "ports" / "unix")
-
-CANDIDATES = (
-    CANONICAL,
-    _LEGACY / "build-moyluagfx" / "micropython",
-    _LEGACY / "build-moycore" / "micropython",
-    _LEGACY / "build-moyaudio" / "micropython",
-)
+# One candidate. The hand-built legacy trees that used to be listed here lived
+# under the fork's .build/lvgl_micropython/, which was deleted with the fork
+# (2026-08-17) -- nothing creates them and the paths can no longer exist.
+CANDIDATES = (CANONICAL,)
 
 _PROBED = {}
 
