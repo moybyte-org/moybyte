@@ -149,11 +149,18 @@ def test_the_baked_bytes_come_back_byte_for_byte(tmp_path):
     assert stamp.startswith("%d %d " % (count, len(expect)))
 
 
-def test_an_image_with_no_bundle_still_compiles_and_reports_nothing(tmp_path):
+def test_an_image_with_no_bundle_still_compiles_and_reports_nothing(
+        tmp_path, monkeypatch):
     """A firmware built with no web bundle available must still LINK -- the
     module exists and says it has nothing, so moy_webhost falls through to its
     404. An ImportError in the middle of a request is the other design, and it
-    fails at the worst moment."""
+    fails at the worst moment.
+
+    This is the LOCAL path, so the levers that flip it strict are cleared: a
+    real CI runner exports CI=true, which would turn this into a second copy of
+    the require tests below and fail exactly there."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
     empty = tmp_path / "empty"
     empty.mkdir()
     rc, gen_c = _generate(tmp_path, empty)
@@ -197,9 +204,12 @@ def test_the_env_switch_is_the_same_lever(tmp_path, monkeypatch):
     assert _generate(tmp_path, empty)[0] == 0
 
 
-def test_a_missing_bundle_is_never_quiet(tmp_path, capsys):
+def test_a_missing_bundle_is_never_quiet(tmp_path, capsys, monkeypatch):
     """The worst outcome of the three is a silent skip that produces a board
-    with no console."""
+    with no console. (Local warn path -- see the no-bundle test above for why
+    the strict levers are cleared.)"""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("MOYBYTE_REQUIRE_WEB_BUNDLE", raising=False)
     empty = tmp_path / "empty"
     empty.mkdir()
     _generate(tmp_path, empty)
