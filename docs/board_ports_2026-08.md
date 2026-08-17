@@ -1,0 +1,127 @@
+# Board ports: the N-board architecture (2026-08)
+
+The standing direction doc for adding boards, written the week the fork died
+and the two-board build system collapsed into one strategy (#161 closed
+2026-08-17). It exists because the next two boards are named and the cost
+curve #161 predicted ("the cost curve is in the number of boards") is about to
+be walked: **a port today costs ~400 lines of copied frame loop plus
+hand-written Makefile/CI plumbing**, and that is the remaining bill after
+everything data-driven already landed.
+
+Status lives in the tracker issue (see below), not here. What IS here: the
+lineup, the measured per-board bill, the phases, and the declines.
+
+## The lineup, and why
+
+| board | class | why |
+|---|---|---|
+| **Guition JC1060P470-class (P4 + C6)** | desktop tier | the COST path: ~$33–37 vs the Waveshare 7B's ~$80 (bom_pricing_2026-07: the $100 retail floor "needs the Guition board as the electronics core"). Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + 1024×600 DSI touch — so this is a **variant port**, and its job is to prove variants are cheap. The 2026-06 evaluation (#12) was closed by buying the Waveshare instead; the reason to want the Guition (price) never went away. |
+| **Guition JC3248W535 (S3)** | handheld tier | a ~$15-class 3.5" 320×480 S3 smart display. Same chip as the T-Deck, but a **new port class** on every other axis: QSPI panel (AXS15231B — not `moy_lcd`'s ST7789-over-SPI), touch on the same chip (no keyboard, no trackball), portrait 320×480. Its job is to prove the contracts, not the copies. |
+
+A working hardware definition for the JC3248W535 already exists at
+`~/Documents/Work/esphome/JC3248W535.yaml` (ESPHome, on the physical board):
+QSPI clk GPIO47 / data [21, 48, 40, 39] / cs 45 @ 40MHz, AXS15231 touch on
+I2C sda 4 / scl 8 (calibrated: swap_xy + mirror_y in landscape), backlight
+PWM GPIO1, battery ADC GPIO5, 16MB flash DIO, octal PSRAM @ 80MHz. Treat its
+pins as verified and its *tuning* as untested here — it runs a 64B cache line,
+and this repo's T-Deck learned on glass that 64B lines break the CPU↔GDMA
+handoff in OUR flush path (sdkconfig.board's cache note). Per-board verdicts
+don't transfer; A/B it.
+
+## What a port costs today (measured 2026-08-17)
+
+| piece | cost | state |
+|---|---|---|
+| `boards/<B>/` (sdkconfig, cmake, partitions) | per-chip facts + learned prose | irreducible, and good — this is where constraints live |
+| `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
+| `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
+| panel backend (native C) | 800+ lines | irreducible unless the panel repeats |
+| input drivers | GT911 already exists twice | Phase C |
+| **`modules/moy_runtime.py`** | **~300–460 lines: run_desktop + frame loop** | **Phase B — the big one** |
+| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | Phase B rides along |
+| Makefile targets | hand-written per board | Phase A |
+| CI legs + cache keys | hand-written per board | Phase A |
+| test tables (NATIVE/HOST_ONLY/WIRING…) | one row per board | deliberate tripwires — keep |
+| on-glass suite | cheap since the shared DevChannel | every board gets one at stage 6 |
+
+## The phases
+
+**Phase A — plumbing as data.** `[flash]`/`[monitor]` sections in `board.toml`
+(chip, image offset, baud, otadata offset/size, flash mode), Makefile pattern
+rules over the board list, CI matrix legs + cache keys derived from the same
+list. Both Guitions flash like their siblings (S3 at 0x0 DIO, P4 at 0x2000),
+so this pays twice on arrival. Safe, mechanical, testable
+(`tests/test_board_toml.py` grows the same both-halves checks the staging got).
+
+**Phase B — the frame-loop spine.** Extract the loop's INVARIANT ORDER into
+shared code (a `FrameLoop` beside `device_boot`'s `FramePump`): begin → input
+sources → dev channel → idle tick (after EVERY input source — the wake-swallow
+rule) → pointer → present hooks → `ws.frame` → tail → pace. Boards supply
+`poll_input()` / `present()` / `tail()` hooks and keep their hardware.
+
+This REVISITS a #161 decline, deliberately. "The frame loop's middle, where
+the hardware genuinely differs" was true when written; the 2026-08-17
+dev-channel + IdleBlank unification then deleted a third of both middles, and
+what remains per-board is an enumerable hook set. And the risk that made the
+decline right — no way to verify a migration on the T-Deck — is gone: both
+boards carry on-glass suites now, and they are the migration gate (**both
+suites green on flashed hardware, or the extraction reverts**). The order
+itself is the payload: #56 (SD-before-display), the idle-after-inputs rule and
+present-before-sync_back are all order bugs, and order that lives in one
+shared file is order a new board cannot re-discover on glass. PURR's F13 —
+quoted in #161 — is the same lesson from a 12-board OS.
+
+Without Phase B the Guition P4's `moy_runtime.py` is a ~95% copy of the
+Waveshare's 460 lines — a twin factory opened the same month the last twins
+were closed.
+
+**Phase C — drivers promoted on demand, never ahead of a second consumer.**
+The rule: a driver moves from a board tree to the shared `device/` (Python) or
+`native/` (C) the day a SECOND board carries the hardware, parameterized by
+`board.toml` data — and not one day earlier.
+  * **GT911**: the second consumer likely arrives with the Guition P4 (to
+    confirm at bring-up). `device/device_input.py`'s core + `p4_input.py`'s
+    calibration become one driver with per-board (addr, addrsize, flips, size).
+  * **AXS15231 touch**: lands directly as a shared `device/` driver — it is
+    new code, so it starts in the right place.
+  * **The QSPI panel**: `moy_lcd`'s VALUE is not the ST7789 init table — it is
+    the band/bounce/kick-pump-drain machinery and the hard-won DMA rules
+    compiled into it. Whether the AXS15231B backend shares that C core
+    (parameterized io layer + init table) or stands alone is a bring-up
+    decision to make ON HARDWARE, not in this doc. Both esp_lcd and the
+    component registry carry AXS15231B references; start there.
+
+**Phase D — the port checklist**, in this doc once the first Guition lands: the
+six-stage bring-up the T-Deck mainline port proved (panel, touch, keyboard/
+input, storage, audio, console — each stage a self-terminating smoke, each a
+flashable bisect point), now with board.toml written at stage 2 and the
+on-glass suite as stage 6's exit criterion. A checklist, not a generator —
+three data points before any codegen.
+
+## What the Guition S3 specifically stresses (and the P4 doesn't)
+
+* **Input without a keyboard.** `moybyte/input.py` is the T-Deck keyboard
+  matrix + InputState fused; a touch-only board needs the InputState core
+  separable from the keyboard driver. Do this split AS the port needs it.
+* **A third system resolution on the fullscreen tier.** 320×480 portrait:
+  system UI responsive at native res (#39 — closed, the machinery exists), the
+  game a fixed 320×240 composited at 1:1 width. First fullscreen-tier board
+  where system canvas ≠ game canvas — the seam the P4 runs windowed, run
+  fullscreen. Expect `wm.composite_game` and the #39 layouts to carry it;
+  pin it with the board's on-glass suite.
+* **Backlight as PWM** (GPIO1) — `set_backlight` grows a duty, or stays
+  binary; owner call at bring-up.
+
+## Declined (recorded so it is not re-litigated)
+
+* **A driver registry / ABI / swappable UI backends** — PURR's own F14 is the
+  bill (17 backend-macro call sites, icons silently gone on three apps).
+  #161's verdict stands: take the board file, leave the ABI.
+* **Full sdkconfig codegen** — the option lists are data fed to the shared
+  guard; `sdkconfig.board` stays the store, with the learned prose beside each
+  value, exactly as the PURR board-file lesson wants.
+* **A board scaffold generator** — before three ports have walked the
+  checklist, a generator is a guess about what varies.
+* Everything here assumes ESP-IDF. `esp32_build_lib.sh` is IDF-specific by
+  name and on purpose; a non-Espressif board would be a second lib, and none
+  is planned.
