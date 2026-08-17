@@ -29,10 +29,14 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# The T-Deck build writes to a repo-root dist/ now (the board directory no
+# longer owns the shared trees), and moy_ota.py is part of the shared device
+# tier. Both moved when the fork was deleted.
 FW_DIR = REPO_ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
-DEFAULT_BIN = FW_DIR / "dist" / "moybyte_micropython_tdeck.bin"
-MOY_OTA = FW_DIR / "modules" / "moy_ota.py"
-OTA_BUILD_JSON = FW_DIR / "dist" / "current" / "ota_build.json"  # stamped by build.sh
+DIST_DIR = REPO_ROOT / "dist" / "tdeck_mainline"
+DEFAULT_BIN = DIST_DIR / "moybyte_tdeck.bin"
+MOY_OTA = REPO_ROOT / "device" / "moy_ota.py"
+OTA_BUILD_JSON = DIST_DIR / "ota_build.json"    # stamped by build.sh
 DEFAULT_PORT = 8000
 
 

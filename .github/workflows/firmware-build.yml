@@ -136,7 +136,7 @@ jobs:
             pip-${{ runner.os }}-
 
       # The BIG win: cache the per-board `.build` UPSTREAM CLONES (esp-idf +
-      # micropython + lvgl_micropython). They are PINNED in build.sh, so an
+      # micropython). They are PINNED in build.sh, so an
       # otherwise-fresh runner re-clones ~1.5 GB of esp-idf on every run -- and for
       # the T-Deck that late esp-idf fetch is exactly why the build had to run
       # twice (the #43 patch can't land until esp-idf exists). Keyed on build.sh so
@@ -156,7 +156,7 @@ jobs:
         with:
           path: |
             firmware/lilygo_t_deck_plus_mainline/.build
-            !firmware/lilygo_t_deck_plus_mainline/.build/lvgl_micropython/lib/micropython/ports/esp32/build-*
+            !firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/esp32/build-*
           key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_mainline/build.sh', 'patches/**') }}
 
       - name: Cache ESP32-P4 build tree (esp-idf + micropython clones)
@@ -197,7 +197,7 @@ jobs:
         if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
         run: |
           # A from-scratch .build fetches esp-idf DURING the first pass, so the
-          # #43 PSRAM-TX-DMA patch only lands on the second run -> build twice
+          # port's esp_lcd/IDF patches only land on the second run -> build twice
           # (ccache makes the second pass fast) so the shipped image is patched.
           # But when the `.build` cache above restored esp-idf, the patch lands on
           # the FIRST pass, so the second full build is unnecessary -- skip it.
@@ -237,7 +237,7 @@ jobs:
           # that board and fell back to the committed FIRMWARE_VERSION, so every
           # P4 on beta was offered the same install forever, which is the exact
           # failure the paragraph above exists to prevent.
-          cp firmware/lilygo_t_deck_plus_mainline/dist/current/ota_build.json out/ 2>/dev/null || true
+          cp dist/tdeck_mainline/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that

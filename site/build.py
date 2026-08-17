@@ -80,7 +80,7 @@ BOARDS = [
         "id": "tdeck",
         "label": "LilyGO T-Deck Plus",
         "chip": "ESP32-S3",                 # what esptool-js must report
-        "images": ("moybyte-current-full-dio-0x0.bin",),
+        "images": ("moybyte_tdeck.bin",),
         "offset": 0x0,
         "baud": 460800,
         "reset": "no_reset",                # the trackball hold below did it

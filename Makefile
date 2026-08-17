@@ -5,9 +5,9 @@ MONITOR_SECONDS ?= 12
 LOG ?= /tmp/moybyte_lilygo_serial.log
 IDF_PYTHON ?= $(HOME)/.espressif/python_env/idf5.5_py3.10_env/bin/python
 MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_mainline
-MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT
-MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-app.bin
-MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-full-dio-0x0.bin
+MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/micropython/ports/esp32/build-MOYBYTE_TDECK
+MPY_APP_BIN ?= dist/tdeck_mainline/moybyte_tdeck_app.bin
+MPY_FULL_BIN ?= dist/tdeck_mainline/moybyte_tdeck.bin
 # OTA (#53): the bootable app partition is ota_0. With the dual-OTA table it sits at
 # 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only cable flash
 # below writes here AND clears otadata (MPY_OTADATA_OFFSET) so the bootloader boots the
@@ -437,19 +437,11 @@ TDECK_MAINLINE_BIN ?= dist/tdeck_mainline/moybyte_tdeck.bin
 TDECK_MAINLINE_OTADATA_OFFSET ?= 0x1d000
 TDECK_MAINLINE_OTADATA_SIZE ?= 0x2000
 
-firmware-build-tdeck-mainline:
-	firmware/lilygo_t_deck_plus_mainline/build.sh
+firmware-build-tdeck-mainline: firmware-build-lilygo-micropython	## alias -- one T-Deck build since the fork went
 
-firmware-flash-tdeck-mainline:
-	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	@[ -z "$(TDECK_MAINLINE_OTADATA_OFFSET)" ] || $(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset erase_region $(TDECK_MAINLINE_OTADATA_OFFSET) $(TDECK_MAINLINE_OTADATA_SIZE)
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after hard_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(TDECK_MAINLINE_BIN)
+firmware-flash-tdeck-mainline: firmware-flash-lilygo-micropython-full	## alias -- the merged image at 0x0 is the port's cable flash
 
-firmware-monitor-tdeck-mainline:
-	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+firmware-monitor-tdeck-mainline: firmware-monitor-lilygo-micropython	## alias
 
 # MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
 # MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the

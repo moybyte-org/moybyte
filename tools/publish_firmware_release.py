@@ -18,7 +18,7 @@ That is deliberate -- the build workflow also runs per board -- and each image
 carries its own provenance beside it:
 
     firmware-latest/
-      tdeck-moybyte-current-full-dio-0x0.bin
+      tdeck-moybyte_tdeck.bin
       tdeck-source.json        <- commit, run, date for THAT image
       p4-moybyte_p4.bin
       p4-source.json
@@ -89,7 +89,7 @@ CHANNELS = {
 # moy_ota.default_manifest_url builds the same name from the board stamped into
 # the running image.
 OTA_IMAGES = {
-    "tdeck": "moybyte-current-app.bin",
+    "tdeck": "moybyte_tdeck_app.bin",
     "p4": "moybyte_p4_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
