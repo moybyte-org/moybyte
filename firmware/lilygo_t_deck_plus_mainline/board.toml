@@ -306,7 +306,7 @@ after a `[[modules.device.group]]` header belongs to that group's table, not to
 `[modules.device]`.)"""
 
 [[modules.device.group]]
-files = ["device_util.py", "device_canvas.py", "device_input.py"]
+files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]
 why = """
 STAGE 2 (touch). The drawing backend and the pointer drivers: `DeviceCanvas`
 (the RGB565 raster every tier now runs, palette resolved at draw time), the

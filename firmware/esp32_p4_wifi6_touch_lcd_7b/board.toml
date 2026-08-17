@@ -274,7 +274,8 @@ after a `[[modules.device.group]]` header belongs to that group's table, not to
 wrong and the stager reported as "no packages staged".)"""
 
 [[modules.device.group]]
-files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py"]
+files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py",
+         "gt911.py"]
 why = """
 The drawing backend and the cart namespace: DeviceCanvas (the raster every tier
 now runs, RGB565 with the palette resolved at draw time), `device_api` (the

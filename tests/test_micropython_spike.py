@@ -323,8 +323,12 @@ def test_micropython_touch_and_idle_cursor():
     device_input = (DEVICE / "device_input.py").read_text(encoding="utf-8")
 
     # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
+    # The register map lives in the shared gt911 core since #202 Phase C;
+    # device_input imports it (kept as class attrs for calibration tooling).
+    gt911_core = (DEVICE / "gt911.py").read_text(encoding="utf-8")
     assert "class Touch:" in device_input
-    assert "0x814E" in device_input and "0x8150" in device_input  # GT911 status/point regs
+    assert "0x814E" in gt911_core and "0x8150" in gt911_core
+    assert "REG_STATUS = gt911.REG_STATUS" in device_input
     assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
     assert "tp = touch.poll()" in runtime
@@ -1187,13 +1191,18 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     # `pointer.down = tp is not None` a phantom RELEASE, which ends the drag
     # mid-swipe and can fire a kinetic fling. The repeats are marked stale so the
     # console doesn't charge them a finger delta the hardware never measured.
+    # The hold/stale/bound contract is ONE copy in the shared gt911 core since
+    # #202 Phase C (both boards' drivers used to maintain it separately, and
+    # the P4's copy shipped without the guards for months); the driver must
+    # still ROUTE its no-news pass through it.
     inp = (DEVICE / "device_input.py").read_text(encoding="utf-8")
+    core = (DEVICE / "gt911.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "HOLD_SAMPLE_MS" in inp
-    assert "if self._down and self._held is not None:" in inp
-    assert "self.fresh = False" in inp
+    assert "HOLD_SAMPLE_MS" in core
+    assert "self.fresh = False" in core
     # A missed finger-up must never wedge the pointer down forever.
-    assert "self._down = False   # missed release" in inp
+    assert "missed release: never wedge the pointer" in core
+    assert "return self._hp.hold()" in inp
     assert "pointer.fresh = getattr(touch, \"fresh\", True)" in runtime
 
 

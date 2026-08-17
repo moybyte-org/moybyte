@@ -15,6 +15,10 @@ its synchronous fallback remain orchestration in run_desktop.
 Device-only module (authored in modules/, not staged from runtime/).
 """
 from device_util import _ticks_us, _ticks_ms, _ticks_diff, _diag_note
+try:                                    # device: staged flat namespace
+    import gt911
+except ImportError:                     # host tests
+    from device import gt911
 
 
 class TrackBall:
@@ -81,9 +85,13 @@ class Touch:
     off the SPI bus -- no display contention). poll() returns an absolute
     (x, y, tap) in canvas coords, where tap is True only on the press edge."""
 
-    ADDRS = (0x5D, 0x14)      # GT911 default / alternate I2C addresses
-    REG_STATUS = 0x814E       # touch status: bit7 ready, low nibble = point count
-    REG_POINT0 = 0x8150       # point 0: [track, xl, xh, yl, yh, sizel, ...]
+    # The register map + addresses are the shared gt911 core's (#202 Phase C);
+    # kept as class attributes so calibration tooling that reads them by name
+    # keeps working. This board's part lays the point out y(lo,hi) x(lo,hi) --
+    # see read_raw and the calibration byte dump.
+    ADDRS = gt911.ADDRS
+    REG_STATUS = gt911.REG_STATUS
+    REG_POINT0 = gt911.REG_POINT0
     # #74 INT gate: the GT911's INT line (BOARD_TOUCH_INT=16 in every T-Deck
     # reference example) pulses when the controller has a fresh report, so a
     # poll pass can skip the I2C transaction entirely when nothing happened --
@@ -95,14 +103,9 @@ class Touch:
     INT_PIN = 16
     INT_GATE = True
     SAFETY_POLL_MS = 250      # gated idle still reads at ~4Hz (miswire/missed-INT net)
-    # How long a held finger's last position stays valid without a fresh sample.
-    # #74 measured the GT911 clock-stretching 20-45ms on 75-90% of the reads made
-    # while a finger is DOWN, so at 30-60fps most frames carry no new sample even
-    # though the finger never left the glass -- poll() reports the held point for
-    # up to this long (see poll()). Long enough to ride out those stalls (and the
-    # rarer status-phase ones), short enough that a MISSED finger-up report frees
-    # the pointer in well under a second instead of wedging it down.
-    HOLD_SAMPLE_MS = 400
+    # The hold/stale/bound no-news contract is gt911.HeldPoint (#202 Phase C,
+    # one copy for every GT911 board); the #74 measurements behind its 400ms
+    # bound were made on THIS board and are recorded in its docstring.
 
     def __init__(self, w, h, i2c=None):
         self.w = w
@@ -110,13 +113,7 @@ class Touch:
         self.available = False
         self.addr = None
         self._i2c = i2c
-        self._down = False
-        # The last mapped point + when it landed: poll() re-reports it while the
-        # finger is down and no new sample has arrived, and flags those repeats
-        # via `fresh` so the console doesn't mistake them for a still finger.
-        self._held = None
-        self._held_ms = 0
-        self.fresh = True
+        self._hp = gt911.HeldPoint()
         # #69 input-poller hook: when set, poll() consumes staged raw samples from
         # the poller thread instead of reading I2C inline (InputPoller wires it).
         self._source = None
@@ -176,6 +173,12 @@ class Touch:
                     _diag_note("touch", "INT pin unavailable: %s" % (exc,))
         except Exception as exc:  # noqa: BLE001
             _diag_note("touch", "unavailable: %s" % (exc,))
+
+    @property
+    def fresh(self):
+        # Read by the frame loop after every poll (pointer.fresh) -- the
+        # HeldPoint owns it.
+        return self._hp.fresh
 
     def should_read(self):
         """#74: should this pass spend a GT911 I2C transaction? True on INT
@@ -321,35 +324,12 @@ class Touch:
         else:
             raw = self.read_raw() if self.should_read() else None
         if raw is False:            # only a confirmed "up" clears the press state
-            self._down = False
-            self._held = None
-            self.fresh = True       # a release IS news
-            return None
+            return self._hp.release()
         if raw is None:
-            # No new sample this pass -- but a finger that was down is still
-            # down, so report its last position instead of nothing. The caller
-            # reads "no sample" as "no finger" (pointer.down), and a phantom
-            # release mid-drag ENDS the gesture: ui.DragTap.frame runs drag_end
-            # (which can launch a kinetic fling all by itself, #113) and the
-            # rest of the swipe then moves nothing, because a resumed hold
-            # carries no new press edge to re-arm the drag. With #74's finger-
-            # down stall rate (75-90% of reads take 20-45ms) that happened on
-            # roughly every other frame -- the faster the console got, the worse
-            # the shelf scrolled. The P4's p4_input.Touch.poll holds the point
-            # for the same reason. `fresh` marks these repeats so the kinetic
-            # velocity isn't charged a delta the hardware never measured.
-            if self._down and self._held is not None:
-                if _ticks_diff(_ticks_ms(), self._held_ms) < self.HOLD_SAMPLE_MS:
-                    self.fresh = False
-                    return (self._held[0], self._held[1], False)
-                self._down = False   # missed release: never wedge the pointer down
-                self._held = None
-            self.fresh = True
-            return None
+            # No news this pass: the shared no-news contract (gt911.HeldPoint)
+            # holds the point, stale-marked and bounded. The #74 history that
+            # forged the contract on this board -- phantom releases ending
+            # every other drag frame -- lives in gt911's docstring.
+            return self._hp.hold()
         x, y = self._map(raw[0], raw[1])
-        tap = not self._down        # press edge -> single tap/click
-        self._down = True
-        self._held = (x, y)
-        self._held_ms = _ticks_ms()
-        self.fresh = True
-        return (x, y, tap)
+        return self._hp.sample(x, y)
