@@ -311,13 +311,42 @@ class FramePump:
         # Pacing debt (#77, 2026-08-10): ms the loop is BEHIND its cadence.
         # See pace() for what it buys.
         self.debt = 0
+        # Sleep-overshoot slack (#202, 2026-08-17): a learned estimate of how
+        # much longer time.sleep_ms actually sleeps than asked, subtracted
+        # from future sleeps. Measured on the P4: FREERTOS_HZ=100 (a 10ms
+        # tick, upstream MicroPython's own sdkconfig) makes every paced sleep
+        # overshoot by ~4.2ms -- and a MEMORYLESS pace() pays that every
+        # frame, which is exactly how a roster that runs 74fps uncapped
+        # paced itself down to 48. The slack is an integer EMA fed by begin()
+        # (the one place that owns the real clock), floored at 0 and capped
+        # small so a hitch stays debt's business; on a platform whose sleeps
+        # are exact it converges to 0 and changes nothing.
+        self.slack = 0
+        self._expected = 0      # what pace() scheduled the last frame to total
+        self._slept = False     # ...and whether it actually asked for a sleep
         self.last = _ticks_ms()
 
     def begin(self):
         """Top of the loop: `(now, dt)`, with dt clamped to 0..100ms so a hitch
-        (a 200ms GC, an SD write) can't teleport a cart's physics."""
+        (a 200ms GC, an SD write) can't teleport a cart's physics. Also the
+        slack learner: the real period of the frame that just ended, compared
+        against what pace() scheduled for it -- only on frames that SLEPT
+        (a no-sleep frame's overrun is debt's business), with the per-sample
+        error clamped so one GC pause cannot slam the estimate."""
         now = _ticks_ms()
-        dt = max(0.0, min(0.1, _ticks_diff(now, self.last) / 1000.0))
+        real = _ticks_diff(now, self.last)
+        if self._slept:
+            over = real - self._expected
+            # A saturating +-1ms/frame walker, not an integer EMA (whose
+            # floor-division stalls 1-3ms under the true overshoot): converges
+            # in a handful of frames and then dithers +-1ms around it, which
+            # at a 16ms budget is fps noise. Clamps keep a hitch from slamming
+            # it; debt owns real overruns.
+            if over > 0 and self.slack < 8:
+                self.slack += 1
+            elif over < 0 and self.slack > 0:
+                self.slack -= 1
+        dt = max(0.0, min(0.1, real / 1000.0))
         self.last = now
         return now, dt
 
@@ -370,7 +399,21 @@ class FramePump:
                 take = sleep if sleep < self.debt else self.debt
                 sleep -= take
                 self.debt -= take
+            cut = 0
+            if self.slack and sleep:            # #202: pre-pay the overshoot
+                cut = self.slack if self.slack < sleep else sleep
+                sleep -= cut
+            self._expected = fms                # the slot this frame should total
+            # A frame whose sleep the slack CUT (even to zero) stays learnable:
+            # if the cut was too deep the real period lands under the slot,
+            # over goes negative and the walker steps back down. Marking only
+            # sleep>0 frames froze the walker at its ceiling the moment it
+            # swallowed a whole sleep -- measured as the roster sailing PAST
+            # the cap (73fps under a 60 cap) with slack stuck at 8.
+            self._slept = sleep > 0 or cut > 0
             return sleep
+        self._expected = elapsed
+        self._slept = False
         self.debt += elapsed - fms
         if self.debt > 2 * fms:
             self.debt = 2 * fms                 # unpayable: just run flat out

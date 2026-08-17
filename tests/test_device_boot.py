@@ -771,3 +771,125 @@ def test_frameloop_gate_respects_a_deliberate_blank():
     lp = r.loop(set_backlight=lit.append, lit=False)
     lp.step()
     assert lit == [], "a blanked panel must not be re-lit by the boot gate"
+
+
+# -- FramePump slack: sleep-overshoot feedback (#202, 2026-08-17) -------------
+
+
+def test_pump_slack_converges_on_a_constant_sleep_overshoot(monkeypatch):
+    """The regression this pins, measured on the P4: FREERTOS_HZ=100 makes
+    every paced sleep overshoot ~4ms, and a MEMORYLESS pace() paid that every
+    frame -- a roster that ran 74fps uncapped paced itself to 48. The slack
+    walker learns the overshoot from begin()'s real periods and pre-pays it,
+    so the cadence converges back to the cap; on an exact-sleep platform it
+    stays 0 and nothing changes."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+
+    class WS:
+        def frame_cap_fps(self):
+            return 60
+
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump.last = clock[0]
+    ws = WS()
+
+    BUSY, OVER = 10, 4
+    periods = []
+    for _ in range(30):
+        t0 = clock[0]
+        pump.begin()
+        clock[0] += BUSY                       # the frame's work
+        sleep = pump.pace(ws, BUSY)
+        if sleep:
+            clock[0] += sleep + OVER           # the platform oversleeps
+        periods.append(clock[0] - t0)
+    # Converged: the last frames sit on the 16ms slot (+-1ms of walker
+    # dither), not the 20ms the overshoot dictated un-compensated.
+    tail = periods[-10:]
+    assert max(tail) <= 17 and min(tail) >= 15, tail
+    assert 3 <= pump.slack <= 5, pump.slack
+
+
+def test_pump_slack_stays_zero_on_exact_sleeps(monkeypatch):
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+
+    class WS:
+        def frame_cap_fps(self):
+            return 60
+
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump.last = clock[0]
+    ws = WS()
+    for _ in range(20):
+        pump.begin()
+        clock[0] += 10
+        sleep = pump.pace(ws, 10)
+        clock[0] += sleep                      # exact platform
+    assert pump.slack == 0
+    assert pump.debt == 0
+
+
+def test_pump_slack_never_charges_a_hitch(monkeypatch):
+    """A 200ms GC on a slept frame must not slam the walker -- the per-frame
+    step is +-1 and the cap is 8, so a hitch is one tick of slack and stays
+    debt's business."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+
+    class WS:
+        def frame_cap_fps(self):
+            return 60
+
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump.last = clock[0]
+    ws = WS()
+    pump.begin()
+    clock[0] += 10
+    sleep = pump.pace(ws, 10)
+    clock[0] += sleep + 200                    # a GC lands in the sleep
+    pump.begin()
+    assert pump.slack <= 1
+
+
+def test_pump_slack_recovers_after_swallowing_the_whole_sleep(monkeypatch):
+    """The stuck case, measured on glass: once slack >= the whole sleep, a
+    sleep-gated learner froze at its ceiling and the loop ran PAST the cap
+    (73fps under 60). A fully-cut sleep stays learnable, so the walker steps
+    back down and the cadence re-converges on the slot."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+
+    class WS:
+        def frame_cap_fps(self):
+            return 60
+
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    pump.last = clock[0]
+    pump.slack = 8                             # walker at its ceiling
+    ws = WS()
+    BUSY, OVER = 12, 2                         # true overshoot far below slack
+    periods = []
+    for _ in range(30):
+        t0 = clock[0]
+        pump.begin()
+        clock[0] += BUSY
+        sleep = pump.pace(ws, BUSY)
+        if sleep:
+            clock[0] += sleep + OVER
+        periods.append(clock[0] - t0)
+    tail = periods[-10:]
+    assert max(tail) <= 17 and min(tail) >= 15, (tail, pump.slack)
