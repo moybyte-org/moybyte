@@ -5,11 +5,7 @@ navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
 from runtime import host_app
 
 
-def _ws(tmp_path, **kw):
-    kw.setdefault("sys_size", (1024, 600))
-    kw.setdefault("font_scale", 2)
-    kw.setdefault("windowed", True)
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_desktop_ws as _ws
 
 
 def _drv(ws):

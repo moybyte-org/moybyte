@@ -11,11 +11,9 @@ Pins:
     the drag-partial streak (the retained ping-pong buffers are foreign).
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _ws(tmp_path):
@@ -26,15 +24,10 @@ def _ws(tmp_path):
     return ws
 
 
-def _drv(ws):
-    from runtime import host_app
-    return host_app.ConsoleDriver(ws)
+from ws_helpers import make_drv as _drv
 
 
-def _quiesce(ws):
-    ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+from ws_helpers import quiesce as _quiesce
 
 
 def _count_grid(ws):

@@ -5,23 +5,14 @@ is no lose-state -- wrong picks just mute the sound and start a short input
 cooldown. Mirrors the `_open_cart`/headless-run idiom in test_seed_carts.py.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    else:  # pragma: no cover - guards a typo in the title
-        raise AssertionError("seed cart not found: " + title)
-    ws.open()
+from ws_helpers import open_cart as _open_cart
 
 
 def _run(ws, frames, dt=1 / 30):

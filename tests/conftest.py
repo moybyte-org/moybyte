@@ -36,8 +36,16 @@ import sys
 
 import pytest
 
-_RUNTIME_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runtime")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ONE repo-root sys.path insert for the whole suite (2026-08-18). 83 test
+# files each carried the same four-line header for this; pytest imports
+# conftest before collecting any of them, so this is the only copy now. Test
+# files keep their OWN inserts only for EXTRA dirs some need (ROOT/"tools", a
+# board modules tree, an experiments dir).
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+_RUNTIME_DIR = os.path.join(_REPO_ROOT, "runtime")
 _SHARED = {
     f[:-3] for f in os.listdir(_RUNTIME_DIR)
     if f.endswith(".py") and f != "__init__.py"

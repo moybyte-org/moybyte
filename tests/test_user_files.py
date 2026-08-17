@@ -4,11 +4,9 @@ one-shot artwork.moyimg migration. Same shared runtime/moy_carts.py the device
 freezes."""
 
 import os
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import moy_carts  # noqa: E402
 

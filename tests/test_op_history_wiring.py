@@ -8,11 +8,9 @@ Workstation), so these assert host == device behavior. The boundary shipped is t
 CLEAN one: in-RAM op steps until exhausted, THEN whole-commit journal steps (a
 commit re-baselines the History, so the two never double-count a stroke)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _make_ws_with_cart(tmp_path, src="def _draw():\n    cls(1)\n", title="Ops"):

@@ -12,16 +12,12 @@ vertical slice:
 All driven through the same shared console the device runs (runtime.host_app),
 so these assert host==device behavior."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
-def _ws(tmp_path, **kwargs):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kwargs)
+from ws_helpers import build_ws as _ws
 
 
 def _home_layer(ws):

@@ -594,9 +594,7 @@ class _FakeHost:
         return "http://192.168.1.151:8080/"
 
 
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
 def _row_keys(ws):

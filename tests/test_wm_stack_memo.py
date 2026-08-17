@@ -12,11 +12,9 @@ and the accessors hand back the SAME list objects, and that a genuine change (na
 overlay gate / tab switch) DOES invalidate the memo.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app  # noqa: E402
 

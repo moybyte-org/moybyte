@@ -9,11 +9,9 @@ frame (scroll_rect by blit_shift's delta + repaint of only the exposed band)
 must be BYTE-IDENTICAL to a full repaint at the same offset, for k = 1, 2, 3.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 W, H = 64, 48
 

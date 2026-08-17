@@ -6,11 +6,9 @@ tracking fake as runtime.console's _moybuf: its alloc/take return REAL
 memoryviews (so the console's isinstance ownership checks fire) and its
 free() enforces exactly the single-owner rule the C registry enforces."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import moy_carts  # noqa: E402
 

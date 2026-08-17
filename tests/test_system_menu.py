@@ -8,23 +8,17 @@ ConsoleDriver: mouse == touch, arrows == trackball, Enter == run / A, Esc == sto
 so these assert host==device behavior. The Popup primitive is also unit-tested directly.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
-def _drv(ws):
-    from runtime import host_app
-    return host_app.ConsoleDriver(ws)
+from ws_helpers import make_drv as _drv
 
 
 def _center(rect):

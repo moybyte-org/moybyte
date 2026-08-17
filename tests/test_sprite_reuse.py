@@ -2,11 +2,9 @@
 the shared sprite sheet stored alongside the carts dir. These exercise the same
 shared `runtime/editors.py` + `runtime/moy_carts.py` the device freezes."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime.editors import SpriteSheet  # noqa: E402
 from runtime import moy_carts  # noqa: E402
@@ -161,13 +159,7 @@ def _tap(ws, rect):
     ws.pointer.click = False
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    raise AssertionError("cart not found: " + title)
+from ws_helpers import open_cart as _open_cart
 
 
 def test_put_then_get_moves_a_tile_between_carts_via_ui(tmp_path):

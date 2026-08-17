@@ -16,11 +16,9 @@ Two things follow, and both are tested here:
 
 All dt is injected, so every trajectory here is exact (the wall-clock rule)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 DT = 16.0        # injected ms per loop frame
 GAP = 3          # a fresh hardware sample every GAP-th frame (the device's rate)

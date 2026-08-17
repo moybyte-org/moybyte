@@ -9,11 +9,9 @@ editor) is out of scope here.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # A tiny two-scene payload used across the store + runtime tests.

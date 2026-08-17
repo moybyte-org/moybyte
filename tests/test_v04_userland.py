@@ -8,11 +8,9 @@ architectures. Its buffer is RGB565, so a pixel is two bytes and never a palette
 index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
 at the canvas's real pixel width."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import palette  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
@@ -25,19 +23,7 @@ import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" prob
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-def _open_cart(ws, title):
-    """Open a seeded system cart by title in the shared console. Games/tools/apps live in
-    the launcher run-grid; a WALLPAPER leaves it (spec shell_ux_v1.md) but stays a real
-    editable cart in the store, so fall back to opening it by reference (as ws.open() does)."""
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
-    assert cart is not None, "seed cart not found: " + title
-    ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+from ws_helpers import open_cart as _open_cart
 
 
 # -- palette ---------------------------------------------------------------

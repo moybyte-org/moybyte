@@ -5,11 +5,9 @@ PERF DIAG (vs 6 visible at fs=1), so even the host without an OTA updater scroll
 by one; the availability flags force the 10-row device case on top of that.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _ws(tmp_path):

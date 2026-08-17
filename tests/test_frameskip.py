@@ -4,11 +4,9 @@ Settings -> FRAMESKIP toggles + persists it; default OFF. The gate lives in
 Workstation.frame BEFORE the redraw gate; the logic-only tick is
 Player.tick(dt, render=False)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _open_game(ws, title="Star Catcher"):

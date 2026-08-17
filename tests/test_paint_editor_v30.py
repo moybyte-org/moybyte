@@ -8,11 +8,9 @@ the device loop calls), not by poking the editor directly. The editor/sheet logi
 lives in runtime.editors, shared with the frozen device modules.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _cell_center(C, lx, ly, dim):

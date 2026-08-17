@@ -12,7 +12,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
@@ -33,12 +32,7 @@ class _Stub:
         return lambda *a, **k: 0
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
+from ws_helpers import open_cart as _open_cart
 
 
 # -- the base key-set is identical; `wifi` is the only conditional name --------

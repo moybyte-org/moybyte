@@ -9,11 +9,9 @@ whole-file-rewriting _write_atomic.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _cart(tmp_path):

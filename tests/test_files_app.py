@@ -4,14 +4,13 @@ OPEN picker + autosave riding the same layer."""
 
 from pathlib import Path
 
-from runtime import host_app, moy_carts
+from runtime import moy_carts
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _ws(tmp_path, **kw):
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_ws as _ws
 
 
 def _open_app(ws, title):

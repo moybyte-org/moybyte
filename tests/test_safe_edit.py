@@ -6,11 +6,9 @@ These exercise the SOFTWARE hardening only; the underlying SD/SPI bus-sharing
 hang is a hardware-only concern (see CLAUDE.md "Hard device constraints") and is
 out of scope here."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # -- (a) atomic save_code roundtrip ----------------------------------------

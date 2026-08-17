@@ -10,11 +10,9 @@ These build the SAME shared console the device runs (runtime.host_app) and drive
 it through ConsoleDriver -- mouse == touch, arrows == trackball -- exactly like
 tests/test_v04_userland.py."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _ws_with_carts(tmp_path, n):

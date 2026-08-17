@@ -90,12 +90,16 @@ def test_publish_mode_stages_channel_dir(tmp_path):
 
 
 def _load_moy_ota():
-    import importlib.util
-    p = ROOT / "device" / "moy_ota.py"
-    spec = importlib.util.spec_from_file_location("moy_ota", p)
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    # A plain shared import (the conftest device finder resolves it), INSIDE a
+    # test so the autouse _no_local_build_stamp fixture is active when
+    # moy_ota's own `import _ota_build` runs -- at collection it is not, and
+    # test_moy_webserver puts a board modules dir on sys.path process-wide
+    # (the conftest "third door" note). These tests never mutate the module,
+    # so one shared instance replaces a fresh exec per call. (Suites that DO
+    # mutate module globals -- test_ota_signing's OTA_PUBLIC_KEYS,
+    # test_release_cut -- keep their fresh spec-loads.)
+    import moy_ota
+    return moy_ota
 
 
 def test_moy_ota_offer_logic_is_channel_aware():

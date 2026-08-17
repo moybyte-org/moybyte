@@ -6,11 +6,9 @@ backend-agnostic Achievements helper and the moy_carts achievements.json store -
 so these assert host==device behavior, not a host-only path.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
@@ -20,8 +18,7 @@ from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402
 
 
-def _ws(tmp_path):
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
 def _tap(drv, rect):

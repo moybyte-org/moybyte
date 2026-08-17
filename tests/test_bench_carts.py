@@ -4,13 +4,11 @@ including the 2026-08-04 verb-set extension (rectb/circb/tri/spr/sprb/map/
 sspr), which exercises the bundled sprites.moygfx sheet and the _init-mset
 tilemap. The Lua twin skips when lupa (the optional host runner) is absent."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _run_bench(tmp_path, title, frames):

@@ -27,7 +27,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 FW = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 SYSTEM_CARTS = ROOT / "system_carts"

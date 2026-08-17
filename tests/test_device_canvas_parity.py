@@ -62,7 +62,6 @@ import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import font as _host_font  # noqa: E402
 from runtime import gfx_binding  # noqa: E402

@@ -12,11 +12,9 @@ Two layers, mirroring test_paint_tools_v90.py:
     drag, tap-to-stamp paste, the COPY/CUT/PASTE action strip).
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # -- core: MapEditor region verbs -------------------------------------------

@@ -10,11 +10,9 @@ cannot simply be dropped.
 These compare the new path against the old one on a real Canvas.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import ui as _ui                     # noqa: E402
 from runtime.host_canvas import make_canvas as Canvas   # noqa: E402

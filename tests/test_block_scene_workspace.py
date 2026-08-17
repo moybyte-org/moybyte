@@ -12,11 +12,9 @@ scene pane persisting through the Blocks tab's commit path.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import block_editor_ui as BU        # noqa: E402
 from runtime import scene_editor_ui as SU        # noqa: E402

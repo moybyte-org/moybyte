@@ -8,11 +8,9 @@ ConsoleDriver (mouse == touch), so the tool buttons + keyboard undo run through 
 real pointer/input dispatch the device loop uses.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _pe(cols=16, rows=16):

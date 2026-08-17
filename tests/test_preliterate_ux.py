@@ -14,11 +14,9 @@ Kept in its own file (per the issue) so it never collides with the existing
 suites. Runs the same code path the device freezes (runtime/console.py).
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app  # noqa: E402  (registers the `editors` alias console needs)
 from runtime import console  # noqa: E402  (import after host_app for the alias)

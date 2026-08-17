@@ -23,12 +23,10 @@ kernel the device uses, so text reaches the browser as pixels and there is no
 encoding left to disagree about.
 """
 
-import sys
 import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import font as host_font  # noqa: E402
 

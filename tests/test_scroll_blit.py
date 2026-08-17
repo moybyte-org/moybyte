@@ -19,11 +19,9 @@ These build the SAME shared console the device runs (runtime.host_app) and
 drive it through ConsoleDriver, exactly like tests/test_launcher_scroll.py."""
 
 import random
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # -- Canvas.scroll_rect ------------------------------------------------------

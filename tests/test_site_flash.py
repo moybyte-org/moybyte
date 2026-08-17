@@ -191,7 +191,6 @@ def test_offsets_match_the_cable_flash():
     # The cable flash reads its facts from each board.toml [flash] section
     # (#202 Phase A) -- so compare the site's table against the DECLARATION,
     # which is stronger than the old Makefile regex ever was.
-    sys.path.insert(0, ROOT)
     from tools import board_config
     table = {b["id"]: b for b in build.BOARDS}
     dirs = {"tdeck": "firmware/lilygo_t_deck_plus_mainline",

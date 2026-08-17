@@ -55,13 +55,11 @@ the wrong reason.
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from unix_mp import require_unix_mp
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 DT = 0.03125          # 1/32: binary-exact, so LUA_32BITS floats carry it whole

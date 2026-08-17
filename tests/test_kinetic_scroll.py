@@ -9,11 +9,9 @@ Region-level tests drive ui.ScrollRegion/DragTap directly; console-level
 tests drive the real shared console through ConsoleDriver and prove the
 fling frames keep riding the #113 blit path with the redraw gate open."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 DT = 16.0        # injected ms per synthetic pointer frame
 

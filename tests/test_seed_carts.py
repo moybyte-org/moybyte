@@ -6,11 +6,9 @@ input contract (buttons + the touch() api). Kept in its own file so it doesn't
 collide with the existing test_v04_userland.py suite.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
@@ -19,19 +17,7 @@ SYSTEM_CARTS = ROOT / "system_carts"
 NEW_CARTS = ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red")
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    # Not in the launcher run-grid (a WALLPAPER leaves it, spec shell_ux_v1.md): still a
-    # real editable cart in the store, so open it by reference (as ws.open() does).
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
-    if cart is None:  # pragma: no cover - guards a typo in the title
-        raise AssertionError("seed cart not found: " + title)
-    ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+from ws_helpers import open_cart as _open_cart
 
 
 def _run(ws, frames, dt=1 / 30):

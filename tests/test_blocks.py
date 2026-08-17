@@ -5,11 +5,9 @@ cart; and every Scratch-style category has at least one compiled-and-runs case. 
 editor UI is exercised here (that's Part 2)."""
 
 import ast
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
 from runtime import moy_carts  # noqa: E402
@@ -26,52 +24,7 @@ def _program(vars_, scripts):
     return {"vars": list(vars_), "scripts": scripts}
 
 
-class _FakeAPI(dict):
-    """A cart namespace: the injected v0.4 API verbs as recording stubs, so a
-    compiled cart can exec + run _init/_update/_draw headlessly with no display.
-    Every draw/input/sound verb the catalog can emit is present here."""
-
-    def __init__(self):
-        super().__init__()
-        self.calls = []
-        # screen dims (carts read W/H like the real namespace)
-        self["W"] = 320
-        self["H"] = 240
-        for name in ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-                     "spr", "print", "sfx", "beep", "music"):
-            self[name] = self._rec(name)
-        from runtime import palette
-        self["col"] = palette.color        # faithful name/index -> 0-63 resolution
-        self["btn"] = lambda d=None: self._btn.get(d, False)
-        self["btnp"] = lambda d=None: self._btnp.get(d, False)
-        self["touch"] = lambda: self._touch
-        self["rnd"] = lambda n=1.0: 0.0       # deterministic for tests
-        self["flr"] = lambda x: int(x // 1)
-        self._btn = {}
-        self._btnp = {}
-        self._touch = None
-
-    def _rec(self, name):
-        def fn(*a, **k):
-            self.calls.append((name, a, k))
-        return fn
-
-
-def _run_cart(src, frames=1, fake=None):
-    """Compile-check, exec the cart source, run _init once and _update/_draw for
-    `frames`. Returns (namespace, fake_api). Raises on any error (the test asserts
-    it runs clean)."""
-    code = compile(src, "<cart>", "exec")     # (a) it parses
-    fake = fake or _FakeAPI()
-    exec(code, fake)                          # module-level defs + var inits
-    if fake.get("_init"):
-        fake["_init"]()
-    for _ in range(frames):
-        if fake.get("_update"):
-            fake["_update"](1 / 30)
-        if fake.get("_draw"):
-            fake["_draw"]()
-    return fake, fake
+from blocks_helpers import _FakeAPI, run_cart as _run_cart  # noqa: E402
 
 
 def _assert_micropython_safe(src):
@@ -160,7 +113,7 @@ def test_schema_roundtrips_through_blocks_json():
 def test_empty_program_compiles_to_runnable_cart():
     src = blocks.compile_blocks(blocks.empty_program())
     _assert_micropython_safe(src)
-    fake, _ = _run_cart(src, frames=2)
+    fake = _run_cart(src, frames=2)
     # all three lifecycle functions exist even when empty (bodies are `pass`)
     assert callable(fake["_init"]) and callable(fake["_draw"])
     assert fake["_update"].__code__.co_argcount == 1     # _update(dt)
@@ -203,7 +156,7 @@ def test_if_else_compiles_and_branches():
     src = blocks.compile_blocks(prog)
     assert "if (hit > 0):" in src and "    else:" in src
     _assert_micropython_safe(src)
-    fake, _ = _run_cart(src)
+    fake = _run_cart(src)
     # hit defaults to 0, so the else branch ran: cls(col("black")) -> col -> 0
     assert ("cls", (0,), {}) in fake.calls
 
@@ -222,7 +175,7 @@ def test_nested_repeat_indentation():
     assert "        for _i2 in range(int(3)):" in src
     assert "            pix(1, 1, col(" in src
     _assert_micropython_safe(src)
-    fake, _ = _run_cart(src)
+    fake = _run_cart(src)
     # 2 * 3 pix() calls
     assert sum(1 for c in fake.calls if c[0] == "pix") == 6
 
@@ -271,7 +224,7 @@ def test_input_reader_expression_in_condition():
     # drive it with left held -> x moves
     fake = _FakeAPI()
     fake._btn = {"left": True}
-    ns, _ = _run_cart(src, frames=1, fake=fake)
+    ns = _run_cart(src, frames=1, fake=fake)
     assert ns["x"] == -2
 
 
@@ -330,7 +283,7 @@ def test_representative_game_compiles_safe_and_runs():
     fake = _FakeAPI()
     fake._btn = {"right": True}
     fake._btnp = {"a": True}
-    ns, _ = _run_cart(src, frames=5, fake=fake)
+    ns = _run_cart(src, frames=5, fake=fake)
     assert ns["x"] == 100 + 2 * 5              # moved right each frame
     assert ns["score"] == 5
     # sound + draw verbs actually fired
@@ -470,7 +423,7 @@ def test_literal_in_expr_slot_compiles_bare_and_runs():
     assert "score = 0" in src and "x = 50" in src
     assert "(x > 100)" in src
     _assert_micropython_safe(src)
-    fake = _run_cart(src)[0]
+    fake = _run_cart(src)
     assert fake["score"] == 0 and fake["x"] == 50
 
 
@@ -479,7 +432,7 @@ def test_float_literal_in_expr_slot():
         mk("set_var", {"var": "g", "value": 4.5})])])
     src = blocks.compile_blocks(prog)
     assert "g = 4.5" in src
-    assert _run_cart(src)[0]["g"] == 4.5
+    assert _run_cart(src)["g"] == 4.5
 
 
 def test_parse_number_literal_coerces_and_sanitizes():
@@ -525,12 +478,12 @@ def test_tap_position_readers_compile_and_hit_test():
     # with a tap at x=150, the branch fires
     fake = _FakeAPI()
     fake._touch = (150, 50, True)
-    fake, _ = _run_cart(src, frames=1, fake=fake)
+    fake = _run_cart(src, frames=1, fake=fake)
     assert fake["hit"] == 1
     # no tap -> _touch_x returns -100, branch does not fire
     fake2 = _FakeAPI()
     fake2._touch = None
-    fake2, _ = _run_cart(src, frames=1, fake=fake2)
+    fake2 = _run_cart(src, frames=1, fake=fake2)
     assert fake2.get("hit", 0) == 0
 
 

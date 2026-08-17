@@ -11,11 +11,9 @@ workspace, the Editor tab-ladder wiring, and the firmware staging pins."""
 
 import json
 import os
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime.editors_scene import SceneEditor, parse_rows  # noqa: E402
 from runtime import scene_editor_ui as SU                  # noqa: E402

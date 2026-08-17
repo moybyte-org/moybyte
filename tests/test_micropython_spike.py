@@ -317,11 +317,11 @@ def test_micropython_touch_and_idle_cursor():
     device_input = (DEVICE / "device_input.py").read_text(encoding="utf-8")
 
     # GT911 touch driver on I2C0 (off the SPI bus), fed into the shared pointer.
-    # The register map lives in the shared gt911 core since #202 Phase C;
-    # device_input imports it (kept as class attrs for calibration tooling).
-    gt911_core = (DEVICE / "gt911.py").read_text(encoding="utf-8")
+    # The register map + its behaviour live in the shared gt911 core since
+    # #202 Phase C and are unit-tested in test_gt911_core.py; this pins the
+    # ROUTING (device_input imports the core's map as class attrs for the
+    # calibration tooling).
     assert "class Touch:" in device_input
-    assert "0x814E" in gt911_core and "0x8150" in gt911_core
     assert "REG_STATUS = gt911.REG_STATUS" in device_input
     assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
@@ -1181,12 +1181,10 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     # the P4's copy shipped without the guards for months); the driver must
     # still ROUTE its no-news pass through it.
     inp = (DEVICE / "device_input.py").read_text(encoding="utf-8")
-    core = (DEVICE / "gt911.py").read_text(encoding="utf-8")
     runtime = (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-    assert "HOLD_SAMPLE_MS" in core
-    assert "self.fresh = False" in core
-    # A missed finger-up must never wedge the pointer down forever.
-    assert "missed release: never wedge the pointer" in core
+    # The core's CONTENT (hold window, stale mark, the missed-release unwedge)
+    # is unit-tested for real in test_gt911_core.py -- this file pins only the
+    # ROUTING: the driver's no-news pass goes through the one shared copy.
     assert "return self._hp.hold()" in inp
     # The sample->pointer application is device_boot.apply_touch since
     # 2026-08-18 (both boards' poll_inputs hooks carried it verbatim); the

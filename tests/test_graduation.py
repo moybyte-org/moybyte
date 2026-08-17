@@ -16,11 +16,9 @@ end-to-end `test_*` below.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
 from runtime import moy_carts  # noqa: E402

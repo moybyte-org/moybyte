@@ -3,16 +3,12 @@ identity to a responsive system process -- launcher dispatch, router kind,
 window minimums, text mode, relayout fan-out -- and Calc is the reference app
 built only on the public seams (ui toolkit + Hits + the registry)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_ws as _ws
 
 
 def _select(ws, title):

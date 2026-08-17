@@ -11,11 +11,9 @@ the Workstation (including the shared-tier promote, which is the T-Deck shape),
 the wm viewport/composite, and the touch mapping through view()."""
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app, moy_carts  # noqa: E402
 from runtime.moy_carts import _canvas_str, _normalize_canvas  # noqa: E402

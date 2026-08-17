@@ -15,11 +15,9 @@ The point of this step is host-verifiable:
   * Sprite/paint + map editors stay a 320x240 viewport (step 3) -- not touched here.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 

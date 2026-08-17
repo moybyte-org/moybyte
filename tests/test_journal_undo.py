@@ -5,11 +5,9 @@ affected editor, and re-run the cart; plus the code-editor keyboard-shortcut UI 
 undo stays in the editor's RAM.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 V1 = "def _draw():\n    cls(1)  # one\n"
 V2 = "def _draw():\n    cls(2)  # two\n"

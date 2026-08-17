@@ -17,33 +17,25 @@ These pin:
   * the self-animating exclusions re-render on animation-armed frames.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+
+from ws_helpers import build_desktop_ws
 
 
 def _ws(tmp_path, **kw):
-    from runtime import host_app
-    kw.setdefault("sys_size", (1024, 600))
-    kw.setdefault("font_scale", 2)
-    kw.setdefault("windowed", True)
-    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
+    ws = build_desktop_ws(tmp_path, **kw)
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     return ws
 
 
-def _drv(ws):
-    from runtime import host_app
-    return host_app.ConsoleDriver(ws)
+from ws_helpers import make_drv as _drv
 
 
-def _quiesce(ws):
-    ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+from ws_helpers import quiesce as _quiesce
 
 
 def _count_draws(ws, kind):

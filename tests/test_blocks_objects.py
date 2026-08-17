@@ -7,11 +7,9 @@ round-trip/graduation, prune) and the BlockEditor per-target root.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import blocks as B                      # noqa: E402
 from runtime import widgets                          # noqa: E402

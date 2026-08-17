@@ -8,11 +8,9 @@ Two layers, mirroring the existing split:
     device runs (host_app + ConsoleDriver / Workstation), so they assert host==device.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 

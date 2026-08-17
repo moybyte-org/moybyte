@@ -9,13 +9,11 @@ not BUILD -- a C compiler, not a wheel -- and the store passthrough tests always
 run.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _need_lua():
@@ -27,9 +25,7 @@ def _need_lua():
         pytest.skip("host lua binding not built (needs a C compiler)")
 
 
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
 def _open(ws, title):

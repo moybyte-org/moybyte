@@ -23,13 +23,11 @@ draws, non-spec draws nothing.
 """
 
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_canvas                                    # noqa: E402
 from runtime.editors_sheet import (SHEET_COLS, SHEET_H, SHEET_ROWS,  # noqa: E402

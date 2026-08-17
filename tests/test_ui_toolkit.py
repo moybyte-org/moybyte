@@ -3,11 +3,9 @@ v1 Phase 3): rect algebra, the draw==tap Hits registry, themed widgets, and the
 one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
 path is the one every tier shares."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import ui
 from runtime.host_canvas import make_system_canvas as SystemCanvas

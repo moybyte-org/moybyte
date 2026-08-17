@@ -6,18 +6,14 @@ ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==devic
 behavior. The theme save uses the exact _with_sd wrapper the cart sprite save uses
 (host: direct write; device: with_sd_live), so what passes here is what the device runs."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-def _ws(tmp_path):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
 def _center(rect):

@@ -7,12 +7,10 @@ relative span lists, and a call-level color override. Camera, clip and the
 palette map must apply exactly as cv.rect applies them.
 """
 
-import sys
 from array import array
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime.host_canvas import make_canvas as Canvas   # noqa: E402
 

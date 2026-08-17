@@ -5,11 +5,9 @@ whose snapshot is byte-identical to what landed on disk.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _make_ws_with_cart(tmp_path, src, title="Journaled", type="app", edit=None):

@@ -34,11 +34,9 @@ memoryview into a larger arena so that a scribble is something the comparison
 can SEE rather than a write past the end that both sides make invisibly.
 """
 
-import os
 import re
 import struct
 import subprocess
-import warnings
 from pathlib import Path
 
 import pytest
@@ -48,15 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # hold gitignored build-staged copies, absent on a fresh checkout.
 DEVICE = ROOT / "device"
 
-# Where `make unix-micropython` puts the desktop MicroPython with the native
-# usermods compiled in. One candidate -- the hand-built fork-tree fallback that
-# used to sit beside it died with the fork (2026-08-17); `MOYBYTE_MICROPYTHON`
-# overrides (the same variable experiments/audio_parity/audio_parity.py reads).
-UNIX_MP_CANDIDATES = (
-    ROOT / ".build" / "unix_micropython" / "micropython" / "ports" / "unix"
-    / "build-moybyte" / "micropython",
-)
-
+from unix_mp import require_unix_mp                              # noqa: E402
 from runtime import gfx_binding as g                             # noqa: E402
 
 pytestmark = pytest.mark.skipif(not g.available(),
@@ -64,47 +54,19 @@ pytestmark = pytest.mark.skipif(not g.available(),
 
 W, H = 16, 8
 
-
-def _find_unix_mp():
-    env = os.environ.get("MOYBYTE_MICROPYTHON")
-    if env and os.path.exists(env):
-        return env
-    for cand in UNIX_MP_CANDIDATES:
-        if cand.exists():
-            return str(cand)
-    return None
-
-
-_NO_MP = """the COMPILED-VS-COMPILED check did not run: no desktop MicroPython
-with the moy_gfx usermod. Build one -- it takes about fifteen seconds:
-
-    make unix-micropython
-
-Without it nothing in `make test` compares two independently COMPILED rasters.
-The host binding is still checked against itself, and the device canvas suite
-still checks the host against a Python transcription -- but a transcription can
-be right while the C is wrong, which is exactly how the board once failed
-provisional_tline against the golden while this repo was green."""
+_NO_MP_WHY = """Without it nothing in `make test` compares two independently
+COMPILED rasters. The host binding is still checked against itself, and the
+device canvas suite still checks the host against a Python transcription --
+but a transcription can be right while the C is wrong, which is exactly how
+the board once failed provisional_tline against the golden while this repo
+was green."""
 
 
 def _require_unix_mp():
-    """The binary, or a LOUD absence.
-
-    A bare `pytest.skip` was the old behaviour and it is what let this check be
-    absent for months: a skip is one `s` in the progress line, and the thing
-    being skipped is the only lane that runs the real kernel. So the absence
-    warns (which pytest prints in its summary even under -q) and, wherever a
-    build is expected -- CI, or anyone who sets MOYBYTE_REQUIRE_UNIX_MP -- it
-    FAILS instead. `CI` is set by GitHub Actions itself, so deleting the build
-    step from the workflow turns this red rather than quiet.
-    """
-    exe = _find_unix_mp()
-    if exe is not None:
-        return exe
-    if os.environ.get("CI") or os.environ.get("MOYBYTE_REQUIRE_UNIX_MP"):
-        pytest.fail(_NO_MP)
-    warnings.warn(UserWarning(_NO_MP), stacklevel=2)
-    pytest.skip("no desktop MicroPython with moy_gfx (see the warning above)")
+    # The shared resolver (tests/unix_mp.py: candidates, MOYBYTE_MICROPYTHON,
+    # the module probe, the loud-absence policy) -- this file carried the last
+    # private copy of the path + the policy prose.
+    return require_unix_mp("moy_gfx", why=_NO_MP_WHY)
 
 
 # The op script's destination is a memoryview SLICE of a bigger allocation, and

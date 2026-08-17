@@ -5,11 +5,9 @@ typing gap), never on a keystroke count, and the autosave is INVISIBLE (spec: "S
 invisible").
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _make_ws_with_cart(tmp_path, src, title="Debounced"):

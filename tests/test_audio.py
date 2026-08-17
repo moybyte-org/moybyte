@@ -14,13 +14,11 @@ active_channels() mask -- the same instrument the device module exposes -- or
 pinned sample-exactly by tests/test_audio_parity.py's scenarios.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import audio  # noqa: E402
 
