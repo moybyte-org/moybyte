@@ -131,6 +131,9 @@ def _init():
     state["sink"] = 0
     state["reported"] = False
     state["warm"] = 5          # skip the first frames (start spike)
+    pmem(3, 0)                 # arm the pmem report: a PREVIOUS run's done
+                               # flag persists (pmem is the save file), and a
+                               # harness polling cell 3 must not read it
 
 
 def _measure_one():
@@ -358,6 +361,7 @@ def _report():
     if not state["reported"]:
         state["reported"] = True
         _serial_report()
+        _pmem_report()
 
 
 def _f1(v):
@@ -377,6 +381,46 @@ def _serial_report():
            + " p50=" + _f1(s["p50"]) + " p90=" + _f1(s["p90"])
            + " p99=" + _f1(s["p99"]) + " worst=" + _f1(s["worst"])
            + " fps=" + _f1(s["fps"]))
+
+
+# PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
+# this cart, bench_lua.moy/main.lua, tools/p4_cart_bench.py). The Lua twin
+# has no serial print (SPEC sandbox), so the report also goes into pmem, which
+# a harness reads live through moycore.pmem_image; this cart writes the SAME
+# cells so the channel itself is A/B-able. Cells are the bench's own save
+# file; the numbers persisting is harmless and even handy.
+#   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
+#   8 + i*3:  verb_id, k, best_ms          (verb ids in _VERB_ID)
+#   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
+_VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
+            "rectb": 6, "circb": 7, "tri": 8, "spr": 9, "map": 10,
+            "sspr": 11, "tline": 12}
+_PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
+                ("silent", 3), ("sound", 4))
+
+
+def _pmem_report():
+    pmem(0, 45948)
+    pmem(1, 1)
+    pmem(2, len(state["micro"]))
+    for i, (name, k, best, med, mx) in enumerate(state["micro"]):
+        base = 8 + i * 3
+        pmem(base, _VERB_ID.get(name, -1))
+        pmem(base + 1, k)
+        pmem(base + 2, int(best))
+    for label, pid in _PHASE_ORDER:
+        s = state["stats"].get(label)
+        if s is None:
+            continue
+        base = 64 + pid * 8
+        pmem(base, pid)
+        pmem(base + 1, s["n"])
+        pmem(base + 2, int(s["p50"] * 10))
+        pmem(base + 3, int(s["p90"] * 10))
+        pmem(base + 4, int(s["p99"] * 10))
+        pmem(base + 5, int(s["worst"] * 10))
+        pmem(base + 6, int(s["fps"] * 10))
+    pmem(3, 1)
 
 
 def _p(line):

@@ -13,9 +13,13 @@ landing is excluded rather than averaged in), then a busy scene. It prints
 `BENCHCART` lines to serial, which is what this reads. Use it to A/B a change to
 the raster kernel -- same workload every run, no play skill, no feel.
 
-`Bench Lua` is the line-faithful twin (same phases, same LCG workload), but the
-SPEC.md 4.1 sandbox has no print, so its report only reaches the glass. Ask for
-it with --cart and pass --frame to capture the final screen instead.
+`Bench Lua` is the line-faithful twin (same phases, same LCG workload). The
+SPEC.md 4.1 sandbox has no print, so the twin writes its report into PMEM
+instead (layout v1, the comment block in bench.moy/main.py -- both carts write
+the same cells), and this tool reads it live through `moycore.pmem_image` over
+the dev channel, synthesizing the same BENCHCART lines -- so `show`, `--json`
+and `--diff` speak one format for both twins. `--frame` still captures the
+final screen if you want the glass itself.
 """
 
 from __future__ import annotations
@@ -31,6 +35,39 @@ from p4_autotest import P4Board            # noqa: E402
 import p4_conformance as PC                 # noqa: E402
 
 
+# PMEM REPORT LAYOUT v1 -- the carts' side of this is the comment block in
+# system_carts/bench.moy/main.py; keep the three copies in lock-step.
+PMEM_MAGIC = 45948
+VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
+              "circb", "tri", "spr", "map", "sspr", "tline")
+PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound")
+
+
+def pmem_lines(cells):
+    """Synthesize BENCHCART lines from the carts' pmem report block, so the
+    Lua twin (whose sandbox has no print) feeds the same parse/show/diff path
+    the Python cart's serial lines do. Rows are id-checked because only the
+    done FLAG is zeroed at cart start -- a stale row from an older layout
+    must read as absent, not as a number."""
+    if len(cells) < 128 or cells[0] != PMEM_MAGIC or cells[1] != 1:
+        return []
+    out = []
+    for i in range(min(cells[2], len(VERB_NAMES))):
+        vid, k, best = cells[8 + i * 3:8 + i * 3 + 3]
+        if 0 <= vid < len(VERB_NAMES) and k > 0:
+            out.append("BENCHCART verb=%s k=%d best_ms=%d"
+                       % (VERB_NAMES[vid], k, best))
+    for pid, name in enumerate(PHASE_NAMES):
+        row = cells[64 + pid * 8:64 + pid * 8 + 8]
+        if row[0] != pid or row[1] <= 0:
+            continue
+        out.append("BENCHCART phase=%s n=%d p50=%.1f p90=%.1f p99=%.1f"
+                   " worst=%.1f fps=%.1f"
+                   % (name, row[1], row[2] / 10.0, row[3] / 10.0,
+                      row[4] / 10.0, row[5] / 10.0, row[6] / 10.0))
+    return out
+
+
 def run_bench(board, title, secs, log):
     board.pyexec("ws.exit()")
     board.drain(0.8)
@@ -41,14 +78,26 @@ def run_bench(board, title, secs, log):
         raise RuntimeError("board never acknowledged `run %s`" % title)
     if "no cart match" in board.lines[-1]:
         raise RuntimeError("no cart titled %r on this board" % title)
+    # Arm the live pmem reader. moycore only fills it while a LUA run is
+    # active (the Python cart's pmem is host-side, but that cart reports over
+    # serial anyway); the poll below is a cheap no-op for the Python twin.
+    board.pyexec("ws._bm = __import__('array').array('i', bytearray(1024))")
+    poll = "__import__('moycore').pmem_image(ws._bm) and ws._bm[3]"
     n0 = len(board.lines)
     end = time.time() + secs
+    cells = None
     while time.time() < end:
         board.drain(1.0)
         if any(l.startswith("BENCHCART phase=game_snd") for l in board.lines[n0:]):
             board.drain(1.0)
             break
-    return board.lines[n0:]
+        if board.pyval(poll, timeout=8.0) == 1:
+            cells = board.pyval("list(ws._bm)", timeout=8.0)
+            break
+    lines = board.lines[n0:]
+    if cells:
+        lines = lines + pmem_lines(cells)
+    return lines
 
 
 def parse(lines):
@@ -83,7 +132,8 @@ def show(res):
     v = res["verbs"]
     sp = res.get("spread") or {}
     if not v:
-        print("  (no BENCHCART verb lines -- a Lua cart reports on the glass only)")
+        print("  (no verb numbers arrived -- neither BENCHCART serial lines"
+              " nor a finished pmem report; did the cart run to DONE?)")
     else:
         print("  %-8s %10s %10s %10s %7s   %s"
               % ("verb", "min", "med", "max", "k", "spread"))
@@ -133,6 +183,10 @@ def main(argv=None):
     ap.add_argument("--cart", default="Bench")
     ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--secs", type=float, default=180.0)
+    ap.add_argument("--attach", action="store_true",
+                    help="open with DTR/RTS HIGH and never pulse reset -- the"
+                         " T-Deck arrangement (USB-Serial/JTAG: an open with"
+                         " both lines low is a chip reset)")
     ap.add_argument("--json", help="write the parsed result here")
     ap.add_argument("--frame", help="also dump the final frame (raw indices)")
     ap.add_argument("--diff", nargs=2, metavar=("BEFORE", "AFTER"))
@@ -148,10 +202,13 @@ def main(argv=None):
         return 0
 
     log = print if a.verbose else (lambda *x: None)
-    board = P4Board(a.port, log=(lambda s: log("  | " + s[:120])))
+    board = P4Board(a.port, log=(lambda s: log("  | " + s[:120])),
+                    dtr=a.attach, rts=a.attach)
     try:
         board.drain(0.5)
         if board.pyval("1", timeout=8.0) != 1:
+            if a.attach:
+                raise RuntimeError("board not answering (attach mode never resets)")
             board.reset()
         res = parse(run_bench(board, a.cart, a.secs, log))
         show(res)

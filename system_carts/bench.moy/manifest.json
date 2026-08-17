@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 9,
+  "version": 10,
   "title": "Bench",
   "type": "game",
   "runtime": "python",

@@ -3,8 +3,19 @@
 -- Line-faithful port of bench.moy/main.py: same phases, same LCG workload,
 -- same constants -- so a glass A/B of the two carts reads the Python-vs-Lua
 -- VERB PATH cost directly (the sprites' C lane is shared; everything else
--- rides each runtime's own dispatch). The report stays ON SCREEN only: the
--- Lua sandbox has no serial print -- read the glass.
+-- rides each runtime's own dispatch). The report draws ON SCREEN and, since
+-- 2026-08-17, is also written into PMEM (the layout below, shared with the
+-- Python twin and tools/p4_cart_bench.py) -- the Lua sandbox has no serial
+-- print, and pmem is the spec-pure side-channel a harness can read live
+-- through moycore.pmem_image. Cells are the bench's own save file; the
+-- numbers persisting is harmless and even handy.
+--
+-- PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
+-- this cart, bench.moy/main.py, tools/p4_cart_bench.py):
+--   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
+--   8 + i*3:  verb_id, k, best_ms          (verb ids in VERB_ID below)
+--   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
+--             (phases in order: idle=0 logic=1 draw=2 silent=3 sound=4)
 
 local PHASE_MICRO = 0
 local PHASE_IDLE = 1        -- the floor: a frame where the cart does nothing
@@ -105,6 +116,9 @@ function _init()
                           -- names at closure-creation, not at call time)
   st.sink = 0
   st.warm = 5
+  pmem(3, 0)              -- arm the pmem report: a PREVIOUS run's done flag
+                          -- persists (pmem is the save file), and a harness
+                          -- polling cell 3 must not read it
 end
 
 local function measure_one()
@@ -267,7 +281,46 @@ local function f1(v)
   return string.format("%.1f", v)
 end
 
+-- The pmem report (layout in the header). Written ONCE, done flag last, so a
+-- reader polling cell 3 never sees a half-written block.
+local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
+                  rectb = 6, circb = 7, tri = 8, spr = 9, map = 10,
+                  sspr = 11, tline = 12 }
+local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
+                      { "silent", 3 }, { "sound", 4 } }
+
+local function pmem_report()
+  pmem(0, 45948)
+  pmem(1, 1)
+  pmem(2, #st.micro)
+  for i = 1, #st.micro do
+    local m = st.micro[i]
+    local base = 8 + (i - 1) * 3
+    pmem(base, VERB_ID[m.name] or -1)
+    pmem(base + 1, m.k)
+    pmem(base + 2, flr(m.best))
+  end
+  for i = 1, #PHASE_ORDER do
+    local s = st.stats[PHASE_ORDER[i][1]]
+    if s ~= nil then
+      local base = 64 + (i - 1) * 8
+      pmem(base, PHASE_ORDER[i][2])
+      pmem(base + 1, s.n)
+      pmem(base + 2, flr(s.p50 * 10))
+      pmem(base + 3, flr(s.p90 * 10))
+      pmem(base + 4, flr(s.p99 * 10))
+      pmem(base + 5, flr(s.worst * 10))
+      pmem(base + 6, flr(s.fps * 10))
+    end
+  end
+  pmem(3, 1)
+end
+
 local function report()
+  if not st.pmem_done then
+    st.pmem_done = true
+    pmem_report()
+  end
   cls(0)
   print("MOYBYTE BENCH LUA", 8, 8, 11)
   local y = 26

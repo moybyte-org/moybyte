@@ -128,8 +128,12 @@ owns is its COMPOSITOR — viewport-aware `fill`/`fill_rect`, `blit565_scale`,
 why** (it carries the before/after table, the dates, and the warning about which
 of the bench's verbs are too cheap to quote); fixes belong upstream (`moy_circ`
 already went that way — moy-spec `ef01426`). Tooling: `tools/p4_perf.py` (per-cart fps),
-`tools/p4_bench.py` (the Bench cart's per-verb µs, and the Lua twin's on-glass
-report), `tools/p4_conformance.py --serve` (holds the board — opening the port
+`tools/p4_cart_bench.py` (the Bench cart's per-verb µs — since 2026-08-17 the
+Lua twin reports over serial too: both carts write a fixed PMEM layout the tool
+reads live via `moycore.pmem_image`, so `--json`/`--diff` speak one format for
+both twins; `tests/test_bench_pmem_report.py` locks the three layout copies
+together), `tools/p4_bench.py` (the console's own UI-panel bench),
+`tools/p4_conformance.py --serve` (holds the board — opening the port
 REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
 
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
