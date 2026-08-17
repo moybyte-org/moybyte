@@ -77,9 +77,11 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "host_api.py"
 kind = "host-only"
 why  = """
-The host's cart-API backend -- portable Python (the web runner freezes it), so
-this board would import it happily and then hold TWO make_api implementations:
-this one and the authored device twin staged below as `device_api.py`."""
+The HOST side of the cart-API backend: FakeAudio/FakeWifi + ConsoleDriver.
+make_api itself is ONE body in the shared `cart_api.py` since 2026-08-17
+(which DOES stage here; `device_api.py` re-exports it), so this denial is
+about dead weight, not duplicate backends: nothing on a board constructs a
+fake service or a sim driver."""
 
 [[modules.shared.deny]]
 file = "host_canvas.py"
@@ -257,10 +259,11 @@ wrong and the stager reported as "no packages staged".)"""
 files = ["device_util.py", "device_canvas.py", "device_api.py", "moycore_glue.py"]
 why = """
 The drawing backend and the cart namespace: DeviceCanvas (the raster every tier
-now runs, RGB565 with the palette resolved at draw time), the device `make_api`
-extracted from moy_runtime so every device target shares it, moycore's host
-half (input snapshot in, audio queue out, pmem at the #66 boundaries), and the
-leaf ticks helpers device_canvas imports."""
+now runs, RGB565 with the palette resolved at draw time), `device_api` (the
+device home of THE make_api -- one body in the shared cart_api.py since
+2026-08-17, re-exported here), moycore's host half (input snapshot in, audio
+queue out, pmem at the #66 boundaries), and the leaf ticks helpers
+device_canvas imports."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]

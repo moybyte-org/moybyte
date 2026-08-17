@@ -46,6 +46,9 @@ def _device_backend_src():
     return "\n".join((
         (ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8"),
         (DEVICE / "device_api.py").read_text(encoding="utf-8"),
+        # THE make_api body since 2026-08-17 (one copy for every tier);
+        # device_api is its device-side re-export home.
+        Path("runtime/cart_api.py").read_text(encoding="utf-8"),
         _staged()["device_boot.py"].read_text(encoding="utf-8"),
     ))
 
@@ -218,7 +221,8 @@ def test_ota_online_wired_and_console_has_online_flow():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     # The online update SCREEN (checking/download/install phases) lives in
@@ -277,7 +281,8 @@ def test_micropython_native_sd_shares_display_spi_host():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
 
     # Native module attaches (init_device) rather than re-initializing the bus.
     assert "MP_REGISTER_MODULE(MP_QSTR_moy_sd" in mod
@@ -310,7 +315,8 @@ def test_micropython_touch_and_idle_cursor():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     shell = (ROOT / "modules" / "moybyte_shell.py").read_text(encoding="utf-8")
     # The GT911 Touch driver (+ TrackBall + TOUCH_* consts) now lives in
     # device_input.py (extracted from moy_runtime.py); run_desktop constructs it.
@@ -345,7 +351,8 @@ def test_micropython_cart_textmode_flips_keyboard_ascii_raw():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     kb = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
@@ -388,10 +395,13 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
-    # The host make_api moved to host_api.py (the host_app -> host_api extraction
-    # mirroring the device's moy_runtime -> device_api split; #151 web runner).
-    host = (Path("runtime") / "host_api.py").read_text(encoding="utf-8")
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
+    # The host make_api moved to host_api.py (#151) and then INTO the unified
+    # cart_api (2026-08-17) -- host_api re-exports it, so the host surface the
+    # grep pins is the pair.
+    host = ((Path("runtime") / "host_api.py").read_text(encoding="utf-8")
+            + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
 
@@ -514,7 +524,8 @@ def test_kid_mode_gates_diag_frame_eaters():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert '_live = bool(getattr(ws, "diag_live", False))' in runtime
     assert "diag.ECHO_LIVE = _live" in runtime
     assert "with_sd_live" in runtime                               # forced GC gated
@@ -1000,7 +1011,8 @@ def test_input_poller_wired_with_gil_release_patch():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     kb = (DEVICE / "moybyte" / "input.py").read_text(encoding="utf-8")
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
     build_sh = (ROOT / "build.sh").read_text(encoding="utf-8")
@@ -1125,7 +1137,8 @@ def test_device_canvas_uses_native_moy_gfx():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # The hot drawing ops go through the native moy_gfx kernel (fill/fill_rect/
     # blit565) writing into the shared framebuffer, not the per-pixel Python loop,
@@ -1197,7 +1210,8 @@ def test_native_blit_map_wired_for_tilemaps():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert runtime  # moy_runtime still imports the canvas (the code moved to device_canvas)
     assert "def map(self, tilemap, sheet" in device_canvas     # DeviceCanvas.map
     assert "self._gfx.blit_map(dst" in device_canvas           # native one-call blit (via _blit_map_into)
@@ -1229,7 +1243,8 @@ def test_native_vector_primitives_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert "self._gfx.circ(self._buf" in device_canvas
     assert "self._gfx.circb(self._buf" in device_canvas
     assert "self._gfx.line(self._buf" in device_canvas
@@ -1255,7 +1270,8 @@ def test_native_text_wired_with_shared_font():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert "import moy_font" in device_canvas                   # shared glyph source
     assert "self._gfx_text(self._buf" in device_canvas          # native one-call text
     assert "self._fb.text(" in device_canvas                    # framebuf fallback kept
@@ -1276,7 +1292,8 @@ def test_native_spr_batch_wired_for_sprites():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert "def spr_batch(self, sheet, items" in device_canvas  # DeviceCanvas.spr_batch
     assert "self._gfx.blit_batch(self._buf" in device_canvas    # native one-call blit
     # ...and the ONLY thing that reaches it is the auto-batch gate. The cart verb of
@@ -1302,7 +1319,8 @@ def test_native_blit_indices_wired_for_paint_images():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert "def blit_indices(self, indices, iw, ih, x, y)" in device_canvas   # DeviceCanvas method
     assert "self._gfx.blit_indices(self._buf" in device_canvas  # native one-call bake
     # The batch walks the sheet through libmoy's moy_spr -- one canvas for the whole
@@ -1327,7 +1345,8 @@ def test_paint_image_assets_wired_device_and_carts():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -1342,8 +1361,11 @@ def test_paint_image_assets_wired_device_and_carts():
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
     assert "texts=None, net=None, owner=\"cart\"):" in runtime
-    assert "def _decode_moyimg(text):" in device_canvas
-    assert "deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()" in device_canvas
+    # _decode_moyimg lives in the unified cart_api since 2026-08-17 (one body
+    # for every tier; the MicroPython lane inflates via `deflate`).
+    cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
+    assert "def _decode_moyimg(text):" in cart_api_src
+    assert "deflate.DeflateIO(io.BytesIO(raw), deflate.ZLIB).read()" in cart_api_src
     assert 'im._paint = True' in runtime                 # tags the bake/ship fast paths
 
     # DeviceCanvas.spr bakes a paint image index->565 ONCE via blit_indices, then blit565s.
@@ -1388,7 +1410,8 @@ def test_native_spr_gate_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     # C side: the gate type + factory exist and are registered.
     assert "moy_gfx_spr_gate_obj_t" in c
     assert "spr_gate_call" in c
@@ -1423,7 +1446,8 @@ def test_async_layer_copy_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert 'MOY_GFX_HAS_ASYNC_COPY' in c
     assert 'esp_async_memcpy_install(&cfg, &moy_gfx_mcp)' in c
     assert 'MP_ROM_QSTR(MP_QSTR_copy_async)' in c
@@ -1533,7 +1557,8 @@ def test_hitch_logger_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     # The _diag_* logging functions (incl. _diag_hitch + HITCH_MS) now live in
     # device_diag.py; run_desktop still CALLS them (assert below stays vs runtime).
@@ -1594,8 +1619,9 @@ def test_scroll_layer_buffer_is_off_gc_heap():
     # _LayerComp moved to device_canvas.py (extracted from moy_runtime.py).
     # Grab the _LayerComp.__init__ body.
     start = device_canvas.index("class _LayerComp")
-    end = device_canvas.index("class _Layer:", start)
-    layercomp = device_canvas[start:end]
+    # (_Layer itself moved to the unified cart_api on 2026-08-17; _LayerComp is
+    # the last class before the end-of-file tombstone.)
+    layercomp = device_canvas[start:]
     assert "import moy_alloc" in layercomp
     # SPIRAM|DMA: off-heap in PSRAM (the GC win) AND DMA-eligible so it stays open to the
     # #54 Stage-2 GDMA async window-copy (free on S3 -- all PSRAM is DMA-reachable).
@@ -1714,7 +1740,8 @@ def test_code_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     editor_app = (Path("runtime") / "editor_app.py").read_text(encoding="utf-8")
@@ -1765,7 +1792,8 @@ def test_unified_top_bar_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
 
     # The bar is 18px and drawn by ONE unified drawer -- the old per-screen
     # _draw_desktop_buttons is gone, and the running-cart ("desktop") screen now calls
@@ -1806,7 +1834,8 @@ def test_icon_theme_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
 
     # Entry point: an "action" Settings row (EDIT ICONS) that opens the theme editor.
     # The EDIT-ICONS lifecycle lives in ThemeLayer (paint_layer.py) now; ws.open_theme
@@ -1839,7 +1868,8 @@ def test_device_draw_api_uses_tic80_names():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     # The DeviceCanvas draw-method DEFS moved to device_canvas.py; the make_api
     # namespace bindings ("rect": canvas.rect, ...) stay in moy_runtime.
     device_canvas = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
@@ -2047,7 +2077,8 @@ def test_device_sprite_storage_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2074,7 +2105,8 @@ def test_device_audio_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     project = (Path("runtime") / "project.py").read_text(encoding="utf-8")
@@ -2147,7 +2179,8 @@ def test_music_editor_wired_into_device_shell():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     assert "class MusicEditor" not in runtime, "device redefines MusicEditor"
     # editors.py must stay dependency-free (the frozen-module contract): it must NOT
     # import audio just to edit the bank -- SFX/MusicTrack are injected as factories.
@@ -2307,7 +2340,8 @@ def test_native_moy_audio_core1_task_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     audio_src = (Path("runtime") / "audio.py").read_text(encoding="utf-8")
     device_audio = (DEVICE / "device_audio.py").read_text(encoding="utf-8")
 
@@ -2410,7 +2444,8 @@ def test_device_wifi_wired():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2466,7 +2501,8 @@ def test_editor_cores_are_shared_single_source():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     # The HOST canvas is the boards' own class now (runtime/host_canvas.py builds
     # `device_canvas.DeviceCanvas` on CPython), so "the host does not redefine the
     # cores" is checked where a redefinition could still be written.
@@ -2494,7 +2530,8 @@ def test_micropython_offline_diag_wiring():
     # greps pin: make_api moved to device_api.py (#58, staged to every device
     # target); run_desktop and the loop stay in moy_runtime.py.
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
-               + (DEVICE / "device_api.py").read_text(encoding="utf-8"))
+               + (DEVICE / "device_api.py").read_text(encoding="utf-8")
+               + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     player = (Path("runtime") / "player.py").read_text(encoding="utf-8")
     # The _diag_* logging functions moved to device_diag.py (extracted from

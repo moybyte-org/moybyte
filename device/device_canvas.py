@@ -6,8 +6,8 @@ map/print + the #54 scroll layers + the #63 sprite-batch/spr-gate) against the
 compositor's RGB565 framebuffer. The hot verbs go through the native moy_gfx kernel
 (fill/fill_rect/blit565/blit_map/blit_batch/blit_indices/circ/line/text/copy_async);
 framebuf is the text/line + no-moy_gfx fallback; moy_alloc gives _LayerComp its
-off-GC-heap DMA buffer. Also here: Image (indexed sprite), _decode_moyimg (.moyimg
-paint asset), _LayerComp/_Layer (the scroll-layer compositor), the MOY64 RGB565
+off-GC-heap DMA buffer. Also here: Image (indexed sprite, re-exported from
+moy_image), _LayerComp (the scroll-layer compositor), the MOY64 RGB565
 palette LUTs (PAL565 / PAL565_SW / PAL565_WIRE / _PAL565_WIRE_BUF), and the native-detection flags
 (_USE_GFX / LAYER_COPY_ASYNC / _RGB_KEY / _FONT8).
 
@@ -347,34 +347,8 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
     from runtime.moy_image import Image  # noqa: F401
 
 
-def _decode_moyimg(text):
-    """Decode a .moyimg paint-image asset (#63 Fold 3) into (w, h, index_bytes), or
-    None on any error (a bad image just doesn't draw). The blob is a JSON header
-    {w, h, data} where `data` is base64 of the zlib-compressed MOY64 index bitmap
-    (1 byte/pixel) -- the SAME base64+zlib envelope sprites author with. The device
-    inflates it with the `deflate` module (MicroPython's zlib), mirroring the host's
-    zlib in host_app._decode_moyimg."""
-    try:
-        import json as _json
-        meta = _json.loads(text)
-        if meta.get("codec") == "rle":
-            import moy_carts as _moy_carts
-            return _moy_carts.decode_moyimg(text)
-        import ubinascii as _binascii
-        import deflate
-        import io
-        w = int(meta["w"])
-        h = int(meta["h"])
-        data = _binascii.a2b_base64(meta["data"])
-        idx = deflate.DeflateIO(io.BytesIO(data), deflate.ZLIB).read()
-        return (w, h, idx)
-    except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
-        return None
-
-
-_GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
-
-
+# _decode_moyimg lived here until 2026-08-17; THE copy is
+# runtime/cart_api.py (one body for every tier -- see its docstring).
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
@@ -2547,20 +2521,6 @@ class _LayerComp:
         return self._gfx
 
 
-class _Layer:
-    """A scroll background (#54): a wider off-screen canvas the cart pre-renders a
-    level into ONCE, then window-copies to the screen per frame via draw_layer. Exposes
-    the draw verbs (sheet/tilemap-aware, pixel-identical to the main api) bound to its
-    OWN canvas, plus W/H. Built by the api's make_layer(w, h)."""
-
-    _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "tri", "trib", "sspr",
-              "spr", "map", "mget", "mset", "print",
-              "camera", "clip", "pal", "palt")
-
-    def __init__(self, canvas, ns):
-        self._canvas = canvas
-        self.W = canvas.w
-        self.H = canvas.h
-        for k in _Layer._VERBS:
-            setattr(self, k, ns[k])
+# class _Layer lived here until 2026-08-17 (end of file); THE copy is
+# runtime/cart_api.py -- whose verb list is the superset this one had
+# drifted from (it was missing tline).

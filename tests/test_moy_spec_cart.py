@@ -196,15 +196,15 @@ def test_cart_cannot_read_the_hosts_exit_button(tmp_path):
 
 
 def test_device_cart_buttons_match_host():
-    """host_api and device_api must agree on the cart-visible button set."""
-    import re
+    """host_api and device_api must agree on the cart-visible button set --
+    trivially, since 2026-08-17: both re-export the ONE tuple from
+    runtime/cart_api.py (the source-regex this test used to run died with the
+    device copy). The identity is the strongest agreement there is."""
     from runtime import host_api
-    src = (ROOT / "device"
-           / "device_api.py").read_text()
-    m = re.search(r"^CART_BUTTONS = \(([^)]*)\)", src, re.M)
-    assert m, "device_api lost its CART_BUTTONS"
-    dev = tuple(re.findall(r'"([a-z]+)"', m.group(1)))
-    assert dev == host_api.CART_BUTTONS
+    from device import device_api
+    assert device_api.CART_BUTTONS is host_api.CART_BUTTONS
+    assert host_api.CART_BUTTONS == ("left", "right", "up", "down",
+                                     "a", "b", "run")
 
 
 def test_host_and_device_make_api_agree_with_every_capability_gate_open():

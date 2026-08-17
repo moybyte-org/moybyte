@@ -86,11 +86,13 @@ The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
 file = "host_api.py"
 kind = "host-only"
 why  = """
-The host's cart-API backend -- and the one denial here that is NOT about
-"cannot import". host_api is deliberately portable (the web runner freezes it),
-so this board would import it happily and then have TWO make_api implementations
-in one image: this one and `device_api.py`, the authored device twin staged
-below. Two backends for one contract is the drift this repo exists to prevent."""
+The HOST side of the cart-API backend: FakeAudio/FakeWifi (the recordable
+service fakes) and ConsoleDriver (the sim/web per-frame driver). Since
+2026-08-17 make_api itself is ONE body in the shared `cart_api.py` (which DOES
+stage here) and host_api merely re-exports it -- so this denial is no longer
+about duplicate backends, it is about dead weight: nothing on a board
+constructs a fake service or a sim driver. host_api stays deliberately
+portable (the web runner freezes it for exactly those classes)."""
 
 [[modules.shared.deny]]
 file = "host_canvas.py"
@@ -322,9 +324,10 @@ missing, which is what makes it stageable before stage 5 compiles one in."""
 [[modules.device.group]]
 files = ["device_api.py", "moycore_glue.py"]
 why = """
-STAGE 6 (console). The cart NAMESPACE: `make_api` (the kid-facing verbs, shared
-verbatim with the P4 so a cart cannot mean two things) and moycore's host half
--- input snapshot in, audio queue out, pmem persisted at the #66 boundaries."""
+STAGE 6 (console). The cart NAMESPACE's device home: `device_api` re-exports
+THE `make_api` (one body in the shared cart_api.py since 2026-08-17, so a cart
+cannot mean two things on any tier) and moycore's host half -- input snapshot
+in, audio queue out, pmem persisted at the #66 boundaries."""
 
 [[modules.device.group]]
 files = ["device_wifi.py"]
