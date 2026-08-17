@@ -125,6 +125,28 @@ jobs:
           key: idf-${{ matrix.board }}-${{ runner.os }}-v1
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
+      # A restored ~/.espressif carries python_env/idf5.5_pyX.Y_env whose
+      # bin/python3 is a SYMLINK into /opt/hostedtoolcache. `Free disk space`
+      # above wipes that tool cache (tool-cache: true) and `Set up Python` then
+      # DOWNLOADS a fresh build, so the symlink dangles -- and `python -m venv`
+      # over a broken env exits 1 with NO stderr, which is exactly how both
+      # boards failed on 2026-08-17, twice, with warm caches. The tell is
+      # idf_tools printing "No such file or directory: .../bin/python3" and then
+      # failing to create the replacement.
+      #
+      # `make setup`'s own venv succeeds in the same job, which is what proves
+      # the interpreter is fine and the TARGET is what is broken.
+      - name: Drop a stale ESP-IDF python_env (dangling interpreter symlink)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          shopt -s nullglob
+          for env in "$HOME"/.espressif/python_env/*/; do
+            if [ ! -x "${env}bin/python3" ]; then
+              echo "== removing broken ESP-IDF venv: ${env}"
+              rm -rf "${env}"
+            fi
+          done
+
       # pip wheels for `make setup` -- small, safe, keyed on the dependency spec.
       - name: Cache pip
         if: steps.gate.outputs.run == 'true'
