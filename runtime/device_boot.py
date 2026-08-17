@@ -1,12 +1,9 @@
 """The device boot spine and frame pump -- ONE implementation, both boards (#161).
 
-WHY THIS EXISTS. `moy_runtime.py` is the only file in the console that is
-AUTHORED TWICE: 1,078 lines on the T-Deck, 1,281 on the P4, of which the
-`run_desktop` boot sequence is ~380 lines across nineteen identically-ordered
-steps. 42,945 of the tree's 47,954 runtime lines are already shared; this was
-the remainder, and the shape of its bugs is the shape of every bug #161 Phase 0b
-and Phase 3 caught -- a step written on one board, forgotten on the other, and
-silent about it because every consumer is capability-gated.
+WHY THIS EXISTS. Each board used to author its own `run_desktop` boot
+sequence, and the shape of that arrangement's bugs is always the same: a step
+written on one board, forgotten on the other, and silent about it because
+every consumer is capability-gated.
 
 `_pace_debt` is the proof. It shipped 2026-08-10 (fd068fc) into the T-Deck's
 loop only, four days before this file was written. Frameskip ships on BOTH
@@ -44,16 +41,10 @@ beside it. The nineteen steps sort into three kinds --
                             missing feature on the other board -- each is a
                             different piece of hardware.
 
-THE RISK THIS FILE CARRIES, said out loud. The T-Deck could not be tested when
-this landed (it was not connected, and its USB-CDC RX is dead under the desktop
-anyway -- see CLAUDE.md's hard constraints), so the S3 half shipped verified
-only by the host suite. Every method below was therefore written to keep that
-board's OBSERVABLE boot byte-for-byte: the same serial lines in the same order,
-the same values, the same guards. `tests/test_device_boot.py` executes them
-against fakes and pins those strings; `tests/test_device_boot_spine.py` pins
-that both boards still call the steps in one order. Where a behaviour DID have
-to change, it changed on the board that can be tested (the P4 gains
-`_pace_debt`), never on the one that cannot.
+Every method below keeps each board's OBSERVABLE boot byte-for-byte: the
+same serial lines in the same order, the same values, the same guards.
+`tests/test_device_boot.py` executes them against fakes, pins those strings,
+and pins that both boards call the steps in one order.
 
 Nothing here imports a board module. Every board-specific object arrives as an
 argument, which is what lets this file live in `runtime/` -- staged to both

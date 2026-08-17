@@ -5,15 +5,10 @@
  * other end of that name on the host, so the boards' canvas class runs here
  * unchanged and the two canvases are one.
  *
- * WHAT IS *NOT* HERE ANY MORE, AND THAT IS THE POINT. The compositor loops --
- * fill, fill_rect, blit565, blit565_scale, blit_window, scroll_rect,
- * blit_indices, text -- used to be ported into this file line for line from
- * modmoy_gfx.c. Two copies of 189 lines that had to agree pixel for pixel, in
- * exactly the layer this exercise exists to make single. They live in
- * `native/moy_gfx/moy_gfx_kernels.c` now, which BOTH this shim and the
- * MicroPython usermod compile; gfx_binding.py calls those `mg_*` symbols
- * directly, so there is not even a forwarder here to drift. Read that file's
- * header before adding a verb: a new compositor loop goes there, not here.
+ * The compositor loops (fill/fill_rect/blit565/.../text) live in
+ * `native/moy_gfx/moy_gfx_kernels.c`, which BOTH this shim and the MicroPython
+ * usermod compile -- gfx_binding.py calls the `mg_*` symbols directly, so there
+ * is no forwarder here to drift. A new compositor loop goes there, not here.
  *
  * WHAT REMAINS. Two things that are genuinely host-side.
  *

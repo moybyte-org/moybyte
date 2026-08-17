@@ -543,49 +543,35 @@ class _CoverJob:
         self.done = True
 
 
-# The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md,
-# extracted from this file -- see project.py). Project holds the open cart's DATA
-# (cart/config/sheet/tilemap/images/pmem) + the builders + the commit_* persistence
-# verbs; the six data fields are exposed back here as forwarding properties, so every
-# surface file + test is unchanged. Project keeps a `ws` back-reference (the seam the
-# plan keeps for Stage 1) and reaches ws.<X> for the Workstation-owned deps.
+# Project (project.py): the open cart's DATA + commit_* verbs; its six data
+# fields are forwarding properties here so the surface files + tests keep the
+# ws.<X> spelling.
 try:
     from project import Project
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.project import Project
 
-# The cart PLAYER (Stage 2 of docs/shell_ux_technical_plan_v1.md, extracted from this
-# file -- see player.py). Player is the run-loop black box: start a cart under the
-# frozen make_api, tick it, feed it input, guarantee it exits. The "desktop" content
-# layer delegates to the one ws.player; ws._start stays a one-line forward, and the
-# cart-run fields the Player owns (cart_error/crash_line/ns/_update/_draw/_cart_key_prev
-# + the private _cart_start_ms) are exposed back as forwarding properties, so every
-# surface file + test is unchanged. Stage 5 retired the #71 pause machinery (the
-# cart_paused/_bks_prev fields + the _PAUSE_* button geometry are gone) -- the Player
-# now exits on hold-BACKSPACE (games) / the bar X (tools). Same bare-or-package fallback as project.py.
+# Player (player.py): the run-loop black box; its cart-run fields
+# (cart_error/crash_line/ns/...) are forwarding properties here for the same
+# reason. Exit is hold-BACKSPACE (games) / the bar X (tools) -- the #71 pause
+# machinery is retired, do not reintroduce it.
 try:
     from player import Player
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.player import Player
 
-# The EDITOR app (Stage 3 of docs/shell_ux_technical_plan_v1.md, extracted from this
-# file -- see editor_app.py). EditorApp owns the tab ladder (Config -> Blocks -> Code
-# -> Sprites -> Map -> Music) + the current-tab state (EditorApp.tab) + the lazy tab
-# builders + the PLAY trigger. ws.menu_view becomes a forwarding projection of
-# EditorApp.tab (the string-keyed router's key, unchanged); ws.set_menu_view/_open_*/
-# _leave_menu stay one-line forwards (tested surface). Same bare-or-package fallback.
+# EditorApp (editor_app.py): the tab ladder + PLAY. ws.menu_view is a
+# forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
+# stay one-line forwards (tested surface).
 try:
     from editor_app import EditorApp
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editor_app import EditorApp
 
-# The window manager (Stage 6 of docs/shell_ux_technical_plan_v1.md, extracted from
-# this file -- see wm.py). FullscreenStackWM owns the game<->system viewport composite
-# (#39), the process back-stack `screen` projects onto (Stage 6b), and the MEMOIZED
-# visible/draw layer stack (Stage 6c -- rebuilt only on a push/pop or overlay-gate
-# change, so a static top-of-stack allocates no per-frame list). ws._composite_game/
-# _game_xy/_viewport stay one-line forwards (tested surface + many surfaces call
-# ws._game_xy). Same bare-or-package fallback as project.py/player.py/editor_app.py.
+# FullscreenStackWM (wm.py): viewport composite (#39), the back-stack `screen`
+# projects onto, and the MEMOIZED visible/draw stack (rebuilt only on push/pop
+# or overlay-gate change -- a static top-of-stack allocates no per-frame list).
+# ws._composite_game/_game_xy/_viewport stay one-line forwards (tested surface).
 try:
     from wm import FullscreenStackWM
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -737,8 +723,8 @@ def _ema(cur, sample):
 
 # Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
 # manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
-# fps cap -- the measurement mode (owner call 2026-07-08: uncapped for now, we
-# want the REAL per-cart numbers while the engine work settles).
+# fps cap -- the measurement mode (owner call 2026-07-08: we want the REAL
+# per-cart numbers on the glass, and #66 is fed from them).
 FPS_GOVERNOR = False
 
 class Workstation:
@@ -753,7 +739,7 @@ class Workstation:
         self._init_state()
         self._init_perf()
         self._init_overlays()
-        # The compositor/router layer stack (docs/shell_layers_refactor_v1.md). Built
+        # The compositor/router layer stack (docs/history/shell_layers_refactor_v1.md). Built
         # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
         self._build_layers()
 
@@ -951,7 +937,7 @@ class Workstation:
         # which is now a forwarding projection of editor_app.tab -- see below). The tab
         # machine (set_menu_view/_open_*/_leave_menu) moved onto it; ws keeps one-line
         # forwards so every surface file + test is unchanged. NAMES/_in are injected
-        # (Stage 4, docs/shell_ux_technical_plan_v1.md): the Editor now lends the top
+        # (Stage 4, docs/history/shell_ux_technical_plan_v1.md): the Editor now lends the top
         # bar's left zone (draw_zone/zone_tap, bar_layer.py) so it needs the shared
         # draw toolkit + rect hit-test, like the other zone-owning surfaces.
         self.editor_app = EditorApp(self, NAMES, _in)
@@ -1068,7 +1054,7 @@ class Workstation:
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None); backs
                                       # ws._icon (the shared draw toolkit), so it stays here.
         # The unified top bar + bottom dock (#46) is its own surface now (BarLayer, Phase 2
-        # of docs/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
+        # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66), the dock geometry, and the bar/dock tap slices live
         # on self.bar_layer; set_icon_sheet bumps its cache gen via bar_layer.invalidate().
         self.bar_layer = BarLayer(self, NAMES, _in)
@@ -1091,7 +1077,7 @@ class Workstation:
                                       # editor shows after a crash-to-code throw
                                       # (owner ask 2026-07-23); dismissed by a
                                       # tap or the first edit
-        # Undo-journal idle-typing debounce (Stage 7 of docs/shell_ux_technical_plan_v1.md):
+        # Undo-journal idle-typing debounce (Stage 7 of docs/history/shell_ux_technical_plan_v1.md):
         # _edit_ms is the ticks of the last keystroke in the code editor (None = no
         # pending edit); frame() fires a durable, INVISIBLE autosave-commit once
         # _edit_debounce_ms of no keystroke elapse, so the SD write lands in a typing
@@ -2514,10 +2500,9 @@ class Workstation:
 
     # -- Settings screen (#28) -----------------------------------------------
     #
-    # Wallpaper is FUNCTIONAL (applies + persists); the rest are real-looking but
-    # no-op controls clearly marked "soon", so the layout is proven without
-    # committing to backends. Each row is (key, label, kind): "wallpaper" is the
-    # live one; "mock" rows just step a cosmetic placeholder value.
+    # Most rows are live (wallpaper/theme/font size/icons/frameskip/fps/diag --
+    # settings_layer.py is the authority); only the remaining "mock" rows step a
+    # cosmetic placeholder value. Each row is (key, label, kind).
 
 
     def _update_available(self):
@@ -3570,7 +3555,7 @@ class Workstation:
             # (still reachable -> the kid can reopen the editor to fix it).
             self.run(self.project, self.editor_app)
 
-    # -- durable undo/redo (Stage 7 of docs/shell_ux_technical_plan_v1.md) ------
+    # -- durable undo/redo (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) ------
     #
     # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER: resolved by
     # owner decision (#88, 2026-07-18) -- shared UNDO/REDO icons in the Editor's lent
@@ -4357,7 +4342,7 @@ class Workstation:
             self.go_home()
 
     def handle_input(self):
-        # Router (docs/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
+        # Router (docs/history/shell_layers_refactor_v1.md §3): walk the z-ordered layer stack
         # top -> bottom and hand the frame's keys to the first layer that claims them.
         # A modal overlay (About / system menu, #52) sits above the content, so it eats
         # this frame's keys before they can leak to the screen underneath; the active
@@ -4411,7 +4396,7 @@ class Workstation:
     # -- pointer (trackball-as-mouse) ----------------------------------------
 
     def handle_pointer(self):
-        # Router (docs/shell_layers_refactor_v1.md §3): publish the game-space pointer
+        # Router (docs/history/shell_layers_refactor_v1.md §3): publish the game-space pointer
         # (so a cart's touch()/mouse() reads the 320x240 viewport, not the panel, #39),
         # then walk the z-ordered stack top -> bottom and let the first layer that
         # claims the tap handle it. A modal overlay (About / system menu) sits above the
@@ -4930,7 +4915,7 @@ class Workstation:
             # device_canvas.py). One attribute read per frame here; the host
             # canvas has no _prof, so getattr returns False and this never fires.
             self.canvas._prof = False
-        # Compositor / router (docs/shell_layers_refactor_v1.md §3): draw the z-ordered
+        # Compositor / router (docs/history/shell_layers_refactor_v1.md §3): draw the z-ordered
         # visible stack bottom -> top. The active content draws first (game-domain
         # content on the fixed 320x240 game canvas); at the game->system domain boundary
         # the router composites that viewport into the system canvas ONCE (#39; the
@@ -4947,7 +4932,7 @@ class Workstation:
         # machinery, not one layer. Built only under _perf, so the kid-mode path
         # never allocates the dict.
         _lay = {} if _deep else None
-        # WM-surface mark (Stage 9, docs/shell_ux_technical_plan_v1.md): when a RECORDING system
+        # WM-surface mark (Stage 9, docs/history/shell_ux_technical_plan_v1.md): when a RECORDING system
         # canvas is installed (the opt-in web view), tag each WM-stack surface so the recorder
         # slices the frame into ONE stream per surface (bar / app-content / player-viewport) --
         # the browser then composites them (a second WM backend). `begin_surface` exists only on

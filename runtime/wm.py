@@ -1,5 +1,5 @@
 """The window manager -- the S3/host fullscreen back-stack WM (Stage 6 of
-docs/shell_ux_technical_plan_v1.md).
+docs/history/shell_ux_technical_plan_v1.md).
 
 `FullscreenStackWM` is the ONLY tier-specific layer of the console (spec
 shell_architecture_v1.md Section 3's tier table): on the S3 + the host simulator the

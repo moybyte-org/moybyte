@@ -1,5 +1,5 @@
 """The desktop home / launcher (#28), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md (Move 1b,
+(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md (Move 1b,
 the last surface). Three classes:
 
   * `Launcher`     -- the cart icon GRID model + draw: items/sel/paging/nav + the
@@ -24,7 +24,7 @@ one shared toolkit fn, like bar_layer takes `_in`), and the launcher-only tile-t
 takes NAMES + `_in` injected too. No circular import: this is a leaf (the only console
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
 
-Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
+Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
 `draw_zone`/`zone_tap` (the lent left zone -- originally NEW/DUP/DEL + the selected
 cart's name, the old where=="home" branch of BarLayer._draw_status_strip) and a
 `zone_gen` property proxying `Launcher.zone_gen` -- an int the GRID bumps whenever its

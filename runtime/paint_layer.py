@@ -1,5 +1,5 @@
 """The sprite/icon PAINT editor (#4/#30), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
+(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
 ONE renderer/input serves BOTH sheets (so the theme chunk reuses it, no duplication):
   * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.project.sheet)

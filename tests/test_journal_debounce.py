@@ -1,4 +1,4 @@
-"""Stage 7 (docs/shell_ux_technical_plan_v1.md Section 3, v1.1 cadence): the idle-typing
+"""Stage 7 (docs/history/shell_ux_technical_plan_v1.md Section 3, v1.1 cadence): the idle-typing
 debounce -- the undo journal's SOFT commit trigger. A durable commit fires ~1.5s after
 the last keystroke in the code editor (never mid-burst, so the SD write lands in a
 typing gap), never on a keystroke count, and the autosave is INVISIBLE (spec: "Save is

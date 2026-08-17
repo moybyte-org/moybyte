@@ -526,12 +526,8 @@ def run_desktop(fps_cap=60):
     # boot indistinguishable from a dead board. Owner-reported after a full
     # erase: "screen is black", serial silent after its last boot line, on a
     # board that was in fact working and did light up eventually.
-    #
-    # WHY that boot was slow is still unmeasured -- a warm boot composes in
-    # ~23ms, so it is something the erase forced (re-seeding, cache rebuilds)
-    # and not the steady state. Naming it is what the timing line at the end of
-    # this function is for; the splash is so the wait is legible while it
-    # happens, on the glass and on the wire.
+    # The splash makes the wait legible on the glass and on the wire; the
+    # timing line at the end of this function names where a slow boot went.
     boot = DeviceBoot(sys_canvas, comp, set_backlight, "Moybyte P4")
     boot.note("starting")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same

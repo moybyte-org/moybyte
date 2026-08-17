@@ -313,8 +313,8 @@ def _system_canvas_class():
             # rect"), and the console clips text to panels everywhere -- an
             # editor's code column, a window's title strip. Going through
             # _put/_fill instead carries camera, clip and pal exactly as
-            # runtime/canvas.py's SystemCanvas.print does, which is what makes
-            # the two byte-identical.
+            # DeviceCanvas.print does, which is what keeps the tiers
+            # byte-identical.
             self.flush_batch()
             col = self._col(c)
             if fs <= 1:

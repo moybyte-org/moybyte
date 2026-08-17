@@ -7,23 +7,11 @@
 // put its bank, forwards the six 8.2 verbs from Python, and owns the I2S plumbing
 // libmoy deliberately has none of.
 //
-// WHY THE BINDING GOT SMALLER (#97)
-// It used to be a REIMPLEMENTATION: a hand-ported copy of runtime/audio.py's
-// per-sample loop, plus the machinery to keep the two halves in step. Python owned
-// the bank, the voices and the music scheduler; every frame it pushed all four
-// voices' entire state across the boundary (voice_set: up to 64 steps x 4 fields
-// per voice, through mp_obj_get_int), C advanced them, and Python read the
-// advanced cursor back (voice_read). The core-1 task then had to snapshot that
-// shared array, mix from the copy, and fold the result back ONLY where core 0
-// had not re-triggered underneath it -- which needed a per-voice commit counter,
-// because the obvious "did anything change?" proxy aliased on a same-sfx
-// retrigger and silently dropped overlapping sound effects.
-//
-// All of that existed to keep two copies of one state consistent. libmoy owns
-// the state now, so there is one copy, and the entire class of bug goes with it:
-// no voice_set, no voice_read, no snapshot, no fold-back, no commit counter, and
-// nothing marshalled per frame. The bank crosses the boundary ONCE per cart, as
-// the sounds.json text the store already has.
+// libmoy owns the synth state -- bank, voices, both sequencers (#97). Do NOT
+// reintroduce a Python-side mirror of any of it: the old two-copy design
+// marshalled four voices' state across the boundary every frame, needed a
+// per-voice commit counter, and still dropped overlapping sfx. The bank
+// crosses ONCE per cart, as sounds.json text.
 //
 // THE CORE SPLIT (unchanged in shape -- #41's crackle fix)
 //   core 0 (MP VM): calls the verbs. That is all. No per-sample work, no I2S.
@@ -39,10 +27,9 @@
 // returns False and DeviceAudio drives render() itself from the frame loop
 // (machine.I2S), with no rebuild needed.
 //
-// NEEDS ON-DEVICE VERIFICATION: the synth half is checked against libmoy under
-// the desktop VM (tests/test_audio_parity.py), but I2S, the core-1 task and the
-// PSRAM bank placement cannot be exercised off-hardware. Do not claim this plays
-// on a board until a board has played it.
+// The synth half is checked against libmoy under the desktop VM
+// (tests/test_audio_parity.py); I2S, the core-1 task and the PSRAM bank
+// placement were confirmed by ear on a T-Deck (2026-08-09, firmware 0.9).
 
 #include <stdlib.h>
 #include <string.h>

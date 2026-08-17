@@ -1238,52 +1238,23 @@ class WindowedWM(FullscreenStackWM):
             return
         if getattr(gc, "buf", None) is None \
                 and getattr(sc, "blit_game", None) is None:
-            # Command-only game canvas (#175): the cart's frame is ALREADY in the
-            # stream, recorded during its draw. There is nothing to composite --
-            # and the letterbox cls() below runs AFTER that draw, so painting it
-            # would wipe the frame. Bail before it. (The play world does not yet
-            # emit a view bracket, so a fullscreen cart lands 1:1 at the origin
-            # rather than centered -- tracked with the scale work in #175.)
-            #
-            # "No .buf" ALONE DOES NOT MEAN COMMAND-ONLY (P4, 2026-08-01). The
-            # device raster canvas keeps its RGB565 framebuffer in `_buf` and
-            # exposes no public `.buf` either, so this bail fired on every
-            # play-world frame: the cart ticked, the console reported it running,
-            # and the fullscreen game was never composited -- while the triple
-            # framebuffer kept rotating three stale Library frames (the "it says
-            # it's running but nothing shows, and the screen flickers" report).
-            # The desk world hid it: there `_order` is non-empty so this method
-            # returns above, and the player WINDOW composites via _blit_game,
-            # which probes the native blit_game BEFORE it ever looks at `.buf`.
-            # So ask the question _blit_game asks -- a system canvas with a
-            # native blit_game can composite, buffer or no buffer.
+            # Command-only game canvas (#175): the cart's frame is ALREADY in
+            # the stream; the letterbox cls() below would wipe it, so bail.
+            # Ask the question _blit_game asks -- a system canvas with a native
+            # blit_game can composite, buffer or no buffer. A `.buf`-only probe
+            # silently never composited the fullscreen game on the device
+            # raster canvas, whose framebuffer is `_buf` (P4, 2026-08-01).
             return
         ox, oy, scale = FullscreenStackWM.viewport(self)
         src = self._view_src()
         # The letterbox bezel is STATIC: fill it only until every framebuffer
-        # holds it (the stale-by-N rule), re-armed when the composite geometry
-        # changes. It was a full-screen fill EVERY play frame -- chrome=8ms of
-        # a 15ms fullscreen celeste frame at 4x (the game rect covers less of
-        # the screen the bigger the letterbox, so the waste grew with `view`).
-        #
-        # GEOMETRY IS NOT THE ONLY WAY IT GOES STALE (P4, 2026-08-01). _bezel_key
-        # and _bezel_paints live on the long-lived WM, so after one run they say
-        # "every buffer holds the bezel" forever. Exit to the Library -- which
-        # repaints the WHOLE screen, letterbox included, into all N buffers --
-        # and launch a cart at the SAME viewport: the key still matches, the
-        # count is still N, and the letterbox is never repainted again. It keeps
-        # whatever the Library left in each buffer, and because the Library
-        # renders a LIVE wallpaper those N leftovers are N different animation
-        # phases, so the rotation flickers them behind the game (owner report:
-        # "the game is on top and the background is flickering"; measured on
-        # glass as 0/32/24 bytes differing between the three framebuffers,
-        # frozen at those values).
-        #
-        # So the retention also has to end when anything ELSE painted the
-        # screen. The signal for that is a gap in the drawn-frame counter: two
-        # consecutive composites are one drawn frame apart, and a skipped frame
-        # advances neither the counter nor the pixels. Anything larger means
-        # some other stack drew in between and the bezel is no longer ours.
+        # holds it (the stale-by-N rule) -- it was a full-screen fill EVERY
+        # play frame (chrome=8ms of a 15ms celeste frame). Retention must end
+        # BOTH on a geometry change AND on a gap in the drawn-frame counter:
+        # anything larger than one frame means another stack painted the screen
+        # and the bezel pixels are no longer ours -- without the gap rule, N
+        # stale Library frames rotate/flicker behind the game (P4, 2026-08-01,
+        # measured as 0/32/24 bytes differing between the three framebuffers).
         bkey = (ox, oy, scale, sc.w, sc.h, src)
         drawn = ws._frames_drawn
         if bkey != getattr(self, "_bezel_key", None) \

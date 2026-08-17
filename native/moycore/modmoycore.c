@@ -1,15 +1,9 @@
 // moycore: the cart's whole frame in C (moycore plan stage 2).
 //
-// A Lua cart's frame used to be a conversation. The VM called a verb, the verb
-// was a C shim that upcalled a Python closure from `make_api`, that closure
-// drew through DeviceCanvas, and control came back -- hundreds of times per
-// frame, each crossing marshalling arguments and leaving garbage the
-// MicroPython GC would collect in one of the ~190ms sweeps that show up as
-// stutter. Stages 1a/1b cut the hottest of those crossings (the sprite batch,
-// the solid draw family, sspr/tline). This module deletes the rest by moving
-// the whole loop: `run_begin()` builds a libmoy console over the buffers the
-// console already owns, and `tick(dt)` runs the cart's _update and _draw end to
-// end in C. ONE upcall per frame.
+// ONE upcall per frame: `run_begin()` builds a libmoy console over the buffers
+// the console already owns, and `tick(dt)` runs the cart's _update and _draw
+// end to end in C. (The per-verb upcall design it replaced left ~190ms GC
+// sweeps from marshalling garbage -- do not reintroduce per-draw crossings.)
 //
 // THE ENGINE IS NOT WRITTEN HERE, AND THAT IS THE POINT. `libmoy/moy_lua.c` is
 // moy-spec's own Lua binding: it registers all 38 SPEC.md verbs as C functions
@@ -42,19 +36,11 @@
 // are REGISTERED here, as Lua globals backed by the same Python closures they
 // always had (register() below).
 //
-// That distinction is the whole design, and getting it wrong cost a rewrite.
-// The first cut treated "layers stay Python-side" as "carts using layers keep
-// the old runtime", which quietly left TWO Lua cart runtimes on the device --
-// moycore for spec-only carts, the trampoline registry for the rest -- both
-// implementing the spec verbs. That is the parallel-implementation disease
-// this project exists to end, reintroduced by the project itself. A cart
-// needing a Python-backed make_layer does not need a second engine; it needs
-// one engine that can hold a Python-backed verb.
-//
-// So: EVERY Lua cart runs here. libmoy's table is installed first, then any
-// extra verbs the host registers land on top as trampolines. A cart that draws
-// through layers pays a couple of upcalls per frame for its blits, exactly as
-// it did before -- and nothing else in the frame crosses at all.
+// That distinction is the whole design, and getting it wrong cost a rewrite:
+// EVERY Lua cart runs here -- libmoy's table first, extra verbs on top as
+// trampolines. A cart needing a Python-backed verb needs ONE engine that can
+// hold one, never a second runtime (the first cut shipped two and the
+// deletion commit records what that cost).
 
 #include <stdlib.h>
 #include <string.h>

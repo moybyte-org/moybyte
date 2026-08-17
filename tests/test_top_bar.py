@@ -502,7 +502,7 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     assert ws.icon_sheet.to_hex() == other
 
 
-# -- the zoned bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46): the
+# -- the zoned bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46): the
 # right zone (clock/wifi/batt/gear) is OS-owned, the left zone is LENT to the
 # active app (launcher_layer/settings_layer/editor_app). The #43 strip cache is
 # GENERALIZED (not duplicated) to cover home/settings/menu too -- these tests are
@@ -974,7 +974,7 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     assert ws.sysmenu.open
 
 
-# -- the context X (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec Section 9):
+# -- the context X (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec Section 9):
 # the right zone's X exits the active TASKBAR app back toward the launcher root. The
 # launcher IS the root -> it draws NO X; only the Editor / Settings get one.
 

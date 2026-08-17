@@ -10,7 +10,8 @@ moy_carts wifi.json store and are used by autoconnect_wifi() at boot.
 Radio coexistence caveat: WiFi shares the ESP32-S3 radio with BLE (#26) and is a
 different mode from LoRa / ESP-NOW (#7) -- only one radio user can be active at a
 time. WiFi STA and the display SPI bus are SEPARATE peripherals (unlike SD), so
-there is no SPI-host fight, but ALL of this is UNVERIFIED on hardware here. The
+there is no SPI-host fight (hardware-confirmed on both boards -- WiFi scan/
+connect, the OTA download and moy_webhost all run on glass). The
 whole class is wrapped in try/except so a board/build without WiFi degrades to a
 never-connected service instead of crashing the console.
 
@@ -26,7 +27,7 @@ from device_util import _diag_note
 class DeviceWifi:
     """network.WLAN(STA_IF) wrapper. `store`/`root` are the moy_carts credential
     store + carts dir; connect()/forget() persist there so the next boot can
-    autoconnect. UNVERIFIED on hardware -- treat the WLAN calls as a sketch."""
+    autoconnect."""
 
     def __init__(self, store=None, root=None):
         self._store = store
@@ -54,7 +55,7 @@ class DeviceWifi:
 
     # -- the injected `wifi` API surface (host == device) ----------------
     def scan(self):
-        """Nearby networks as (ssid, signal%, locked?) -- NEEDS ON-DEVICE VERIFICATION.
+        """Nearby networks as (ssid, signal%, locked?).
         WLAN.scan() returns (ssid, bssid, channel, RSSI, security, hidden) tuples;
         map RSSI (~-100..-30 dBm) to a 0..100 bar and security!=0 to locked."""
         if self._ensure_wlan() is None:
@@ -79,8 +80,10 @@ class DeviceWifi:
         known-network reconnect passes "" (it has no credential access), and the
         old behavior associated with "" AND remembered it, destroying the saved
         password (the on-glass P4 "says not connected after i exit", 2026-07-25).
-        NEEDS ON-DEVICE VERIFICATION (the connect()/isconnected() poll
-        timing below is a sketch -- a real impl waits on a status callback/timeout)."""
+        The connect()/isconnected() poll below gives up after ~4s; a saved network
+        that comes up later is caught by moy_ota's ensure_online() ONLINE_WAIT_MS
+        (measured 1.5s late on glass, 2026-08-02 -- the wait deliberately lives
+        there, not here, so a wrong password never freezes the desktop)."""
         ssid = str(ssid)
         if not password and self._store is not None and self._root is not None:
             try:
@@ -178,7 +181,7 @@ class DeviceWifi:
 def make_wifi(store=None, root=None):
     """Injected backend factory (#38): the device network.WLAN service over the
     moy_carts store. run_desktop hands this to the shared Workstation -- the mirror
-    of the host's make_wifi. NEEDS ON-DEVICE VERIFICATION (DeviceWifi is a sketch)."""
+    of the host's make_wifi."""
     return DeviceWifi(store, root)
 
 
@@ -186,8 +189,7 @@ def autoconnect_wifi(wifi):
     """Boot-time autoconnect (#38): try the most-recently-remembered known network
     first (moy_carts stores it at the front), so the kid joins once and the console
     is online thereafter. Best-effort + guarded: a no-WiFi build or no saved creds
-    just no-ops. NEEDS ON-DEVICE VERIFICATION -- the credential store round-trip is
-    host-tested, but the actual WLAN association at boot is unproven on hardware."""
+    just no-ops."""
     if wifi is None:
         return False
     try:

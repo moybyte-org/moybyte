@@ -1,11 +1,9 @@
 # Moybyte userland runtime (host reference)
 
-This is the **"other end" of the stack** from the native graphics core
-(`firmware/.../native/moy_gfx`, `moy_compositor`): the **fantasy-workstation
-userland** a cartridge runs on. It runs entirely on the host (no device), so it's
-the fast Codex/dev loop for the v0.4 product, and it realizes v0.4 plan **Task
-Group A (PC simulator first)** + **Task Group B (cartridge format)** + the first
-**Living Desktop** content.
+The **shared console** every target runs — host simulator, both boards and the
+browser build stage or freeze these files. On the host it sits over
+`runtime/host_canvas.py` and the native kernels in `native/moy_gfx`, with no
+device required, so it is the fast dev loop.
 
 ## What's here
 

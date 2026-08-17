@@ -7,10 +7,9 @@
  * is this console's compositor: a viewport-aware fill and fill_rect, the RGB565
  * blit with its opaque memcpy lane, the integer-upscale blit the windowed WM
  * composites through, blit_window, scroll_rect, blit_indices, and the
- * system-font (scale > 1) text rasterizer. Those were written TWICE -- 189
- * lines in runtime/moyhost_gfx.c and 205 in modmoy_gfx.c, 179 of them identical
- * -- and the copies had already drifted by one dead branch. This file is the
- * one copy.
+ * system-font (scale > 1) text rasterizer. These loops were once written
+ * twice (moyhost_gfx.c + modmoy_gfx.c) and had already drifted; this file is
+ * the one copy.
  *
  * WHY IT MATTERS MORE THAN A TIDY-UP. The goldens
  * (tests/test_spec_conformance.py) replay CART draws, and a cart's coordinates

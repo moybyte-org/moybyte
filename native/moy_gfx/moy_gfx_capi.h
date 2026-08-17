@@ -9,7 +9,7 @@
 // and the raster underneath is the same gate_fill / libmoy kernels the MP
 // verbs end in -- so a pixel drawn through this API is byte-identical to one
 // drawn through the canvas method it shadows. That equivalence is pinned by
-// tests/test_lua_draw_direct.py on a unix-port MicroPython build.
+// tests/test_gfx_binding.py on the unix-port MicroPython build.
 //
 // Consumers include this RELATIVELY ("../moy_gfx/moy_gfx_capi.h"): the build
 // stages native modules as sibling directories on every target that has

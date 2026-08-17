@@ -1,4 +1,4 @@
-"""The open cart's live WORKSPACE (Stage 1 of docs/shell_ux_technical_plan_v1.md).
+"""The open cart's live WORKSPACE (Stage 1 of docs/history/shell_ux_technical_plan_v1.md).
 
 `Project` holds the DATA of the one cart currently open in the console -- the cart
 dict (src/cfg/sprites/map/sounds/blocks/path, as loaded by moy_carts.load), its
@@ -9,7 +9,7 @@ object the Player runs; it is NOT a copy -- the editors and a re-run share the s
 live sheet/tilemap/bank exactly as before (edits reach a running cart via `gen`
 bumps).
 
-Boundary (docs/shell_ux_technical_plan_v1.md Section 1.2): Project owns the cart's
+Boundary (docs/history/shell_ux_technical_plan_v1.md Section 1.2): Project owns the cart's
 DATA, not the draw toolkit. It keeps a `ws` back-reference -- the seam the plan
 explicitly keeps for Stage 1 -- and reaches `ws.<X>` for the Workstation-owned deps
 the builders/commits need (the SD-session wrapper `ws._with_sd`, the cart store
@@ -199,7 +199,7 @@ class Project:
         else:
             ws.audio = _SilentAudio(engine)
 
-    # -- the undo journal (Stage 7 of docs/shell_ux_technical_plan_v1.md) -------
+    # -- the undo journal (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) -------
     #
     # A commit PERSISTS and JOURNALS: after each successful store write below, the
     # exact bytes that landed on disk are appended to the cart's durable undo journal

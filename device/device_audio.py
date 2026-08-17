@@ -29,7 +29,9 @@ Self-contained: imports the leaf device_util (diag + tick helpers) and lazily th
 native `moy_audio` + `machine.I2S` inside its methods, so no moy_runtime cycle.
 Device-only module (modules/, auto-frozen).
 
-NEEDS ON-DEVICE VERIFICATION. The synth half is pinned off-hardware -- the same
+Heard on a T-Deck (owner-verified 2026-08-09, firmware 0.9 -- and note the
+audible balance change is the SPEC, not a bug: CLAUDE.md's audio section).
+The synth half is pinned off-hardware -- the same
 native module, built into a desktop MicroPython, renders bit-identically to
 libmoy across the whole parity suite (tests/test_audio_parity.py). I2S, the
 core-1 task and the PSRAM bank placement cannot be reached that way. Do not claim
@@ -104,7 +106,7 @@ _AUDIO_BACKEND_SEQ = 0
 # celeste-sized bank push, render 6s of music 4 through the DEVICE'S OWN C
 # engine and print it as base64 AUDIODUMP lines -- the host listener captures
 # and compares it against the authored reference with no mic, speaker or I2S
-# in the loop. Diagnostic build flag; rip out when the hunt closes.
+# in the loop (the 2026-08-10 hunt closed; the lever stays for the next one).
 AUDIO_SELFDUMP = False
 _SELFDUMP_DONE = False
 
@@ -509,5 +511,5 @@ class DeviceAudio:
 def make_audio(engine):
     """Injected backend factory (#16): wrap an AudioEngine in the device I2S
     backend. run_desktop hands this to the shared Workstation, the mirror of the
-    host's make_audio. NEEDS ON-DEVICE VERIFICATION (see module docstring)."""
+    host's make_audio."""
     return DeviceAudio(engine)

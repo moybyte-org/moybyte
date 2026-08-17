@@ -72,12 +72,8 @@ except ImportError:
 # its own reason) -- is imported above from lua_ext, with the full rationale
 # beside the declaration there. So is the MOY_BUTTONS bit order.
 #
-# All three used to be written out here AND in runtime/lua_host.py. Read
-# lua_ext's note before moving any of them back: the button order spent a day
-# duplicated-by-another-name and rotated the d-pad of every Lua cart on both
-# boards, silently, and the deny lists fail the same way -- a name that goes
-# missing from one copy shadows libmoy's C with a Python trampoline and raises
-# nothing.
+# Read lua_ext's note (the d-pad incident) before duplicating any of them
+# back here.
 
 
 class MoycoreRun:

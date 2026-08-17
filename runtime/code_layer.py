@@ -1,12 +1,12 @@
 """The Python code editor (#24/#39), extracted from Workstation (runtime/console.py)
-as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2 (the last surface).
+as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2 (the last surface).
 
 The full-screen code view: the responsive text area (drawn on the SYSTEM canvas at the
 CodeLayout geometry), the syntax-highlighted line rendering, the coding-symbol palette
 (the T-Deck keyboard can't type `=[]{}<>%`, so a tappable palette supplies them), and
 the touch/keyboard editing.
 
-Stage-4 bar rollout (docs/shell_ux_technical_plan_v1.md): the code editor's OWN top
+Stage-4 bar rollout (docs/history/shell_ux_technical_plan_v1.md): the code editor's OWN top
 band -- the cart title + the RUN/SAVE/CLOSE icons -- is GONE. draw() now paints the
 unified zoned bar (the tab ladder + PLAY + X, no SAVE -- #111) over the top 18px like
 every other editor tab, so the body below it is fullscreen text + the symbol palette

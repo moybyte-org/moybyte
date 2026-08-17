@@ -509,7 +509,7 @@ def fill_uncovered(cv, inner, outer, col):
 # --- scrolling ------------------------------------------------------------------
 
 # The largest physical-buffer rotation any canvas has (host 1, device
-# ping-pong 2, the P4's planned triple framebuffer 3 -- #58). The paint ring
+# ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). The paint ring
 # keeps this many entries so blit_shift can verify RETAINED_FRAMES consecutive
 # paints on ANY tier; raise it if a canvas ever rotates more buffers.
 _MAX_RETAINED = 3
@@ -596,9 +596,9 @@ class ScrollRegion:
         self._painted.insert(0, (frame_no, self.offset, key, stamp))
         # Keep _MAX_RETAINED entries: blit_shift needs RETAINED_FRAMES
         # consecutive paints, and note_painted has no canvas to read the real
-        # N from. Trimming below the largest N anywhere (the P4's planned
-        # triple framebuffer, #58) would silently disable scroll-as-blit
-        # there: len(_painted) < k forever.
+        # N from. Trimming below the largest N anywhere (the P4's triple
+        # framebuffer) would silently disable scroll-as-blit there:
+        # len(_painted) < k forever.
         del self._painted[_MAX_RETAINED:]
 
     def blit_shift(self, cv, frame_no, key=None):

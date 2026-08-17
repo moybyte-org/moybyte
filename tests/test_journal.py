@@ -1,4 +1,4 @@
-"""Stage 7 (#7, docs/shell_ux_technical_plan_v1.md Section 3): the durable, per-project,
+"""Stage 7 (#7, docs/history/shell_ux_technical_plan_v1.md Section 3): the durable, per-project,
 reboot-surviving undo/redo journal in runtime/moy_carts.py.
 
 Exercises the storage logic directly (no console): the append->undo->redo->new-commit-

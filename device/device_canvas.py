@@ -16,11 +16,10 @@ Imports: `array` + the leaf device_util tick helpers; the native modules
 staged `moy_font` + `moy_compositor.SRAM_BOUNCE_FLUSH` at module load (guarded).
 No moy_runtime cycle. Device-only module (modules/, auto-frozen).
 
-NEEDS ON-DEVICE SMOKE BEFORE TRUSTING -- this is a pure code move, but EVERY pixel
-the device draws flows through here and the native moy_gfx/moy_alloc/lcd_bus paths
-cannot be exercised by the host test shim (those modules are absent under CPython).
-Host tests prove the import DAG + structure; only a board confirms the panel still
-draws. The module-load reads (_PAL565_WIRE_BUF buffer, _SRAM_BOUNCE_FLUSH->
+EVERY pixel the device draws flows through here, and the native moy_gfx/
+moy_alloc/lcd_bus paths cannot be exercised by the host test shim -- host tests
+prove the import DAG + structure; only a board confirms the panel draws, so run
+an on-glass suite after touching the hot paths. The module-load reads (_PAL565_WIRE_BUF buffer, _SRAM_BOUNCE_FLUSH->
 LAYER_COPY_ASYNC) must stay intact -- they travelled with the block verbatim.
 """
 from array import array

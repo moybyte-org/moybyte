@@ -1,5 +1,5 @@
 """The "Make it mine" config-card editor (#3/#15), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
+(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
 The cards surface is the kid's read-light way to tune a cart: each `edit` field is a
 card the child steps with -/+ (or taps a picture for choice/sprite/bg pickers), then
@@ -12,7 +12,7 @@ fill the FULL width below the 18px bar (no centered mini-panel).
 Boundary (the anti-spaghetti line, per the doc): CART STATE lives on the open
 Project -- the Config tab reads its DATA through the injected workspace,
 `ws.project.config`/`ws.project.cart`/`ws.project.sheet` (Stage 3 of
-docs/shell_ux_technical_plan_v1.md moved the tabs' data reach-through off the ws.*
+docs/history/shell_ux_technical_plan_v1.md moved the tabs' data reach-through off the ws.*
 god-API onto Project; the ws.config/ws.cart forwards stay as tested surface). It is
 the single source of truth, and `ws.apply` re-runs the cart. CardsLayer never OWNS
 config; it mutates ws.project.config in

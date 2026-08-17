@@ -1,4 +1,4 @@
-"""Stage 7 (docs/shell_ux_technical_plan_v1.md Section 3): the durable undo/redo WALK
+"""Stage 7 (docs/history/shell_ux_technical_plan_v1.md Section 3): the durable undo/redo WALK
 driven through the console -- ws.undo()/ws.redo() restore the live file, rebuild the
 affected editor, and re-run the cart; plus the code-editor keyboard-shortcut UI trigger
 (Ctrl+Z / Ctrl+Y). A durable step = one COMMIT (not one keystroke); finer, in-session

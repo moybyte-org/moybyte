@@ -1,5 +1,5 @@
 """The unified 18px top bar + bottom dock (#46), extracted from Workstation
-(runtime/console.py) as its own surface -- docs/shell_layers_refactor_v1.md.
+(runtime/console.py) as its own surface -- docs/history/shell_layers_refactor_v1.md.
 
 This module is the SINGLE SOURCE of the bar/dock geometry constants (`_STATUS_H`,
 `_BAR_*`, the fixed 320x240 tool-switcher button rects `_HOME_BTN`/`_MENU_BTN`/...,
@@ -49,7 +49,7 @@ _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _STATUS_H = 18          # unified top bar height (16px icons + 1px top/bottom margin)
 
 # -- the ZONED bar's fixed GAME-canvas right cluster (Stage 4 of
-# docs/shell_ux_technical_plan_v1.md, #46 macOS-menu-bar model): reused by the
+# docs/history/shell_ux_technical_plan_v1.md, #46 macOS-menu-bar model): reused by the
 # game-domain Editor tabs (cards/paint/map -- see EditorApp/cards_layer.py/
 # paint_layer.py/layers.py's _MapLayer) that draw on the SAME fixed 320x240 canvas
 # as the running-cart pause/crash bar above. This is a SEPARATE cluster from
@@ -83,8 +83,8 @@ except ImportError:                     # host: the runtime package
 
 class BarLayer:
     """The unified 18px top bar + bottom dock (#46), migrated out of Workstation as
-    its own surface (docs/shell_layers_refactor_v1.md Phase 2) and reshaped into a
-    ZONED bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, the macOS-menu-bar
+    its own surface (docs/history/shell_layers_refactor_v1.md Phase 2) and reshaped into a
+    ZONED bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, the macOS-menu-bar
     model): a RIGHT zone (OS-owned: clock/wifi/batt/gear + a slot reserved for the
     Stage-5 context X) drawn by the bar itself, and a LEFT zone LENT to whichever
     app is active -- `launcher_layer`/`settings_layer`/`editor_app` each implement

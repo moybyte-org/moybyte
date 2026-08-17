@@ -168,7 +168,7 @@ class HostWifi(FakeWifi):
     is already online, so `status()` returns the actual LAN IP and `scan()` lists
     the real network alongside the canned demo APs. This makes the desktop sim a
     genuine testbed for network features (#22 web editor, #8 AI) over real Python
-    sockets, with the device `network.WLAN` as the unverified port. scan/connect
+    sockets, mirroring the device `network.WLAN` service. scan/connect
     stay light (we don't manage the OS's WiFi); the value is real status/IP. Falls
     back to FakeWifi when offline."""
 

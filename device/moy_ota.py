@@ -27,9 +27,11 @@ Phase 3 (#53) adds WiFi download: check_online() fetches a small JSON manifest
 and if it advertises a newer FIRMWARE_VERSION, download_step()*N streams the .bin
 straight to /sd/update (raw socket -> SD, never buffering the whole image in RAM)
 while accumulating a SHA-256 to verify before the same Phase-2 install path runs.
-The network code is the LIVE counterpart of the host fake -- like DeviceWifi it is
-UNVERIFIED on hardware (WiFi + the LCD DMA flush fight for internal RAM, see the
-#38 notes in moy_runtime) -- so treat the socket calls as a sketch until a device pass.
+The network code is the LIVE counterpart of the host fake. The whole chain --
+TLS to github.com, the 302 to the release CDN, signature verify, the streamed
+download, install and rollback -- ran on glass on BOTH boards 2026-08-02
+(CLAUDE.md's OTA channel entry has the numbers), which also settled the
+WiFi/LCD-DMA coexistence #38 had flagged.
 """
 
 UPDATE_DIR = "/sd/update"    # the T-Deck default; a board with no SD passes its own
@@ -594,7 +596,7 @@ class OtaUpdater:
     # begin_download() -> download_step()*N -> download_finish(), which streams the
     # image straight from the socket into /sd/update/firmware.bin (never holding the
     # whole 3MB in RAM) and verifies size + sha256. Then the normal Phase-2 install
-    # path takes the downloaded file. UNVERIFIED on hardware (see the class docstring).
+    # path takes the downloaded file. On-glass verified on both boards (2026-08-02).
 
     def manifest_url(self, channel=None):
         """The manifest URL for `channel`: /sd/update/ota.json if it names one, else

@@ -6,8 +6,7 @@
 #   config.json     user-edited values (the Make-it-mine surface)
 #   (sprites later)
 #
-# Mirrors the host runtime/cartridge.py model, but MicroPython-friendly (no
-# shutil; os-only). Functions take a `root` so the format/seed/scan logic is
+# MicroPython-friendly by construction (no shutil; os-only). Functions take a `root` so the format/seed/scan logic is
 # host-testable against a temp dir. SD shares the SPI bus with the display, so
 # the caller mounts SD (moybyte_sd) with the LoRa/TFT CS deselected first.
 
@@ -937,7 +936,7 @@ def set_graduated(cart_or_path, value=True):
 # The Config tab's "CART INFO" mini-editor (cards_layer.py): a kid-editable
 # title + author, the tracker's gap 2 ("Cart manifest / metadata editing --
 # title, author, permissions not editable here"). `permissions` stays
-# READ-ONLY for now -- it gates privileged system-app identity + the network
+# READ-ONLY -- it gates privileged system-app identity + the network
 # capability (app_shell.py/artwork.py/appearance_app.py/calc_app.py check it,
 # wifi.moy is the one network cart), so turning it into a free-form kid toggle
 # is a separate, security-sensitive design question the tracker doesn't settle;

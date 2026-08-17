@@ -1,5 +1,5 @@
 """The cart PLAYER -- the run-loop black box (Stage 2 of
-docs/shell_ux_technical_plan_v1.md).
+docs/history/shell_ux_technical_plan_v1.md).
 
 `Player` is the one object that RUNS a cart: it starts a cart under the frozen
 `make_api`, feeds it input, presents its pixels, and guarantees it exits (a crash
@@ -260,7 +260,7 @@ def _wrap(text, cols):
     return out
 
 
-# The Player's EXIT gesture (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec
+# The Player's EXIT gesture (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec
 # Section 9): the #71 pause machinery is GONE. A running GAME owns the full 320x240
 # with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a single
 # deliberate gesture that pops to the run caller:
@@ -880,23 +880,11 @@ class Player:
                 # early-out) when the cart never called background(). Skipped on a
                 # frameskip logic-only tick (nothing draws over it this frame).
                 #
-                # TIMED, and charged to RENDER (#172, measured on glass
-                # 2026-08-02). This restore is the cart's own drawing -- it
-                # stands in for the cls() a cart would otherwise make as _draw's
-                # first call -- but it runs before the render bracket opens
-                # below, so its cost used to fall out of `draw - upd - cart -
-                # audio` as CHROME. On the T-Deck that put ~4.7ms of Brick
-                # Siege's frame under a bucket named for the shell: chrome read
-                # 7.03ms with CHROMEBRK naming none of it (bar=0.00 cmp=0.01
-                # cur=0.06), which is what sent #172 hunting the shell for a
-                # regression that was never there.
-                #
-                # The control is brick_siege_lua, the same game clearing
-                # explicitly inside _draw ("the draw stream is IDENTICAL either
-                # way", its own comment): desktop-minus-render 2.20ms vs the
-                # Python twin's 6.58ms, for identical pixels. Counting it here
-                # makes the two languages' splits comparable, which is the whole
-                # point of the bucket.
+                # TIMED, and charged to RENDER, not chrome (#172, on-glass
+                # 2026-08-02): this restore IS the cart's drawing (it stands in
+                # for its first cls()), and letting it fall out of the bracket
+                # once put ~4.7ms of Brick Siege's frame under CHROME and sent
+                # #172 hunting the shell for a regression that was never there.
                 _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:

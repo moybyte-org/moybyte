@@ -1,4 +1,4 @@
-"""Stage 7 wiring (docs/shell_ux_technical_plan_v1.md Section 3): a Project commit
+"""Stage 7 wiring (docs/history/shell_ux_technical_plan_v1.md Section 3): a Project commit
 PERSISTS and JOURNALS. Drives the real console (host_app + Workstation) so the
 Project.commit_* verbs run, and checks each one leaves a durable undo-journal entry
 whose snapshot is byte-identical to what landed on disk.

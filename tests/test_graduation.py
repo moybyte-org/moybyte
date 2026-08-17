@@ -1,4 +1,4 @@
-"""Stage 8 (docs/shell_ux_technical_plan_v1.md Section 3): blocks<->code
+"""Stage 8 (docs/history/shell_ux_technical_plan_v1.md Section 3): blocks<->code
 GRADUATION -- the MakeCode model with an honest one-way door (spec Section 8).
 
 This module has three layers, matching the three implementation commits:

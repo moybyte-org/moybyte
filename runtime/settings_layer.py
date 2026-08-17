@@ -1,5 +1,5 @@
 """The Settings app (#28/#39/#53), extracted from Workstation (runtime/console.py) as
-its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
+its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
 Settings is the console's AGGREGATOR: a scrolling list of rows (APPEARANCE / font size /
 volume / brightness / name / EDIT ICONS / PERF DIAG, plus the injected OTA + web-view
@@ -48,7 +48,7 @@ class SettingsLayer:
     wallpaper backdrop. Owns the scroll window (set_msel/set_top) + row geometry +
     drawing; reads ws config/system state and dispatches every mutation to ws setters.
 
-    Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): Settings lends the
+    Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): Settings lends the
     top bar's left zone too, via draw_zone/zone_tap -- but it has nothing to put
     there today (its own panel already shows a title + row list below the bar), so
     both are no-ops and `zone_gen` is a constant. Wired now so a future "which
@@ -80,8 +80,8 @@ class SettingsLayer:
         # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
         # loop rate but render every SECOND frame -- halves the whole render-side
         # cost (per-draw-call dispatch, the measured tax) for 30Hz motion. Default
-        # OFF pending the on-glass feel verdict. Reads ws.frameskip (the "diag"
-        # kind's generic getattr ON/OFF rendering).
+        # OFF -- the on-glass feel pass kept it opt-in (2026-07-10, both boards).
+        # Reads ws.frameskip (the "diag" kind's generic getattr ON/OFF rendering).
         ("frameskip", "FRAMESKIP", "diag"),
         # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME
         # canvas, so on a small-canvas cart (celeste) it scales up with the

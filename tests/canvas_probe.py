@@ -4,8 +4,8 @@ WHY THIS EXISTS
 
 The stock idiom for "the screen is not blank" was `len(set(cv.buf)) > 1`: one
 distinct byte in the buffer means one flat colour, more than one means something
-drew. That reasoning is only sound while a pixel IS a byte, which is true of the
-indexed host canvas (`runtime/canvas.py`, one MOY64 palette index per byte) and
+drew. That reasoning is only sound while a pixel IS a byte, which was true of
+the deleted indexed host canvas (one MOY64 palette index per byte) and
 stops being true the moment a canvas stores RGB565 -- because then a COMPLETELY
 BLANK frame holds two distinct byte values, the high and the low half of the one
 background colour, and `len(set(...)) > 1` passes on an empty screen.

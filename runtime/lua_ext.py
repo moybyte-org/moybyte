@@ -50,12 +50,7 @@ MOY_BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 # Either the host stops testing what the board runs, or the board quietly takes
 # a per-verb slowdown with nothing pointing at a cause -- which is exactly the
 # shape of the three moycore regressions CLAUDE.md records.
-#
-# lua_host used to carry a comment defending its copy on the grounds that "this
-# file is host-only and that one is staged into firmware trees". That was never
-# the operative fact: both files ALREADY import this module (for MOY_BUTTONS
-# and install_handles), by the same name on a board and by `runtime.lua_ext` on
-# the host. There was no boundary to cross.
+
 #
 # NOT a tripwire, which is the distinction that decides it. The staging
 # closure's HOST_ONLY / NEVER_ON_A_BOARD tables are deliberately kept as twins

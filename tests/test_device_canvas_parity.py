@@ -990,7 +990,7 @@ def _stray_image(mk):
 
 
 def _drive_sprite_scene(c, sheet, img, use_batch):
-    """One scene that touches every flush trigger from docs/fast_by_default_drawing.md
+    """One scene that touches every flush trigger from docs/history/fast_by_default_drawing.md
     2.2. `use_batch` picks the auto-batch path (spr_tile) or the immediate reference
     (resolve the tile + spr() now). Both MUST paint the same pixels."""
     def stile(tile, x, y, ck=-1, scale=1, flip=0):

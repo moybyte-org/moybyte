@@ -1,5 +1,5 @@
 """The desktop wallpaper backdrop (#28), extracted from Workstation
-(runtime/console.py) as a component -- docs/shell_layers_refactor_v1.md (Move 1a).
+(runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
 Wallpaper isn't a screen like the surface Layers -- it's the SHARED backdrop the
 launcher home AND the Settings screen both draw behind their chrome (the Picotron

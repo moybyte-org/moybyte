@@ -18,13 +18,9 @@
 #                           # staged sources into the VFS, which SHADOWS the
 #                           # frozen copies (sys.path puts /modules first) --
 #                           # so runtime/ edits are testable without a rebuild
-#
-# It used to also build `--spec`: a de-branded slim player (24 shell modules
-# AST-stubbed into absorbing no-ops, one cart, no HUD) vendored into moy-spec's
-# runner/. That is gone -- the spec builds its own player now, from libmoy
-# through emscripten (moy-spec/libmoy/port/wasm), which is a third the size and
-# does not need a Python VM to run a Lua cart. This build is Moybyte's own
-# browser console and nothing else's.
+
+# This build is Moybyte's own browser console and nothing else's (the spec repo
+# builds its own player from libmoy -- CLAUDE.md's web-runner section).
 #
 # Variant notes (variant/mpconfigvariant.*, copied into the port):
 #   - pyscript-shaped: GC_SPLIT_HEAP_AUTO -> collections defer to the JS<->Python
@@ -294,10 +290,8 @@ PYEOF
 
 # ---------------------------------------------------------------------------
 # 4. The driver page: page_core.html (present + input + audio) + page_tail.js
-#    (the worker transport + the module-script loader). Both are plain files in
-#    this directory now -- the page used to be generated from a Python string in
-#    runtime/, back when three transports shared it (moycore stage 4 note in
-#    page_core.html).
+#    (the worker transport + the module-script loader) -- plain files in this
+#    directory.
 # ---------------------------------------------------------------------------
 echo "== generating index.html"
 # @MOY_BUILD@ becomes worker.js's CONTENT HASH, which the page appends to the
