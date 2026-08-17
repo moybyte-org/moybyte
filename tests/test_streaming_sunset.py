@@ -64,7 +64,12 @@ def test_the_wasm_head_rasterizes_with_the_boards_kernel():
     raster written for the web."""
     build = _read("firmware", "web_runner", "build.sh")
     assert "native/moy_gfx" in build           # the kernel is compiled in
-    assert "device_canvas.py" in build         # ...and the boards' canvas staged
+    # ...and the boards' canvas staged -- declared in the runner's board.toml
+    # since 2026-08-17 (the last hand-rolled staging list to convert).
+    from tools import board_config
+    staged = board_config.staged_modules(
+        os.path.join(ROOT, "firmware", "web_runner"), ROOT)
+    assert "device_canvas.py" in staged
     canvas = _read("firmware", "web_runner", "web_canvas.py")
     # The CLAIM is "the browser draws with the boards' own class", not "the
     # import statement is spelled on one line" -- this pinned the latter and

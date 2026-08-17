@@ -226,6 +226,28 @@ which is what makes pixel parity a fact rather than a hope."""
 
 # ---------------------------------------------------------------------------
 
+[native]
+dest = "native/.staged"
+
+[native.shared]
+source   = "native"
+strategy = "denylist"
+why = """
+The C-module twin of [modules.shared], one tier down and for the same reason
+(#161): the shared native list used to be a hand-written line in each build.sh
+-- an allowlist, whose wrong answer is silent -- and which modules a board
+compiles in is a per-board DECISION that belongs beside the Python one. Every
+directory under native/ with a micropython.cmake crosses unless denied here;
+tools/board_config.py stage-native stages the copies and generates the
+.staged/micropython.cmake include list that the board's tracked
+native/micropython.cmake pulls in.
+
+This board denies NOTHING: the T-Deck drives all seven shared modules (moy_gfx,
+moy_alloc, moy_sd, moy_audio, moy_lua, moycore, moy_web) plus its own
+native/moy_lcd, which lives in the board tree and is not staged."""
+
+# ---------------------------------------------------------------------------
+
 [modules.device]
 source   = "device"
 strategy = "allowlist"

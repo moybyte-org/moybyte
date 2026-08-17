@@ -2,6 +2,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+from tools import board_config
+
 
 ROOT = Path("firmware/lilygo_t_deck_plus_mainline")
 # The device tier moved out of the board directory when the fork went
@@ -282,8 +284,8 @@ def test_micropython_native_sd_shares_display_spi_host():
     assert "sdspi_host_init_device" in mod
     assert "sdmmc_read_sectors" in mod and "sdmmc_write_sectors" in mod
     assert "target_link_libraries(usermod INTERFACE usermod_moy_sd)" in cmake
-    assert "moy_sd" in build
-    assert "moy_sd" in build
+    # Staged per board.toml [native.shared] (the C-module list is data now).
+    assert "moy_sd" in board_config.native_modules(ROOT)
 
     # Python live-mount path + block device backed by moy_sd.
     assert "class _NativeSDBlockDev" in sd_loader
@@ -2247,9 +2249,8 @@ def test_native_moy_audio_is_vendored_libmoy():
     assert "target_link_libraries(usermod INTERFACE usermod_moy_audio)" in cmake
     assert "libmoy/moy_audio.c" in mk
     assert "SRC_USERMOD_C += $(MOY_AUDIO_MOD_DIR)/modmoy_audio.c" in mk
-    # build.sh stages it into ext_mod next to moy_gfx/moy_sd (re-staged every build).
-    assert "moy_audio" in build
-    assert "moy_audio" in build
+    # Staged per board.toml [native.shared] (re-staged every build).
+    assert "moy_audio" in board_config.native_modules(ROOT)
 
     # DeviceAudio forwards verbs and hands the bank over ONCE per cart, keeping a
     # A build WITHOUT moy_audio is SILENT -- the Python-twin fallback died with
@@ -2652,8 +2653,12 @@ def test_ota_two_channel_wired():
     # u.offers(...) is inside _pump_update, which now lives in update_ui.py (UpdateUI).
     update_ui = Path("runtime/update_ui.py").read_text(encoding="utf-8")
     assert "u.offers(manifest, ch)" in update_ui
-    # build.sh stamps the channel into a generated _ota_build module + dist manifest.
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
+    # The build stamps the channel into a generated _ota_build module + dist
+    # manifest -- via the SHARED build lib since 2026-08-17 (both boards call
+    # moybyte_ota_identity), so the grep spans build.sh plus the lib.
+    build = ((ROOT / "build.sh").read_text(encoding="utf-8")
+             + Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8"))
+    assert "moybyte_ota_identity" in build
     assert "MOYBYTE_OTA_CHANNEL" in build
     assert "_ota_build.py" in build
     assert "ota_build.json" in build
@@ -2734,9 +2739,9 @@ def test_one_lua_runtime_wired():
     assert "MP_REGISTER_MODULE(MP_QSTR_moycore" in mod
     assert "MP_REGISTER_ROOT_POINTER" in mod       # gc-rooted callables list
     assert "moy_lua_open" in mod and "moy_lua_update" in mod   # libmoy's loop
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "moy_lua" in build    # the VM is still staged
-    assert "moycore" in build
+    staged_native = board_config.native_modules(ROOT)
+    assert "moy_lua" in staged_native    # the VM is still staged
+    assert "moycore" in staged_native
 
     # No chooser on any tier: one import, one factory, an ImportError floor.
     # The two BOARDS reach it through the shared boot spine since #161 Phase 4

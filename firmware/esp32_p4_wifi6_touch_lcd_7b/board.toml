@@ -180,6 +180,42 @@ rasterizes from the same bytes the host draws from."""
 
 # ---------------------------------------------------------------------------
 
+[native]
+dest = "native/.staged"
+
+[native.shared]
+source   = "native"
+strategy = "denylist"
+why = """
+The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
+the mechanism). Every directory under native/ with a micropython.cmake crosses
+unless denied here -- this board's own moy_dsi/moy_ppa/moy_ble_hid live in its
+board tree and are not staged. The two denials below are what the old
+hand-written cp list in build.sh silently encoded; now they are decisions with
+reasons someone can check."""
+
+[[native.shared.deny]]
+module = "moy_sd"
+why = """
+This console has no SD card in play: carts live on the internal-flash VFS
+(/moy/carts), OTA stages to /moy/update, and moy_sd's whole reason to exist --
+attaching a card to a host the T-Deck's moy_lcd already initialised, on a
+SHARED SPI bus -- names hardware this board does not have. The board README's
+SD notes (LDO4 power, SDMMC slot 1 belongs to the C6) are about a FUTURE
+removable-cart workflow; when that lands it will be an SDMMC driver, not this
+SPI-attach module."""
+
+[[native.shared.deny]]
+module = "moy_audio"
+why = """
+Audio on this board is the OPEN ES8311 bring-up (#82). moy_audio's synth half
+(vendored libmoy) is board-agnostic, but its I2S plumbing is written against
+the T-Deck's wiring and nothing here would construct it -- device_audio.py is
+not in this board's device allowlist either. Flip both together when #82
+lands."""
+
+# ---------------------------------------------------------------------------
+
 [modules.device]
 source   = "device"
 strategy = "allowlist"

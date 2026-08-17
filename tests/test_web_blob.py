@@ -341,16 +341,28 @@ def test_every_board_bakes_the_console_in(name, path):
     board quietly does not carry it, and a capability-gated feature that is
     absent reads as a feature that does not exist.
     """
+    # The bake lives in the SHARED build lib since 2026-08-17 (both boards
+    # call moybyte_stage_native, which generates the blob into the staged
+    # copy), and the staging is board.toml's [native.shared] -- so the pin
+    # follows: the board must reach the lib step, and must not DENY the module.
     sh = (path / "build.sh").read_text()
-    assert "gen_web_blob.py" in sh, "%s never bakes the bundle" % name
-    assert "moy_web" in sh, "%s never stages the module" % name
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
+    assert "moybyte_stage_native" in sh, "%s never bakes the bundle" % name
+    assert "gen_web_blob.py" in lib
+    from tools import board_config
+    assert "moy_web" in board_config.native_modules(path, ROOT), (
+        "%s never stages the module" % name)
 
 
 def test_the_p4_usermod_list_includes_the_module():
-    """The T-Deck's build.sh seds its include into the upstream ext_mod list;
-    the P4's is a tracked file, so it is checked directly."""
+    """Both boards' tracked cmake now includes ONE generated list
+    (.staged/micropython.cmake, written by board_config.stage_native from
+    board.toml), so the pin is that the generator emits the module's include
+    for this board's declared set."""
     cm = (P4 / "native" / "micropython.cmake").read_text()
-    assert ".staged/moy_web/micropython.cmake" in cm
+    assert ".staged/micropython.cmake" in cm
+    from tools import board_config
+    assert "moy_web" in board_config.native_modules(P4, ROOT)
 
 
 @pytest.mark.parametrize("name,path", BOARDS, ids=[b for b, _ in BOARDS])
@@ -360,17 +372,20 @@ def test_an_image_too_big_for_its_slot_fails_the_build(name, path):
     -- an image esptool refuses and no board can take over OTA. It fails now,
     on both boards (the P4 had no guard at all).
     """
+    # The guard is ONE implementation in the shared build lib now
+    # (moybyte_app_size_guard, 2026-08-17); each board must still CALL it.
     sh = (path / "build.sh").read_text()
-    assert "APP_HEADROOM_BYTES" in sh, "%s does not measure its slot" % name
+    assert "moybyte_app_size_guard" in sh, "%s does not measure its slot" % name
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
     # The OVERFLOW branch only -- everything from `headroom < 0` to the `elif`
     # that merely warns about a thin margin.
-    head, _, rest = sh.partition('"${APP_HEADROOM_BYTES}" -lt 0 ]; then')
-    assert rest, "%s has no overflow branch" % name
+    head, _, rest = lib.partition('"${headroom}" -lt 0 ]; then')
+    assert rest, "the build lib has no overflow branch"
     branch = rest.split("elif", 1)[0]
-    assert "exit 1" in branch, "%s only warns about an oversized image" % name
+    assert "exit 1" in branch, "the size guard only warns about an oversized image"
     for word in ("slot", "OVERFLOW"):
         assert word in branch, (
-            "%s's failure does not name the %s" % (name, word))
+            "the size guard's failure does not name the %s" % word)
 
 
 def test_the_module_is_importable_by_the_generator_without_a_board():

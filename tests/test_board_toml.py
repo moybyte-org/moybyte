@@ -167,22 +167,91 @@ def test_the_board_identity_matches_the_ota_stamp():
     actually stamps -- the P4's build.sh writes it into `_ota_build.py`, and the
     T-Deck's comes from `moy_ota.BOARD`'s default.
     """
+    # The stamp is ONE implementation in the shared build lib (2026-08-17):
+    # moybyte_ota_identity writes BOARD="${board_id}" into _ota_build.py, and
+    # each build.sh passes its [board].ota as that argument -- so the pin is
+    # the call site, plus the lib actually stamping what it is handed.
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert 'BOARD = "${board_id}"' in lib
+
     p4_sh = (P4 / "build.sh").read_text(encoding="utf-8")
     p4_id = board_config.load(P4)["board"]["ota"]
-    assert 'BOARD = "%s"' % p4_id in p4_sh
+    assert "moybyte_ota_identity %s " % p4_id in p4_sh
 
-    ota = (TDECK / "modules" / "moy_ota.py").read_text(encoding="utf-8")
+    tdeck_sh = (TDECK / "build.sh").read_text(encoding="utf-8")
     tdeck_id = board_config.load(TDECK)["board"]["ota"]
-    assert 'BOARD = "%s"' % tdeck_id in ota
+    assert "moybyte_ota_identity %s " % tdeck_id in tdeck_sh
     assert p4_id != tdeck_id
 
-    # The mainline T-Deck stamps the SAME id, and that is the correct answer
-    # rather than a copy-paste: it produces an app-partition image for the same
-    # Xtensa board on a byte-identical partition table, so an OTA payload from
-    # either build installs into the other's inactive slot. A distinct id would
-    # mean a board could not move between the two builds, which is exactly the
-    # migration this port exists to make possible.
-    ml_sh = (TDECK_MAINLINE / "build.sh").read_text(encoding="utf-8")
-    ml_id = board_config.load(TDECK_MAINLINE)["board"]["ota"]
-    assert 'BOARD = "%s"' % ml_id in ml_sh
-    assert ml_id == tdeck_id
+    # ...and moy_ota.py's own BOARD default (what runs when the generated
+    # _ota_build.py is missing) agrees with the T-Deck's id -- read from the
+    # TRACKED device/ source, not a gitignored staged copy.
+    ota = (ROOT / "device" / "moy_ota.py").read_text(encoding="utf-8")
+    assert 'BOARD = "%s"' % tdeck_id in ota
+
+
+# -- the [native] declaration (#161: the C-module list is data too) -----------
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_every_native_denial_names_a_module_and_says_why(board):
+    """The C twin of the shared denylist's contract: a denial with no reason is
+    an allowlist wearing a costume, and a denial naming a module that does not
+    exist is a decision about nothing (or a rename nobody followed)."""
+    for name, entry in board_config.native_denials(BOARDS[board]).items():
+        assert entry.get("why", "").strip(), (
+            "%s denies native module %r without a why" % (board, name))
+        assert (ROOT / "native" / name / "micropython.cmake").exists(), (
+            "%s denies native module %r which does not exist under native/"
+            % (board, name))
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_build_sh_stages_native_via_the_declaration(board):
+    """No hand-written native list in build.sh -- the same both-halves check
+    as the Python side: the script must reach the stager (via the shared build
+    lib's moybyte_stage_native, which runs `board_config.py stage-native`) and
+    must not carry `cp` lines over the shared native/ tree beside it."""
+    sh = (BOARDS[board] / "build.sh").read_text(encoding="utf-8")
+    assert "moybyte_stage_native" in sh or "stage-native" in sh, (
+        "%s/build.sh no longer stages native modules via board.toml" % board)
+    lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert "stage-native" in lib
+    stale = [line for line in sh.splitlines()
+             if "${REPO_ROOT}/native/" in line
+             and line.strip().startswith("cp ")]
+    assert not stale, (
+        "%s/build.sh hand-copies shared native modules again: %s"
+        % (board, stale))
+
+
+@pytest.mark.parametrize("board", sorted(BOARDS))
+def test_stage_native_produces_the_declared_tree(tmp_path, board):
+    """stage-native writes exactly the declared modules plus one generated
+    cmake whose include list names each of them -- and a re-run DEMOLISHES a
+    stray, because nothing in .staged/ is authored."""
+    src = BOARDS[board]
+    work = tmp_path / "board"
+    work.mkdir()
+    shutil.copyfile(src / "board.toml", work / "board.toml")
+    mods = board_config.stage_native(work, ROOT, quiet=True)
+    assert mods == board_config.native_modules(src, ROOT)
+    staged = work / "native" / ".staged"
+    dirs = sorted(p.name for p in staged.iterdir() if p.is_dir())
+    assert dirs == mods
+    cmake = (staged / "micropython.cmake").read_text(encoding="utf-8")
+    for m in mods:
+        assert "/%s/micropython.cmake" % m in cmake
+    # A stray from an older declaration must not survive the next stage.
+    (staged / "moy_stray").mkdir()
+    board_config.stage_native(work, ROOT, quiet=True)
+    assert not (staged / "moy_stray").exists()
+
+
+def test_the_p4_denies_exactly_its_missing_hardware():
+    """The two P4 denials are the hand-cp list build.sh used to encode
+    silently: no SD in play, ES8311 audio still open (#82). The T-Deck denies
+    nothing. If this changes, it should be because a board's hardware story
+    changed -- update board.toml first, this pin second."""
+    assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_sd"]
+    assert board_config.native_denials(TDECK) == {}

@@ -198,36 +198,15 @@ fi
 echo "== staging runtime/ modules"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/modules"
-# The *_binding.py are the HOST's ctypes loaders: they shell out to a C
-# compiler (subprocess/shutil) and dlopen the result. The browser reaches libmoy
-# through its compiled-in usermods instead, so these were pure dead weight in the
-# image -- swept in only because a denylist includes whatever nobody excluded.
-# tests/test_staging_closure.py is what noticed. (raster_binding.py was a fourth;
-# it was deleted with runtime/canvas.py, the host's second raster.)
-DENY="host_app.py lua_host.py palette.py font.py __init__.py \
-      audio_binding.py lua_binding.py \
-      gfx_binding.py native_build.py host_canvas.py"
-for f in "${REPO_ROOT}/runtime/"*.py; do
-  base="$(basename "${f}")"
-  skip=0
-  for d in ${DENY}; do [ "${base}" = "${d}" ] && skip=1; done
-  [ "${skip}" = "1" ] || cp "${f}" "${STAGE_DIR}/modules/${base}"
-done
-# font.py stages as moy_font.py (the boards' name for it -- device_canvas gates
-# its native text op on being able to import that name).
-cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
-# Modules staged from the T-Deck tree (the single source both boards use):
-#   moycore_glue  -- the host half of moycore: snapshot in, audio queue out,
-#     pmem at boundaries. Board-agnostic by construction (it talks to ws and to
-#     the module, never to a panel), which is why the browser needs no twin.
-#   device_canvas -- THE RASTER (moycore stage 4). The browser runs the boards'
-#     own canvas class over web_canvas.WebCompositor; see web_canvas.py for why
-#     that works and what stays board-only.
-#   device_util   -- ticks helpers device_canvas imports
-for f in moycore_glue.py device_canvas.py device_util.py; do
-  cp "${REPO_ROOT}/device/${f}" \
-     "${STAGE_DIR}/modules/${f}"
-done
+# WHAT crosses and WHY is declared in board.toml (#161 -- the last hand-rolled
+# staging list to convert; the boards went in Phase 3). The stager applies the
+# denylist over runtime/, the font.py -> moy_font.py rename, and the device/
+# allowlist (moycore_glue / device_canvas / device_util), into
+# .build/stage/modules per the file's `dest`. tests/test_staging_closure.py
+# derives the web frozen set from that declaration, same as the boards'.
+"${PY}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+# The runner's own AUTHORED modules -- the analogue of a board's tracked
+# modules/ files, copied by name because the stage dir is rebuilt from scratch.
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
 cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
 

@@ -24,9 +24,9 @@ quarter:
 The shape of the defect is always the same: an import that fails on device
 turns into a MISSING FEATURE rather than a crash, because the callers are
 guarded and the UI is capability-gated. Nothing goes red. So the frozen set is
-derived from what a FRESH build produces -- each board's `board.toml` (#161
-Phase 3), and the web runner's inline `DENY=` -- and never from `modules/` on
-disk, which is precisely where the staleness hides.
+derived from what a FRESH build produces -- every target's `board.toml`
+(#161 Phase 3 for the boards, 2026-08-17 for the web runner) -- and never
+from `modules/` on disk, which is precisely where the staleness hides.
 
 The rule is deliberately weak enough not to be noisy: for each import site, at
 least ONE branch of its try/except-ImportError ladder must resolve. That accepts
@@ -81,8 +81,8 @@ NATIVE = {
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
                        "moycore", "moy_web", "moy_lcd"},
-    "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_dsi", "moy_ppa",
-           "moy_ble_hid"},
+    "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
+           "moy_ppa", "moy_ble_hid"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
 }
 
@@ -200,63 +200,6 @@ def _tracked(modules_dir):
     return found
 
 
-def _cp_staged(sh, board_dir):
-    """`cp "${REPO_ROOT}/runtime/a.py" "${SCRIPT_DIR}/modules/b.py"`.
-
-    The RENAME matters: font.py is staged as moy_font.py, and a rule that keyed
-    on the source name would think `import moy_font` was unsatisfied.
-    """
-    found = {}
-    pat = r'cp\s+"\$\{(\w+)\}/([^"]+?)"\s+"\$\{\w+\}/([^"]+\.py)"'
-    for m in re.finditer(pat, sh):
-        src_var, src_path, dst = m.group(1), m.group(2), m.group(3)
-        # A destination nested below modules/ is a PACKAGE member (moybyte/
-        # input.py). Its importable name is the package's, not the file's, so
-        # keying it by basename would invent a top-level `input` module and then
-        # report it as an untracked stray. PACKAGES covers these.
-        tail = dst.split("modules/", 1)[-1]
-        if "/" in tail:
-            continue
-        base = ROOT if src_var in ("REPO_ROOT",) else board_dir
-        p = base / src_path
-        if p.exists():
-            found[Path(tail).stem] = p
-    return found
-
-
-def _for_staged(sh):
-    """`for f in a.py b.py \\\n c.py; do cp "${SRC}/${sub}${f}" ...`."""
-    found = {}
-    pat = (r'for f in ((?:[^;]|\n)*?); do\s*\n\s*cp\s+'
-           r'"\$\{(\w+)\}/([^"]*?)\$\{f\}"')
-    for m in re.finditer(pat, sh):
-        names, src_var, sub = m.group(1), m.group(2), m.group(3)
-        base = ROOT if src_var == "REPO_ROOT" else (
-            TDECK if src_var == "TDECK_DIR" else ROOT)
-        for n in names.replace("\\\n", " ").split():
-            if not n.endswith(".py"):
-                continue
-            p = base / sub / n
-            if p.exists():
-                found[Path(n).stem] = p
-    return found
-
-
-def _web_staged(sh):
-    """The web runner globs runtime/*.py minus an inline DENY list.
-
-    It got there first; both boards followed in #161 Phase 3, where the
-    equivalent list moved into `board.toml` so the REASON for each exclusion
-    could live beside it. This one is still shell, so it is still parsed.
-    """
-    m = re.search(r'DENY="([^"]*)"', sh)
-    deny = set(m.group(1).split()) if m else set()
-    found = {p.stem: p for p in (ROOT / "runtime").glob("*.py")
-             if p.name not in deny}
-    found.pop("__init__", None)
-    return found
-
-
 def frozen_set(target):
     """The modules a FRESH build of `target` freezes, and where each comes from.
 
@@ -266,23 +209,25 @@ def frozen_set(target):
     every developer's board still working.
     """
     if target == "web":
-        sh = (WEB / "build.sh").read_text()
-        mods = _web_staged(sh)
-        mods.update(_cp_staged(sh, WEB))
-        mods.update(_for_staged(sh))
-        # web_boot/web_canvas are staged by name; the runner's own moy.py and
-        # serve.py are HOST dev tools and never enter the image.
+        # The web runner DECLARES its staging too now (board.toml -- the last
+        # hand-rolled DENY list to convert, 2026-08-17; the boards went in
+        # #161 Phase 3). The shell extractors that used to parse its build.sh
+        # died with the inline list.
+        mods = {Path(name).stem: path for name, path
+                in board_config.staged_modules(WEB, ROOT).items()}
+        # web_boot/web_canvas are the runner's AUTHORED modules, copied by
+        # name in build.sh; its moy.py and serve.py are HOST dev tools and
+        # never enter the image.
         for name in ("web_boot", "web_canvas"):
             p = WEB / (name + ".py")
             if p.exists():
                 mods[name] = p
     else:
-        # The boards DECLARE their staging (#161 Phase 3): board.toml holds the
-        # denylist over runtime/ and the allowlist over the T-Deck's device
-        # tree, and build.sh does nothing but call the stager. So this reads the
-        # declaration rather than re-deriving it from shell syntax -- one source
-        # for what a build produces, and the regex extractors below survive only
-        # for the web runner, which still declares its DENY inline.
+        # The boards DECLARE their staging (#161 Phase 3): board.toml holds
+        # the denylist over runtime/ and the allowlist over the shared device
+        # tree, and build.sh does nothing but call the stager. This reads the
+        # declaration rather than re-deriving it from shell syntax -- one
+        # source for what a build produces, on every target now.
         board = BOARD_DIR[target]
         mods = dict(_tracked(board / "modules"))
         mods.update({Path(name).stem: path for name, path
@@ -609,3 +554,25 @@ def test_the_frozen_set_is_derived_from_the_declaration():
         assert not untracked, (
             "%s: frozen set includes untracked staged copies (stale-build risk):"
             "\n  %s" % (target, "\n  ".join(untracked)))
+
+
+def test_the_native_tripwire_agrees_with_the_native_declaration():
+    """Two statements of one truth, compared -- the same discipline the shared
+    Python denials get, applied to the C modules (#161).
+
+    NATIVE above is a hand-written tripwire: the modules each image's imports
+    may resolve against. board.toml [native.shared] is the declaration a build
+    actually stages. Each board's row must equal its declared shared modules
+    plus the board-AUTHORED ones in its own native/ tree -- derived from the
+    tree, not restated, so a new board module joins the comparison by
+    existing. The web target has no [native] section (its emscripten staging
+    is structurally different) and stays hand-listed."""
+    for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4)):
+        shared = set(board_config.native_modules(board_dir, ROOT))
+        authored = {p.name for p in (board_dir / "native").iterdir()
+                    if p.is_dir() and not p.name.startswith(".")
+                    and (p / "micropython.cmake").exists()}
+        assert shared | authored == NATIVE[target], (
+            "%s: NATIVE tripwire %s != declaration %s + board-authored %s"
+            % (target, sorted(NATIVE[target]), sorted(shared),
+               sorted(authored)))
