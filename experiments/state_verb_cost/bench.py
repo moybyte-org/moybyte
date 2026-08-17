@@ -1,5 +1,9 @@
 """State-verb cost attribution: crossing vs body, on the unix dual-usermod build.
 
+HISTORICAL -- this ran against moy_lua_glue.LuaCartRun, deleted 2026-08-13 with
+the old Lua runtime, so the script no longer executes; the numbers it produced
+are pinned where they are cited (tests/test_gate_pal_sync, device_canvas).
+
 M0(a) priced a Lua cart's state-verb trampolines at ~0.55ms/call on the S3 by
 difference (issue #66's attribution table), a lumped number that cannot say
 whether the milliseconds live in the Lua->MP CROSSING or in the verb BODY.

@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython firmware-stage-xiao-zero ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: check-venv firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -441,10 +441,4 @@ firmware-monitor-p4:
 # (The build/flash/monitor targets live above, under their canonical
 # firmware-*-tdeck-mainline names; the image + otadata offsets are the MPY_*
 # variables at the top of this file.)
-
-# MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
-# MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the
-# shared console modules + the Zero backend over mpremote (PORT defaults to the first ttyACM*).
-firmware-stage-xiao-zero:
-	bash firmware/seeed_xiao_esp32s3_zero/stage.sh $(PORT)
 

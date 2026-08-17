@@ -974,7 +974,8 @@ only the number was missing, and because the shape of the error is the useful
 part: every step was a plausible inference from real data, and the one control
 nobody had run turned a 2.9x into a 1.0x.
 
-`experiments/batch_kernel_ab/batch_ab.py` on the unix build, 200 sprites, same
+The batch-kernel A/B script (deleted with the experiment; git history has it)
+ran on the unix build, 200 sprites, same
 tiles, same positions, same canvas, both paths verified to draw an IDENTICAL
 12,656 pixels:
 

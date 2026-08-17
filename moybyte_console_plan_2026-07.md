@@ -270,7 +270,7 @@ Progressive authoring, all editing the *same* cart:
 - **Icons → blocks → Python.** #29 shipped the block-language overhaul + a working single-object tap game.
 - **Blocks depth (#48)** is the path to real games in blocks, in leverage order: **lists** (the biggest gap — no collections ⇒ no multiple enemies/bullets/inventories), **custom blocks** (define/call with params), **control** (`repeat until`, `wait until`, `break`; fix frame-yielding `forever`), **operators** (`mod`, `round`, `abs`, `min/max`, comparisons).
 - **Blockly-in-browser (#22)** is the richer web-based block editor path.
-- The `.moyproj` SDK + block compiler is deliberately **kept** — it seeds the icons→blocks→code ladder even though `.moy` is the active console format.
+- The block compiler lives in `runtime/blocks.py`; the old `.moyproj` SDK around it was deleted 2026-07-31 (git history has it).
 
 ### 6.3 Quests & pedagogy (#20, see §7).
 

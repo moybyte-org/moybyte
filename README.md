@@ -111,22 +111,20 @@ card and it is on the launcher. Built-in carts re-seed by version and keep the
 your saves and tuning across an update.
 
 **Wireless** — WiFi setup lives in Settings, so it works while a game runs.
-Firmware updates go over the air on two channels, stable and beta, into an
-inactive OTA slot with bootloader rollback; that whole path was confirmed on a
-T-Deck — download, install, boot the new slot, roll back. It has not been
-exercised in a while, so treat it as "worked when last tested". The device can
-also serve the running system to a browser on the same network as draw commands
-rather than pixels — verified on a T-Deck
-([#182](https://github.com/moybyte-org/moybyte/issues/182)), where it works and
-is slow: that board's WiFi moves roughly 72 KB/s, and that, not the drawing, is
-what caps the frame rate over the wire.
+Firmware updates go over the air on two signed channels, stable and beta, into
+an inactive OTA slot with bootloader rollback — the whole chain (real WiFi,
+signature check on device, streamed install, boot the new slot, rollback
+self-heal) has run on the glass of both boards. Each board also serves the
+browser console below over its own WiFi: the wasm bundle is baked into the
+firmware image, so a phone on the same network gets the full console from the
+device itself.
 
-**Four rendering backends, one contract** — host, two boards, and a browser page
-that draws the system's draw commands itself. That contract is written down
+**Four rendering backends, one contract** — host, two boards, and a browser
+build that rasterizes in WebAssembly. That contract is written down
 ([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
 of approaches that were built, measured and reverted.
 
-**Tests** — ~1900, all headless. Golden-frame tests pin the host renderer and a
+**Tests** — over 2,300, all headless. Golden-frame tests pin the host renderer and a
 canvas-parity suite holds the device backend to it; the firmware tests read the
 frozen module tree rather than executing it. The P4 is driven over its live serial
 console by a pytest suite that taps and swipes the real UI, and the browser build
@@ -300,7 +298,7 @@ cost a debugging session.
 |---|---|
 | `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
 | `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Sheets, Writer, Storybook, Calc) |
-| `firmware/lilygo_t_deck_plus_micropython/` | the ESP32-S3 port + the native C modules (`moy_gfx`, `moy_lua`, `moy_audio`, `moy_sd`) |
+| `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
 | `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
 | `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |

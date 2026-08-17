@@ -171,13 +171,6 @@ def _background(px, bg):
     return Counter(px).most_common(1)[0][0]
 
 
-def painted_pixels_in(buf, bpp, bg=None):
-    """Pixels of a raw buffer that differ from the background."""
-    px = pixels_in(buf, bpp)
-    ref = _background(px, bg)
-    return sum(1 for p in px if p != ref)
-
-
 def painted_pixels(cv, bg=None):
     """How many pixels differ from the background colour.
 

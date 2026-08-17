@@ -33,7 +33,6 @@ sim = [
 device = [
   "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
   "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
-  "mpremote",          # firmware/seeed_xiao_esp32s3_zero/stage.sh
 ]
 # SIGNING an OTA manifest (tools/ota_sign.py keygen/sign). Not in `make setup`:
 # only the release publisher needs it, and only for the private-key half.

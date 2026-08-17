@@ -34,11 +34,6 @@ def _ws(tmp_path, **kw):
 # Graceful degradation: 320x240 system canvas == game canvas, pixel-identical.
 # ---------------------------------------------------------------------------
 
-def _run_n(drv, n, dt=1 / 30):
-    for _ in range(n):
-        drv.frame(dt)
-
-
 def test_default_build_shares_one_canvas(tmp_path):
     """The default (T-Deck) build has no distinct system canvas: the system canvas
     IS the game canvas (one object), so the composite step is a no-op and the

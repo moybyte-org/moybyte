@@ -184,7 +184,7 @@ PICO-8's measured output (as reverse-engineered by zepto8/fake-08) — the
 unequal instrument loudness, the pitched noise walk, the Hz-linear slide, the
 109/110 phaser detune — and moy-spec ships its own C implementation of it,
 **libmoy**. That source is vendored verbatim into
-`firmware/lilygo_t_deck_plus_mainline/native/moy_audio/libmoy/` and
+`native/moy_audio/libmoy/` and
 **compiled into** the T-Deck and the web runner; `modmoy_audio.c` is a thin
 binding that forwards the six §8.2 verbs and owns I2S. libmoy owns the bank,
 both sequencers and the mixer, so the boards are conformant by construction and

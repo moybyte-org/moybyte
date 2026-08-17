@@ -607,11 +607,6 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
 # REDO only lights on the tab that actually has something ahead.
 # ==================================================================#
 
-def _cell_painted(ws):
-    ox, oy = ws.sheet.tile_origin(0)
-    return ws.sheet.pget(ox, oy)
-
-
 def test_active_tab_files_maps_each_tab(tmp_path):
     # The tab -> journal-file-set table the scoped walk routes through.
     ws = _make_ws_with_cart(tmp_path)
