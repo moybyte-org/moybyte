@@ -348,7 +348,15 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 
 
 # _decode_moyimg lived here until 2026-08-17; THE copy is
-# runtime/cart_api.py (one body for every tier -- see its docstring).
+# runtime/cart_api.py (one body for every tier -- see its docstring). Its
+# removal briefly took the neighbouring constant below with it, which broke
+# make_spr_gate -- and therefore EVERY cart start -- while both on-glass
+# suites stayed green, because neither ran a cart. The host pyflakes net
+# (test_no_undefined_names) caught it on the next staged build; the suites
+# grew a run-a-cart test the same day so the glass can catch its own.
+_GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
+
+
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --

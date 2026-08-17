@@ -114,6 +114,30 @@ def test_swipe_rides_the_real_pointer_feed(board):
     board.drain(0.8)                       # let the fling settle
 
 
+def test_a_cart_runs_and_exits(board):
+    """THE test the 2026-08-17 _GATE_SEQ regression bought: a staged-constant
+    deletion broke make_spr_gate -- and therefore EVERY cart start -- while
+    both boards' suites stayed green, because nothing on glass ever RAN a
+    cart. The host pyflakes net caught it one staged build later; this makes
+    the glass able to catch its own. Launch through the real launcher path,
+    assert the cart is ticking, exit through the cart-quit flag the Player
+    honors (the same flag the cart-API quit() verb sets)."""
+    line = board.cmd("run star", wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.0)
+    st = board.state()
+    assert st.get("cart"), "the cart never started: %r" % st
+    assert not st.get("cart_error"), st["cart_error"]
+    f0 = st["frames"]
+    board.drain(1.0)
+    assert board.state()["frames"] > f0, "the cart is not ticking"
+    board.cmd("py ws.input.cart_quit = True", wait_for="PY")
+    board.drain(1.5)
+    st = board.state()
+    assert not st.get("cart"), "quit did not pop to the caller: %r" % st
+    assert st["stack"][-1] == "launcher"
+
+
 def test_idle_screen_blank_and_wake(board):
     """The idle blank on THIS board (shared IdleBlank + shared power verb):
     blank on silence, wake on the next serial command, `power off` outranks

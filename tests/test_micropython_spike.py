@@ -340,7 +340,11 @@ def test_micropython_touch_and_idle_cursor():
     assert "class Pointer:" in widgets
     assert "def tick(self, now):" in widgets
     assert "self.pointer.visible" in console               # draw guard (stays on the ws)
-    assert "pointer.tick(now)" in runtime
+    # pointer.tick runs in the SHARED FrameLoop since #202 Phase B (one order
+    # for every board), which run_desktop constructs.
+    boot_spine = Path("runtime/device_boot.py").read_text(encoding="utf-8")
+    assert "pointer.tick(now)" in boot_spine
+    assert "loop = FrameLoop(" in runtime
 
     # Touch calibration bring-up mode (serial-only, flush-once).
     assert "RUN_TOUCH_CALIBRATE" in shell
@@ -533,7 +537,7 @@ def test_kid_mode_gates_diag_frame_eaters():
     assert '_live = bool(getattr(ws, "diag_live", False))' in runtime
     assert "diag.ECHO_LIVE = _live" in runtime
     assert "with_sd_live" in runtime                               # forced GC gated
-    assert "_cart_prev and not _cart_now" in runtime       # cart-exit flush
+    assert "_cart_prev[0] and not _cart_now" in runtime    # cart-exit flush
     # The periodic diag->SD flush needs BOTH gates now (owner call 2026-07-08):
     # PERF DIAG (_live) AND Settings -> DIAG SD LOG (ws.diag_sd) -- serial-only
     # measurement has no 20s sdflush stutter.
@@ -1579,7 +1583,7 @@ def test_hitch_logger_wired():
     # split printed (EMAs hid which phase a single spike lived in), pump= and
     # lw= (copy_wait trips) added; copy_wait is bounded ~250k spins and REPORTS
     # a trip, with the consume site forcing the sync path on one.
-    assert "_diag_hitch(diag, ws, comp, elapsed, _t_kbd, _t_inp, _t_sb, _t_ws," in runtime
+    assert '_diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],' in runtime
     assert "pump=%.1f lw=%d raw(logic=%.1f" in device_diag
     assert "self._lcopy_trips += 1" in device_canvas
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -2955,8 +2959,10 @@ def test_the_p4_perf_sampler_cannot_kill_the_frame_loop():
         "stale diag line and not a dead console"
     # The timer state has to be reset OUTSIDE the guard, or a sampler that
     # raises retries every frame and floods the serial it is measured over.
+    # (#202 Phase B: the sampler is the _account hook now; the reset must
+    # still follow the except, inside the hook.)
     reset = tail[tail.index("except Exception"):]
-    assert reset.index("_pf_at = ") < reset.index("\n        # Frame pacing")
+    assert '_pf["at"] = ' in reset
     # ...and no bare `ws._<timing>` left in the line itself: the guard keeps the
     # loop alive, getattr keeps the LINE alive (one renamed meter should cost
     # one field, not the whole sample).

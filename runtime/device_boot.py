@@ -458,3 +458,147 @@ class IdleBlank:
             print("Moybyte power save: screen off (idle %ds)"
                   % (self.timeout_ms // 1000))
         return click
+
+
+def _sleep_ms(ms):
+    """MicroPython's sleep_ms, with the host shim the tick helpers get for
+    free -- FrameLoop is host-executed by tests/test_device_boot.py."""
+    import time
+    try:
+        time.sleep_ms(ms)
+    except AttributeError:
+        time.sleep(ms / 1000.0)
+
+
+class FrameLoop:
+    """The device frame loop's INVARIANT ORDER, one copy for every board
+    (#202 Phase B -- the extraction #161 declined while the loop middles were
+    still large and the T-Deck had no on-glass harness; both premises expired
+    on 2026-08-17).
+
+    What this class owns is exactly the ordering whose per-board copies are
+    where this repo's worst bugs have lived (#56 was an order bug; so was
+    PURR's F13, quoted in #161):
+
+      pump.begin -> poll_inputs (EVERY input source) -> dev channel ->
+      idle.tick (the wake-swallow needs all inputs read first) ->
+      pointer.click/tick -> present (pre-frame buffer work: the P4's
+      present_pending must precede sync_back, which re-points at the freed
+      buffer) -> ws.handle_input/handle_pointer/frame -> the first-frame
+      backlight gate -> pump.tail -> tail -> pace -> account -> sleep.
+
+    Boards supply the hooks; everything hardware stays theirs:
+
+      poll_inputs(now) -> (click, active)  read every input source, feed the
+                          pointer's place/down/fresh. `active` is the idle
+                          blank's wake condition MINUS the dev channel (the
+                          loop adds `ran` itself).
+      present()         pre-frame buffer work (sync_back and friends), or None.
+      frame_error(exc)  the board's crash note (default: print). Runs for any
+                          Exception; KeyboardInterrupt always propagates (the
+                          Ctrl-C -> shell -> REPL contract).
+      tail(now)         per-frame services after pump.tail (webhost poll, diag
+                          ticks, SD flush cadence), counted INSIDE the frame's
+                          elapsed, or None.
+      account(now, elapsed, sleep_ms)  frame accounting after pace (HITCH,
+                          LOOP accumulators, PERF samplers), or None.
+
+    The loop also exposes the per-frame ws-phase splits every board's
+    diagnostics want (t_hi/t_hp/t_ws -- handle_input/handle_pointer/frame ms)
+    and the drew/frames_before pair the T-Deck's SD bracket and idle-band
+    drain read. run() returns "quit" when the dev channel asked for the REPL;
+    the board prints its own goodbye.
+    """
+
+    def __init__(self, ws, pump, pointer, poll_inputs,
+                 idle=None, serial=None, present=None, tail=None,
+                 account=None, frame_error=None,
+                 set_backlight=None, lit=False):
+        self.ws = ws
+        self.pump = pump
+        self.pointer = pointer
+        self.poll_inputs = poll_inputs
+        self.idle = idle
+        self.serial = serial
+        self.present = present
+        self.tail = tail
+        self.account = account
+        self.frame_error = frame_error
+        self.set_backlight = set_backlight
+        self._lit = lit
+        self.t_hi = 0            # ws.handle_input ms, this frame
+        self.t_hp = 0            # ws.handle_pointer ms
+        self.t_ws = 0            # the whole ws phase (input+pointer+frame) ms
+        self.frames_before = 0   # _frames_drawn entering the ws phase
+        self.drew = False        # did this frame reach the glass
+
+    def step(self):
+        """One frame. Returns "quit" when the dev channel asked for the REPL,
+        else None. Split from run() so a test can drive single frames."""
+        ws = self.ws
+        pointer = self.pointer
+        now, dt = self.pump.begin()
+        click, active = self.poll_inputs(now)
+        ran = False
+        if self.serial is not None:
+            ran = self.serial.poll(ws)
+            click = self.serial.click or click
+            if self.serial.quit:
+                return "quit"
+        if self.idle is not None:
+            # After EVERY input source (poll_inputs + the dev channel) and
+            # before the pointer reaches the console -- the ordering that lets
+            # the waking touch be swallowed instead of pressing what it landed
+            # on. A dev command or scripted gesture frame counts as activity.
+            click = self.idle.tick(now, bool(active) or ran, ws, pointer, click)
+        pointer.click = click
+        pointer.tick(now)
+        self.frames_before = getattr(ws, "_frames_drawn", 0)
+        if self.present is not None:
+            self.present()
+        t0 = _ticks_ms()
+        self.t_hi = 0
+        self.t_hp = 0
+        try:
+            ws.handle_input()
+            self.t_hi = _ticks_diff(_ticks_ms(), t0)
+            ws.handle_pointer()
+            self.t_hp = _ticks_diff(_ticks_ms(), t0) - self.t_hi
+            ws.frame(dt)         # draw + composite + flush
+        except KeyboardInterrupt:
+            raise                # Ctrl-C -> shell -> REPL, never swallowed
+        except Exception as exc:  # noqa: BLE001 -- one bad frame must not brick it
+            if self.frame_error is not None:
+                self.frame_error(exc)
+            else:
+                print("Moybyte frame error:", exc)
+        self.t_ws = _ticks_diff(_ticks_ms(), t0)
+        self.drew = getattr(ws, "_frames_drawn", 0) != self.frames_before
+        # First composed frame lights the panel (#45): _frames_drawn ticks past
+        # 0 only inside frame() after the flush, so the first sight is the
+        # desktop, not power-on GRAM noise. `not idle.asleep` keeps the gate
+        # from re-lighting a deliberately blanked panel (the boards keep
+        # RENDERING while dark).
+        if not self._lit and (self.idle is None or not self.idle.asleep) \
+                and getattr(ws, "_frames_drawn", 0) > 0:
+            if self.set_backlight is not None:
+                try:
+                    self.set_backlight(True)
+                except Exception as exc:  # noqa: BLE001
+                    print("Moybyte backlight on failed:", exc)
+            self._lit = True
+        self.pump.tail(ws)
+        if self.tail is not None:
+            self.tail(now)
+        elapsed = _ticks_diff(_ticks_ms(), now)
+        sleep_ms = self.pump.pace(ws, elapsed)
+        if self.account is not None:
+            self.account(now, elapsed, sleep_ms)
+        if sleep_ms:
+            _sleep_ms(sleep_ms)
+        return None
+
+    def run(self):
+        while True:
+            if self.step() == "quit":
+                return "quit"

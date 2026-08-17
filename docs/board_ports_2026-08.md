@@ -91,12 +91,64 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     decision to make ON HARDWARE, not in this doc. Both esp_lcd and the
     component registry carry AXS15231B references; start there.
 
-**Phase D — the port checklist**, in this doc once the first Guition lands: the
-six-stage bring-up the T-Deck mainline port proved (panel, touch, keyboard/
-input, storage, audio, console — each stage a self-terminating smoke, each a
-flashable bisect point), now with board.toml written at stage 2 and the
-on-glass suite as stage 6's exit criterion. A checklist, not a generator —
-three data points before any codegen.
+**Phase D — the port checklist** (below). A checklist, not a generator —
+three data points before any codegen. Drafted from the T-Deck mainline port
+(the most recent board to walk all six stages, 2026-08-16) after Phases A–C
+landed; the first Guition port validates it and corrects it in place.
+
+## The port checklist (Phase D)
+
+Every stage is a **flashable bisect point**: consecutive images differ by the
+thing under test. Every bring-up program before stage 6 is **self-terminating**
+(paints, prints a number, returns to the REPL — never spends a REPL the owner
+might still have had).
+
+**Stage 0 — the skeleton.** `firmware/<board>/` with: `board.toml` (start from
+the sibling of your tier; write `[board]` chip/ota/tier + tier_why, `[flash]`
+`[monitor]`, the `[modules]`/`[native]` denials WITH reasons — the whole
+console stages from here on, deliberately: images must differ by the subsystem
+under test, not by a megabyte of frozen bytecode), `boards/<BOARD>/`
+(mpconfigboard.cmake/.h, `sdkconfig.board` with the prose beside every value,
+the OTA-shaped partitions CSV), `build.sh` (source
+`tools/esp32_build_lib.sh`; write only the board's patch ladder + sdkconfig
+guard list), a `native/micropython.cmake` including the board modules +
+`.staged/micropython.cmake`, and `modules/` with `boot.py`/`main.py`/
+`moybyte_shell.py` (MODE string, self-terminating smokes) + `moy_runtime.py`
+(run_desktop). Add the Makefile build target and the CI matrix row. Run
+`make test`: the staging-closure/board-toml suites must pass before any
+hardware exists.
+
+**Stage 1 — panel.** The board's compositor (implementing
+`docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
+native panel module. Smoke: colour bars + checker, printed flush µs. The
+MADCTL / byte-order / rotation table in the T-Deck README's stage-1 section is
+the debug map. Decide the panel driver's share-or-stand-alone question ON THIS
+GLASS (moy_lcd's band/bounce machinery vs. a new io layer).
+
+**Stage 2 — touch.** Start from `device/gt911.py` if the part matches (the
+byte-order caveat: read the dump, never assume); calibrate with a
+corner-target smoke; bake the swap/flip knobs with the calibration date. A new
+part's driver starts IN `device/` (shared) with board params.
+
+**Stage 3 — input beyond touch** (keyboard/trackball/BLE), if any. This is
+where the poller-thread question lives on a bus-contended board.
+
+**Stage 4 — storage.** SD or internal VFS; the store root must not shadow a
+frozen module name (`/moy/carts`, never `/moybyte/...`).
+
+**Stage 5 — audio**, if wired (the moy_audio usermod + a device_audio
+constructor carrying the board's pins).
+
+**Stage 6 — the console.** run_desktop = construct compositor/canvas/inputs,
+`DeviceBoot` → `wire_workstation_core` → services (`ws.updater`/`ws.webhost`)
+→ `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
+the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
+`device_boot.FrameLoop`. Exit criteria, all three: the desktop on glass;
+`make test` green; **the board's on-glass suite exists and passes** (copy
+`tests/test_tdeck_on_glass.py`'s shape — attach or reset per the board's USB
+anatomy, assert against `state`, leave the console where you found it). OTA
+needs no extra step: the board id is in board.toml and the manifest publisher
+follows the CI matrix row.
 
 ## What the Guition S3 specifically stresses (and the P4 doesn't)
 

@@ -534,7 +534,11 @@ BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py"}
 @pytest.mark.parametrize("board", sorted(BOARDS))
 def test_each_board_imports_the_shared_spine(board):
     src = BOARDS[board].read_text(encoding="utf-8")
-    assert "from device_boot import DeviceBoot, FramePump" in src
+    line = [l for l in src.splitlines()
+            if l.startswith("from device_boot import")]
+    assert line, "%s does not import the shared spine" % board
+    for name in ("DeviceBoot", "FramePump", "FrameLoop"):
+        assert name in line[0], "%s does not import %s" % (board, name)
     # The staged name is flat (`device_boot`), never the host package path --
     # there is no `runtime` package on a board.
     assert "from runtime.device_boot" not in src
@@ -558,11 +562,21 @@ def test_both_boards_run_the_boot_steps_in_ONE_order():
 
 
 def test_both_boards_pump_the_frame_the_same_way():
+    """Since #202 Phase B the pump is driven by the SHARED FrameLoop
+    (device_boot), whose begin -> tail -> pace order the FrameLoop tests below
+    pin directly -- so the per-board claim inverts: a board's run_desktop must
+    CONSTRUCT the loop and must not drive the pump itself (a board that calls
+    pump.begin beside the loop is running two cadences)."""
     for name, path in BOARDS.items():
-        calls = _calls_on(_run_desktop(path), "pump")
-        assert calls == [("begin", True), ("tail", True), ("pace", True)], (
-            "%s: the pump's head, tail and cadence all belong INSIDE the frame "
-            "loop, in that order -- %s" % (name, calls))
+        rd = _run_desktop(path)
+        calls = _calls_on(rd, "pump")
+        assert calls == [], (
+            "%s: run_desktop drives the pump beside the shared loop -- %s"
+            % (name, calls))
+        src_txt = BOARDS[name].read_text(encoding="utf-8")
+        assert "loop = FrameLoop(" in src_txt, (
+            "%s never constructs the shared frame loop" % name)
+        assert "loop.run()" in src_txt
 
 
 def test_the_spine_imports_no_board_module():
@@ -584,3 +598,176 @@ def test_the_spine_imports_no_board_module():
             seen.add(node.module.split(".")[0])
     assert seen <= allowed, "device_boot imports board modules: %s" % sorted(
         seen - allowed)
+
+
+# -- FrameLoop: the invariant order, pinned (#202 Phase B) --------------------
+
+
+class _Rec:
+    """A recording stub-kit for one FrameLoop frame."""
+
+    def __init__(self, frames_drawn_after=1, serial=None, idle=None,
+                 frame_raises=None):
+        self.calls = []
+        self.frames_drawn = 0
+        self._after = frames_drawn_after
+        self._raises = frame_raises
+        rec = self
+
+        class Pump:
+            def begin(self):
+                rec.calls.append("begin")
+                return 1000, 0.016
+
+            def tail(self, ws):
+                rec.calls.append("pump.tail")
+
+            def pace(self, ws, elapsed):
+                rec.calls.append("pace")
+                return 0
+
+        class WS:
+            @property
+            def _frames_drawn(self):
+                return rec.frames_drawn
+
+            def handle_input(self):
+                rec.calls.append("handle_input")
+
+            def handle_pointer(self):
+                rec.calls.append("handle_pointer")
+
+            def frame(self, dt):
+                rec.calls.append("frame")
+                if rec._raises is not None:
+                    raise rec._raises
+                rec.frames_drawn = rec._after
+
+        class Pointer:
+            click = False
+
+            def tick(self, now):
+                rec.calls.append("pointer.tick")
+
+        self.pump = Pump()
+        self.ws = WS()
+        self.pointer = Pointer()
+        self.serial = serial
+        self.idle = idle
+
+    def poll_inputs(self, now):
+        self.calls.append("poll_inputs")
+        return False, False
+
+    def present(self):
+        self.calls.append("present")
+
+    def tail(self, now):
+        self.calls.append("tail")
+
+    def account(self, now, elapsed, sleep_ms):
+        self.calls.append("account")
+
+    def loop(self, **kw):
+        from runtime.device_boot import FrameLoop
+        return FrameLoop(self.ws, self.pump, self.pointer, self.poll_inputs,
+                         idle=self.idle, serial=self.serial,
+                         present=self.present, tail=self.tail,
+                         account=self.account, **kw)
+
+
+def test_frameloop_order_is_the_invariant():
+    """THE pin this class exists for: the order that lives in one shared file
+    instead of N per-board copies. #56 was an order bug; so was PURR's F13;
+    so is the idle-after-every-input rule and present-before-frame. A board
+    cannot re-discover any of them on glass if the order cannot vary."""
+    r = _Rec()
+    r.loop().step()
+    assert r.calls == ["begin", "poll_inputs", "pointer.tick", "present",
+                       "handle_input", "handle_pointer", "frame",
+                       "pump.tail", "tail", "pace", "account"]
+
+
+def test_frameloop_serial_and_idle_slot_between_inputs_and_pointer():
+    order = []
+
+    class Serial:
+        click = False
+        quit = False
+
+        def poll(self, ws):
+            order.append("serial")
+            return True                      # a dev command ran
+
+    class Idle:
+        asleep = False
+
+        def tick(self, now, active, ws, pointer, click):
+            order.append("idle")
+            # A dev command counts as activity even with every other input
+            # quiet -- the unattended-harness rule.
+            assert active is True
+            return click
+
+    r = _Rec(serial=Serial(), idle=Idle())
+    r.loop().step()
+    i = r.calls.index
+    assert (i("poll_inputs") < r.calls.index("pointer.tick")
+            and order == ["serial", "idle"])
+    # ...and both ran after inputs, before the pointer reaches the console.
+    full = ["poll_inputs", "serial", "idle", "pointer.tick"]
+    merged = [c for c in ["poll_inputs"] + order + ["pointer.tick"]]
+    assert merged == full
+
+
+def test_frameloop_quit_returns_before_the_frame_runs():
+    class Serial:
+        click = False
+        quit = True
+
+        def poll(self, ws):
+            return True
+
+    r = _Rec(serial=Serial())
+    assert r.loop().step() == "quit"
+    assert "frame" not in r.calls and "handle_input" not in r.calls
+
+
+def test_frameloop_frame_errors_are_contained_and_ctrl_c_is_not():
+    import pytest
+
+    errs = []
+    r = _Rec(frame_raises=ValueError("boom"))
+    lp = r.loop(frame_error=errs.append)
+    lp.step()
+    assert len(errs) == 1 and "pump.tail" in r.calls   # the frame survived
+    r2 = _Rec(frame_raises=KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        r2.loop().step()                    # Ctrl-C -> shell -> REPL, always
+
+
+def test_frameloop_backlight_gate_fires_once_after_the_first_drawn_frame():
+    lit = []
+    r = _Rec(frames_drawn_after=0)          # first frame draws nothing
+    lp = r.loop(set_backlight=lit.append, lit=False)
+    lp.step()
+    assert lit == [] and lp.drew is False   # nothing composed -> stay dark
+    r._after = 1                            # now a frame reaches the glass
+    lp.step()
+    assert lit == [True] and lp.drew is True
+    lp.step()
+    assert lit == [True], "the gate is a one-shot boot hand-over"
+
+
+def test_frameloop_gate_respects_a_deliberate_blank():
+    class Idle:
+        asleep = True
+
+        def tick(self, now, active, ws, pointer, click):
+            return click
+
+    lit = []
+    r = _Rec(idle=Idle())
+    lp = r.loop(set_backlight=lit.append, lit=False)
+    lp.step()
+    assert lit == [], "a blanked panel must not be re-lit by the boot gate"

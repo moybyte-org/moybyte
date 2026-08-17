@@ -39,7 +39,7 @@ from console import Pointer, Workstation, wire_workstation_core
 # the serial dev channel (runtime/dev_channel.py, one vocabulary for every
 # board -- this file adds only the P4-only extras: bt/union/cache). What stays
 # here is hardware: the DPI scan-out, the PPA composite, BLE HID.
-from device_boot import DeviceBoot, FramePump, IdleBlank, OtaHealth
+from device_boot import DeviceBoot, FrameLoop, FramePump, IdleBlank, OtaHealth
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -701,9 +701,6 @@ def run_desktop(fps_cap=60):
     pump = FramePump(boot, _ota, fps_cap)
     if serial is not None:
         serial.env["pump"] = pump   # created just above; see the env note
-    # Dark until the first composed frame (#45) -- unless the splash already
-    # composed one, in which case the panel is lit and stays lit.
-    _backlight_on = boot.lit
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
     # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
@@ -718,16 +715,15 @@ def run_desktop(fps_cap=60):
     # first issuing `diag 0` -- which tools/p4_perf.py already did, its
     # docstring already claiming "DIAG IS OFF BY DEFAULT".
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf_at = _ticks_ms() + 2000
-    _pf_n = 0
-    _pf_busy = 0
-    _pf_drawn = 0
-    while True:
-        now, dt = pump.begin()
-        # BLE notifications arrive asynchronously; applying their latest level
-        # state before begin_frame gives InputState clean press/release edges.
-        # poll() also advances scan/reconnect and flushes a newly-created bond
-        # once, outside the NimBLE IRQ.
+    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
+
+    def _poll_inputs(now):
+        """This board's input sources: the BLE keyboard's async notifications
+        (applied before begin_frame so InputState gets clean press/release
+        edges; poll() also advances scan/reconnect and flushes a new bond once,
+        outside the NimBLE IRQ) and the GT911 pointer. The dev channel and the
+        idle blank run in the SHARED loop, in the one order that lets the
+        waking touch be swallowed."""
         try:
             keyboard.poll()
         except Exception as exc:  # noqa: BLE001 -- keyboard must fail touch-only
@@ -736,72 +732,34 @@ def run_desktop(fps_cap=60):
         click = False
         tp = touch.poll()
         pointer.down = tp is not None
-        # Touch.poll holds a held finger's last point across the passes the GT911
-        # produced no fresh buffer for, so `down` above is a real LEVEL and a
-        # drag survives them; `fresh` marks those repeats so kinetic scrolling
-        # (#113) doesn't measure finger speed against a sample the hardware
-        # never took. Same two lines as the T-Deck's loop -- this board held the
-        # point without ever flagging the repeats, which is what made a fling
-        # die on the desk here and carry there.
+        # Touch.poll holds a held finger's last point across the passes the
+        # GT911 produced no fresh buffer for, so `down` above is a real LEVEL
+        # and a drag survives them; `fresh` marks those repeats so kinetic
+        # scrolling (#113) doesn't measure finger speed against a sample the
+        # hardware never took.
         pointer.fresh = getattr(touch, "fresh", True)
         if tp is not None:
             pointer.place(tp[0], tp[1])
             if tp[2]:
                 click = True
-        _serial_ran = False
-        if serial is not None:
-            # Commands + the swipe/drag playbacks run inside poll() -- one
-            # vocabulary, one reader, per dev_channel's module docstring. A
-            # scripted frame counts as activity exactly as a typed command.
-            _serial_ran = serial.poll(ws)
-            click = serial.click or click
-            if serial.quit:
-                return
-        # -- idle screen blank (#58) -------------------------------------------
-        # IdleBlank (device_boot, shared with the T-Deck -- this board shipped
-        # the behaviour first and ran its own inline copy until 2026-08-17).
-        # Ticked after EVERY input source has been read and before the pointer
-        # is handed to the console, which is what lets the waking touch be
-        # swallowed instead of pressing whatever it landed on.
-        click = idle.tick(now, (tp is not None) or bool(inp._held)
-                          or bool(inp.last_key) or _serial_ran,
-                          ws, pointer, click)
-        pointer.click = click
-        pointer.tick(now)
-        # Present the PREVIOUS quiet game frame now (its async composite has been
-        # DMAing through the input poll above): wait the DMA, switch scan-out to
-        # it, free the other buffer. No-op unless the last frame deferred (#58
-        # composite-overlap). Must precede sync_back, which re-points at the freed
-        # buffer.
+        return click, ((tp is not None) or bool(inp._held)
+                       or bool(inp.last_key))
+
+    def _present():
+        # Present the PREVIOUS quiet game frame now (its async composite has
+        # been DMAing through the input poll above): wait the DMA, switch
+        # scan-out to it, free the other buffer. No-op unless the last frame
+        # deferred (#58 composite-overlap). Must precede sync_back, which
+        # re-points at the freed buffer.
         comp.present_pending()
         game.sync_back()           # off-screen: contract no-op
         sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
-        try:
-            ws.handle_input()
-            ws.handle_pointer()
-            ws.frame(dt)           # draw + composite + flush (cache msync)
-        except KeyboardInterrupt:
-            raise                  # Ctrl-C -> moybyte_shell -> REPL
-        except Exception as exc:   # noqa: BLE001 -- one bad frame must not brick the boot
-            print("Moybyte P4 frame error:", exc)
-            gc.collect()
-        # First composed frame lights the panel (#45). `not idle.asleep` is
-        # load bearing: without it this fires the frame after the idle blank --
-        # frames keep being drawn while dark -- and the screen comes straight
-        # back on. (IdleBlank owns the light from the wake side; this latch is
-        # only the BOOT hand-over.)
-        if not _backlight_on and not idle.asleep \
-                and getattr(ws, "_frames_drawn", 0) > 0:
-            set_backlight(True)
-            _backlight_on = True
-        # The shared once-only tail (#161 Phase 5): the splash hands the glass
-        # over and reports how long the desktop took to reach it -- the number
-        # that was missing when a black screen had to be diagnosed by guesswork
-        # -- and the OTA rollback confirm fires now that frames are really going
-        # out. Both are self-disarming; both run AFTER the backlight gate above,
-        # which stays here because on this board the idle screen blank owns the
-        # panel light too (hence its `not idle.asleep` guard).
-        pump.tail(ws)
+
+    def _frame_error(exc):
+        print("Moybyte P4 frame error:", exc)
+        gc.collect()
+
+    def _tail(now):
         _wh = ws.webhost
         if _wh is not None and _wh.serving:
             # One non-blocking accept/serve per frame (plan 3.4 pull half).
@@ -814,36 +772,35 @@ def run_desktop(fps_cap=60):
                 _wh.poll()
             except Exception as exc:  # noqa: BLE001 -- never break a frame
                 print("WEB ERR %s: %s" % (type(exc).__name__, exc))
-        elapsed = _ticks_diff(_ticks_ms(), now)
-        _pf_n += 1
-        _pf_busy += elapsed
-        if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
+
+    def _account(now, elapsed, sleep_ms):
+        _pf["n"] += 1
+        _pf["busy"] += elapsed
+        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
             _drawn = getattr(ws, "_frames_drawn", 0)
-            # GUARDED, like every diag helper on the T-Deck (device_diag.py's
-            # _diag_perf_sample and friends are `try: ... except Exception`).
-            # This block reads a dozen Workstation internals owned by the SHARED
-            # runtime/console.py and sits OUTSIDE the frame try, so while the
-            # reads were bare, renaming one of them there dropped this board to
-            # the REPL about two seconds after boot -- a measurement killing the
-            # loop it measures. PRINTED rather than swallowed (2s cadence, live
-            # serial) so a stale sampler says so; the timer state below resets
-            # either way, so a broken sample cannot become a per-frame retry.
+            # GUARDED, like every diag helper on the T-Deck. This block reads a
+            # dozen Workstation internals owned by the SHARED runtime/console.py
+            # and sits OUTSIDE the frame try, so while the reads were bare,
+            # renaming one of them there dropped this board to the REPL about
+            # two seconds after boot -- a measurement killing the loop it
+            # measures. PRINTED rather than swallowed (2s cadence, live serial)
+            # so a stale sampler says so; the timer resets either way, so a
+            # broken sample cannot become a per-frame retry.
             try:
                 # The meters follow Settings -> PERF DIAG live, so flipping it
-                # needs no reboot (T-Deck twin: the 3s diag tick in its
-                # run_desktop).
+                # needs no reboot (T-Deck twin: the 3s diag tick in its tail).
                 _live = bool(getattr(ws, "diag_live", False))
                 if ws.perf_capture != _live:
                     ws.perf_capture = _live
                 # home(wp/grid/bar): the LAUNCHER frame's section split (stashed
-                # by the shared launcher_layer under perf_capture) -- names where
-                # a slow desktop repaint goes; empty when the last frame wasn't
-                # the home screen.
+                # by the shared launcher_layer under perf_capture) -- names
+                # where a slow desktop repaint goes; empty when the last frame
+                # wasn't the home screen.
                 _home = getattr(ws, "_pf_home", None)
                 print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
                       "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
-                      % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
-                         _pf_busy // (_pf_n or 1),
+                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
+                         _pf["busy"] // (_pf["n"] or 1),
                          getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
                          getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
                          getattr(ws, "_chrome_ms", 0),
@@ -855,16 +812,18 @@ def run_desktop(fps_cap=60):
             except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop
                 print("PERF sample failed: %s: %s"
                       % (type(_pf_exc).__name__, _pf_exc))
-            _pf_at = _ticks_ms() + 2000
-            _pf_n = 0
-            _pf_busy = 0
-            _pf_drawn = _drawn
-        # Frame pacing (#63/#77): the shared cadence + pacing debt. The DEBT is
-        # new on this board (#161 Phase 5) and is the asymmetry that made the
-        # case for sharing the pump: it shipped into the T-Deck's loop alone on
-        # 2026-08-10, while frameskip -- the thing it corrects -- has shipped on
-        # BOTH boards since 2026-07-10, and this board even has a serial
-        # `skip 0|1` to A/B it. It is inert while frames fit their budget.
-        _t_sleep = pump.pace(ws, elapsed)
-        if _t_sleep:
-            time.sleep_ms(_t_sleep)
+            _pf["at"] = _ticks_ms() + 2000
+            _pf["n"] = 0
+            _pf["busy"] = 0
+            _pf["drawn"] = _drawn
+
+    # The shared frame loop (#202 Phase B): the invariant order lives ONCE, in
+    # device_boot.FrameLoop -- including the #77/#161 pacing debt via
+    # pump.pace and the first-frame backlight gate (dark until the first
+    # composed frame, #45, unless the splash already lit it). Every hook above
+    # is this board's own hardware.
+    loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
+                     present=_present, tail=_tail, account=_account,
+                     frame_error=_frame_error,
+                     set_backlight=set_backlight, lit=boot.lit)
+    loop.run()

@@ -598,16 +598,26 @@ def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
             "%s: the OTA health reporter must be built on the boot path" % mod_path)
         assert seen.get("boot_check") == {False}, (
             "%s: the boot verdict is read once, before the loop" % mod_path)
-        assert seen.get("tail") == {True}, (
-            "%s: the rollback confirm is pumped from the FRAME LOOP -- made "
-            "where the desktop is merely constructed it would certify an image "
-            "that never painted (#56)" % mod_path)
+        # #202 Phase B: the frame loop itself is SHARED (device_boot.FrameLoop
+        # calls pump.tail every frame -- asserted against the spine below), so
+        # the per-board placement claim becomes: run_desktop hands the pump to
+        # a FrameLoop and runs it, and does NOT drive pump.tail beside it.
+        assert "FrameLoop" in seen, (
+            "%s: run_desktop no longer constructs the shared frame loop"
+            % mod_path)
+        assert seen.get("run") is not None, mod_path
+        assert seen.get("tail") is None, (
+            "%s: pump.tail driven beside the shared loop -- two cadences"
+            % mod_path)
         # The old unconditional confirm at desktop-construction time is gone.
         assert "ws.updater.mark_valid()" not in src, mod_path
 
     # And the shared half really does confirm on painted frames, not on boot.
     spine = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
     assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in spine
+    # ...and the shared FrameLoop is what pumps it, after the ws phase.
+    step = spine[spine.index("def step(self):"):]
+    assert step.index("ws.frame(dt)") < step.index("self.pump.tail(ws)")
     tree = ast.parse(spine)
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "boot_check":
