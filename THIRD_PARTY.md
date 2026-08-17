@@ -409,8 +409,7 @@ Installed from PyPI; never vendored, never redistributed by this repository.
 | pygame | the simulator window (`sim`), imported lazily | **LGPL-2.1** |
 | esptool | flashing a board (`device`); `tools/esptool_no_modem.py` monkeypatches its reset strategy at runtime | **GPL-2.0-or-later** |
 | pyserial | serial I/O (`device`) | BSD-3-Clause |
-| lupa | host-side Lua carts (`runtime/lua_host.py`); optional, probed at import | MIT |
-| fontTools | `tools/make_petme_webfont.py` only | MIT |
+| fontTools | `tools/make_petme_webfont.py` only (install on demand; in no extra) | MIT |
 
 `pygame` (LGPL) and `esptool` (GPL) are the only copyleft-licensed software the
 project touches. Neither is copied into this repository and neither is part of

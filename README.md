@@ -150,14 +150,15 @@ spelled out — same three steps, same extras:
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip setuptools
-.venv\Scripts\python -m pip install -e ".[dev,sim,lua]"
+.venv\Scripts\python -m pip install -e ".[dev,sim]"
 
 .venv\Scripts\python tools\simulate_desktop.py
 ```
 
 Every command below works as written with `.venv\Scripts\python` in place of
-`.venv/bin/python`. Python 3.10+; the `lua` extra is `lupa`, the host's Lua 5.4
-VM (`runtime/lua_host.py`) — drop it and Python carts still run, but a
+`.venv/bin/python`. Python 3.10+. Lua carts need a C compiler, not an extra:
+the host builds the boards' own vendored Lua 5.4 + libmoy binding on demand
+(`runtime/lua_binding.py`) — without a compiler Python carts still run, but a
 `"runtime": "lua"` cart opens the "needs the Lua runtime" panel.
 
 ```bash

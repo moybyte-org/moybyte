@@ -629,9 +629,11 @@ to whoever called it.
   `"runtime": "lua"` (+ `"main": "main.lua"`) routes `Player.start` through the
   injected `ws.lua_runtime` factory instead of the Python compile/exec path — a
   build without the runtime opens the normal cart-error panel. Host runner:
-  `runtime/lua_host.py` (lupa, Lua 5.4 pinned, stdlib sandboxed to
-  base/math/string/table, lupa's `python` bridge removed; injected by
-  `build_workstation` when lupa imports — an optional dev dep). Device +
+  `runtime/lua_host.py` over `runtime/lua_binding.py` — ctypes over the SAME
+  vendored Lua 5.4 + libmoy binding the boards build, `LUA_32BITS` included,
+  compiled on demand into a hash-cached `.so` (lupa and its `lua` extra were
+  DELETED 2026-08-14: no compiler means the runtime-missing panel, not a
+  second engine — same rule as host audio). Device +
   browser runtime: **`moycore`** (`native/moycore/`, staged to both boards and
   the wasm head), which binds the vendored Lua 5.4 through **libmoy's own
   binding** (`libmoy/moy_lua.c`, vendored from moy-spec): all 38 SPEC verbs are
@@ -716,9 +718,9 @@ to whoever called it.
   palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`).
   **`LUA_32BITS` is DECIDED AND ON** (`6ddaf7c`, `luaconf.h`): both boards' FPUs
   are single-precision, so doubles would be soft-float — 32-bit floats use the
-  hardware FPU and halve TValue. The host runner (lupa) stays on 64-bit doubles,
-  so golden-frame parity is host-only for float-heavy carts and device integers
-  wrap at 2^31. Recorded because this line said "remaining: only the LUA_32BITS
+  hardware FPU and halve TValue. Since the lupa deletion the host binding builds
+  the same `LUA_32BITS`, so all tiers share float semantics and integers wrap at
+  2^31 everywhere. Recorded because this line said "remaining: only the LUA_32BITS
   decision" for weeks after it was made, and a 2026-08-09 perf hunt spent its
   last lead re-proposing a lever that was already shipped.
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
@@ -729,7 +731,7 @@ to whoever called it.
   perf_capture-gated `PMEM save=<ms>` diag line shows the deferred cadence.
 - `runtime/font.py` — petme128 8×8 font, the ONE glyph source both backends rasterize (#62): the host draws it per-pixel, the device passes its blob to the native `moy_gfx.text` kernel (staged as `moy_font` at build; framebuf.text — same glyphs, no clip rect — is the no-gfx fallback).
 - **UI scrolling is kinetic + scroll-as-blit (#113, 2026-07-22 — the living plan/status issue):** `ui.ScrollRegion` owns the fling physics (all dt INJECTED from the loop — never a clock — so tests are exact-trajectory deterministic) plus a painted-frame ring; an eligible drag/fling frame SHIFTS the retained pixels via the `scroll_rect` system verb (ONE implementation on every tier since the canvas flip — `DeviceCanvas.scroll_rect` over `moy_gfx.scroll_rect`, which the host reaches through `runtime/gfx_binding.py`; the old host `canvas.py` lane is deleted) and repaints only the exposed band (`Launcher.draw_shift` — the home shelf + Editor picker pilots; Settings still row-snaps, its pixel-smooth conversion is #113 Phase 5). The learned rule: **everything inside a scrolled band must be a pure function of the offset** (the picker's dots now ride the scroll in-band). The ring pins sel/statics/`ws._cover_gen` and measures against `RETAINED_FRAMES` paints back (host/layers 1, device root ping-pong 2). Web transport: the `scr` op shifts the browser's retained buffer (never deduped to `{"same":1}` — replaying a shift double-applies), covers + the static wallpaper composite ship ONCE via `/assets` (`ws.cover_assets`, serial names), and the windowed WM's gesture-vs-window checks resolve by IDENTITY (`_wins.get(key) is win` — the shared "make" group's `win.kind` is the CONTENT kind, so `key == win.kind` never matched and silently disabled the drag content-freeze/stamp-defer everywhere).
-- `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (injects `ws.lua_runtime` when lupa imports, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
+- `runtime/host_app.py` — host glue: host `make_api`, `build_workstation()` (injects `ws.lua_runtime` when the native binding builds, #67), `ConsoleDriver` (mouse=touch, arrows=trackball). Not on device.
 
 (The pre-unification host UI — `shell.py`/`workstation.py`/`engine.py`/`api.py`/
 `cartridge.py` — was removed once the shared console replaced it; issue #17.)

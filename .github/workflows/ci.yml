@@ -163,7 +163,7 @@ jobs:
               echo "(or run the \"Firmware build\" workflow from the Actions tab for a downloadable \`.bin\` without a local ESP-IDF toolchain.)"
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Pure software -- host tests + \`make check-portable\` are the full gate here, no device step needed." >> "$GITHUB_STEP_SUMMARY"
+            echo "### Pure software -- the host test suite is the full gate here, no device step needed." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # Comment (not just summary) so the flag is visible on the PR itself.

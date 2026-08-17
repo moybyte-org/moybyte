@@ -23,6 +23,7 @@ PATCH_DIR="${SCRIPT_DIR}/patches"
 DIST_DIR="${REPO_ROOT}/dist/p4"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 MANIFEST="${BUILD_DIR}/moybyte_p4_manifest.py"
+BUILD_JOBS="${MOYBYTE_BUILD_JOBS:-$(nproc)}"
 
 # shellcheck source=../../tools/esp32_build_lib.sh
 source "${REPO_ROOT}/tools/esp32_build_lib.sh"
@@ -129,11 +130,11 @@ moybyte_partition_and_sdkconfig_guard \
 # ---------------------------------------------------------------------------
 # 5) Build.
 # ---------------------------------------------------------------------------
-make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)"
+make -C "${MPY_DIR}/mpy-cross" -j"${BUILD_JOBS}"
 
 cd "${MPY_DIR}/ports/esp32"
 make submodules BOARD_DIR="${BOARD_DIR}"
-make BOARD_DIR="${BOARD_DIR}" \
+make -j"${BUILD_JOBS}" BOARD_DIR="${BOARD_DIR}" \
   USER_C_MODULES="${SCRIPT_DIR}/native/micropython.cmake" \
   FROZEN_MANIFEST="${MANIFEST}"
 

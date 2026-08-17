@@ -37,9 +37,9 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 #                            venv setuptools (59.6 on 3.10, absent on 3.12+) failed
 #                            with "invalid command 'bdist_wheel'".
 # `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
-# needs pygame. So is `lua` (lupa): the seed roster ships lua carts, and without it
-# they open the runtime-missing panel and every lua test silently skips -- including
-# in CI, which runs this target.
+# needs pygame. Lua needs no extra: the host builds the boards' own vendored
+# Lua 5.4 + libmoy binding on demand (runtime/lua_binding.py -- the lupa extra
+# was deleted 2026-08-14), so a C compiler is the requirement, same as host audio.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
 # A venv seeded by an older distro python can carry setuptools < 64, which has
@@ -266,9 +266,11 @@ firmware-build-lilygo-micropython: firmware-build-tdeck-mainline	## alias (fork-
 ota-manifest:
 	$(PYTHON) tools/gen_ota_manifest.py $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
-# Serve dist/ (the .bin + latest.json) over plain HTTP for the device to pull from.
+# Serve the built T-Deck dist (the .bin + latest.json) over plain HTTP for the
+# device to pull from. (The build writes to a repo-root dist/ -- the board-local
+# dist/ this once served died with the fork.)
 ota-serve:
-	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
+	cd dist/tdeck_mainline && $(PYTHON) -m http.server $(OTA_PORT)
 
 # The two OTA channels are the two BRANCHES, and CI publishes both (a push to master
 # rolls the `firmware-latest` release, a push to dev rolls `firmware-beta`; moy_ota's

@@ -13,7 +13,6 @@ docs/issues/
 firmware/**/.pio/
 firmware/lilygo_t_deck_plus_mainline/.build
 firmware/esp32_p4_wifi6_touch_lcd_7b/.build
-firmware/lilygo_t_deck_plus_mainline/dist/
 /dist/
 # The two boards' staged modules/ trees are ignored by PATTERN, in each board's
 # own .gitignore -- not by a list here. This used to be a hand-maintained

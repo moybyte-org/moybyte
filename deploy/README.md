@@ -12,14 +12,11 @@ Python process, no WebSocket stepping frames, no VM, no auth problem.
 ## Firmware builds on GitHub Actions
 
 `.github/workflows/firmware-build.yml` builds the ESP32 images on GitHub's
-runners — no VM. Trigger it from the **Actions** tab → *Firmware build* → *Run
-workflow*, pick `tdeck`, `p4`, or `both`. The `.bin` images upload as artifacts
-(`moybyte-firmware-<board>`), 14-day retention.
+runners — no VM. It runs automatically on path-filtered pushes (master → the
+`firmware-latest` stable release, dev → `firmware-beta`; the workflow header
+is the authority), or from the **Actions** tab → *Firmware build* → *Run
+workflow* for an unpublished one-off `.bin` of `tdeck`, `p4`, or `both`
+(artifacts `moybyte-firmware-<board>`, 14-day retention).
 
-Notes:
-- Manual-only by default (no minutes burned on ordinary pushes). Uncomment the
-  `push:` trigger in the workflow to also archive every `master` build.
-- First run installs the ESP-IDF toolchains (~2–3 GB, cached after) so it's the
-  slow one; later runs are faster via the toolchain + ccache caches.
-- The T-Deck build runs twice on purpose — a fresh checkout fetches ESP-IDF
-  mid-build, so the #43 PSRAM-DMA patch only lands on the second pass.
+Note: the first run installs the ESP-IDF toolchains (~2–3 GB, cached after) so
+it's the slow one; later runs ride the toolchain + ccache caches.

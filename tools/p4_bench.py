@@ -19,29 +19,23 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from p4_autotest import P4Board            # noqa: E402
 
 
 def pyexec(b, code, timeout=60):
-    """Run a multi-line snippet on the device (single quotes inside, please)."""
-    esc = code.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    r = b.cmd('py exec("%s")' % esc, wait_for="PY", timeout=timeout)
-    if r and "ERR" in r:
-        print("      ! device error: %s" % r.strip())
-    return r
+    """P4Board.pyexec (the chunked, RX-safe uploader). The escape-into-one-
+    exec-line version that lived here predated it and silently could not run
+    a long snippet."""
+    ok = b.pyexec(code, timeout=timeout)
+    if not ok:
+        print("      ! device error (see -v log)")
+    return ok
 
 
 def pyval(b, expr, timeout=30):
-    r = b.cmd("py " + expr, wait_for="PY", timeout=timeout) or ""
-    if "PY ERR" in r:
-        return None
-    try:
-        return eval(r.split("PY ", 1)[1])
-    except Exception:  # noqa: BLE001
-        return None
+    return b.pyval(expr, timeout=timeout)
 
 
 INSTRUMENT = """

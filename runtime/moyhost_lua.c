@@ -4,12 +4,11 @@
 
 /* The host's libmoy LUA shim (moycore plan rung 4).
  *
- * The host sim runs Lua carts through lupa -- a second Lua embedding, with a
- * second set of semantics: lupa is 64-bit doubles where both boards build
- * LUA_32BITS (their FPUs are single-precision, so doubles would be soft-float),
- * which is a standing parity hole the plan records. This shim closes it by
- * giving CPython the SAME program the boards run: libmoy's binding of the spec
- * verb table, over the same vendored Lua, built the same way.
+ * The host sim used to run Lua carts through lupa -- a second Lua embedding
+ * with second semantics (64-bit doubles where both boards build LUA_32BITS) --
+ * until this shim replaced it (lupa deleted 2026-08-14). CPython gets the
+ * SAME program the boards run: libmoy's binding of the spec verb table, over
+ * the same vendored Lua, built the same way.
  *
  * Structurally it is modmoycore.c with the MicroPython removed -- the same
  * console, the same snapshot-in/queue-out host callbacks -- because the two
