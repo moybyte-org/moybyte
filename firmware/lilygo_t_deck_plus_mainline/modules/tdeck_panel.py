@@ -73,10 +73,8 @@ ASYNC_FLUSH = True
 # `moy_runtime.run_desktop`.
 #
 # It lives in THIS module because the fact it rests on is the compositor's, not
-# the canvas's: on the fork build `device_canvas` reads it as
-# `moy_compositor.SRAM_BOUNCE_FLUSH`, and `tdeck_panel` is that module's twin
-# here. `device_canvas.py` is STAGED from the fork tree and must not be edited
-# from this port, so run_desktop assigns `device_canvas.LAYER_COPY_ASYNC` from
+# the canvas's. `device_canvas.py` is STAGED from the shared `device/` tree and
+# must not be edited here, so run_desktop assigns `device_canvas.LAYER_COPY_ASYNC` from
 # this constant BEFORE the first DeviceCanvas exists (`_async_ok` is latched in
 # __init__; a later assignment would reach nothing).
 #

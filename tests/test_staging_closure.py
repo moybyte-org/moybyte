@@ -54,11 +54,10 @@ from tools import board_config
 
 ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
-# The SAME board as TDECK, built on mainline MicroPython instead of the
-# lvgl_micropython fork. It is a separate target here rather than an assumed
-# copy: it stages from TWO sources (runtime/ and the fork build's modules/),
-# and the second one is exactly where a shared-tree assumption would go wrong.
-TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
+# One T-Deck target since the fork's deletion (2026-08-17). The alias survives
+# because half this file's assertions were written against the mainline port by
+# name, and a rename would churn them for nothing.
+TDECK_MAINLINE = TDECK
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 WEB = ROOT / "firmware" / "web_runner"
 BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4}
@@ -544,10 +543,9 @@ def test_the_two_tdeck_builds_stage_the_same_shared_console():
     module one build forgot or a tier claim nobody wrote down, and both are
     worth failing over while the two targets coexist.
 
-    Their DEVICE staging is deliberately not compared: the fork build keeps its
-    device modules as tracked files in its own `modules/`, while the mainline
-    build stages the same files FROM there through board.toml -- one tree, two
-    routes to it, which is the arrangement that lets them share a console at all.
+    Their DEVICE staging is deliberately not compared: the two boards' device
+    allowlists differ on purpose (the T-Deck drives SD/I2S/diag pieces the P4
+    does not), and that difference is each board.toml's to declare.
     """
     fork = board_config.denials(TDECK)
     mainline = board_config.denials(TDECK_MAINLINE)
@@ -563,23 +561,24 @@ def test_the_two_tdeck_builds_stage_the_same_shared_console():
 
 
 def test_the_mainline_tdeck_stages_no_module_that_needs_the_fork():
-    """The three modules the mainline build must never pick up.
+    """Tripwire: names the staged trees must never grow.
 
-    `tdeck_display.py`, `moy_compositor.py` and `moy_canvas.py` all drive
-    `lcd_bus`/`lvgl`, which do not exist in a mainline image; `moy_runtime.py`
-    and `moybyte_shell.py` are the fork build's own boot spine and would SHADOW
-    the mainline board's authored ones, since both trees freeze into one flat
+    `tdeck_display.py`, `moy_compositor.py` and `moy_canvas.py` drove
+    `lcd_bus`/`lvgl` and died with the fork (2026-08-17) -- if one of those
+    names reappears in a shared tree it should be by decision, not by drift.
+    `moy_runtime.py` and `moybyte_shell.py` are BOARD-AUTHORED boot-spine files
+    (tracked in each board's `modules/`), and a shared module of the same name
+    would SHADOW them, since staging and authorship freeze into one flat
     namespace. That is why `[modules.device]` in the board file is an ALLOWLIST
-    and has to stay one -- a denylist over a board tree picks all five up the
-    moment somebody adds a file.
+    and has to stay one.
     """
     staged = set(board_config.staged_modules(TDECK_MAINLINE, ROOT))
     forbidden = {"tdeck_display.py", "moy_compositor.py", "moy_canvas.py",
                  "moy_runtime.py", "moybyte_shell.py"}
     leaked = sorted(staged & forbidden)
     assert not leaked, (
-        "the mainline T-Deck stages fork-only modules from the fork's board "
-        "tree: %s" % leaked)
+        "the T-Deck stages modules that would shadow board-authored files "
+        "or revive fork-only drivers: %s" % leaked)
 
 
 def test_the_frozen_set_is_derived_from_the_declaration():

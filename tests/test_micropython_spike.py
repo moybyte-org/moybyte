@@ -1451,7 +1451,7 @@ def test_the_mainline_tdeck_arms_the_async_layer_copy_before_its_canvas():
     `device_canvas.py` reads `LAYER_COPY_ASYNC` from `moy_compositor`, which the
     mainline build does not stage (its compositor is `tdeck_panel` over the C
     `moy_lcd`), so the import guard resolves it False. That file is STAGED from
-    the fork tree and is not the mainline's to edit, so the flag is declared in
+    the shared `device/` tree and is not this board's to edit, so the flag is declared in
     `tdeck_panel` -- the module that plays `moy_compositor`'s part there, and the
     module that owns the fact the lever rests on -- and `run_desktop` assigns it
     across.

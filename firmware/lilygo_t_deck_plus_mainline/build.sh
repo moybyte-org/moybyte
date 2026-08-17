@@ -1,19 +1,14 @@
 #!/usr/bin/env bash
-# Moybyte T-Deck on MAINLINE MicroPython -- one build strategy for both boards.
+# Moybyte T-Deck on MAINLINE MicroPython -- THE T-Deck build (the only one since
+# the lvgl_micropython fork was deleted, 2026-08-17: this port measured 2ms/frame
+# faster on the Bench referee and is the only build whose serial RX works).
 #
-# The shipping T-Deck target (firmware/lilygo_t_deck_plus_mainline/) builds on
-# the lvgl_micropython FORK: it clones the fork, stages our native modules into
-# its ext_mod tree, drives its make.py wrapper, and edits a dozen of its files by
-# sed. This target builds the SAME console the way the P4 does -- mainline
-# MicroPython + an out-of-tree board definition + USER_C_MODULES -- so the two
-# boards stop being two different build systems.
+# One build strategy for both boards: mainline MicroPython + an out-of-tree
+# board definition + USER_C_MODULES, exactly like the P4. The shared trees it
+# reads are repo-root (`native/`, `patches/`, `device/`, `runtime/`) -- nothing
+# here resolves inside another board's directory.
 #
-# THIS SCRIPT NEVER TOUCHES THE SHIPPING TARGET. It reads two things from it (a
-# read is not a write): the shared native modules under native/, which stay
-# single-sourced there, and two .patch files that are board-agnostic.
-#
-# The bring-up runs in six stages (panel, touch, keyboard, SD, audio, console);
-# `modules/moybyte_shell.py` picks which one boots. Build -> flash -> look:
+# Build -> flash -> look:
 #
 #   ./build.sh
 #   make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
@@ -70,8 +65,8 @@ fi
 
 # ---------------------------------------------------------------------------
 # 2) ESP-IDF v5.5.1. Reuse a checkout that already exists (they are ~500MB and
-#    the same version): an explicit IDF_DIR wins, then the P4 build's, then the
-#    fork build's, then clone our own.
+#    the same version): an explicit IDF_DIR wins, then the P4 build's, then our
+#    own .build/, then clone.
 # ---------------------------------------------------------------------------
 if [ -z "${IDF_DIR:-}" ]; then
   for _cand in \
@@ -124,8 +119,7 @@ fi
 # 3b) PATCH 1 of 3 -- REPR_C unboxed floats (#66).
 #     Kid float-physics carts otherwise allocate a 16B heap box per float RESULT
 #     (~73KB/frame measured in sakura), and the heap-wrap gc collect that follows
-#     is a 130-175ms visible hitch. The fork ships this as a context diff against
-#     ports/esp32/mpconfigport.h; here it is a guarded sed on the same line,
+#     is a 130-175ms visible hitch. A guarded sed rather than a context diff,
 #     which survives the line moving between MicroPython releases.
 if ! grep -q "MICROPY_OBJ_REPR_C" "${MPCONFIGPORT_H}"; then
   sed -i 's|^#define MICROPY_OBJ_REPR  *(MICROPY_OBJ_REPR_A)|#define MICROPY_OBJ_REPR                    (MICROPY_OBJ_REPR_C) /* Moybyte #66: unboxed 30-bit floats */|' \
@@ -262,9 +256,8 @@ echo "== staged shared native modules: ${SHARED_NATIVE}"
 # 4a) The BROWSER CONSOLE blob, generated INTO THE STAGED COPY.
 #     tools/gen_web_blob.py .incbin's the four pre-gzipped wasm-console assets
 #     into a C file inside moy_web, so the image serves a console with no card
-#     and no push. The P4 build generates it into the fork tree and copies
-#     afterwards; this one copies first and generates into `.staged/`, so this
-#     script keeps its promise never to write into the shipping target.
+#     and no push. Copy first, generate into `.staged/`: a build must never
+#     write into the shared `native/` tree two builds read.
 #
 #     No bundle built = an empty table + a loud warning, which is the right
 #     default for a bring-up. Under CI (or MOYBYTE_REQUIRE_WEB_BUNDLE=1) it is a
@@ -286,13 +279,10 @@ fi
 #
 #       runtime/          -- DENYLIST. A shared tree's default answer is "yes,
 #                            this crosses", so what needs writing down is the
-#                            exclusions, with a reason on each. Identical to the
-#                            fork build's list, because it is the same board and
-#                            the same 320x240 tier.
-#       the fork's tree   -- ALLOWLIST, and it stays one. That is a BOARD tree
-#                            whose default answer is "no": three of its modules
-#                            drive lcd_bus/lvgl and two are that build's own boot
-#                            spine, which would SHADOW this one's.
+#                            exclusions, with a reason on each.
+#       device/           -- ALLOWLIST, and it stays one: the device tier both
+#                            boards stage, where each board says which pieces
+#                            it actually drives (see board.toml's rationale).
 #
 #     The stager also PRUNES untracked strays it did not just stage: the frozen
 #     manifest freezes the whole modules/ DIRECTORY and this one is gitignored,
@@ -318,11 +308,10 @@ fi
 #     is auto-newer on every publish; a stable's is the counter in moy_ota.py,
 #     which `make release` bumps.
 #
-#     BOARD is "tdeck" -- the SAME id the fork build stamps, and that is
-#     correct rather than sloppy: an OTA payload is an app-partition image, and
-#     these two builds produce interchangeable ones for the same Xtensa board on
-#     a byte-identical partition table. A separate id would mean a board could
-#     not move between them, which is exactly the migration this port needs.
+#     BOARD is "tdeck" -- the same id the deleted fork build stamped, kept on
+#     purpose: an OTA payload is an app-partition image on a byte-identical
+#     partition table, so boards that took their last update from the fork
+#     build move onto this one over plain OTA.
 OTA_CHANNEL="${MOYBYTE_OTA_CHANNEL:-stable}"
 if [ -n "${MOYBYTE_OTA_VERSION:-}" ]; then
   OTA_VERSION="${MOYBYTE_OTA_VERSION}"

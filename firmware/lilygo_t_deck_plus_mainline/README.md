@@ -1,13 +1,16 @@
 # T-Deck on mainline MicroPython (no LVGL, no fork)
 
 This is the LilyGO T-Deck Plus built **the way the P4 is built**: mainline
-MicroPython + an out-of-tree board definition + `USER_C_MODULES`. It exists so
-the project has ONE build strategy instead of two.
+MicroPython + an out-of-tree board definition + `USER_C_MODULES`. One build
+strategy for the whole project.
 
-It does **not** replace `firmware/lilygo_t_deck_plus_mainline/` yet. That
-target is what ships; nothing here touches it. This tree reads two things from
-it and writes nothing: the shared native modules under `native/` (single source
-of truth stays there) and two board-agnostic `.patch` files.
+**THIS IS THE ONLY T-DECK BUILD.** The lvgl_micropython fork build this port
+was written against was **deleted 2026-08-17** (`a02bb33`): this port measured
+2 ms/frame faster on the Bench referee and is the only build whose serial RX
+works. Every "the fork ..." comparison below is therefore HISTORY — the
+measured record of what the port was verified against, kept because those are
+the numbers that justify this board's settings. The shared trees this build
+stages from are repo-root: `native/`, `patches/`, `device/`, `runtime/`.
 
 **Stage 1 — panel bring-up — was VERIFIED ON GLASS 2026-08-16.** Flashed to the
 owner's T-Deck and confirmed by eye: the eight colour bars and the checker came
@@ -44,8 +47,9 @@ the frame. Worth being precise about which line said what, because the two
 even import it. Both are fixed below, so **the `PUMP` line appearing at all is
 the first proof the overlap is in an image.**
 
-**The flush is fixed as of this commit and is the one thing here that has NOT
-been on glass**; see "the compositor" below for what to watch.
+**The flush overlap has since been verified on glass** (the `PUMP` line flows,
+and the Bench referee put this build at or above the fork — see "the
+compositor" below for the numbers and what to watch if it regresses).
 
 Stage 2 also settles where the module list lives: `board.toml` + `tools/board_config.py`,
 the same declaration the other two boards use, and the whole shared console
@@ -55,7 +59,7 @@ subsystem under test and not also by a megabyte of frozen bytecode.
 
 ### What it costs, against the build it replaces
 
-| | shipping fork build | this build |
+| | fork build (deleted 2026-08-17) | this build |
 |---|---|---|
 | app image | 5,052,032 B | **3,566,592 B** |
 | headroom in the 5 MB `ota_0` slot | 186 KB | **1,639 KB** |
@@ -94,7 +98,7 @@ Outputs land in `dist/tdeck_mainline/`:
 | `moybyte_tdeck_app.bin` | the app partition alone | what an OTA writes into the inactive slot |
 
 The merged image leaves `otadata` (0x1D000) erased, so the bootloader falls back
-to `ota_0` — the same effect the fork target gets by erasing that region
+to `ota_0` — the same effect the fork build got by erasing that region
 explicitly. The flash target erases it anyway, because a board that has taken an
 OTA is running `ota_1` and would otherwise boot the stale slot and look like the
 flash did nothing.
@@ -337,7 +341,7 @@ scan, so Ctrl-C/REPL/commands never arrive". The revert that established the
 lore (`4faf07a`) says "select.poll reports stdin ALWAYS-READY even when empty,
 so poll-then-readline becomes a blocking read that stalled the loop ~30s".
 
-The first claim is false and checkable. The shipping fork is MicroPython
+The first claim is false and checkable. The fork was MicroPython
 **v1.27.0**; this build is **v1.28.0**; and every file on the CDC receive path
 is byte-identical between them — MicroPython's `mp_usbd_cdc.c`, `mp_usbd.c`,
 `mp_usbd_runtime.c`, `interrupt_char.c`, `sys_stdio_mphal.c`, and the esp32
@@ -435,7 +439,7 @@ which is more than the previous attempt could say.
 boards/MOYBYTE_TDECK/   out-of-tree board definition + the OTA partition table
 board.toml              WHICH modules cross, and why (tools/board_config.py)
 native/moy_lcd/         the ST7789 SPI panel backend (this board's moy_dsi)
-native/.staged/         shared native modules, copied from the fork tree (gitignored)
+native/.staged/         shared native modules, copied from the repo-root native/ (gitignored)
 modules/                board-authored: boot/main/moybyte_shell/tdeck_panel/tdeck_smoke
                         + everything board.toml stages (gitignored)
 build.sh                clone -> patch -> stage -> freeze -> build -> collect
@@ -450,8 +454,8 @@ different strategies:
 
 | source | strategy | why |
 |---|---|---|
-| `runtime/` | **denylist** | a shared tree's default answer is "yes, this crosses", so what needs writing down is the exclusions, each with a reason. Identical to the fork build's list — same board, same 320×240 tier. |
-| the fork build's `modules/` | **allowlist** | a board tree's default answer is "no". Three of its modules drive `lcd_bus`/`lvgl` and two are that build's own boot spine, which would *shadow* this one's. |
+| `runtime/` | **denylist** | a shared tree's default answer is "yes, this crosses", so what needs writing down is the exclusions, each with a reason. |
+| `device/` | **allowlist** | the shared device tier; each board names the pieces it actually drives (this board has no BLE, the P4 no SD/I2S), so the difference is written down instead of frozen by accident. |
 
 The stager also prunes: the frozen manifest freezes the whole `modules/`
 directory, and that directory is gitignored, so an unstaged module would
@@ -671,7 +675,7 @@ the authority; what follows is how they land in *this* tree.
   `with_sd_live` session around the whole seed+scan and repaints the progress
   bar *inside* it (`DeviceBoot.note` → `comp.flush()`, once per cart), so a
   first boot genuinely interleaves panel bands with SD writes. `CLAUDE.md`
-  states the no-flush-in-session rule absolutely, and **the shipping fork build
+  states the no-flush-in-session rule absolutely, and **the fork build
   has been violating it in this exact place for as long as it has had the async
   flush** — `moy_runtime` passes a bare `with_sd_live`, not the synced wrapper,
   and it works on glass. So this build matching it is not a new risk; before
@@ -684,12 +688,12 @@ the authority; what follows is how they land in *this* tree.
   `ws._with_sd`, so it takes no `sync()` either. It is gated on **three**
   consecutive quiet frames, which at the frame cap is ~50 ms after the last
   kick — long after the 2 ms pump has finished the frame — so it is very hard to
-  hit, and again it is what the fork already does.
+  hit, and again it is what the fork already did.
   Worth being honest about the size of this risk rather than repeating the
   folklore: what `CLAUDE.md` records as having actually hung boards is
   `sdspi_host_deinit` between ops and re-creating a `Pin` on `TFT_CS` —
   *teardown*, not concurrency. Two devices transacting on one host is what
-  `spi_master`'s bus lock is for, and it is what the fork has relied on for
+  `spi_master`'s bus lock is for, and it is what the fork relied on for
   months. And interleaving is *architecturally* fine on SPI: every band is its
   own transaction with CS released at the end, so a card transfer slotted
   between two bands is latched by the card alone, and the ST7789 — mid-RAMWR

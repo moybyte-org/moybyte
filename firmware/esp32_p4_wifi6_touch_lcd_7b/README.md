@@ -1,9 +1,10 @@
 # Moybyte on ESP32-P4 (Waveshare ESP32-P4-WIFI6-Touch-LCD-7B)
 
 The second device backend (#58): a 7" 1024×600 MIPI-DSI "desktop workstation"
-tier next to the T-Deck pocket handheld. **Not** an lvgl_micropython build —
-this is mainline MicroPython v1.28.0 (`ESP32_GENERIC_P4`, C6 WiFi variant baked
-into our out-of-tree board def) + our native modules via `USER_C_MODULES`.
+tier next to the T-Deck pocket handheld. Mainline MicroPython v1.28.0
+(`ESP32_GENERIC_P4`, C6 WiFi variant baked into our out-of-tree board def) +
+our native modules via `USER_C_MODULES` — the build strategy both boards share
+now (this board had it first; the T-Deck's port copied it).
 
 Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
 console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;

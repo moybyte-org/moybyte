@@ -267,8 +267,8 @@ keyboard handheld; the P4 board is a 7″ desktop. What's honest about the state
 Build and flash:
 
 ```bash
-MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython   # needs ESP-IDF 5.5
-make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
+MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-tdeck-mainline   # needs ESP-IDF 5.5
+make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4 && make firmware-flash-p4 PORT=/dev/ttyACM0
 ```
 

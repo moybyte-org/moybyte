@@ -187,44 +187,25 @@ why = """
 The second staging source, and the one that must STAY an allowlist.
 
 `runtime/` is a shared tree by definition, so a denylist over it is safe: the
-default answer is "yes, this crosses". The T-Deck's `modules/` is a BOARD tree
-whose default answer is "no" -- most of it is S3 hardware (moy_runtime.py's
-run_desktop, tdeck_display.py, moybyte_sd.py, moy_compositor.py, the keyboard).
-A denylist over a board tree would silently import another board's panel driver
-the moment someone adds a file, which is the mirror-image of the bug the shared
-denylist fixes.
+default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
+tier -- a repo-root tree since the fork's deletion (2026-08-17, `a02bb33`),
+which is the move an earlier revision of this section called "the right end
+state" and #161's Phase 4/5 had promised. It stays an allowlist even so,
+because not every board drives every piece of it: this board has no SD and no
+I2S (`moybyte_sd.py`, `device_audio.py` stay T-Deck-only), the T-Deck has no
+BLE, and the allowlist is where that per-board difference is written down
+rather than discovered as a frozen module nothing imports.
 
-These files live in the T-Deck tree for historical reasons -- that is the board
-they were written for -- but each is board-AGNOSTIC by construction, with its
-S3-only imports guarded and its board-specific inputs passed as constructor
-arguments. Moving them to a shared tree is the right end state and is #161's
-Phase 4/5 work, not this file's.
+Each file named below is board-AGNOSTIC by construction, with its
+board-specific imports guarded and its hardware inputs passed as constructor
+arguments.
 
 PHASE 4/5 UPDATE (2026-08-15): the boot spine and frame pump did NOT move here
 -- they went into `runtime/device_boot.py` and reach this board through the
 SHARED denylist above, which is why nothing was added to this section for them.
 The line that decides is whether a module can import with no board present:
 device_boot takes every hardware object as an argument, so it loads on CPython
-and its shared half is executed by tests/test_device_boot.py.
-
-CORRECTION, same day: this paragraph used to END by saying the four modules in
-the first group "cannot -- they reach `framebuf`, `moy_gfx`, `machine`", and
-that reason is FALSE. None of the four imports `machine` or `moy_gfx` at all
-(device_api mentions moy_gfx once, in a comment; the rest not at all), and
-`framebuf` appears only inside device_canvas methods -- its own docstring says
-so: "the native modules (moy_gfx/moy_alloc/lcd_bus/framebuf) are imported
-lazily inside methods". All four bare-import on CPython today, which is how
-tests/test_multiplayer.py already builds the device `make_api`.
-
-So the blocker is not importability, and nobody should re-derive that by
-testing it again. What is actually left is ordinary work: `runtime/` is the
-tree the host and the wasm head GLOB, so a move has to answer for the staging
-config on both boards, the `runtime.`-prefixed import lane these files use as
-their host fallback, and the frozen-module names the boards already ship. This
-file's whole premise is that its reasons are CHECKABLE -- a wrong one is worse
-than none, because it converts a scheduling decision into a false technical
-impossibility and stops anyone looking. They stay here until someone does that
-job; it is bigger than #161, and it is not blocked."""
+and its shared half is executed by tests/test_device_boot.py."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState

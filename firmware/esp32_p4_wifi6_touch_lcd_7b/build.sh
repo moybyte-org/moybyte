@@ -3,9 +3,10 @@
 # variant) + the moy_dsi native module (EK79007 MIPI-DSI panel) for the
 # Waveshare ESP32-P4-WIFI6-Touch-LCD-7B.
 #
-# Unlike the T-Deck build this does NOT use lvgl_micropython (no P4/DSI support
-# there) -- it is a plain mainline build with USER_C_MODULES. Output flashes at
-# offset 0x2000:
+# A plain mainline build with USER_C_MODULES -- the strategy both boards use
+# now (this board went mainline first, because the deleted lvgl_micropython
+# fork had no P4/DSI support, and became the T-Deck port's template). Output
+# flashes at offset 0x2000:
 #   esptool --port /dev/ttyACM0 --baud 921600 write_flash 0x2000 dist/p4/moybyte_p4.bin
 set -euo pipefail
 
@@ -125,8 +126,8 @@ if ! grep -q "moybyte_native_code_free" "${MPY_DIR}/ports/esp32/mpconfigport.h";
   patch -d "${MPY_DIR}" -p1 < "${NATIVE_FREE_PATCH}"
 fi
 
-# 2c) Stage the shared NATIVE modules from the T-Deck tree (single source of
-#     truth: native/). moy_gfx is the
+# 2c) Stage the shared NATIVE modules (single source of truth: the repo-root
+#     native/). moy_gfx is the
 #     VM-neutral RGB565 pixel kernel every draw verb runs through; moy_alloc is
 #     the off-gc-heap PSRAM allocator the layer/window buffers use. Both are
 #     plain-C usermods (the S3-specific pieces are include-guarded), so they

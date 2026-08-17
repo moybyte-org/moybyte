@@ -1,34 +1,31 @@
-"""Moybyte T-Deck device backend, MAINLINE build -- the shared console on the S3.
+"""Moybyte T-Deck device backend -- the shared console on the S3.
 
-The third `run_desktop` in the tree, and the one that had the least to invent:
-the shared boot spine (`runtime/device_boot.py`) already owns the splash, the
-cart seed/scan, the Lua probe, the OTA verdict and the frame cadence, and the
-shared `console.Workstation` owns every pixel. What is left here is the part
-that is genuinely this board's hardware, and one thing that is new.
+The `run_desktop` that had the least to invent: the shared boot spine
+(`runtime/device_boot.py`) already owns the splash, the cart seed/scan, the Lua
+probe, the OTA verdict and the frame cadence, and the shared
+`console.Workstation` owns every pixel. What is left here is the part that is
+genuinely this board's hardware.
 
-WHAT DIFFERS FROM THE FORK BUILD'S `moy_runtime.py`, which drives the same glass:
+This port replaced the lvgl_micropython fork build of the same glass (deleted
+2026-08-17). What structurally changed with it: the panel machine is
+`native/moy_lcd`, one C module that also owns the SPI host, with
+`tdeck_panel.TDeckCompositor` the thin ping-pong over its kick/pump/drain
+split (the fork's Python `moy_compositor` + `lcd_bus` banding died with it,
+strategy retained -- `flush()` queues the first bands and returns, the rest
+are fed while this loop renders the next frame, `comp.sync()` is a real
+fence); there is no LVGL; and the SERIAL DEV CHANNEL works, which on the fork
+it never did.
 
-  * the panel. There, a Python `moy_compositor.Compositor` drives `lcd_bus`
-    band by band and owns the bounce buffers, the completion counter and the
-    pacing stats. Here that whole machine is `moy_lcd`, one C module that also
-    owns the SPI host, and `tdeck_panel.TDeckCompositor` is the thin ping-pong
-    over its kick/pump/drain split. The STRATEGY is the same one, including the
-    overlap: `flush()` queues the first bands and returns, the rest are fed
-    while this loop renders the next frame, and `comp.sync()` is a real fence.
-  * no LVGL, so no `handler.deinit()` takeover and no `tdeck_display`.
-  * a SERIAL DEV CHANNEL, which that board does not have. See below -- it is
-    the most consequential difference and the one most likely to be doubted.
-
-WHAT IS DELIBERATELY IDENTICAL: the input drivers, the SD lifecycle, the cart
-API, the audio backend, the WiFi service, the OTA updater and every module the
-console is built from are the SAME FILES, staged from the fork build's tree by
-`board.toml`. Two builds of one board must not become two consoles.
+Everything the console is built from -- input drivers, SD lifecycle, cart API,
+audio backend, WiFi service, OTA updater -- is staged from the shared
+`runtime/` and `device/` trees by `board.toml`: one console, per-board hardware
+underneath.
 """
 
 import time
 
 from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
-# The boot spine + frame pump, shared with the P4 and the fork build (#161
+# The boot spine + frame pump, shared with the P4 (#161
 # Phase 4/5, canonical: runtime/device_boot.py). The steps that used to be
 # written per board -- boot splash, cart seed+scan, the Lua runtime probe, the
 # OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
@@ -147,9 +144,9 @@ def run_desktop(fps_cap=60):
     # #54 St.2: arm the async layer copy BEFORE the first canvas exists.
     # `DeviceCanvas` latches `_async_ok` in __init__, so this has to precede the
     # construction below or it reaches nothing. It is an assignment rather than
-    # an edit because `device_canvas.py` is staged from the fork tree and is not
-    # this port's to change: there it reads the flag from
-    # `moy_compositor.SRAM_BOUNCE_FLUSH`, and `tdeck_panel` is that module here.
+    # an edit because `device_canvas.py` is staged from the shared `device/`
+    # tree and is not this board's to change; the flag lives in the compositor
+    # module (`tdeck_panel`) because the fact it rests on is the compositor's.
     # Read the block beside the constant for why the 2026-07-03 verdict against
     # this lever does not apply to `moy_lcd`, and for which carts it can and
     # cannot move.

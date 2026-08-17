@@ -19,8 +19,7 @@ WINS at serve time; see `moy_webhost._asset`.
 WHY .incbin AND NOT ESP-IDF's EMBED_FILES: `EMBED_FILES` is an argument to
 `idf_component_register`, and a MicroPython usermod is not a component -- it is
 an INTERFACE library linked into the port's main component, whose registration
-we do not own and which differs between the two boards (mainline on the P4,
-the lvgl_micropython fork on the T-Deck). `.incbin` is a toolchain feature, so
+we do not own. `.incbin` is a toolchain feature, so
 one generated file works on Xtensa, on RISC-V, and on the host compiler that
 the test suite checks it with. What was never on the table is a Python `bytes`
 literal: 573 KB of escaped source is ~2 MB of text through mpy-cross, and it

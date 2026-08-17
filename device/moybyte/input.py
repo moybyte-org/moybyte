@@ -476,7 +476,7 @@ class InputPoller:
     reads, deferred set_game_mode writes) and stages results; the frame loop
     only consumes staged state (consume()/consume_touch -- cheap, I2C-free).
     A stall then blocks only this thread while the VM keeps rendering -- WHICH
-    REQUIRES the build's I2C GIL-release patch (esp32_i2c_gil_release.patch:
+    REQUIRES the build's I2C GIL-release patch (build.sh step 3c, #69:
     machine_i2c.c frees the GIL across the blocking i2c_master_cmd_begin;
     without it a stall holds the GIL and freezes the loop no matter which
     thread reads, since MicroPython threads share one GIL on MP_TASK_COREID).

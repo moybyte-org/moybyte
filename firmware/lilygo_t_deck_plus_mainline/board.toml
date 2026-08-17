@@ -1,19 +1,17 @@
 #  Moybyte board definition -- LilyGO T-Deck Plus on MAINLINE MicroPython
 #  ======================================================================
 #
-#  The THIRD board file (#161 Phase 3), and the one that has a twin: this is
-#  the same physical board as `firmware/lilygo_t_deck_plus_mainline/`, built
-#  the P4's way -- mainline MicroPython + an out-of-tree board definition +
-#  USER_C_MODULES -- instead of on the lvgl_micropython fork. So its
-#  `[modules.shared]` section is IDENTICAL to that board's, deny for deny, and
-#  it should stay identical: the same glass, the same 320x240 tier, the same
-#  console. `tests/test_board_toml.py` compares them, because two statements of
-#  one truth are only worth having if something checks they agree.
+#  THE T-Deck board file (#161 Phase 3). Until 2026-08-17 this board had a twin
+#  -- the lvgl_micropython fork build, deleted that day -- and this file's
+#  `[modules.shared]` section was kept deny-for-deny identical to its twin's,
+#  cross-checked by `tests/test_board_toml.py`. The fork is gone; what that
+#  discipline bought stays: the P4's `[modules.shared]` differs from this one by
+#  exactly the presentation-tier pair (`wm_windowed.py` + `surface.py`), an
+#  asserted invariant.
 #
-#  What differs is `[modules.device]`, and only by subtraction. The fork build's
-#  panel/compositor trio (`tdeck_display.py`, `moy_compositor.py`,
-#  `moy_canvas.py`) all drive `lcd_bus`/`lvgl`, which do not exist here -- their
-#  replacement is `native/moy_lcd` plus the board-authored `modules/tdeck_panel.py`.
+#  The panel path here is `native/moy_lcd` plus the board-authored
+#  `modules/tdeck_panel.py` -- the fork's LVGL trio (`tdeck_display.py`,
+#  `moy_compositor.py`, `moy_canvas.py`) died with it.
 #
 #  Read `README.md` in this directory first. The hardware-learned constraints
 #  (SD shares SPI2 with the panel; never re-create a Pin on TFT_CS/SD_CS; the
@@ -30,8 +28,7 @@ tier_why = """
 320x240, ONE canvas: the system surface IS the game surface (console.py builds
 them as the same object). That is what makes `wm.FullscreenStackWM` the right
 window manager here and the windowed desktop tier wrong -- see the
-`wm_windowed.py` denial below. Same tier as the fork build of this board,
-because it is the same board."""
+`wm_windowed.py` denial below."""
 
 # ---------------------------------------------------------------------------
 
@@ -237,21 +234,16 @@ The second staging source, and the one that must STAY an allowlist -- the same
 call the P4's board file makes, for the same reason.
 
 `runtime/` is a shared tree by definition, so a denylist over it is safe: the
-default answer is "yes, this crosses". The fork build's `modules/` is a BOARD
-tree whose default answer is "no", and on THIS board that is sharper than it is
-on the P4: three of its files (`tdeck_display.py`, `moy_compositor.py`,
-`moy_canvas.py`) drive `lcd_bus`/`lvgl` and would import cleanly nowhere here,
-while `moy_runtime.py` and `moybyte_shell.py` are that build's own boot spine
-and would SHADOW this one's. A denylist over a board tree picks all four up the
-moment somebody adds a file.
+default answer is "yes, this crosses". `device/` is the boards' shared DEVICE
+tier (repo root since the fork's deletion, 2026-08-17 -- the "shared device
+tree" #161 Phase 4/5 called the right end state), and it stays an allowlist
+because not every board drives every piece of it: this board has no BLE, the
+P4 has no SD or I2S, and an allowlist is where that difference is written down
+per board rather than discovered as a frozen module nothing imports.
 
-These modules live in the fork's tree for historical reasons -- that is the
-board they were written for -- but each named below is board-agnostic by
-construction, with its hardware-specific inputs passed as constructor arguments
-and its optional native modules imported inside a guard. That they are staged
-from a SIBLING BOARD rather than from `runtime/` is #161's Phase 4/5 work
-showing its edge: the right end state is a shared device tree, and until then
-this list is the honest description of where the files are.
+Each module named below is board-agnostic by construction, with its
+hardware-specific inputs passed as constructor arguments and its optional
+native modules imported inside a guard.
 
 The groups below are ordered by the BRING-UP STAGE that first needed them, and
 each says which. The whole list is present from stage 2 (see the shared section
@@ -330,8 +322,8 @@ files = ["moy_ota.py"]
 why = """
 STAGE 6. The OTA updater (#53). Board-agnostic: its staging directory is a
 constructor argument and its identity comes from the generated `_ota_build.py`.
-The partition table this build ships is byte-for-byte the fork's, so an image
-from either build installs into the other's inactive slot."""
+The partition table is byte-for-byte the deleted fork build's, so boards that
+took their last update from it install this build over plain OTA."""
 
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]

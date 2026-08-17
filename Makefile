@@ -249,8 +249,14 @@ vendor-libmoy:
 vendor-p8-import:
 	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
 
-firmware-build-lilygo-micropython:
+# The T-Deck build (mainline MicroPython -- the only T-Deck build since the
+# fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the
+# fork-era spelling, kept as aliases because the site, CI echoes and muscle
+# memory all use them.
+firmware-build-tdeck-mainline:
 	bash firmware/lilygo_t_deck_plus_mainline/build.sh
+
+firmware-build-lilygo-micropython: firmware-build-tdeck-mainline	## alias (fork-era name)
 
 # OTA (#53 Phase 3): emit dist/latest.json from the built image (auto size + sha256 +
 # version read from moy_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;
@@ -332,10 +338,12 @@ firmware-flash-lilygo-micropython-no-reset:
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
-firmware-flash-lilygo-micropython-full:
+firmware-flash-tdeck-mainline:
 	$(REQUIRE_PORT)
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
+
+firmware-flash-lilygo-micropython-full: firmware-flash-tdeck-mainline	## alias (fork-era name)
 
 firmware-flash-lilygo-micropython-full-erase:
 	$(REQUIRE_PORT)
@@ -347,10 +355,12 @@ firmware-run-lilygo-micropython:
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) --before no_reset --after hard_reset --no-stub run
 
-firmware-monitor-lilygo-micropython:
+firmware-monitor-tdeck-mainline:
 	$(REQUIRE_PORT)
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+
+firmware-monitor-lilygo-micropython: firmware-monitor-tdeck-mainline	## alias (fork-era name)
 
 # ESP32-P4 (Waveshare 7B, #58): mainline-MicroPython build via the board dir's
 # build.sh -> dist/p4/moybyte_p4.bin, flashed at 0x2000 (the P4's app offset).
@@ -420,28 +430,12 @@ firmware-monitor-p4:
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
 
-# T-Deck on MAINLINE MicroPython -- the P4's build strategy, applied to the S3
-# (firmware/lilygo_t_deck_plus_mainline/README.md). This does NOT replace
-# firmware-build-lilygo-micropython, which is what ships; it is the second,
-# LVGL-free build of the same board, currently at stage 1 (panel bring-up).
-#
-# There is NO BOOT BUTTON on a T-Deck. The trackball CLICK is GPIO0: hold the
-# trackball in while powering the board on, then release, to reach the ROM
-# loader. esptool's auto-reset does not sync over this board's native USB, hence
-# --before no_reset. (The P4's CH343 auto-resets fine, which is why its targets
-# above look simpler.)
-TDECK_MAINLINE_BIN ?= dist/tdeck_mainline/moybyte_tdeck.bin
-# otadata: a board that has taken an OTA is running ota_1, so a flash into ota_0
-# would look like it did nothing. Erasing otadata makes the bootloader fall back
-# to ota_0 -- the slot the merged image just wrote. Same reason as the P4's.
-TDECK_MAINLINE_OTADATA_OFFSET ?= 0x1d000
-TDECK_MAINLINE_OTADATA_SIZE ?= 0x2000
-
-firmware-build-tdeck-mainline: firmware-build-lilygo-micropython	## alias -- one T-Deck build since the fork went
-
-firmware-flash-tdeck-mainline: firmware-flash-lilygo-micropython-full	## alias -- the merged image at 0x0 is the port's cable flash
-
-firmware-monitor-tdeck-mainline: firmware-monitor-lilygo-micropython	## alias
+# T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
+# CLICK is GPIO0: hold the trackball in while powering the board on, then
+# release, to reach the ROM loader when an image wedges the USB device.
+# (The build/flash/monitor targets live above, under their canonical
+# firmware-*-tdeck-mainline names; the image + otadata offsets are the MPY_*
+# variables at the top of this file.)
 
 # MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
 # MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the

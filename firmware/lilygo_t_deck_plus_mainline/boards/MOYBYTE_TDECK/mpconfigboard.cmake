@@ -1,7 +1,6 @@
-# Moybyte T-Deck on MAINLINE MicroPython (the ONE build strategy, #58's pattern).
-#
-# The shipping T-Deck target builds on the lvgl_micropython FORK; this board is
-# the same console on plain mainline + USER_C_MODULES, exactly like the P4.
+# Moybyte T-Deck on MAINLINE MicroPython (the ONE build strategy, #58's pattern
+# -- and the ONE T-Deck build since the lvgl_micropython fork's deletion,
+# 2026-08-17): plain mainline + USER_C_MODULES, exactly like the P4.
 # There is no BOARD_VARIANT: the octal-PSRAM + 240MHz fragments the generic S3
 # board reaches through `SPIRAM_OCT` are listed here directly, because a
 # variant would put half this board's identity in a second file for no gain.

@@ -115,8 +115,8 @@ the ones already proven on this exact glass by the fork build.
 
 - **Upstream:** `api_drivers/common_api_drivers/display/st7789/_st7789_init.py`
   in [`lvgl-micropython/lvgl_micropython`](https://github.com/lvgl-micropython/lvgl_micropython),
-  at the commit this repo already pins for the fork build,
-  `14ad6ce2c5555272398debeff77b69021ca7ddda`.
+  at commit `14ad6ce2c5555272398debeff77b69021ca7ddda` — the commit the deleted
+  fork build (removed 2026-08-17) had pinned.
 - **Licence:** MIT, © 2024–2025 Kevin G. Schlosser. The same project is already
   listed in §5 as a build-time upstream of the shipping T-Deck image; this is
   the one place its source is *carried* rather than fetched.

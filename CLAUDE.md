@@ -253,11 +253,12 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
 This is the active hardware target. Build → flash → monitor:
 
 ```bash
-MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython     # -> dist/tdeck_mainline/
-make firmware-flash-lilygo-micropython-full PORT=/dev/ttyACM0      # merged image at 0x0
+MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-tdeck-mainline         # -> dist/tdeck_mainline/
+make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0               # merged image at 0x0
 #   ... then a SEPARATE esptool --before default_reset --after hard_reset to START it:
 #   write_flash's own trailing reset does not, and the board otherwise sits in the loader
-make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @115200
+make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @115200
+#   (the fork-era firmware-*-lilygo-micropython names survive as aliases)
 ```
 
 - The build (`firmware/lilygo_t_deck_plus_mainline/build.sh`) **clones mainline MicroPython v1.28 and
@@ -284,8 +285,12 @@ make firmware-monitor-lilygo-micropython PORT=/dev/ttyACM0         # miniterm @1
   (the device tier both boards stage — `device_canvas`, `device_api`, `device_diag`, `moy_ota`,
   `moy_webhost`, `moybyte_sd`, `moycore_glue`, the `moybyte` package …). LVGL is gone with it; the
   panel comes up through `native/moy_lcd` + `modules/tdeck_panel.py`, and that is now the ONLY panel
-  driver in the tree. `patches/esp32_i2c_new_driver.patch` is currently ORPHANED — it was reachable
-  only through the fork's `MOYBYTE_I2C_NEW_DRIVER` knob and wants re-wiring or a decision (#69).
+  driver in the tree. `patches/` was pruned to its three consumers on 2026-08-17: five orphans were
+  DELETED (git history has them) — `esp32_i2c_new_driver` (reachable only through the fork's knob,
+  the #69 decision), `esp32_repr_c_floats` + `esp32_i2c_gil_release` (both live on as build.sh's
+  guarded sed/heredoc, steps 3b/3c — the patch files were unapplied second copies),
+  `esp32_tdeck_early_board_init` and `spi_master_psram_tx_dma` (fork-only mechanisms; the mainline
+  flush never DMAs from PSRAM).
 - The MicroPython console is the only firmware. (The older Arduino/PlatformIO serial-smoke firmware and the legacy LVGL `.moyproj` game-loop boot path were removed; git history has them.)
 
 ### Second device target: ESP32-P4 (Waveshare 7B) — bring-up (#58)

@@ -11,9 +11,9 @@ can check, in a form a human can check it in.
 Two rules every smoke here follows.
 
   SELF-TERMINATING. Each returns to the REPL rather than taking the loop over.
-  Under the fork build this board's USB-CDC RX dies once a takeover loop starts
-  (CLAUDE.md's hard constraints), and whether mainline's CDC stack has the same
-  hole is one of the questions this port exists to answer -- so a bring-up
+  Under the deleted fork build this board's serial RX died once a takeover loop
+  started, and whether this port had the same hole was one of the questions the
+  bring-up existed to answer (it does not -- #201, RX works) -- so a bring-up
   program must never be the thing that costs the owner a REPL they might have
   had. Stage 6's desktop is the first loop that does not return.
 

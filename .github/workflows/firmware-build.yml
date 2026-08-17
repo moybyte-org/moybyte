@@ -188,7 +188,11 @@ jobs:
           path: |
             firmware/esp32_p4_wifi6_touch_lcd_7b/.build
             !firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython/ports/esp32/build-*
-          key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**') }}
+          # patches/** (repo root) is in this key too: the P4 build applies the
+          # shared esp32_native_code_free.patch under the same one-shot marker
+          # guard, so a change to it must bust this cache exactly as a board
+          # patch does -- a restored tree carries the OLD patch and skips it.
+          key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**', 'patches/**') }}
 
       # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
       # emsdk + a micropython checkout, both pinned by web_runner/build.sh).

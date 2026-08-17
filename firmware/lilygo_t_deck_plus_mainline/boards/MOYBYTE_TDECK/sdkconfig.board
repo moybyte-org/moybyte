@@ -1,9 +1,10 @@
 # Moybyte T-Deck board fragment (mainline build).
 #
 # Everything here is either a BOARD FACT (flash size/mode, partition table) or a
-# lever that was A/B'd on THIS board's glass and shipped in the fork build. The
-# fork's knobs that are NOT here are deliberate; see the README's "what the fork
-# tunes that this build does not (yet)" table.
+# lever that was A/B'd on THIS board's glass. "The fork" below is the
+# lvgl_micropython build this port replaced (deleted 2026-08-17): its measured
+# verdicts transferred here knob for knob, and the README's "what the fork
+# tunes that this build does not (yet)" table records the deltas that did not.
 
 # 16MB flash. The generic S3 board assumes 4MB.
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -49,7 +50,7 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 
 # PSRAM at 120MHz, matching the fork. THIS IS THE PORT'S LAST MEASURED GAP and
 # it was not a code difference at all: the mainline board set no SPIRAM speed, so
-# it took the 80MHz default while the shipping fork has run 120M OCT for months.
+# it took the 80MHz default while the fork build had run 120M OCT for months.
 #
 # Measured on the owner's board, same cart, same night, after the flush overlap
 # had already landed:
@@ -65,7 +66,7 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 # tax (1.50 -> 2.00) is the same clock on the PSRAM-resident gc heap.
 #
 # 120M is ESP-IDF "experimental" and temperature-sensitive, so this is a risk
-# decision rather than free -- but it is the SAME risk the shipping fork has
+# decision rather than free -- but it is the SAME risk the fork build
 # carried on this exact hardware, so matching it is the conservative choice for a
 # replacement build, not a new gamble. If the panel ever shows garbage bands or
 # the board wedges under sustained load, this is the first line to revert; note
@@ -78,12 +79,12 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 # SPEED=80 after a clean build). All five together, matching the fork's `fast`
 # profile, or none of them.
 # External MSPI speed: octal flash + octal PSRAM at 120MHz. This is the SAME
-# flag set the shipping fork applies (its build.sh MOYBYTE_EXTMEM_SPEED=fast) --
+# flag set the fork build applied (its MOYBYTE_EXTMEM_SPEED=fast) --
 # keep the two together rather than deriving this one from Kconfig again.
 #
 # Flash and PSRAM move TOGETHER: at 240MHz core, ESP-IDF 5.5.1 ships no MSPI
 # timing table for PSRAM-120 with flash-80, and says so as a compile error
-# naming the 240M/120M table. Do not set a FLASHMODE here -- the fork sets none,
+# naming the 240M/120M table. Do not set a FLASHMODE here -- the fork set none,
 # the octal variant decides it.
 #
 # THIS REQUIRES esp_psram_temp_retune_any_vendor.patch (#169), applied by
@@ -128,8 +129,11 @@ CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
 # `tud_cdc_rx_cb` are both absent from the elf). No TinyUSB is needed: the S3's
 # USB-Serial-JTAG peripheral is bidirectional on its own once it is primary.
 #
-# The same misconfiguration is why the SHIPPING FORK has no serial harness
-# either, and why CLAUDE.md carried a wrong explanation for it for months.
+# The fork build (deleted 2026-08-17) shared this misconfiguration -- but note
+# that fixing it there was measured as NOT sufficient: with an identical console
+# config and identical linked symbols it printed and still took no input
+# (CLAUDE.md's RX section). On THIS port the three changes together are the
+# whole fix, verified on glass.
 #
 # UART REPL stays on (mpconfigboard.h) -- it costs nothing and keeps the header
 # pins usable with a USB-UART adapter, which is how the P4 has always worked

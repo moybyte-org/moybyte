@@ -464,12 +464,15 @@ libraries' answer is to not do most of it.
 
 ## 4. Decision: why not adopt LVGL
 
-Recorded so it is not re-litigated. **We already ship LVGL, and we already left
-it.**
+Recorded so it is not re-litigated. **We shipped LVGL, and we left it** —
+first the drawing path, then (2026-08-17) the build entirely: the T-Deck now
+ships the mainline port with `native/moy_lcd`, and no LVGL exists anywhere in
+the tree. The numbered record below is kept as written, because the
+measurements are what closed the question.
 
-1. **The T-Deck build *is* `lvgl_micropython`** — but LVGL is used only to bring up
+1. **The T-Deck build *was* `lvgl_micropython`** — but LVGL was used only to bring up
    the panel and the SPI bus (`tdeck_display.py`, plus `lcd_bus` for DMA-capable
-   memory). Nothing draws the UI with it.
+   memory). Nothing drew the UI with it.
 2. **The drawing path was LVGL once.** Replacing it with our own native blitter
    went **47 → 90 FPS**; LVGL's CPU-bound rotation was the wall. A measured
    retreat, not a taste decision.
