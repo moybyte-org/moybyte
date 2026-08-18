@@ -30,7 +30,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))ok
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # The board-facing imports (p4_autotest -> pyserial, the `device` extra that
 # `make setup` deliberately does not install) live in main(), not here: the
 # pmem-layout helpers below are imported by tests/test_bench_pmem_report.py,
