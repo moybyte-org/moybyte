@@ -49,8 +49,12 @@ its power-on circuit, not a GPIO. Eliminated empirically on a live wedged
 unit: display-path SWRESET (0x01) + full re-init, I2C SWRESET to 0x3B,
 I2C general-call reset (nobody ACKs 0x00), display sleep/wake cycling,
 and both read-frame variants (8- and 14-byte). ONLY A POWER DRAIN
-restarts it. Operational rule: cable flash -> unplug, count to ten,
-replug. OTA installs never cut panel power and never wedge.
+restarts it -- when it stays stuck. OBSERVED 2026-08-19, same day: the
+post-flash constant state can also SELF-CLEAR (the detector announced a
+wedge at boot and the owner found touch working later, no replug) -- so
+the rule is: if touch is dead after a cable flash, serial says which
+state it is in, a replug always fixes it, and it may come back on its
+own. OTA installs never cut panel power and never wedge.
 
 Residual mystery, recorded so nobody rebuilds a theory on it: one session
 showed a probe instance reading constants minutes before AND after the
