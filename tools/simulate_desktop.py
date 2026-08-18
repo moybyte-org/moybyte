@@ -107,14 +107,32 @@ def parse_script(text):
 
 
 def run_script(driver, actions, dt):
+    """Drive the scripted tour. Returns (images, errors).
+
+    `errors` is why this returns a pair: the tour is the ONLY lane that boots
+    the console through the production import path rather than the test
+    harness's meta-path finder, so it is the gate for "does the shell actually
+    come up" -- and it used to print `Moybyte frame error: ...` and exit 0,
+    which is a gate that cannot fail. A cart crash sets `ws.cart_error` (the
+    Player's forwarding property) and the panel then clears it on recovery, so
+    sample it EVERY frame and keep the distinct strings; sampling once at the
+    end sees nothing.
+    """
     images = []
+    errors = []
+    seen = set()
+    ws = getattr(driver, "ws", None)
     for press in actions:
         if press:
             driver.press(press)
         driver.frame(dt)
+        err = getattr(ws, "cart_error", None) if ws is not None else None
+        if err and err not in seen:
+            seen.add(err)
+            errors.append(err)
         cv = driver.current_canvas() if hasattr(driver, "current_canvas") else driver.rt.canvas
         images.append((cv.w, cv.h, driver.rgb888()))
-    return images
+    return images, errors
 
 
 def save_gif(images, path, scale):
@@ -290,6 +308,10 @@ def main():
     ap.add_argument("--gif", metavar="PATH")
     ap.add_argument("--script", default=None)
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit non-zero if the scripted tour hit any frame error "
+                         "(this is the only lane that boots through the production "
+                         "import path, so CI wants it)")
     ap.add_argument("--autoplay", dest="autoplay", action="store_true", default=None,
                     help="force games into attract/autoplay mode (default ON for --demo)")
     ap.add_argument("--no-autoplay", dest="autoplay", action="store_false",
@@ -334,16 +356,22 @@ def main():
 
     script = DEMO_SCRIPT if args.demo else args.script
     if script is not None:
-        images = run_script(driver, parse_script(script), dt)
+        images, errors = run_script(driver, parse_script(script), dt)
         if args.gif:
             save_gif(images, args.gif, args.scale)
         else:
             print("ran %d scripted frames" % len(images))
-        return
+        for err in errors:
+            print("  frame error: %s" % err)
+        if errors:
+            print("%d distinct frame error(s) during the tour" % len(errors))
+            if args.strict:
+                return 1
+        return 0
 
     ws.arm_splash()          # boot logo: show the moybyte mascot before the launcher
     run_live(driver, dt, args.scale)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
