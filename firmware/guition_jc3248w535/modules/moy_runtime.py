@@ -42,6 +42,62 @@ FONT_SCALE = 1                 # 2x was BUILT AND REVERTED on owner verdict
 CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
+# Stage 4 (owner call 2026-08-20): a TF card, when present, IS the cart store
+# (the T-Deck model -- removable, kid-swappable carts); no card degrades to the
+# internal-flash root above, exactly the store this board shipped with. The
+# slot is on its OWN SPI3 pins (community map, verified on this glass), nothing
+# shared with the panel's SPI2, so this is plain machine.SDCard + os.mount --
+# none of the T-Deck's moy_sd bus-sharing machinery applies. Deliberate: OTA
+# keeps staging on the INTERNAL VFS (a pulled card must never kill an update
+# mid-stream; the 16MB flash has the room), and the BLE bond store stays
+# internal too (device identity, not cart data). Wifi credentials live beside
+# the carts and so follow the card -- the T-Deck accepts the same trade.
+# slot=2 IS SPI3_HOST -- machine_sdcard.c's spi table lists SPI3 FIRST, so
+# SPI slot numbers map in the OPPOSITE order of the host numbers (slot 2 ->
+# SPI3, slot 3 -> SPI2). slot=3 therefore grabs the PANEL's bus and every
+# construction dies with ESP_ERR_INVALID_STATE before touching the card --
+# measured on this glass 2026-08-20, one evening of postmortem plumbing.
+SD_PINS = dict(slot=2, sck=12, mosi=11, miso=13, cs=10)
+SD_MOUNT = "/sd"
+SD_CARTS_ROOT = "/sd/carts"
+# _mount_sd's postmortem: the boot happens before a serial host attaches (the
+# #201 console DROPS unheard output), so the mount verdict is also recorded
+# here for the dev channel -- `py __import__("moy_runtime").SD_STATUS`.
+SD_STATUS = "not attempted"
+
+
+def _mount_sd():
+    """Mount the TF card; True if the store should live there. Any failure --
+    no card, wrong pins, dead card, foreign filesystem -- degrades to internal
+    flash with the reason on serial, so SD can only ever ADD storage, never
+    cost the boot."""
+    global SD_STATUS
+    try:
+        import machine
+        import os
+        sd = machine.SDCard(**SD_PINS)
+    except Exception as exc:  # noqa: BLE001
+        SD_STATUS = "construct failed: %r" % exc
+        print("Moybyte Guition SD: no card interface (%r)" % exc)
+        return False
+    try:
+        os.mount(sd, SD_MOUNT)
+        SD_STATUS = "mounted"
+        print("Moybyte Guition SD: mounted at %s" % SD_MOUNT)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        SD_STATUS = "mount failed: %r" % exc
+        # deinit() frees the SPI bus (it calls spi_bus_free) -- without it a
+        # failed mount leaks the claimed host and every later probe, live ones
+        # over the dev channel included, reads ESP_ERR_INVALID_STATE.
+        try:
+            sd.deinit()
+        except Exception:  # noqa: BLE001
+            pass
+        print("Moybyte Guition SD: card unreadable (%r) -- carts on internal "
+              "flash (a modern card often ships exFAT; format it FAT32)" % exc)
+        return False
+
 # Idle screen blank -- the shared IdleBlank, the shared 5 minutes.
 POWER_SAVE_MS = 300000         # 0 disables
 
@@ -77,8 +133,11 @@ def run_desktop(fps_cap=60):
     inp.pointer = pointer
 
     boot.note("loading cartridges")
-    carts, carts_root = boot.load_carts(moy_carts, CARTS, root=CARTS_ROOT,
-                                        media="flash")
+    sd_ok = _mount_sd()
+    carts, carts_root = boot.load_carts(
+        moy_carts, CARTS,
+        root=SD_CARTS_ROOT if sd_ok else CARTS_ROOT,
+        media="SD" if sd_ok else "flash")
     # BLE HID keyboard (shared driver, #202): the S3's on-chip radio.
     # Constructed AFTER the cart load so /moy exists (the bond store lives
     # beside the carts -- the P4's lesson); started after the Workstation's

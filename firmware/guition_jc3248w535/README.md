@@ -20,7 +20,7 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 | backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
 | flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass: carts +25-29%, pump -23%, SPI starvation -77%; needs the #169 retune patch, applied by build.sh). |
-| SD | TF slot exists; pins UNVERIFIED -- stage 4 is open, carts live on the internal VFS (`/moy/carts`). |
+| SD | TF slot VERIFIED on glass (2026-08-20): SPI3, CS 10 / MOSI 11 / SCLK 12 / MISO 13 (f1atb's field guide, confirmed by mount). **A card, when present, IS the cart store** (`/sd/carts`, T-Deck model, seeds on first boot); no card degrades to the internal VFS (`/moy/carts`). THE TRAP: `machine.SDCard`'s SPI slot numbers map INVERTED to host numbers -- **slot=2 is SPI3, slot=3 is SPI2 (the panel's bus)**; slot=3 dies with ESP_ERR_INVALID_STATE before touching the card, and the failed constructor leaks the sdspi singleton so every later probe fails the same way until a reboot. `moy_runtime.SD_STATUS` carries the mount verdict for the dev channel (boot output is DROPPED until a serial host attaches, #201). OTA staging deliberately stays on the internal VFS (a pulled card must not kill an update). |
 | audio | speaker header exists; amp/pins UNVERIFIED -- stage 5 is open. |
 | USB | the S3's native USB-Serial/JTAG (303a:1001). Console primary per #201, so serial RX works under the desktop. |
 
@@ -90,6 +90,17 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 ## Bring-up log
 
+* 2026-08-20 -- **stage 4 lands: the TF card is the cart store** (owner call
+  "already has an SD inside, so you can do that now"; the exit-gesture DECLINE
+  and the #202 close are the same session -- see the hardware table's SD row
+  for the slot-numbering trap that cost the evening's plumbing). 34 carts
+  seed to `/sd/carts` on first boot with a card, on-glass suite 10/10 running
+  carts from the card, no card = the internal store this board shipped with.
+  Also decided: **no touch-only game-exit gesture -- DECLINED** (owner: "we
+  don't support that"; a paired BLE keyboard's hold-BACKSPACE is the exit
+  path on this board), and **audio stays untracked** (the board HAS an audio
+  out -- a 2-pin JST1.25 speaker connector, I2S per the field guides -- amp
+  pins unverified; revisit if a speaker ever gets plugged in).
 * 2026-08-19 (evening) -- **the owner calls the board PORTED.** Also the
   wedge arc's closing field data: **the cable-flash replug rule is RETIRED**
   (owner observation, after many flashes since bring-up: touch answered

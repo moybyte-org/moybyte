@@ -26,7 +26,11 @@
 #define MICROPY_HW_I2C0_SCL                 (8)
 #define MICROPY_HW_I2C0_SDA                 (4)
 
-// The board has a TF slot, but SD is NOT part of this bring-up (stage 4 is an
-// open decision -- carts live on the internal-flash VFS like the P4). Keep the
-// port's SD support off until that stage decides otherwise.
-#define MICROPY_HW_ENABLE_SDCARD            (0)
+// Stage 4 decided (owner call 2026-08-20): the TF slot is the CART STORE when
+// a card is present. It lives on its OWN SPI (SPI3: CS 10 / MOSI 11 / SCK 12 /
+// MISO 13 -- community pin map, verified on this glass), sharing NOTHING with
+// the QSPI panel on SPI2 -- so the port's plain machine.SDCard is the RIGHT
+// driver here. The (0) this shipped with was the T-Deck template's foot-gun
+// guard (there SD shares the panel host and machine.SDCard wedges the board);
+// that hazard does not exist on this wiring.
+#define MICROPY_HW_ENABLE_SDCARD            (1)
