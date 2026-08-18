@@ -92,13 +92,20 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 * 2026-08-19 (evening) -- **the owner calls the board PORTED.** Two closers
   the same session:
-  * **the system UI went font_scale 2** (owner call: at 1x the 3.5" glass was
-    untappable -- "impossible to tap anything"). One constant in
-    moy_runtime.py; the #39 responsive layouts reflow at 480x320@2, which is
-    240x160 font units -- NARROWER than the 320x240 base design, a
-    combination no tier had run -- verified on the host demo tour before
-    flashing, then on-glass suite 10/10. Play rates untouched (a game owns
-    the whole canvas; font scale is system chrome only).
+  * **font_scale 2 was BUILT, SHIPPED AND REVERTED the same day** (the full
+    A/B ran on glass with the owner's eyes on both ends). At 1x the glass was
+    untappable ("impossible to tap anything"), so 2x shipped -- the #39
+    layouts held at 480x320@2 (240x160 font units, narrower than the 320x240
+    base, a combination no tier had run; host demo tour + on-glass 10/10) --
+    and the owner's verdict on the result was "2x looks bad": text at 1x
+    reads FINE here, the real problem is TAP TARGETS. The direction that
+    replaces it (recorded in #202, deferred until after the UI refactor):
+    interactive chrome -- bar icons especially, and menu/settings rows --
+    wants a MINIMUM PHYSICAL SIZE (a PPI floor) independent of the font
+    scale, i.e. a chrome_scale beside font_scale in chrome.Layout. On this
+    glass 16px is 2.46mm (~165 PPI); the Library shelf already models the
+    answer (resolution-driven with fs floors, the 2026-07-12 owner call).
+    FONT_SCALE stays 1; do not re-flip it to solve tap size.
   * **the Bench twins ran on this board for the first time** (over the dev
     channel, feeder image; JSON via tools/p4_cart_bench.py --attach). The
     floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
