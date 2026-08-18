@@ -30,33 +30,41 @@ applies to the pass that produced NO successful read -- an I2C error mid-drag
 must hold the point (stale, bounded), never end the gesture (the phantom-
 release lesson, all three clauses in gt911.py's docstring).
 
-TWO FAILURE MODES, both learned on the first consumer's glass (2026-08-19),
-recorded together because they present identically (touch dead, taps do
-nothing) and are nothing alike underneath:
+THE WEDGE -- the settled story (2026-08-19, one full day of live-unit
+forensics; the interim theories it replaced are in git history):
 
-1. THE SECOND-INSTANCE ARTIFACT. A probe that constructs its own
-   machine.I2C(0) beside the driver's reads EIGHT IDENTICAL BYTES per read
-   (a per-session constant -- 0xA8/0xB0/0x41/0xAC all observed), finger or
-   no finger, while the FIRST instance keeps working. A whole "wedged
-   controller" theory was built on such probes before a working desktop
-   falsified it. Do not diagnose this driver with a second I2C instance;
-   go through the running console's own object (dev channel `py`).
+A CABLE FLASH WEDGES THE TOUCH MCU. After esptool's flash sequence the
+touch half of the bridge streams EIGHT IDENTICAL BYTES per read (a
+per-session constant -- 0xA8/0xB0/0x41/0xAC all observed), finger or no
+finger, forever. Proven PANEL-REAL on a live wedged unit: bit-banged
+SoftI2C on the same pins reads the same constants, so it is not our I2C
+peripheral. Mechanism (consistent, unproven): during download mode the
+QSPI pins float, the bridge parses line noise as commands, and the shared
+touch 8051 crashes -- the same class of insult as the MADCTL MV
+experiments that produced the first wedge.
 
-2. THE BOOT RACE. One real full-session touch death: the constructor's
-   single probe read lost a race (fresh flash, controller still settling)
-   and `available` latched False for the session -- cured by power cycling,
-   which is what made it look like a hardware wedge. The constructor now
-   RETRIES its probe, and poll() re-probes an unavailable controller every
-   ~2s instead of staying dead, so losing the boot race costs seconds.
+THERE IS NO SOFTWARE UN-WEDGE. Datasheet: the touch MCU's only reset is
+the RSTN pin (5ms pulse, points after 200ms), which this board ties to
+its power-on circuit, not a GPIO. Eliminated empirically on a live wedged
+unit: display-path SWRESET (0x01) + full re-init, I2C SWRESET to 0x3B,
+I2C general-call reset (nobody ACKs 0x00), display sleep/wake cycling,
+and both read-frame variants (8- and 14-byte). ONLY A POWER DRAIN
+restarts it. Operational rule: cable flash -> unplug, count to ten,
+replug. OTA installs never cut panel power and never wedge.
 
-The constant-byte DETECTOR below covers whichever of these ever shows up
-through the driver's own instance: it names the signature on serial after
-~5s, because the silent version reads exactly like "nobody is touching the
-screen" and cost a debugging session. It fired for real the day it shipped
-and named the trigger: a CABLE FLASH (esptool's reset sequence) wedges the
-touch MCU through the driver's own first instance -- so a flashed board
-needs one power cycle before its touch answers. An I2C-level un-wedge is an
-open question (#202); SWRESET over the display path does not clear it.
+Residual mystery, recorded so nobody rebuilds a theory on it: one session
+showed a probe instance reading constants minutes before AND after the
+console's own instance handled real touches -- either a transient derail
+that self-healed or an instance-local effect. Diagnose through the
+running console's own object (dev channel `py`), never a side probe.
+
+THE BOOT RACE is separate and real: the constructor's single probe read
+can lose (fresh boot, controller settling) and `available` used to latch
+False for the session. The ctor now retries and poll() re-probes every
+~2s. The constant-byte DETECTOR below names the wedge on serial after
+~5s, because the silent version reads exactly like "nobody is touching
+the screen" and cost a debugging session; it caught its first live wedge
+the day it shipped.
 """
 
 try:                                    # device: staged flat namespace
