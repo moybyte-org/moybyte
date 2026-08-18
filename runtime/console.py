@@ -725,6 +725,14 @@ def _ema(cur, sample):
 # manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
 # fps cap -- the measurement mode (owner call 2026-07-08: we want the REAL
 # per-cart numbers on the glass, and #66 is fed from them).
+#
+# RE-AFFIRMED ON PRODUCT GROUNDS 2026-08-19 (owner): uncapped-by-default is
+# not just the measurement mode, it is the intended shipping behavior --
+# "if no fps set, it should be 60; 30 is available via FRAMESKIP always."
+# The 30-lock is the governor/frameskip's business, chosen per device in
+# Settings, never the silent default. (This footnote exists because the
+# docstring below once read as "games default to 30" and a same-day A/B
+# verdict was misworded off the back of it.)
 FPS_GOVERNOR = False
 
 class Workstation:
@@ -2933,15 +2941,17 @@ class Workstation:
         return self.bar_layer.handle_cart_tap(px, py)
 
     def frame_cap_fps(self):
-        """The frame-loop cap for THIS moment (#63 frame pacing, the SNES rule:
-        a LOCKED cadence feels smoother than a swing). A running GAME locks to a
-        steady 30fps by default -- most carts land in the 29-45 band, and holding
-        the fast frames to the slow ones' pace turns "38-55 and jittery" into
-        "30 and rock solid", with the freed headroom absorbing GC/SD hitches. A
-        cart that sustains more declares `"fps": 60` in its manifest (Hop Quest,
-        Sky Run). Tools/apps and every console screen keep 60 -- the pointer must
-        stay responsive. The device loop re-reads this every iteration; the host
-        simulator paces via its own --fps flag."""
+        """The frame-loop cap for THIS moment (#63 frame pacing). DEFAULT:
+        everything runs uncapped at the loop's 60 -- FPS_GOVERNOR ships False
+        (see its block above; owner-affirmed twice). WHEN the governor or
+        FRAMESKIP is on, a running GAME locks to a steady 30 (the SNES rule: a
+        LOCKED cadence feels smoother than a swing -- most carts land in the
+        29-45 band, and holding the fast frames to the slow ones' pace turns
+        "38-55 and jittery" into "30 and rock solid") unless its manifest
+        declares `"fps": 60` (Hop Quest, Sky Run). Tools/apps and every console
+        screen keep 60 in every mode -- the pointer must stay responsive. The
+        device loop re-reads this every iteration; the host simulator paces via
+        its own --fps flag."""
         # #77 pairing (2026-08-10, learned on zoomed celeste): FRAMESKIP implies
         # the cap. The p8 ports pace THEMSELVES by frame-quantized dt with a
         # never-fast rule -- against an UNCAPPED skip loop (~30ms frames) the
