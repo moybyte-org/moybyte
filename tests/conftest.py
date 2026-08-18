@@ -155,3 +155,17 @@ class _DeviceModuleFinder(importlib.abc.MetaPathFinder):
 # Runtime aliasing first: a device module must never shadow a shared one.
 sys.meta_path.insert(0, _DeviceModuleFinder())
 sys.meta_path.insert(0, _SharedRuntimeAliasFinder())
+
+
+def pytest_addoption(parser):
+    """`--update-goldens` -- the explicit re-baseline switch for the shell
+    pixel goldens (tests/test_shell_goldens.py, UI refactor Phase 0).
+
+    Re-baselining must be a deliberate act, never a side effect of a run, so
+    the harness rewrites tests/shell_goldens/hashes.json ONLY when this flag
+    (or MOYBYTE_UPDATE_GOLDENS=1) is given. Registered here because pytest
+    accepts pytest_addoption in initial conftests only, and pyproject's
+    `testpaths = ["tests"]` makes this one initial for a bare `pytest` too."""
+    parser.addoption("--update-goldens", action="store_true", default=False,
+                     help="rewrite tests/shell_goldens/hashes.json from this "
+                          "run (shell pixel goldens; run with -p no:xdist)")
