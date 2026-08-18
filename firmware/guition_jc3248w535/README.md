@@ -26,6 +26,18 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 
 ## The panel path
 
+**The game fold** (2026-08-19, #190's cousin): on a play frame the game
+composite never touches the root framebuffer -- `DeviceCanvas.blit_game`'s
+existing #190 plumbing arms `moy_axs`, whose flush synthesizes every band
+(black bezels + game pixels read straight from the scratch snapshot). Half
+the per-frame PSRAM traffic; proven byte-identical to the composite path on
+the device itself (`moy_axs.fold_test`, 0 mismatched bytes). Overlays disarm
+through the shared frame walk and pay the old cost. Measured: Star Catcher
+30->35fps, Sakura Lua 27->30 (cumulative with the 120MHz lever: 24->35 and
+21->30 against the 80MHz bring-up baseline; the T-Deck's 60/50 on the same
+carts remains the open gap -- pump-on-core-1 is the next strategic lever).
+
+
 `native/moy_axs` -- raw `spi_master`, NOT esp_lcd, because the AXS15231B's
 QSPI protocol wants the whole frame under ONE CS assertion behind a 4-byte
 1-line opcode header (`0x32 00 2C 00`), which is the opposite of esp_lcd's

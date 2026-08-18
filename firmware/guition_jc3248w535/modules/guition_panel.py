@@ -64,6 +64,18 @@ class GuitionCompositor:
         except ImportError:
             self._gfx = None
 
+        # The #190-cousin GAME FOLD: DeviceCanvas.blit_game probes
+        # `fold_supported` and, instead of compositing the game into the root
+        # fb, hands the (scratch-snapshotted) game frame to arm_scale_fold --
+        # the flush then SYNTHESIZES every band (black bezels + game pixels
+        # read straight from the scratch) and the root is neither written by
+        # a composite nor read by the pump: half the per-frame PSRAM traffic
+        # on a play frame. The shared frame walk disarms when an overlay
+        # paints the root (console.py's _fold_live), and the disarm performs
+        # the skipped composite in C. Scale-1 only in the C; other scales
+        # (cart-declared views) composite here in the fallback below.
+        self.fold_supported = hasattr(moy_axs, "arm_fold")
+
         if async_flush is None:
             async_flush = ASYNC_FLUSH
         self._async = bool(async_flush) and len(self._fbs) > 1 \
@@ -122,6 +134,30 @@ class GuitionCompositor:
         the idle-band drain take; also what anything reaching around the
         console must call first."""
         self._lcd.drain()
+
+    # -- the game fold (#190's cousin; see __init__'s note) -------------------
+
+    def fold_fence(self):
+        self._lcd.fold_fence()
+
+    def arm_scale_fold(self, src_buf, vw, vh, ox, oy, scale):
+        if scale == 1:
+            try:
+                self._lcd.arm_fold(src_buf, vw, vh, ox, oy)
+                return
+            except (ValueError, OSError):
+                pass                    # geometry the C declines: composite below
+        # Fallback: perform the composite blit_game skipped (bezels + scaled
+        # blit into the root), so declining is invisible one level up.
+        g = self._gfx
+        if g is None:
+            return
+        fb = self.framebuffer()
+        g.fill(fb, self._w * self._h, 0)
+        g.blit565_scale(fb, self._w, self._h, ox, oy, src_buf, vw, vh, scale)
+
+    def disarm_scale_fold(self):
+        self._lcd.disarm_fold(self._back)
 
     # -- diagnostics ---------------------------------------------------------
 

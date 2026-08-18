@@ -215,6 +215,50 @@ static bool moy_axs_drain_locked(void);
 // upright on glass.
 static int s_rot = 0;
 
+// --- the #190-cousin GAME FOLD (armed by DeviceCanvas.blit_game through
+// guition_panel; see that module's prose). While armed, the flush SYNTHESIZES
+// every band -- black bezels + the game pixels read STRAIGHT from the
+// (scratch-snapshotted) game buffer -- and the root framebuffer is neither
+// written by a composite nor read by the pump. Scale 1 only (the Python glue
+// declines and composites itself otherwise). One-shot: kick() consumes the
+// arm; disarm performs the skipped composite into a caller-named fb.
+static bool s_fold_armed;              // this frame's composite is the flush's job
+static bool s_fold_inflight;           // the in-flight flush reads s_fold_src
+static const uint8_t *s_fold_src;      // game pixels, RGB565 wire order
+static int s_fold_vw, s_fold_vh;       // game geometry (logical px)
+static int s_fold_ox, s_fold_oy;       // viewport origin in the logical frame
+static uint32_t s_fold_frames;         // flushes folded since boot (diag)
+
+// Fill a bounce slot with physical band `k` under the GAME FOLD: bezels are
+// black, the game region reads the game buffer directly -- same loop shape as
+// the plain rotate below, with bounds. The root fb is not touched.
+static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
+    const uint16_t *g = (const uint16_t *)s_fold_src;
+    uint16_t *dst = (uint16_t *)slot;
+    int py0 = k * MOY_AXS_BAND_ROWS;
+    for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+        // rot 0: ly = px; rot 1: ly = PANEL_W-1-px.
+        int ly = (s_rot == 0) ? px : (MOY_AXS_PANEL_W - 1 - px);
+        uint16_t *d = dst + px;
+        int gy = ly - s_fold_oy;
+        if (gy < 0 || gy >= s_fold_vh) {
+            for (int r = 0; r < rows; r++) {
+                *d = 0;
+                d += MOY_AXS_PANEL_W;
+            }
+            continue;
+        }
+        const uint16_t *grow = g + (size_t)gy * s_fold_vw;
+        for (int r = 0; r < rows; r++) {
+            int lx = (s_rot == 0) ? (MOY_AXS_PANEL_H - 1 - (py0 + r))
+                                  : (py0 + r);
+            int gx = lx - s_fold_ox;
+            *d = (gx >= 0 && gx < s_fold_vw) ? grow[gx] : 0;
+            d += MOY_AXS_PANEL_W;
+        }
+    }
+}
+
 // Fill a bounce slot with physical band `k`, rotating from the logical
 // landscape framebuffer. The loop order is the whole trick: outer over px
 // (= a LOGICAL ROW of the source), inner over the band's physical rows
@@ -552,7 +596,11 @@ static void moy_axs_pump_locked(void) {
                    ? MOY_AXS_BAND_ROWS : (MOY_AXS_PANEL_H - y);
         size_t nbytes = (size_t)rows * MOY_AXS_PANEL_ROW_BYTES;
         uint8_t *slot = s_bounce[k % slots];
-        moy_axs_rotate_band(slot, k, rows);
+        if (s_fold_inflight) {
+            moy_axs_fold_band(slot, k, rows);
+        } else {
+            moy_axs_rotate_band(slot, k, rows);
+        }
         spi_transaction_t *t = &s_band_trans[k];
         memset(t, 0, sizeof(*t));
         t->length = nbytes * 8;
@@ -638,6 +686,12 @@ static void moy_axs_kick_locked(int n) {
     s_bnc_next = 0;
     s_bnc_src = s_fbs[n];
     s_bnc_total = MOY_AXS_BANDS;
+    // Consume the one-shot fold arm: THIS flush synthesizes its bands.
+    s_fold_inflight = s_fold_armed;
+    s_fold_armed = false;
+    if (s_fold_inflight) {
+        s_fold_frames++;
+    }
     s_flush_t0 = esp_timer_get_time();
     s_kick_us = (uint32_t)s_flush_t0;
     moy_axs_pump_locked();
@@ -682,6 +736,7 @@ static bool moy_axs_drain_locked(void) {
     s_bnc_total = 0;
     s_bnc_next = 0;
     s_bnc_src = NULL;
+    s_fold_inflight = false;
     if (s_bus_held) {
         spi_device_release_bus(s_dev);
         s_bus_held = false;
@@ -791,6 +846,123 @@ static mp_obj_t moy_axs_madctl(void) {
     return MP_OBJ_NEW_SMALL_INT(s_madctl);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_madctl_obj, moy_axs_madctl);
+
+// arm_fold(buf, vw, vh, ox, oy) -- register THIS frame's game composite as
+// the flush's job (scale-1 geometry; the Python glue declines others). The
+// buffer must stay alive and unwritten until the next fold_fence()/drain --
+// which is exactly the scratch snapshot DeviceCanvas.blit_game hands over.
+static mp_obj_t moy_axs_arm_fold(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_axs_require();
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(a[0], &buf, MP_BUFFER_READ);
+    int vw = mp_obj_get_int(a[1]);
+    int vh = mp_obj_get_int(a[2]);
+    int ox = mp_obj_get_int(a[3]);
+    int oy = mp_obj_get_int(a[4]);
+    if (vw <= 0 || vh <= 0 || ox < 0 || oy < 0
+            || ox + vw > MOY_AXS_W || oy + vh > MOY_AXS_H
+            || buf.len < (size_t)vw * vh * 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
+    }
+    s_fold_src = (const uint8_t *)buf.buf;
+    s_fold_vw = vw;
+    s_fold_vh = vh;
+    s_fold_ox = ox;
+    s_fold_oy = oy;
+    s_fold_armed = true;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_obj, 5, 5, moy_axs_arm_fold);
+
+// fold_fence() -- block until no in-flight flush still reads the fold source
+// (called by blit_game before it overwrites the scratch). A two-compare no-op
+// on the ordinary cadence, a drain only when frames outrun the flush.
+static mp_obj_t moy_axs_fold_fence(void) {
+    if (s_fold_inflight && s_bnc_total != 0) {
+        moy_axs_drain_locked();
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_fence_obj, moy_axs_fold_fence);
+
+// disarm_fold(back_fb) -- an overlay is about to paint the root: perform the
+// SKIPPED composite (black bezels + game rows) into framebuffer `back_fb` so
+// the overlay lands on a current picture, and clear the arm. The frame then
+// flushes through the ordinary rotate path.
+static mp_obj_t moy_axs_disarm_fold(mp_obj_t back_in) {
+    if (!s_fold_armed) {
+        return mp_const_false;
+    }
+    s_fold_armed = false;
+    int n = mp_obj_get_int(back_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    uint16_t *fb = (uint16_t *)s_fbs[n];
+    memset(fb, 0, MOY_AXS_FB_BYTES);            // the bezels (black)
+    const uint8_t *g = s_fold_src;
+    for (int gy = 0; gy < s_fold_vh; gy++) {
+        memcpy(fb + (size_t)(s_fold_oy + gy) * MOY_AXS_W + s_fold_ox,
+               g + (size_t)gy * s_fold_vw * 2, (size_t)s_fold_vw * 2);
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_disarm_fold_obj, moy_axs_disarm_fold);
+
+// fold_stats() -> (frames_folded, armed, inflight) -- the on-glass proof.
+static mp_obj_t moy_axs_fold_stats(void) {
+    mp_obj_t t[3] = {
+        mp_obj_new_int_from_uint(s_fold_frames),
+        s_fold_armed ? mp_const_true : mp_const_false,
+        s_fold_inflight ? mp_const_true : mp_const_false,
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_stats_obj, moy_axs_fold_stats);
+
+// fold_test() -- the eyes-free pixel proof: with a fold ARMED and the current
+// back fb holding the REFERENCE composite (the ordinary bezels+game blit,
+// performed by the caller in Python), synthesize every band BOTH ways --
+// fold_band from the game buffer, rotate_band from the reference fb -- and
+// count mismatching bytes. 0 = the fold is pixel-identical to the path it
+// replaces, proven on-device with no glass needed. Consumes nothing.
+static mp_obj_t moy_axs_fold_test(mp_obj_t back_in) {
+    moy_axs_require();
+    if (!s_fold_armed) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no fold armed"));
+    }
+    int n = mp_obj_get_int(back_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    if (s_bnc_total != 0) {
+        moy_axs_drain_locked();     // the bounce slots are our scratch here
+    }
+    const uint8_t *keep_src = s_bnc_src;
+    s_bnc_src = s_fbs[n];
+    uint32_t bad = 0;
+    bool keep_inflight = s_fold_inflight;
+    s_fold_inflight = true;         // fold_band reads the armed geometry
+    for (int k = 0; k < MOY_AXS_BANDS; k++) {
+        int y = k * MOY_AXS_BAND_ROWS;
+        int rows = (y + MOY_AXS_BAND_ROWS <= MOY_AXS_PANEL_H)
+                   ? MOY_AXS_BAND_ROWS : (MOY_AXS_PANEL_H - y);
+        moy_axs_fold_band(s_bounce[0], k, rows);
+        moy_axs_rotate_band(s_bounce[1], k, rows);
+        const uint8_t *p0 = s_bounce[0];
+        const uint8_t *p1 = s_bounce[1];
+        for (size_t i = 0; i < (size_t)rows * MOY_AXS_PANEL_ROW_BYTES; i++) {
+            if (p0[i] != p1[i]) {
+                bad++;
+            }
+        }
+    }
+    s_fold_inflight = keep_inflight;
+    s_bnc_src = keep_src;
+    return mp_obj_new_int_from_uint(bad);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_fold_test_obj, moy_axs_fold_test);
 
 // set_rot(0|1) -- which 90-degree direction the band rotation ships (the
 // live-glass calibration knob; the default is the owner-confirmed one).
@@ -902,6 +1074,11 @@ static const mp_rom_map_elem_t moy_axs_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_madctl),     MP_ROM_PTR(&moy_axs_madctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_rot),    MP_ROM_PTR(&moy_axs_set_rot_obj) },
     { MP_ROM_QSTR(MP_QSTR_rot),        MP_ROM_PTR(&moy_axs_rot_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_fold),   MP_ROM_PTR(&moy_axs_arm_fold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_fence), MP_ROM_PTR(&moy_axs_fold_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disarm_fold), MP_ROM_PTR(&moy_axs_disarm_fold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_stats), MP_ROM_PTR(&moy_axs_fold_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_test),  MP_ROM_PTR(&moy_axs_fold_test_obj) },
     { MP_ROM_QSTR(MP_QSTR_cmd),        MP_ROM_PTR(&moy_axs_cmd_obj) },
     { MP_ROM_QSTR(MP_QSTR_bars),       MP_ROM_PTR(&moy_axs_bars_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),      MP_ROM_PTR(&moy_axs_stats_obj) },
