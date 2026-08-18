@@ -1,10 +1,17 @@
-"""Bluetooth LE HID keyboard input for the P4 desktop tier.
+"""Bluetooth LE HID keyboard input -- the shared device driver (#202 Phase C).
 
-The ESP32-P4 has no radio of its own.  On the Waveshare 7B, mainline
-MicroPython's C6_WIFI variant exposes the companion ESP32-C6 as a BLE controller
-over the same ESP-Hosted SDIO transport used by ``network.WLAN``.  The board
-definition already enables MicroPython's NimBLE central/GATT-client bindings, so
-the keyboard path can stay in Python:
+Born as the P4's `p4_ble_keyboard.py` and PROMOTED to the shared device tree
+on 2026-08-19, the day the rule's second consumer arrived (the Guition S3
+wants the same cheap HOGP keyboards). Everything here is written against
+MicroPython's standard `bluetooth` (NimBLE) API, so where the radio LIVES is
+each board's business and invisible to this file: the P4 reaches a companion
+ESP32-C6 over ESP-Hosted SDIO, the S3 boards use the radio on the chip. The
+`moy_ble_hid` native notification fast-path is a guarded OPTIONAL (a P4-local
+usermod + a modbluetooth patch, built because the P4's synchronous NimBLE
+IRQ/GIL hop measured too slow for steady-state play input THERE) -- a board
+without it runs the ordinary Python notification path, and whether that path
+is fast enough is a per-board measurement, not an assumption. The keyboard
+path itself:
 
     scan for HID service 0x1812 -> connect/bond -> discover Report or Boot
     Keyboard Input characteristics -> enable their CCCDs -> consume 8-byte HID
@@ -20,7 +27,7 @@ The class owns only its BLE connection and writes into the existing InputState:
 real report make/break state becomes held buttons, while ``last_key`` carries the
 held ASCII/control byte.  That gives games true hold-to-move and lets the shared
 editors keep their existing edge detector.  Every radio/storage operation is
-best-effort; a missing/broken Bluetooth stack leaves the P4 touch-only.
+best-effort; a missing/broken Bluetooth stack leaves the board touch-only.
 """
 
 
@@ -353,7 +360,7 @@ class BleHidKeyboard:
         except Exception as exc:
             self.error = str(exc)
             self.state = "off"
-            self._log("Moybyte P4 BLE keyboard unavailable:", exc)
+            self._log("Moybyte BLE keyboard unavailable:", exc)
             return False
 
     def status(self):
@@ -676,14 +683,14 @@ class BleHidKeyboard:
                 self.ble.gap_scan(self.SCAN_MS, 30000, 30000, True)
             except TypeError:
                 self.ble.gap_scan(self.SCAN_MS, 30000, 30000)
-            self._log("Moybyte P4 BLE keyboard: scanning%s"
+            self._log("Moybyte BLE keyboard: scanning%s"
                       % (" for devices" if picker else ""))
             return True
         except Exception as exc:
             self.error = str(exc)
             self.state = "idle"
             self._retry_at = _ticks_ms() + self.RETRY_MS
-            self._log("Moybyte P4 BLE keyboard scan failed:", exc)
+            self._log("Moybyte BLE keyboard scan failed:", exc)
             return False
 
     def _connect_candidate(self):
@@ -793,10 +800,10 @@ class BleHidKeyboard:
         try:
             # Protocol Mode is a Write Without Response characteristic in HIDS.
             self.ble.gattc_write(self._conn, self._protocol_handle, b"\x00", 0)
-            self._log("Moybyte P4 BLE keyboard: boot protocol")
+            self._log("Moybyte BLE keyboard: boot protocol")
             return True
         except Exception as exc:
-            self._log("Moybyte P4 BLE keyboard boot protocol failed:", exc)
+            self._log("Moybyte BLE keyboard boot protocol failed:", exc)
             return False
 
     def _write_next(self):
@@ -806,7 +813,7 @@ class BleHidKeyboard:
             self._write_pending = None
             self._enable_fastpath()
             self._set_state("ready")
-            self._log("Moybyte P4 BLE keyboard ready:", self.name or "?")
+            self._log("Moybyte BLE keyboard ready:", self.name or "?")
             return
         handle = self._subscribe_queue.pop(0)
         self._write_pending = handle
@@ -829,7 +836,7 @@ class BleHidKeyboard:
     def _disconnect(self, reason=None):
         if reason:
             self.error = reason
-            self._log("Moybyte P4 BLE keyboard:", reason)
+            self._log("Moybyte BLE keyboard:", reason)
         conn = self._conn
         if conn is not None:
             try:
@@ -881,11 +888,11 @@ class BleHidKeyboard:
         try:
             self._fast.configure(self._conn, tuple(self._input_handles))
             self._fast_active = True
-            self._log("Moybyte P4 BLE keyboard: native input queue")
+            self._log("Moybyte BLE keyboard: native input queue")
             return True
         except Exception as exc:
             self._fast_active = False
-            self._log("Moybyte P4 BLE keyboard native queue unavailable:", exc)
+            self._log("Moybyte BLE keyboard native queue unavailable:", exc)
             return False
 
     def _disable_fastpath(self):
@@ -909,7 +916,7 @@ class BleHidKeyboard:
         except Exception as exc:
             # Disable interception so subsequent reports fall back to the
             # ordinary MicroPython IRQ rather than leaving input stuck.
-            self._log("Moybyte P4 BLE keyboard native queue failed:", exc)
+            self._log("Moybyte BLE keyboard native queue failed:", exc)
             self._disable_fastpath()
 
     def _consume_report(self, value_handle, payload, age_us=-1):
@@ -1000,20 +1007,20 @@ class BleHidKeyboard:
             self._remember_device(addr_type, addr, self.name, -127)
             self._store_dirty = True
             self._set_state("pairing")
-            self._log("Moybyte P4 BLE keyboard connected:", self.name)
+            self._log("Moybyte BLE keyboard connected:", self.name)
             # Pairing and ATT discovery can proceed together.  Cheap keyboards
             # commonly use unauthenticated (Just Works) encryption; encrypted
             # CCCD writes complete once SMP has established the link keys.
             try:
                 self.ble.gap_pair(conn_handle)
             except Exception as exc:
-                self._log("Moybyte P4 BLE keyboard pair start:", exc)
+                self._log("Moybyte BLE keyboard pair start:", exc)
             self._discover()
 
         elif event == _IRQ_PERIPHERAL_DISCONNECT:
             conn_handle, _addr_type, _addr = data
             if conn_handle == self._conn:
-                self._log("Moybyte P4 BLE keyboard disconnected")
+                self._log("Moybyte BLE keyboard disconnected")
                 self._reset_connection()
                 if not self._enabled:
                     self.state = "disabled"
@@ -1114,7 +1121,7 @@ class BleHidKeyboard:
             conn_handle, encrypted, _authenticated, bonded, _key_size = data
             if conn_handle == self._conn:
                 self._encrypted = bool(encrypted)
-                self._log("Moybyte P4 BLE keyboard security: encrypted=%s bonded=%s"
+                self._log("Moybyte BLE keyboard security: encrypted=%s bonded=%s"
                           % (encrypted, bonded))
                 if bonded:
                     self._store_dirty = True
@@ -1133,15 +1140,15 @@ class BleHidKeyboard:
                 # but keep a deterministic response + serial diagnostic for a
                 # peripheral that insists on passkey entry.
                 self.passkey = (_ticks_ms() ^ (conn_handle << 8)) % 1000000
-                self._log("Moybyte P4 BLE keyboard passkey: %06d" % self.passkey)
+                self._log("Moybyte BLE keyboard passkey: %06d" % self.passkey)
                 self.ble.gap_passkey(conn_handle, action, self.passkey)
             elif action == _PASSKEY_ACTION_NUMCMP:
                 self.passkey = passkey
-                self._log("Moybyte P4 BLE keyboard compare: %06d (accepted)" % passkey)
+                self._log("Moybyte BLE keyboard compare: %06d (accepted)" % passkey)
                 self.ble.gap_passkey(conn_handle, action, 1)
             elif action == _PASSKEY_ACTION_INPUT:
                 self.error = "keyboard asks console to enter a passkey"
-                self._log("Moybyte P4 BLE keyboard cannot enter remote passkey")
+                self._log("Moybyte BLE keyboard cannot enter remote passkey")
 
         elif event == _IRQ_SET_SECRET:
             sec_type, key, value = data
@@ -1237,4 +1244,4 @@ class BleHidKeyboard:
             # Do not retry every 16ms if storage is unavailable; the live bond
             # still works for this boot and the next key change must stay cheap.
             self._store_dirty = False
-            self._log("Moybyte P4 BLE keyboard bond save failed:", exc)
+            self._log("Moybyte BLE keyboard bond save failed:", exc)

@@ -285,6 +285,15 @@ queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
 
 [[modules.device.group]]
+files = ["ble_keyboard.py"]
+why = """
+The BLE HID keyboard (#26) -- born in this board's tree as p4_ble_keyboard.py,
+promoted to device/ on 2026-08-19 when the Guition S3 became its second
+consumer. Standard `bluetooth` API; this board's radio is the companion C6
+over ESP-Hosted SDIO, and its `moy_ble_hid` notification fast-path usermod
+stays board-local (the driver imports it guardedly)."""
+
+[[modules.device.group]]
 files = ["device_wifi.py"]
 why = "The WLAN service the console's Settings WIFI panel and the OTA check ride."
 

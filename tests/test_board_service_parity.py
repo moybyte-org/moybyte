@@ -177,10 +177,7 @@ WIRING = {
                       "story)",
         "wifi": INJECTED,
         "pointer": INJECTED,
-        "keyboard": "this board has no physical keyboard at all -- touch is "
-                    "the whole input story, and ws.keyboard exists only for "
-                    "the T-Deck's ASCII/raw-matrix mode flip. A soft keyboard "
-                    "would be a new shared feature, not a wiring line",
+        "keyboard": INJECTED,
         "_with_sd": "no SD in play (stage 4 open) -- the store is internal "
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",

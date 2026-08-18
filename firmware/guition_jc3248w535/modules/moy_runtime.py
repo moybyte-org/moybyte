@@ -46,6 +46,7 @@ def run_desktop(fps_cap=60):
     and the dev channel takes complete lines."""
     from guition_panel import GuitionCompositor, set_backlight
     from axs_touch import Touch
+    from ble_keyboard import BleHidKeyboard
     from moybyte.input import InputState
     import moy_carts
 
@@ -71,6 +72,13 @@ def run_desktop(fps_cap=60):
     boot.note("loading cartridges")
     carts, carts_root = boot.load_carts(moy_carts, CARTS, root=CARTS_ROOT,
                                         media="flash")
+    # BLE HID keyboard (shared driver, #202): the S3's on-chip radio.
+    # Constructed AFTER the cart load so /moy exists (the bond store lives
+    # beside the carts -- the P4's lesson); started after the Workstation's
+    # boot allocations below. Also this board's game-exit path: a paired
+    # keyboard's hold-BACKSPACE works through the shared console unmodified.
+    keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
+                              auto_start=False)
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
@@ -86,7 +94,7 @@ def run_desktop(fps_cap=60):
     wire_workstation_core(ws, moy_carts, carts_root, make_api,
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
-                          pointer=pointer, inp=inp)
+                          pointer=pointer, inp=inp, keyboard=keyboard)
     # OTA (#53), the P4 arrangement: no SD, image stages on the internal VFS,
     # with_sd is a plain call-through.
     try:
@@ -110,12 +118,37 @@ def run_desktop(fps_cap=60):
     except Exception as exc:  # noqa: BLE001
         print("Moybyte Guition: web console unavailable:", exc)
 
+    keyboard.start()               # failure is touch-only, never a boot failure
+
     # The serial dev channel: ONE class, every board (runtime/dev_channel.py).
-    # No board extras yet -- this board has no windowed tier and no BLE.
+    # Board extra: `bt status|scan|forget|trace` -- the P4's BLE keyboard
+    # diagnostics, minus its DSI-underrun field.
     ws._psave_ms = POWER_SAVE_MS
+
+    def _bt_cmd(ws, parts, line):
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "scan":
+            print("REMOTE bt scan ->", keyboard.scan())
+        elif action == "forget":
+            keyboard.forget()
+            print("REMOTE bt forgot keyboard + local bonds")
+        elif action == "status":
+            print("REMOTE bt status state=%s name=%s passkey=%s "
+                  "protocol=%s interval_ms=%s notify=%s fast=%s error=%s"
+                  % (keyboard.status()[0], keyboard.status()[1],
+                     keyboard.status()[2], keyboard.protocol,
+                     keyboard._conn_interval_ms, keyboard._notify_count,
+                     keyboard.fast_status(), keyboard.error))
+        elif action == "trace":
+            on = not (len(parts) > 2 and parts[2] == "0")
+            print("REMOTE bt trace ->", keyboard.trace(on))
+        else:
+            print("REMOTE bt ? %s" % line)
+
     try:
         from dev_channel import DevChannel
         serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
+                            extra={"bt": _bt_cmd},
                             env={"comp": comp, "game": game, "boot": boot})
     except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
         print("Moybyte Guition serial channel unavailable:", exc)
@@ -138,7 +171,14 @@ def run_desktop(fps_cap=60):
     _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
 
     def _poll_inputs(now):
-        """This board's one input source: the AXS15231 pointer."""
+        """This board's input sources: the BLE keyboard's async notifications
+        (applied before begin_frame so InputState gets clean press/release
+        edges; poll() also advances scan/reconnect -- the P4's arrangement)
+        and the AXS15231 pointer."""
+        try:
+            keyboard.poll()
+        except Exception as exc:  # noqa: BLE001 -- keyboard must fail touch-only
+            print("Moybyte Guition BLE keyboard poll failed:", exc)
         inp.begin_frame()
         touched, click = apply_touch(touch, pointer)
         return click, (touched or bool(inp._held) or bool(inp.last_key))

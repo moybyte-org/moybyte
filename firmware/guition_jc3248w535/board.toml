@@ -278,6 +278,18 @@ STAGE 6 (console). The cart namespace's device home: `device_api` re-exports
 THE make_api (one body in the shared cart_api.py) and moycore's host half."""
 
 [[modules.device.group]]
+files = ["ble_keyboard.py"]
+why = """
+The BLE HID keyboard -- the shared driver (promoted from the P4's tree
+2026-08-19, this board being the second consumer that fired the Phase C
+rule). The S3's radio is on-chip and `import bluetooth` is already in this
+image (sdkconfig.ble); the P4-local moy_ble_hid fast-path is absent here on
+purpose -- the driver's guarded import runs the ordinary notification path,
+and whether this board ever needs the fast-path is an on-glass measurement.
+Also this board's first game-EXIT path: hold-BACKSPACE works once a keyboard
+is paired (the touch-only gesture stays open on #202 for keyboard-less use)."""
+
+[[modules.device.group]]
 files = ["device_wifi.py"]
 why = "STAGE 6. The WLAN service the Settings WIFI panel and the OTA check ride."
 

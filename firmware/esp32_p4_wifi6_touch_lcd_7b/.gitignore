@@ -11,5 +11,4 @@ modules/*
 !modules/moybyte_shell.py
 !modules/p4_display.py
 !modules/p4_input.py
-!modules/p4_ble_keyboard.py
 !modules/moy_runtime.py

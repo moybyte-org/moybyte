@@ -13,12 +13,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
-          / "p4_ble_keyboard.py")
+# The driver is SHARED since 2026-08-19 (device/ble_keyboard.py -- promoted
+# from the P4's tree when the Guition S3 became its second consumer); the
+# moy_ble_hid fast-path assertions below still point at the P4's board tree,
+# where that usermod deliberately stays.
+SOURCE = ROOT / "device" / "ble_keyboard.py"
 
 
 def _load_module():
-    spec = importlib.util.spec_from_file_location("p4_ble_keyboard_under_test", SOURCE)
+    spec = importlib.util.spec_from_file_location("ble_keyboard_under_test", SOURCE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -479,6 +482,6 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
         text = sdkconfig.read_text()
         assert "CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y" in text
 
-    assert "from p4_ble_keyboard import BleHidKeyboard" in runtime
+    assert "from ble_keyboard import BleHidKeyboard" in runtime
     assert "keyboard=keyboard" in runtime    # via console.wire_workstation_core
     assert runtime.index("keyboard.poll()") < runtime.index("inp.begin_frame()")

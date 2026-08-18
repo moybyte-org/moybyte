@@ -423,7 +423,7 @@ def run_desktop(fps_cap=60):
     USB starvation on this board)."""
     from p4_display import P4Compositor, set_backlight
     from p4_input import Touch
-    from p4_ble_keyboard import BleHidKeyboard
+    from ble_keyboard import BleHidKeyboard
     from moybyte.input import InputState
     from wm_windowed import WindowedWM
     import moy_carts

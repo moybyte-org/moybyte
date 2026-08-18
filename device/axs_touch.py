@@ -52,7 +52,11 @@ nothing) and are nothing alike underneath:
 The constant-byte DETECTOR below covers whichever of these ever shows up
 through the driver's own instance: it names the signature on serial after
 ~5s, because the silent version reads exactly like "nobody is touching the
-screen" and cost a debugging session.
+screen" and cost a debugging session. It fired for real the day it shipped
+and named the trigger: a CABLE FLASH (esptool's reset sequence) wedges the
+touch MCU through the driver's own first instance -- so a flashed board
+needs one power cycle before its touch answers. An I2C-level un-wedge is an
+open question (#202); SWRESET over the display path does not clear it.
 """
 
 try:                                    # device: staged flat namespace

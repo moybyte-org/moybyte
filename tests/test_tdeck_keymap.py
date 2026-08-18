@@ -231,8 +231,7 @@ def test_the_p4_ble_keyboard_is_an_arrow_host_too():
     L/K. Its table said it was "shared with the T-Deck keyboard's game-button
     mapping" and was a fourth hand-written copy -- still carrying hjkl as a
     d-pad and R as `run` after the others had moved on."""
-    src = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
-           / "p4_ble_keyboard.py").read_text(encoding="utf-8")
+    src = (ROOT / "device" / "ble_keyboard.py").read_text(encoding="utf-8")
     tbl = re.search(r"BUTTON_FOR_KEY = \{(.+?)\n\}", src, re.S).group(1)
     for want in ('ord("z"): "a"', 'ord("x"): "b"', 'ord(" "): "a"',
                  '0x0D: "run"', '0x08: "home"'):
