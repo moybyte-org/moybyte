@@ -65,6 +65,8 @@ TARGETS = {
               "run_desktop"),
     "p4": ("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
            "run_desktop"),
+    "guition": ("firmware/guition_jc3248w535/modules/moy_runtime.py",
+                "run_desktop"),
     "host": ("runtime/host_app.py", "build_workstation"),
     # The wasm head is the third tier and wires the same console (moycore stage
     # 4), so it belongs in the table: it is the target most likely to be handed
@@ -156,6 +158,39 @@ WIRING = {
         "reboot_hook": INJECTED,
         "net": "same as the T-Deck: no #65 transport on a board yet",
         "wm": INJECTED,
+        "perf_capture": INJECTED,
+    },
+    "guition": {
+        "make_api": INJECTED,
+        "make_audio": "audio is stage 5 of this board's bring-up and OPEN: "
+                      "which amp (if any) is populated and on which I2S pins "
+                      "is unverified, and its board.toml denies the moy_audio "
+                      "usermod for the same reason. Wire both together at "
+                      "stage 5",
+        "lua_runtime": INJECTED,
+        "make_game_canvas": INJECTED,
+        "carts_store": INJECTED,
+        "carts_root": INJECTED,
+        "can_manage": "derived, not passed -- the store is on internal flash "
+                      "and always writable, so the carts_root default is "
+                      "already the right answer (the P4's row, same hardware "
+                      "story)",
+        "wifi": INJECTED,
+        "pointer": INJECTED,
+        "keyboard": "this board has no physical keyboard at all -- touch is "
+                    "the whole input story, and ws.keyboard exists only for "
+                    "the T-Deck's ASCII/raw-matrix mode flip. A soft keyboard "
+                    "would be a new shared feature, not a wiring line",
+        "_with_sd": "no SD in play (stage 4 open) -- the store is internal "
+                    "flash and races nothing, so the Workstation's own "
+                    "call-through default IS the correct gate",
+        "updater": INJECTED,
+        "webhost": INJECTED,
+        "reboot_hook": INJECTED,
+        "net": "same as the other boards: no #65 transport on a board yet",
+        "wm": "the fullscreen tier, same as the T-Deck: Workstation.__init__ "
+              "already installs FullscreenStackWM, and wm_windowed.py is "
+              "deliberately not staged into this build",
         "perf_capture": INJECTED,
     },
     "host": {

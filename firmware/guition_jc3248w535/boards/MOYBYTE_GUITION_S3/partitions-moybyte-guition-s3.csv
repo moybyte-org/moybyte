@@ -1,0 +1,16 @@
+# Moybyte Guition JC3248W535 partition table -- 16MB flash, dual-OTA (#53).
+#
+# Byte-for-byte the T-Deck's table (same chip, same 16MB flash), TAKEN AS A
+# DESIGN rather than a transcription this time: this board has no field
+# devices yet, so the offsets are free -- but sharing the S3 layout means one
+# set of numbers to hold in the head (otadata 0x1D000 on BOTH S3 boards; only
+# the P4 differs at 0xD000) and the same 5MB slot arithmetic the #168 size
+# guard already watches.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x14000,
+otadata,  data, ota,     0x1D000,  0x2000,
+phy_init, data, phy,     0x1F000,  0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x500000,
+ota_1,    app,  ota_1,   0x520000, 0x500000,
+vfs,      data, fat,     0xA20000, 0x5E0000,

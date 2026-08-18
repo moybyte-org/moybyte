@@ -30,7 +30,9 @@ ROOT = Path(__file__).resolve().parent.parent
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 TDECK_MAINLINE = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
-BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4}
+GUITION = ROOT / "firmware" / "guition_jc3248w535"
+BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4,
+          "guition-s3": GUITION}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -137,7 +139,7 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
         "must be impossible, since modules/ holds the board's own sources too")
     assert (dest / "console.py").exists() and (dest / "moy_font.py").exists()
     assert not (dest / "font.py").exists(), "font.py must stage RENAMED only"
-    if board.startswith("tdeck"):
+    if board.startswith("tdeck") or board.startswith("guition"):
         assert not (dest / "wm_windowed.py").exists()
     on_disk = {p.name for p in dest.glob("*.py")} - {"carts_data.py",
                                                      "moy_runtime.py"}
@@ -154,8 +156,10 @@ def test_the_p4_stages_the_windowed_tier_and_the_s3_does_not():
     """
     tdeck = set(board_config.staged_modules(TDECK, ROOT))
     p4 = set(board_config.staged_modules(P4, ROOT))
+    guition = set(board_config.staged_modules(GUITION, ROOT))
     assert {"wm_windowed.py", "surface.py"} <= p4
     assert not {"wm_windowed.py", "surface.py"} & tdeck
+    assert not {"wm_windowed.py", "surface.py"} & guition
 
 
 def test_the_board_identity_matches_the_ota_stamp():
@@ -182,6 +186,11 @@ def test_the_board_identity_matches_the_ota_stamp():
     tdeck_id = board_config.load(TDECK)["board"]["ota"]
     assert "moybyte_ota_identity %s " % tdeck_id in tdeck_sh
     assert p4_id != tdeck_id
+
+    guition_sh = (GUITION / "build.sh").read_text(encoding="utf-8")
+    guition_id = board_config.load(GUITION)["board"]["ota"]
+    assert "moybyte_ota_identity %s " % guition_id in guition_sh
+    assert guition_id not in (p4_id, tdeck_id)
 
     # ...and moy_ota.py's own BOARD default (what runs when the generated
     # _ota_build.py is missing) agrees with the T-Deck's id -- read from the
@@ -255,6 +264,10 @@ def test_the_p4_denies_exactly_its_missing_hardware():
     changed -- update board.toml first, this pin second."""
     assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_sd"]
     assert board_config.native_denials(TDECK) == {}
+    # The Guition's two denials are bring-up staging decisions (SD is stage 4,
+    # audio stage 5 -- docs/board_ports_2026-08.md); each names its stage in
+    # board.toml. Update there first, this pin second.
+    assert sorted(board_config.native_denials(GUITION)) == ["moy_audio", "moy_sd"]
 
 
 # -- the [flash]/[monitor] declaration (#202 Phase A) -------------------------

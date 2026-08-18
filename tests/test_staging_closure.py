@@ -59,8 +59,10 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 # name, and a rename would churn them for nothing.
 TDECK_MAINLINE = TDECK
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
+GUITION = ROOT / "firmware" / "guition_jc3248w535"
 WEB = ROOT / "firmware" / "web_runner"
-BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4}
+BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
+             "guition-s3": GUITION}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -83,6 +85,10 @@ NATIVE = {
                        "moycore", "moy_web", "moy_lcd"},
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid"},
+    # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
+    # see its board.toml); moy_axs is its board-authored QSPI panel backend.
+    "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
+                   "moy_axs"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
 }
 
@@ -105,6 +111,9 @@ HOST_ONLY = {
     "p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
            "audio_binding", "lua_binding", "gfx_binding", "native_build",
            "simulate_desktop"},
+    "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
+                   "audio_binding", "lua_binding", "gfx_binding",
+                   "native_build", "simulate_desktop"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
@@ -120,6 +129,7 @@ HOST_ONLY = {
 GENERATED = {
     "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
+    "guition-s3": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
     "web": {"palette"},
@@ -127,7 +137,7 @@ GENERATED = {
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
 PACKAGES = {"tdeck-mainline": {"moybyte"},
-            "p4": {"moybyte"}, "web": set()}
+            "p4": {"moybyte"}, "guition-s3": {"moybyte"}, "web": set()}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -318,7 +328,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck-mainline", "p4", "web")
+TARGETS = ("tdeck-mainline", "p4", "guition-s3", "web")
 
 
 def _unresolved(target):
@@ -369,7 +379,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
 def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
     """A module that RAISES on import is worse than one that is missing.
 
@@ -416,7 +426,7 @@ def _kinds(target):
     return out
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
 def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     declared = _kinds(target)
     # HOST_ONLY carries names that are not runtime modules at all
@@ -434,7 +444,7 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
             "longer exists -- that is what makes it a tripwire" % (target, name))
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4"))
+@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
 def test_every_board_toml_denial_is_explained_and_classified(target):
     """#161: the prose rationale moves WITH the data. An unexplained denial is
     the state this phase existed to leave behind -- a staging list whose
@@ -476,6 +486,14 @@ def test_the_two_boards_differ_by_exactly_the_presentation_tier():
         "the S3 denies these and the P4 does not: %s" % sorted(tdeck - p4))
     assert p4 - tdeck == set(), (
         "the P4 denies modules the S3 stages: %s" % sorted(p4 - tdeck))
+    # The Guition is the SAME fullscreen tier as the T-Deck, so its shared
+    # denials must agree with the T-Deck's exactly -- a third statement of the
+    # same tier claim, compared instead of copied.
+    guition = set(board_config.denials(GUITION))
+    assert guition == tdeck, (
+        "the Guition's shared denials differ from the T-Deck's -- guition only:"
+        " %s; tdeck only: %s"
+        % (sorted(guition - tdeck), sorted(tdeck - guition)))
 
 
 def test_the_two_tdeck_builds_stage_the_same_shared_console():
@@ -567,7 +585,8 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     tree, not restated, so a new board module joins the comparison by
     existing. The web target has no [native] section (its emscripten staging
     is structurally different) and stays hand-listed."""
-    for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4)):
+    for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
+                              ("guition-s3", GUITION)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")

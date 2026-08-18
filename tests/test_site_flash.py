@@ -39,8 +39,11 @@ def _load_build():
 build = _load_build()
 
 
-def _fake_firmware(root, boards=("tdeck", "p4"), stamp=True):
-    """A stand-in for tools/fetch_ci_firmware.py's output tree."""
+def _fake_firmware(root, boards=None, stamp=True):
+    """A stand-in for tools/fetch_ci_firmware.py's output tree. Fakes every
+    board in the table by default, so board N+1 joins these checks by existing."""
+    if boards is None:
+        boards = tuple(b["id"] for b in build.BOARDS)
     src = os.path.join(root, "ci-firmware")
     for board in build.BOARDS:
         if board["id"] not in boards:

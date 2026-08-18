@@ -1,0 +1,61 @@
+# Moybyte Guition JC3248W535 board fragment (mainline build).
+#
+# Everything here is a BOARD FACT or a deliberately conservative bring-up
+# choice with the A/B it defers named beside it. The reference points are the
+# T-Deck's sdkconfig.board (same chip, and the source of every lever verdict
+# below) and the owner's working ESPHome config for this exact board
+# (~/Documents/Work/esphome/JC3248W535.yaml -- pins verified, tuning NOT
+# transferable, per docs/board_ports_2026-08.md).
+
+# 16MB flash, DIO @ 80MHz -- the ESPHome build's proven mode on this board
+# (board_build.flash_mode: dio, f_flash 80MHz). The generic S3 board assumes
+# 4MB QIO.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# The dual-OTA partition table (#53) -- the T-Deck's S3 layout, adopted fresh
+# (no field devices to migrate). CONFIG_PARTITION_TABLE_CUSTOM_FILENAME
+# resolves relative to ports/esp32, so build.sh stages the CSV there.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-s3.csv"
+
+# Rollback (#53): restated here because build.sh's stale-sdkconfig guard greps
+# the GENERATED config for it.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Cache geometry: the T-Deck's #63 A/B verdict (32KB icache / 64KB dcache)
+# adopted as the starting point -- same chip, same VM-reads-frozen-bytecode +
+# gc-heap-in-PSRAM + panel-DMA-through-one-dcache workload.
+#
+# The LINE is 32B, and this is the one place this file knowingly DIVERGES from
+# the ESPHome config that otherwise vouches for the board: ESPHome runs
+# DATA_CACHE_LINE_64B here, but the T-Deck's on-glass verdict was that 64B
+# lines break the CPU<->GDMA handoff in OUR SRAM-bounce flush path (horizontal
+# garbage bands), and this board runs that flush path, not ESPHome's. Per-board
+# verdicts don't transfer in either direction, so 64B is a legitimate A/B to
+# run on this glass later -- from a working 32B baseline, not blind.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
+
+# PSRAM: octal at 80MHz -- the ESPHome-proven setting for THIS board's part.
+# Deliberately NOT the T-Deck's 120MHz experimental profile at bring-up: 120M
+# drags in IDF_EXPERIMENTAL_FEATURES, flash@120M, the temperature retune AND
+# the #169 vendor-gate patch, and a wrong guess presents as a board that
+# flashes cleanly and never says a word (measured on the T-Deck 2026-08-16).
+# The ~1.5x PSRAM write-rate lever is real (the T-Deck measured it at ~2ms a
+# frame) and stays on the table as an on-glass A/B from a booting baseline.
+CONFIG_SPIRAM_SPEED_80M=y
+
+# USB-Serial-JTAG as the PRIMARY console (#201, the T-Deck's three-part RX
+# fix; parts 1 and 3 are MICROPY_HW_ENABLE_USBDEV/UART_REPL in
+# mpconfigboard.h). A secondary console is output-only by design; primary +
+# USBDEV off is what gives this board a live dev channel under the desktop.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

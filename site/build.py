@@ -126,6 +126,30 @@ BOARDS = [
                   "this if connecting fails.",
         "cli": "make firmware-flash-p4 PORT=/dev/ttyACM0",
     },
+    {
+        # The Guition JC3248W535 (#202) -- port in bring-up; the entry exists
+        # so the release publisher has its row (it reads THIS table), and the
+        # site card renders honestly-empty until CI has published an image.
+        "id": "guition_s3",
+        "label": "Guition JC3248W535 3.5&Prime;",
+        "chip": "ESP32-S3",
+        "images": ("moybyte_guition_s3.bin",),
+        "offset": 0x0,
+        "baud": 460800,
+        "reset": "default_reset",           # native USB-Serial/JTAG; auto-reset
+        "usb_otg": True,                    # works on this one (unlike the T-Deck)
+        "after": "hard_reset",
+        "done": "Done &mdash; the board is rebooting into this build.",
+        "prep": "Plug into the board&rsquo;s USB-C port. The S3&rsquo;s own "
+                "USB-Serial/JTAG handles the reset into the loader and back.",
+        "erase": "Erase the whole chip first. This board keeps its cartridges "
+                 "on internal flash, so that deletes them along with their "
+                 "saves.",
+        "manual": "Skip the reset &mdash; I have put the board in download "
+                  "mode myself (hold <b>BOOT</b>, tap <b>RST</b>, release "
+                  "BOOT). Try this if connecting fails.",
+        "cli": "make firmware-flash-guition-s3 PORT=/dev/ttyACM1",
+    },
 ]
 
 

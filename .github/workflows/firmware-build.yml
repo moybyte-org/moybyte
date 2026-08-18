@@ -33,10 +33,10 @@ on:
   workflow_dispatch:
     inputs:
       board:
-        description: "Which board(s) to build"
+        description: "Which board(s) to build ('both' = all boards)"
         type: choice
         default: tdeck
-        options: [tdeck, p4, both]
+        options: [tdeck, p4, guition_s3, both]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -61,6 +61,9 @@ jobs:
           - board: p4
             dir: firmware/esp32_p4_wifi6_touch_lcd_7b
             make_target: firmware-build-p4
+          - board: guition_s3
+            dir: firmware/guition_jc3248w535
+            make_target: firmware-build-guition-s3
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
     # branch build does both boards; a dispatch honours the choice.
     env:
@@ -263,6 +266,7 @@ jobs:
           # failure the paragraph above exists to prevent.
           cp dist/tdeck_mainline/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
+          cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

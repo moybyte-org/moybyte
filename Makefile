@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: check-venv firmware-build-guition-s3 firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -75,7 +75,7 @@ VENV_TARGETS := test \
                 site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
-                firmware-monitor-p4
+                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -434,6 +434,23 @@ firmware-monitor-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
+
+# Guition JC3248W535 (#202): the third board, provisioned through the port
+# kit -- build via the board dir's build.sh -> dist/guition_s3/, and the
+# flash/monitor facts live in its board.toml [flash]/[monitor].
+
+firmware-build-guition-s3:
+	firmware/guition_jc3248w535/build.sh
+
+firmware-flash-guition-s3:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/guition_jc3248w535 --port $(PORT)
+
+firmware-monitor-guition-s3:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc3248w535 --port $(PORT)
 
 # T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
 # CLICK is GPIO0: hold the trackball in while powering the board on, then
