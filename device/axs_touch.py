@@ -57,10 +57,8 @@ like the disproven "wedge".
 
 try:                                    # device: staged flat namespace
     from gt911 import HeldPoint
-    from ticks import _ticks_ms, _ticks_diff
 except ImportError:                     # host tests
     from device.gt911 import HeldPoint
-    from runtime.ticks import _ticks_ms, _ticks_diff
 
 # The read-touchpad command, verbatim from ESPHome (11 bytes; the trailing
 # zeros are part of the command).
@@ -86,7 +84,7 @@ class Touch:
         self.addr = addr
         self.available = False
         self.raw = None          # last raw coords (pre-mapping), for calibrate
-        self._hp = HeldPoint()
+        self._hp = HeldPoint(extrapolate=True, w=w, h=h)
         # THE PER-CONTROLLER NO-NEWS BOUND (2026-08-19, measured on glass).
         # HeldPoint's 400ms default is sized for the GT911's #74 stall
         # clusters. This controller STREAMS while touched -- moving OR
@@ -97,21 +95,11 @@ class Touch:
         # 400ms-stale velocity -- the drag-hang-then-move bug) into a prompt
         # one, with the velocity still current.
         self._hp.HOLD_SAMPLE_MS = 90
-        # HOLD-WINDOW EXTRAPOLATION (same session, the owner's felt tail:
-        # "goes fast, slows down a bit, speeds up again"). Freezing the held
-        # point makes the <=90ms between a lift and its inferred release a
-        # visible stall in the middle of a flick. During the hold this driver
-        # EXTRAPOLATES the pointer along its measured velocity instead: a
-        # lift glides seamlessly into the fling, and the rare mid-touch gap
-        # (worst measured: 3 frames) gets corrected by a few pixels at the
-        # next real sample. The extrapolated frames keep fresh=False, so the
-        # kinetic velocity EMA never measures a sample the hardware never
-        # took -- this moves PIXELS, not physics.
-        self._vx = 0.0               # mapped px/ms, EMA over fresh samples
-        self._vy = 0.0
-        self._fx = 0                 # last FRESH mapped point + its clock
-        self._fy = 0
-        self._ft = 0
+        # The hold-window EXTRAPOLATION (the owner's felt tail: "goes fast,
+        # slows down a bit, speeds up again" -- freezing the held point made
+        # the <=90ms release window a visible stall mid-flick) is the shared
+        # gt911.HeldPoint's now, opted in above: born here, promoted the day
+        # the T-Deck became its second consumer.
         self._i2c = i2c
         self._reprobe_n = 0
         try:
@@ -165,12 +153,12 @@ class Touch:
         try:
             d = self._read()
         except Exception:  # noqa: BLE001 -- a flaky read = no news, never a release
-            return self._extrapolate(self._hp.hold())
+            return self._hp.hold()
         if d[0] != 0:
             # Not a touch report: the IDLE FILLER (docstring). While a finger
-            # is held this is a rare 1-3 frame gap -- extrapolate through it;
-            # past the 90ms bound it is the lift.
-            return self._extrapolate(self._hp.hold())
+            # is held this is a rare 1-3 frame gap -- HeldPoint extrapolates
+            # through it; past the 90ms bound it is the lift.
+            return self._hp.hold()
         if d[1] == 0:
             return self._hp.release()
         x = ((d[2] & 0x0F) << 8) | d[3]
@@ -186,40 +174,4 @@ class Touch:
             x = self.w - 1
         if y >= self.h:
             y = self.h - 1
-        # Velocity bookkeeping for the hold-window extrapolation (mapped px/ms;
-        # a press EDGE resets it -- the previous gesture's speed must not leak).
-        now = _ticks_ms()
-        was_down = self._hp.down
-        r = self._hp.sample(x, y)
-        if was_down:
-            dt = _ticks_diff(now, self._ft)
-            if 0 < dt <= 100:
-                self._vx += ((x - self._fx) / dt - self._vx) * 0.5
-                self._vy += ((y - self._fy) / dt - self._vy) * 0.5
-        else:
-            self._vx = 0.0
-            self._vy = 0.0
-        self._fx = x
-        self._fy = y
-        self._ft = now
-        return r
-
-    def _extrapolate(self, held):
-        """A held (no-news) sample, advanced along the finger's measured
-        velocity -- see the __init__ note. None (a release) passes through."""
-        if held is None:
-            return None
-        dt = _ticks_diff(_ticks_ms(), self._ft)
-        if dt <= 0 or dt > 200:
-            return held
-        x = int(self._fx + self._vx * dt)
-        y = int(self._fy + self._vy * dt)
-        if x < 0:
-            x = 0
-        elif x >= self.w:
-            x = self.w - 1
-        if y < 0:
-            y = 0
-        elif y >= self.h:
-            y = self.h - 1
-        return (x, y, held[2])
+        return self._hp.sample(x, y)

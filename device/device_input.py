@@ -102,6 +102,18 @@ class Touch:
     # INT_GATE=False is the A/B revert to blind every-pass polling.
     INT_PIN = 16
     INT_GATE = True
+    # Extrapolation TRIED AND DECLINED on this board (2026-08-19, owner on
+    # glass, three variants): full glide made slow drags ripple forward-back,
+    # damp 0.5 shrank but kept it, the monotonic recovery clamp shrank it to
+    # "very small but always present" -- because the underlying samples are
+    # STALE (a stalled read delivers a 20-45ms-old position), which no
+    # display-side smoothing fully hides. The pre-extrapolation feel won.
+    # The real lever for this board's ripple is fewer stalled reads (#74's
+    # INT-gate follow-ups). The Guition keeps extrapolate=True: its only
+    # long gap is the lift window, which ends in a release, never a stale
+    # correction -- per-board verdicts don't transfer, in either direction.
+    EXTRAPOLATE = False
+    EXTRAP_DAMP = 0.5         # (the declined experiment's dial, kept for A/Bs)
     SAFETY_POLL_MS = 250      # gated idle still reads at ~4Hz (miswire/missed-INT net)
     # The hold/stale/bound no-news contract is gt911.HeldPoint (#202 Phase C,
     # one copy for every GT911 board); the #74 measurements behind its 400ms
@@ -113,7 +125,10 @@ class Touch:
         self.available = False
         self.addr = None
         self._i2c = i2c
-        self._hp = gt911.HeldPoint()
+        # The extrapolation flags above: OFF on this board by measured
+        # verdict (see the class-attr block).
+        self._hp = gt911.HeldPoint(extrapolate=self.EXTRAPOLATE, w=w, h=h,
+                                   damp=self.EXTRAP_DAMP)
         # #69 input-poller hook: when set, poll() consumes staged raw samples from
         # the poller thread instead of reading I2C inline (InputPoller wires it).
         self._source = None
