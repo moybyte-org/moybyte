@@ -90,8 +90,16 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 ## Bring-up log
 
-* 2026-08-19 (evening) -- **the owner calls the board PORTED.** Two closers
-  the same session:
+* 2026-08-19 (evening) -- **the owner calls the board PORTED.** Also the
+  wedge arc's closing field data: **the cable-flash replug rule is RETIRED**
+  (owner observation, after many flashes since bring-up: touch answered
+  immediately after every one -- the single dead-touch episode never
+  recurred, consistent with the boot-race + idle-filler story in
+  device/axs_touch.py's docstring). Flash normally; a dead touch after boot
+  would be a boot-race recurrence worth a serial trace, not routine. (The
+  rule lives on only in this issue thread's OLDER comments -- an agent
+  following #202 chronologically re-instructed replugs twice on 2026-08-19;
+  the driver docstring is the authority.) Two closers the same session:
   * **font_scale 2 was BUILT, SHIPPED AND REVERTED the same day** (the full
     A/B ran on glass with the owner's eyes on both ends). At 1x the glass was
     untappable ("impossible to tap anything"), so 2x shipped -- the #39
