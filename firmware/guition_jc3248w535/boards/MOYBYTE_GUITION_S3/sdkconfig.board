@@ -42,14 +42,40 @@ CONFIG_ESP32S3_DATA_CACHE_32KB=
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
 
-# PSRAM: octal at 80MHz -- the ESPHome-proven setting for THIS board's part.
-# Deliberately NOT the T-Deck's 120MHz experimental profile at bring-up: 120M
-# drags in IDF_EXPERIMENTAL_FEATURES, flash@120M, the temperature retune AND
-# the #169 vendor-gate patch, and a wrong guess presents as a board that
-# flashes cleanly and never says a word (measured on the T-Deck 2026-08-16).
-# The ~1.5x PSRAM write-rate lever is real (the T-Deck measured it at ~2ms a
-# frame) and stays on the table as an on-glass A/B from a booting baseline.
-CONFIG_SPIRAM_SPEED_80M=y
+# PSRAM + flash at 120MHz -- the T-Deck's experimental profile, adopted here
+# 2026-08-19 as the deferred bring-up A/B (owner call: "try 120mhz"), from a
+# proven 80MHz baseline whose image is the rollback. The T-Deck's rules carry
+# over verbatim (read its sdkconfig.board for the full prose): all five flags
+# together or none -- PSRAM-120 has no timing table against flash-80 at a
+# 240MHz core, so flash moves too; 120M is Kconfig-gated behind
+# IDF_EXPERIMENTAL_FEATURES; the S3's 120M PSRAM timing drifts with
+# temperature, so the 5s retune rides along; and the retune REQUIRES the #169
+# vendor-gate patch (build.sh applies it) or an unverified flash vendor id
+# ABORTS THE BOOT -- a board that flashes cleanly and never says a word.
+# Do NOT read the generated sdkconfig's FLASHFREQ string to check this landed
+# ("80m" is correct and stays -- the image header cannot encode 120M; the MSPI
+# tuning code applies it at runtime). One divergence from the T-Deck: its
+# flash is octal, this board's is DIO -- whether IDF 5.5.1 carries a DIO@120M
+# timing config is part of what this A/B answers -- it does: the build takes
+# it and the board runs it. A/B'D ON THIS GLASS 2026-08-19, identical image,
+# only the MSPI profile differing, and 120M won EVERYWHERE: Star Catcher
+# 24->30fps, Sakura Lua 21->27fps (both UNCAPPED natural rates -- the #63
+# governor ships off; the same carts run 60/50 on the T-Deck, and that gap
+# is this board's open per-frame ledger item, not a cap), pump CPU
+# 9.6->7.3ms, SPI
+# starvation 3.3->0.7ms, scripted-swipe transition spikes 84->~70ms, steady
+# drag frames ~30->25ms. (The control run also priced the landscape rotate
+# honestly: ~4ms/frame at 80M, folded to ~2ms net by this clock.) Same
+# temperature-drift risk profile the T-Deck accepted; if the panel ever shows
+# garbage bands or the board wedges under sustained load, THIS block is the
+# first revert, exactly as on the T-Deck.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=
+CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPIRAM_SPEED_80M=
+CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
+CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
 
 # USB-Serial-JTAG as the PRIMARY console (#201, the T-Deck's three-part RX
 # fix; parts 1 and 3 are MICROPY_HW_ENABLE_USBDEV/UART_REPL in

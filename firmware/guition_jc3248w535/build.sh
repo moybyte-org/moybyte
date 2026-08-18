@@ -45,11 +45,9 @@ moybyte_setup_idf esp32s3 \
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- THIS BOARD'S half of the build, deliberately short.
 #    Not applied, each a decision: the esp_lcd tx_color no-acquire patch
-#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build), the
-#    #69 I2C GIL release (no input-poller thread here -- the AXS touch is one
-#    8-byte read per frame on an otherwise idle bus), and the #169 PSRAM
-#    retune vendor gate (this board runs PSRAM at the stock 80MHz; the patch
-#    only matters at 120M, which is a recorded future A/B in sdkconfig.board).
+#    (moy_axs drives spi_master raw, no esp_lcd anywhere in this build) and
+#    the #69 I2C GIL release (no input-poller thread here -- the AXS touch is
+#    one 8-byte read per frame on an otherwise idle bus).
 # ---------------------------------------------------------------------------
 MPCONFIGPORT_H="${MPY_DIR}/ports/esp32/mpconfigport.h"
 
@@ -68,6 +66,18 @@ fi
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
+
+# 2c) PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by
+#     the 120MHz MSPI profile in sdkconfig.board (adopted 2026-08-19), for the
+#     T-Deck's reason verbatim: IDF only starts the retune for verified flash
+#     vendor ids and otherwise ABORTS THE BOOT from a secondary init fn -- a
+#     board that flashes cleanly, says nothing, and reads like a PSRAM timing
+#     failure. If sdkconfig.board ever reverts to 80MHz, this patch is inert.
+MSPI_TUNING_C="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
+if [ -f "${MSPI_TUNING_C}" ] && ! grep -q "Moybyte #169" "${MSPI_TUNING_C}"; then
+  echo "== applying PSRAM temperature-retune vendor-gate patch (#169)"
+  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_psram_temp_retune_any_vendor.patch"
+fi
 
 # ---------------------------------------------------------------------------
 # 3) Stage: shared native modules (board.toml [native.shared]) with the web
@@ -96,6 +106,7 @@ moybyte_partition_and_sdkconfig_guard \
   'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
   'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y' \
   'CONFIG_SPIRAM_MODE_OCT=y' \
+  'CONFIG_SPIRAM_SPEED_120M=y' \
   'CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y' \
   'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
 

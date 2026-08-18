@@ -19,7 +19,7 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 | touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: `device/axs_touch.py`). |
 | backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
-| flash/PSRAM | 16MB DIO @ 80MHz; octal PSRAM @ 80MHz. |
+| flash/PSRAM | 16MB DIO; octal PSRAM. BOTH at 120MHz since 2026-08-19 (the T-Deck's experimental MSPI profile, A/B'd on this glass: carts +25-29%, pump -23%, SPI starvation -77%; needs the #169 retune patch, applied by build.sh). |
 | SD | TF slot exists; pins UNVERIFIED -- stage 4 is open, carts live on the internal VFS (`/moy/carts`). |
 | audio | speaker header exists; amp/pins UNVERIFIED -- stage 5 is open. |
 | USB | the S3's native USB-Serial/JTAG (303a:1001). Console primary per #201, so serial RX works under the desktop. |
