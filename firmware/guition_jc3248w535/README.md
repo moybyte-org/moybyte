@@ -26,16 +26,24 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 
 ## The panel path
 
-**The game fold** (2026-08-19, #190's cousin): on a play frame the game
-composite never touches the root framebuffer -- `DeviceCanvas.blit_game`'s
-existing #190 plumbing arms `moy_axs`, whose flush synthesizes every band
-(black bezels + game pixels read straight from the scratch snapshot). Half
-the per-frame PSRAM traffic; proven byte-identical to the composite path on
-the device itself (`moy_axs.fold_test`, 0 mismatched bytes). Overlays disarm
-through the shared frame walk and pay the old cost. Measured: Star Catcher
-30->35fps, Sakura Lua 27->30 (cumulative with the 120MHz lever: 24->35 and
-21->30 against the 80MHz bring-up baseline; the T-Deck's 60/50 on the same
-carts remains the open gap -- pump-on-core-1 is the next strategic lever).
+**The game fold + the game window** (2026-08-19, #190's cousin, then the
+owner's bezel insight the same evening): on a play frame the game composite
+never touches the root framebuffer -- `DeviceCanvas.blit_game`'s existing
+#190 plumbing arms `moy_axs`, whose flush synthesizes every band from the
+scratch snapshot directly. And because the bezels never change while the
+panel's GRAM persists, only the FIRST folded flush ships full-screen (laying
+the bezels); every steady play frame after it arms CASET/RASET to the game's
+physical rectangle (240x320, 8-aligned) and ships the game alone -- the
+T-Deck's exact payload at a quarter of this bus's full-frame time. Proven
+byte-identical to the composite path on the device itself
+(`moy_axs.fold_test`, both passes, 0 mismatched bytes); `fold_stats`'
+windowed counter tracks folded flushes 1:1 minus the bezel-layers. Overlays
+disarm through the shared frame walk and pay the old cost. Measured ladder
+on this glass (Star Catcher / Sakura Lua): 80MHz bring-up 24/21 -> 120MHz
+MSPI 30/27 -> fold 35/30 -> game window **42/34fps**. The remaining gap to
+the T-Deck's 60/50 is CPU-side (busy 23ms); recorded follow-ups: the pump's
+SPI idle rose with the small bands (~4ms starved -- slot count / feed pacing
+tuning), and pump-on-core-1 stays the strategic lever.
 
 
 `native/moy_axs` -- raw `spi_master`, NOT esp_lcd, because the AXS15231B's

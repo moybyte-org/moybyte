@@ -228,6 +228,26 @@ static const uint8_t *s_fold_src;      // game pixels, RGB565 wire order
 static int s_fold_vw, s_fold_vh;       // game geometry (logical px)
 static int s_fold_ox, s_fold_oy;       // viewport origin in the logical frame
 static uint32_t s_fold_frames;         // flushes folded since boot (diag)
+static uint32_t s_fold_win_frames;     // ...of which shipped game-window-only
+
+// THE GAME WINDOW (owner's insight, 2026-08-19: "it doesn't move double the
+// pixels -- the banding around the game never changes"). The panel's GRAM
+// persists, so the bezels only need shipping when they might have changed:
+// the FIRST folded flush after anything else goes full-screen (bezels black
+// + game), and every folded flush after it, same geometry, arms CASET/RASET
+// to just the game's physical rectangle (8-aligned -- the AXS draw-rounding)
+// and ships game bytes alone. For the stock viewport that is 240x320 =
+// 153,600 B, a ~7.7ms transfer against the full frame's ~15.4 -- the flush
+// ceiling for play frames roughly doubles, and the synthesis halves with it.
+// Every flush (windowed or not) runs through one window state, full-panel by
+// default:
+static int s_win_x, s_win_y, s_win_w, s_win_h;   // physical rect this flush
+static int s_win_bands;                          // ceil(s_win_h / BAND_ROWS)
+// Whether the bezels currently on the glass belong to this fold geometry
+// (rot + viewport). Set when a FULL folded flush ships; cleared by any
+// non-folded flush, a rot flip, or a geometry change.
+static bool s_bezels_valid;
+static int s_bez_rot, s_bez_ox, s_bez_oy, s_bez_vw, s_bez_vh;
 
 // Fill a bounce slot with physical band `k` under the GAME FOLD: bezels are
 // black, the game region reads the game buffer directly -- same loop shape as
@@ -235,16 +255,16 @@ static uint32_t s_fold_frames;         // flushes folded since boot (diag)
 static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
     const uint16_t *g = (const uint16_t *)s_fold_src;
     uint16_t *dst = (uint16_t *)slot;
-    int py0 = k * MOY_AXS_BAND_ROWS;
-    for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+    int py0 = s_win_y + k * MOY_AXS_BAND_ROWS;
+    for (int px = s_win_x; px < s_win_x + s_win_w; px++) {
         // rot 0: ly = px; rot 1: ly = PANEL_W-1-px.
         int ly = (s_rot == 0) ? px : (MOY_AXS_PANEL_W - 1 - px);
-        uint16_t *d = dst + px;
+        uint16_t *d = dst + (px - s_win_x);
         int gy = ly - s_fold_oy;
         if (gy < 0 || gy >= s_fold_vh) {
             for (int r = 0; r < rows; r++) {
                 *d = 0;
-                d += MOY_AXS_PANEL_W;
+                d += s_win_w;
             }
             continue;
         }
@@ -254,7 +274,7 @@ static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
                                   : (py0 + r);
             int gx = lx - s_fold_ox;
             *d = (gx >= 0 && gx < s_fold_vw) ? grow[gx] : 0;
-            d += MOY_AXS_PANEL_W;
+            d += s_win_w;
         }
     }
 }
@@ -268,27 +288,27 @@ static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
 static void moy_axs_rotate_band(uint8_t *slot, int k, int rows) {
     const uint16_t *src = (const uint16_t *)s_bnc_src;
     uint16_t *dst = (uint16_t *)slot;
-    int py0 = k * MOY_AXS_BAND_ROWS;
+    int py0 = s_win_y + k * MOY_AXS_BAND_ROWS;
     if (s_rot == 0) {
         // lx = PANEL_H-1-py, descending as py ascends: read backwards.
-        for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+        for (int px = s_win_x; px < s_win_x + s_win_w; px++) {
             const uint16_t *srow = src + (size_t)px * MOY_AXS_W
                                    + (MOY_AXS_PANEL_H - 1 - py0);
-            uint16_t *d = dst + px;
+            uint16_t *d = dst + (px - s_win_x);
             for (int r = 0; r < rows; r++) {
                 *d = srow[-r];
-                d += MOY_AXS_PANEL_W;
+                d += s_win_w;
             }
         }
     } else {
         // ly = PANEL_W-1-px, lx = py: read forwards.
-        for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+        for (int px = s_win_x; px < s_win_x + s_win_w; px++) {
             const uint16_t *srow = src
                 + (size_t)(MOY_AXS_PANEL_W - 1 - px) * MOY_AXS_W + py0;
-            uint16_t *d = dst + px;
+            uint16_t *d = dst + (px - s_win_x);
             for (int r = 0; r < rows; r++) {
                 *d = srow[r];
-                d += MOY_AXS_PANEL_W;
+                d += s_win_w;
             }
         }
     }
@@ -383,18 +403,49 @@ static void moy_axs_cmd(uint8_t cmd, const uint8_t *data, size_t len) {
     moy_axs_check(err, "cmd");
 }
 
-// Arm the full-screen write window. Bus must be acquired. See THE WINDOW MUST
-// BE ARMED above -- without this the panel discards every pixel write.
-static esp_err_t moy_axs_arm_window_acquired(void) {
+// Arm the write window to a physical rect. Bus must be acquired. See THE
+// WINDOW MUST BE ARMED above -- without this the panel discards every pixel
+// write; and see THE GAME WINDOW for why the rect is not always full-screen.
+static esp_err_t moy_axs_arm_window_acquired(int x, int y, int w, int h) {
     uint8_t p[4];
-    p[0] = 0; p[1] = 0;
-    p[2] = (MOY_AXS_PANEL_W - 1) >> 8; p[3] = (MOY_AXS_PANEL_W - 1) & 0xFF;
+    int x1 = x + w - 1, y1 = y + h - 1;
+    p[0] = x >> 8; p[1] = x & 0xFF;
+    p[2] = x1 >> 8; p[3] = x1 & 0xFF;
     esp_err_t err = moy_axs_cmd_acquired(0x2A, p, 4);   // CASET
     if (err != ESP_OK) {
         return err;
     }
-    p[2] = (MOY_AXS_PANEL_H - 1) >> 8; p[3] = (MOY_AXS_PANEL_H - 1) & 0xFF;
+    p[0] = y >> 8; p[1] = y & 0xFF;
+    p[2] = y1 >> 8; p[3] = y1 & 0xFF;
     return moy_axs_cmd_acquired(0x2B, p, 4);            // RASET
+}
+
+// The fold geometry's physical rect, 8-aligned outward (the AXS draw-rounding;
+// the synthesis paints any alignment sliver black). Writes s_win_*.
+static void moy_axs_set_game_window(void) {
+    int px0, pw, py0, ph;
+    if (s_rot == 0) {
+        px0 = s_fold_oy;                          pw = s_fold_vh;
+        py0 = MOY_AXS_PANEL_H - s_fold_ox - s_fold_vw;  ph = s_fold_vw;
+    } else {
+        px0 = MOY_AXS_PANEL_W - s_fold_oy - s_fold_vh;  pw = s_fold_vh;
+        py0 = s_fold_ox;                          ph = s_fold_vw;
+    }
+    int px1 = (px0 + pw + 7) & ~7;
+    int py1 = (py0 + ph + 7) & ~7;
+    px0 &= ~7;
+    py0 &= ~7;
+    if (px1 > MOY_AXS_PANEL_W) { px1 = MOY_AXS_PANEL_W; }
+    if (py1 > MOY_AXS_PANEL_H) { py1 = MOY_AXS_PANEL_H; }
+    s_win_x = px0; s_win_w = px1 - px0;
+    s_win_y = py0; s_win_h = py1 - py0;
+    s_win_bands = (s_win_h + MOY_AXS_BAND_ROWS - 1) / MOY_AXS_BAND_ROWS;
+}
+
+static void moy_axs_set_full_window(void) {
+    s_win_x = 0; s_win_y = 0;
+    s_win_w = MOY_AXS_PANEL_W; s_win_h = MOY_AXS_PANEL_H;
+    s_win_bands = MOY_AXS_BANDS;
 }
 
 typedef struct {
@@ -443,6 +494,10 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         s_target = 0;
         s_retrieved = 0;
         s_tx_err = ESP_OK;
+        s_fold_armed = false;
+        s_fold_inflight = false;
+        s_bezels_valid = false;
+        moy_axs_set_full_window();
         return mp_const_none;
     }
     int nfbs = args[0].u_int;
@@ -515,6 +570,7 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         }
     }
     s_madctl = 0x00;
+    moy_axs_set_full_window();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(moy_axs_init_obj, 0, moy_axs_init);
@@ -592,9 +648,9 @@ static void moy_axs_pump_locked(void) {
             }
         }
         int y = k * MOY_AXS_BAND_ROWS;
-        int rows = (y + MOY_AXS_BAND_ROWS <= MOY_AXS_PANEL_H)
-                   ? MOY_AXS_BAND_ROWS : (MOY_AXS_PANEL_H - y);
-        size_t nbytes = (size_t)rows * MOY_AXS_PANEL_ROW_BYTES;
+        int rows = (y + MOY_AXS_BAND_ROWS <= s_win_h)
+                   ? MOY_AXS_BAND_ROWS : (s_win_h - y);
+        size_t nbytes = (size_t)rows * (size_t)s_win_w * 2;
         uint8_t *slot = s_bounce[k % slots];
         if (s_fold_inflight) {
             moy_axs_fold_band(slot, k, rows);
@@ -657,12 +713,43 @@ static void moy_axs_kick_locked(int n) {
         }
         s_bus_held = true;
     }
+    // Consume the one-shot fold arm FIRST -- the window decision needs it
+    // (THE GAME WINDOW above): a folded flush whose geometry matches the
+    // bezels already on the glass ships the game rect alone; the first folded
+    // flush (or any geometry/rot change) ships full-screen to lay the bezels;
+    // a non-folded flush is always full-screen and invalidates them.
+    s_fold_inflight = s_fold_armed;
+    s_fold_armed = false;
+    bool windowed = false;
+    if (s_fold_inflight) {
+        s_fold_frames++;
+        if (s_bezels_valid && s_bez_rot == s_rot
+                && s_bez_ox == s_fold_ox && s_bez_oy == s_fold_oy
+                && s_bez_vw == s_fold_vw && s_bez_vh == s_fold_vh) {
+            windowed = true;
+        } else {
+            s_bez_rot = s_rot;
+            s_bez_ox = s_fold_ox; s_bez_oy = s_fold_oy;
+            s_bez_vw = s_fold_vw; s_bez_vh = s_fold_vh;
+            s_bezels_valid = true;      // this full flush lays them
+        }
+    } else {
+        s_bezels_valid = false;
+    }
+    if (windowed) {
+        moy_axs_set_game_window();
+        s_fold_win_frames++;
+    } else {
+        moy_axs_set_full_window();
+    }
     // Arm the window EVERY frame (the discard rule above; also the recovery
     // point after a timed-out flush, exactly like moy_lcd's arm_window).
-    esp_err_t werr = moy_axs_arm_window_acquired();
+    esp_err_t werr = moy_axs_arm_window_acquired(s_win_x, s_win_y,
+                                                 s_win_w, s_win_h);
     if (werr != ESP_OK) {
         s_tx_err = werr;
         s_tx_errs++;
+        s_bezels_valid = false;
         spi_device_release_bus(s_dev);
         s_bus_held = false;
         return;
@@ -676,6 +763,7 @@ static void moy_axs_kick_locked(int n) {
     if (err != ESP_OK) {
         s_tx_err = err;
         s_tx_errs++;
+        s_bezels_valid = false;
         spi_device_release_bus(s_dev);
         s_bus_held = false;
         return;
@@ -685,13 +773,7 @@ static void moy_axs_kick_locked(int n) {
     s_retrieved = 0;
     s_bnc_next = 0;
     s_bnc_src = s_fbs[n];
-    s_bnc_total = MOY_AXS_BANDS;
-    // Consume the one-shot fold arm: THIS flush synthesizes its bands.
-    s_fold_inflight = s_fold_armed;
-    s_fold_armed = false;
-    if (s_fold_inflight) {
-        s_fold_frames++;
-    }
+    s_bnc_total = s_win_bands;
     s_flush_t0 = esp_timer_get_time();
     s_kick_us = (uint32_t)s_flush_t0;
     moy_axs_pump_locked();
@@ -910,14 +992,17 @@ static mp_obj_t moy_axs_disarm_fold(mp_obj_t back_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_disarm_fold_obj, moy_axs_disarm_fold);
 
-// fold_stats() -> (frames_folded, armed, inflight) -- the on-glass proof.
+// fold_stats() -> (frames_folded, armed, inflight, windowed) -- the proof:
+// `windowed` climbing 1:1 with `frames_folded` = play frames shipping the
+// game rect alone (the first of a run stays full to lay the bezels).
 static mp_obj_t moy_axs_fold_stats(void) {
-    mp_obj_t t[3] = {
+    mp_obj_t t[4] = {
         mp_obj_new_int_from_uint(s_fold_frames),
         s_fold_armed ? mp_const_true : mp_const_false,
         s_fold_inflight ? mp_const_true : mp_const_false,
+        mp_obj_new_int_from_uint(s_fold_win_frames),
     };
-    return mp_obj_new_tuple(3, t);
+    return mp_obj_new_tuple(4, t);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_stats_obj, moy_axs_fold_stats);
 
@@ -942,23 +1027,31 @@ static mp_obj_t moy_axs_fold_test(mp_obj_t back_in) {
     const uint8_t *keep_src = s_bnc_src;
     s_bnc_src = s_fbs[n];
     uint32_t bad = 0;
-    bool keep_inflight = s_fold_inflight;
-    s_fold_inflight = true;         // fold_band reads the armed geometry
-    for (int k = 0; k < MOY_AXS_BANDS; k++) {
-        int y = k * MOY_AXS_BAND_ROWS;
-        int rows = (y + MOY_AXS_BAND_ROWS <= MOY_AXS_PANEL_H)
-                   ? MOY_AXS_BAND_ROWS : (MOY_AXS_PANEL_H - y);
-        moy_axs_fold_band(s_bounce[0], k, rows);
-        moy_axs_rotate_band(s_bounce[1], k, rows);
-        const uint8_t *p0 = s_bounce[0];
-        const uint8_t *p1 = s_bounce[1];
-        for (size_t i = 0; i < (size_t)rows * MOY_AXS_PANEL_ROW_BYTES; i++) {
-            if (p0[i] != p1[i]) {
-                bad++;
+    // Pass 1: FULL window -- fold synthesis vs the rotate of the reference
+    // composite the caller painted into fb n. Pass 2: the GAME window --
+    // both paths again, over the sub-rect a steady play frame ships.
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 0) {
+            moy_axs_set_full_window();
+        } else {
+            moy_axs_set_game_window();
+        }
+        for (int k = 0; k < s_win_bands; k++) {
+            int y = k * MOY_AXS_BAND_ROWS;
+            int rows = (y + MOY_AXS_BAND_ROWS <= s_win_h)
+                       ? MOY_AXS_BAND_ROWS : (s_win_h - y);
+            moy_axs_fold_band(s_bounce[0], k, rows);
+            moy_axs_rotate_band(s_bounce[1], k, rows);
+            const uint8_t *p0 = s_bounce[0];
+            const uint8_t *p1 = s_bounce[1];
+            for (size_t i = 0; i < (size_t)rows * (size_t)s_win_w * 2; i++) {
+                if (p0[i] != p1[i]) {
+                    bad++;
+                }
             }
         }
     }
-    s_fold_inflight = keep_inflight;
+    moy_axs_set_full_window();
     s_bnc_src = keep_src;
     return mp_obj_new_int_from_uint(bad);
 }
@@ -975,6 +1068,7 @@ static mp_obj_t moy_axs_set_rot(mp_obj_t v_in) {
         moy_axs_drain_locked();     // never flip mid-frame
     }
     s_rot = (int)v;
+    s_bezels_valid = false;
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_set_rot_obj, moy_axs_set_rot);
