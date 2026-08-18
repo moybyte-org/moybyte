@@ -2,13 +2,15 @@
 board the port kit was built for.
 
 The first FULLSCREEN-tier board where the system canvas is not the game
-canvas: the system surface is the native 320x480 portrait glass (the #39
-responsive layouts run at native res, exactly as they do in a P4 window) and
-the game stays a fixed 320x240 DeviceCanvas that `wm.FullscreenStackWM`'s
-composite_game centres 1:1-width -- the seam the P4 runs windowed, run
-fullscreen for the first time, with no new code on this side of it: the base
-`SystemCanvas` already carries blit_game/blit_cover, the WM already computes
-the viewport, and this file only constructs the pieces.
+canvas: the system surface is the LANDSCAPE 480x320 glass (owner call
+2026-08-18 -- the panel is portrait-native and its MADCTL MV is dead, so
+moy_axs rotates in the band copy; the #39 responsive layouts run at native
+res exactly as they do in a P4 window) and the game stays a fixed 320x240
+DeviceCanvas that `wm.FullscreenStackWM`'s composite_game centres at 1:1 --
+the seam the P4 runs windowed, run fullscreen for the first time, with no new
+code on this side of it: the base `SystemCanvas` already carries
+blit_game/blit_cover, the WM already computes the viewport, and this file
+only constructs the pieces.
 
 Input is the P4's shape (touch-only, no poller thread, no keyboard modes),
 storage is the P4's (internal-flash VFS -- SD is an open stage-4 decision),
@@ -59,7 +61,7 @@ def run_desktop(fps_cap=60):
     boot.note("starting")
 
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 over the same
-    # native kernel; composite_game centres it 1:1 on the 320x480 glass.
+    # native kernel; composite_game centres it 1:1 on the 480x320 glass.
     game = DeviceCanvas(_LayerComp(GAME_W, GAME_H, gfx))
     inp = InputState()
     touch = Touch(sys_canvas.w, sys_canvas.h)

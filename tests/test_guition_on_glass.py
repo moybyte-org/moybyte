@@ -56,16 +56,17 @@ def test_state_snapshot_has_the_fullscreen_tier_shape(board):
     assert secs > 0
 
 
-def test_the_system_canvas_is_the_portrait_glass(board):
+def test_the_system_canvas_is_the_landscape_glass(board):
     """The board's one structural novelty (#202): the first FULLSCREEN-tier
-    console whose system canvas (320x480) is not its game canvas (320x240).
-    Assert both sizes and the viewport seam through the live console."""
+    console whose system canvas (480x320 landscape, rotated in moy_axs's band
+    copy) is not its game canvas (320x240). Assert both sizes and the
+    viewport seam through the live console."""
     line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.canvas.w, ws.canvas.h)",
                      wait_for="PY ")
-    assert line == "PY (320, 480, 320, 240)", line
-    # composite_game's placement: 1:1 width, centred vertically.
+    assert line == "PY (480, 320, 320, 240)", line
+    # composite_game's placement: 1:1, centred both ways.
     line = board.cmd("py ws.wm.viewport()", wait_for="PY ")
-    assert line == "PY (0, 120, 1)", line
+    assert line == "PY (80, 40, 1)", line
 
 
 def test_every_system_app_claims_exactly_one_cart(board):
@@ -94,11 +95,11 @@ def test_swipe_rides_the_real_pointer_feed(board):
     """A horizontal fling over the home shelf, through the same pointer the
     AXS15231 feeds -- and the console is still on home afterwards."""
     frames0 = board.state()["frames"]
-    board.swipe(260, 240, 60, 240, frames=20)
+    board.swipe(400, 160, 80, 160, frames=20)
     st = board.state()
     assert st["stack"][-1] == "launcher", st["stack"]
     assert st["frames"] > frames0, "the gesture drew no frames"
-    board.swipe(60, 240, 260, 240, frames=20)
+    board.swipe(80, 160, 400, 160, frames=20)
     board.drain(0.8)
 
 

@@ -15,8 +15,12 @@ no SD-on-the-panel-bus prose (nothing else is known to share this board's QSPI
 host; sync() stays load-bearing anyway, as the idle-band drain and the
 backlight gate's fence).
 
-The flush arithmetic this board inherits: 320x480x2 = 307,200 B is ~15.4ms at
-QSPI 40MHz x 4 lines. Paid synchronously that caps the loop near 60fps before
+The flush arithmetic this board inherits: 480x320x2 = 307,200 B is ~15.4ms at
+QSPI 40MHz x 4 lines -- and since the landscape decision (2026-08-18/19, the
+panel's MADCTL MV being dead on this glass) the band copy is a ROTATE-gather
+rather than a memcpy: same PSRAM read traffic, plus an in-loop scatter into
+the uncached internal-SRAM bounce that costs ~2ms/frame of CPU (moy_axs's
+LANDSCAPE block carries the design; pump_stats' pump= carries the measurement). Paid synchronously that caps the loop near 60fps before
 a pixel is drawn -- the T-Deck's exact pre-#66 shape -- so the kick/pump/drain
 overlap ships from day one, with ASYNC_FLUSH the one-flag serialized fallback
 if the glass disagrees (a QSPI wrinkle the ST7789 never had: the whole frame
@@ -25,8 +29,8 @@ idle mid-frame; the bridge latches per byte and should not care, but "should"
 is what the flag is for).
 """
 
-WIDTH = 320
-HEIGHT = 480
+WIDTH = 480
+HEIGHT = 320
 
 # False -> flush() is one blocking moy_axs.show(); pump_if_pending is then not
 # defined at all (DeviceCanvas getattrs it and degrades) and sync() is a drain

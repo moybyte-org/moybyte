@@ -5,7 +5,9 @@ The third board and the first provisioned through the #202 port kit
 port; #202 is the living status). A ~$15-class smart display: same chip as
 the T-Deck, a **new port class** on every other axis -- QSPI panel
 (AXS15231B, not an ST7789 over plain SPI), touch on the same controller
-(no keyboard, no trackball), portrait 320x480 on the fullscreen tier.
+(no keyboard, no trackball), and a 480x320 LANDSCAPE console on the
+fullscreen tier, rotated out of the portrait-native glass in the panel
+driver's band copy.
 
 ## Hardware facts (pin provenance: the owner's working ESPHome definition,
 `~/Documents/Work/esphome/JC3248W535.yaml` -- pins verified on the physical
@@ -13,7 +15,7 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 
 | subsystem | facts |
 |---|---|
-| panel | AXS15231B, 320x480 portrait-native, QSPI @ 40MHz: CLK 47, D0 21, D1 48, D2 40, D3 39, CS 45. No reset GPIO. Cannot swap axes (MADCTL MV) -- the console runs PORTRAIT. |
+| panel | AXS15231B, 320x480 portrait-native, QSPI @ 40MHz: CLK 47, D0 21, D1 48, D2 40, D3 39, CS 45. No reset GPIO. MADCTL MV is DEAD on this glass (tested 0x60 + 0x20 live, both scramble; Arduino_GFX writes the bit, the LVGL-forum reports match ours) -- the console runs LANDSCAPE 480x320 via the rotate in moy_axs's band copy (owner call 2026-08-18). |
 | touch | AXS15231 (same bridge), I2C0 SDA 4 / SCL 8, addr 0x3B. Raw coords are portrait panel coords (driver: `device/axs_touch.py`). |
 | backlight | GPIO1, active high, PWM-capable (binary on/off for now -- owner call). |
 | battery | ADC GPIO5, divider ~1.72x (unwired here yet). |
@@ -55,7 +57,40 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 * 2026-08-18 -- port authored (stage 0 skeleton through stage 6 code):
   moy_axs + guition_panel + axs_touch + run_desktop; `make test` green with
   the board in the staging-closure/board-toml suites.
-* 2026-08-18 (same night, on glass, first build) -- **the console runs**:
+* 2026-08-19 (the morning after, owner's eyes on the glass) -- three hardware
+  verdicts and the LANDSCAPE flip:
+  * **the panel discards writes until CASET/RASET are armed** -- first light's
+    "coloured static" was power-on GRAM noise under a fully-successful flush;
+    arming the window live fixed it, and moy_axs arms it every kick now.
+  * **MADCTL MV is dead**: 0x60 and 0x20 both scramble the write path while
+    0x00 stays clean. Landscape therefore rotates in the band copy
+    (rotate-gather: sequential PSRAM reads, scattered writes into the
+    uncached SRAM bounce -- same read traffic as the memcpy it replaced), with
+    `moy_axs.set_rot(0|1)` as the direction knob; rot 0 confirmed upright.
+  * **touch has two failure modes that present identically** (both in
+    `device/axs_touch.py`'s docstring): a SECOND machine.I2C(0) instance
+    reads constant bytes while the driver's first instance works -- so never
+    diagnose touch with a side probe, go through the live console -- and a
+    BOOT RACE where the constructor's single probe read loses and
+    `available` latches False for the session (the episode that looked like
+    a hardware wedge until two power cycles cleared it). The ctor retries
+    now, poll() re-probes every ~2s, and a constant-byte streak is named on
+    serial after ~5s instead of reading as "nobody is touching the screen".
+  * touch mapping CALIBRATED on glass (SWAP_XY + FLIP_X, rot 0): taps land
+    under the finger, corners included.
+  * `tests/test_guition_on_glass.py` re-passed **10/10** on the landscape
+    console (viewport seam now `(80, 40, 1)`).
+  * **kinetic-scroll hiccup, measured and named** (open perf item, #202/#66
+    style): a fling feels like start-stop-continue because the first
+    repaint at a gesture transition bills ~80-84ms (frame-timer trace: idle
+    frames cost 0 under the redraw gate, steady drag frames 27ms, fling
+    shift frames ~0ms at 60fps -- and NO gc, the heap never jumps). It is
+    the #113 retained-ring's full-paints-before-shift-eligibility cost at
+    480x320. The lever is the launcher first-paint diet, not the driver.
+  * lived pain: entering a game with no way out (the touch-only exit
+    gesture, already on #202) -- the owner had to power cycle to leave a
+    cart. Rising priority.
+* 2026-08-18 (first night, on glass, first build) -- **the console runs**:
   * stage 1: `moy_axs` first light on the first attempt -- init accepted,
     banded bounce flush at **19.4ms/frame** (51.6fps ceiling; pump 5.4ms CPU,
     idle 1.1ms, blocked only 1.1ms -- the kick/pump/drain overlap works,

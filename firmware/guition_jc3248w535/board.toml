@@ -21,8 +21,9 @@ ota     = "guition_s3"      # the board id inside a signed OTA manifest (#53)
 tier    = "handheld"
 tier_why = """
 Fullscreen tier, like the T-Deck, but with TWO canvases: the system surface is
-the native 320x480 portrait glass (#39 responsive layouts at native res) and
-the game stays a fixed 320x240 composited 1:1-width by wm.FullscreenStackWM's
+the LANDSCAPE 480x320 glass (the panel is portrait-native with a dead MADCTL
+MV, so moy_axs rotates in its band copy -- owner call 2026-08-18) and the
+game stays a fixed 320x240 composited 1:1 by wm.FullscreenStackWM's
 composite_game -- the seam the P4 runs windowed, run fullscreen for the first
 time. `wm_windowed.py` is still the wrong tier here; see its denial below."""
 

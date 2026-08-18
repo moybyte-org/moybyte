@@ -34,6 +34,33 @@
 //   Pixel bytes are RGB565 high byte first, so the framebuffer stores wire
 //   order (BYTE_SWAP below; the shared palette on this board is PAL565_SW).
 //
+//   THE WINDOW MUST BE ARMED (hardware-learned 2026-08-18, first light's one
+//   real bug): the AXS15231B DISCARDS memory writes until CASET/RASET have
+//   been sent at least once -- the first image showed the panel's power-on
+//   GRAM noise under a fully "successful" flush, and arming the window over
+//   the live dev channel fixed it with no other change. Every proven driver
+//   (ESPHome, esp_lcd's AXS component) arms the window before every write;
+//   kick() arms it before every frame now, which is also moy_lcd's recovery
+//   point after a timed-out flush.
+//
+// LANDSCAPE, ROTATED IN THE BAND COPY (owner call, 2026-08-18/19). The
+//   console runs 480x320 landscape; the glass is portrait-native and the
+//   AXS15231B's MADCTL MV (row/column exchange) is DEAD ON THIS GLASS --
+//   tested live, twice: 0x60 (MX|MV, Arduino_GFX's landscape value) and 0x20
+//   (MV alone) both scramble the write path to a sliver of pixels while
+//   0x00 portrait writes stay clean, matching the LVGL-forum field reports
+//   and contradicting the Arduino_GFX driver that writes the bit. So the
+//   rotation happens where the bytes already move: the PSRAM->SRAM band copy
+//   becomes a rotate-gather. The loop order makes it nearly free -- outer
+//   loop over LOGICAL rows (sequential PSRAM reads, every cache line fully
+//   used: the same read traffic as the straight memcpy), inner writes
+//   scattered into the bounce slot, which is INTERNAL SRAM and uncached, so
+//   the scatter costs nothing. Measured cost lives in guition_panel's
+//   docstring once benched; the design estimate is ~2ms/frame of CPU.
+//   `set_rot(0|1)` flips which 90-degree direction ships (a live-glass
+//   calibration knob, like set_madctl); the baked default is the one the
+//   owner confirmed upright.
+//
 // INIT -- the vendor block is ESPHome's AXS15231 model (3 commands), plus the
 //   standard DCS tail ESPHome generates around it (PIXFMT 0x55, MADCTL 0x00,
 //   INVOFF, SLPOUT, DISPON). That exact sequence runs on this exact board
@@ -85,10 +112,14 @@
 
 // ---- board facts (Guition JC3248W535; pins from the owner's working ESPHome
 // definition -- treat as verified)
-#define MOY_AXS_W            320
-#define MOY_AXS_H            480
+// LOGICAL geometry (what the console draws; WIDTH/HEIGHT exports): landscape.
+#define MOY_AXS_W            480
+#define MOY_AXS_H            320
+// PHYSICAL geometry (what the panel scans; the window + the bands): portrait.
+#define MOY_AXS_PANEL_W      320
+#define MOY_AXS_PANEL_H      480
 #define MOY_AXS_FB_BYTES     (MOY_AXS_W * MOY_AXS_H * 2)
-#define MOY_AXS_ROW_BYTES    (MOY_AXS_W * 2)
+#define MOY_AXS_PANEL_ROW_BYTES (MOY_AXS_PANEL_W * 2)
 
 #define MOY_AXS_SPI_HOST     SPI2_HOST
 #define MOY_AXS_PIN_SCK      47
@@ -103,13 +134,13 @@
 // ceiling is unpublished; do not raise without an on-glass A/B.
 #define MOY_AXS_PCLK_HZ      (40 * 1000 * 1000)
 
-// Bands of 48 rows = 30720 B (the T-Deck's numbers transfer exactly: same
-// row-bytes, same 32768 B S3 DMA chunk cap). 480/48 = 10 bands a frame; a band
-// is ~1.5ms of transfer at 40MHz x 4 lines, so two slots buffer ~3ms.
+// Bands of 48 PHYSICAL rows = 30720 B (the T-Deck's numbers transfer exactly:
+// same row-bytes, same 32768 B S3 DMA chunk cap). 480/48 = 10 bands a frame;
+// a band is ~1.5ms of transfer at 40MHz x 4 lines, so two slots buffer ~3ms.
 #define MOY_AXS_BAND_ROWS    48
-#define MOY_AXS_BAND_BYTES   (MOY_AXS_BAND_ROWS * MOY_AXS_ROW_BYTES)
+#define MOY_AXS_BAND_BYTES   (MOY_AXS_BAND_ROWS * MOY_AXS_PANEL_ROW_BYTES)
 #define MOY_AXS_BOUNCE_SLOTS 2
-#define MOY_AXS_BANDS        ((MOY_AXS_H + MOY_AXS_BAND_ROWS - 1) / MOY_AXS_BAND_ROWS)
+#define MOY_AXS_BANDS        ((MOY_AXS_PANEL_H + MOY_AXS_BAND_ROWS - 1) / MOY_AXS_BAND_ROWS)
 #define MOY_AXS_MAX_FBS      3
 #define MOY_AXS_FLUSH_TIMEOUT_US 500000
 
@@ -174,6 +205,51 @@ static uint32_t s_block_last_us;
 
 static bool moy_axs_drain_locked(void);
 
+// Which 90-degree rotation ships (see LANDSCAPE above). Two mappings from the
+// LOGICAL landscape buffer L[ly][lx] (320 rows x 480 cols) to the PHYSICAL
+// panel P[py][px] (480 rows x 320 cols):
+//   rot 0:  P[py][px] = L[px][PANEL_H-1-py]   (logical top edge -> one side)
+//   rot 1:  P[py][px] = L[PANEL_W-1-px][py]   (the other way up)
+// Both read the logical buffer SEQUENTIALLY along lx in the inner walk, so
+// they cost the same; the default is the direction the owner confirmed
+// upright on glass.
+static int s_rot = 0;
+
+// Fill a bounce slot with physical band `k`, rotating from the logical
+// landscape framebuffer. The loop order is the whole trick: outer over px
+// (= a LOGICAL ROW of the source), inner over the band's physical rows
+// (= consecutive lx, sequential PSRAM reads -- every 32B cache line fully
+// used, same total read traffic as a straight memcpy); the writes scatter
+// with a 640B stride, into internal SRAM, where a scatter is free.
+static void moy_axs_rotate_band(uint8_t *slot, int k, int rows) {
+    const uint16_t *src = (const uint16_t *)s_bnc_src;
+    uint16_t *dst = (uint16_t *)slot;
+    int py0 = k * MOY_AXS_BAND_ROWS;
+    if (s_rot == 0) {
+        // lx = PANEL_H-1-py, descending as py ascends: read backwards.
+        for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+            const uint16_t *srow = src + (size_t)px * MOY_AXS_W
+                                   + (MOY_AXS_PANEL_H - 1 - py0);
+            uint16_t *d = dst + px;
+            for (int r = 0; r < rows; r++) {
+                *d = srow[-r];
+                d += MOY_AXS_PANEL_W;
+            }
+        }
+    } else {
+        // ly = PANEL_W-1-px, lx = py: read forwards.
+        for (int px = 0; px < MOY_AXS_PANEL_W; px++) {
+            const uint16_t *srow = src
+                + (size_t)(MOY_AXS_PANEL_W - 1 - px) * MOY_AXS_W + py0;
+            uint16_t *d = dst + px;
+            for (int r = 0; r < rows; r++) {
+                *d = srow[r];
+                d += MOY_AXS_PANEL_W;
+            }
+        }
+    }
+}
+
 static void moy_axs_check(esp_err_t err, const char *what) {
     if (err != ESP_OK) {
         mp_raise_msg_varg(&mp_type_OSError, MP_ERROR_TEXT("moy_axs %s: err 0x%x"),
@@ -226,20 +302,19 @@ static void moy_axs_free_all(void) {
     s_tx_err = ESP_OK;
 }
 
-// One panel command over the 1-line opcode path. Bus must NOT be held by a
-// frame (init-time only). `data` is COPIED to the stack first: the init table
-// lives in flash rodata and the SPI DMA cannot read flash-mapped memory --
-// the stack (internal SRAM) is DMA-reachable.
-static void moy_axs_cmd(uint8_t cmd, const uint8_t *data, size_t len) {
+// One panel command over the 1-line opcode path, bus ALREADY ACQUIRED by the
+// caller. `data` is COPIED to the stack first: the init table lives in flash
+// rodata and the SPI DMA cannot read flash-mapped memory -- the stack
+// (internal SRAM) is DMA-reachable.
+static esp_err_t moy_axs_cmd_acquired(uint8_t cmd, const uint8_t *data, size_t len) {
     uint8_t hdr[4] = { AXS_OP_CMD1, 0x00, cmd, 0x00 };
     uint8_t pbuf[16];
     if (len > sizeof(pbuf)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("moy_axs cmd: too many params"));
+        return ESP_ERR_INVALID_ARG;
     }
     if (len) {
         memcpy(pbuf, data, len);
     }
-    moy_axs_check(spi_device_acquire_bus(s_dev, portMAX_DELAY), "acquire");
     spi_transaction_t t = { 0 };
     t.length = 32;
     t.tx_buffer = hdr;
@@ -253,8 +328,29 @@ static void moy_axs_cmd(uint8_t cmd, const uint8_t *data, size_t len) {
         d.tx_buffer = pbuf;
         err = spi_device_polling_transmit(s_dev, &d);
     }
+    return err;
+}
+
+// The same, acquiring the bus itself (init-time / REPL escape hatches).
+static void moy_axs_cmd(uint8_t cmd, const uint8_t *data, size_t len) {
+    moy_axs_check(spi_device_acquire_bus(s_dev, portMAX_DELAY), "acquire");
+    esp_err_t err = moy_axs_cmd_acquired(cmd, data, len);
     spi_device_release_bus(s_dev);
     moy_axs_check(err, "cmd");
+}
+
+// Arm the full-screen write window. Bus must be acquired. See THE WINDOW MUST
+// BE ARMED above -- without this the panel discards every pixel write.
+static esp_err_t moy_axs_arm_window_acquired(void) {
+    uint8_t p[4];
+    p[0] = 0; p[1] = 0;
+    p[2] = (MOY_AXS_PANEL_W - 1) >> 8; p[3] = (MOY_AXS_PANEL_W - 1) & 0xFF;
+    esp_err_t err = moy_axs_cmd_acquired(0x2A, p, 4);   // CASET
+    if (err != ESP_OK) {
+        return err;
+    }
+    p[2] = (MOY_AXS_PANEL_H - 1) >> 8; p[3] = (MOY_AXS_PANEL_H - 1) & 0xFF;
+    return moy_axs_cmd_acquired(0x2B, p, 4);            // RASET
 }
 
 typedef struct {
@@ -452,11 +548,11 @@ static void moy_axs_pump_locked(void) {
             }
         }
         int y = k * MOY_AXS_BAND_ROWS;
-        int rows = (y + MOY_AXS_BAND_ROWS <= MOY_AXS_H)
-                   ? MOY_AXS_BAND_ROWS : (MOY_AXS_H - y);
-        size_t nbytes = (size_t)rows * MOY_AXS_ROW_BYTES;
+        int rows = (y + MOY_AXS_BAND_ROWS <= MOY_AXS_PANEL_H)
+                   ? MOY_AXS_BAND_ROWS : (MOY_AXS_PANEL_H - y);
+        size_t nbytes = (size_t)rows * MOY_AXS_PANEL_ROW_BYTES;
         uint8_t *slot = s_bounce[k % slots];
-        memcpy(slot, s_bnc_src + (size_t)y * MOY_AXS_ROW_BYTES, nbytes);
+        moy_axs_rotate_band(slot, k, rows);
         spi_transaction_t *t = &s_band_trans[k];
         memset(t, 0, sizeof(*t));
         t->length = nbytes * 8;
@@ -512,6 +608,16 @@ static void moy_axs_kick_locked(int n) {
             return;
         }
         s_bus_held = true;
+    }
+    // Arm the window EVERY frame (the discard rule above; also the recovery
+    // point after a timed-out flush, exactly like moy_lcd's arm_window).
+    esp_err_t werr = moy_axs_arm_window_acquired();
+    if (werr != ESP_OK) {
+        s_tx_err = werr;
+        s_tx_errs++;
+        spi_device_release_bus(s_dev);
+        s_bus_held = false;
+        return;
     }
     // The pixel-write header: 1 line, CS held for the bands that follow.
     spi_transaction_t hdr = { 0 };
@@ -686,6 +792,26 @@ static mp_obj_t moy_axs_madctl(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_madctl_obj, moy_axs_madctl);
 
+// set_rot(0|1) -- which 90-degree direction the band rotation ships (the
+// live-glass calibration knob; the default is the owner-confirmed one).
+static mp_obj_t moy_axs_set_rot(mp_obj_t v_in) {
+    mp_int_t v = mp_obj_get_int(v_in);
+    if (v != 0 && v != 1) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rot 0|1"));
+    }
+    if (s_bnc_total != 0) {
+        moy_axs_drain_locked();     // never flip mid-frame
+    }
+    s_rot = (int)v;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_set_rot_obj, moy_axs_set_rot);
+
+static mp_obj_t moy_axs_rot(void) {
+    return MP_OBJ_NEW_SMALL_INT(s_rot);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_rot_obj, moy_axs_rot);
+
 // cmd(c, data=b"") -- raw command escape hatch for bring-up probing (e.g.
 // INVON 0x21 if the colors come up inverted). Drains first.
 static mp_obj_t moy_axs_cmd_py(size_t n_args, const mp_obj_t *a) {
@@ -720,7 +846,7 @@ static mp_obj_t moy_axs_bars(size_t n_args, const mp_obj_t *a) {
     uint8_t *fb = s_fbs[n];
     const int split = MOY_AXS_H * 3 / 4;
     for (int y = 0; y < MOY_AXS_H; y++) {
-        uint8_t *row = fb + (size_t)y * MOY_AXS_ROW_BYTES;
+        uint8_t *row = fb + (size_t)y * MOY_AXS_W * 2;
         for (int x = 0; x < MOY_AXS_W; x++) {
             uint16_t c;
             if (y < split) {
@@ -774,6 +900,8 @@ static const mp_rom_map_elem_t moy_axs_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_backlight),  MP_ROM_PTR(&moy_axs_backlight_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_madctl), MP_ROM_PTR(&moy_axs_set_madctl_obj) },
     { MP_ROM_QSTR(MP_QSTR_madctl),     MP_ROM_PTR(&moy_axs_madctl_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_rot),    MP_ROM_PTR(&moy_axs_set_rot_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rot),        MP_ROM_PTR(&moy_axs_rot_obj) },
     { MP_ROM_QSTR(MP_QSTR_cmd),        MP_ROM_PTR(&moy_axs_cmd_obj) },
     { MP_ROM_QSTR(MP_QSTR_bars),       MP_ROM_PTR(&moy_axs_bars_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats),      MP_ROM_PTR(&moy_axs_stats_obj) },
