@@ -109,7 +109,22 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
     480x320. The lever is the launcher first-paint diet, not the driver.
   * lived pain: entering a game with no way out (the touch-only exit
     gesture, already on #202) -- the owner had to power cycle to leave a
-    cart. Rising priority.
+    cart. Rising priority (a paired BLE keyboard's hold-BACKSPACE now
+    also serves).
+  * **the scroll feel, closed the same evening** (owner verdict: "perfect,
+    looks better than tdeck"): the drag-hang-then-phantom-fling was the
+    driver waiting the GT911's 400ms no-news bound to believe a lift on a
+    controller whose only silence IS the lift. Fixed in device/axs_touch.py
+    with measured constants: a 90ms per-controller bound (2x the worst
+    touched gap) plus hold-window EXTRAPOLATION (the pointer glides on its
+    measured velocity through the <=90ms release window instead of
+    freezing -- pixels, not physics: extrapolated frames stay stale for
+    the velocity EMA). A shared-console "still finger" decay rule was
+    built on the wrong model the same day and REVERTED on data -- the
+    trace that killed it (a resting finger streams 88% fresh) is in the
+    console.py docstring. GPIO3 is CONFIRMED the touch INT (pulses while
+    touched, silent after lift) -- the recorded next lever if release
+    latency ever needs to drop below ~90ms.
 * 2026-08-18 (first night, on glass, first build) -- **the console runs**:
   * stage 1: `moy_axs` first light on the first attempt -- init accepted,
     banded bounce flush at **19.4ms/frame** (51.6fps ceiling; pump 5.4ms CPU,

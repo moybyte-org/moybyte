@@ -30,51 +30,37 @@ applies to the pass that produced NO successful read -- an I2C error mid-drag
 must hold the point (stale, bounded), never end the gesture (the phantom-
 release lesson, all three clauses in gt911.py's docstring).
 
-THE WEDGE -- the settled story (2026-08-19, one full day of live-unit
-forensics; the interim theories it replaced are in git history):
-
-A CABLE FLASH WEDGES THE TOUCH MCU. After esptool's flash sequence the
-touch half of the bridge streams EIGHT IDENTICAL BYTES per read (a
-per-session constant -- 0xA8/0xB0/0x41/0xAC all observed), finger or no
-finger, forever. Proven PANEL-REAL on a live wedged unit: bit-banged
-SoftI2C on the same pins reads the same constants, so it is not our I2C
-peripheral. Mechanism (consistent, unproven): during download mode the
-QSPI pins float, the bridge parses line noise as commands, and the shared
-touch 8051 crashes -- the same class of insult as the MADCTL MV
-experiments that produced the first wedge.
-
-THERE IS NO SOFTWARE UN-WEDGE. Datasheet: the touch MCU's only reset is
-the RSTN pin (5ms pulse, points after 200ms), which this board ties to
-its power-on circuit, not a GPIO. Eliminated empirically on a live wedged
-unit: display-path SWRESET (0x01) + full re-init, I2C SWRESET to 0x3B,
-I2C general-call reset (nobody ACKs 0x00), display sleep/wake cycling,
-and both read-frame variants (8- and 14-byte). ONLY A POWER DRAIN
-restarts it -- when it stays stuck. OBSERVED 2026-08-19, same day: the
-post-flash constant state can also SELF-CLEAR (the detector announced a
-wedge at boot and the owner found touch working later, no replug) -- so
-the rule is: if touch is dead after a cable flash, serial says which
-state it is in, a replug always fixes it, and it may come back on its
-own. OTA installs never cut panel power and never wedge.
-
-Residual mystery, recorded so nobody rebuilds a theory on it: one session
-showed a probe instance reading constants minutes before AND after the
-console's own instance handled real touches -- either a transient derail
-that self-healed or an instance-local effect. Diagnose through the
-running console's own object (dev channel `py`), never a side probe.
+THE CONSTANT-BYTE STREAM IS THE IDLE FILLER -- the FINAL story
+(2026-08-19 evening, after a full day of theories each killed by better
+data; the arc is in git history and #202, kept there as a lesson in
+diagnosing with side probes). Reads while NOTHING touches the glass
+return eight identical bytes whose value varies per power-up
+(0xA8/0xB0/0x41/0xAC all observed). That is NORMAL. It was misread, in
+order, as: a bridge MCU wedged by MADCTL experiments, a second-instance
+I2C artifact, and a cable-flash-induced crash needing a power cycle --
+because every probe that "confirmed" those theories happened to sample
+while no finger was on the glass. What the controller actually does,
+measured through the live console's own driver: STREAM ~55-60Hz reports
+while touched (moving OR resting -- a 5s held-still trace read 88%
+fresh, worst touched gap ~50ms) and return pure filler once lifted.
+The filler IS the lift signal; the driver's 90ms no-news bound below is
+built on exactly that.
 
 THE BOOT RACE is separate and real: the constructor's single probe read
 can lose (fresh boot, controller settling) and `available` used to latch
-False for the session. The ctor now retries and poll() re-probes every
-~2s. The constant-byte DETECTOR below names the wedge on serial after
-~5s, because the silent version reads exactly like "nobody is touching
-the screen" and cost a debugging session; it caught its first live wedge
-the day it shipped.
+False for the session -- the one genuinely dead-touch episode. The ctor
+now retries and poll() re-probes every ~2s. Diagnose this driver through
+the running console's own object (dev channel `py`), never a fresh side
+instance or SoftI2C -- an idle-time probe reads filler and looks exactly
+like the disproven "wedge".
 """
 
 try:                                    # device: staged flat namespace
     from gt911 import HeldPoint
+    from ticks import _ticks_ms, _ticks_diff
 except ImportError:                     # host tests
     from device.gt911 import HeldPoint
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 # The read-touchpad command, verbatim from ESPHome (11 bytes; the trailing
 # zeros are part of the command).
@@ -101,11 +87,32 @@ class Touch:
         self.available = False
         self.raw = None          # last raw coords (pre-mapping), for calibrate
         self._hp = HeldPoint()
+        # THE PER-CONTROLLER NO-NEWS BOUND (2026-08-19, measured on glass).
+        # HeldPoint's 400ms default is sized for the GT911's #74 stall
+        # clusters. This controller STREAMS while touched -- moving OR
+        # resting: a 5s held-still trace read 88% fresh at ~55Hz, worst
+        # touched gap 3 frames (~50ms) -- and goes SILENT only after a lift.
+        # So no-news past ~2x the worst touched gap IS the lift: 90ms turns
+        # "release" from a 400ms hold-expiry (the fling launched from
+        # 400ms-stale velocity -- the drag-hang-then-move bug) into a prompt
+        # one, with the velocity still current.
+        self._hp.HOLD_SAMPLE_MS = 90
+        # HOLD-WINDOW EXTRAPOLATION (same session, the owner's felt tail:
+        # "goes fast, slows down a bit, speeds up again"). Freezing the held
+        # point makes the <=90ms between a lift and its inferred release a
+        # visible stall in the middle of a flick. During the hold this driver
+        # EXTRAPOLATES the pointer along its measured velocity instead: a
+        # lift glides seamlessly into the fling, and the rare mid-touch gap
+        # (worst measured: 3 frames) gets corrected by a few pixels at the
+        # next real sample. The extrapolated frames keep fresh=False, so the
+        # kinetic velocity EMA never measures a sample the hardware never
+        # took -- this moves PIXELS, not physics.
+        self._vx = 0.0               # mapped px/ms, EMA over fresh samples
+        self._vy = 0.0
+        self._fx = 0                 # last FRESH mapped point + its clock
+        self._fy = 0
+        self._ft = 0
         self._i2c = i2c
-        # Wedge detector state (see THE WEDGE above): consecutive reads that
-        # were 8 identical bytes, and whether the one-shot warning fired.
-        self._const_n = 0
-        self._wedge_said = False
         self._reprobe_n = 0
         try:
             if self._i2c is None:
@@ -158,28 +165,12 @@ class Touch:
         try:
             d = self._read()
         except Exception:  # noqa: BLE001 -- a flaky read = no news, never a release
-            return self._hp.hold()
+            return self._extrapolate(self._hp.hold())
         if d[0] != 0:
-            # Not a touch report (the controller talks other frames too):
-            # no news, same clause as a flaky read. But COUNT the wedge
-            # signature -- 8 identical bytes, every read, forever -- and name
-            # it once after ~5s of it, because it otherwise reads exactly
-            # like an untouched screen (THE WEDGE, module docstring).
-            if (d[0] == d[1] == d[2] == d[3] == d[4] == d[5] == d[6] == d[7]):
-                self._const_n += 1
-                if self._const_n == 300 and not self._wedge_said:
-                    self._wedge_said = True
-                    print("Moybyte AXS touch: constant 0x%02x responses -- "
-                          "the bridge's touch MCU is wedged; POWER CYCLE the "
-                          "board (no reset line, SWRESET does not clear it)"
-                          % d[0])
-            else:
-                self._const_n = 0
-            return self._hp.hold()
-        self._const_n = 0
-        if self._wedge_said:
-            self._wedge_said = False
-            print("Moybyte AXS touch: real reports again -- wedge cleared")
+            # Not a touch report: the IDLE FILLER (docstring). While a finger
+            # is held this is a rare 1-3 frame gap -- extrapolate through it;
+            # past the 90ms bound it is the lift.
+            return self._extrapolate(self._hp.hold())
         if d[1] == 0:
             return self._hp.release()
         x = ((d[2] & 0x0F) << 8) | d[3]
@@ -195,4 +186,40 @@ class Touch:
             x = self.w - 1
         if y >= self.h:
             y = self.h - 1
-        return self._hp.sample(x, y)
+        # Velocity bookkeeping for the hold-window extrapolation (mapped px/ms;
+        # a press EDGE resets it -- the previous gesture's speed must not leak).
+        now = _ticks_ms()
+        was_down = self._hp.down
+        r = self._hp.sample(x, y)
+        if was_down:
+            dt = _ticks_diff(now, self._ft)
+            if 0 < dt <= 100:
+                self._vx += ((x - self._fx) / dt - self._vx) * 0.5
+                self._vy += ((y - self._fy) / dt - self._vy) * 0.5
+        else:
+            self._vx = 0.0
+            self._vy = 0.0
+        self._fx = x
+        self._fy = y
+        self._ft = now
+        return r
+
+    def _extrapolate(self, held):
+        """A held (no-news) sample, advanced along the finger's measured
+        velocity -- see the __init__ note. None (a release) passes through."""
+        if held is None:
+            return None
+        dt = _ticks_diff(_ticks_ms(), self._ft)
+        if dt <= 0 or dt > 200:
+            return held
+        x = int(self._fx + self._vx * dt)
+        y = int(self._fy + self._vy * dt)
+        if x < 0:
+            x = 0
+        elif x >= self.w:
+            x = self.w - 1
+        if y < 0:
+            y = 0
+        elif y >= self.h:
+            y = self.h - 1
+        return (x, y, held[2])

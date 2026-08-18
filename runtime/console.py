@@ -4500,7 +4500,20 @@ class Workstation:
         p4_input.Touch does it for the same reason device_input.Touch does,
         which it did not until 2026-08-15 -- it held the point and flagged
         nothing, so this docstring's old claim that the P4 "samples every frame"
-        described the bug rather than the board."""
+        described the bug rather than the board.
+
+        (A "third rule" -- charge stale stretches past a threshold as real dt
+        so a silent still finger decays the fling -- was built here on
+        2026-08-19 and REVERTED the same day, on data: the theory said the
+        Guition's AXS15231 goes quiet when a finger rests, and a 5s
+        held-still trace said otherwise -- 88% of hold frames FRESH, ~55Hz of
+        same-position reports whose zero deltas decay the velocity exactly
+        like the GT911's. The controller's only true silence is after a LIFT,
+        and the defect that motivated the rule was the driver waiting the
+        GT911's 400ms hold bound to believe one -- fixed where it belongs, in
+        device/axs_touch.py's per-controller bound. The rule meanwhile killed
+        real flicks dead: a lift's 400ms silence crossed the threshold and
+        decayed the velocity to zero before the release ever fired.)"""
         dt = self._frame_dt_ms
         if getattr(p, "fresh", True):
             self._pointer_dt_ms = min(dt + self._stale_ptr_ms, 100.0)
