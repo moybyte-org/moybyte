@@ -28,7 +28,11 @@ from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
 
 GAME_W, GAME_H = 320, 240
-FONT_SCALE = 1                 # 320px-wide glass: geometry, not magnification
+FONT_SCALE = 2                 # owner call 2026-08-19: at 1x the 3.5" glass
+                               # was untappable ("impossible to tap anything").
+                               # The #39 layouts reflow at 480x320@2 -- 240x160
+                               # font units, NARROWER than the 320x240 base,
+                               # verified on the host demo tour before flashing.
 # Internal-flash store root -- the P4's arrangement and the P4's hard-learned
 # name rule: NOT "/moybyte/..." (a root-level VFS dir named like a frozen
 # module SHADOWS it; '' precedes '.frozen' on sys.path).

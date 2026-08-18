@@ -90,6 +90,24 @@ import moybyte_shell as s; s.MODE = "touch"; s.main()
 
 ## Bring-up log
 
+* 2026-08-19 (evening) -- **the owner calls the board PORTED.** Two closers
+  the same session:
+  * **the system UI went font_scale 2** (owner call: at 1x the 3.5" glass was
+    untappable -- "impossible to tap anything"). One constant in
+    moy_runtime.py; the #39 responsive layouts reflow at 480x320@2, which is
+    240x160 font units -- NARROWER than the 320x240 base design, a
+    combination no tier had run -- verified on the host demo tour before
+    flashing, then on-glass suite 10/10. Play rates untouched (a game owns
+    the whole canvas; font scale is system chrome only).
+  * **the Bench twins ran on this board for the first time** (over the dev
+    channel, feeder image; JSON via tools/p4_cart_bench.py --attach). The
+    floors MATCH THE T-DECK REFEREE: idle 62.5fps p50=16ms, silent/sound
+    scenes 55.5fps p50=18ms, sound ≡ silent -- despite the rotate and the
+    2x-class glass, which is the fold + game window + core-0 feeder chain
+    doing its job. Lua logic 2.2x Python (45.4 vs 32.2fps), draw paths equal
+    within the clock -- the #66 twin-audit result reproduced. Numbers in
+    #202; cross-session diffs need a fresh-boot same-shape session (the
+    ledger's rule).
 * 2026-08-18 -- port authored (stage 0 skeleton through stage 6 code):
   moy_axs + guition_panel + axs_touch + run_desktop; `make test` green with
   the board in the staging-closure/board-toml suites.
