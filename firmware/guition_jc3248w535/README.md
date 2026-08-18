@@ -40,10 +40,26 @@ byte-identical to the composite path on the device itself
 windowed counter tracks folded flushes 1:1 minus the bezel-layers. Overlays
 disarm through the shared frame walk and pay the old cost. Measured ladder
 on this glass (Star Catcher / Sakura Lua): 80MHz bring-up 24/21 -> 120MHz
-MSPI 30/27 -> fold 35/30 -> game window **42/34fps**. The remaining gap to
-the T-Deck's 60/50 is CPU-side (busy 23ms); recorded follow-ups: the pump's
-SPI idle rose with the small bands (~4ms starved -- slot count / feed pacing
-tuning), and pump-on-core-1 stays the strategic lever.
+MSPI 30/27 -> fold 35/30 -> game window 42/34 -> **core-0 feeder 53/43fps**.
+
+**The feed left the VM core** (2026-08-19, the ledger's recorded strategic
+lever, landed the same evening as the window): MicroPython's task is pinned
+to core 1 on this port, so the band feed -- the rotate/fold synthesis plus
+the queueing, ~7-8ms/frame -- used to bill every frame AND starve whenever
+the VM sat inside a long native call (a moycore tick pumps nothing; the
+flush wall measured 12.4ms against a 7.7ms game-window transfer). `moy_axs`
+now runs the WHOLE flush on a FreeRTOS task pinned to core 0 (the CORE-0
+FEEDER block in the C carries the handoff protocol), woken per band by the
+SPI done-ISR, itself pinned to core 0. The 2ms soft pump timer and the
+DeviceCanvas draw-op pump pokes are retired on this board (`moy_axs.pump`
+survives as a no-op; tdeck_panel keeps both -- moy_lcd still feeds from the
+VM core). Measured on this glass: MP-side flush block 0ms, SPI starvation
+0us (was ~4ms), flush wall 9.4ms, 0 timeouts / 0 tx errors over a
+5,000-flush soak, `fold_test` re-proven at 0 mismatched bytes, on-glass
+suite 10/10. The remaining gap to the T-Deck's 60/50 is now the VM core's
+own frame (cart logic+render + the composite snapshot); recorded next
+levers: per-cart render diets and the launcher first-paint diet (the
+gesture-transition spike, which the feeder does not touch).
 
 
 `native/moy_axs` -- raw `spi_master`, NOT esp_lcd, because the AXS15231B's

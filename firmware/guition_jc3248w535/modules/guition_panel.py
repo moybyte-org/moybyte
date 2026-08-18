@@ -19,14 +19,22 @@ The flush arithmetic this board inherits: 480x320x2 = 307,200 B is ~15.4ms at
 QSPI 40MHz x 4 lines -- and since the landscape decision (2026-08-18/19, the
 panel's MADCTL MV being dead on this glass) the band copy is a ROTATE-gather
 rather than a memcpy: same PSRAM read traffic, plus an in-loop scatter into
-the uncached internal-SRAM bounce that costs ~2ms/frame of CPU (moy_axs's
-LANDSCAPE block carries the design; pump_stats' pump= carries the measurement). Paid synchronously that caps the loop near 60fps before
-a pixel is drawn -- the T-Deck's exact pre-#66 shape -- so the kick/pump/drain
+the uncached internal-SRAM bounce (moy_axs's LANDSCAPE block carries the
+design; pump_stats' pump= carries the measurement). The kick/pump/drain
 overlap ships from day one, with ASYNC_FLUSH the one-flag serialized fallback
 if the glass disagrees (a QSPI wrinkle the ST7789 never had: the whole frame
 ships under ONE CS assertion, so a starved pump leaves CS low with the clock
 idle mid-frame; the bridge latches per byte and should not care, but "should"
 is what the flag is for).
+
+THE FEED LEFT THE VM CORE (2026-08-19, #202's recorded strategic lever):
+moy_axs runs the whole band feed on a FreeRTOS task pinned to core 0 --
+MicroPython's task is pinned to core 1 on this port -- woken per band by the
+SPI done-ISR. So this compositor has NO pump timer and does NOT export
+`pump_if_pending`: the 2ms soft-timer feeder and DeviceCanvas's every-N-ops
+draw pokes are retired on this board (they fed a pump that no longer needs
+the VM core; `moy_axs.pump` survives as a no-op for the verb-set shape).
+tdeck_panel keeps both -- its moy_lcd still feeds from the VM core.
 """
 
 WIDTH = 480
@@ -36,12 +44,6 @@ HEIGHT = 320
 # defined at all (DeviceCanvas getattrs it and degrades) and sync() is a drain
 # that always finds nothing. The one-reflash fallback if the panel tears.
 ASYNC_FLUSH = True
-
-# Soft-timer pump period -- the T-Deck's shipped 2ms (a band here is ~1.5ms of
-# transfer, two slots buffer ~3ms, so a 2ms feeder stays ahead). Timer 3 of
-# the S3's four; nothing else in this image takes one. 0 disables the timer.
-PUMP_TIMER_MS = 2
-PUMP_TIMER_ID = 3
 
 
 class GuitionCompositor:
@@ -81,20 +83,8 @@ class GuitionCompositor:
         self._async = bool(async_flush) and len(self._fbs) > 1 \
             and hasattr(moy_axs, "kick")
         self.bounce_flush = self._async
-        self._pump_timer = None
-        if self._async:
-            self.pump_if_pending = moy_axs.pump
-            if PUMP_TIMER_MS:
-                try:
-                    from machine import Timer
-                    self._pump_timer = Timer(PUMP_TIMER_ID)
-                    self._pump_timer.init(period=PUMP_TIMER_MS,
-                                          mode=Timer.PERIODIC,
-                                          callback=moy_axs.pump)
-                except Exception as exc:  # noqa: BLE001
-                    print("Moybyte panel: pump timer unavailable "
-                          "(draw-poke + drain only):", exc)
-                    self._pump_timer = None
+        # No pump timer and no pump_if_pending here -- the CORE-0 FEEDER owns
+        # the feed (see the module docstring).
 
     # -- the contract --------------------------------------------------------
 
