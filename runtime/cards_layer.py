@@ -568,20 +568,23 @@ class CardsLayer:
         cv = ws.sys_canvas
         fs = self.layout.fs
         t = self._t
-        i, f = row["i"], row["f"]
+        i = row["i"]
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
         sel = (i == self.msel)
-        if sel:
-            cv.rect(x, y - 1 * fs, w, h, t["row"])
         fg = t["sel_text"] if sel else t["text"]
         disp = row["display"]
+        # ONE list row: the selection field (the card's full height, starting a
+        # pixel above its text) plus the card's label line, which sits 18px in on
+        # a stepper card (clear of the -/+ glyphs) and 2px in on a visual one.
+        # The stepper glyphs and the picture displays below are this card's own
+        # CONTENT -- `row` draws the row, not the card.
+        _ui.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
+                colors=(t["row"] if sel else None, fg, None), edge=False,
+                pad=(18 if disp is None else 2) * fs, text_dy=1 * fs, fs=fs)
         if disp is None:                                # today's plain text card
             ws._glyph("minus", (x, y, 14 * fs, 14 * fs), t["accent"], cv)
-            cv.print(self.card_text(i), x + 18 * fs, y, fg, 2)
             ws._glyph("plus", (x + w - 14 * fs, y, 14 * fs, 14 * fs), t["accent"], cv)
             return
-        # Visual card: a small label line (the SECONDARY text cue) + a picture row.
-        cv.print(self.card_text(i), x + 2 * fs, y, fg, 1)
         if disp == "gauge":
             self._draw_gauge(row)
         elif disp == "count":
@@ -606,8 +609,12 @@ class CardsLayer:
         f = row["f"]
         key = f.get("key") if isinstance(f, dict) else None
         label = str(key) if key else ("card %d" % row["i"])
-        cv.rect(x, y, w, h, NAMES["dark_grey"])
-        cv.rectb(x, y, w, h, NAMES["red"])
+        # The row FRAME only: the "!" and the reason are content with their own
+        # budget (the message is already clipped to 32 chars, which `row`'s
+        # symmetric pad would re-clip to 30).
+        _ui.row(cv, self._t, (x, y, w, h), None,
+                colors=(NAMES["dark_grey"], NAMES["light_grey"], NAMES["red"]),
+                fs=fs)
         cv.print("!", x + 4 * fs, y + max(0, (h - 8 * fs) // 2), NAMES["red"], 2)
         msg = ("%s: %s" % (label, row["error"]))[:32]
         cv.print(msg, x + 20 * fs, y + max(0, (h - 8) // 2), NAMES["light_grey"], 1)
@@ -681,20 +688,29 @@ class CardsLayer:
         sel_k = self._choice_index(f, cur)
         tiles = self._resolve_tiles(f) if row["display"] == "sprite-tiles" else None
         icons = f.get("icons") or []
+        t = self._t
+        use_tiles = tiles is not None and ws.project.sheet is not None
         for k, (cx, cy, cw, ch) in self._choice_cells(row):
             chosen = (k == sel_k)
-            t = self._t
-            cv.rect(cx, cy, cw, ch, NAMES["black"] if chosen else t["cell"])
-            cv.rectb(cx, cy, cw, ch, NAMES["yellow"] if chosen else t["cell_edge"])
-            if tiles is not None and ws.project.sheet is not None:
+            # A choice IS a grid cell. The FRAME is the toolkit's; the picture --
+            # a real sprite tile or a chrome glyph -- is this card's own, which is
+            # why `cell` hands back the art rect instead of trying to draw it.
+            # Deliberately NO hit rect per cell: `_choice_cells` hit-tests
+            # arithmetically and `cell` takes no `hits` argument by design.
+            img = None
+            glyph = None
+            if use_tiles:
                 img = ws.project.sheet.tile_image(tiles[k] if k < len(tiles) else 0, -1)
-                if img is not None:
-                    cv.spr(img, cx + (cw - 16 * fs) // 2, cy + (ch - 16 * fs) // 2,
-                           2 * fs)
             else:
                 glyph = icons[k] if k < len(icons) else "dot"
-                ws._glyph(glyph, (cx + (cw - 14 * fs) // 2, cy + (ch - 14 * fs) // 2,
-                                  14 * fs, 14 * fs), NAMES["white"], cv)
+            art = _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+                           colors=(NAMES["black"] if chosen else t["cell"],
+                                   NAMES["white"],
+                                   NAMES["yellow"] if chosen else t["cell_edge"]),
+                           glyph=glyph, glyph_draw=ws._glyph)
+            if img is not None:
+                cv.spr(img, art[0] + (art[2] - 16 * fs) // 2,
+                       art[1] + (art[3] - 16 * fs) // 2, 2 * fs)
 
     # Each bg-thumbs choice is drawn as a tiny "what the screen will look like"
     # preview. A cart reads the chosen name in cfg("bg") and paints to match.
@@ -731,11 +747,16 @@ class CardsLayer:
         f = row["f"]
         cur = ws.project.config.get(f["key"], f.get("default"))
         sel_k = self._choice_index(f, cur)
+        t = self._t
         for k, (cx, cy, cw, ch) in self._choice_cells(row):
+            # A FRAME-ONLY cell (`field` None): the picture is a hand-painted
+            # preview of the resulting background, so it draws first into its own
+            # inset rect and the cell puts the selection border around it.
             self._draw_bg_thumb(f["choices"][k],
                                 (cx + 1 * fs, cy + 1 * fs, cw - 2 * fs, ch - 2 * fs))
-            cv.rectb(cx, cy, cw, ch,
-                     NAMES["yellow"] if k == sel_k else self._t["cell_edge"])
+            _ui.cell(cv, t, (cx, cy, cw, ch), pad=0, caption_h=0, fs=fs,
+                     colors=(None, t["cell_edge"],
+                             NAMES["yellow"] if k == sel_k else t["cell_edge"]))
 
     # -- CART INFO: manifest title/author editing (#94) ----------------------
     #

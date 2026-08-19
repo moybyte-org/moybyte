@@ -56,6 +56,11 @@ try:
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
     from runtime.chrome import _GLYPHS, _gbtn as _chrome_gbtn
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
+
 # Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
 # SONG (a column of SFX-id slots making the looping phrase). The cursor picks a
@@ -519,14 +524,18 @@ class MusicEditorUI:
         _chrome_gbtn(self.ws, self._NAMES, kind, label, rect, fill, cv)
 
     def _mu_tick(self, rect, label):
-        """A small +/- tick button (smaller text than _btn for the title-strip nudges)."""
+        """A small +/- tick button (smaller text than _btn for the title-strip
+        nudges). Drawn as a `ui.row` with an explicit `colors=` triple: the
+        palette is a frozen literal set with no theme token behind it, which is
+        the case that escape hatch exists for. `pad`/`text_dy` carry the frozen
+        centring -- the label is one character, so the row's own clip is a no-op
+        at every font scale."""
         x, y, w, h = rect
         NAMES = self._NAMES
-        cv = self.ws.sys_canvas
         fs = self.layout.fs
-        cv.rect(x, y, w, h, NAMES["blue"])
-        cv.rectb(x, y, w, h, NAMES["white"])
-        cv.print(label, x + (w - 8 * fs) // 2, y + (h - 8 * fs) // 2, NAMES["black"], 1)
+        _ui.row(self.ws.sys_canvas, self.ws.theme_colors, rect, label,
+                colors=(NAMES["blue"], NAMES["black"], NAMES["white"]),
+                pad=(w - 8 * fs) // 2, text_dy=(h - 8 * fs) // 2, fs=fs)
 
     def _mu_visible_top(self, cur, total):
         """First list row to show so the cursor stays in view (simple scrolloff)."""
