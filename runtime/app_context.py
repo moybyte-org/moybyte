@@ -406,6 +406,22 @@ class Files:
         """Stamp `blob` with where it was copied FROM and that source's sig."""
         return self._ws.carts_store.stamp_provenance(blob, kind, name, sig)
 
+    # -- the moytext codec (#181) --------------------------------------------
+    #
+    # Pure functions on the store, same shape as the image codec above. Here
+    # because a USER APP cart saving a note must write the blob Writer and Files
+    # can READ -- a plain string in a `.moytext` decodes to nothing, silently,
+    # and looks exactly like a save that did not happen.
+
+    def encode_text(self, body):
+        store = self._ws.carts_store
+        return store.encode_text(body) if store is not None else None
+
+    def decode_text(self, blob):
+        """The doc body as a list of LINES ([] on anything malformed)."""
+        store = self._ws.carts_store
+        return store.decode_text(blob) if (store is not None and blob) else []
+
     def provenance(self, blob):
         """`(src_key, sig)` off a stamped copy, or `(None, None)`."""
         store = self._ws.carts_store

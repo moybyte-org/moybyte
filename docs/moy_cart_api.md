@@ -505,6 +505,40 @@ Both `net` and `on_net` are **only present** when the manifest grants
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
 > game logic off the wall clock — otherwise the two screens drift apart.
 
+## Turning a cart into an APP (`#181`)
+
+A cart whose manifest says `"type": "app"` is a tool rather than a game. The
+console runs it **with its own top bar** — a title and an X — so it can never trap
+you, and it can ask for a few of the console's own powers by naming them in
+`permissions`, exactly like `"multiplayer"` above:
+
+```json
+"type": "app",
+"permissions": ["graphics", "input", "files:docs", "prefs"]
+```
+
+| permission | what the cart gets |
+|---|---|
+| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Writer and Files show) |
+| `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
+| `appearance` | `set_theme(name)` / `themes()` |
+| `launch` | `open_app(id)` |
+
+Every app cart also gets four names with no permission needed, because they are
+how an app draws rather than what it may touch: **`screen()`** (the canvas),
+**`theme()`** (the console's live colors), **`bar_h()`** (how many rows the top
+bar owns — draw below them) and **`ui`**, the console's own widget toolkit
+(buttons, rows, panels, rect maths, `ui.Hits`). Storage answers `(value, error)`
+and never crashes, so there is no `try` to write.
+
+Anything you did not ask for **is not there** — no `carts`, no shell. Writing
+that name is an ordinary "name is not defined" error, like a typo.
+
+`system_carts/notes.moy` is a small worked example: it types, saves, and lists
+what it saved. The full rules (what is never grantable, and how to make an app
+reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
+320×240) are in `docs/app_api_v1.md`.
+
 ## Audio
 
 | call | does |

@@ -136,6 +136,28 @@ _COVER_SLICE_UNBOUNDED = 10 ** 9   # ms: build every cover in its own frame
 # a tilemap, a scene and a sound bank, so all seven tabs have real content.
 _EDITOR_CART = "Star Catcher"
 
+# Seed carts the golden matrix deliberately does NOT show.
+#
+# The launcher shelf, the picker grid and the desk icon column render REAL
+# seeded content (see "What moves these goldens" above), so without this list
+# these 87 goldens are a function of `system_carts/` and merely ADDING a cart
+# turns five configurations red for a reason that is not a pixel. That is the
+# worst kind of red: it trains the reader to re-baseline, which is precisely the
+# laundering this file exists to prevent.
+#
+# So a content addition is either EXCLUDED here -- one line, with a `why`, the
+# `board.toml` deny convention -- or deliberately re-baselined. Both are
+# decisions; neither is a shrug. Excluding a cart costs nothing this file
+# measures: no golden here renders a cart's own pixels (a running cart is the
+# game domain, pinned by tests/test_spec_conformance.py), only the tile the
+# shelf draws for it, and 34 tiles already exercise every shelf branch there is.
+GOLDEN_EXCLUDE = {
+    "Notes": "the #181 user-app demo cart, added after the Phase 0 baseline. "
+             "It is content; the shell paths it exercises (the app bar over a "
+             "cart, the permission-gated namespace) are pinned by "
+             "tests/test_user_apps.py.",
+}
+
 # The Editor tab ladder and the system-app roster. Both are pinned against the
 # live registries below (test_tab_ladder_is_fully_covered /
 # test_every_registered_app_is_covered), so adding a tab or an app without
@@ -229,6 +251,9 @@ def _build(cfg, carts_dir):
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
     ws.set_theme_variant(cfg["variant"], persist=False)
+    keep = [c for c in ws._all_carts if c.get("title") not in GOLDEN_EXCLUDE]
+    if len(keep) != len(ws._all_carts):
+        ws._apply_items(keep)            # pin the roster -- see GOLDEN_EXCLUDE
     return ws
 
 

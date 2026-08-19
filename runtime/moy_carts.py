@@ -458,6 +458,17 @@ def decode_table(blob):
     return rows
 
 
+def encode_text(body):
+    """A doc body string -> the `moytext-v1` blob a `.moytext` file holds.
+
+    The inverse of `decode_text`, put here in the store beside it (#181) so a
+    USER APP cart can write a document Writer and Files can actually read --
+    `ctx.files.encode_text` is what reaches it, and `system_api.ScopedFiles`
+    what a cart calls. `writer_app._encode` is the same two lines and predates
+    this; it is a de-duplication waiting for someone who owns that file."""
+    return json.dumps({"format": "moytext-v1", "body": str(body)})
+
+
 def decode_text(blob):
     """A moytext-v1 blob -> the doc body split into a list of lines. A blank/absent
     body is []. Anything malformed yields []."""

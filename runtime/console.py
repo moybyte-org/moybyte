@@ -298,6 +298,23 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import AppContext
 
+# Crash isolation for content the shell runs on the kid's behalf (#160,
+# ui_refactor_2026-08 Phase 8): three failed opens and an app cart stops being
+# offered -- see runtime/crash_guard.py for why an in-process except cannot do
+# this job.
+try:
+    from crash_guard import CrashGuard
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.crash_guard import CrashGuard
+
+# USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
+# over AppContext that a `type: "app"` CART is handed. The shell needs only its
+# identity helper here; the Player is what builds the namespace.
+try:
+    import system_api
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import system_api
+
 
 def _resolve_app_entry(entry):
     """Resolve an app declaration's "module:Class" to the class itself.
@@ -809,6 +826,12 @@ class Workstation:
         self._run_canvas_stock = None      # what self.canvas was before the bind
         self._run_canvas_shared = False    # True when the bind promoted stock to system
         self._run_canvas_cache = {}        # {(w, h): canvas} -- 3 sizes max, reused
+        # A RESPONSIVE app cart (#181) draws on the SYSTEM canvas instead of the
+        # fixed game one; a plain attribute (never a property -- the app-context
+        # perf convention) so the chrome can read it once per frame. False for
+        # every game, every fixed app cart, and every shipped system app, which
+        # is what keeps the pixel goldens where they are.
+        self.app_full_canvas = False
         # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
         # visible effect on a distinct SYSTEM canvas that can render scaled text; in
         # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
@@ -1046,6 +1069,11 @@ class Workstation:
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
         # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
         self.system = {}              # system settings dict (moy_carts system.json)
+        # Crash isolation (#160 / Phase 8). The store is passed as a CALLABLE
+        # because load_system() rebinds self.system to what it read off the
+        # card -- a guard holding this boot-time dict would count strikes into
+        # an object nobody ever writes.
+        self.app_guard = CrashGuard(lambda: self.system, self._persist_system)
         self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
                                       # the single source; select_wallpaper drives it.
         # The wallpaper RENDERING + compiled-cart cache is its own component (#28); both
@@ -1447,6 +1475,40 @@ class Workstation:
         gated APIs."""
         perms = self.cart.get("permissions") if self.cart else None
         return bool(perms) and name in perms
+
+    # -- user apps: identity + the crash guard (#181 / #160) -----------------
+
+    def app_cart_id(self, cart):
+        """The stable identity a USER APP cart's prefs namespace and crash
+        strikes are keyed by (`system_api.app_id_for`: the title slug, so it
+        survives the host-folder / device-folder mismatch)."""
+        return system_api.app_id_for(cart)
+
+    def is_user_app(self, cart):
+        """True when `cart` is an app cart the Player runs as a USER APP -- a
+        `type: "app"` cart that no registered shell app claims as its identity.
+
+        The claim check matters: `calc.moy` is also `type: "app"`, but the
+        launcher dispatches it to `CalcAppLayer` and its `main.py` is only the
+        older-shell fallback body."""
+        return (cart is not None and cart.get("type") == "app"
+                and not self.is_system_app(cart))
+
+    def app_bar_h(self):
+        """Rows the exitable "tool" strip owns on top of a running app cart's
+        surface -- what `bar_h()` reports to a USER APP so it can draw below the
+        chrome instead of hardcoding 18 and breaking at font scale 2."""
+        return self.bar_layer._bar_h("tool")
+
+    def cart_broken(self, cart):
+        """True when the crash guard has turned this app cart OFF (#160).
+
+        Read by the Player (which refuses the run and opens the panel) and
+        available to any surface that wants to badge it -- the cart stays in the
+        Editor picker either way, because editing it is how it gets fixed."""
+        if not self.is_user_app(cart):
+            return False
+        return self.app_guard.disabled(system_api.app_id_for(cart))
 
     # -- desktop wallpaper (#28) ---------------------------------------------
     #
@@ -4758,10 +4820,55 @@ class Workstation:
         self.canvas = small
         return True
 
+    def bind_app_canvas(self):
+        """Bind the SYSTEM canvas as a RESPONSIVE app cart's draw surface (#181).
+
+        The sibling of `bind_run_canvas`, and its opposite direction: that one
+        gives a cart a SMALLER raster than the glass, this one gives an app cart
+        the whole responsive system surface so `_layout(w, h, fs)` means
+        something. Because `ws.canvas` then IS `ws.sys_canvas`, every downstream
+        consumer degrades for free -- `composite_game` short-circuits on the
+        identity check it has always had, `viewport()` reads (0, 0, 1) and
+        `game_xy` becomes the identity, so the pointer arrives in the same
+        coordinates the app drew in.
+
+        Returns False on a SHARED-canvas tier (the T-Deck, where the boot canvas
+        IS the glass and the two are already one object): there is nothing to
+        bind and nothing to change, which is exactly why the handheld's pixels
+        cannot move. Released by `release_run_canvas`, on every exit path.
+
+        Also returns False in the windowed DESK world, and that one is not a
+        degradation but a correctness rule -- measured, 2026-08-19. There a cart
+        lives in a WINDOW, and `wm_windowed._draw_player_window` blits
+        `ws.canvas` into it: with the system canvas bound, the window blits the
+        screen into a rectangle OF that screen and the desktop renders as a
+        recursive smear of its own bar. Giving a cart its own window surface is a
+        `wm_windowed` change, which `docs/ui_refactor_2026-08.md` Section 6 puts
+        out of scope -- so in the desk world a responsive cart keeps the fixed
+        raster and is told (320, 240) by `_layout`, which is the truth. From the
+        fullscreen Library (the play world, where `windowed_chrome` is False
+        because the desk is popped) it gets the whole surface."""
+        sc = self._sys_canvas
+        if self.windowed_chrome:
+            return False
+        if sc is None or sc is self.canvas or self._run_canvas is not None:
+            # ...or a cart-declared small canvas already holds the slot: a
+            # manifest asking for 128x128 AND a _layout is contradictory, and
+            # the declared size is the one with a SPEC contract behind it.
+            return False
+        self._run_canvas = sc
+        self._run_canvas_stock = self.canvas
+        self._run_canvas_shared = False
+        self.canvas = sc
+        self.app_full_canvas = True
+        return True
+
     def release_run_canvas(self):
-        """Undo bind_run_canvas at run death (Player.release_world) -- the
-        cart_quit pattern, idempotent. Identity-guarded so a backend that
-        swapped ws.canvas mid-run (the web-view Tee) is never clobbered."""
+        """Undo bind_run_canvas / bind_app_canvas at run death
+        (Player.release_world) -- the cart_quit pattern, idempotent.
+        Identity-guarded so a backend that swapped ws.canvas mid-run (the
+        web-view Tee) is never clobbered."""
+        self.app_full_canvas = False
         stock = self._run_canvas_stock
         if stock is None:
             return

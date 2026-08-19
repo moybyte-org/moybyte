@@ -212,13 +212,109 @@ silently, and on device only.** Forgetting `CART_ORDER` meant the identity cart
 never seeded, so `is_app` never claimed it, so the app was unreachable on
 hardware while working perfectly on the host.
 
+## USER APPS: an app that is nothing but a cart (2026-08-19, #181)
+
+Everything above describes a SHIPPED app -- a Layer class in `runtime/`, frozen
+into the firmware, registered from a manifest. A USER APP is the other kind: an
+ordinary `.moy` cart, editable in the project picker, that asks for shell
+capabilities in its own `manifest.json` and gets them as cart globals.
+
+    "type": "app"
+    "permissions": ["graphics", "input", "files:docs", "prefs"]
+
+The mechanism is `make_system_api(ctx_factory, cart, canvas, bar_h)`
+(`runtime/system_api.py` -- READ IT, it is the authority and carries the policy
+argument for each entry). It is a FILTER over the `AppContext` above and not a
+second interface: it maps each declared permission to a role, calls the same
+`ws.app_context` factory a shipped app goes through, and returns the globals
+those roles publish. The Player merges that into the cart namespace.
+
+**An ungranted capability has NO NAME.** Not a stub, not an object with a nicer
+error -- absent, so touching it is a `NameError` in the cart. That is the same
+gate `wifi` has ridden since #38 and `net` since #65, and `tests/test_user_apps.py`
+proves it with one cart source opened twice, one manifest line apart.
+
+| permission | cart globals |
+|---|---|
+| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name`, scoped to ONE user-files kind (`docs` by default) |
+| `prefs` | `prefs.get` / `prefs.set`, namespaced under the app's own title slug |
+| `appearance` | `set_theme(name)` / `themes()` |
+| `launch` | `open_app(id)` |
+
+Never grantable, whatever a manifest says: `shell`, `carts` (a cart that can
+author carts can escalate itself), `wallpaper`, `artwork`, `damage`, `surface`,
+`clipboard`, `notify`. Firmware update and reboot are not roles at all. The
+enforcement is that the permission table is an ALLOWLIST, so a role nobody
+mapped is ungrantable by construction; a test asserts every role in
+`app_context.ROLES` is classified as one or the other, so ADDING a role forces
+the decision.
+
+Four globals every `type: "app"` cart gets with no permission, because they are
+how an app draws rather than what it may reach: **`ui`** (the real
+`runtime/ui.py`), **`screen()`** (the canvas -- `ui`'s `cv`), **`theme()`** (the
+live tokens -- its `th`), and **`bar_h()`** (rows the host's exitable strip owns;
+draw below them, never hardcode 18).
+
+### The canvas: FIXED by default, responsive by opt-in
+
+A shipped app is responsive because a Layer class can afford to be. A cart
+hardcodes coordinates, so **fixed is the default and there is no way to get the
+other by accident**: the manifest's `canvas` (320x240 unless it says otherwise)
+is the raster, and the WM centres and integer-scales it exactly as it does for a
+game. On the handheld nothing changed at all -- there is no new code on that path.
+
+A cart that defines a top-level `_layout(w, h, fs)` opts INTO the whole system
+surface: it draws on the system canvas, is called once before `_init` and again
+whenever the size or font scale changes, and gets the responsive exitable strip
+instead of the frozen 320-wide cluster. Two cases keep the fixed raster and are
+told so through `_layout`'s own arguments, which is the whole reason it takes
+them: a cart that ALSO declares a small `canvas` (that has a SPEC contract behind
+it), and the windowed DESK world, where a cart lives in a window whose blit
+source is `ws.canvas` -- binding the screen there makes the desktop blit itself.
+From the fullscreen Library the same cart gets the full desktop surface.
+
+Say the honest part out loud: **responsive is real authoring work most app carts
+should not take.** It means no literal coordinates anywhere, a rect-algebra
+layout pass, and testing at more than one size; `W`/`H` are bound once at start
+and go stale, so a responsive cart must read its `_layout` arguments instead.
+The payoff is one app that fills a 7" desktop and a 3.5" handheld. For a
+calculator or a notepad, fixed is the right answer.
+
+### What a user app costs to write
+
+`system_carts/notes.moy` is the worked example: a notepad that types, saves into
+the kid's documents (the same `docs` kind Writer and Files browse -- open one
+there and it is really the same file), lists what it saved and remembers which
+note was open. **~130 lines of cart, no shell code, no registration, no
+`runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
+and re-runs on the device.
+
+    system_carts/notes.moy/manifest.json   "type": "app" + the permissions
+    system_carts/notes.moy/main.py         _init / _update / _draw
+    system_carts/notes.moy/sprites.moygfx  one 8x8 tile: its launcher icon
+
+Compare the shipped path in the checklist below: a Layer class, a `NEEDS` tuple,
+an `app` block, a regenerated `app_decls.py` and a firmware build.
+
+### Crash isolation: three strikes (#160)
+
+The Player has turned a cart exception into the friendly panel plus
+crash-to-code since 2026-07-23. What it cannot catch is a cart that does not
+raise -- a hang, an OOM, a native fault -- and if the thing that died runs
+itself, the next boot runs it again. `runtime/crash_guard.py` marks the app id in
+`system.json` BEFORE the cart's code is compiled and clears it after three
+painted frames; three unhealed opens and the console stops running it, landing
+the next tap on the ordinary error panel whose top bar carries EDIT/CODE. The
+cart stays in the picker, because editing it is how it gets fixed.
+
+Armed for `type: "app"` carts only. Two small settings writes per open is not
+free, and a game that always crashes shows the panel and is not a brick.
+
 ## Non-goals (v1)
 
-- Third-party/kid-installed native apps: `register_app` is a SHELL seam; kid
-  content stays `.moy` carts under the frozen cart API. The capability track in
-  `docs/shell_architecture_v1.md` is where sandboxed app privileges would land,
-  and `NEEDS` is the shape it will take -- `make_system_api(ctx, cart)` is the
-  same filter keyed on a manifest's permissions instead of a class constant.
+- Kid-installed NATIVE apps -- a `runtime/` module in an image the kid did not
+  build. `register_app` is a shell seam and stays one. What #181 asked for is
+  covered by the USER APPS section above: the cart IS the app.
 - Multiple instances of one app.
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped

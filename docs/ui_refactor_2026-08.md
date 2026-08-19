@@ -151,6 +151,11 @@ game canvas, and `make_system_api` as a **filter over `AppContext`** keyed on
 declared permissions. Plus a crash breadcrumb so a kid's broken app cannot
 brick the console (#160-shaped, ~80 lines, needed for wallpapers anyway).
 
+*(Built 2026-08-19 — Phase 7/8 below. The estimate held: `make_system_api` is a
+filter and nothing else, and the canvas binding is a sibling of the
+`bind_run_canvas` the SPEC canvas gate already had. What the estimate missed is
+recorded with the phases, and it was chrome geometry, not privilege.)*
+
 ### 2.4 Three perf guard-rails the plans did not state
 
 Measured on the repo's own unix MicroPython build and scaled by the P4 factor
@@ -290,20 +295,65 @@ modules. *Note:* the source doc's stop-condition grep is unsatisfiable as
 written — its glob catches `editor_app.py` and `host_app.py`, neither of which
 is in scope.
 
-**Phase 7 — user apps.** `make_system_api(ctx, cart)` as a permission-keyed
-filter over `AppContext`; system-canvas binding for `type:"app"` carts (fixed
-size by default, responsive by opt-in when the cart defines `_layout(w,h,fs)`);
-`ui` and `theme()` injected as cart globals. *Gate:* a hand-written app cart
-with `"permissions": ["files"]` opens, draws with `ui`, saves a document — and a
-copy of it *without* the permission finds no `files` name at all.
+**Phase 7 — user apps: LANDED 2026-08-19.** `runtime/system_api.py`
+(`make_system_api`) is the permission-keyed filter over `AppContext`; the shipped
+demo is `system_carts/notes.moy` -- a manifest, a `main.py` and one 8x8 tile,
+~130 lines of cart. The
+permission table, the never-grantable list, the ungated draw globals and the
+canvas rule are documented once, in `docs/app_api_v1.md`'s USER APPS section, and
+argued at length in the module's own docstring; do not re-derive them here.
 
-**Phase 8 — crash isolation.** The #160-shaped breadcrumb: mark the app id in a
-sidecar before `open()`, clear it after N successful painted frames, three
-strikes disables it and shows it as broken in the picker. *Gate:* a cart that
-raises on every open is disabled after three boots.
+Three things the plan did not anticipate, recorded because each was a decision:
+
+- **The responsive opt-in is probed from the SOURCE**, not declared. The canvas
+  has to be chosen before `make_api` closes over it, which is before the cart
+  body has ever run, so `ns.get("_layout")` cannot answer in time. A manifest
+  key would have to be threaded through load/save/duplicate/seed and kept in step
+  with a `def` the author can delete; `"canvas": "responsive"` would put a
+  non-size into SPEC.md 3.1's closed set. `system_api.wants_layout` is a
+  column-0 `def _layout(` test, the same shape `_nativize` already uses.
+- **The exitable strip had to follow the canvas.** `bar_layer._zone_is_game`
+  answered `where == "tool"` unconditionally, i.e. the frozen 320-wide cluster;
+  on an 800px system canvas that leaves the context-X stranded mid-screen. It now
+  reads `ws.app_full_canvas`, which is False for every game, every fixed app cart
+  and every shipped system app -- so the 87 goldens did not move.
+- **Two extras earn their keep.** `bar_h()` is published ungated, because the
+  alternative is what several seed carts actually do (hardcode 18, and break at
+  font scale 2 -- a recorded defect). And `files.save_text`/`load_text` carry the
+  `moytext-v1` codec on the shell side: a cart writing a bare string produces a
+  document Writer and Files decode to nothing, silently, looking exactly like a
+  save that never happened.
+
+*Gate MET:* `tests/test_user_apps.py` opens the demo, draws it with `ui`, saves a
+document the store decodes, and opens the SAME cart source with the permission
+removed -- where `files` is absent from the namespace and the run dies on
+`NameError`.
+
+**Phase 8 — crash isolation: LANDED 2026-08-19.** `runtime/crash_guard.py`
+(`CrashGuard`), armed in `Player.start` for `type:"app"` carts, healed after
+three painted frames in `Player.tick`, state in the existing `system.json`. A
+disabled cart lands on the ordinary error panel -- whose top bar carries
+EDIT/CODE, so "it is broken" and "here is how to fix it" are one screen -- and
+stays in the picker. *Gate MET:* `test_a_cart_that_raises_on_every_open_is_disabled_after_three`
+plus `test_the_strikes_survive_a_reboot` (three fresh workstations over one
+store).
+
+Two open tails, deliberately not built:
+
+- **A broken-app BADGE in the launcher/picker.** The plan's phrase was "shows it
+  as broken in the picker". `ws.cart_broken(cart)` and
+  `ws.app_guard.broken_ids()` exist and are tested; wiring a badge needs
+  `launcher_layer` (a new corner-chrome idiom next to the favourite star), which
+  is Phase 3's file and a visual-identity decision. The refusal is not silent
+  without it -- the panel says so by name.
+- **The WALLPAPER is not guarded yet**, and it is the actual #160 report: a
+  wallpaper cart runs itself at boot. `CrashGuard` is keyed by an arbitrary id
+  precisely so `wallpaper.compile()` can adopt it in a few lines.
 
 **Phases 0–4 make the UI one surface. Phases 2, 5, 6 make system apps easy.
-Phases 7–8 make user apps possible.**
+Phases 7–8 make user apps possible** — and as of 2026-08-19 they do: a `.moy`
+cart is a real app with declared capabilities, and a broken one cannot brick the
+console.
 
 ---
 

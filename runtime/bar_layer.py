@@ -207,8 +207,14 @@ class BarLayer:
         """True for the surfaces that draw on the fixed 320x240 GAME canvas -- since
         the #39 step-3 conversions moved every Editor tab onto the responsive SYSTEM
         canvas, that's only the Part-4 "tool" bar (a running tool/app is on the game
-        canvas, like the running cart's crash chrome)."""
-        return where == "tool"
+        canvas, like the running cart's crash chrome).
+
+        The one exception is a RESPONSIVE app cart (#181): it drew on the SYSTEM
+        canvas, so its exitable strip has to be the responsive geometry too --
+        the fixed cluster would leave the context-X stranded 700px left of the
+        right edge on the P4. `app_full_canvas` is False for every game, every
+        fixed app cart and every shipped system app, so nothing else moves."""
+        return where == "tool" and not getattr(self.ws, "app_full_canvas", False)
 
     def _bar_canvas(self, where):
         if where == "desktop" or self._zone_is_game(where):
@@ -404,13 +410,19 @@ class BarLayer:
             # TITLE only, NO tab ladder (a tool isn't an editor with tabs). No owner.draw_zone
             # call here, so the play-frame guardrail (draw_zone never during a Player) holds.
             th = ws.theme_colors
-            cv.rect(0, 0, cv.w, _STATUS_H, th["bar"])
-            cv.rect(0, _STATUS_H - 1, cv.w, 1, th["bar_edge"])       # shelf edge line
+            # Both metrics go through the `where` helpers rather than the game
+            # constants, which is a NO-OP for the fixed case (_bar_h/_zone_rect
+            # return exactly _STATUS_H / _ZONE_LEFT_GAME while _zone_is_game is
+            # True) and is what lets a RESPONSIVE app cart's strip scale (#181).
+            bar_h = self._bar_h(where)
+            zone = self._zone_rect(where)
+            cv.rect(0, 0, cv.w, bar_h, th["bar"])
+            cv.rect(0, bar_h - 1, cv.w, 1, th["bar_edge"])           # shelf edge line
             self._render_right_zone(cv, where)                       # clock/wifi/batt/≡ + X
             title = (ws.cart.get("title") if ws.cart else "") or ""
-            maxc = _ZONE_LEFT_GAME[2] // 8                           # 8px cells in the lent rect
+            maxc = zone[2] // 8                                      # 8px cells in the lent rect
             if maxc > 0:
-                cv.print(title[:maxc], _ZONE_LEFT_GAME[0], 3, th["chrome_ink_dim"], 1)
+                cv.print(title[:maxc], zone[0], 3, th["chrome_ink_dim"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
