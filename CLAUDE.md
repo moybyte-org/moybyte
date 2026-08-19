@@ -457,6 +457,76 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   square at 1× instead of compositing the centered 128×120 at 2× — a
   regeneration on 2026-08-11 lost it and shipped a tiny celeste to the glass.
 
+### The UI refactor landed (2026-08-19) -- one widget vocabulary, apps as data, user apps
+
+`docs/ui_refactor_2026-08.md` is the plan and the authority; it folds
+`docs/ui_widgets_2026-08.md` and `docs/shell_decoupling_2026-08.md` (both of which
+stay as their evidence) after four parallel adversarial reviews, and **cuts about
+half of the combined program on evidence**. Read its Section 1 before proposing any
+of the cut parts again. What shipped, in ten commits on dev:
+
+- **The shell has pixel goldens now, and it had NONE before.** 87 stored hashes x
+  5 configs (`tests/test_shell_goldens.py`) plus **300 sub-surface hashes**
+  (`tests/test_settings_layer_pixels.py`) for the states whole-screen rendering
+  cannot reach -- the WiFi/Bluetooth panels, the system menu, About, achievements,
+  the egg and all 11 update phases. Before this, every "byte-identical" claim in
+  the tree rested on live-vs-live A/Bs that a refactor moving both arms passes
+  green. Two axes rendered NOWHERE previously: `variant="light"` (it appeared five
+  times and was never followed by a draw) and 480x320.
+  **The 320x240/1x baseline does NOT exercise the toolkit** -- `editor_app._draw_zone`
+  and siblings are guarded `if not ws.layout._base`, so perturbing `ui.button`'s pad
+  turns the Guition/fs3/windowed configs red and leaves BOTH T-Deck rows green. A
+  widget change is verified on the non-`_base` configs; a green T-Deck row proves
+  nothing.
+- **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist). An
+  `"app"` block in the identity cart's manifest is the declaration; `runtime/app_decls.py`
+  is its generated frozen copy (like `carts_data.py`) and `console.py` loops over it.
+  Five hand-maintained lists are gone -- `CART_ORDER`, the title->folder map, the web
+  roster, and console's import/construct/register block -- and **four of the five
+  failed silently and on device only**. Ratchet: `tests/test_app_registry.py`.
+- **The bar contract is a HOST guarantee**, not a ritual: the router draws the
+  strip and routes the context-X, so an app can no longer forget to be exitable.
+  Scoped to `"tool"` for registered apps -- there are SEVEN strip kinds and
+  collapsing them breaks the others. Apps get an optional `commit()` / `close()`.
+- **Apps declare what they need.** `runtime/app_context.py` (a pure leaf) with
+  roles damage/surface/theme/files/carts/nav/prefs/notify/wallpaper/clipboard/
+  artwork/shell; every app carries `NEEDS` and there is **zero `ws.` in the app
+  tier**. `ctx.files` and `ctx.carts` are SPLIT deliberately -- carts authors
+  executable content, so granting it to a cart is self-escalation. **No `property`
+  forwards anywhere** (measured: a plain hop is +0.5us, a property forward +5.1us);
+  live state reads through a method. `prefs_ns` exists because `paint_doc` is the
+  key in real cards' `system.json` since #108 -- namespacing by app id would have
+  silently lost every kid's open drawing.
+- **Style is data.** `runtime/skin.py` -- NOT in `chrome.py`, which would close
+  `ui -> chrome -> settings_layer -> ui`. Nested pre-flattened tables, and the
+  per-widget path is CHEAPER than what it replaced (two subscripts returning a
+  shared tuple, vs 2-3 dict `.get`s plus a per-call allocation). A second skin
+  ("outline") restyles every surface of all five configs and **the only files that
+  mention it are `skin.py` and its test**, pinned by a ratchet. That was the
+  owner's "easily change the UI look" ask, proven rather than asserted.
+- **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
+  roles as an ALLOWLIST (`files`/`files:<kind>`, `prefs`, `appearance`, `launch`);
+  never grantable: `shell`, `carts`, `wallpaper`, `artwork`, `damage`, `surface`,
+  `clipboard`, `notify`. An ungranted verb is **ABSENT**, not stubbed.
+  `system_carts/notes.moy` is the proof -- 200 lines of cart, no shell module, no
+  registration, no reflash. Fixed 320x240 is the default (unchanged code, which is
+  why the goldens could not move); responsive is opt-in via a top-level
+  `_layout(w, h, fs)`. **The windowed DESK world must NOT bind the system canvas** --
+  a cart there lives in a window whose blit source IS `ws.canvas`, so binding makes
+  the desktop blit itself (a recursive smear, found only by rendering it).
+  `runtime/crash_guard.py` disables a type:"app" cart after three crashed opens.
+  Storybook/Sheets/Files/Paint must STAY shell code; Calc is portable today.
+- **Perf: steady-state frames unmoved, two one-shot transitions cost +4ms.** Both
+  arms were built, flashed and measured on the same board: every `p4_bench` median
+  is inside the +/-1ms noise floor and idle still paints zero frames, while
+  `p4_clicks` shows `tab_code` 112 -> 116ms and `open_project` 216 -> 220-224ms,
+  each repeating exactly on both arms. That is the symbol palette's 17 extra
+  Python-level calls per code-tab draw on a dispatch-bound surface (#163) -- the
+  recorded price of the unification. Image cost: **+28 KB**. Numbers belong in #58.
+  Also learned: the OTA-verifier on-glass failures (`test_the_shipped_verifier_runs_on_micropython`
+  plus the two that cascade) **reproduce on the pre-refactor build** -- an
+  intermittent chunked-`pyexec` upload, not a regression.
+
 ### Host == device: the shared console (important)
 
 The console UI is **one codebase** that both the host simulator and the
