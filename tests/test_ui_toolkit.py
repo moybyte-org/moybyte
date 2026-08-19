@@ -1,7 +1,13 @@
 """runtime/ui.py -- the shared immediate-mode widget toolkit (visual identity
 v1 Phase 3): rect algebra, the draw==tap Hits registry, themed widgets, and the
 one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
-path is the one every tier shares."""
+path is the one every tier shares.
+
+The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
+model, the `Hits` pointer pump, and the `row`/`cell` kinds -- are in
+`tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
+all 12 theme sets so a later phase cannot re-baseline them by accident.
+"""
 
 from pathlib import Path
 
