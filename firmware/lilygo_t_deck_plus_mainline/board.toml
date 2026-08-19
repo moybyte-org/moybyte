@@ -245,6 +245,22 @@ otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
 before         = "usb_reset"
 
+[serial]
+# Read by tools/push_cart.py. This board's USB-Serial/JTAG is ON the SoC, which
+# inverts the P4's rule: opening with dtr/rts LOW is a CHIP RESET (rst:0x15,
+# measured 2026-08-17) after which the USB device re-enumerates under the open
+# handle and every read returns nothing forever. Attach with both ASSERTED --
+# pyserial's default, and what miniterm does.
+dtr         = true
+rts         = true
+# ATTACH ONLY: never pulse the line to reset. tools/p4_autotest.py's reset() is
+# CH343-specific; on this board it strands the handle, which is why the on-glass
+# suite attaches and leaves the console where it found it.
+attach_only = true
+# USB backpressures, so the default chunk is safe here -- measured 2026-08-19, a
+# 44KB cart pushed clean at 768 in 45s, twice as fast as the P4 needs at 256.
+chunk       = 768
+
 [monitor]
 baud = 115200
 

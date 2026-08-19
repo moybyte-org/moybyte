@@ -195,6 +195,24 @@ baud           = 921600
 otadata_offset = "0xd000"
 otadata_size   = "0x2000"
 
+[serial]
+# Read by tools/push_cart.py. THE LINE STATE AT OPEN IS BOARD-SPECIFIC AND
+# LOAD-BEARING -- the same facts tests/test_p4_on_glass.py and
+# tests/test_tdeck_on_glass.py encode by hand, as data instead.
+#
+# The CH343 is an EXTERNAL USB-UART: opening with dtr/rts LOW never glitches the
+# auto-reset circuit, so a reset is explicit and safe here.
+dtr         = false
+rts         = false
+attach_only = false
+# 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
+# harness default failed five times with a DIFFERENT bad hash each attempt and
+# succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow
+# control (the same mechanism CLAUDE.md records for long `py` lines), so an
+# over-long line is dropped as noise with no error -- only the final hash
+# catches it. USB boards backpressure and keep the default.
+chunk       = 256
+
 [monitor]
 baud = 115200
 

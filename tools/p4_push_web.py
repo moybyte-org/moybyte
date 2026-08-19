@@ -29,7 +29,7 @@ flashed. Deploying a new web build costs no rebuild and no reflash.
 It is deliberately not a `make` target. It needs a board on a serial port and
 both machines on one network, which is a bench operation, not a build step.
 
-WHY IT ALSO PUSHES CARTS (2026-08-15). `tools/p4_push_cart.py` sends a cart down
+WHY IT ALSO PUSHES CARTS (2026-08-15). `tools/push_cart.py` sends a cart down
 the SERIAL link as base64 chunks, and on a 43KB main.lua that failed: the board
 stalled ~7.5s (a BLE keyboard scan), its UART receive buffer overflowed mid-line
 while it was not draining, the harness resent the chunk it had heard nothing

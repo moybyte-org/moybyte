@@ -316,3 +316,53 @@ def test_makefile_flashes_via_the_declaration():
         body = mk.split(target, 1)[1].split("\n\n", 1)[0]
         assert "write_flash" not in body, "%s restates flash facts" % target
         assert "board_flash.py" in body
+
+
+# -- [serial]: the cart-push transport, as data (tools/push_cart.py) ----------
+
+_DEVICE_BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION}
+
+
+@pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
+def test_every_device_board_declares_its_serial_transport(board):
+    """`tools/push_cart.py` refuses a board with no [serial] block rather than
+    guessing, because both wrong guesses are silent: opening a USB-Serial/JTAG
+    part with the lines LOW chip-resets it mid-write, and an over-long line on
+    the P4's unflow-controlled UART is dropped as noise with no error."""
+    ser = board_config.load(str(_DEVICE_BOARDS[board])).get("serial")
+    assert ser, "%s/board.toml has no [serial] section" % board
+    for key in ("dtr", "rts", "attach_only", "chunk"):
+        assert key in ser, "%s [serial] is missing %r" % (board, key)
+    assert isinstance(ser["chunk"], int) and ser["chunk"] > 0
+
+
+def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
+    """The line-state rule is INVERTED between the two part families, and each
+    half was learned on glass. The S3 boards' USB-Serial/JTAG is ON the SoC, so
+    a reset re-enumerates the device under an open handle (rst:0x15, 2026-08-17)
+    -- attach, never pulse. The P4's CH343 is external, so an explicit reset is
+    safe and dtr/rts LOW at open never glitches its auto-reset circuit."""
+    for name in ("tdeck", "guition-s3"):
+        ser = board_config.load(str(_DEVICE_BOARDS[name]))["serial"]
+        assert ser["dtr"] is True and ser["rts"] is True, name
+        assert ser["attach_only"] is True, name
+    p4 = board_config.load(str(P4))["serial"]
+    assert p4["dtr"] is False and p4["rts"] is False
+    assert p4["attach_only"] is False
+
+
+def test_the_p4_chunk_stays_under_its_uart_ring():
+    """Measured 2026-08-19: a 44KB cart at the harness default of 768 failed
+    five times with a DIFFERENT bad hash each attempt and went clean at 256.
+    That UART's stdin ring is ~256 bytes with no flow control, so this is a
+    hardware bound, not a tuning preference -- raising it re-breaks the push."""
+    assert board_config.load(str(P4))["serial"]["chunk"] <= 256
+
+
+def test_push_cart_holds_no_per_board_branch():
+    """The board differences are DATA (#202 Phase A). The tool may name the
+    board dirs in its BOARDS map; it may not branch on which board it is."""
+    src = (ROOT / "tools" / "push_cart.py").read_text()
+    for marker in ('== "p4"', "== 'p4'", '== "tdeck"', "== 'tdeck'",
+                   '== "guition"', "== 'guition'"):
+        assert marker not in src, "push_cart.py branches on the board: %s" % marker

@@ -1,23 +1,34 @@
 #!/usr/bin/env python3
-"""Copy a cart folder onto the P4's internal store, over the serial console.
+"""Copy a cart folder onto a board's cart store, over the serial console.
 
-    python tools/p4_push_cart.py ports/celeste.moy
-    python tools/p4_push_cart.py ports/celeste.moy --dest /moy/carts/celeste.moy
-    python tools/p4_push_cart.py ports/celeste.moy --only main.lua --force
+    python tools/push_cart.py ports/celeste.moy                    # the P4
+    python tools/push_cart.py ports/celeste.moy --board tdeck
+    python tools/push_cart.py ports/celeste.moy --board guition --port /dev/ttyACM1
+    python tools/push_cart.py ports/celeste.moy --only main.lua --force
 
-WHY THIS EXISTS. This board has no SD card: its cartridges live on the internal
-VFS at /moy/carts, seeded from the build for system carts and put there by hand
-for anything else -- which meant a hand-carried cart arrived by whatever route
-that session improvised, with no record. One did: the P4 was carrying a celeste
-whose `local P8_VH = 128` made its own `if view ~= nil and P8_VH < 128` guard
-never fire, so it never declared view(128, 120) and played letterboxed at 1x.
-That is the missing `--zoom` at port time, shipped to glass, and nobody could
-say how it got there. A cart is data; putting data on the board should be a
-command, not an improvisation.
+WHY THIS EXISTS. A board's cartridges live on its store -- the P4's internal VFS,
+the S3 boards' SD -- seeded from the build for system carts and put there by hand
+for anything else, which meant a hand-carried cart arrived by whatever route that
+session improvised, with no record. One did: the P4 was carrying a celeste whose
+`local P8_VH = 128` made its own `if view ~= nil and P8_VH < 128` guard never
+fire, so it never declared view(128, 120) and played letterboxed at 1x. That is
+the missing `--zoom` at port time, shipped to glass, and nobody could say how it
+got there. A cart is data; putting data on the board should be a command, not an
+improvisation.
 
 Skips files whose hash already matches, so re-running is cheap and a partial
-transfer resumes. ~20s per 40KB at 768-byte chunks -- serial, not a bulk pipe;
-push one cart, not a library.
+push is resumable.
+
+THE BOARD DIFFERENCES ARE DATA, not branches here: each board.toml carries a
+[serial] block with the line state at open, whether the board may be reset, and
+the upload chunk size (#202 Phase A's pattern, the same one [flash]/[monitor]
+follow). Read those declarations before changing anything here -- each field
+records a failure that cost an attempt.
+
+THE STORE PATH IS DISCOVERED, NOT DECLARED: it comes from the live console's
+`ws.carts_root`. The Guition's store is CONDITIONAL (a TF card when present,
+else the internal VFS, #202), so a hardcoded path would be wrong on that board
+half the time and a second source of truth on the others.
 
 FOUR THINGS THIS GETS RIGHT, each of which cost an attempt:
 
@@ -32,8 +43,10 @@ FOUR THINGS THIS GETS RIGHT, each of which cost an attempt:
      is a cart that will not load, and the board is not where you want to
      discover that.
 
-The T-Deck has no equivalent and cannot: its USB-CDC RX is dead under the
-desktop (see CLAUDE.md's hard constraints). That board takes carts by SD card.
+THE T-DECK LINE THAT USED TO BE HERE IS GONE. It said this board "has no
+equivalent and cannot: its USB-CDC RX is dead under the desktop" and that carts
+reach it by SD card. #201 fixed that board's RX (2026-08-16) and a 44KB cart was
+pushed to its SD store over serial on 2026-08-19, twice as fast as the P4.
 """
 import argparse
 import base64
@@ -43,7 +56,36 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import board_config                                              # noqa: E402
 from p4_autotest import P4Board                                  # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Short names -> the board directory holding board.toml. The same three the
+# Makefile's flash/monitor targets name.
+BOARDS = {
+    "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b",
+    "tdeck": "firmware/lilygo_t_deck_plus_mainline",
+    "guition": "firmware/guition_jc3248w535",
+}
+
+
+def serial_cfg(board):
+    """The board's [serial] declaration, or a clear failure.
+
+    Deliberately NOT defaulted: a board whose line state we have not established
+    is one where a wrong guess either chip-resets it mid-write (the S3 parts) or
+    silently truncates the upload (the P4's unflow-controlled UART). Both cost an
+    attempt to find; neither announces itself."""
+    d = BOARDS.get(board)
+    if d is None:
+        sys.exit("unknown board %r -- one of: %s"
+                 % (board, ", ".join(sorted(BOARDS))))
+    cfg = board_config.load(os.path.join(ROOT, d))
+    ser = cfg.get("serial")
+    if not ser:
+        sys.exit("%s/board.toml has no [serial] section" % d)
+    return ser
 
 HELPERS = """
 import binascii, hashlib, os
@@ -106,8 +148,11 @@ def push_file(b, src, dst, verbose=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cart", help="the cart folder (e.g. ports/celeste.moy)")
+    ap.add_argument("--board", default="p4", choices=sorted(BOARDS),
+                    help="which board's [serial] declaration to use")
     ap.add_argument("--port", default="/dev/ttyACM0")
-    ap.add_argument("--dest", help="target path (default /moy/carts/<foldername>)")
+    ap.add_argument("--dest",
+                    help="target path (default <ws.carts_root>/<foldername>)")
     ap.add_argument("--only", action="append",
                     help="push just this file (repeatable)")
     ap.add_argument("--force", action="store_true",
@@ -126,13 +171,30 @@ def main(argv=None):
         if missing:
             sys.exit("not in the cart: " + ", ".join(missing))
         names = [f for f in names if f in a.only]
-    dest = a.dest or ("/moy/carts/" + os.path.basename(cart))
-    print("%s -> %s  (%d file%s)"
-          % (cart, dest, len(names), "" if len(names) == 1 else "s"))
-
-    b = P4Board(a.port, log=(print if a.verbose else (lambda s: None)))
+    ser = serial_cfg(a.board)
+    b = P4Board(a.port, log=(print if a.verbose else (lambda s: None)),
+                dtr=bool(ser.get("dtr")), rts=bool(ser.get("rts")))
+    # The chunk a `py` line may carry. The P4's UART drops an over-long line as
+    # noise with no error (see its board.toml); USB boards backpressure.
+    chunk = int(ser.get("chunk") or P4Board.CHUNK)
+    b.CHUNK = chunk
     try:
-        b.reset()
+        if ser.get("attach_only"):
+            # ATTACH: never pulse the line. P4Board.reset() is CH343-specific and
+            # on a USB-Serial/JTAG board it re-enumerates the device under our own
+            # open handle, after which every read returns nothing, forever.
+            if b.pyval("1+1", timeout=20) != 2:
+                sys.exit("%s is not responding -- this board is attached to, not "
+                         "reset, so its console must already be running" % a.port)
+        else:
+            b.reset()
+        # The store the CONSOLE says it uses -- the Guition's is conditional on a
+        # TF card being present, so asking beats declaring.
+        dest = a.dest or (str(b.pyval("str(ws.carts_root)", timeout=20)).rstrip("/")
+                          + "/" + os.path.basename(cart))
+        print("%s -> %s  (%d file%s, %s, chunk %d)"
+              % (cart, dest, len(names), "" if len(names) == 1 else "s",
+                 a.board, chunk))
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
         b.pyval("ws._g['_mkdir'](%r)" % dest)
