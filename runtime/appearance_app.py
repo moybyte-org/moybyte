@@ -415,10 +415,21 @@ class AppearanceAppLayer:
                      n["black"], 1)
 
     def _draw_wall_card(self, cv, r, cart, selected, image_kind):
+        # A grid CELL whose picture is a wallpaper preview and whose caption is
+        # a filled band -- ui.cell's own second example. The picture rect is the
+        # toolkit's (ui.cell_art_rect, the pure half); the frame below is NOT,
+        # and deliberately: this card's caption baseline is the frozen literal
+        # `y + h - 13*fs`, which sits one pixel above the band's true centre at
+        # font scale 2 and 3, and ui.cell -- unlike ui.row -- exposes no
+        # `text_dy` to say so. Converting it would move the Appearance app in
+        # two golden configs for no gain. See the report / ui.py's `cell`.
         x, y, w, h = r
         th = self.ws.theme_colors
-        pad = 3 * self.layout.fs
-        ix, iy, iw, ih = x + pad, y + pad, w - pad * 2, max(12, h - 20 * self.layout.fs)
+        lay = self.layout
+        fs = lay.fs
+        pad = lay.CARD_PAD * fs
+        ix, iy, iw, _ih = _ui.cell_art_rect(r, fs, pad, lay.LABEL_H * fs)
+        ih = max(12, _ih)
         title = self._wall_title(cart)
         if isinstance(cart, str):              # solid fill: the color itself
             cv.rect(ix, iy, iw, ih, self.names.get(cart[5:], 0))
@@ -432,10 +443,9 @@ class AppearanceAppLayer:
                         max(2, min(iw, ih) // 8), self.names["yellow"])
         else:
             self._cart_scene(cv, ix, iy, iw, ih, title)
-        cv.rect(x, y + h - 17 * self.layout.fs, w, 17 * self.layout.fs,
+        cv.rect(x, y + h - lay.LABEL_H * fs, w, lay.LABEL_H * fs,
                 th["accent"] if selected else th["title"])
-        cv.print(title[:max(1, w // (8 * self.layout.fs) - 2)], x + 5 * self.layout.fs,
-                 y + h - 13 * self.layout.fs,
+        cv.print(title[:max(1, w // (8 * fs) - 2)], x + 5 * fs, y + h - 13 * fs,
                  self.names["black"] if selected else th["title_ink"], 1)
         cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
 
@@ -488,6 +498,13 @@ class AppearanceAppLayer:
         tok = theme_colors(name, self.ws.theme_variant)
         x, y, w, h = r
         fs = self.layout.fs
+        # NOT ui.cell, and the reason is draw ORDER, not colour: this card's
+        # own caption is placed at `y + h - 14*fs`, which at font scale 3 lands
+        # ABOVE the card (h can be 35px there) -- and the frozen pixels depend
+        # on the border being painted AFTER it, clipping the escaped glyph row.
+        # ui.cell's order is fixed field -> caption -> edge -> art, so it cannot
+        # put the border on top of the picture. Measured: converting this moved
+        # 144 of 720 A/B renders, all at fs=3. See the report / ui.py's `cell`.
         cv.rect(x, y, w, h, tok["panel"])
         compact = h < 46 * fs
         band_h = max(6 * fs, h - 18 * fs) if compact else 16 * fs

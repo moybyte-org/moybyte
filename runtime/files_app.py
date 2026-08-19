@@ -356,6 +356,11 @@ class FilesAppLayer(ListShellApp):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         lay = self.layout
+        # The grid's hover/pressed pump runs on EVERY sample, not just clicks --
+        # a press cue that only appeared on the click frame would never be seen.
+        if self.mode in ("grid", "rename") and self.grid.pointer_frame(
+                px, py, ws.pointer):
+            ws._dirty = True
         if not click:
             return True
         if self._in(px, py, lay.head):
@@ -505,11 +510,5 @@ class FilesAppLayer(ListShellApp):
             i = self.top + row
             if i >= len(self._rows):
                 break
-            r = lay.row_rect(row)
-            on = i == self.sel
-            cv.rect(r[0], r[1], r[2], r[3], th["title"] if on else th["panel"])
-            cv.rectb(r[0], r[1], r[2], r[3],
-                     th.get("accent", 10) if on else th["dim"])
-            maxc = max(1, (r[2] - 8 * fs) // (8 * fs))
-            cv.print(self._rows[i][:maxc], r[0] + 4 * fs, r[1] + 6 * fs,
-                     th["title_ink"], 1)
+            _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
+                    pad=4 * fs, text_dy=6 * fs, fs=fs)

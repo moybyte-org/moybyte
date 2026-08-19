@@ -611,19 +611,24 @@ class StorybookAppLayer(ListShellApp):
         th = self.ws.theme_colors
         fs = lay.fs
         rows = [new_label] + list(items) if new_label is not None else list(items)
+        black = self.names["black"]
         for i in range(self.top, min(self.top + lay.list_rows, len(rows))):
-            x, y, w, h = lay.row_rect(i - self.top)
+            r = lay.row_rect(i - self.top)
             selected = i == self.sel
-            item = rows[i]
+            edge = th["accent"] if selected else th["dim"]
             if new_label is not None and i == 0:
-                cv.rect(x, y, w, h, th["accent"] if selected else th["hilite"])
-                cv.print(new_label, x + 6 * fs, y + (h - 8 * fs) // 2,
-                         self.names["black"], 1)
+                # The + NEW row: a themed call-to-action field, black ink.
+                label = new_label
+                colors = (th["accent"] if selected else th["hilite"], black, edge)
             else:
-                cv.rect(x, y, w, h, 7)
-                cv.print(label_fn(item)[:max(1, w // (8 * fs) - 2)],
-                         x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
-            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+                # A deck row: cream paper with black ink -- frozen OFF-token
+                # pixels, which is exactly what ui.row's `colors` escape hatch
+                # is for. The label is truncated HERE because this site's frozen
+                # cap (`w // 8fs - 2`) is one column tighter than the toolkit's
+                # pad-derived one at some widths.
+                label = label_fn(rows[i])[:max(1, r[2] // (8 * fs) - 2)]
+                colors = (7, 0, edge)
+            _ui.row(cv, th, r, label, colors=colors, pad=6 * fs, fs=fs)
 
     def _draw_page(self, cv):
         lay = self.layout

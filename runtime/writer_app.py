@@ -512,6 +512,8 @@ class WriterAppLayer(ListShellApp):
     def handle_pointer(self, px, py, click):
         lay = self.layout
         if self.mode == "list":
+            if self.grid.pointer_frame(px, py, self.ws.pointer):
+                self.ws._dirty = True
             if not click:
                 return True
             if self._in(px, py, lay.new_btn):
@@ -569,22 +571,18 @@ class WriterAppLayer(ListShellApp):
 
     # -- draw --------------------------------------------------------------------
 
-    def _button(self, cv, label, r, hot=False):
-        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
+    def _button(self, cv, label, r, hot=False, glyph=None, enabled=True):
+        """ONE chip call for this app's whole toolbar.
 
-    def _hist_btn(self, cv, kind, r, enabled):
-        """The UNDO/REDO toolbar pair (#111 phase 3): the same quiet chip shell
-        `_button` draws (theme panel/dim, so it matches DOCS/RENAME/TRASH),
-        with the shared #88 chrome glyph ('undo'/'redo') in place of a label,
-        dimmed to a flat grey via can_undo()/can_redo() -- there's no separate
-        dimmed sprite, so (like paint_layer._draw_tools and the Editor bar's
-        _draw_history_icon) the ink color carries the disabled affordance."""
-        th = self.ws.theme_colors
-        x, y, w, h = r
-        cv.rect(x, y, w, h, th.get("panel", self.names["black"]))
-        cv.rectb(x, y, w, h, th.get("dim", self.names["light_grey"]))
-        ink = th.get("title_ink", self.names["black"]) if enabled else self.names["dark_grey"]
-        self.ws._glyph(kind, r, ink, cv)
+        `glyph` + `enabled` are the UNDO/REDO pair (#111 phase 3): the same
+        quiet chip shell DOCS/RENAME/TRASH wear, with the shared #88 chrome
+        glyph in place of the label and the ink carrying the unusable
+        affordance (there is no dimmed sprite -- only a dimmed colour). That
+        used to be a private `_hist_btn` copy of ui.chip; the toolkit models
+        `disabled` natively now, so the copy is gone and the dim ink comes
+        from the theme's own `ink_dim` role instead of a hardcoded grey."""
+        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self.ws._glyph, disabled=not enabled)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas
@@ -605,8 +603,10 @@ class WriterAppLayer(ListShellApp):
             self._button(cv, "DOCS", lay.back_btn)
             self._button(cv, "RENAME", lay.name_btn)
             self._button(cv, "TRASH", lay.del_btn)
-            self._hist_btn(cv, "undo", lay.undo_btn, self.can_undo())
-            self._hist_btn(cv, "redo", lay.redo_btn, self.can_redo())
+            self._button(cv, "undo", lay.undo_btn, glyph="undo",
+                         enabled=self.can_undo())
+            self._button(cv, "redo", lay.redo_btn, glyph="redo",
+                         enabled=self.can_redo())
         right = lay.undo_btn[0] - 4 * lay.fs if self.mode == "edit" else lay.w
         label = self.status[:max(1, (right - lay.status_x) // (8 * lay.fs) - 1)]
         sx = lay.status_x if self.mode != "list" else lay.new_btn[0] + lay.new_btn[2] + 8 * lay.fs

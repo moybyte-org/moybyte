@@ -709,6 +709,8 @@ class SheetsAppLayer(ListShellApp):
     def handle_pointer(self, px, py, click):
         lay = self.layout
         if self.mode == "list":
+            if self.grid.pointer_frame(px, py, self.ws.pointer):
+                self.ws._dirty = True
             if not click:
                 return True
             if self._in(px, py, lay.new_btn):
@@ -777,8 +779,19 @@ class SheetsAppLayer(ListShellApp):
 
     # -- draw ----------------------------------------------------------------
 
-    def _button(self, cv, label, r, hot=False):
-        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
+    def _button(self, cv, label, r, hot=False, glyph=None, enabled=True):
+        """ONE chip call for this app's whole toolbar.
+
+        `glyph` + `enabled` are the #111 UNDO/REDO pair: the same quiet chip
+        shell SHEETS/CLEAR/RENAME wear, with the shared #88 chrome glyph in
+        place of the label and the ink carrying the unusable affordance. That
+        used to be a private `_icon_btn` copy of ui.chip; the toolkit models
+        `disabled` natively now, so the copy is gone -- and with it the local
+        divergence where this app ringed an ENABLED icon in `accent` while
+        Writer's identical pair ringed it in `dim`.
+        """
+        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self.ws._glyph, disabled=not enabled)
 
     def draw(self, dt):
         cv = self.ws.sys_canvas
@@ -831,13 +844,17 @@ class SheetsAppLayer(ListShellApp):
             cv.print("NO GAMES YET", 6 * fs, lay.list_y + 4 * fs, th["dim"], 1)
             return
         for i in range(self.top, min(self.top + lay.list_rows, len(targets))):
-            x, y, w, h = lay.row_rect(i - self.top)
+            r = lay.row_rect(i - self.top)
             selected = i == self.sel
-            cv.rect(x, y, w, h, 7)
             title = targets[i].get("title") or "GAME"
-            cv.print(title[:max(1, w // (8 * fs) - 2)],
-                     x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
-            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+            # colors= is ui.row's escape hatch for a site whose field/ink are
+            # frozen OFF-token (cream paper, black ink) -- only the edge reads
+            # the theme. The label is truncated HERE because this row's frozen
+            # cap (`w // 8fs - 2`) is one column tighter than the toolkit's
+            # pad-derived one at some widths.
+            _ui.row(cv, th, r, title[:max(1, r[2] // (8 * fs) - 2)],
+                    colors=(7, 0, th["accent"] if selected else th["dim"]),
+                    pad=6 * fs, fs=fs)
 
     def _draw_undo_redo(self, cv):
         """The #111 op-history undo/redo pair: compact icon-only buttons (the
@@ -846,15 +863,10 @@ class SheetsAppLayer(ListShellApp):
         the Editor bar icons will read too."""
         lay = self.layout
         hist = self.history
-        self._icon_btn(cv, "undo", lay.undo_btn, bool(hist and hist.can_undo()))
-        self._icon_btn(cv, "redo", lay.redo_btn, bool(hist and hist.can_redo()))
-
-    def _icon_btn(self, cv, kind, r, enabled):
-        th = self.ws.theme_colors
-        x, y, w, h = r
-        cv.rect(x, y, w, h, th["panel"])
-        cv.rectb(x, y, w, h, th["accent"] if enabled else th["dim"])
-        self.ws._glyph(kind, r, th["title_ink"] if enabled else th["dim"], cv)
+        self._button(cv, "undo", lay.undo_btn, glyph="undo",
+                     enabled=bool(hist and hist.can_undo()))
+        self._button(cv, "redo", lay.redo_btn, glyph="redo",
+                     enabled=bool(hist and hist.can_redo()))
 
     def _draw_grid(self, cv):
         lay = self.layout
