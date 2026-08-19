@@ -264,7 +264,7 @@ Two consequences, and neither is optional:
   is a separate, deliberate, re-baselined act; do not let a conversion agent do
   it by accident, and do not claim the T-Deck is unified until it is done.
 
-**Phase 4 — skins as data.** A new leaf `+runtime/skin.py` (NOT in `chrome.py`,
+**Phase 4 — skins as data.** A new leaf `runtime/skin.py` (NOT in `chrome.py`,
 which would create the cycle `ui → chrome → settings_layer → ui`), with
 **nested** pre-flattened tables `SKIN[kind][state]` — nested, because a single
 flattened `kind + ":" + state` key allocates a string per draw. Default skin is

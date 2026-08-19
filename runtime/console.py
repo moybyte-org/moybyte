@@ -290,6 +290,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_decls import APPS
 
+# The narrowed shell interface a SYSTEM APP is handed (ui_refactor_2026-08
+# Phase 6). An app no longer holds `ws`; it holds an AppContext carrying only
+# the roles its NEEDS tuple declares -- see runtime/app_context.py.
+try:
+    from app_context import AppContext
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.app_context import AppContext
+
 
 def _resolve_app_entry(entry):
     """Resolve an app declaration's "module:Class" to the class itself.
@@ -848,7 +856,12 @@ class Workstation:
         EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
-        self.artwork = ArtworkService(self)  # narrow capability for the shipped Paint app
+        # A narrow capability for the shipped Paint app. It is not a Layer, so
+        # it is not in app_decls -- but it is on the APP side of the seam, so it
+        # takes an AppContext like one. Its prefs namespace is "paint" and not
+        # its id, because `paint_doc` is on real cards since #108 (see Prefs).
+        self.artwork = ArtworkService(
+            self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
         # WiFi (#38): a SYSTEM service shared across carts (the connection persists
@@ -3139,6 +3152,17 @@ class Workstation:
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
 
+    def app_context(self, app_id, needs=(), prefs_ns=None):
+        """Build the narrowed shell interface for one system app
+        (docs/app_api_v1.md, runtime/app_context.py).
+
+        `needs` is the app class's own `NEEDS` tuple, and `AppContext` attaches
+        ONLY those roles -- so an app reaching for something it did not declare
+        raises here rather than growing an invisible dependency. That filter is
+        the whole point: Phase 7's `make_system_api(ctx, cart)` is this same
+        call with a cart's manifest permissions in place of a class constant."""
+        return AppContext(self, app_id, needs, prefs_ns)
+
     def _init_apps(self):
         """Construct and register every SYSTEM APP from its declaration.
 
@@ -3153,7 +3177,9 @@ class Workstation:
         the manifest rather than being implied by a dict.
         """
         for d in APPS:
-            app = _resolve_app_entry(d["entry"])(self, NAMES, _in)
+            cls = _resolve_app_entry(d["entry"])
+            app = cls(self.app_context(d["id"], getattr(cls, "NEEDS", ())),
+                      NAMES, _in)
             setattr(self, str(d["id"]) + "_app", app)
             ms = d.get("min_size")
             self.register_app(app, text_mode=bool(d.get("text_mode")),
@@ -4117,25 +4143,24 @@ class Workstation:
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
-        _writer = getattr(self, "writer_app", None)
-        if _writer is not None:
-            _writer.flush()            # never lose typed notes on ANY home pop
-        _story = getattr(self, "storybook_app", None)
-        if _story is not None:
-            _story._commit_deck()      # same rule for an open story (clean = no-op)
         # (#111) autosave-only: going home is an exit path for every persistent
-        # system app + the Editor, not just Writer/Storybook above -- hard-commit
-        # each BEFORE the state below is torn down (self.editor/self.project etc.),
-        # so a HOME-key tap (which reaches here directly, bypassing any per-app
-        # CLOSE affordance) never drops an edit still sitting in its idle-debounce
-        # window. Guarded so a plain RUN (the Editor/apps never opened this
-        # session) costs nothing.
-        _sheets = getattr(self, "sheets_app", None)
-        if _sheets is not None:
-            _sheets.flush()
-        _art = getattr(self, "artwork_app", None)
-        if _art is not None:
-            _art._save()
+        # system app + the Editor, so each is persisted BEFORE the state below is
+        # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches
+        # here directly, bypassing any per-app CLOSE affordance, and must never
+        # drop an edit still sitting in its idle-debounce window.
+        #
+        # This used to be a hand-written ladder naming four apps and four
+        # DIFFERENT verbs (writer.flush / storybook._commit_deck / sheets.flush /
+        # artwork._save) -- the bar-contract bug class one level down: an app that
+        # persists on a debounce and is not on the list loses the kid's work,
+        # silently. `close()` is the uniform LEAVING hook now
+        # (ui_refactor_2026-08 Phase 6, docs/app_api_v1.md); it is change-gated,
+        # so this costs nothing for an app with nothing pending, and a future app
+        # gets it by implementing one method instead of editing this file.
+        for _app, _text in getattr(self, "_apps", ()):
+            _close = getattr(_app, "close", None)
+            if _close is not None:
+                _close()
         _editor_app = getattr(self, "editor_app", None)
         if _editor_app is not None and _editor_app.project is self.project:
             _editor_app.save_current()

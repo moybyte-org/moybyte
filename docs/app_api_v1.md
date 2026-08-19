@@ -27,22 +27,27 @@ A system APP is two artifacts:
        id = "myapp"          # process kind: router / back-stack / window key
        domain = "system"     # draws on the responsive system canvas
        TITLE = "MY APP"      # windowed WM title strip (falls back to id.upper())
+       NEEDS = ("surface", "theme", "damage")   # the shell roles you use
+
+       def __init__(self, ctx, names, in_rect): ...   # ctx = your AppContext
 
        def is_app(self, cart): ...   # claim the identity cart (title + marker
                                      # permission + slug -- never a renamed copy)
        def open(self): ...           # (re)enter on every launch
        def relayout(self, w, h, fs): ...  # adopt a new canvas size / font scale
+       def close(self): ...          # OPTIONAL -- you are leaving the screen
 
        def draw(self, dt): ...
        def handle_input(self, i): ...
        def handle_pointer(self, px, py, click): ...
    ```
 
-3. **One registration** (console does this for the shipped apps; anything with
-   a `ws` can do it after construction):
+3. **One registration** (console does this for the shipped apps, from the
+   manifest declaration; anything holding a `ws` can do it after construction):
 
    ```python
-   ws.register_app(MyAppLayer(ws, NAMES, _in),
+   ws.register_app(MyAppLayer(ws.app_context("myapp", MyAppLayer.NEEDS),
+                              NAMES, _in),
                    text_mode=False,        # True = typing app (Writer precedent)
                    min_size=(310, 230))    # windowed resize floor, fs-scaled
    ```
@@ -65,10 +70,80 @@ Everything else follows from the registration — **apps never edit console.py**
 - exit via the tool bar's context-X / `ws.exit()` — return-to-caller is the
   WM's, not the app's.
 
+## What an app is HANDED: the AppContext (2026-08-19)
+
+An app used to hold `ws` -- the whole `Workstation` -- and reach through it for
+whatever it needed, private members included. Across the seven shipped apps that
+came to 41 distinct names and ~371 uses, 13 of the names private. Nothing could
+say what an app was permitted to do, which is the question user apps have to
+answer.
+
+An app now takes an **`AppContext`** (`runtime/app_context.py`) carrying only the
+roles it declared:
+
+| role | what it is |
+|---|---|
+| `ctx.damage` | `all()` -- repaint the whole system surface next frame |
+| `ctx.surface` | `canvas()`, `size()`, `font_scale()`, `windowed()`, `pointer()`, `glyph()` |
+| `ctx.theme` | `colors()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
+| `ctx.files` | the USER-FILES store (#108): named documents, the trash, history sidecars, the image codec |
+| `ctx.carts` | the CART store: projects, decks, cart images, `create`/`scan`/`hydrate` |
+| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()` |
+| `ctx.prefs` | `get`/`set`/`clear` on `system.json`, namespaced per app |
+| `ctx.notify` | `achieve()`, `notice()` |
+| `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
+| `ctx.artwork` | the ArtworkService handle (Paint's document model) |
+| `ctx.clipboard` | the system cut/copy/paste buffer (#132) |
+| `ctx.shell` | the escape hatch -- see below |
+
+Read that module for the signatures; it is the authority and this table is a
+map. Four things about it are load-bearing:
+
+- **`NEEDS` is a filter, not documentation.** `AppContext` attaches only the
+  declared roles, so reaching an undeclared one raises immediately.
+  `tests/test_app_context.py` pins it in BOTH directions: a role your source
+  names must be declared, and a role you declare must be named. An
+  over-declaration is a capability granted for nothing, and user apps will be
+  handed exactly these tuples.
+- **Roles expose METHODS, and there is not one `property` in the module.**
+  Measured (`docs/ui_refactor_2026-08.md` Section 2.4): a plain attribute hop
+  costs +0.5us on the P4 and the same forward written as a descriptor costs
+  +5.1us. So `cv = ctx.surface.canvas()`, and a test asserts the absence.
+- **Hoist.** Bind the roles you use every frame once in `__init__`
+  (`self._surf = ctx.surface`) and read the live values once at the top of
+  `draw()`. Reading `ctx.surface.canvas()` per widget adds a call per widget;
+  a counter budget in that test file caps it at one per drawn frame.
+- **Storage returns `(value, err)` and never raises.** `err` is `None`, the
+  `NO_STORE` singleton, or the failure's text -- which is exactly what
+  `app_shell._persist` turns into CAN'T SAVE HERE versus CAN'T SAVE <why>.
+  Several verbs in one storage session go through `batch(fn)`, whose `fn` gets a
+  raw view of the same verbs.
+
+**`ctx.shell` is the un-narrowed Workstation, and it is open for one reason:**
+the shared `file_widgets.FileGridView` still duck-types on `ws.carts_store` /
+`ws.carts_root` / `ws._with_sd`. Four apps declare it to construct that widget,
+its consumer list is pinned so it can only shrink, and it is the one role a user
+app will never be granted. Giving the widget the files role closes it.
+
+## Lifecycle: `close()` is the LEAVING hook
+
+`close()` is optional and the host calls it when your app comes off the screen,
+whatever route took it there. Implement it if you persist on an idle debounce --
+it should be **change-gated and cheap**, because a pop home must not cost a
+flash write for an app nobody edited (~800ms on the P4).
+
+`commit()` (see "The bar contract" below) is its forced twin for an explicit
+exit GESTURE: the bar's context-X, or the WM strip's X on the windowed tier.
+
+This replaced a ladder in `go_home()` that named four apps and four different
+verbs. An app persisting on a debounce that nobody added to that list lost the
+kid's work -- the same shape as the bar bug, one level down. Neither list exists
+now.
+
 ## What an app draws with
 
 The ui toolkit (`runtime/ui.py`) is the intended surface: theme tokens
-(`ws.theme_colors`, `ws.light_chrome()`), widgets (`button`, `chip`, `tab_row`,
+(`ctx.theme.colors()`, `ctx.theme.light()`), widgets (`button`, `chip`, `tab_row`,
 `status_row`, `panel`, `toolbar`, `dialog`, `text_field`, `focus_ring`,
 `scroll_cues`), `ScrollRegion`, the rect algebra (`cut_*`/`inset`/`hsplit`/
 `vsplit` — the recommended layout style for NEW apps; see `CalcLayout`), and
@@ -108,7 +183,7 @@ Two things follow for an app author:
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 
-1. `runtime/<name>_app.py` — the Layer.
+1. `runtime/<name>_app.py` — the Layer, with its `NEEDS` tuple.
 2. `system_carts/<slug>.moy` — the identity cart, whose manifest carries an
    `"app"` block:
 
@@ -141,5 +216,15 @@ hardware while working perfectly on the host.
 
 - Third-party/kid-installed native apps: `register_app` is a SHELL seam; kid
   content stays `.moy` carts under the frozen cart API. The capability track in
-  `docs/shell_architecture_v1.md` is where sandboxed app privileges would land.
-- Multiple instances of one app, or app-to-app IPC.
+  `docs/shell_architecture_v1.md` is where sandboxed app privileges would land,
+  and `NEEDS` is the shape it will take -- `make_system_api(ctx, cart)` is the
+  same filter keyed on a manifest's permissions instead of a class constant.
+- Multiple instances of one app.
+
+**App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
+anyway: `files_app` reached `ws.writer_app.open_named(...)` across five sites,
+because "open this table in Sheets" is a real product need and there was no seam
+for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam -- resolution is
+by REGISTERED ID, so no app holds a reference to another app's class and a build
+without the target degrades to a status line. IPC beyond "open that, pointed
+here" is still out.

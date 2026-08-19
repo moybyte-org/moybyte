@@ -130,13 +130,24 @@ class AppearanceAppLayer:
     domain = "system"
     TITLE = "APPEARANCE"
     MODES = ("images", "carts", "themes")
+    # The shell roles this app uses (runtime/app_context.py). `wallpaper` is a
+    # CAPABILITY, not a core role: this app and Paint are its only consumers,
+    # and nothing else should reach the desktop backdrop.
+    NEEDS = ("surface", "theme", "damage", "wallpaper", "artwork")
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._wall = ctx.wallpaper
+        self._art = ctx.artwork
         self.names = names
         self._in = in_rect
-        self.layout = AppearanceLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                       ws._effective_font_scale(), ws.windowed_chrome)
+        cv = ctx.surface.canvas()
+        self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
+                                       self._surf.windowed())
         self.mode = "images"
         self.sel = 0
         self.status = "IMAGE WALLPAPERS"
@@ -159,31 +170,31 @@ class AppearanceAppLayer:
         return base in ("theme_picker.moy", "appearance.moy")
 
     def relayout(self, w, h, fs):
-        self.layout = AppearanceLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = AppearanceLayout(w, h, fs, self._surf.windowed())
 
     def open(self):
         # Land on the current wallpaper's source category. Solid fills live on
         # the IMAGES tab beside My Art.
-        wp = self.ws.wallpaper_id
-        cart = self.ws._wp_cart_by_id(wp)
+        wp = self._wall.current()
+        cart = self._wall.cart_by_id(wp)
         my_art = cart is not None and cart.get("title") == "My Art"
         fill = isinstance(wp, str) and wp.startswith("fill:")
         self.mode = "images" if (my_art or fill) else "carts"
         self.sel = self._selected_index()
         self.status = self.mode.upper()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _image_items(self):
         # My Art (the paint document) + the built-in solid fills ("fill:<color>"
         # id strings) -- everything that isn't a live wallpaper CART.
-        wall = next((c for c in self.ws.wallpaper_carts()
+        wall = next((c for c in self._wall.carts()
                      if c.get("title") == "My Art"), None)
         items = [wall] if wall is not None else []
-        items.extend(self.ws._FILL_WALLPAPERS)
+        items.extend(self._wall.fills())
         return items
 
     def _cart_items(self):
-        return [c for c in self.ws.wallpaper_carts() if c.get("title") != "My Art"]
+        return [c for c in self._wall.carts() if c.get("title") != "My Art"]
 
     def _items(self):
         if self.mode == "images":
@@ -194,17 +205,17 @@ class AppearanceAppLayer:
 
     def _wall_id(self, item):
         """The selectable wallpaper id: a fill item IS its id string."""
-        return item if isinstance(item, str) else self.ws._wp_id_for(item)
+        return item if isinstance(item, str) else self._wall.id_for(item)
 
     def _selected_index(self):
         items = self._items()
         if self.mode == "themes":
             for i, item in enumerate(items):
-                if item[0] == self.ws.theme_name:
+                if item[0] == self._theme.name():
                     return i
             return 0
         for i, item in enumerate(items):
-            if self._wall_id(item) == self.ws.wallpaper_id:
+            if self._wall_id(item) == self._wall.current():
                 return i
         return 0
 
@@ -212,7 +223,7 @@ class AppearanceAppLayer:
         self.mode = mode
         self.sel = self._selected_index()
         self.status = mode.upper()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _apply(self, index):
         items = self._items()
@@ -221,12 +232,12 @@ class AppearanceAppLayer:
         self.sel = max(0, min(int(index), len(items) - 1))
         item = items[self.sel]
         if self.mode == "themes":
-            self.ws.set_theme(item[0], persist=True)
-            self.status = (item[0] + " " + self.ws.theme_variant).upper()
+            self._theme.set(item[0], persist=True)
+            self.status = (item[0] + " " + self._theme.variant()).upper()
         else:
-            self.ws.select_wallpaper(self._wall_id(item), persist=True)
+            self._wall.select(self._wall_id(item), persist=True)
             self.status = self._wall_title(item).upper()
-        self.ws._dirty = True
+        self._damage.all()
 
     @staticmethod
     def _wall_title(item):
@@ -263,9 +274,9 @@ class AppearanceAppLayer:
         return out
 
     def _set_variant(self, variant):
-        self.ws.set_theme_variant(variant, persist=True)
-        self.status = (self.ws.theme_name + " " + variant).upper()
-        self.ws._dirty = True
+        self._theme.set_variant(variant, persist=True)
+        self.status = (self._theme.name() + " " + variant).upper()
+        self._damage.all()
 
     def handle_pointer(self, px, py, click):
         lay = self.layout
@@ -288,14 +299,14 @@ class AppearanceAppLayer:
 
     def _button(self, cv, label, r, on=False):
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs)
+        _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs)
 
     # -- drawing --------------------------------------------------------------
 
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         # A flat panel field -- the wallpaper renders ONLY inside the monitor's
         # screen (owner call: never doubled as a full-bleed backdrop here).
         cv.rect(0, lay.bar_h, lay.w, lay.h - lay.bar_h, th["panel"])
@@ -309,7 +320,7 @@ class AppearanceAppLayer:
             fx, fy, fw, fh = lay.field
             band = 17 * fs
             for v, r in self._variant_chip_rects():
-                self._button(cv, v.upper(), r, self.ws.theme_variant == v)
+                self._button(cv, v.upper(), r, self._theme.variant() == v)
             self._draw_theme_preview(cv, (fx, fy + band, fw, max(1, fh - band)))
         elif lay.screen is not None:
             self._draw_monitor(cv, dt)
@@ -347,7 +358,7 @@ class AppearanceAppLayer:
         cv.rect(mx, my, mw, mh, n["light_grey"])              # the case
         cv.rectb(mx, my, mw, mh, n["dark_grey"])
         cv.rectb(sx - 1, sy - 1, sw + 2, sh + 2, n["dark_grey"])  # screen inset
-        self.ws.wallpaper.draw_preview(cv, lay.screen, dt)
+        self._wall.preview(cv, lay.screen, dt)
         # power LED on the bezel's bottom-right
         cv.rect(mx + mw - 5 * fs, my + mh - bz + bz // 2 - fs, 2 * fs, 2 * fs,
                 n["green"])
@@ -366,7 +377,7 @@ class AppearanceAppLayer:
         theme -- an inactive window behind, the active one in front, over the
         theme's desk field. Token roles mirror the windowed WM's strip drawing
         (focused = title/title_ink, unfocused = panel + light-grey ink)."""
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         n = self.names
         fs = self.layout.fs
         x, y, w, h = field
@@ -397,8 +408,8 @@ class AppearanceAppLayer:
         cv.rect(ax + 1, ay + 1, ww - 2, strip, th["title"])
         if ww >= 70 * fs:
             cv.print("MOYBYTE", ax + 3 * fs, ay + 2 * fs, th["title_ink"], 1)
-        self.ws._glyph("close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
-                       th["title_ink"], cv)
+        self._surf.glyph("close", (ax + ww - strip, ay + 1, strip - 1, strip - 1),
+                         th["title_ink"], cv)
         # body: a text line, a selected row, an accent button
         body_y = ay + strip + 2 * fs
         body_h = wh - strip - 3 * fs
@@ -424,7 +435,7 @@ class AppearanceAppLayer:
         # `text_dy` to say so. Converting it would move the Appearance app in
         # two golden configs for no gain. See the report / ui.py's `cell`.
         x, y, w, h = r
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         lay = self.layout
         fs = lay.fs
         pad = lay.CARD_PAD * fs
@@ -434,7 +445,7 @@ class AppearanceAppLayer:
         if isinstance(cart, str):              # solid fill: the color itself
             cv.rect(ix, iy, iw, ih, self.names.get(cart[5:], 0))
         elif image_kind:
-            preview = self.ws.artwork.thumbnail(iw, ih)
+            preview = self._art.thumbnail(iw, ih)
             if preview is not None:
                 cv.spr(preview, ix, iy)
             else:
@@ -487,7 +498,7 @@ class AppearanceAppLayer:
                         self.layout.fs, self.layout.fs, 7 if i % 3 else 10)
             cv.circ(x + w * 3 // 4, y + h // 3, max(3, h // 6), 10)
         else:
-            cv.rect(x, y, w, h, self.ws.theme_colors["hilite"])
+            cv.rect(x, y, w, h, self._theme.colors()["hilite"])
             cv.rect(x, y + h * 2 // 3, w, h // 3, self.names["dark_green"])
             cv.circ(x + w * 3 // 4, y + h // 3, max(2, h // 8), self.names["yellow"])
 
@@ -495,7 +506,7 @@ class AppearanceAppLayer:
         # Cards preview the theme in the ACTIVE variant, so flipping DARK/LIGHT
         # repaints the whole catalog in that presentation.
         name = item[0]
-        tok = theme_colors(name, self.ws.theme_variant)
+        tok = theme_colors(name, self._theme.variant())
         x, y, w, h = r
         fs = self.layout.fs
         # NOT ui.cell, and the reason is draw ORDER, not colour: this card's

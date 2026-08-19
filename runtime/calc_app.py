@@ -4,10 +4,12 @@ Deliberately tiny and built ONLY on the public seams, so it doubles as the
 "how to write an app" example:
 
   * a cartridge IDENTITY (system_carts/calc.moy: manifest + a fallback main.py
-    an older shell runs as a plain cart);
+    an older shell runs as a plain cart) whose manifest carries the `app` block
+    the shell registers from -- there is no per-app line in console.py;
   * one content-Layer class here (id/domain/draw/handle_input/handle_pointer +
-    the app protocol: is_app / open / relayout);
-  * ONE `ws.register_app(CalcAppLayer(...))` call -- launcher dispatch, the
+    the app protocol: is_app / open / relayout), declaring the shell roles it
+    uses in NEEDS and reaching the shell ONLY through the AppContext it is
+    constructed with (runtime/app_context.py) -- launcher dispatch, the
     back-stack/window kind, taskbar chip, WM title ("CALC" from TITLE), the
     per-window layout context AND the exitable bar (the host draws the strip
     after draw() and routes its taps before handle_pointer()) all follow from
@@ -56,21 +58,30 @@ class CalcAppLayer:
     id = "calc"
     domain = "system"
     TITLE = "CALC"
+    # The shell roles this app uses (runtime/app_context.py). The context
+    # carries these and nothing else, so an undeclared reach-in is an
+    # AttributeError here rather than a coupling nobody sees.
+    NEEDS = ("surface", "theme", "damage")
 
     _KEYS = (("7", "8", "9", "/"),
              ("4", "5", "6", "*"),
              ("1", "2", "3", "-"),
              ("C", "0", "=", "+"))
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles used on every drawn frame are bound ONCE here, not looked up
+        # per draw -- the hoist mandate (ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
         self._NAMES = names
         self._in = in_rect
         self.hits = _ui.Hits()
         self.entry = "0"              # the number being typed
         self.acc = None               # banked left operand
         self.op = None                # pending operator
-        sc = ws.sys_canvas
+        sc = self._surf.canvas()
         self.layout = CalcLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
     # -- the app protocol (docs/app_api_v1.md) --------------------------------
@@ -91,21 +102,21 @@ class CalcAppLayer:
         self.entry = "0"
         self.acc = None
         self.op = None
-        self.ws._dirty = True
+        self._damage.all()
 
     def relayout(self, w, h, fs):
-        self.layout = CalcLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = CalcLayout(w, h, fs, self._surf.windowed())
 
     # -- draw (the draw pass IS the hit map: ui.Hits) --------------------------
 
     def draw(self, dt):
-        ws = self.ws
         NAMES = self._NAMES
-        cv = ws.sys_canvas
-        th = ws.theme_colors
+        theme = self._theme
+        cv = self._surf.canvas()
+        th = theme.colors()
         lay = self.layout
         fs = lay.fs
-        light = ws.light_chrome()
+        light = theme.light()
         cv.cls(th["surface"] if light else th["panel"])
         # The display: a dark field with the value right-aligned (readable on
         # either chrome), showing the pending operator as a small left cue.
@@ -172,7 +183,7 @@ class CalcAppLayer:
             self.entry = "0"
         elif label == "=":
             self._compute()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _value(self):
         try:

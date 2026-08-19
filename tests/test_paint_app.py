@@ -129,7 +129,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     assert "artwork" not in base
 
     paint_app = _open_paint(ws)
-    assert paint_app.ws.artwork is ws.artwork
+    assert paint_app.ctx.artwork is ws.artwork      # the AppContext handle
 
     other = next(c for c in ws._all_carts if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")

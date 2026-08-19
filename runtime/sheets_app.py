@@ -193,15 +193,29 @@ class SheetsAppLayer(ListShellApp):
     APP_PERM = "sheets"
     APP_FOLDER = "sheets.moy"
     TITLE = "SHEETS"
+    # The shell roles this app uses (runtime/app_context.py). `carts` is here
+    # only for ATTACH -- copying the open sheet into a game cart; `shell` only
+    # because the shared FileGridView widget still duck-types on the raw
+    # Workstation (see the role's docstring).
+    NEEDS = ("surface", "theme", "damage", "files", "carts", "clipboard",
+             "shell")
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._store = ctx.files       # ListShellApp's storage role
+        self._carts = ctx.carts
+        self._clip = ctx.clipboard
         self.names = names
         self._in = in_rect
-        self.layout = SheetsLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                   ws._effective_font_scale(), ws.windowed_chrome)
+        cv = ctx.surface.canvas()
+        self.layout = SheetsLayout(cv.w, cv.h,
+                                   self._surf.font_scale(), self._surf.windowed())
         self.mode = "list"            # list | grid | rename | attach
-        self.grid = FileGridView(ws, "tables")
+        self.grid = FileGridView(ctx.shell, "tables")
         self.sheet = None             # the open formula.Sheet
         self.sheet_name = None        # its files/tables/<name> file name
         self.history = None           # op_history.History over the open sheet (#111)
@@ -221,7 +235,7 @@ class SheetsAppLayer(ListShellApp):
         self.top = 0                  # attach-list scroll origin
 
     # -- store ---------------------------------------------------------------
-    # (is_app / _store_ready / _load_blob / _persist / _edge_key: ListShellApp)
+    # (is_app / _store_ready / _load_json / _persist / _edge_key: ListShellApp)
 
     def open_named(self, name):
         """Point Sheets at a named sheet to open on its next open() -- the Files
@@ -243,8 +257,7 @@ class SheetsAppLayer(ListShellApp):
             return False
         name = self.sheet_name
         blob = json.dumps(self.sheet.to_dict())
-        ok = self._persist(lambda: self.ws.carts_store.save_file(
-            "tables", name, blob, self.ws.carts_root))
+        ok = self._persist(self._store.save("tables", name, blob))
         if ok:
             self._unsaved = False
             self.grid.invalidate(name)
@@ -256,6 +269,13 @@ class SheetsAppLayer(ListShellApp):
         before routing a tap into this app's bar band -- the context-X there is
         an exit path and must never lose data, so this forces the write."""
         self.flush(force=True)
+
+    def close(self):
+        """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
+        this app comes off the screen by ANY route. Change-gated, unlike
+        `commit()` -- an open but unedited sheet must not cost a flash write on
+        every pop home (~800ms on the P4)."""
+        self.flush()
 
     def _flush_history(self, name):
         """The #111 op-history sidecar write, at the SAME autosave point as the
@@ -271,10 +291,8 @@ class SheetsAppLayer(ListShellApp):
         ops = hist.flush()
         if kf is None and not ops:
             return
-        try:
-            self.ws._with_sd(lambda: self.ws.carts_store.history_commit(
-                "tables", name, ops, keyframe=kf, root=self.ws.carts_root))
-        except Exception:  # noqa: BLE001 -- best-effort sidecar, never crash the shell
+        _v, err = self._store.history_commit("tables", name, ops, keyframe=kf)
+        if err is not None:      # best-effort sidecar, never crash the shell
             return
         if kf is not None:
             hist.mark_keyframe()
@@ -283,16 +301,11 @@ class SheetsAppLayer(ListShellApp):
 
     def relayout(self, w, h, fs):
         cols = self.sheet.cols if self.sheet is not None else DEFAULT_COLS
-        self.layout = SheetsLayout(w, h, fs, self.ws.windowed_chrome, cols)
+        self.layout = SheetsLayout(w, h, fs, self._surf.windowed(), cols)
         self._scroll_grid()
 
     def open(self):
-        if self._store_ready():
-            try:
-                self.ws._with_sd(
-                    lambda: self.ws.carts_store.migrate_tables(self.ws.carts_root))
-            except Exception:  # noqa: BLE001 -- migration is best-effort
-                pass
+        self._store.migrate("tables")     # best-effort, err ignored by design
         self.grid.refresh()
         pending = self._pending_open
         self._pending_open = None
@@ -307,7 +320,7 @@ class SheetsAppLayer(ListShellApp):
         self.editing = False
         self.edit_buf = ""
         self._ekey_prev = 0
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- sheet verbs ---------------------------------------------------------
 
@@ -324,10 +337,10 @@ class SheetsAppLayer(ListShellApp):
         self.edit_buf = ""
         self._ekey_prev = 0
         self.layout = SheetsLayout(self.layout.w, self.layout.h, self.layout.fs,
-                                   self.ws.windowed_chrome, sheet.cols)
+                                   self._surf.windowed(), sheet.cols)
         self.status = name.upper()
         self.history = self._build_history(sheet, name)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _build_history(self, sheet, name):
         """A fresh op_history.History over `sheet`, its undo stack rebuilt from
@@ -341,11 +354,8 @@ class SheetsAppLayer(ListShellApp):
         file, same as everywhere else in moy_carts."""
         hist = History(sheet, _SheetCellCodec())
         if self._store_ready():
-            try:
-                recs = self.ws._with_sd(lambda: self.ws.carts_store.load_history(
-                    "tables", name, self.ws.carts_root))
-            except Exception:  # noqa: BLE001 -- a bad/missing sidecar just starts empty
-                recs = None
+            # a bad/missing sidecar just starts empty (err -> recs None)
+            recs, _err = self._store.history("tables", name)
             if recs:
                 hist.seed(_ops_since_keyframe(recs))
         return hist
@@ -353,11 +363,7 @@ class SheetsAppLayer(ListShellApp):
     def _open_file(self, name):
         blob = None
         if self._store_ready():
-            try:
-                blob = self.ws._with_sd(lambda: self.ws.carts_store.load_file(
-                    "tables", name, self.ws.carts_root))
-            except Exception:  # noqa: BLE001
-                blob = None
+            blob, _err = self._store.load("tables", name)
         data = None
         if blob:
             try:
@@ -371,11 +377,7 @@ class SheetsAppLayer(ListShellApp):
         self.flush()
         name = None
         if self._store_ready():
-            try:
-                name = self.ws._with_sd(lambda: self.ws.carts_store.new_file_name(
-                    "tables", self.ws.carts_root))
-            except Exception:  # noqa: BLE001
-                name = None
+            name, _err = self._store.new_name("tables")
         name = name or "table_1"
         sheet = Sheet(name, DEFAULT_ROWS, DEFAULT_COLS)
         self._enter_grid(sheet, name)
@@ -393,14 +395,13 @@ class SheetsAppLayer(ListShellApp):
         self.grid.refresh()
         self.grid.select(keep)
         self.status = "MY SHEETS"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _delete_current(self):
         if self.sheet_name is None:
             return
         name = self.sheet_name
-        if self._persist(lambda: self.ws.carts_store.delete_file(
-                "tables", name, self.ws.carts_root)):
+        if self._persist(self._store.delete("tables", name)):
             self.grid.invalidate(name)
             self.status = "IN TRASH"
         self.sheet = None
@@ -410,7 +411,7 @@ class SheetsAppLayer(ListShellApp):
         self.mode = "list"
         self.grid.refresh()
         self.grid.select(None)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _begin_rename(self):
         if self.sheet_name is None:
@@ -419,25 +420,27 @@ class SheetsAppLayer(ListShellApp):
         self._ekey_prev = 0
         self.mode = "rename"
         self.status = "TYPE A NAME"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _rename_commit(self):
         name = self.sheet_name
         text = self.rename_text
-        new = [name]
-
-        def _do():
-            new[0] = self.ws.carts_store.rename_file(
-                "tables", name, text, self.ws.carts_root)
-
-        if name and self._persist(_do):
-            self.grid.invalidate(name)
-            self.sheet_name = new[0]
-            if self.sheet is not None:
-                self.sheet.name = new[0]
-            self.status = new[0].upper()
+        if name:
+            self._persist_rename(name, text)
         self.mode = "grid"
-        self.ws._dirty = True
+        self._damage.all()
+
+    def _persist_rename(self, name, text):
+        res = self._store.rename("tables", name, text)
+        if not self._persist(res):
+            return False
+        new = res[0] or name
+        self.grid.invalidate(name)
+        self.sheet_name = new
+        if self.sheet is not None:
+            self.sheet.name = new
+        self.status = new.upper()
+        return True
 
     # -- attach to a game (#78: the Sheets-to-game UI, table() feeds it) ------
     #
@@ -452,7 +455,7 @@ class SheetsAppLayer(ListShellApp):
         """Every cart a sheet can be attached to: GAME/story carts with a store
         path -- table() is game data (inventories/waves/scores), so system apps
         (Sheets/Writer/Storybook/... are type 'app') and wallpapers are excluded."""
-        return [c for c in self.ws._all_carts
+        return [c for c in self._carts.all()
                 if c.get("path") and c.get("type") in ("game", "story")]
 
     def _open_attach(self):
@@ -460,19 +463,19 @@ class SheetsAppLayer(ListShellApp):
             return
         if not self._store_ready():
             self.status = "CAN'T ATTACH HERE"
-            self.ws._dirty = True
+            self._damage.all()
             return
         self._commit_edit()
         self.mode = "attach"
         self.sel = 0
         self.top = 0
         self.status = "ATTACH TO WHICH GAME?"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _close_attach(self):
         self.mode = "grid"
         self.status = (self.sheet_name or "SHEETS").upper()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _attach_to(self, cart):
         """Write the open sheet's CURRENT computed cells into `cart`'s folder as
@@ -480,20 +483,19 @@ class SheetsAppLayer(ListShellApp):
         the sheet's own file holds, decoded by table() at cart load)."""
         if self.sheet is None or not self._store_ready():
             self.status = "CAN'T SAVE HERE"
-            self.ws._dirty = True
+            self._damage.all()
             return
-        store = self.ws.carts_store
-        name = store.slug(self.sheet_name or self.sheet.name)
+        carts = self._carts
+        name = carts.slug(self.sheet_name or self.sheet.name)
         blob = json.dumps(self.sheet.to_dict())
-        try:
-            self.ws._with_sd(lambda: store.save_table(cart, name, blob))
-        except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
-            self.status = ("ATTACH FAILED " + str(exc))[:28]
-            self.ws._dirty = True
+        _v, err = carts.save_table(cart, name, blob)
+        if err is not None:      # surface, never crash the shell
+            self.status = ("ATTACH FAILED " + str(err))[:28]
+            self._damage.all()
             return
         self.status = ("ATTACHED TO " + (cart.get("title") or "GAME"))[:28]
         self.mode = "grid"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _tap_row(self, i):
         """The shared _list_nav A-button verb -- only the attach picker uses it
@@ -513,7 +515,7 @@ class SheetsAppLayer(ListShellApp):
     def _begin_edit(self, seed=None):
         self.editing = True
         self.edit_buf = self._cur_raw() if seed is None else seed
-        self.ws._dirty = True
+        self._damage.all()
 
     def _commit_edit(self):
         if not self.editing or self.sheet is None:
@@ -543,7 +545,7 @@ class SheetsAppLayer(ListShellApp):
         self.cur_row = max(0, min(self.sheet.rows - 1, self.cur_row + dr))
         self._scroll_grid()
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _scroll_grid(self):
         lay = self.layout
@@ -558,24 +560,24 @@ class SheetsAppLayer(ListShellApp):
 
     def _copy_cell(self):
         """Copy the current cell's raw text to the system clipboard (#132)."""
-        clip = getattr(self.ws, "clipboard", None)
+        clip = self._clip
         if clip is None or self.sheet is None:
             return
         clip.put_text(self.edit_buf if self.editing else self._cur_raw())
         self.status = "COPIED"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _paste_cell(self):
         """Paste the system clipboard into the current cell (#132) -- naive v1:
         multi-line text lands as its first line. A cell edit like any other,
         so the same cell OpCodec makes it undoable (the _clear_cell shape)."""
-        clip = getattr(self.ws, "clipboard", None)
+        clip = self._clip
         if clip is None or self.sheet is None or not clip.text():
             return
         t = clip.text().split("\n")[0][:CELL_MAX]
         if self.editing:
             self.edit_buf = (self.edit_buf + t)[:CELL_MAX]
-            self.ws._dirty = True
+            self._damage.all()
             return
         before = self._cur_raw()
         self.sheet.set_cell(self.cur_col, self.cur_row, t)
@@ -583,7 +585,7 @@ class SheetsAppLayer(ListShellApp):
             self._unsaved = True
             self._record_cell_op(self.cur_col, self.cur_row, before, t)
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _clear_cell(self):
         # CLEAR (#111 phase 3 marquee win): this is a cell edit to "" like any
@@ -599,7 +601,7 @@ class SheetsAppLayer(ListShellApp):
             self._unsaved = True
             self._record_cell_op(self.cur_col, self.cur_row, before, "")
         self.status = index_to_col(self.cur_col) + str(self.cur_row + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- undo / redo (#111): one History per open sheet ------------------------
 
@@ -621,7 +623,7 @@ class SheetsAppLayer(ListShellApp):
             self.cur_col, self.cur_row = op["c"], op["r"]
             self._scroll_grid()
             self.status = "UNDO " + index_to_col(op["c"]) + str(op["r"] + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _redo(self):
         if self.sheet is None or self.history is None or not self.history.can_redo():
@@ -634,7 +636,7 @@ class SheetsAppLayer(ListShellApp):
             self.cur_col, self.cur_row = op["c"], op["r"]
             self._scroll_grid()
             self.status = "REDO " + index_to_col(op["c"]) + str(op["r"] + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- input ---------------------------------------------------------------
 
@@ -692,10 +694,10 @@ class SheetsAppLayer(ListShellApp):
                     self._move(0, 1)
                 elif k in (0x08, 0x7F):          # Backspace
                     self.edit_buf = self.edit_buf[:-1]
-                    self.ws._dirty = True
+                    self._damage.all()
                 elif 0x20 <= k <= 0x7E and len(self.edit_buf) < CELL_MAX:
                     self.edit_buf += chr(k)
-                    self.ws._dirty = True
+                    self._damage.all()
             else:
                 if k in (0x0D, 0x0A):            # Enter: open the cell for editing
                     self._begin_edit()
@@ -709,8 +711,8 @@ class SheetsAppLayer(ListShellApp):
     def handle_pointer(self, px, py, click):
         lay = self.layout
         if self.mode == "list":
-            if self.grid.pointer_frame(px, py, self.ws.pointer):
-                self.ws._dirty = True
+            if self.grid.pointer_frame(px, py, self._surf.pointer()):
+                self._damage.all()
             if not click:
                 return True
             if self._in(px, py, lay.new_btn):
@@ -773,7 +775,7 @@ class SheetsAppLayer(ListShellApp):
                         self.cur_col = ci
                         self.cur_row = ri
                         self.status = index_to_col(ci) + str(ri + 1)
-                        self.ws._dirty = True
+                        self._damage.all()
                         return True
         return True
 
@@ -790,13 +792,13 @@ class SheetsAppLayer(ListShellApp):
         divergence where this app ringed an ENABLED icon in `accent` while
         Writer's identical pair ringed it in `dim`.
         """
-        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs,
-                 glyph=glyph, glyph_draw=self.ws._glyph, disabled=not enabled)
+        _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
 
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
         if self.mode == "grid":
@@ -827,7 +829,7 @@ class SheetsAppLayer(ListShellApp):
 
     def _draw_rename(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         ex, ey, ew, eh = lay.entry
         cv.rect(ex, ey, ew, eh, self.names["white"])
@@ -837,7 +839,7 @@ class SheetsAppLayer(ListShellApp):
 
     def _draw_attach(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         targets = self._attach_targets()
         if not targets:
@@ -870,7 +872,7 @@ class SheetsAppLayer(ListShellApp):
 
     def _draw_grid(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         sheet = self.sheet
         if sheet is None:

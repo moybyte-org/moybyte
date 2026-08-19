@@ -236,15 +236,21 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
             th = theme_colors(name, variant)
             seen = []
 
-            class _WS:
-                theme_colors = th
-
+            class _Theme:
                 @staticmethod
-                def _glyph(kind, rect, color, cv):
+                def colors():
+                    return th
+
+            class _Surface:
+                @staticmethod
+                def glyph(kind, rect, color, cv=None):
                     seen.append(color)
 
             app = writer_app.WriterAppLayer.__new__(writer_app.WriterAppLayer)
-            app.ws = _WS()
+            # The app reads its shell through AppContext roles now
+            # (runtime/app_context.py), so the stub supplies those two.
+            app._theme = _Theme()
+            app._surf = _Surface()
             app.names = {}
             app.layout = writer_app.WriterLayout(320, 240, 1)
             cv = SystemCanvas(320, 240, 1)
