@@ -482,18 +482,27 @@ class SettingsLayer:
             except Exception:  # noqa: BLE001
                 pass
         th = ws.theme_colors
+        # The status ICON is an IconSheet sprite the caller owns (ui.py must not
+        # learn about the sheet), so it draws first and the label row takes the
+        # rest of the slot; the IP keeps its own fixed column.
         ws._icon("wifi" if connected else "wifi_off", x, y, cv)
         if connected:
-            cv.print(("ON  " + str(ssid))[:22], x + 20 * fs, y + 5, th["play"], 1)
+            _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
+                    colors=(None, th["play"], None), edge=False,
+                    pad=20 * fs, text_dy=5, fs=fs)
             if ip:
                 cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
         else:
-            cv.print("NOT CONNECTED", x + 20 * fs, y + 5, th["ink_dim"], 1)
+            _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED",
+                    colors=(None, th["ink_dim"], None), edge=False,
+                    pad=20 * fs, text_dy=5, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
-            cv.print(("PASSWORD FOR " + str(self.wifi_pick))[:30], x + 4, y + 5,
-                     th["ink"], 1)
+            _ui.row(cv, th, (x, y, w, h),
+                    ("PASSWORD FOR " + str(self.wifi_pick))[:30],
+                    colors=(None, th["ink"], None), edge=False, pad=4,
+                    text_dy=5, fs=fs)
             bx, by, bw2, bh2 = self._wifi_row_rect(1)
             cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
@@ -501,8 +510,9 @@ class SettingsLayer:
             cv.print(shown, bx + 4, by + 5, NAMES["yellow"], 1)
             cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
-            cv.print("ENTER = CONNECT   ESC = BACK", x + 4, y + 5,
-                     th["ink_dim"], 1)
+            _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
+                    colors=(None, th["ink_dim"], None), edge=False, pad=4,
+                    text_dy=5, fs=fs)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -511,10 +521,13 @@ class SettingsLayer:
                 if y + h > py + ph - 30 * fs:
                     break                          # keep clear of the button row
                 sel = (k == self.wifi_sel)
-                if sel:
-                    cv.rect(x, y, w, h, th["hilite"])
                 fg = th["selection_ink"] if sel else th["ink_dim"]
-                cv.print(str(ssid_k)[:16], x + 4, y + 5, fg, 1)
+                # Same split as the Settings rows: ui.row draws the selection
+                # fill + the name, the signal bars / lock / SAVED markers are
+                # this list's own per-row content at their fixed columns.
+                _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16], on=sel,
+                        colors=(th["hilite"] if sel else None, fg, None),
+                        edge=False, pad=4, text_dy=5, fs=fs)
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
                     c = th["play"] if s < bars else th["ink_dim"]
@@ -560,9 +573,9 @@ class SettingsLayer:
         enabled, state, name, _preferred, _error = status
         _ui.status_row(cv, th, status_r,
                        (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
-        cv.print(self.bt_msg[:max(1, msg_r[2] // fw - 1)],
-                 msg_r[0] + 3 * fs, msg_r[1] + (msg_r[3] - 8 * fs) // 2,
-                 th["ink_dim"], 1)
+        _ui.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
+                colors=(None, th["ink_dim"], None), edge=False, pad=3 * fs,
+                text_dy=(msg_r[3] - 8 * fs) // 2, fs=fs)
 
         self._bt_hits.clear()
         row_h = 24 * fs
@@ -573,8 +586,9 @@ class SettingsLayer:
         end = min(len(self.bt_devices), top + visible)
         if not self.bt_devices:
             label = "SCANNING..." if state == "scanning" else "NO KEYBOARDS FOUND"
-            cv.print(label, list_r[0] + 3 * fs, list_r[1] + 6 * fs,
-                     th["ink_dim"], 1)
+            _ui.row(cv, th, (list_r[0], list_r[1], list_r[2], row_h), label,
+                    colors=(None, th["ink_dim"], None), edge=False,
+                    pad=3 * fs, text_dy=6 * fs, fs=fs)
         for i in range(top, end):
             address, dev_name, rssi, preferred, connected = self.bt_devices[i]
             rect = (list_r[0], list_r[1] + (i - top) * row_h,
@@ -970,13 +984,14 @@ class SettingsLayer:
         _windowed = getattr(ws, "windowed_chrome", False)
         if _windowed:
             cv.cls(th["panel"])
-        else:
-            ws.wallpaper.draw(dt)
             # (windowed: cls above already laid this exact colour over the whole
             # buffer -- re-filling the panel rect would paint 272k of the same
-            # pixels a second time, ~9ms of pure duplicate fill.)
-            cv.rect(px, py, pw, ph, th["panel"])
-        cv.rectb(px, py, pw, ph, th["edge"])
+            # pixels a second time, ~9ms of pure duplicate fill, so this tier
+            # takes the ring alone rather than the whole ui.dialog shell.)
+            cv.rectb(px, py, pw, ph, th["edge"])
+        else:
+            ws.wallpaper.draw(dt)
+            _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["panel"])
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
@@ -1040,10 +1055,20 @@ class SettingsLayer:
         key, label, kind = self._settings_rows()[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
-        if sel:
-            cv.rect(x, y, w, h, th["hilite"])
         fg = th["selection_ink"] if sel else th["chrome_ink_dim"]
-        cv.print(label, x + 4, y + 5, fg, 1)
+        # ui.row owns the ROW CHROME -- the selection fill, the label ink and its
+        # frozen (4, 5) placement, and the clip that keeps a long label inside the
+        # rect (#174). Everything below is this row's per-KIND content, drawn by
+        # the caller into the space `row` left: a value at the fixed value COLUMN
+        # (x + w - 78fs, not right-aligned, so `row`'s `value=` slot is the wrong
+        # shape), an icon, an OPEN affordance or a stepper.
+        # The palette rides `colors` because a Settings row is panel-CHROME
+        # coloured (hilite / selection_ink / chrome_ink_dim), not the row kind's
+        # token palette -- the documented escape hatch, and the one argument
+        # Phase 4 replaces with a skin entry.
+        _ui.row(cv, th, (x, y, w, h), label, on=sel,
+                colors=(th["hilite"] if sel else None, fg, None),
+                edge=False, pad=4, text_dy=5, fs=lay.fs)
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
             # affordance -- a tap / A opens the wifi panel, no stepper.
@@ -1134,4 +1159,8 @@ class SettingsLayer:
         # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
                         "diag", "webhost"):
-            cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
+            # A second label line inside the SAME row rect (one font row below
+            # the title), so it is the row kind again with its own text_dy.
+            _ui.row(cv, th, (x, y, w, h), "soon",
+                    colors=(None, NAMES["dark_grey"], None), edge=False,
+                    pad=4, text_dy=6 + fw, fs=lay.fs)

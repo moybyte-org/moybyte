@@ -30,6 +30,11 @@ values), so the eggs + drawing are unchanged (host == device).
 """
 
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
+
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
 except ImportError:                     # host: the runtime package
@@ -115,10 +120,16 @@ class AchievementsUI:
         x = (cv.w - w) // 2
         y = 150
         h = 30
-        cv.rect(x, y, w, h, NAMES["black"])
-        cv.rectb(x, y, w, h, NAMES["pink"])
+        _ui.dialog(cv, (x, y, w, h), ring=NAMES["pink"], fill=NAMES["black"])
         self.ws._glyph(glyph, (x + 4, y + 7, 16, 16), NAMES["peach"], cv)
-        cv.print(line, x + 24, y + 11, NAMES["white"], 1)
+        # The banner's own 16x16 character glyph is wider than ui.row's 14px
+        # leading slot, so the caller draws it and hands `row` the rect that is
+        # LEFT -- the same "caller keeps its picture" split the grid cells use.
+        # fs=1 deliberately: this popup is sized in 8px glyph units (`w` above),
+        # so its clip budget is the frozen one, not the canvas font scale.
+        _ui.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
+                colors=(None, NAMES["white"], None), edge=False, pad=0,
+                text_dy=11, fs=1)
 
     def _draw_confetti(self):
         """The Konami egg's celebration: a scatter of colored spark glyphs that
@@ -147,8 +158,7 @@ class AchievementsUI:
         light = th.get("bar_light", False)
         ink = th["ink"] if light else th["chrome_ink"]
         dim = th["chrome_ink_dim"]
-        cv.rect(6, 14, 308, 212, th["panel"])
-        cv.rectb(6, 14, 308, 212, th["accent"])
+        _ui.dialog(cv, (6, 14, 308, 212), ring=th["accent"], fill=th["panel"])
         self.ws._glyph("trophy", (12, 16, 14, 14), th["accent"], cv)
         cv.print("ACHIEVEMENTS", 30, 18, ink, 2)
         cv.print("%d / %d" % (self.ws.ach.count(), len(ACHIEVEMENTS)), 240, 20,
@@ -166,13 +176,22 @@ class AchievementsUI:
             y = y0 + row * row_h
             got = self.ws.ach.has(ach_id)
             if got:
-                self.ws._glyph(glyph, (x, y, 14, 14), th["accent"], cv)
-                cv.print(title[:16], x + 16, y + 3, ink, 1)
+                g_col, label, row_ink = th["accent"], title[:16], ink
             else:
-                self.ws._glyph("lock", (x, y, 14, 14),
-                               th["ink_dim"] if light else NAMES["dark_grey"], cv)
                 # A hidden (Easter-egg) achievement stays "???"; a normal locked one
                 # shows its name greyed so a kid knows what's there to earn.
+                glyph = "lock"
+                g_col = th["ink_dim"] if light else NAMES["dark_grey"]
                 label = "???" if hidden else title[:16]
-                cv.print(label, x + 16, y + 3, dim, 1)
+                row_ink = dim
+            # The glyph and the label carry DIFFERENT inks here (a bright badge
+            # beside quiet text), which `row`'s single-ink leading slot cannot
+            # express -- so the caller draws the badge and `row` takes the rect
+            # after it. `disabled` states the locked semantics for the Phase 4
+            # skin; the frozen chrome_ink palette rides `colors` until there is
+            # a skin entry for it. fs=1: this view is frozen 320x240 geometry.
+            self.ws._glyph(glyph, (x, y, 14, 14), g_col, cv)
+            _ui.row(cv, th, (x + 16, y, col_w - 16, 14), label,
+                    disabled=not got, colors=(None, row_ink, None),
+                    edge=False, pad=0, text_dy=3, fs=1)
         cv.print("TAP TO CLOSE", 110, 210, dim, 1)

@@ -131,6 +131,11 @@ class SystemMenuUI:
         x, y, w, h = m.panel_rect()
         _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
         cy = _POPUP_Y * fs
+        row_h = _POPUP_ROW_H * fs
+        # Rows sit 1px inside the panel ring, so the label's own inset from the
+        # PANEL edge (_POPUP_PAD_X) is one less from the ROW edge.
+        pad = _POPUP_PAD_X * fs - 1
+        dy = 2 * fs
         for idx in range(len(m.items)):
             it = m.items[idx]
             kind = it[0]
@@ -138,17 +143,22 @@ class SystemMenuUI:
                 cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H * fs, th["edge"])
                 cy += _POPUP_SEP_H * fs
                 continue
+            # ui.row owns the chrome (the selection fill + the label's ink and
+            # placement); the three inks stay this surface's semantics. They ride
+            # `colors` because a popup row is panel-CHROME coloured (chrome_ink /
+            # hilite), which is not the row kind's token palette -- the documented
+            # escape hatch, and the one line Phase 4 replaces with a skin entry.
             label = it[1]
-            tx = x + _POPUP_PAD_X * fs
-            ty = cy + 2 * fs
+            sel = (kind != "header" and idx == m.sel)
             if kind == "header":
-                cv.print(label, tx, ty, hdr_ink, 1)   # dim section title
-            elif idx == m.sel:
-                cv.rect(x + 1, cy, w - 2, _POPUP_ROW_H * fs, th["hilite"])  # highlight
-                cv.print(label, tx, ty, row_ink, 1)
+                colors = (None, hdr_ink, None)        # dim section title
+            elif sel:
+                colors = (th["hilite"], row_ink, None)
             else:
-                cv.print(label, tx, ty, dim_ink, 1)
-            cy += _POPUP_ROW_H * fs
+                colors = (None, dim_ink, None)
+            _ui.row(cv, th, (x + 1, cy, w - 2, row_h), label, on=sel,
+                    colors=colors, edge=False, pad=pad, text_dy=dy, fs=fs)
+            cy += row_h
 
     def _draw_about(self):
         """The ABOUT info modal (#52): a small centered panel with the console name +
@@ -170,8 +180,7 @@ class SystemMenuUI:
         x = (cv.w - w) // 2
         y = (cv.h - h) // 2
         th = self.ws.theme_colors
-        cv.rect(x, y, w, h, th["panel"])
-        cv.rectb(x, y, w, h, th["edge"])
+        _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
         ink = th["ink"] if th.get("bar_light", False) else th["chrome_ink"]
         ly = y + 10 * fs
         for ln in lines:
