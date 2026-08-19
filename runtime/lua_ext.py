@@ -104,6 +104,13 @@ LIBMOY_VERBS = frozenset((
 # and clobber Lua's library, which celeste's p8 shim needs for table.remove. It
 # goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto the library as a
 # metatable __call.
+# libmoy installs make_layer/draw_layer as CORE since moy-spec b9dbba1
+# (2026-08-19): they stopped being SPEC.md 10 extensions because a verb that
+# degrades truthfully belongs in core. Its versions return nil when the host
+# supplies no Display seam -- verified on the unix build. Moybyte's prelude
+# REPLACES them (it runs through moycore.exec before the cart loads), because
+# ours are object-valued and actually composite. That override is deliberate,
+# not an oversight: a moybyte cart never sees the degrading form.
 NOT_REGISTRABLE = frozenset((
     "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
     "Image",                               # a constructor, likewise

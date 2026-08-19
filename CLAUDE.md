@@ -414,7 +414,7 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   VM was only ever there for the shell `--spec` stubbed out — and because a C
   raster in wasm can fill 76,800 px/frame, so the page's whole JS
   draw-command replayer stopped being necessary. That repo is still SPEC.md
-  ("moy core 0.1") + runner + the `moy` CLI (new/run/export/port/demo) + the
+  ("moy core 0.2") + runner + the `moy` CLI (new/run/export/port/demo) + the
   **p8 converter, which is UPSTREAM of us** (2026-08-15). This line used to say
   "re-vendor `p8_import.py` whenever `tools/import_p8.py` changes", i.e.
   moybyte → spec, and it had the arrow backwards: SPEC.md is what says what a

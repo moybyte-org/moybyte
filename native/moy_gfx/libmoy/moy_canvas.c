@@ -540,7 +540,7 @@ float moy_rnd(moy_console *con, float n)
     return (float)((double)x / 4294967296.0) * n;
 }
 
-/* SPEC.md 10 `layers`. See moy.h for why this ignores camera, clip and pal:
+/* SPEC.md 6 layers. See moy.h for why this ignores camera, clip and pal:
  * it composites a finished buffer rather than drawing into one, which is the
  * same reason cls ignores them.
  *

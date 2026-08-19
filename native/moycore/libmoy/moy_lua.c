@@ -187,8 +187,8 @@ static int l_palt(lua_State *L)
  *
  * So the BINDING is where the console's optional halves get checked -- once
  * per call, rather than a NULL test inside per-pixel loops that already hold
- * the pointer. The semantics follow SPEC.md 10's rule for a feature the host
- * did not supply: degrade truthfully. No sheet means every sprite is empty,
+ * the pointer. The semantics follow the rule that keeps these verbs OUT of
+ * SPEC.md 10: degrade truthfully. No sheet means every sprite is empty,
  * which is what an unpainted sheet looks like; no map means every cell is
  * empty, which is what mget already answers for a cell out of range. A cart
  * cannot tell "no sheet" from "a sheet full of colour 0", and should not have
@@ -469,12 +469,12 @@ static int l_textmode(lua_State *L)
 }
 
 
-/* -- SPEC.md 10 extensions ------------------------------------------------
+/* -- the host-dependent core verbs (SPEC.md 6) -----------------------------
  *
- * Installed only when the host supplies the matching callback, because 10 says
- * an extension's verbs "simply do not exist as globals on a host without it" --
- * so the capability is the pointer, and a cart's `if view ~= nil` is answering
- * a real question.
+ * view, background and the layer verbs. Each does more on a host that can and
+ * something truthful on one that cannot, so none is gated on a host callback
+ * and none needs a cart-side guard -- SPEC.md 10 lists no standard extension
+ * precisely because a verb that degrades honestly belongs in core instead.
  *
  * `layers` is a full drawing surface, and the trick that keeps it from being a
  * second implementation of the verb table is that it reuses the FIRST one: a
@@ -494,7 +494,7 @@ typedef struct {
 } moy_lua_layer;
 
 /* The verbs a layer answers: everything that draws, and the draw STATE that
- * scopes it. Not spr's siblings from other extensions, and not input/audio --
+ * scopes it. Not spr's siblings elsewhere in core, and not input/audio --
  * a layer is a surface, not a console. */
 static const luaL_Reg LAYER_VERBS[] = {
     {"cls", l_cls}, {"pix", l_pix}, {"line", l_line}, {"rect", l_rect},
@@ -596,8 +596,8 @@ static int l_view(lua_State *L)
     return 0;
 }
 
-/* Install whichever extensions this host implements. */
-static void open_extensions(lua_State *L, moy_console *con)
+/* Install the core verbs whose effect -- not existence -- depends on the host. */
+static void open_host_verbs(lua_State *L, moy_console *con)
 {
     /* All CORE (SPEC.md 6). None of these is gated on a host callback, because
      * none of them can leave a cart unable to tell it was denied: view and
@@ -647,7 +647,7 @@ static const luaL_Reg VERBS[] = {
     {"volume", l_volume},
     {"touch", l_touch}, {"key", l_key}, {"keyp", l_keyp},
     {"textmode", l_textmode},
-    /* PROVISIONAL -- SPEC.md 6.1, not part of core 0.1. */
+    /* PROVISIONAL -- SPEC.md 6.1, not part of core 0.2. */
     {"tri", l_tri}, {"trib", l_trib}, {"sspr", l_sspr}, {"tline", l_tline},
     {NULL, NULL}
 };
@@ -699,10 +699,9 @@ int moy_lua_open(struct lua_State *Ls, moy_console *con)
         lua_pushcfunction(L, v->func);
         lua_setglobal(L, v->name);
     }
-    /* SPEC.md 10's optional features, each installed only if this host
-     * implements it -- so a cart's `if make_layer ~= nil` is a real question
-     * with a real answer, and a host that implements none is unchanged. */
-    open_extensions(L, con);
+    /* The rest of core: the verbs whose EFFECT the host varies, never their
+     * presence (SPEC.md 6). Installed unconditionally, like the table above. */
+    open_host_verbs(L, con);
     /* SPEC.md 9: read these, do not assume 320x240. */
     lua_pushinteger(L, con->canvas->w);
     lua_setglobal(L, "W");
@@ -752,7 +751,7 @@ int moy_lua_update(struct lua_State *L, float dt, char *err, size_t errlen)
 
 int moy_lua_draw(struct lua_State *L, char *err, size_t errlen)
 {
-    /* SPEC.md 10: background(x) declares a backdrop repainted each frame. A
+    /* SPEC.md 6: background(x) declares a backdrop repainted each frame. A
      * host that took the callback has already done it its own way; one that
      * did not gets it here, which is what lets a cart call background()
      * unguarded on every console. Before _draw, where the cart would have

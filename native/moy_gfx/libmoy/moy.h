@@ -44,7 +44,7 @@
 extern "C" {
 #endif
 
-#define MOY_VERSION "0.1.0"
+#define MOY_VERSION "0.2.0"
 
 /* SPEC.md 1: the console is a fixed-size machine. */
 #define MOY_W            320
@@ -162,10 +162,10 @@ void moy_canvas_wire(moy_canvas *c, const uint16_t tab[MOY_PALETTE]);
  * not leak between carts, or from host UI into a cart's first frame. */
 void moy_reset_state(moy_canvas *c);
 
-/* SPEC.md 10 `layers`: copy the dst-sized window of `src` whose top-left is
+/* SPEC.md 6 layers: copy the dst-sized window of `src` whose top-left is
  * (cam_x, cam_y) into `dst`. The point of a layer is that a wide level is
  * drawn ONCE and window-copied per frame instead of re-rendered, so this is
- * the per-frame half of the extension.
+ * the per-frame half of it.
  *
  * Like cls, this is a COMPOSITING verb rather than a drawing one: it ignores
  * dst's camera, clip and pal, and writes whole rows. Source coordinates are
@@ -199,7 +199,7 @@ void moy_pal_reset(moy_canvas *c);
 void moy_palt  (moy_canvas *c, int col, int on);
 void moy_palt_reset(moy_canvas *c);
 
-/* PROVISIONAL -- SPEC.md 6.1 is unsettled and these are not part of core 0.1. */
+/* PROVISIONAL -- SPEC.md 6.1 is unsettled and these are not part of core 0.2. */
 void moy_tri   (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int col);
 void moy_trib  (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int col);
 
@@ -282,24 +282,27 @@ typedef struct {
      * it is a host's job. */
     const char *(*cfg)(void *user, const char *key);
 
-    /* -- SPEC.md 10 EXTENSIONS ------------------------------------------
+    /* -- what the host VARIES, never withholds (SPEC.md 6) ---------------
      *
-     * Optional by construction, and the capability IS the pointer: a verb is
-     * installed as a global only when the host supplies its callback, which is
-     * exactly what 10 requires ("an extension's verbs simply do not exist as
-     * globals on a host without it"). A host that leaves these NULL is
-     * conforming and its carts see no such names -- so a cart can nil-guard
-     * them, or declare the extension in its manifest and be refused up front.
+     * These back core verbs, so leaving one NULL changes what the console does
+     * with a call, never whether the call exists: the verb is a global either
+     * way and a cart needs no nil-guard. That is precisely why SPEC.md 10 does
+     * not list them -- a capability a cart can be shielded from is not an
+     * extension.
      *
-     * `viewport`: view(w, h) declares a logical viewport smaller than the
-     * canvas; compositing it centered at the largest integer scale that fits
-     * is the host's job, because only the host knows what it is compositing
-     * onto. libmoy just relays the declaration. */
+     * view(w, h) declares a logical viewport smaller than the canvas.
+     * Compositing it centered at the largest integer scale that fits is the
+     * host's job, because only the host knows what it is compositing onto;
+     * libmoy relays the declaration and also records it in moy_console, so a
+     * host may poll instead of taking the callback. A host that does neither
+     * presents the whole canvas, which is the cart's region unscaled. */
     void (*view)(void *user, int w, int h);        /* optional; see moy_console */
 
-    /* `layers`: the host owns the memory, as it does for every other buffer
-     * here -- libmoy allocates nothing. layer_new returns w*h pixels (or NULL
-     * to decline, which makes make_layer return nil rather than fail), and
+    /* Layers (SPEC.md 6): the host owns the memory, as it does for every
+     * other buffer here -- libmoy allocates nothing. 1.1 guarantees a cart ONE
+     * full-screen layer, so a conforming host implements this. layer_new
+     * returns w*h pixels (or NULL to decline a FURTHER one, which makes
+     * make_layer return nil rather than fail), and
      * layer_free is optional: a host whose layers live until the cart exits
      * may leave it NULL and reclaim them wholesale. */
     moy_pixel *(*layer_new)(void *user, int w, int h);
@@ -320,7 +323,7 @@ typedef struct {
     moy_map    *map;
     moy_host    host;
     uint32_t    rng;        /* see moy_rnd */
-    /* SPEC.md 10, the always-present half. A cart calls view() or background()
+    /* SPEC.md 6, the always-present half. A cart calls view() or background()
      * unguarded; what it declared lands HERE whether or not the host took the
      * callback, so a host may read state instead of accepting calls, and a
      * host that does neither still runs the cart correctly -- unscaled for

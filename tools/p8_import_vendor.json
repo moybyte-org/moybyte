@@ -3,8 +3,8 @@
     "tools/p8_import.py": "a222c0509a385988e0a76b848ccc1b16d690f229005d939026de4e13d0b24b3e"
   },
   "upstream": {
-    "commit": "896c1974f2aaf8cb713e7bc6e67cdcedca44cc61",
-    "date": "2026-08-13",
+    "commit": "31e71e9c06c2f3fd0c7268d0c7825723c6f71720",
+    "date": "2026-08-19",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }
