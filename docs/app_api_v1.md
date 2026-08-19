@@ -60,6 +60,8 @@ Everything else follows from the registration — **apps never edit console.py**
   `.layout` generically, so the app reflows per window);
 - the resize minimum (the ui.py min-size convention);
 - keyboard text mode after open (for typing apps);
+- the exitable bar itself — the strip draw and its context-X tap are the
+  router's, not the app's (see "The bar contract" below);
 - exit via the tool bar's context-X / `ws.exit()` — return-to-caller is the
   WM's, not the app's.
 
@@ -74,10 +76,35 @@ The ui toolkit (`runtime/ui.py`) is the intended surface: theme tokens
 draw pass registers every key's rect, the pointer resolves against the same
 registry).
 
-Bar contract: draw `ws.bar_layer._draw_status_strip("tool")` last when not
-`ws.windowed_chrome`, and route clicks through
-`ws.bar_layer.handle_bar_tap("tool", ...)` first — that keeps the app exitable
-everywhere (spec `shell_ux_v1.md` §9).
+## The bar contract is the HOST's, not yours (2026-08-19)
+
+An app draws **no bar at all**. On the fullscreen tiers the router paints the
+minimal exitable strip (title + status + the context-X, spec `shell_ux_v1.md`
+§9) *after* your `draw()` — chrome over content — and routes a tap in that band
+*before* your `handle_pointer()`; in the windowed desk world it suppresses the
+strip, because the WM's title strip carries the close there. You get all of
+that from `register_app` alone, including in an app that has never heard of the
+bar.
+
+This used to be a paragraph here telling you to write both halves yourself, in
+the right order, and an app that forgot either became **unexitable** — silently,
+on device only. Seven apps carried the same two lines. `runtime/console.py`'s
+`_app_bar_route` owns them now, pinned behaviourally by
+`tests/test_app_api.py` (a stub app that draws no strip and routes no bar tap
+must still show the strip and still exit on its X, and so must all seven
+shipped apps, through the same assertion).
+
+Two things follow for an app author:
+
+- **Leave the bar band alone.** It is the top `layout.bar_h` rows of your own
+  layout (`0` when windowed — the `ListShellLayout._init_frame` convention every
+  app already follows); the host paints over it and swallows taps inside it, so
+  `handle_pointer` never sees one. An app with no `layout` gets the bar's own
+  band height instead.
+- **Optional `commit(self)`** — the host calls it just before routing a bar
+  tap, because the X there is an exit path. An app that persists on an idle
+  debounce (#111) implements it (`writer_app`, `sheets_app`, `storybook_app`
+  do); forgetting it costs an autosave, never the exit.
 
 ## Checklist for a new shipped app
 

@@ -8,8 +8,10 @@ Deliberately tiny and built ONLY on the public seams, so it doubles as the
   * one content-Layer class here (id/domain/draw/handle_input/handle_pointer +
     the app protocol: is_app / open / relayout);
   * ONE `ws.register_app(CalcAppLayer(...))` call -- launcher dispatch, the
-    back-stack/window kind, taskbar chip, WM title ("CALC" from TITLE), and the
-    per-window layout context all follow from the registration;
+    back-stack/window kind, taskbar chip, WM title ("CALC" from TITLE), the
+    per-window layout context AND the exitable bar (the host draws the strip
+    after draw() and routes its taps before handle_pointer()) all follow from
+    the registration;
   * geometry from the ui rect algebra (cut/inset/vsplit/hsplit), drawing from
     the ui widgets, and taps resolved through ui.Hits -- the draw pass IS the
     hit-map, the toolkit's draw==tap contract.
@@ -131,8 +133,6 @@ class CalcAppLayer:
                     kind = "author"
                 _ui.button(cv, th, rect, label, kind=kind)
                 self.hits.add(rect, "key", label)
-        if not ws.windowed_chrome:
-            ws.bar_layer._draw_status_strip("tool")
 
     # -- input -----------------------------------------------------------------
 
@@ -149,11 +149,8 @@ class CalcAppLayer:
         return True
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         if not click:
             return True
-        if not ws.windowed_chrome and ws.bar_layer.handle_bar_tap("tool", px, py):
-            return True                       # clock/menu/wifi + the context X
         hit = self.hits.at(px, py)
         if hit is not None:
             self._key(hit[1])

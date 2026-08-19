@@ -214,6 +214,13 @@ class StorybookAppLayer(ListShellApp):
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
             self.status = ("CAN'T SAVE " + str(exc))[:28]
 
+    def commit(self):
+        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
+        before routing a tap into this app's bar band -- the context-X there is
+        an exit path and must never lose a story."""
+        self._sync_editor()
+        self._commit_deck()
+
     def _sync_editor(self):
         ed = self.editor
         if ed is None or self.deck is None:
@@ -493,12 +500,7 @@ class StorybookAppLayer(ListShellApp):
                 self.status = "PAGE " + str(self.page_i + 1)
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            self._sync_editor()
-            self._commit_deck()                   # the X must never lose a story
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if not click:
             return True
         if self.mode == "shelf":
@@ -597,8 +599,6 @@ class StorybookAppLayer(ListShellApp):
             self._button(cv, "MY ART", lay.btn3)
             self._button(cv, "TEAR OUT", lay.btn4, hot=self.del_armed)
             self._draw_page(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _page_label(self, p):
         text = (p.get("text") or [""])

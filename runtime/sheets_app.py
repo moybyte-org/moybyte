@@ -251,6 +251,12 @@ class SheetsAppLayer(ListShellApp):
             self._flush_history(name)
         return ok
 
+    def commit(self):
+        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
+        before routing a tap into this app's bar band -- the context-X there is
+        an exit path and must never lose data, so this forces the write."""
+        self.flush(force=True)
+
     def _flush_history(self, name):
         """The #111 op-history sidecar write, at the SAME autosave point as the
         sheet file itself (just above): drain History's pending ops (+ a fresh
@@ -701,11 +707,7 @@ class SheetsAppLayer(ListShellApp):
 
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            self.flush(force=True)              # the X must never lose data
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if self.mode == "list":
             if not click:
                 return True
@@ -809,8 +811,6 @@ class SheetsAppLayer(ListShellApp):
                      lay.bar_h + 8 * lay.fs, th["title_ink"], 1)
             self.grid.set_rect(lay.body, lay.fs)
             self.grid.draw(cv, th)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_rename(self, cv):
         lay = self.layout

@@ -269,8 +269,6 @@ class AppearanceAppLayer:
 
     def handle_pointer(self, px, py, click):
         lay = self.layout
-        if click and not self.ws.windowed_chrome and py < lay.bar_h:
-            return bool(self.ws.bar_layer.handle_bar_tap("tool", px, py))
         if not click:
             return True
         for i, r in enumerate(lay.tabs):
@@ -334,8 +332,6 @@ class AppearanceAppLayer:
             else:
                 self._draw_wall_card(cv, r, items[i], i == self.sel,
                                      self.mode == "images")
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_monitor(self, cv, dt):
         """The Background-tab nod: a little monitor whose 4:3 screen shows the

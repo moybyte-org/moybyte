@@ -164,7 +164,10 @@ def test_bar_x_exit_saves_the_open_sheet(tmp_path):
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "99")               # an OPEN, uncommitted edit
     xb = ws.layout.context_x_btn
-    app.handle_pointer(xb[0] + 2, xb[1] + 2, True)
+    ws.pointer.place(xb[0] + 2, xb[1] + 2)
+    ws.pointer.click = True
+    ws.handle_pointer()                   # the ROUTER owns the app bar contract
+    ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     data = json.loads(moy_carts.load_file("tables", name, carts))
     assert data["cells"]["A1"]["v"] == 99

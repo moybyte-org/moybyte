@@ -356,8 +356,6 @@ class FilesAppLayer(ListShellApp):
     def handle_pointer(self, px, py, click):
         ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if not click:
             return True
         if self._in(px, py, lay.head):
@@ -469,8 +467,6 @@ class FilesAppLayer(ListShellApp):
         cv.rect(0, lay.h - lay.status_h, lay.w, lay.status_h, self.names["black"])
         cv.print(self.status[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
                  lay.h - lay.status_h + 3 * fs, self.names["yellow"], 1)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_kinds(self, cv):
         shown = self._shown_kinds()

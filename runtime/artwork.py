@@ -565,8 +565,6 @@ class PaintAppLayer:
     def handle_pointer(self, px, py, click):
         ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if self.mode == "show":
             if click:
                 self.mode = "paint"
@@ -784,8 +782,6 @@ class PaintAppLayer:
             self._draw_open(cv)
         else:
             self._draw_paint(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_paint(self, cv):
         lay = self.layout

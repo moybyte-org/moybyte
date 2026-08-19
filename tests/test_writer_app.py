@@ -218,7 +218,10 @@ def test_bar_x_exit_saves_the_open_page(tmp_path):
     name = app.doc_name
     _type(app, ws.input, "not lost")
     xb = ws.layout.context_x_btn          # the OS bar's context-X
-    app.handle_pointer(xb[0] + 2, xb[1] + 2, True)
+    ws.pointer.place(xb[0] + 2, xb[1] + 2)
+    ws.pointer.click = True
+    ws.handle_pointer()                   # the ROUTER owns the app bar contract
+    ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     assert _body_of(moy_carts.load_file("docs", name, carts)) == "not lost"
 

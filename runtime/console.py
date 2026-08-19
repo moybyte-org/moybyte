@@ -3186,6 +3186,49 @@ class Workstation:
         """The registered app's requested window/taskbar title, or None."""
         return self._app_titles.get(kind)
 
+    # -- the app bar contract: a HOST GUARANTEE, not a per-app ritual ---------
+    #
+    # On the fullscreen tiers a registered app shows the minimal exitable bar
+    # (title + status + the context-X, spec shell_ux_v1.md Section 9). Every app
+    # used to hand-write BOTH halves -- `_draw_status_strip("tool")` last in its
+    # draw() and `handle_bar_tap("tool", ...)` first in its handle_pointer() --
+    # and an app that forgot either became UNEXITABLE, silently, on device only.
+    # The router already knows it is drawing a registered app, so it owns the
+    # contract: frame()'s draw walk paints the strip AFTER the app's draw()
+    # (chrome over content) and handle_pointer's walk routes the band BEFORE the
+    # app's handle_pointer(). An app registered in future gets both for free,
+    # including one that never heard of the bar -- pinned BEHAVIOURALLY (not by a
+    # call-site count) in tests/test_app_api.py: a stub app that draws no strip
+    # and routes no bar tap must still show the strip's pixels and still exit on
+    # its context-X, and so must all seven shipped apps, parametrized.
+    #
+    # SCOPE, deliberately narrow: this owns the "tool" strip for REGISTERED APPS
+    # ONLY. The other strip kinds -- "menu" (the Editor surfaces), "settings",
+    # "home"/"picker" (launcher_layer), "desk" (wm_windowed) and "desktop" (the
+    # running cart's crash chrome / a running TOOL CART's bar, _draw_tool_bar
+    # above) -- stay with their surfaces. Collapsing the kinds would pick one and
+    # silently break the context-X on the rest.
+    def _app_bar_route(self, app, px, py):
+        """Route a click at (px, py) against registered `app`'s bar band.
+
+        Returns None when the tap is BELOW the band (the app sees it as usual),
+        True when the bar consumed it, and False when it did not -- the band
+        belongs to the bar either way, so a miss inside it is swallowed rather
+        than handed down, which is what each app's `return bool(...)` did."""
+        lay = getattr(app, "layout", None)
+        band = getattr(lay, "bar_h", None)
+        if band is None:                    # an app with no layout of its own
+            band = self.bar_layer._bar_h("tool")
+        if py >= band:
+            return None
+        # The context-X in that band is an EXIT path, so hard-commit first: an
+        # app that persists on an idle debounce (#111) would otherwise lose the
+        # last edit. Optional -- forgetting it costs an autosave, never the exit.
+        commit = getattr(app, "commit", None)
+        if commit is not None:
+            commit()
+        return bool(self.bar_layer.handle_bar_tap("tool", px, py))
+
     def open(self):
         # RUN landing (spec shell_ux_v1.md Section 2): build the workspace + run the
         # cart on the desktop, recording the launcher home as the caller so QUIT pops
@@ -4457,8 +4500,23 @@ class Workstation:
         self._ptr_was_down = p.down
         self._ptr_last_x = px
         self._ptr_last_y = py
+        # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
+        # REGISTERED app's bar band belongs to the bar, and the router routes it
+        # BEFORE the app's own handle_pointer -- checked inside the walk (not
+        # ahead of it) so an open overlay above the content still gets the tap
+        # first, exactly as when each app hand-wrote this as its first statement.
+        # Only a CLICK can reach the bar, so a move/hover frame pays one compare.
+        _appbar = self._apps_by_id if (click and not self.windowed_chrome) else None
         # Memoized, pre-reversed visible stack (Stage 6c) -- no per-frame allocation.
         for layer in self.wm.visible_stack_rev():
+            if _appbar is not None:
+                _app = _appbar.get(layer.id)
+                if _app is not None:
+                    _bar = self._app_bar_route(_app, px, py)
+                    if _bar is not None:            # the band is the bar's
+                        if _bar:
+                            return
+                        continue
             if not _perf:
                 if layer.handle_pointer(px, py, click):
                     return
@@ -5010,6 +5068,14 @@ class Workstation:
         # only then. One compare per post-composite layer; None everywhere the
         # comp has no fold (host/P4/web).
         _fold_live = False
+        # THE APP BAR CONTRACT, draw half (docs/app_api_v1.md): a REGISTERED
+        # system app gets the minimal exitable "tool" strip drawn over its
+        # content by the router -- the app draws no bar of its own. Resolved
+        # ONCE per frame (the walk cannot change either term): `_apps_by_id`
+        # while the fullscreen chrome rules apply, None in the windowed desk
+        # world, where the WM's title strip carries the close instead. See
+        # `_app_bar_route` for the input half and the scope note there.
+        _appbar = self._apps_by_id if not self.windowed_chrome else None
         for layer in self.wm.draw_stack():          # memoized (Stage 6c) -- no per-frame alloc
             if _prev_domain == "game" and layer.domain == "system":
                 if _game_open:                      # close the placement span
@@ -5051,6 +5117,8 @@ class Workstation:
             if _lay is not None:
                 _tk = _ticks_us()
                 layer.draw(dt)
+                if _appbar is not None and layer.id in _appbar:
+                    self.bar_layer._draw_status_strip("tool")   # host guarantee
                 _lus = _ticks_diff(_ticks_us(), _tk)
                 # SUMMED, not assigned: the windowed WM draws several windows
                 # that share one layer id, and each would otherwise clobber the
@@ -5060,6 +5128,8 @@ class Workstation:
                     _cur = _lus                     # CHROMEBRK: cursor (us)
             else:
                 layer.draw(dt)
+                if _appbar is not None and layer.id in _appbar:
+                    self.bar_layer._draw_status_strip("tool")   # host guarantee
             _prev_domain = layer.domain
         if _deep:
             # Last PAINTED frame's split (the skip/quiet gates return above), so

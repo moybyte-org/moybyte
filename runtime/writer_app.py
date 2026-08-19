@@ -200,6 +200,14 @@ class WriterAppLayer(ListShellApp):
             self._commit_history(name)
         return ok
 
+    def commit(self):
+        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
+        before routing a tap into this app's bar band, because the context-X
+        there is an exit path and a doc still inside its idle-debounce window
+        would otherwise lose the last edit. Change-gated -- an untouched blank
+        doc is not written just to exit."""
+        self.flush()
+
     # -- op-history (#111 phase 3) --------------------------------------------
 
     def can_undo(self):
@@ -502,13 +510,7 @@ class WriterAppLayer(ListShellApp):
 
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            # The OS bar (context-X exits): flush FIRST so an exit never loses text
-            # (change-gated -- an untouched blank doc is not written just to exit).
-            self.flush()
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if self.mode == "list":
             if not click:
                 return True
@@ -616,8 +618,6 @@ class WriterAppLayer(ListShellApp):
             self._draw_rename(cv)
         else:
             self._draw_page(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_rename(self, cv):
         lay = self.layout
