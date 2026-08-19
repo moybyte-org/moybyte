@@ -6,6 +6,8 @@
   "runtime": "python",
   "main": "main.py",
   "system": true,
+  "order": 160,
+  "targets": ["host", "device"],
   "canvas": "320x240",
   "permissions": [
     "graphics",

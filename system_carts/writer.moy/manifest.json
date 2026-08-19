@@ -6,6 +6,13 @@
   "runtime": "python",
   "main": "main.py",
   "system": true,
+  "order": 290,
+  "app": {
+    "id": "writer",
+    "entry": "writer_app:WriterAppLayer",
+    "text_mode": true,
+    "order": 30
+  },
   "canvas": "320x240",
   "permissions": [
     "graphics",

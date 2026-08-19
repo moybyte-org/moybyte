@@ -235,11 +235,16 @@ PYEOF
 #    binary cache) is skipped. Lua twins stay out until the wasm Lua VM lands.
 # ---------------------------------------------------------------------------
 echo "== packing carts"
-# The WALLPAPER carts (moy_night + ocean/open_machine/wallpaper_space) ride
-  # along even though they never appear on the run-grid: they are the Appearance
-  # app's CARTS catalog, and shipping only moy_night left that tab with one
-  # choice (owner report 2026-07-31).
-  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy harpoon_pop.moy coin_quest.moy platformer.moy tiny_runner.moy brick_siege.moy brick_siege_lua.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy ocean.moy open_machine.moy wallpaper_space.moy paint.moy files.moy writer.moy sheets.moy storybook.moy calc.moy theme_picker.moy}"
+# The roster is DATA now (the UI refactor's Phase 5, 2026-08-19): every cart
+# ships everywhere unless its own manifest.json says otherwise, so this build
+# asks tools/gen_device_carts.py which folders declare a "web" target instead
+# of carrying a hand-written list that nothing compared against system_carts/.
+# (The WALLPAPER carts -- moy_night + ocean/open_machine/wallpaper_space --
+# ride along even though they never appear on the run-grid: they are the
+# Appearance app's CARTS catalog, and shipping only moy_night left that tab
+# with one choice, owner report 2026-07-31. Excluded here are the dev/test
+# carts and wifi.moy, each by a `"targets"` line in its OWN manifest.)
+ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import json, os, sys
 root, out = sys.argv[1], sys.argv[2]

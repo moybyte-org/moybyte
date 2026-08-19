@@ -6,6 +6,8 @@
   "runtime": "lua",
   "main": "main.lua",
   "system": true,
+  "order": 260,
+  "targets": ["host", "device"],
   "canvas": "320x240",
   "permissions": [
     "graphics",

@@ -286,6 +286,27 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.calc_app import CalcAppLayer
 
 try:
+    from app_decls import APPS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.app_decls import APPS
+
+
+def _resolve_app_entry(entry):
+    """Resolve an app declaration's "module:Class" to the class itself.
+
+    Two namespaces, as everywhere in this tree: the boards and the wasm head
+    freeze `runtime/` FLAT (`import writer_app`), the host imports the package
+    (`runtime.writer_app`). Same ladder every module header here writes by
+    hand -- resolved from data instead of once per app.
+    """
+    mod_name, _, cls_name = entry.partition(":")
+    try:
+        mod = __import__(mod_name, None, None, (cls_name,))
+    except ImportError:
+        mod = __import__("runtime." + mod_name, None, None, (cls_name,))
+    return getattr(mod, cls_name)
+
+try:
     from artwork import PaintAppLayout
     from appearance_app import AppearanceLayout
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -1291,23 +1312,11 @@ class Workstation:
         # scroll window (set_msel/set_top) + drawing; reads ws config/system state +
         # dispatches every mutation to ws setters (it owns NO config).
         self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
-        # Full-canvas Paint is a system-domain app process: its 320x240/512x300
-        # document stays indexed, while its chrome/view reflows to each window.
-        self.artwork_app = PaintAppLayer(self, NAMES, _in)
-        self.appearance_app = AppearanceAppLayer(self, NAMES, _in)
-        # Writer (the kid notebook): notes list + a ruled text page over the shared
-        # CodeEditor core; autosaves its notes.json through the cart store.
-        self.writer_app = WriterAppLayer(self, NAMES, _in)
-        # Storybook (#78): decks of art+words pages that COMPILE to story carts
-        # (deck.json + a generated, readable main.py -- the blocks->code model).
-        self.storybook_app = StorybookAppLayer(self, NAMES, _in)
-        # Sheets (#78): the kid spreadsheet -- a workbook of grids with a hand-rolled
-        # formula engine (runtime/formula.py); values reach a game via table().
-        self.sheets_app = SheetsAppLayer(self, NAMES, _in)
-        # Files (#108): the user-files gallery/manager over files/<kind>/ --
-        # browse, rename, duplicate, trash/restore, and the copy-on-use reuse
-        # verbs (wallpaper / game bg) on the kid's drawings.
-        self.files_app = FilesAppLayer(self, NAMES, _in)
+        # The system APPS are constructed AND registered below, from the
+        # declarations (`_init_apps`) -- Paint's indexed document + reflowing
+        # chrome, Writer's notebook, Storybook's compiling decks, Sheets'
+        # formula grids, Files' user-files gallery and Calc. Each is a
+        # `system_carts/<folder>/manifest.json` "app" block, not a line here.
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -1350,15 +1359,7 @@ class Workstation:
         self._apps_by_id = {}
         self._app_min_sizes = {}
         self._app_titles = {}
-        self.register_app(self.artwork_app,
-                          min_size=(PaintAppLayout.MIN_W, PaintAppLayout.MIN_H))
-        self.register_app(self.appearance_app,
-                          min_size=(AppearanceLayout.MIN_W, AppearanceLayout.MIN_H))
-        self.register_app(self.writer_app, text_mode=True)
-        self.register_app(self.storybook_app)
-        self.register_app(self.sheets_app, text_mode=True)
-        self.register_app(self.files_app, text_mode=True)   # rename typing
-        self.register_app(CalcAppLayer(self, NAMES, _in))
+        self._init_apps()
         # The boot logo is a draw-time takeover of the screen content (input still
         # routes to the underlying screen), so it's not in _content_layers.
         self._splash_layer = L("splash", "system", draw=lambda dt: self._draw_splash())
@@ -3137,6 +3138,26 @@ class Workstation:
         # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+
+    def _init_apps(self):
+        """Construct and register every SYSTEM APP from its declaration.
+
+        There is no per-app line in this file. `app_decls.APPS` is GENERATED
+        from the `app` blocks in `system_carts/*/manifest.json`, so adding an
+        app is a manifest plus a module -- never an edit here
+        (docs/app_api_v1.md). The `<id>_app` attributes are kept because the
+        shell and the apps address each other by them (`files_app` opens
+        `ws.writer_app`), and because 100+ call sites use them.
+
+        Declaration order IS dispatch precedence, which is why `order` lives in
+        the manifest rather than being implied by a dict.
+        """
+        for d in APPS:
+            app = _resolve_app_entry(d["entry"])(self, NAMES, _in)
+            setattr(self, str(d["id"]) + "_app", app)
+            ms = d.get("min_size")
+            self.register_app(app, text_mode=bool(d.get("text_mode")),
+                              min_size=(tuple(ms) if ms else None))
 
     def register_app(self, app, text_mode=False, min_size=None):
         """Register a SYSTEM APP (docs/app_api_v1.md). `app` is a content Layer

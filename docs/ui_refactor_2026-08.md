@@ -248,6 +248,22 @@ X exits; run it per registered app kind.
   (`cv.rect(...)` + `cv.print(...)` as a row/cell) exists nowhere outside
   `ui.py`. *Gate:* goldens byte-identical + the P4 bench within noise (§7).
 
+**The frozen baseline does not exercise the toolkit — verify on the OTHER
+configs.** Discovered while building Phase 0 and proven by perturbation:
+`editor_app._draw_zone` and its siblings are guarded `if not ws.layout._base`,
+so at 320×240/1× the shell takes frozen hand-rolled branches. Changing
+`ui.button`'s padding turned the Guition, fs3 and windowed configs red and left
+**both T-Deck rows green**.
+
+Two consequences, and neither is optional:
+- A conversion is verified by the **non-`_base`** golden configs. A green
+  T-Deck row proves nothing about a widget change.
+- "The whole UI surface is unified" is therefore true of the responsive tiers
+  first. The `_base` branches stay frozen **on purpose** — `rest` must be
+  byte-identical, and unfreezing them would move T-Deck pixels. Converting them
+  is a separate, deliberate, re-baselined act; do not let a conversion agent do
+  it by accident, and do not claim the T-Deck is unified until it is done.
+
 **Phase 4 — skins as data.** A new leaf `+runtime/skin.py` (NOT in `chrome.py`,
 which would create the cycle `ui → chrome → settings_layer → ui`), with
 **nested** pre-flattened tables `SKIN[kind][state]` — nested, because a single

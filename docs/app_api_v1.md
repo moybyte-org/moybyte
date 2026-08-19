@@ -106,14 +106,36 @@ Two things follow for an app author:
   debounce (#111) implements it (`writer_app`, `sheets_app`, `storybook_app`
   do); forgetting it costs an autosave, never the exit.
 
-## Checklist for a new shipped app
+## Checklist for a new shipped app (2026-08-19: it is two files)
 
-1. `runtime/<name>_app.py` (the Layer), `system_carts/<slug>.moy` (identity).
-2. `ws.register_app(...)` in console's app block (one line).
-3. Staging: both firmware `build.sh` module lists; `host_app` bare-name alias.
-4. `tools/gen_device_carts.py` `CART_ORDER` (device launcher order) and the
-   parity map in `tests/test_device_seed_parity.py`.
-5. Tests (see `tests/test_app_api.py` for the Calc set).
+1. `runtime/<name>_app.py` — the Layer.
+2. `system_carts/<slug>.moy` — the identity cart, whose manifest carries an
+   `"app"` block:
+
+   ```json
+   "app": { "id": "myapp", "entry": "myapp_app:MyAppLayer",
+            "text_mode": false, "order": 80 }
+   ```
+
+   then regenerate the frozen copy:
+   `python tools/gen_device_carts.py --app-decls`.
+3. Tests (see `tests/test_app_api.py` for the Calc set).
+
+**That is the whole list.** Everything else is derived from the declaration:
+console constructs and registers it in a loop (there is no per-app line in
+`console.py`), the device seed order, the host↔device title map, and the web
+bundle's roster. `tests/test_app_registry.py` fails if any of them grows a
+hand-written app name back.
+
+Staging needs no entry either — since #161 a board declares what it DENIES in
+its `board.toml`, so a new `runtime/` module reaches every target by default and
+keeping it off one is a written decision. (This section used to say "both
+firmware `build.sh` module lists", which stopped being true when that landed.)
+
+The four lists this replaced were not merely tedious: **four of the five failed
+silently, and on device only.** Forgetting `CART_ORDER` meant the identity cart
+never seeded, so `is_app` never claimed it, so the app was unreachable on
+hardware while working perfectly on the host.
 
 ## Non-goals (v1)
 

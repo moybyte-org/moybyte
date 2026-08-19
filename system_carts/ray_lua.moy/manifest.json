@@ -6,6 +6,7 @@
   "runtime": "lua",
   "main": "main.lua",
   "system": true,
+  "order": 150,
   "canvas": "320x240",
   "permissions": [
     "graphics",
