@@ -197,21 +197,25 @@ def use(name):
     return name
 
 
-# --- where the Appearance row plugs in ---------------------------------------
+# --- who installs one, and where it is picked --------------------------------
 #
-# The picker UI is deliberately NOT here and NOT in this phase's file set
-# (`runtime/appearance_app.py` is owned elsewhere while this lands). When it is
-# added, it is one row beside THEMES / DARK-LIGHT:
+# WIRED 2026-08-20. For a while this note described the wiring in the future
+# tense while the module had zero importers -- a catalog nothing could reach,
+# no way to choose a skin and nothing persisted. There are exactly two
+# consumers now, and `tests/test_skin.py` asserts that set in both directions:
 #
-#     from runtime import skin                    # (device: `import skin`)
-#     ...
-#     for name in skin.names():                   # a chip row, like THEMES
-#         _ui.chip(cv, th, r, name.upper(), on=(name == skin.active()))
-#     ...
-#     def _pick_skin(self, name):
-#         self.ws.set_skin(skin.use(name))        # persist beside theme_variant
+#   * `runtime/console.py` -- the OWNER. `Workstation.set_skin(name)` is the
+#     one call to `use()` anywhere: it installs, remembers the RESOLVED name in
+#     `system.json` under `"skin"`, invalidates the cached bar strip and marks
+#     the frame dirty; `load_system` re-applies the stored name at boot, beside
+#     the theme and its variant. An ABSENT key installs nothing -- `ui`'s own
+#     tables already are the default, so there is nothing to assert over a host
+#     process that may hold several workstations.
+#   * `runtime/appearance_app.py` -- the PICKER. The THEMES tab draws
+#     `skin.names()` as a chip band under DARK/LIGHT and calls
+#     `ctx.theme.set_skin(name)`; it imports this module for the NAME LIST only
+#     (as it imports `chrome.THEMES`) and never installs one itself.
 #
-# `Workstation` needs the same two lines `set_theme_variant` has: store the
-# name in its config and call `skin.use(stored)` at boot, before the first
-# draw. Nothing else in the shell changes -- that is the claim this phase
-# makes, and `tests/test_skin.py` is where it is checked.
+# Every other surface still draws through `ui` and cannot tell which skin is
+# installed -- that is the claim this phase makes, and
+# `test_no_surface_module_knows_about_skins` is where it is kept.

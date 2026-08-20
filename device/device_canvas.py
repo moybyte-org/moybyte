@@ -388,7 +388,9 @@ class DeviceCanvas:
         # virtually every frame. The big verbs call self._pump() right after
         # their native call instead. None on layers / host fakes (no bounce).
         self._pump = getattr(compositor, "pump_if_pending", None)
-        # Cart-view crop scratch (SPEC.md 10; see blit_game): one pooled
+        # Cart-view crop scratch (SPEC.md 6, CORE since the layers promotion --
+        # `view` stopped being a section 10 extension in the moy-spec bump that
+        # made layers/view/background core; see blit_game): one pooled
         # _LayerComp reused across frames, allocated on first cropped composite.
         self._view_scratch = None
         # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-

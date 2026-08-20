@@ -224,10 +224,77 @@ def test_the_quirks_that_stayed_code_are_documented():
 # 2. the second skin is pure data
 # =============================================================================
 
+# The modules allowed to know the catalog exists, and what each is allowed to
+# do with it. Everything else in `runtime/` is a SURFACE: it draws through `ui`
+# and cannot tell which skin is installed.
+#
+# This is an exact set, not a floor -- `test_the_skin_wiring_is_exactly_two_modules`
+# asserts the tree matches it in both directions, so adding a fourth consumer is
+# a deliberate edit here rather than a quiet import somewhere.
+_SKIN_OWNERS = {
+    # The SETTING's owner: imports the catalog, installs a skin, persists the
+    # name, re-applies it at boot. The one place `skin.use` is called.
+    "console.py": "installs + persists the skin (Workstation.set_skin)",
+    # The PICKER: imports the catalog for its NAME LIST (as it imports
+    # chrome.THEMES), and asks the theme role to install one. Never calls
+    # `skin.use` itself.
+    "appearance_app.py": "lists the catalog; installs via ctx.theme.set_skin",
+}
+
+# May NAME the verb (it forwards it) but must not import the catalog: the
+# AppContext role an app reaches the setting through.
+_SKIN_FORWARDERS = {"app_context.py": "Theme.set_skin -> ws.set_skin"}
+
+
 def test_no_surface_module_knows_about_skins():
     """The ratchet. `runtime/skin.py` installs itself into `ui`; nothing in the
     surface graph may import it, name a skin or reach into the tables -- the
-    moment one does, a skin stops being data and becomes a fork."""
+    moment one does, a skin stops being data and becomes a fork.
+
+    "Nothing" was once literally every module, which made WIRING the catalog a
+    red test -- and for a while the wiring simply did not exist: 217 lines with
+    zero importers, no way to pick a skin and nothing persisted. The exemption
+    is the two modules named in `_SKIN_OWNERS` (plus the role that forwards the
+    verb), because a setting needs an owner and a picker; the ratchet itself is
+    unchanged for the ~60 surface modules it is actually about."""
+    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        if path.name in ("skin.py", "ui.py"):
+            continue
+        src = path.read_text(encoding="utf-8")
+        owner = path.name in _SKIN_OWNERS
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+                names += [a.name for a in node.names]
+            for n in names:
+                assert owner or n.split(".")[-1] != "skin", (
+                    "%s imports the skin catalog. Skins are installed once, "
+                    "by whoever owns the setting; a surface only ever draws "
+                    "through ui." % path.name)
+        if not (owner or path.name in _SKIN_FORWARDERS):
+            assert "set_skin" not in src, path.name
+        # No module -- owner, forwarder or surface -- may name a SKIN, and none
+        # may reach into the tables. A picker offers `skin.names()`; a literal
+        # skin name in shell code is the fork this whole phase exists to
+        # prevent.
+        for name in skin.names():
+            if name == skin.DEFAULT:
+                continue          # "default" is an ordinary English word
+            assert repr(name) not in src and ('"%s"' % name) not in src, (
+                "%s names the %r skin" % (path.name, name))
+        assert "DEFAULT_SPECS" not in src and "_METRICS[" not in src, path.name
+
+
+def test_the_skin_wiring_is_exactly_two_modules():
+    """The other direction of the ratchet: the exemption list is not a place
+    to park modules, so the tree must MATCH it. A named owner that stopped
+    importing the catalog is dead wiring (which is what shipped), and an
+    unnamed one is the fork."""
+    importers = set()
     for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
         if path.name in ("skin.py", "ui.py"):
             continue
@@ -239,14 +306,18 @@ def test_no_surface_module_knows_about_skins():
             elif isinstance(node, ast.ImportFrom):
                 names = [node.module or ""]
                 names += [a.name for a in node.names]
-            for n in names:
-                assert n.split(".")[-1] != "skin", (
-                    "%s imports the skin catalog. Skins are installed once, "
-                    "by whoever owns the setting; a surface only ever draws "
-                    "through ui." % path.name)
+            if any(n.split(".")[-1] == "skin" for n in names):
+                importers.add(path.name)
+    assert importers == set(_SKIN_OWNERS), sorted(importers)
+    # And `use` is called from the owner alone.
+    users = set()
+    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        if path.name == "skin.py":
+            continue
         src = path.read_text(encoding="utf-8")
-        assert "set_skin" not in src, path.name
-        assert "DEFAULT_SPECS" not in src and "_METRICS[" not in src, path.name
+        if "_skin.use(" in src or "skin.use(" in src:
+            users.add(path.name)
+    assert users == {"console.py"}, sorted(users)
 
 
 def test_skin_is_a_leaf_and_ui_never_imports_it():
@@ -537,3 +608,121 @@ def test_the_second_skin_draws_a_real_frame_on_every_theme():
             assert len(set(indices_of(b))) > 3, (name, variant)
             assert hashlib.sha256(indices_of(b)).digest() != \
                 hashlib.sha256(indices_of(a)).digest()
+
+
+# =============================================================================
+# 5. the wiring: an owner, a persisted setting, a picker
+# =============================================================================
+#
+# Phase 4 shipped the catalog with NO importers -- 217 lines, no `set_skin`
+# call anywhere, no UI, nothing stored -- so "a skin is data" was true and
+# unreachable. These pin the three pieces that make it a setting.
+
+def test_the_workstation_owns_the_skin_and_re_installs_it_at_boot(tmp_path):
+    """`ws.set_skin` is the ONE install (`skin.use`) + the persistence, and
+    `load_system` re-applies it -- the same two lines `set_theme_variant` has.
+    Asserted through `ui` as well as through the store: storing the name and
+    forgetting to install it would look identical from the settings dict."""
+    from runtime import host_app, moy_carts
+    th = theme_colors("night")
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    assert ws.skin_name == skin.DEFAULT
+    plain = ui.state_colors(th, "row", ui.REST)
+
+    ws.set_skin("outline")
+    assert ws.skin_name == "outline" and skin.active() == "outline"
+    assert ui.state_colors(th, "row", ui.REST) != plain, "ui was not restyled"
+    assert moy_carts.load_system(carts)["skin"] == "outline"
+
+    # A fresh boot over the same store re-installs it.
+    skin.use(skin.DEFAULT)
+    assert ui.state_colors(th, "row", ui.REST) == plain
+    ws2 = host_app.build_workstation(carts)
+    assert ws2.skin_name == "outline"
+    assert ui.state_colors(th, "row", ui.REST) != plain, "boot did not apply"
+
+    # An unknown name resolves to the default and STORES the resolved value,
+    # so a store naming a skin this build dropped heals on the next pick.
+    ws2.set_skin("no-such-skin")
+    assert ws2.skin_name == skin.DEFAULT
+    assert ui.state_colors(th, "row", ui.REST) == plain
+    assert moy_carts.load_system(carts)["skin"] == skin.DEFAULT
+
+
+def test_a_store_that_names_no_skin_installs_nothing(tmp_path):
+    """`ui`'s own tables ARE the default, so an absent key means "nothing to
+    install" -- not "assert the default over whatever this process has". On a
+    board the two readings coincide; on a host that builds several
+    workstations in one process (this file, the sim's A/B) only the first is
+    true."""
+    from runtime import host_app
+    skin.use("outline")
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    assert skin.active() == "outline"
+    assert ws.skin_name == "outline"
+
+
+def test_the_appearance_app_is_the_picker(tmp_path):
+    """The THEMES tab carries the chips, beside DARK/LIGHT: same tab, same
+    band shape, and a tap installs + persists through `ctx.theme.set_skin`
+    (the app never calls `skin.use`)."""
+    from runtime import host_app, moy_carts
+    from tests.test_appearance_app import _open_appearance
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_appearance(ws)
+    app._set_mode("themes")
+
+    chips = app._skin_chip_rects()
+    assert [n for n, _r in chips] == list(skin.names())
+    rect = dict(chips)["outline"]
+    x, y, w, h = rect
+    app.handle_pointer(x + w // 2, y + h // 2, True)
+    assert ws.skin_name == "outline"
+    assert skin.active() == "outline"
+    assert moy_carts.load_system(carts)["skin"] == "outline"
+    assert "OUTLINE" in app.status
+
+    # ...and the tab draws under it, chips included (the pick must not be a
+    # state change nothing renders).
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    before = bytes(ws.sys_canvas._buf)
+    app.handle_pointer(*_center(dict(chips)[skin.DEFAULT]), click=True)
+    ws._dirty = True
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert bytes(ws.sys_canvas._buf) != before, "the skin swap painted nothing"
+
+
+def _center(rect):
+    x, y, w, h = rect
+    return (x + w // 2, y + h // 2)
+
+
+def test_the_skin_chips_fit_every_tier(tmp_path):
+    """Geometry, on the golden matrix's five configurations: the chips sit
+    inside the preview field, never overlap the DARK/LIGHT band above them,
+    and are wide enough for the catalog's longest name at font scale 1-2.
+
+    The band exists because they did NOT fit beside the variant chips: 70px of
+    room at 320x240 clips "DEFAULT" to four characters."""
+    from runtime import host_app
+    from tests.test_appearance_app import _open_appearance
+    longest = max(len(n) for n in skin.names())
+    for config in sorted(goldens.CONFIGS):
+        cfg = goldens.CONFIGS[config]
+        ws = host_app.build_workstation(
+            str(tmp_path / ("carts_" + config)), sys_size=cfg["sys_size"],
+            font_scale=cfg["font_scale"], windowed=cfg["windowed"])
+        app = _open_appearance(ws)
+        app._set_mode("themes")
+        fx, fy, fw, fh = app.layout.field
+        fs = app.layout.fs
+        below = fy + 17 * fs                     # the variant band's bottom
+        for name, (x, y, w, h) in app._skin_chip_rects():
+            assert x >= fx and x + w <= fx + fw, (config, name)
+            assert y >= below and y + h <= fy + fh, (config, name)
+            if fs <= 2:
+                assert w >= (longest + 1) * 8 * fs, (config, name, w)

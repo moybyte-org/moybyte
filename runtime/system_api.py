@@ -20,10 +20,34 @@ Player merges that dict into the cart namespace, so a capability the cart did
 not declare has **no name at all** -- exactly how `wifi` has been gated on the
 `"network"` permission since #38, and `net` on `"multiplayer"` since #65.
 
-That "no name" property is the whole security model and it is worth being
-explicit about: an ungranted verb is a `NameError` inside the cart, not a stub
-that quietly returns None and not an object that raises a nicer message. There
-is nothing to probe, nothing to unwrap, and nothing to forget to check.
+That "no name" property is the model, and it is worth being explicit about what
+it is and is not. An ungranted verb is a `NameError` inside the cart, not a stub
+that quietly returns None and not an object that raises a nicer message -- so
+there is nothing to check and nothing to forget to check, and a cart that never
+mentions a capability provably cannot use it.
+
+## This is NOT a sandbox, and saying so is not a caveat -- it is the design
+
+A cart runs `exec` in a plain namespace with the real builtins: it can
+`import`, walk `gc.get_objects()`, or reach an attribute on anything it was
+handed. The role objects hold their `Workstation` in a name-mangled slot
+(`self.__ws` -> `_Theme__ws`), and `ScopedFiles` holds its unscoped role the
+same way, so the obvious reach-through -- `files._files.save("drawings", ...)`,
+`prefs._ws.carts_store` -- fails. That is a SPEED BUMP: it turns an accident
+into a deliberate act, and it makes the honest API the easy one. It is not
+containment, and two things say so plainly. A cart that goes looking will find
+a path, and **on the boards it does not even bump**: MicroPython implements no
+name mangling (measured on this repo's unix build -- `self.__x` stays the
+literal attribute `__x`, readable from outside), so the mangling is a host-side
+speed bump on device-side code.
+
+What the permission filter actually buys, then, is not confinement but
+LEGIBILITY: a manifest states what an app is for, the shell hands it exactly
+that, and an app that quietly wanted more has to say so in a file the owner can
+read. The threat model that goes with it is the household one -- a kid's cart,
+a cart a friend sent, a cart off a card -- not hostile code auditing itself for
+escapes. A cart you would not run is a cart you should not install; nothing
+here changes that, and no amount of wrapper would.
 
 ## The map
 
@@ -172,6 +196,52 @@ def app_id_for(cart):
     return slug(cart.get("title") or "app")
 
 
+def _file_kinds(cart):
+    """Every user-files kind `cart`'s manifest asks for, in declaration order
+    and de-duplicated. Unknown kinds are dropped here (a typo narrows), so what
+    comes back is what could actually be granted."""
+    out = []
+    for perm in (cart.get("permissions") or ()) if cart else ():
+        perm = str(perm)
+        colon = perm.find(":")
+        arg = perm[colon + 1:] if colon >= 0 else None
+        if (perm[:colon] if colon >= 0 else perm) != "files":
+            continue
+        # A scoped grant names its kind; an unscoped one takes the default. An
+        # unknown kind is NOT a fallback to the default -- a typo must narrow
+        # to nothing, never widen to the kid's documents.
+        if arg is None:
+            arg = DEFAULT_FILE_KIND
+        elif arg not in FILE_KINDS:
+            continue
+        if arg not in out:
+            out.append(arg)
+    return out
+
+
+def manifest_error(cart):
+    """A refusal string when the manifest cannot be honoured as written, else
+    None. `Player.start` shows it on the ordinary cart-error panel and does not
+    run the cart.
+
+    ONE rule today: **a cart gets at most one user-files kind.** `files` is
+    published as a single kind-bound handle (`ScopedFiles`, whose verbs take a
+    name and never a kind), so there is nowhere for a second kind to go. Until
+    this check existed, `["files:docs", "files:tables"]` silently kept the LAST
+    one -- an order-dependent grant, with the cart's docs quietly landing in
+    tables and no diagnostic anywhere. Refusing beats guessing: a manifest that
+    asks for two kinds is asking for something this build does not have, and
+    the author is the only one who can say which kind they meant.
+
+    (If multi-kind is ever wanted, it is an API change -- `files.docs.save()`
+    style namespacing -- not a widening of this function.)"""
+    kinds = _file_kinds(cart)
+    if len(kinds) > 1:
+        return ("manifest asks for %d file kinds (%s) - pick one"
+                % (len(kinds), ", ".join(kinds)))
+    return None
+
+
 def granted_roles(cart):
     """`(roles, file_kind)` for `cart`'s manifest permissions.
 
@@ -179,32 +249,29 @@ def granted_roles(cart):
     earned; `file_kind` is the user-files kind its `files` grant is scoped to
     (None when it has none). An unknown permission, an unknown file kind and a
     permission naming an ungrantable role all resolve to "no grant" -- a
-    manifest can ask for anything and get only what this table says."""
+    manifest can ask for anything and get only what this table says.
+
+    TWO or more file kinds is a manifest ERROR (`manifest_error`), which the
+    Player refuses before it ever reaches this function. If some other caller
+    skips that check, the files grant is dropped entirely rather than resolved
+    to one of them: the residual behaviour of a rule this function cannot
+    express has to fail closed, not pick a winner by declaration order."""
+    kinds = _file_kinds(cart)
+    file_kind = kinds[0] if len(kinds) == 1 else None
     roles = []
-    kind = None
     for perm in (cart.get("permissions") or ()) if cart else ():
         perm = str(perm)
-        arg = None
         colon = perm.find(":")
         if colon >= 0:
-            arg = perm[colon + 1:]
             perm = perm[:colon]
         role = _ROLE_FOR.get(perm)
         if role is None:
             continue
-        if role == "files":
-            # A scoped grant names its kind; an unscoped one takes the default.
-            # An unknown kind is NOT a fallback to the default -- a typo must
-            # narrow to nothing, never widen to the kid's documents.
-            if arg is None:
-                kind = DEFAULT_FILE_KIND
-            elif arg in FILE_KINDS:
-                kind = arg
-            else:
-                continue
+        if role == "files" and file_kind is None:
+            continue                  # unknown kind, or the multi-kind refusal
         if role not in roles:
             roles.append(role)
-    return (tuple(roles), kind)
+    return (tuple(roles), file_kind)
 
 
 # -- the kind-scoped user-files handle ---------------------------------------
@@ -213,41 +280,47 @@ class ScopedFiles:
     """`ctx.files` narrowed to ONE user-files kind (#108).
 
     The role itself takes `(kind, name)` on every verb, which would let an app
-    granted `"files:docs"` read the kid's drawings by passing another kind. This
-    binds the kind at construction and never takes it as an argument, so the
-    scope is not something the cart can spell its way out of.
+    granted `"files:docs"` read the kid's drawings by passing another kind.
+    This binds the kind at construction and never takes it as an argument, so
+    no ARGUMENT reaches another kind: every published verb spells one kind, the
+    granted one.
+
+    The unscoped role is held name-mangled (`self.__files`) so the one-hop
+    reach-through does not work by accident -- but see the module docstring:
+    that is a speed bump on the host and nothing at all on MicroPython, which
+    does not mangle. The scope is honest, not enforced.
 
     Same `(value, err)` contract as the role -- nothing here raises."""
 
     def __init__(self, files, kind):
-        self._files = files
+        self.__files = files
         self.kind = kind
 
     def ready(self):
         """True when a writable store is present -- what an app checks before
         offering a SAVE."""
-        return self._files.ready()
+        return self.__files.ready()
 
     def list(self):
-        return self._files.list(self.kind)
+        return self.__files.list(self.kind)
 
     def load(self, name):
-        return self._files.load(self.kind, name)
+        return self.__files.load(self.kind, name)
 
     def save(self, name, blob):
-        return self._files.save(self.kind, name, blob)
+        return self.__files.save(self.kind, name, blob)
 
     def delete(self, name):
-        return self._files.delete(self.kind, name)
+        return self.__files.delete(self.kind, name)
 
     def rename(self, name, new):
-        return self._files.rename(self.kind, name, new)
+        return self.__files.rename(self.kind, name, new)
 
     def duplicate(self, name):
-        return self._files.duplicate(self.kind, name)
+        return self.__files.duplicate(self.kind, name)
 
     def new_name(self):
-        return self._files.new_name(self.kind)
+        return self.__files.new_name(self.kind)
 
     # -- text documents ------------------------------------------------------
     #
@@ -260,19 +333,19 @@ class ScopedFiles:
     def save_text(self, name, text):
         """Write `text` as a document. `(name, err)` -- the name it was saved
         under, so a caller that passed a fresh `new_name()` can remember it."""
-        blob = self._files.encode_text(text)
+        blob = self.__files.encode_text(text)
         if blob is None:
             return (None, NO_STORE)
-        value, err = self._files.save(self.kind, name, blob)
+        value, err = self.__files.save(self.kind, name, blob)
         return (name if err is None else value, err)
 
     def load_text(self, name):
         """Read a document back as ONE string (lines joined by newlines).
         `("", err)` on failure -- never a raise, never None."""
-        blob, err = self._files.load(self.kind, name)
+        blob, err = self.__files.load(self.kind, name)
         if err is not None:
             return ("", err)
-        return ("\n".join(self._files.decode_text(blob)), None)
+        return ("\n".join(self.__files.decode_text(blob)), None)
 
 
 # -- the factory -------------------------------------------------------------

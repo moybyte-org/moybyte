@@ -15,8 +15,10 @@ The assets come from the FIRMWARE IMAGE (native/moy_web, gzipped, ~573KB of
 the app slot), and a copy pushed onto the board's storage overrides them. That
 way round because the drift went the other way for months: the bundle was only
 ever a hand-placed copy, so a board could serve a console older than its own
-firmware -- and the T-Deck could not even be pushed to (its USB-CDC RX is dead
-under the desktop), so its copy went on by card reader or not at all.
+firmware -- and when this was decided the T-Deck could not even be pushed to
+(its serial RX was dead under the desktop until #201, 2026-08-16), so its copy
+went on by card reader or not at all. The image is the guarantee; a push is
+still the faster dev loop.
 
 The last line is why this needs almost nothing new on the page. `worker.js`
 already boots by doing `fetch("carts.json")` and writing the result into the
@@ -59,11 +61,16 @@ except ImportError:                      # pragma: no cover -- host/no-bundle
 # Where a PUSHED copy of `firmware/web_runner/dist` lives on this board -- the
 # override, not the source of truth: since 2026-08-15 the bundle is baked into
 # the firmware image (native/moy_web) and this directory is what a human puts
-# there to iterate faster than a reflash. The T-Deck has an SD card and the P4
-# does not, so the caller passes the directory rather than this module
-# guessing; these are the conventional homes.
-TDECK_WEB_DIR = "/sd/web"
-P4_WEB_DIR = "/moy/web"
+# there to iterate faster than a reflash. The caller passes the directory
+# rather than this module guessing; these are the two conventional homes.
+#
+# NAMED FOR THE STORAGE, NOT FOR A BOARD. They were TDECK_/P4_ when there were
+# two boards and each used a different one, which read as a per-board constant
+# and is not: it is a storage choice, and the third board picked the internal
+# one while carrying an SD slot of its own. A board name here would have to be
+# re-decided every time the roster grows; the storage fact does not move.
+SD_WEB_DIR = "/sd/web"
+INTERNAL_WEB_DIR = "/moy/web"
 
 # Only these are ever served, and only from the web dir. An allowlist and not a
 # path check, because "reject .." is the kind of rule that is one encoding trick

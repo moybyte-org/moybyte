@@ -143,7 +143,6 @@ class HeldPoint:
                 if self.extrapolate and dt > 0:
                     x = int(x + self._vx * self.damp * dt)
                     y = int(y + self._vy * self.damp * dt)
-                    self._gx = (x, y)   # the recovery clamp's anchor
                     if self._w:
                         if x < 0:
                             x = 0
@@ -154,6 +153,13 @@ class HeldPoint:
                             y = 0
                         elif y >= self._h:
                             y = self._h - 1
+                    # The recovery clamp's anchor -- set AFTER the clamp, so it
+                    # is the point that was DISPLAYED. Anchoring the raw
+                    # extrapolation put an off-glass coordinate into both the
+                    # `behind` dot product and the recovery snap, i.e. a finger
+                    # gliding into an edge could be "recovered" to a pixel the
+                    # user never saw.
+                    self._gx = (x, y)
                 return (x, y, False)
             self.down = False         # missed release: never wedge the pointer
             self.last = None

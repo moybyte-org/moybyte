@@ -65,9 +65,11 @@ except ImportError:                     # host tests
 _READ_CMD = b"\xb5\xab\xa5\x5a\x00\x00\x00\x08\x00\x00\x00"
 
 # Live-tweakable mapping knobs (module globals, read per poll) -- flip from
-# the REPL during the calibration smoke, then bake the winners here with the
-# date. Current values are the rot-0 landscape mapping (see the docstring);
-# glass-calibration pending.
+# the REPL during a calibration smoke, then bake the winners here with the
+# date. These ARE the baked winners: the rot-0 landscape mapping (see the
+# docstring), CALIBRATED ON GLASS 2026-08-19 -- taps land under the finger,
+# corners included, and tests/test_guition_on_glass.py passed 10/10 on the
+# landscape console the same evening.
 SWAP_XY = True
 FLIP_X = True
 FLIP_Y = False
@@ -170,8 +172,17 @@ class Touch:
             x = self.w - 1 - x
         if FLIP_Y:
             y = self.h - 1 - y
-        if x >= self.w:
+        # BOTH bounds, not just the upper one. The controller reports a raw
+        # 12-bit coordinate and a touch past the panel edge reads BIGGER than
+        # the axis it is mapped onto -- which a flip then turns NEGATIVE, so
+        # clamping only the top let an off-glass press arrive as a point off
+        # the other side of the screen.
+        if x < 0:
+            x = 0
+        elif x >= self.w:
             x = self.w - 1
-        if y >= self.h:
+        if y < 0:
+            y = 0
+        elif y >= self.h:
             y = self.h - 1
         return self._hp.sample(x, y)

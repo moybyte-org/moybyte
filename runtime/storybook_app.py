@@ -588,10 +588,6 @@ class StorybookAppLayer(ListShellApp):
 
     # -- draw -------------------------------------------------------------------------
 
-    def _button(self, cv, label, r, hot=False):
-        # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs)
-
     def draw(self, dt):
         cv = self._surf.canvas()
         lay = self.layout

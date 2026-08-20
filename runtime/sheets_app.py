@@ -709,23 +709,11 @@ class SheetsAppLayer(ListShellApp):
 
 
     def handle_pointer(self, px, py, click):
+        # The LIST + RENAME modes are the shared shell's (app_shell), verbatim
+        # in Writer too; what is left below is this app's own grid/attach views.
+        if self._list_pointer(px, py, click, self._new_sheet, self._open_file):
+            return True
         lay = self.layout
-        if self.mode == "list":
-            if self.grid.pointer_frame(px, py, self._surf.pointer()):
-                self._damage.all()
-            if not click:
-                return True
-            if self._in(px, py, lay.new_btn):
-                self._new_sheet()
-                return True
-            hit = self.grid.tap(px, py)
-            if hit and hit[0] in ("pick", "sel"):
-                self._open_file(hit[1])
-            return True
-        if self.mode == "rename":
-            if click and self._in(px, py, lay.del_btn):
-                self._rename_commit()
-            return True
         if self.mode == "attach":
             if not click:
                 return True
@@ -780,20 +768,6 @@ class SheetsAppLayer(ListShellApp):
         return True
 
     # -- draw ----------------------------------------------------------------
-
-    def _button(self, cv, label, r, hot=False, glyph=None, enabled=True):
-        """ONE chip call for this app's whole toolbar.
-
-        `glyph` + `enabled` are the #111 UNDO/REDO pair: the same quiet chip
-        shell SHEETS/CLEAR/RENAME wear, with the shared #88 chrome glyph in
-        place of the label and the ink carrying the unusable affordance. That
-        used to be a private `_icon_btn` copy of ui.chip; the toolkit models
-        `disabled` natively now, so the copy is gone -- and with it the local
-        divergence where this app ringed an ENABLED icon in `accent` while
-        Writer's identical pair ringed it in `dim`.
-        """
-        _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
-                 glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
 
     def draw(self, dt):
         cv = self._surf.canvas()

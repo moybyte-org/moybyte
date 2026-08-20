@@ -98,15 +98,21 @@ PMEM_FLUSH_MS = 60000
 # manifest "extensions" lists anything else is REFUSED at start -- the clean
 # §10 decline, never a mid-frame crash on a missing verb.
 #
-# The first two are the spec's STANDARD extensions. The rest are moybyte's own,
+# The first two are BACK-COMPAT names, not features this gate decides. Upstream
+# b9dbba1 (vendored 2026-08-19) made `make_layer`/`draw_layer`/`background` and
+# `view` CORE -- SPEC.md 6, installed unconditionally, because a verb that
+# degrades truthfully cannot be an extension. They stay listed here so a
+# manifest written against the older spec still starts: declaring them is now a
+# no-op, and REMOVING them from this tuple would refuse carts that already ship
+# with the declaration. The rest are moybyte's own,
 # namespaced `vendor.feature` exactly as §10 requires so they can never collide
 # with a future standard name -- a cart declaring one is non-portable by
 # construction, which is the honest trade its author is making. Before this
 # list existed the gate refused every namespaced name, so a cart that truthfully
 # declared what it used was rejected by the one console that implements it.
 SUPPORTED_EXTENSIONS = (
-    "layers",             # §10 standard: make_layer / draw_layer / background
-    "viewport",           # §10 standard: view(w, h)
+    "layers",             # CORE now (SPEC.md 6): make_layer/draw_layer/background
+    "viewport",           # CORE now (SPEC.md 6): view(w, h)
     "moybyte.scenes",     # #85/#109: scene/load_scene + the actor world
     "moybyte.docs",       # #78 Desk Lab interop: table(name) / text(name)
     "moybyte.images",     # #63: image(name) / Image paint-image assets
@@ -126,9 +132,10 @@ except ImportError:                     # host: the runtime package
 # AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
 # file imports -- it holds no Workstation, only the context FACTORY it is handed.
 try:
-    from system_api import make_system_api, wants_layout
+    from system_api import make_system_api, manifest_error, wants_layout
 except ImportError:                     # host: the runtime package
-    from runtime.system_api import make_system_api, wants_layout
+    from runtime.system_api import (make_system_api, manifest_error,
+                                     wants_layout)
 
 
 def _safe_len(obj):
@@ -643,6 +650,17 @@ class Player:
         # whoever owns the console, editable in the picker, and handed shell
         # capabilities by MANIFEST PERMISSION (make_system_api, below).
         if ws.is_user_app(cart):
+            # A manifest this build cannot honour AS WRITTEN is refused by
+            # name, like an unknown runtime or an out-of-set canvas -- and
+            # BEFORE the crash guard arms, because a mis-declared permission is
+            # not a crash and must not spend a strike. Today the only such rule
+            # is "at most one file kind"; the alternative was the silent
+            # last-one-wins grant this replaced.
+            _man = manifest_error(cart)
+            if _man is not None:
+                self.cart_error = _man
+                self.crash_line = None
+                return False
             # CRASH ISOLATION FIRST, before a single line of the cart's code has
             # been compiled, let alone run: the mark has to survive a death the
             # interpreter never observes (a hang, an OOM, a native fault). See

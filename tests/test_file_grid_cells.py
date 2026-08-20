@@ -200,15 +200,25 @@ def test_the_cue_paints_only_the_edge_at_rest_geometry():
 
 # --- the embedders pump it -------------------------------------------------------
 
+def _pointer_head(mod, verb="handle_pointer"):
+    """The source of `verb` up to its first `if not click` early return."""
+    src = (ROOT / "runtime" / (mod + ".py")).read_text(encoding="utf-8")
+    return src.split("def " + verb + "(", 1)[1].split("if not click", 1)[0]
+
+
 def test_every_grid_embedder_pumps_on_non_click_samples():
     """A press cue that only appeared on the CLICK frame would never be seen:
-    the pump has to run before each app's `if not click: return`."""
-    for mod, fn in (("files_app", "FilesAppLayer"),
-                    ("writer_app", "WriterAppLayer"),
-                    ("sheets_app", "SheetsAppLayer")):
-        src = (ROOT / "runtime" / (mod + ".py")).read_text(encoding="utf-8")
-        body = src.split("def handle_pointer(", 1)[1]
-        head = body.split("if not click", 1)[0]
+    the pump has to run before each app's `if not click: return`.
+
+    Writer and Sheets no longer own that head -- their list/rename modes are
+    `app_shell.ListShellApp._list_pointer`, one copy of what was 13 verbatim
+    lines in each. The ratchet FOLLOWS the delegation rather than pinning a
+    copy back into place: what must stay true is that the pump precedes the
+    early return, wherever the head lives."""
+    for mod in ("files_app", "writer_app", "sheets_app"):
+        head = _pointer_head(mod)
+        if "_list_pointer(" in head:
+            head = _pointer_head("app_shell", "_list_pointer")
         assert "grid.pointer_frame(" in head, mod
 
 
@@ -217,12 +227,19 @@ def test_every_grid_embedder_pumps_on_non_click_samples():
 def test_the_two_private_button_copies_are_gone():
     """`writer_app._hist_btn` and `sheets_app._icon_btn` were two hand-rolled
     copies of `ui.chip` that disagreed with each other about what an enabled
-    icon button looks like. Both are absorbed; `disabled` is the toolkit's."""
+    icon button looks like. Both are absorbed; `disabled` is the toolkit's.
+
+    The two-line DELEGATE they left behind was itself duplicated (Writer,
+    Sheets, and Storybook's argument-poorer twin) and is now one method,
+    `app_shell.ListShellApp._button`. So the chip call is asserted THERE, and
+    the apps are asserted not to have re-grown one."""
+    shell = (ROOT / "runtime" / "app_shell.py").read_text(encoding="utf-8")
+    assert "disabled=not enabled" in shell, "the shared chip lost `disabled`"
     for mod, gone in (("writer_app", "_hist_btn"), ("sheets_app", "_icon_btn")):
         src = (ROOT / "runtime" / (mod + ".py")).read_text(encoding="utf-8")
         assert ("def " + gone) not in src, mod
         assert gone not in src.replace("`" + gone + "`", ""), mod
-        assert "disabled=not enabled" in src, mod
+        assert "def _button(" not in src, mod + " re-grew a private _button"
 
 
 def test_the_disabled_history_chip_dims_through_the_theme_role():

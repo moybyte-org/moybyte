@@ -34,6 +34,27 @@ def test_hold_repeats_the_point_stale_then_bounds_it(monkeypatch):
     assert hp.down is False and hp.fresh is True
 
 
+def test_the_glide_anchor_is_the_point_that_was_DISPLAYED(monkeypatch):
+    """`_gx` is documented as "last DISPLAYED glide point", and both readers of
+    it -- the monotonic-recovery dot product and the snap it feeds -- are only
+    sound if that is true. It was set from the RAW extrapolation, before the
+    clamp, so a finger gliding into an edge anchored off the glass and the next
+    trailing sample was "recovered" to a pixel nobody ever saw."""
+    now = [0]
+    monkeypatch.setattr(gt911, "_ticks_ms", lambda: now[0])
+    monkeypatch.setattr(gt911, "_ticks_diff", lambda a, b: a - b)
+    hp = HeldPoint(extrapolate=True, w=100, h=100)
+    hp.sample(80, 50)
+    now[0] = 20
+    hp.sample(95, 50)                 # 0.75 px/ms, headed off the right edge
+    now[0] = 60
+    assert hp.hold() == (99, 50, False)      # the glide is clamped to the glass
+    assert hp._gx == (99, 50), "the anchor must be the clamped point"
+    now[0] = 80
+    x, y, _ = hp.sample(97, 50)       # a trailing sample -> recovery snap
+    assert (x, y) == (99, 50)         # ...to a point ON the glass
+
+
 def test_release_is_news():
     hp = HeldPoint()
     hp.sample(1, 2)

@@ -751,9 +751,14 @@ def test_make_webhost_reads_the_wifi_service_lazily():
     assert host._ensure_online() == "192.168.1.50"
 
 
+# The web dir a board passes is named for the STORAGE it lives on, never for
+# the board (moy_webhost's constants say why): the T-Deck's copy goes on its
+# SD, the P4 has no card, and the Guition -- which does have a slot -- still
+# stages the pushed bundle on the internal VFS.
 BOARDS = (
-    ("lilygo_t_deck_plus_mainline", "TDECK_WEB_DIR"),
-    ("esp32_p4_wifi6_touch_lcd_7b", "P4_WEB_DIR"),
+    ("lilygo_t_deck_plus_mainline", "SD_WEB_DIR"),
+    ("esp32_p4_wifi6_touch_lcd_7b", "INTERNAL_WEB_DIR"),
+    ("guition_jc3248w535", "INTERNAL_WEB_DIR"),
 )
 
 

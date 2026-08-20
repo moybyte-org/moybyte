@@ -186,14 +186,19 @@ def test_config_grids_register_no_per_cell_hit_rects(tmp_path, monkeypatch):
     all, so this asserts the whole cards draw adds ZERO."""
     from runtime import ui
     ws = _cards_ws(tmp_path, sys_size=(480, 320))
+    counter = _Counter(monkeypatch)
     added = []
-    real_add = ui.Hits.add
     monkeypatch.setattr(ui.Hits, "add",
                         lambda self, *a, **kw: added.append(a))
     ws.cards_layer._t = ws.cards_layer._tones()
     ws.cards_layer._draw_cards()
+    # The FLOOR comes first, and it is the whole point of writing it this way:
+    # an empty `added` is ALSO what a draw that returned early reports, so the
+    # widgets the draw actually made are what make the zero mean something.
+    # (This assertion used to be `real_add is not None`, which cannot fail.)
+    assert counter.n["row"] == 3, counter.n
+    assert counter.n["cell"] == 5, counter.n
     assert added == []
-    assert real_add is not None                 # the counter was really wired
 
 
 # -------------------------------------------------------------- the music tab

@@ -18,6 +18,15 @@ to work, so the evidence outlives the death:
     arm(id)   -> strike++, remember `id` as OPEN, persist    (before the cart runs)
     frame()   -> after HEAL_FRAMES painted frames: strike = 0, OPEN = None, persist
     disabled(id) -> strikes >= STRIKES
+    forgive(id)  -> strikes = 0                              (the kid edited the CODE)
+
+## How a struck-out app comes back
+
+`Player` refuses a disabled cart into the ordinary error panel, whose bar
+carries EDIT/CODE -- and committing new source through that editor is what
+clears the strikes: `Project.commit_code` -> `Workstation.forgive_app` ->
+`forgive` here. Code and nothing else, because code is the only edit that can
+change whether the cart hangs or faults; the reasoning is in `forgive_app`.
 
 A cart that crashes in-process never reaches `HEAL_FRAMES` either -- the crash
 panel paints instead of the cart -- so the same counter catches both shapes with
@@ -118,8 +127,14 @@ class CrashGuard:
 
         Set by `arm` and cleared by the heal, so on a fresh boot a non-None
         value means the previous run of that id never reached
-        `HEAL_FRAMES` -- i.e. it crashed, hung or took the board with it. This
-        is what a notice can name; the strike count is what acts on it."""
+        `HEAL_FRAMES` -- i.e. it crashed, hung or took the board with it.
+
+        No shell surface reads this: acting on a bad open is the strike
+        COUNT's job, and it already happens without anyone naming the cart.
+        What the accessor is for is the marker itself -- `arm`/`frame`/
+        `forgive` maintain it, and `tests/test_user_apps.py` observes the
+        arm-heal bracket through here rather than reaching into the stored
+        dict's layout."""
         return self._data().get("open")
 
     # -- the run bracket -----------------------------------------------------
@@ -169,7 +184,9 @@ class CrashGuard:
         self._frames = 0
 
     def forgive(self, cid):
-        """Clear `cid`'s strikes -- re-enable an app the owner has fixed."""
+        """Clear `cid`'s strikes -- re-enable an app the owner has fixed.
+
+        Reached from `Workstation.forgive_app` when a code commit lands."""
         cid = str(cid)
         d = self._data()
         if d["strikes"].pop(cid, None) is None and d.get("open") != cid:
@@ -180,7 +197,13 @@ class CrashGuard:
         return True
 
     def broken_ids(self):
-        """Every disabled id, for a picker badge or a Settings list."""
+        """Every disabled id.
+
+        Nothing calls it yet: the picker BADGE is Phase 8's recorded open tail
+        (docs/ui_refactor_2026-08.md), which needs a `launcher_layer` chrome
+        idiom and a visual-identity call, not more guard state. Kept because
+        that doc names this as the half already built, and pinned by
+        `tests/test_user_apps.py`."""
         d = self._data()
         return sorted(k for k in d["strikes"] if self.disabled(k))
 

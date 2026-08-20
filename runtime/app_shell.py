@@ -30,6 +30,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.app_context import NO_STORE
 
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import ui as _ui
+
 
 class ListShellLayout:
     """Base for the apps' Layout classes. Subclass __init__ calls _init_frame
@@ -58,7 +63,8 @@ class ListShellApp:
     """Mixin for the app layers. Expects the host class to provide `_store`
     (its AppContext storage role), `_damage`, layout, sel, top, status
     (+ _save_failed where _persist is used) and a _tap_row verb for the A
-    button."""
+    button. `_button` and `_list_pointer` additionally want `_theme`,
+    `_surf` and (for the pointer) `_in` + a `grid`."""
 
     APP_TITLE = None            # the shipped cart's title ("Writer", ...)
     APP_PERM = None             # its identity permission ("notebook", ...)
@@ -103,6 +109,59 @@ class ListShellApp:
         self._save_failed = True
         self.status = ("CAN'T SAVE HERE" if err is NO_STORE
                        else ("CAN'T SAVE " + str(err))[:28])
+        return False
+
+    # -- the shared toolbar chip -------------------------------------------------
+
+    def _button(self, cv, label, r, hot=False, glyph=None, enabled=True):
+        """ONE chip call for a Desk-Lab app's whole toolbar.
+
+        `glyph` + `enabled` are the #111 UNDO/REDO pair: the same quiet chip
+        shell DOCS/RENAME/TRASH wear, with the shared #88 chrome glyph in place
+        of the label and the ink carrying the unusable affordance (there is no
+        dimmed sprite -- only a dimmed colour).
+
+        Three private copies of this collapsed into one over two passes.
+        Phase 3a absorbed `writer._hist_btn` and `sheets._icon_btn` into
+        `ui.chip` itself (whose `disabled` state ended the divergence where
+        Sheets ringed an enabled icon in `accent` and Writer's identical pair
+        in `dim`), which left three byte-identical two-line DELEGATES -- and
+        Storybook's, which was the same call with the two arguments it never
+        passes left off. They are this one method now."""
+        _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
+
+    # -- the list/rename pointer head ---------------------------------------------
+
+    def _list_pointer(self, px, py, click, on_new, on_open):
+        """The LIST and RENAME modes' pointer handling, shared by the two apps
+        whose list view is a `FileGridView` (Writer, Sheets). True when it
+        handled the event; False when the host is in one of its OWN modes and
+        should carry on.
+
+        `on_new` / `on_open` are the host's verbs (`_new_doc`/`_open_doc` vs
+        `_new_sheet`/`_open_file`) -- passed rather than renamed, because a
+        thumbnail grid of documents is generic and "make a new sheet" is not.
+        Bound methods are built on a pointer EVENT, never per frame."""
+        lay = self.layout
+        if self.mode == "list":
+            # The grid's hover/pressed pump runs on every sample, not just the
+            # click frame -- a press cue nobody sees is not a cue.
+            if self.grid.pointer_frame(px, py, self._surf.pointer()):
+                self._damage.all()
+            if not click:
+                return True
+            if self._in(px, py, lay.new_btn):
+                on_new()
+                return True
+            hit = self.grid.tap(px, py)
+            if hit and hit[0] in ("pick", "sel"):
+                on_open(hit[1])              # the picker opens on ONE tap
+            return True
+        if self.mode == "rename":
+            if click and self._in(px, py, lay.del_btn):
+                self._rename_commit()
+            return True
         return False
 
     # -- typed keys ------------------------------------------------------------

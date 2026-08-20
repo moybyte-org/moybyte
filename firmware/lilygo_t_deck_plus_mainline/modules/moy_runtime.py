@@ -243,8 +243,8 @@ def run_desktop(fps_cap=60):
     # the LCD DMA flush needs, which is why boot does NOT autoconnect. Turning
     # the row on takes that risk knowingly, exactly as UPDATE ONLINE does.
     try:
-        from moy_webhost import make_webhost, TDECK_WEB_DIR
-        ws.webhost = make_webhost(ws, carts_root, TDECK_WEB_DIR,
+        from moy_webhost import make_webhost, SD_WEB_DIR
+        ws.webhost = make_webhost(ws, carts_root, SD_WEB_DIR,
                                   autoconnect=autoconnect_wifi,
                                   with_sd=_with_sd_synced)
     except Exception as exc:  # noqa: BLE001

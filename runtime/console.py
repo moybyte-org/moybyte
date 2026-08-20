@@ -307,6 +307,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard
 
+# The widget SKIN catalog (ui_refactor_2026-08 Phase 4, runtime/skin.py). The
+# Workstation is the one module that installs one, for the same reason it is
+# the one that installs a theme: the choice is a persisted setting, and the
+# installed skin is process-wide state inside `ui`. Every surface just draws
+# through `ui` and never learns a skin exists -- pinned by
+# tests/test_skin.py::test_no_surface_module_knows_about_skins, whose exemption
+# list is exactly this module and the Appearance app that picks.
+try:
+    import skin as _skin
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import skin as _skin
+
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
 # identity helper here; the Player is what builds the namespace.
@@ -855,6 +867,14 @@ class Workstation:
         self.theme_name = DEFAULT_THEME
         self.theme_variant = DEFAULT_VARIANT
         self.theme_colors = theme_colors(DEFAULT_THEME)
+        # The widget SKIN (Appearance -> THEMES -> the skin chips) is the third
+        # axis, and unlike the two above it is not this object's state: it is
+        # installed INTO `ui`, process-wide. A fresh Workstation therefore
+        # ADOPTS what is installed rather than asserting the default over it --
+        # on a board the two readings are the same (one Workstation, and `ui`'s
+        # own tables are the default), and on a host that builds several in one
+        # process an unrelated boot must not silently restyle the others.
+        self.skin_name = _skin.active()
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
                              self._effective_font_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
@@ -1511,12 +1531,39 @@ class Workstation:
     def cart_broken(self, cart):
         """True when the crash guard has turned this app cart OFF (#160).
 
-        Read by the Player (which refuses the run and opens the panel) and
-        available to any surface that wants to badge it -- the cart stays in the
-        Editor picker either way, because editing it is how it gets fixed."""
+        NOT what the Player reads -- it refuses through `app_guard.arm()`
+        returning False, which is the same answer taken on the path that also
+        records the strike. This is the shell-vocabulary query (is_user_app +
+        the title-slug id in one call): `tests/test_user_apps.py` asserts
+        against it, and it is half of what the deferred picker BADGE needs
+        (docs/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
+        the Editor picker either way, because editing it is how it gets
+        fixed."""
         if not self.is_user_app(cart):
             return False
         return self.app_guard.disabled(system_api.app_id_for(cart))
+
+    def forgive_app(self, cart):
+        """Clear `cart`'s crash strikes -- the kid changed its CODE (#160).
+
+        The other half of three-strikes, and without it the refusal panel's
+        "EDIT it" was a dead end: nothing called `CrashGuard.forgive`, so the
+        only ways back were renaming the cart or hand-editing `system.json`.
+
+        Called from `Project.commit_code`, and deliberately from there ALONE.
+        A code commit is the one edit that can change whether the cart hangs,
+        faults or exhausts the heap -- the failures the guard exists for, none
+        of which a sprite, a map or a config tweak can fix or cause. Forgiving
+        on every asset save would hand a boot-looping app a fresh set of
+        strikes for repainting a tile; forgiving only on a hand-edited
+        `system.json` is what we had.
+
+        Strikes are cleared, not decremented: the kid's next open starts from
+        zero and gets the full three, exactly like a cart the guard has never
+        seen. False when there was nothing to forgive."""
+        if not self.is_user_app(cart):
+            return False
+        return self.app_guard.forgive(system_api.app_id_for(cart))
 
     # -- desktop wallpaper (#28) ---------------------------------------------
     #
@@ -1585,6 +1632,13 @@ class Workstation:
         self.select_wallpaper(self.system.get("wallpaper"), persist=False)
         self.set_theme(self.system.get("theme", self.theme_name), persist=False,
                        variant=self.system.get("theme_variant", self.theme_variant))
+        # The widget skin, beside the colorway it belongs with. Applied ONLY
+        # when the store names one: `ui`'s tables are already the default, so
+        # "no key" means "nothing to install", not "install the default over
+        # whatever this process has" -- see the note at self.skin_name.
+        _sk = self.system.get("skin")
+        if _sk is not None:
+            self.set_skin(_sk, persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
@@ -1739,6 +1793,31 @@ class Workstation:
         """Flip the current theme between its dark and light presentation
         (Appearance app -> THEMES -> DARK/LIGHT)."""
         self.set_theme(self.theme_name, persist=persist, variant=variant)
+
+    def skin_names(self):
+        """The widget skins a picker may offer, in presentation order."""
+        return _skin.names()
+
+    def set_skin(self, name, persist=True):
+        """Install the widget SKIN (Appearance -> THEMES -> the skin chips) and
+        persist the choice, exactly as `set_theme` does for the colorway.
+
+        A skin is a delta over `ui`'s widget tables -- fields, edges, label
+        alignment -- so every surface changes at once and none of them knows:
+        this is the ONLY place the catalog is installed. An unknown name
+        resolves to the default (`skin.use`), and the RESOLVED name is what
+        gets stored, so a store that names a skin this build dropped heals
+        itself on the next pick instead of re-failing every boot."""
+        self.skin_name = _skin.use(name)
+        # Same two invalidations a theme change needs: the cached top-bar strip
+        # paints widget pixels and its key does not fold the skin, and every
+        # other surface repaints from the damage epoch.
+        if getattr(self, "bar_layer", None) is not None:
+            self.bar_layer.invalidate()
+        self._dirty = True
+        if persist:
+            self.system["skin"] = self.skin_name
+            self._persist_system()
 
     def cycle_theme(self, d):
         """Step the panel theme through chrome.THEMES (programmatic verb; the UI

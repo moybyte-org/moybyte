@@ -481,6 +481,11 @@ class Project:
             # cart instead of re-painting the old "crashed" panel. (run_code/the
             # _leave_menu re-_start() then actually re-exec it.)
             ws.cart_error = None
+            # ...and the same for a `type: "app"` cart the crash guard struck
+            # out (#160). The refusal panel says "EDIT it"; this is the line
+            # that makes that true. Code is the ONLY edit that clears strikes
+            # -- see Workstation.forgive_app for why not every commit_* verb.
+            ws.forgive_app(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

@@ -255,14 +255,15 @@ why = """
 The second staging source, and the one that must STAY an allowlist -- same
 call as both siblings, same reason: `device/` is the boards' shared device
 tier and not every board drives every piece of it. This board's absences, each
-a decision: no `gt911.py`/`device_input.py` (the touch part is an AXS15231, on
-its own shared driver below; there is no trackball and no I2C keyboard), no
-`moybyte_sd.py` (stage 4, see the moy_sd native denial), no `device_audio.py`
-(stage 5, see moy_audio), no `device_diag.py`/`moybyte_diag.py` (the T-Deck's
-offline diag ring exists because that board's serial RX was dead for months;
-this board boots with a live dev channel, so it starts with the P4's
-print-to-serial arrangement and earns a ring only if a real debugging session
-misses one)."""
+a decision: no `device_input.py` (there is no trackball and no I2C keyboard;
+the touch part is an AXS15231 on its own shared driver below -- `gt911.py`
+DOES stage, but only for the `HeldPoint` that driver imports, never for its
+GT911 register map, see that group's why), no `moybyte_sd.py` (stage 4, see
+the moy_sd native denial), no `device_audio.py` (stage 5, see moy_audio), no
+`device_diag.py`/`moybyte_diag.py` (the T-Deck's offline diag ring exists
+because that board's serial RX was dead for months; this board boots with a
+live dev channel, so it starts with the P4's print-to-serial arrangement and
+earns a ring only if a real debugging session misses one)."""
 packages = ["moybyte"]
 packages_why = """
 `moybyte/` is directory-shaped: `moybyte.input` is the boards' real InputState.

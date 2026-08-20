@@ -143,9 +143,48 @@ def test_a_manifest_asking_for_shell_or_carts_gets_neither():
     (["appearance"], ("theme",), None),
     (["launch"], ("nav",), None),
     (["files:docs", "prefs"], ("files", "prefs"), "docs"),
+    (["files:docs", "files:docs"], ("files",), "docs"),   # a repeat is one kind
+    # TWO kinds is a manifest error (below); the residual here fails CLOSED
+    # rather than keeping whichever was declared last.
+    (["files:docs", "files:tables"], (), None),
+    (["files", "files:tables", "prefs"], ("prefs",), None),
 ])
 def test_granted_roles_reads_the_manifest(perms, roles, kind):
     assert system_api.granted_roles({"permissions": perms}) == (roles, kind)
+
+
+@pytest.mark.parametrize("perms,bad", [
+    (["files:docs"], False),
+    (["files"], False),
+    (["files", "files:docs"], False),           # the same kind, spelled twice
+    (["files:nonsense", "files:docs"], False),  # the typo already narrowed away
+    (["files:docs", "files:tables"], True),
+    (["files", "files:tables"], True),          # bare `files` IS the docs kind
+])
+def test_two_file_kinds_is_a_manifest_error(perms, bad):
+    """`files` is ONE kind-bound handle, so a second kind has nowhere to go.
+    It used to be kept silently -- last declaration wins, order-dependent, no
+    diagnostic -- which put an app's documents in `tables` and looked like a
+    save that did not happen."""
+    err = system_api.manifest_error({"permissions": perms})
+    if not bad:
+        assert err is None, err
+    else:
+        assert err and "file kinds" in err and "pick one" in err, err
+
+
+def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
+    """End to end: the ordinary error panel names the manifest, the cart body
+    never runs, and the refusal costs no crash-guard strike (a mis-declared
+    permission is not a crash)."""
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Greedy", "raise SystemExit\n",
+                perms=["files:docs", "files:tables"])
+    ws = _ws(tmp_path)
+    _open(ws, "Greedy")
+    assert ws.player.cart_error is not None
+    assert "file kinds" in ws.player.cart_error, ws.player.cart_error
+    assert ws.app_guard.strikes("greedy") == 0
 
 
 def test_the_prefs_namespace_is_the_title_slug_and_matches_the_store():
@@ -245,8 +284,10 @@ def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
 
     Two assertions, and both matter: the name is not in the namespace at all
     (not a stub, not a disabled object), and the cart consequently dies with a
-    NameError that says `files`. A capability you were not granted does not
-    exist -- there is nothing to probe and nothing to unwrap."""
+    NameError that says `files`. A capability you were not granted has no NAME
+    to probe or unwrap -- which is a stronger property than the granted objects
+    themselves have (those are a speed bump, not a sandbox; see
+    `test_the_scope_is_a_speed_bump_not_a_sandbox` and system_api's docstring)."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Sneaky", NOTES_SRC, perms=["graphics", "input", "prefs"])
     ws = _ws(tmp_path)
@@ -297,11 +338,41 @@ def test_a_scoped_grant_cannot_reach_another_kind(tmp_path):
     _open(ws, "Tabby")
     f = ws.player.ns["files"]
     assert f.kind == "tables"
-    # The kind is bound at construction and is never an argument, so there is
-    # no spelling of `save` that reaches the kid's drawings.
+    # The kind is bound at construction and is never an argument, so no
+    # ARGUMENT to `save` reaches the kid's drawings.
     f.save_text("NOTE", "hi")
     assert moy_carts.list_files("drawings", ws.carts_root) == []
     assert moy_carts.list_files("tables", ws.carts_root) == ["note"]
+
+
+def test_the_scope_is_a_speed_bump_not_a_sandbox(tmp_path):
+    """What the narrowing IS, pinned so the docstrings cannot drift back into
+    claiming containment.
+
+    The published handles hold their internals name-mangled, so the one-hop
+    reach-through (`files._files`, `prefs._ws`) is not there to be found by
+    accident -- that is the property worth keeping, and it is asserted here.
+    What is NOT claimed: that a determined cart cannot get out. It runs `exec`
+    with real builtins, and MicroPython does not implement mangling at all
+    (measured on the unix build), so on a board the same attribute is plainly
+    readable. The value of the filter is a manifest that states what an app is
+    for -- see system_api's module docstring."""
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Tabby", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
+                                "    cls(0)\n", perms=["files:tables", "prefs"])
+    ws = _ws(tmp_path)
+    _open(ws, "Tabby")
+    f = ws.player.ns["files"]
+    for casual in ("_files", "files", "ws", "_ws"):
+        assert not hasattr(f, casual), (
+            "ScopedFiles.%s hands the unscoped role back in one hop" % casual)
+    p = ws.player.ns["prefs"]
+    for casual in ("_ws", "ws", "shell"):
+        assert not hasattr(p, casual), "Prefs.%s is the Workstation" % casual
+    # The roles the shipped apps get are mangled the same way.
+    ctx = ws.app_context("probe", ("theme", "surface", "files"))
+    for role in (ctx.theme, ctx.surface, ctx.files):
+        assert not hasattr(role, "_ws"), type(role).__name__
 
 
 def test_a_game_gets_no_app_api_at_all(tmp_path):
@@ -627,3 +698,52 @@ def test_a_broken_app_stays_editable_in_the_picker(tmp_path):
     ws.go_home()
     titles = [it.get("title") for it in ws._picker_items(ws._all_carts)]
     assert "Boomy" in titles
+
+
+FIXED_SRC = """
+def _update(dt):
+    pass
+
+
+def _draw():
+    cls(0)
+"""
+
+
+def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
+    """The other half of three strikes: the refusal panel says "EDIT it", so
+    editing it has to be a way back.
+
+    Nothing called `CrashGuard.forgive` when the guard shipped, and saving
+    fixed code cleared nothing -- the only escapes were renaming the cart or
+    hand-editing `system.json`, i.e. the panel's one instruction was a lie.
+    A COMMITTED code change is the hook (`Project.commit_code` ->
+    `ws.forgive_app`), because code is the only edit that can change whether
+    the cart hangs, faults or eats the heap."""
+    carts = str(tmp_path / "carts")
+    _write_cart(carts, "Boomy", BOOM_SRC)
+    ws = _ws(tmp_path)
+    for _ in range(3):
+        ws.go_home()
+        _open(ws, "Boomy")
+    boomy = next(c for c in ws._all_carts if c["title"] == "Boomy")
+    assert ws.cart_broken(boomy) is True
+
+    # The fourth open is refused -- and lands on the panel whose bar edits it.
+    ws.go_home()
+    _open(ws, "Boomy")
+    assert "turned off" in ws.player.cart_error, ws.player.cart_error
+
+    # The kid fixes the code and it commits.
+    ws.set_menu_view("code")
+    ws.screen = "menu"
+    ws.editor.set_text(FIXED_SRC)
+    assert ws.save_code() is True
+    assert ws.app_guard.strikes("boomy") == 0
+    assert ws.cart_broken(boomy) is False
+
+    # ...and the app opens and runs again, with a full three strikes back.
+    ws.go_home()
+    _open(ws, "Boomy")
+    _frames(ws, CrashGuard.HEAL_FRAMES + 1)
+    assert ws.player.cart_error is None, ws.player.cart_error

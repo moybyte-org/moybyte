@@ -141,6 +141,33 @@ def _shot(ws, fn):
     return hashlib.sha256(bytes(cv._buf)).hexdigest()
 
 
+def blank_digest(ws):
+    """The hash of the CLEARED canvas -- a shot that drew nothing at all.
+
+    76 of the 300 stored digests were this, in every config, for three months
+    of nobody noticing: `capture` pinned `set_top = 0` and then drew row `idx`,
+    and a row below the scroll window gets an off-panel rect that `ui.row`
+    clips away entirely. The hash was stable, committed and green, and it
+    pinned the colour of nothing. So the blank canvas gets a name here and
+    `_no_blanks` refuses it, on the capture path AND against the stored file --
+    a golden that can be produced by deleting the draw call is not a golden."""
+    cv = ws.sys_canvas
+    cv.cls(0)
+    return hashlib.sha256(bytes(cv._buf)).hexdigest()
+
+
+def _no_blanks(out, blank, cfg_name=""):
+    """Raise if any shot in `out` is the empty canvas."""
+    dead = sorted(k for k, v in out.items() if v == blank)
+    if dead:
+        raise AssertionError(
+            "%s%d sub-surface shot(s) rendered NOTHING (the hash is sha256 of "
+            "the cleared canvas): %s\n"
+            "  A blank shot pins no pixel. Scroll the surface into view in "
+            "`capture` instead of storing the void."
+            % (("config %r: " % cfg_name) if cfg_name else "", len(dead), ", ".join(dead)))
+
+
 def _build(cfg, carts_dir):
     from runtime import host_app
     ws = host_app.build_workstation(
@@ -159,6 +186,7 @@ def _build(cfg, carts_dir):
 def capture(cfg, carts_dir):
     """{sub_surface: sha256} for one configuration."""
     ws = _build(cfg, carts_dir)
+    blank = blank_digest(ws)
     ws.open_settings()
     sl = ws.settings_layer
     out = {}
@@ -166,10 +194,19 @@ def capture(cfg, carts_dir):
     # Every Settings row KIND, selected and unselected: the selection fill and
     # the label ink are what `ui.row` took over, and each kind then draws its
     # own trailing content (value column / icon / OPEN glyph / stepper).
+    #
+    # Each row is SCROLLED INTO VIEW first. `_draw_settings_row` places row i in
+    # on-screen slot `i - set_top`, and a slot past the panel is drawn off the
+    # canvas -- so the old `set_top = 0` silently hashed an empty canvas for
+    # every row below the fold (10-22 of them per config, the whole OTA/diag
+    # tail). The scroll is the MINIMUM that reveals the row -- rows already
+    # inside the first window keep slot `i`, so what moved here is exactly the
+    # set that was blank.
     rows = sl._settings_rows()
+    vis = sl._settings_visible()
     for idx in range(len(rows)):
         key = rows[idx][0]
-        sl.set_top = 0
+        sl.set_top = max(0, idx - vis + 1)
         sl.set_msel = idx
         out["row_sel_" + key] = _shot(ws, lambda i=idx: sl._draw_settings_row(i))
         sl.set_msel = -1
@@ -179,8 +216,10 @@ def capture(cfg, carts_dir):
     keys = [r[0] for r in rows]
     ws.wifi = _Wifi(False)
     wi = keys.index("wifi")
+    sl.set_top = max(0, wi - vis + 1)
     out["row_wifi_off"] = _shot(ws, lambda: sl._draw_settings_row(wi))
     ws.wifi = _Wifi(True)
+    sl.set_top = 0
 
     # The WIFI panel: the scan list (a selection row per network), the password
     # prompt, and the offline status line.
@@ -189,9 +228,21 @@ def capture(cfg, carts_dir):
                     ("cafe wifi", 12, True)]
     sl.wifi_known = ["MoyNet-5G-Long-Name"]
     sl.wifi_msg = "scanning..."
+    # `_draw_wifi` has no scroll: it STOPS listing networks once the next row
+    # would collide with the button strip, so at 800x480/fs3 only the first one
+    # fits and selecting #1 or #2 changed no pixel -- two goldens that were
+    # byte-identical to each other and to selecting nothing. Rather than
+    # re-deriving that break condition here (a second copy to drift), probe it:
+    # shoot the no-selection list once, and store a selection only when it
+    # actually moved a pixel. A key that DISAPPEARS later is still a failure --
+    # the diff loop walks the union of stored and rendered names.
+    sl.wifi_sel = -1
+    unselected = _shot(ws, lambda: sl._draw_wifi())
     for sel in range(3):
         sl.wifi_sel = sel
-        out["wifi_list_%d" % sel] = _shot(ws, lambda: sl._draw_wifi())
+        shot = _shot(ws, lambda: sl._draw_wifi())
+        if shot != unselected:
+            out["wifi_list_%d" % sel] = shot
     sl.wifi_pick = "MoyNet-5G-Long-Name"
     sl.wifi_pw = "hunter2hunter2"
     out["wifi_password"] = _shot(ws, lambda: sl._draw_wifi())
@@ -237,6 +288,10 @@ def capture(cfg, carts_dir):
     for phase in _UPDATE_PHASES:
         uu._upd_phase = phase
         out["update_" + phase] = _shot(ws, lambda: uu._draw_update(_DT))
+
+    # The capture path refuses to PRODUCE a blank, so a re-baseline cannot put
+    # one back into the file either.
+    _no_blanks(out, blank)
     return out
 
 
@@ -319,6 +374,22 @@ def test_goldens_file_covers_exactly_the_matrix(request):
             assert isinstance(digest, str) and len(digest) == 64, (
                 "%s/%s: %r is not a sha256 hex digest"
                 % (config_name, name, digest))
+
+
+@pytest.mark.parametrize("config_name", sorted(CONFIGS))
+def test_no_stored_golden_is_a_blank_canvas(config_name, tmp_path, request):
+    """The ratchet for the defect this file shipped with.
+
+    `capture` refuses to emit a blank shot, which stops a bad re-baseline at
+    the source; this checks the FILE, so a digest pasted or merged in by hand
+    -- or one recorded before the guard existed -- is caught too. The blank is
+    per-config because the canvas size (and therefore the hash of all-zero
+    bytes) is."""
+    if _updating(request):
+        pytest.skip("re-baselining: capture() enforces this on the way in")
+    blank = blank_digest(_build(CONFIGS[config_name], tmp_path / "carts"))
+    stored = json.loads(GOLDEN_FILE.read_text(encoding="utf-8"))[config_name]
+    _no_blanks(stored, blank, config_name)
 
 
 def test_every_capability_row_is_reachable(tmp_path):

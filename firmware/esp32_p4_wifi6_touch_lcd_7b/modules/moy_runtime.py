@@ -571,12 +571,12 @@ def run_desktop(fps_cap=60):
     # which is what the row displays: 0.0.0.0 is the one address nobody can type
     # into a browser.
     try:
-        from moy_webhost import make_webhost, P4_WEB_DIR
+        from moy_webhost import make_webhost, INTERNAL_WEB_DIR
 
         # The link wait that used to be a closure here is moy_webhost.ensure_online
         # now -- it was the same 25 lines the T-Deck needed, and writing it per
         # board is how that board went without the feature entirely.
-        ws.webhost = make_webhost(ws, carts_root, P4_WEB_DIR,
+        ws.webhost = make_webhost(ws, carts_root, INTERNAL_WEB_DIR,
                                   autoconnect=autoconnect_wifi)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: web console unavailable:", exc)

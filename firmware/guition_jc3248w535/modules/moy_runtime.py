@@ -178,8 +178,8 @@ def run_desktop(fps_cap=60):
     # WEB CONSOLE: the wasm console baked into this image (native/.staged/
     # moy_web), served from the board. Constructed, not started.
     try:
-        from moy_webhost import make_webhost, P4_WEB_DIR
-        ws.webhost = make_webhost(ws, carts_root, P4_WEB_DIR,
+        from moy_webhost import make_webhost, INTERNAL_WEB_DIR
+        ws.webhost = make_webhost(ws, carts_root, INTERNAL_WEB_DIR,
                                   autoconnect=autoconnect_wifi)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte Guition: web console unavailable:", exc)

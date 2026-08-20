@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Copy a cart folder onto a board's cart store, over the serial console.
 
-    python tools/push_cart.py ports/celeste.moy                    # the P4
+    python tools/push_cart.py ports/celeste.moy --board p4
     python tools/push_cart.py ports/celeste.moy --board tdeck
-    python tools/push_cart.py ports/celeste.moy --board guition --port /dev/ttyACM1
-    python tools/push_cart.py ports/celeste.moy --only main.lua --force
+    python tools/push_cart.py ports/celeste.moy --board guition_s3 --port /dev/ttyACM1
+    python tools/push_cart.py ports/celeste.moy --board p4 --only main.lua --force
+
+--board is REQUIRED and deliberately has no default: the boards differ in line
+state, reset policy and chunk size, so a default is a silent wrong transport on
+every board but one.
 
 WHY THIS EXISTS. A board's cartridges live on its store -- the P4's internal VFS,
 the S3 boards' SD -- seeded from the build for system carts and put there by hand
@@ -50,6 +54,7 @@ pushed to its SD store over serial on 2026-08-19, twice as fast as the P4.
 """
 import argparse
 import base64
+import glob
 import hashlib
 import os
 import sys
@@ -61,13 +66,35 @@ from p4_autotest import P4Board                                  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Short names -> the board directory holding board.toml. The same three the
-# Makefile's flash/monitor targets name.
-BOARDS = {
-    "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b",
-    "tdeck": "firmware/lilygo_t_deck_plus_mainline",
-    "guition": "firmware/guition_jc3248w535",
-}
+
+def _boards(root=ROOT):
+    """Short name -> the board directory holding its board.toml, DISCOVERED by
+    globbing `firmware/*/board.toml`.
+
+    A hand-kept dict here would be the FOURTH list of the boards -- beside the
+    Makefile's flash/monitor targets, the CI matrix and tools/fetch_ci_firmware
+    -- and the one most likely to rot, because nothing fails when a board is
+    missing from it: the board simply cannot be pushed to and no test notices.
+    It had already drifted in SPELLING (this map said `guition`, everything
+    else says `guition_s3`).
+
+    The short name is the board file's own `[board] ota` id -- the name that is
+    already inside a signed OTA manifest, so it is a published identifier
+    rather than a nickname invented here, and it is what fetch_ci_firmware and
+    the CI matrix spell. A board file with no `ota` id is not a flashable board
+    (`firmware/web_runner` is the browser build) and drops out by itself; one
+    with an id but no [serial] block is a real board that has not declared its
+    transport, and serial_cfg says exactly that rather than "unknown board"."""
+    out = {}
+    for path in sorted(glob.glob(os.path.join(root, "firmware", "*", "board.toml"))):
+        d = os.path.dirname(path)
+        name = board_config.load(d).get("board", {}).get("ota")
+        if name:
+            out[name] = os.path.relpath(d, root)
+    return out
+
+
+BOARDS = _boards()
 
 
 def serial_cfg(board):
@@ -148,8 +175,9 @@ def push_file(b, src, dst, verbose=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cart", help="the cart folder (e.g. ports/celeste.moy)")
-    ap.add_argument("--board", default="p4", choices=sorted(BOARDS),
-                    help="which board's [serial] declaration to use")
+    ap.add_argument("--board", required=True, choices=sorted(BOARDS),
+                    help="which board's [serial] declaration to use (required: "
+                         "a default here is a silent wrong transport)")
     ap.add_argument("--port", default="/dev/ttyACM0")
     ap.add_argument("--dest",
                     help="target path (default <ws.carts_root>/<foldername>)")

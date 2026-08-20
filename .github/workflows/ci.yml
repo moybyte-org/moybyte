@@ -90,7 +90,7 @@ jobs:
       # The console itself, headless: boot the launcher, run a cart, exit. This
       # is what the .moyproj SDK's example steps used to stand in for.
       - name: Boot the console headless
-        run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif
+        run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif --strict
 
   classify-hardware-impact:
     name: Classify software vs. hardware impact

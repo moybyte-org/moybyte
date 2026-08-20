@@ -40,8 +40,15 @@
 //   GRAM noise under a fully "successful" flush, and arming the window over
 //   the live dev channel fixed it with no other change. Every proven driver
 //   (ESPHome, esp_lcd's AXS component) arms the window before every write;
-//   kick() arms it before every frame now, which is also moy_lcd's recovery
-//   point after a timed-out flush.
+//   kick() arms it before every frame now. Arm-every-frame is the DESIGN, and
+//   deliberately not a recovery mechanism -- because on this path there is no
+//   recovery to hang off it. moy_lcd can lean on esp_lcd recycling its own
+//   in-flight transactions after a bad flush; here the retrieve loop only
+//   reclaims results the done-ISR has COUNTED, so a band that was queued and
+//   never completed (the timed-out flush) is never retrieved and its
+//   spi_master queue slot is gone until reboot. Tracked in the moy_axs
+//   hardening issue; a next kick that finds the queue full latches ESP_ERR
+//   and reports it, which is a symptom, not a cure.
 //
 // LANDSCAPE, ROTATED IN THE BAND COPY (owner call, 2026-08-18/19). The
 //   console runs 480x320 landscape; the glass is portrait-native and the
@@ -765,8 +772,12 @@ static void moy_axs_pump_locked(void) {
         }
         esp_err_t err = spi_device_queue_trans(s_dev, t, 0);
         if (err != ESP_OK) {
-            // Queue full would be a bookkeeping bug (queue_size covers a whole
-            // frame); either way: latch, count, let kick report it.
+            // Queue full is either a bookkeeping bug (queue_size covers a
+            // whole frame) or the LEAK from an earlier timed-out flush: bands
+            // that never completed are never retrieved, so their queue slots
+            // stay taken for the rest of the boot (see the header note; the
+            // moy_axs hardening issue tracks it). Either way, all this can do
+            // is latch, count, and let kick report it.
             s_tx_err = err;
             s_tx_errs++;
             break;
@@ -992,9 +1003,13 @@ static mp_obj_t moy_axs_kick(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_kick_obj, 0, 1, moy_axs_kick);
 
 static mp_obj_t moy_axs_pump(size_t n_args, const mp_obj_t *a) {
-    // The CORE-0 FEEDER owns the feed; the verb stays a no-op so the
-    // tdeck_panel-shaped probe (`pump_if_pending`) and any stale caller keep
-    // working. Nothing on the VM core needs to feed a flush anymore.
+    // The CORE-0 FEEDER owns the feed; nothing on the VM core needs to feed a
+    // flush anymore. The verb survives only for VERB-SET PARITY with moy_lcd
+    // (guition_panel's docstring says the same), so a reader comparing the two
+    // modules is not left wondering which half is missing -- it is NOT wiring
+    // anything up: guition_panel deliberately never sets `pump_if_pending`, so
+    // DeviceCanvas's probe finds nothing and no caller in the tree reaches
+    // here. Droppable the day that parity stops being worth a stub.
     (void)n_args; (void)a;
     return mp_const_none;
 }
