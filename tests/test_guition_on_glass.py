@@ -34,8 +34,12 @@ pytestmark = pytest.mark.skipif(
 def board():
     # The shared line-pump driver; dtr/rts HIGH on open (USB-Serial/JTAG board
     # -- an open with both LOW chip-resets it). reset() is never called.
-    from p4_autotest import P4Board
-    b = P4Board(PORT, dtr=True, rts=True)
+    from p4_autotest import P4Board, declared_chunk
+    # Its own [serial] chunk, not the driver's P4 default: USB-Serial/JTAG
+    # backpressures and keeps 768, where the P4's flow-control-free UART ring
+    # needs 256. Same board.toml the flash/push tools read.
+    b = P4Board(PORT, dtr=True, rts=True,
+                chunk=declared_chunk(ROOT / "firmware" / "guition_jc3248w535"))
     b.drain(0.8)
     line = b.cmd("state", wait_for="STATE ", timeout=10.0)
     if line is None:

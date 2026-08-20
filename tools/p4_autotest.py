@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -28,11 +29,37 @@ import serial
 BAUD = 115200
 BOOT_BANNER = "desktop running"
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+P4_BOARD_DIR = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
+
+
+def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
+    """A board's upload chunk from its own [serial] block -- the same number
+    tools/push_cart.py reads, kept in ONE place beside the measurement that
+    produced it.
+
+    It is PER BOARD and the boards disagree for a hardware reason: the P4's
+    CH343 stdin is a ~256-byte ring with no flow control, while the two S3
+    boards' USB-Serial/JTAG backpressures and keeps 768. So this takes the
+    directory of the board being driven, and a suite that drives a USB board
+    passes its own -- a single class-wide constant is what went stale here.
+
+    Falls back to `default` if board.toml cannot be read, because a test driver
+    that refuses to start is worse than one on a stale constant."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import board_config
+        return int(board_config.load(board_dir).get("serial", {}).get("chunk")
+                   or default)
+    except Exception:  # noqa: BLE001 -- any parse/IO failure means "use default"
+        return default
+
 
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
-    def __init__(self, port, log=None, timeout=0.2, dtr=False, rts=False):
+    def __init__(self, port, log=None, timeout=0.2, dtr=False, rts=False,
+                 chunk=None):
         self.log = log if log is not None else (lambda s: None)
         self.ser = serial.Serial()
         self.ser.port = port
@@ -52,6 +79,9 @@ class P4Board:
         self.ser.open()
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)
+        # Per instance, because the boards' rings differ (see declared_chunk).
+        if chunk:
+            self.CHUNK = int(chunk)
 
     def close(self):
         self.ser.close()
@@ -208,10 +238,24 @@ class P4Board:
     # Re-measured, five tries per size: 120, 400, 512, 640, 768, 900 and 1000
     # all pass 5/5 -- and 256 passes 3/5. So the 2026-07-26 failure was not
     # length at all, it was the INTERMITTENT lost reply that shows up at every
-    # size. `cmd` retries once for that (below), and the chunk is now sized for
-    # round trips instead: 768 is 6x fewer, with 25% of headroom under the
-    # largest size that measured clean.
-    CHUNK = 768
+    # size. `cmd` retries once for that (below), and the chunk was sized for
+    # round trips instead: 768 is 6x fewer.
+    #
+    # 768 WAS WRONG, and the 5/5 above is why it survived a fortnight: this
+    # UART's stdin is a ~256-byte ring with NO flow control, so an over-long
+    # line is dropped as NOISE with no error -- the failure is silent, and it
+    # only bites once the frame loop is slow enough (a cart running, PERF diag
+    # streaming) that the ring fills between drains. The board.toml measurement
+    # of 2026-08-19 caught it on a 44KB cart push (five failures, a different
+    # bad hash each time; clean first try at 256), and the same size is what
+    # the conformance harness and the RSA-verifier test upload through -- both
+    # failed here as `SyntaxError: invalid syntax` / `ValueError: incorrect
+    # padding` from a corrupted chunk, which names nothing that is wrong.
+    #
+    # So the size is READ from the board's own [serial] declaration rather than
+    # kept as a second copy of the number. The literal below is only the
+    # fallback for a checkout where board.toml cannot be read.
+    CHUNK = declared_chunk()          # the P4's; USB boards pass their own
 
     def pyval(self, expr, timeout=30.0):
         """Evaluate a short expression on the device; returns the repr'd value

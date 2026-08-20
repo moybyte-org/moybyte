@@ -42,8 +42,13 @@ def board():
     # LOW chip-resets a USB-Serial/JTAG board and the handle goes stale on the
     # re-enumeration -- measured 2026-08-17, and it reads exactly like a board
     # that never boots. Only P4Board.reset() is CH343-specific; never called.
-    from p4_autotest import P4Board
-    b = P4Board(PORT, dtr=True, rts=True)
+    from p4_autotest import P4Board, declared_chunk
+    # Its own [serial] chunk, not the driver's P4 default: this board's
+    # USB-Serial/JTAG backpressures and keeps 768 (measured), where the P4's
+    # flow-control-free UART ring needs 256.
+    b = P4Board(PORT, dtr=True, rts=True,
+                chunk=declared_chunk(ROOT / "firmware"
+                                     / "lilygo_t_deck_plus_mainline"))
     # The board is already running; a first drain absorbs whatever diag lines
     # are mid-flight before the first command's reply is awaited.
     b.drain(0.8)
