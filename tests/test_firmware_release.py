@@ -177,6 +177,29 @@ def test_the_workflow_publishes_what_the_fetcher_looks_for():
     assert "actions: read" in pages
 
 
+def test_every_tree_an_image_is_built_from_triggers_a_build():
+    """A push that changes firmware must BUILD firmware.
+
+    The filter began as firmware/ + runtime/ + system_carts/ and stayed that way
+    after the 2026-08-17 refactor moved the device tier and the C modules to the
+    repo root -- so a change to `device/` or `native/` is compiled into every
+    board's image and triggered nothing at all. Found 2026-08-20: the OTA
+    payload fix (device/moy_ota.py) landed on dev, no beta was built, and it
+    reached an image only because the release merge dragged firmware paths along
+    with it.
+
+    This fails by publishing NOTHING, which is the kind of failure nobody
+    notices -- hence a test rather than a comment."""
+    wf = open(os.path.join(ROOT, ".github", "workflows", "firmware-build.yml"),
+              encoding="utf-8").read()
+    head = wf.split("workflow_dispatch:", 1)[0]      # the push filter only
+    for tree in ("firmware/**", "runtime/**", "system_carts/**",
+                 "device/**", "native/**", "patches/**"):
+        assert '"%s"' % tree in head, (
+            "%s is compiled or frozen into board images but does not trigger a "
+            "build -- a change there would publish nothing" % tree)
+
+
 # -- the two channels are the two branches ----------------------------------
 #
 # `dev` publishes beta images and `master` publishes the ones people get. The
