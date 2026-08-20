@@ -568,7 +568,40 @@ class OtaUpdater:
             self.error = _short(exc)
             return False
         self._arm_pending(slot)
+        self._discard_download()
         return True
+
+    def _discard_download(self):
+        """Delete the image WE downloaded, now that it is safely in the slot.
+
+        Nothing used to, and on a board that stages on INTERNAL flash that makes
+        for a one-update console. Measured on the Guition 2026-08-20, its first
+        OTA: vfs is 0x5E0000 (6.2MB) against a 3,585,936-byte payload, and the
+        console's own files take ~2MB of it, so the second download had 0.6MB to
+        land in. That board stages internally on purpose -- a card pulled
+        mid-stream must never kill an update (moy_runtime's note) -- so the fix
+        is to stop hoarding the payload, not to move it to the card.
+
+        Scoped to DOWNLOAD_NAME deliberately: a .bin the owner copied into
+        /sd/update themselves is THEIR file, possibly meant for another board,
+        and is never touched. A failed unlink is not an error either -- the
+        install already succeeded, and refusing to boot it over a stale temp
+        file would be the worse failure."""
+        if self.path != self.update_dir + "/" + DOWNLOAD_NAME:
+            return
+
+        def _rm():
+            import os
+
+            try:
+                os.remove(self.update_dir + "/" + DOWNLOAD_NAME)
+            except OSError:
+                pass
+
+        try:
+            self._with_sd(_rm)
+        except Exception:  # noqa: BLE001 -- cleanup must never fail a good install
+            pass
 
     def cancel(self):
         self._close_file()

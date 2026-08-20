@@ -155,6 +155,61 @@ def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):
     assert rec["channel"] == mod.FIRMWARE_CHANNEL
 
 
+def test_finish_discards_the_payload_it_downloaded(tmp_path):
+    """A consumed download is deleted, or a board that stages on internal flash
+    can only ever update once.
+
+    Measured on the Guition's first OTA (2026-08-20): its vfs is 6.2MB, the
+    payload 3.5MB, and with the console's own ~2MB of files the NEXT download
+    had 0.6MB to land in. That board stages internally on purpose (a card pulled
+    mid-stream must not kill an update), so the payload has to go, not move."""
+    mod, u = _updater(tmp_path)
+    payload = Path(u.update_dir) / mod.DOWNLOAD_NAME
+    payload.write_bytes(b"\xe9" + b"\x00" * 64)
+    u.path = str(payload)                  # what begin_download/begin() leave behind
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert not payload.exists(), "the consumed download was hoarded"
+    # the marker is NOT collateral: it has to survive into the next boot
+    assert Path(u._pending_path()).exists()
+
+
+def test_finish_never_deletes_an_image_the_owner_supplied(tmp_path):
+    """The Phase-2 path installs whatever .bin is on the card. That file is the
+    owner's -- possibly the only copy, possibly meant for the other board -- so
+    only DOWNLOAD_NAME is ever removed."""
+    mod, u = _updater(tmp_path)
+    theirs = Path(u.update_dir) / "moybyte_tdeck_app.bin"
+    theirs.write_bytes(b"\xe9" + b"\x00" * 64)
+    u.path = str(theirs)
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert theirs.exists(), "an owner-supplied image was deleted"
+
+
+def test_a_failed_discard_still_boots_the_new_image(tmp_path):
+    """Cleanup is housekeeping. The image is already in the slot and the
+    bootloader already points at it, so an unlink that cannot happen must not
+    turn a good install into a failure.
+
+    The unremovable payload here is a DIRECTORY under the name (os.remove
+    raises EISDIR): a real card can refuse for its own reasons, and this
+    reproduces the refusal through the public API rather than by stubbing
+    _with_sd, which _arm_pending also rides -- stubbing it tests the marker,
+    not the cleanup."""
+    mod, u = _updater(tmp_path)
+    stuck = Path(u.update_dir) / mod.DOWNLOAD_NAME
+    stuck.mkdir()
+    u.path = str(stuck)
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert Path(u._pending_path()).exists()
+    assert stuck.exists()
+
+
 def test_a_refused_set_boot_records_nothing(tmp_path):
     # ESP_ERR_OTA_VALIDATE_FAILED on a truncated image: the bootloader was never
     # repointed, so there is no pending update and the next boot must say nothing.
