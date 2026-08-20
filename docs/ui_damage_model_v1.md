@@ -40,7 +40,7 @@ and then immediately fill `lay.panel` **in the same colour**:
 
 `map_editor_ui.py:861,864` and `paint_layer.py:686,690`. `panel` covers `body_fill`
 except two 8px columns and a bottom strip, so **~94% of ~450K px is written twice**
-— ~848KB of redundant writes per frame, and `moy_gfx_fill_run` is a cached store
+— ~848KB of redundant writes per frame, and `mg_fill_run` is a cached store
 loop, so on PSRAM write-allocate genuinely doubles a fill's traffic.
 
 This exact bug was already fixed in **Settings** during this session, and its own
@@ -464,12 +464,15 @@ libraries' answer is to not do most of it.
 
 ## 4. Decision: why not adopt LVGL
 
-Recorded so it is not re-litigated. **We already ship LVGL, and we already left
-it.**
+Recorded so it is not re-litigated. **We shipped LVGL, and we left it** —
+first the drawing path, then (2026-08-17) the build entirely: the T-Deck now
+ships the mainline port with `native/moy_lcd`, and no LVGL exists anywhere in
+the tree. The numbered record below is kept as written, because the
+measurements are what closed the question.
 
-1. **The T-Deck build *is* `lvgl_micropython`** — but LVGL is used only to bring up
+1. **The T-Deck build *was* `lvgl_micropython`** — but LVGL was used only to bring up
    the panel and the SPI bus (`tdeck_display.py`, plus `lcd_bus` for DMA-capable
-   memory). Nothing draws the UI with it.
+   memory). Nothing drew the UI with it.
 2. **The drawing path was LVGL once.** Replacing it with our own native blitter
    went **47 → 90 FPS**; LVGL's CPU-bound rotation was the wall. A measured
    retreat, not a taste decision.

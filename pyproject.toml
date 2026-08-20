@@ -11,8 +11,9 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-# `make setup` installs dev + sim + lua: the test suite, the simulator window and
-# BOTH cart languages are what a fresh clone is expected to be able to run.
+# `make setup` installs dev + sim: the test suite and the simulator window. BOTH
+# cart languages still run from a fresh clone -- Lua needs no dependency now, it
+# needs a C COMPILER, which is already true of audio (runtime/audio_binding).
 dev = [
   "pytest",
   "pytest-xdist", # `make test` runs the ~2000 host tests across cores (3m25s -> ~40s)
@@ -21,21 +22,17 @@ dev = [
 sim = [
   "pygame>=2.5",  # the live simulator window (tools/simulate_desktop.py, moybyte run)
 ]
-# The HOST's Lua tier (#67): runtime/lua_host.py runs a "runtime": "lua" cart on a
-# real Lua 5.4 VM, the device's moy_lua native module's opposite number. Its own
-# extra rather than part of `sim` because it is genuinely optional -- python carts
-# never touch it, and a lua cart without it opens the runtime-missing panel rather
-# than failing. Unpinned: lua_host prefers lupa 2.x's `lupa.lua54` and falls back
-# to the top-level LuaRuntime on older wheels.
-lua = [
-  "lupa",
-]
+# (There was a `lua` extra here carrying lupa, the host's second Lua VM. It is
+# GONE as of 2026-08-14: the host runs the BOARDS' Lua -- libmoy's binding over
+# the same vendored 5.4, built on demand by runtime/lua_binding -- so a Lua cart
+# needs a C compiler rather than a wheel, exactly as host audio already does.
+# See runtime/lua_host.py's module docstring for why two engines was worse than
+# one requirement.)
 # Flashing/monitoring a real board. NOT installed by `make setup` -- it needs
 # hardware, and the T-Deck targets use the ESP-IDF toolchain's python instead.
 device = [
   "esptool>=4.7,<5",   # tools/esptool_no_modem.py patches esptool 4.x internals
   "pyserial>=3.5",     # serial monitor + tools/p4_autotest.py (on-glass tests)
-  "mpremote",          # firmware/seeed_xiao_esp32s3_zero/stage.sh
 ]
 # SIGNING an OTA manifest (tools/ota_sign.py keygen/sign). Not in `make setup`:
 # only the release publisher needs it, and only for the private-key half.

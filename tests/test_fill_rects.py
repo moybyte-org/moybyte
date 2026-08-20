@@ -1,20 +1,18 @@
 """#163 span-batch verb: `fill_rects` must be byte-identical to the rect loop.
 
-The contract every backend implements (host Canvas here; the device DrawCtx
-method mirrors gate_fill, which mirrors _fill; the web recorders expand to
-plain rect ops): n packed int16 quads (x, y, w, h, ci), an (ox, oy) shift for
+The contract every backend implements (the shared DeviceCanvas here; the
+device DrawCtx method mirrors gate_fill, which mirrors _fill): n packed int16
+quads (x, y, w, h, ci), an (ox, oy) shift for
 relative span lists, and a call-level color override. Camera, clip and the
 palette map must apply exactly as cv.rect applies them.
 """
 
-import sys
 from array import array
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
-from runtime.canvas import Canvas                 # noqa: E402
+from runtime.host_canvas import make_canvas as Canvas   # noqa: E402
 
 QUADS = [
     (3, 4, 10, 6, 5),
@@ -39,7 +37,7 @@ def _canvas():
 
 
 def _snap(cv):
-    return bytes(cv.buf)
+    return bytes(cv._buf)
 
 
 def test_fill_rects_matches_the_rect_loop():

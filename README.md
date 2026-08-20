@@ -5,7 +5,7 @@
 **An operating system that turns an ESP32 board into a small general-purpose
 computer — one you can also write software on, on the board itself. The software
 is cartridges: games, wallpapers, tools, whatever you make. Open any of them,
-change it, run it, with no host computer in the loop. It boots on two
+change it, run it, with no host computer in the loop. It boots on three
 off-the-shelf boards today; the same source tree is also a PC simulator and a
 browser build.**
 
@@ -26,7 +26,7 @@ Carts draw in 64 indexed colours on a 320×240 surface, the same on every target
 The shell around them is not fixed — it reflows from that handheld screen to a 7″
 1024×600 desktop, all from one implementation.
 
-This repo is the **reference implementation of [moy core 0.1](https://github.com/moybyte-org/moy-spec)**,
+This repo is the **reference implementation of [moy core 0.2](https://github.com/moybyte-org/moy-spec)**,
 the public spec for that cart format and its verb table.
 
 <p align="center">
@@ -46,6 +46,7 @@ the public spec for that cart format and its verb table.
 | **PC simulator** | `runtime/` — pure Python, no device. The host reference and the fast dev loop. |
 | **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD, OTA updates. |
 | **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same system, second presentation tier: a windowed desktop with draggable app windows. |
+| **Guition JC3248W535** (ESP32-S3) | the ~$15 3.5″ smart display: a QSPI AXS15231B panel, touch-only, landscape 480×320, carts on the TF card when one is in the slot. |
 | **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the OS *is* the page, no server. |
 
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
@@ -101,7 +102,7 @@ poll; scrolling shifts retained pixels instead of repainting them; sprite
 batching collapses N calls into one. An optional frameskip runs logic at the full
 rate and motion at 30 Hz.
 
-**Sound** — a C mixer (`moy_audio`) on both boards and in the browser, fed by a
+**Sound** — a C mixer (`moy_audio`) on the boards and in the browser, fed by a
 tracker-style sound bank. PICO-8 imports carry eight waveforms, the effect
 column, four-channel patterns and SFX loop ranges.
 
@@ -111,22 +112,20 @@ card and it is on the launcher. Built-in carts re-seed by version and keep the
 your saves and tuning across an update.
 
 **Wireless** — WiFi setup lives in Settings, so it works while a game runs.
-Firmware updates go over the air on two channels, stable and beta, into an
-inactive OTA slot with bootloader rollback; that whole path was confirmed on a
-T-Deck — download, install, boot the new slot, roll back. It has not been
-exercised in a while, so treat it as "worked when last tested". The device can
-also serve the running system to a browser on the same network as draw commands
-rather than pixels — verified on a T-Deck
-([#182](https://github.com/moybyte-org/moybyte/issues/182)), where it works and
-is slow: that board's WiFi moves roughly 72 KB/s, and that, not the drawing, is
-what caps the frame rate over the wire.
+Firmware updates go over the air on two signed channels, stable and beta, into
+an inactive OTA slot with bootloader rollback — the whole chain (real WiFi,
+signature check on device, streamed install, boot the new slot, rollback
+self-heal) has run on the glass of the T-Deck and the P4. Each board also serves
+the browser console below over its own WiFi: the wasm bundle is baked into the
+firmware image, so a phone on the same network gets the full console from the
+device itself.
 
-**Four rendering backends, one contract** — host, two boards, and a browser page
-that draws the system's draw commands itself. That contract is written down
+**Five rendering backends, one contract** — host, three boards, and a browser
+build that rasterizes in WebAssembly. That contract is written down
 ([`docs/surface_model_v1.md`](docs/surface_model_v1.md)), including its graveyard
 of approaches that were built, measured and reverted.
 
-**Tests** — ~1900, all headless. Golden-frame tests pin the host renderer and a
+**Tests** — over 2,300, all headless. Golden-frame tests pin the host renderer and a
 canvas-parity suite holds the device backend to it; the firmware tests read the
 frozen module tree rather than executing it. The P4 is driven over its live serial
 console by a pytest suite that taps and swipes the real UI, and the browser build
@@ -150,14 +149,15 @@ spelled out — same three steps, same extras:
 ```bat
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install --upgrade pip setuptools
-.venv\Scripts\python -m pip install -e ".[dev,sim,lua]"
+.venv\Scripts\python -m pip install -e ".[dev,sim]"
 
 .venv\Scripts\python tools\simulate_desktop.py
 ```
 
 Every command below works as written with `.venv\Scripts\python` in place of
-`.venv/bin/python`. Python 3.10+; the `lua` extra is `lupa`, the host's Lua 5.4
-VM (`runtime/lua_host.py`) — drop it and Python carts still run, but a
+`.venv/bin/python`. Python 3.10+. Lua carts need a C compiler, not an extra:
+the host builds the boards' own vendored Lua 5.4 + libmoy binding on demand
+(`runtime/lua_binding.py`) — without a compiler Python carts still run, but a
 `"runtime": "lua"` cart opens the "needs the Lua runtime" panel.
 
 ```bash
@@ -170,8 +170,8 @@ VM (`runtime/lua_host.py`) — drop it and Python carts still run, but a
 # ...and run YOUR cart in place, editing it between runs (see below)
 .venv/bin/python tools/simulate_desktop.py --cart ~/.moybyte/projects/mine.moy
 
-# the whole system streamed to a browser as draw commands (no wasm build)
-.venv/bin/python tools/web_console.py --size 1024x600 --windowed
+# the whole console in a browser: the wasm build (firmware/web_runner)
+cd firmware/web_runner && python moy.py run
 
 # headless tour -> animated GIF (this is how the GIFs above are made)
 .venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif
@@ -249,11 +249,12 @@ expected to differ there.
 
 ## The hardware, honestly
 
-Both boards are real and both boot to Moybyte — but both are off-the-shelf
-dev boards; bespoke hardware is roadmap, not shipped. The T-Deck Plus is a
-keyboard handheld; the P4 board is a 7″ desktop. What's honest about the state:
+All three boards are real and all three boot to Moybyte — but all three are
+off-the-shelf dev boards; bespoke hardware is roadmap, not shipped. The T-Deck
+Plus is a keyboard handheld; the P4 board is a 7″ desktop; the Guition is a
+~$15 touch-only 3.5″ display. What's honest about the state:
 
-- **It plays.** The seed carts run at playable frame rates on both boards, with
+- **It plays.** The seed carts run at playable frame rates on the boards, with
   the whole editor suite usable on the device itself.
 - **Performance is tracked in the open, not claimed.** Per-cart fps, the frame
   budget model, and every lever *including the ones that were built, measured
@@ -267,8 +268,8 @@ keyboard handheld; the P4 board is a 7″ desktop. What's honest about the state
 Build and flash:
 
 ```bash
-MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython   # needs ESP-IDF 5.5
-make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
+MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-tdeck-mainline   # needs ESP-IDF 5.5
+make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4 && make firmware-flash-p4 PORT=/dev/ttyACM0
 ```
 
@@ -299,10 +300,11 @@ cost a debugging session.
 |---|---|
 | `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
 | `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Sheets, Writer, Storybook, Calc) |
-| `firmware/lilygo_t_deck_plus_micropython/` | the ESP32-S3 port + the native C modules (`moy_gfx`, `moy_lua`, `moy_audio`, `moy_sd`) |
+| `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
+| `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |
 | `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
-| `tools/` | simulator, web console, GIF recorder, p8 importers, on-glass test drivers |
+| `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |
 | `docs/` | cart API, shell UX, visual identity, architecture and design docs |
 | **`CLAUDE.md`** | **the best single map of this repo.** Written for AI tools, but it is the orientation doc humans should read first. |
 
@@ -315,7 +317,8 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) — features want an issue first, and
 every commit needs a DCO sign-off (`git commit -s`). Then read `CLAUDE.md`.
 
 The one rule that trips people up: **host == device.** A change to the drawing
-API must land in both backends (`runtime/canvas.py` and the device modules) with
+API lands in the ONE canvas class every tier runs (`device_canvas.DeviceCanvas`,
+built for the host by `runtime/host_canvas.py`) with
 an identical API, or the "one cart, every tier" contract breaks.
 
 ## License

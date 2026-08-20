@@ -149,7 +149,7 @@ def test_rename_moves_the_file(tmp_path):
     old = app.sheet_name
     app._begin_rename()
     app.rename_text = "budget"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "budget"
     assert "budget" in moy_carts.list_files("tables", carts)
     assert old not in moy_carts.list_files("tables", carts)
@@ -164,7 +164,10 @@ def test_bar_x_exit_saves_the_open_sheet(tmp_path):
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "99")               # an OPEN, uncommitted edit
     xb = ws.layout.context_x_btn
-    app.handle_pointer(xb[0] + 2, xb[1] + 2, True)
+    ws.pointer.place(xb[0] + 2, xb[1] + 2)
+    ws.pointer.click = True
+    ws.handle_pointer()                   # the ROUTER owns the app bar contract
+    ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     data = json.loads(moy_carts.load_file("tables", name, carts))
     assert data["cells"]["A1"]["v"] == 99
@@ -245,7 +248,7 @@ def test_attach_sheet_lands_the_table_in_the_target_cart(tmp_path):
     # the game reads it back through table('wave').
     app._begin_rename()
     app.rename_text = "wave"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "wave"
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "1\n")
@@ -476,7 +479,7 @@ def test_attach_unaffected_by_op_history(tmp_path):
     app._new_sheet()
     app._begin_rename()
     app.rename_text = "wave2"
-    app._typed_name(type("K", (), {"last_key": 0x0D})())
+    app._typed_rename(type("K", (), {"last_key": 0x0D})())
     assert app.sheet_name == "wave2"
     app.cur_col, app.cur_row = 0, 0
     _type(app, ws.input, "1\n")

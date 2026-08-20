@@ -1,16 +1,20 @@
 """runtime/ui.py -- the shared immediate-mode widget toolkit (visual identity
 v1 Phase 3): rect algebra, the draw==tap Hits registry, themed widgets, and the
 one ScrollRegion model. Pixel checks run on a real SystemCanvas so the drawing
-path is the one every tier shares."""
+path is the one every tier shares.
 
-import sys
+The 2026-08 UI refactor's Phase 3a additions -- the six-state interaction
+model, the `Hits` pointer pump, and the `row`/`cell` kinds -- are in
+`tests/test_ui_states.py`, which also pins every SHIPPED widget's pixels across
+all 12 theme sets so a later phase cannot re-baseline them by accident.
+"""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import ui
-from runtime.canvas import SystemCanvas
+from runtime.host_canvas import make_system_canvas as SystemCanvas
 from runtime.chrome import theme_colors
 
 
@@ -404,3 +408,184 @@ def test_drag_tap_disambiguates():
     # A press OUTSIDE the view arms nothing.
     assert dt.frame(200, 200, True, True) is None
     assert dt.frame(200, 200, False, False) is None
+
+
+# -- Phase 4 parameter additions: every one of them default-OFF ---------------
+#
+# Each knob below was asked for by a conversion that measured a real mismatch
+# against a frozen site (see the Phase 4 report). The contract for all of them
+# is the same: passing the default, or not passing it at all, must be the same
+# call, because the 87 shell goldens and the 48 widget hashes were taken before
+# they existed.
+
+def _glyphd(kind, rect, color, cv):
+    x, y, w, h = rect
+    cv.rect(x, y, w, h, color)
+
+
+def test_every_new_parameter_defaults_to_the_frozen_rendering():
+    for th in (theme_colors("night"), theme_colors("machine", "light")):
+        for fs in (1, 2, 3):
+            pairs = (
+                (ui.chip, (), {"label": "HI"}, {"colors": None}),
+                (ui.cell, (), {"label": "C"},
+                 {"text_dx": None, "text_dy": None, "edge_last": False}),
+                (ui.row, (), {"label": "R", "value": "v"},
+                 {"pad_right": None, "scale": 1, "glyph_ink": None,
+                  "glyph_size": None}),
+            )
+            for fn, args, base, added in pairs:
+                a = SystemCanvas(120, 60, font_scale=fs)
+                b = SystemCanvas(120, 60, font_scale=fs)
+                fn(a, th, (4, 4, 100, 40), *args, **base)
+                merged = dict(base)
+                merged.update(added)
+                fn(b, th, (4, 4, 100, 40), *args, **merged)
+                assert bytes(a._buf) == bytes(b._buf), (fn.__name__, fs)
+            a = SystemCanvas(120, 60, font_scale=fs)
+            b = SystemCanvas(120, 60, font_scale=fs)
+            ui.text_field(a, (4, 4, 100, 16), "hi", "ph")
+            ui.text_field(b, (4, 4, 100, 16), "hi", "ph", colors=None, fs=None)
+            assert bytes(a._buf) == bytes(b._buf), ("text_field", fs)
+
+
+def test_cell_text_offsets_place_a_frozen_caption_baseline():
+    """`appearance_app._draw_wall_card`'s blocker: its caption baseline is the
+    frozen literal `y + h - 13*fs`, and the band centre agrees with it only at
+    font scale 1 (fs=2: 8 vs 9). `text_dy` is what lets a site say so."""
+    for fs in (1, 2, 3):
+        h = 40 * fs
+        want_dy = h - 13 * fs
+        a = SystemCanvas(120 * fs, 80 * fs, font_scale=fs)
+        ui.cell(a, TH, (0, 0, 100 * fs, h), "T", band=True,
+                caption_h=17 * fs, pad=3 * fs, text_dy=want_dy,
+                text_dx=5 * fs)
+        b = SystemCanvas(120 * fs, 80 * fs, font_scale=fs)
+        cap_y = h - 17 * fs
+        ui.cell(b, TH, (0, 0, 100 * fs, h), None, caption_h=17 * fs,
+                pad=3 * fs)
+        b.rect(0, cap_y, 100 * fs, 17 * fs, TH["title"])
+        b.print("T", 5 * fs, want_dy, TH["title_ink"], 1)
+        b.rectb(0, 0, 100 * fs, h, ui.state_colors(TH, "cell", ui.REST)[2])
+        assert bytes(a._buf) == bytes(b._buf), fs
+
+
+def test_cell_edge_last_paints_the_frame_over_the_content():
+    """`appearance_app._draw_theme_card`'s blocker in miniature: a glyph that
+    reaches the cell's border must be clipped by it, which needs the border
+    painted after the picture rather than before."""
+    edge = ui.state_colors(TH, "cell", ui.REST)[2]
+    ink = ui.state_colors(TH, "cell", ui.REST)[1]
+    # A cell exactly as big as the skin's 14px glyph box, pad 0: the glyph
+    # covers every pixel including the frame, so the draw ORDER is the whole
+    # difference between the two renderings.
+    r = (0, 0, 14, 14)
+    before = SystemCanvas(30, 30)
+    ui.cell(before, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0)
+    after = SystemCanvas(30, 30)
+    ui.cell(after, TH, r, None, glyph="g", glyph_draw=_glyphd, pad=0,
+            edge_last=True)
+    assert before.pix(0, 0) == ink                 # the glyph won
+    assert after.pix(0, 0) == edge                 # the frame won
+    assert before.pix(7, 7) == ink and after.pix(7, 7) == ink
+    assert bytes(before._buf) != bytes(after._buf)
+
+
+def test_chip_colors_bypasses_the_skin_like_row_and_cell():
+    """Parity: absorbing a private button (writer's history pair, sheets' icon
+    button) must be able to keep that site's exact palette."""
+    cv = SystemCanvas(80, 40)
+    ui.chip(cv, TH, (0, 0, 60, 20), "X", colors=(19, 0, 22))
+    assert cv.pix(1, 1) == 19
+    assert cv.pix(0, 0) == 22
+    flat = SystemCanvas(80, 40)
+    flat.rect(0, 0, 80, 40, 7)
+    ui.chip(flat, TH, (0, 0, 60, 20), "X", colors=(None, 0, None))
+    assert flat.pix(1, 1) == 7                     # no field, no border
+
+
+def test_row_pad_right_frees_a_narrow_rows_value_column():
+    """The achievements badge: one number did both insets, so a deep LEFT pad
+    inside a narrow rect truncated the text to nothing."""
+    both = SystemCanvas(120, 30)
+    ui.row(both, TH, (0, 0, 60, 16), "NAME", pad=24, value="9")
+    split = SystemCanvas(120, 30)
+    ui.row(split, TH, (0, 0, 60, 16), "NAME", pad=24, pad_right=2, value="9")
+    assert bytes(both._buf) != bytes(split._buf)
+    ink = ui.state_colors(TH, "row", ui.REST)[1]
+    painted = sum(1 for x in range(60) for y in range(16)
+                  if split.pix(x, y) == ink)
+    assert painted > 0
+    assert sum(1 for x in range(60) for y in range(16)
+               if both.pix(x, y) == ink) < painted
+
+
+def test_row_scale_prints_bigger_and_still_clips_inside_the_rect():
+    """The scale-2 update headlines. The width arithmetic follows `scale`, so a
+    long label truncates at the right column instead of escaping (#174)."""
+    cv = SystemCanvas(200, 40)
+    cv.rect(0, 0, 200, 40, 7)
+    ui.row(cv, TH, (0, 0, 80, 24), "ABCDEFGHIJ", scale=2)
+    for x in range(80, 200):
+        for y in range(40):
+            assert cv.pix(x, y) == 7, (x, y)
+    one = SystemCanvas(200, 40)
+    ui.row(one, TH, (0, 0, 80, 24), "AB", scale=1)
+    two = SystemCanvas(200, 40)
+    ui.row(two, TH, (0, 0, 80, 24), "AB", scale=2)
+    assert bytes(one._buf) != bytes(two._buf)
+
+
+def test_row_glyph_ink_and_size_are_independent_of_the_label():
+    """Achievements (bright badge, quiet text) and the egg banner (a 16x16
+    glyph where the skin says 14) both had to draw their own art."""
+    a = SystemCanvas(120, 30)
+    ui.row(a, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd)
+    b = SystemCanvas(120, 30)
+    ui.row(b, TH, (0, 0, 100, 20), "X", glyph="g", glyph_draw=_glyphd,
+           glyph_ink=TH["accent"], glyph_size=16)
+    assert bytes(a._buf) != bytes(b._buf)
+    assert b.pix(5, 5) == TH["accent"]
+
+
+def test_row_content_rect_is_where_row_actually_draws():
+    """The PURE half, so a caller can place its own trailing content without
+    `row` paying a tuple allocation on every row of every frame."""
+    for fs in (1, 2):
+        for kwargs, geo in (({}, {}),
+                           ({"glyph": "g", "glyph_draw": _glyphd},
+                            {"glyph": True}),
+                           ({"pad": 9, "pad_right": 3}, {"pad": 9,
+                                                         "pad_right": 3})):
+            cv = SystemCanvas(200, 40, font_scale=fs)
+            rect = (0, 0, 160, 16 * fs)
+            # glyph_ink keeps the leading art out of the ink scan below.
+            ui.row(cv, TH, rect, "MMMMMMMMMMMMMMMMMMMM",
+                   glyph_ink=TH["accent"], **kwargs)
+            band = ui.row_content_rect(rect, fs, **geo)
+            ink = ui.state_colors(TH, "row", ui.REST)[1]
+            cols = [x for x in range(160)
+                    if any(cv.pix(x, y) == ink for y in range(16 * fs))]
+            assert cols, (fs, kwargs)
+            assert min(cols) >= band[0], (fs, kwargs, min(cols), band)
+            assert max(cols) < band[0] + band[2] + 8 * fs, (fs, kwargs, band)
+
+
+def test_text_field_can_be_themed_and_scaled_without_moving_the_default():
+    """The WiFi password field: it needs the theme's ring, its own ink and an
+    fs-wide caret; the block prompts need the frozen 1x rendering. Both."""
+    frozen = SystemCanvas(140, 30)
+    ui.text_field(frozen, (0, 0, 120, 14), "ab")
+    assert frozen.pix(1, 1) == 0                       # black field
+    assert frozen.pix(0, 0) == 6                       # light-grey ring
+    themed = SystemCanvas(140, 30)
+    ui.text_field(themed, (0, 0, 120, 14), "ab",
+                  colors=(TH["surface"], TH["edge"], TH["ink"], 5,
+                          TH["accent"]))
+    assert themed.pix(1, 1) == TH["surface"]
+    assert themed.pix(0, 0) == TH["edge"]
+    scaled = SystemCanvas(200, 60, font_scale=2)
+    ui.text_field(scaled, (0, 0, 160, 28), "ab", fs=2)
+    plain = SystemCanvas(200, 60, font_scale=2)
+    ui.text_field(plain, (0, 0, 160, 28), "ab")
+    assert bytes(scaled._buf) != bytes(plain._buf)

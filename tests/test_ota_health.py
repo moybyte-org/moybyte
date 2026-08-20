@@ -20,23 +20,23 @@ An image that boots, reports its verdict and then dies still carries a marker
 into the boot after the rollback, so that second failure gets reported too.
 """
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
-TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
+# moy_ota lives in the shared device tier at the repo root (the boards' modules/
+# dirs only hold gitignored build-staged copies -- absent on a fresh checkout).
+DEVICE = ROOT / "device"
 
 
 def _load_moy_ota():
-    spec = importlib.util.spec_from_file_location("moy_ota_health", TDECK / "moy_ota.py")
-    m = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(m)
-    return m
+    # See test_ota_manifest._load_moy_ota: a shared plain import, made inside
+    # a test so the _no_local_build_stamp fixture guards _ota_build.
+    import moy_ota
+    return moy_ota
 
 
 class _FakePart:
@@ -153,6 +153,61 @@ def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):
     assert rec["slot"] == "ota_1"          # where we are going
     assert rec["version"] == mod.FIRMWARE_VERSION   # what we are leaving
     assert rec["channel"] == mod.FIRMWARE_CHANNEL
+
+
+def test_finish_discards_the_payload_it_downloaded(tmp_path):
+    """A consumed download is deleted, or a board that stages on internal flash
+    can only ever update once.
+
+    Measured on the Guition's first OTA (2026-08-20): its vfs is 6.2MB, the
+    payload 3.5MB, and with the console's own ~2MB of files the NEXT download
+    had 0.6MB to land in. That board stages internally on purpose (a card pulled
+    mid-stream must not kill an update), so the payload has to go, not move."""
+    mod, u = _updater(tmp_path)
+    payload = Path(u.update_dir) / mod.DOWNLOAD_NAME
+    payload.write_bytes(b"\xe9" + b"\x00" * 64)
+    u.path = str(payload)                  # what begin_download/begin() leave behind
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert not payload.exists(), "the consumed download was hoarded"
+    # the marker is NOT collateral: it has to survive into the next boot
+    assert Path(u._pending_path()).exists()
+
+
+def test_finish_never_deletes_an_image_the_owner_supplied(tmp_path):
+    """The Phase-2 path installs whatever .bin is on the card. That file is the
+    owner's -- possibly the only copy, possibly meant for the other board -- so
+    only DOWNLOAD_NAME is ever removed."""
+    mod, u = _updater(tmp_path)
+    theirs = Path(u.update_dir) / "moybyte_tdeck_app.bin"
+    theirs.write_bytes(b"\xe9" + b"\x00" * 64)
+    u.path = str(theirs)
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert theirs.exists(), "an owner-supplied image was deleted"
+
+
+def test_a_failed_discard_still_boots_the_new_image(tmp_path):
+    """Cleanup is housekeeping. The image is already in the slot and the
+    bootloader already points at it, so an unlink that cannot happen must not
+    turn a good install into a failure.
+
+    The unremovable payload here is a DIRECTORY under the name (os.remove
+    raises EISDIR): a real card can refuse for its own reasons, and this
+    reproduces the refusal through the public API rather than by stubbing
+    _with_sd, which _arm_pending also rides -- stubbing it tests the marker,
+    not the cleanup."""
+    mod, u = _updater(tmp_path)
+    stuck = Path(u.update_dir) / mod.DOWNLOAD_NAME
+    stuck.mkdir()
+    u.path = str(stuck)
+    u._part = _FakePart("ota_1")
+
+    assert u.finish() is True
+    assert Path(u._pending_path()).exists()
+    assert stuck.exists()
 
 
 def test_a_refused_set_boot_records_nothing(tmp_path):
@@ -555,13 +610,72 @@ def test_no_updater_at_all_defaults_to_stable(tmp_path):
 # -- both boards are wired to it ---------------------------------------------
 
 def test_both_boards_confirm_from_the_frame_loop_not_the_boot_path():
-    """A grep test, like the rest of the frozen-module suite: these two files are
-    never imported by the host (they import esp32/machine), so the only thing CI
-    can check is the shape of the source."""
-    for mod_path, frames in ((TDECK / "moy_runtime.py", "_frames_drawn"),
-                             (P4 / "moy_runtime.py", "_frames_drawn")):
+    """WHERE each half runs, asserted structurally rather than by grep.
+
+    Both boards drive one shared implementation now (`runtime/device_boot.py`'s
+    OtaHealth + FramePump, #161 Phase 4/5), which makes the old string match
+    both weaker and misleading: a literal that lives in a third file says
+    nothing about whether a board reached it, and the whole claim here is about
+    PLACEMENT. So this walks each `run_desktop` and asserts the boot verdict is
+    read OUTSIDE the frame loop while the confirm is pumped INSIDE it -- the
+    distinction #56 was: made where the desktop is merely CONSTRUCTED, the
+    confirm certifies an image that has never drawn a pixel.
+
+    These two files are never imported by the host (they import esp32/machine),
+    so the source is all CI can reach -- same house rule as the rest of the
+    frozen-module suite.
+    """
+    import ast
+
+    for mod_path in (TDECK / "moy_runtime.py", P4 / "moy_runtime.py"):
         src = mod_path.read_text(encoding="utf-8")
-        assert "confirm_when_healthy(getattr(ws, \"%s\", 0))" % frames in src, mod_path
-        assert "boot_check()" in src, mod_path
+        fn = None
+        for node in ast.walk(ast.parse(src, filename=str(mod_path))):
+            if isinstance(node, ast.FunctionDef) and node.name == "run_desktop":
+                fn = node
+        assert fn is not None, mod_path
+
+        seen = {}
+
+        def walk(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                loop = in_loop or isinstance(node, (ast.While, ast.For))
+                if isinstance(child, ast.Call):
+                    name = (child.func.attr
+                            if isinstance(child.func, ast.Attribute)
+                            else getattr(child.func, "id", None))
+                    if name:
+                        seen.setdefault(name, set()).add(loop)
+                walk(child, loop)
+
+        walk(fn, False)
+        assert seen.get("OtaHealth") == {False}, (
+            "%s: the OTA health reporter must be built on the boot path" % mod_path)
+        assert seen.get("boot_check") == {False}, (
+            "%s: the boot verdict is read once, before the loop" % mod_path)
+        # #202 Phase B: the frame loop itself is SHARED (device_boot.FrameLoop
+        # calls pump.tail every frame -- asserted against the spine below), so
+        # the per-board placement claim becomes: run_desktop hands the pump to
+        # a FrameLoop and runs it, and does NOT drive pump.tail beside it.
+        assert "FrameLoop" in seen, (
+            "%s: run_desktop no longer constructs the shared frame loop"
+            % mod_path)
+        assert seen.get("run") is not None, mod_path
+        assert seen.get("tail") is None, (
+            "%s: pump.tail driven beside the shared loop -- two cadences"
+            % mod_path)
         # The old unconditional confirm at desktop-construction time is gone.
         assert "ws.updater.mark_valid()" not in src, mod_path
+
+    # And the shared half really does confirm on painted frames, not on boot.
+    spine = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
+    assert 'confirm_when_healthy(getattr(self.ws, "_frames_drawn", 0))' in spine
+    # ...and the shared FrameLoop is what pumps it, after the ws phase.
+    step = spine[spine.index("def step(self):"):]
+    assert step.index("ws.frame(dt)") < step.index("self.pump.tail(ws)")
+    tree = ast.parse(spine)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "boot_check":
+            assert "confirm_when_healthy" not in ast.dump(node), (
+                "device_boot.OtaHealth.boot_check must NOT confirm -- reaching "
+                "the boot path proves only that the desktop was constructed")

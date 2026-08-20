@@ -53,6 +53,23 @@ jobs:
       - name: Install package
         run: make setup
 
+      # The COMPILED-VS-COMPILED lane. tests/test_gfx_binding.py's
+      # test_matches_the_native_moy_gfx drives the same ops through the host's
+      # ctypes binding and through the REAL native moy_gfx under a desktop
+      # MicroPython, byte for byte -- the only check in this suite where two
+      # independently compiled rasters are compared. It needed a hand-built
+      # binary that nothing produced, so it passed on one developer's machine
+      # and silently SKIPPED on every runner; `make unix-micropython` is that
+      # build, and this step is what makes the check exist here.
+      #
+      # Deliberately NOT cached. It is ~20s from cold on a runner (clone,
+      # submodules, mpy-cross, compile) and a cache is another thing that can
+      # go stale or miss -- and a miss that silently skipped the check is the
+      # exact failure being fixed. If this step ever breaks, the tests below go
+      # RED rather than quiet: the parity test fails outright when `CI` is set.
+      - name: Build the desktop MicroPython with the native usermods
+        run: make unix-micropython
+
       # tests/test_redraw_on_change.py asserts exact/zero redraw counts against
       # real wall-clock deadlines (Workstation._frames_drawn), but the top bar
       # clock legitimately repaints on a real minute rollover -- so when this
@@ -73,7 +90,7 @@ jobs:
       # The console itself, headless: boot the launcher, run a cart, exit. This
       # is what the .moyproj SDK's example steps used to stand in for.
       - name: Boot the console headless
-        run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif
+        run: .venv/bin/python tools/simulate_desktop.py --demo --gif /tmp/demo.gif --strict
 
   classify-hardware-impact:
     name: Classify software vs. hardware impact
@@ -146,7 +163,7 @@ jobs:
               echo "(or run the \"Firmware build\" workflow from the Actions tab for a downloadable \`.bin\` without a local ESP-IDF toolchain.)"
             } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Pure software -- host tests + \`make check-portable\` are the full gate here, no device step needed." >> "$GITHUB_STEP_SUMMARY"
+            echo "### Pure software -- the host test suite is the full gate here, no device step needed." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       # Comment (not just summary) so the flag is visible on the PR itself.

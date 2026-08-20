@@ -8,16 +8,12 @@ is never lost.
 Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver), so these assert host == device behavior."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_ws as _ws
 
 
 def _open_in_editor_by_title(ws, title):

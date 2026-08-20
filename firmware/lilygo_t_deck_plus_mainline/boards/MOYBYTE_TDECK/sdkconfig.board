@@ -1,0 +1,164 @@
+# Moybyte T-Deck board fragment (mainline build).
+#
+# Everything here is either a BOARD FACT (flash size/mode, partition table) or a
+# lever that was A/B'd on THIS board's glass. "The fork" below is the
+# lvgl_micropython build this port replaced (deleted 2026-08-17): its measured
+# verdicts transferred here knob for knob, and the README's "what the fork
+# tunes that this build does not (yet)" table records the deltas that did not.
+
+# 16MB flash. The generic S3 board assumes 4MB.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# DIO, not the generic board's QIO: the images this repo actually flashes to a
+# T-Deck are the dio ones (Makefile MPY_FLASH_MODE ?= dio), and the mode in the
+# image header is what the ROM bootloader uses.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# The dual-OTA partition table (#53). IDENTICAL to what the fork build's
+# --ota --flash-size=16 --partition-size=5242880 generates, offset for offset:
+# both boards in the field are on this table and a change costs every deployed
+# device a full-erase USB flash. CONFIG_PARTITION_TABLE_CUSTOM_FILENAME
+# resolves relative to ports/esp32, so build.sh stages the CSV there.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"
+
+# Rollback (#53): an app that never calls
+# esp32.Partition.mark_app_valid_cancel_rollback() is reverted by the
+# bootloader on the next boot, so a bad OTA self-heals. sdkconfig.base already
+# sets this upstream; restated here because build.sh's stale-sdkconfig guard
+# greps the GENERATED config for it -- an existing build dir silently keeps
+# whatever it was first configured with.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Cache geometry (#63, A/B'd on this board): the stock build runs the S3's
+# MINIMUM caches (16KB icache / 32KB dcache) while the VM reads frozen bytecode
+# from flash AND the gc heap from PSRAM through that one small dcache, with the
+# panel DMA streaming through the same path. Doubling both is worth ~2.5x on kid
+# float loops. Costs 48KB of internal SRAM.
+#
+# The LINE stays 32B. A first pass also widened lines to 64B and the hardware
+# answered with horizontal garbage bands on every screen -- the 64B coherency
+# granularity breaks the CPU<->GDMA handoff in the PSRAM flush path. Do not
+# re-widen without an on-hardware A/B.
+CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB=
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_32KB=
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y
+
+# PSRAM at 120MHz, matching the fork. THIS IS THE PORT'S LAST MEASURED GAP and
+# it was not a code difference at all: the mainline board set no SPIRAM speed, so
+# it took the 80MHz default while the fork build had run 120M OCT for months.
+#
+# Measured on the owner's board, same cart, same night, after the flush overlap
+# had already landed:
+#
+#     render= minus bg=   fork 7.73ms   mainline 7.93ms   (matches to 0.2ms)
+#     bg= (a 153,600 B PSRAM fill)   4.06ms   vs   5.99ms
+#     implied write rate  37.8 MB/s   vs   25.6 MB/s   = 1.475x
+#     clock ratio         120 / 80                     = 1.5x
+#
+# Everything else was already equal -- same cache geometry (checked in the
+# generated sdkconfig, not assumed), same staged kernel at the same -O3, 240MHz
+# on both. The ~2ms lives in the MSPI clock and nowhere else, and the `logic=`
+# tax (1.50 -> 2.00) is the same clock on the PSRAM-resident gc heap.
+#
+# 120M is ESP-IDF "experimental" and temperature-sensitive, so this is a risk
+# decision rather than free -- but it is the SAME risk the fork build
+# carried on this exact hardware, so matching it is the conservative choice for a
+# replacement build, not a new gamble. If the panel ever shows garbage bands or
+# the board wedges under sustained load, this is the first line to revert; note
+# the cache LINE above stays 32B for a related and separately-learned reason.
+# 120M is not one flag. It is Kconfig-gated behind IDF_EXPERIMENTAL_FEATURES,
+# it requires the FLASH at 120M too, and the S3's 120M PSRAM timing DRIFTS WITH
+# TEMPERATURE -- so the fork also enables the temperature-sensor retune on a 5s
+# interval. Setting SPIRAM_SPEED_120M alone silently leaves you at 80M, which is
+# exactly what a first attempt here did (the generated sdkconfig still read
+# SPEED=80 after a clean build). All five together, matching the fork's `fast`
+# profile, or none of them.
+# External MSPI speed: octal flash + octal PSRAM at 120MHz. This is the SAME
+# flag set the fork build applied (its MOYBYTE_EXTMEM_SPEED=fast) --
+# keep the two together rather than deriving this one from Kconfig again.
+#
+# Flash and PSRAM move TOGETHER: at 240MHz core, ESP-IDF 5.5.1 ships no MSPI
+# timing table for PSRAM-120 with flash-80, and says so as a compile error
+# naming the 240M/120M table. Do not set a FLASHMODE here -- the fork set none,
+# the octal variant decides it.
+#
+# THIS REQUIRES esp_psram_temp_retune_any_vendor.patch (#169), applied by
+# build.sh. IDF only starts the temperature retune for verified flash vendor IDs
+# (0xC8/0x20) and otherwise returns ESP_ERR_NOT_SUPPORTED from a SECONDARY
+# ESP_SYSTEM_INIT_FN -- which ABORTS THE BOOT. Enabling the retune without the
+# patch gives a board that flashes cleanly, says nothing on serial and never
+# reaches the console; that was measured here on 2026-08-16 and read for an hour
+# as a PSRAM timing problem, which it is not.
+#
+# Do NOT read the generated sdkconfig's STRINGS to check this landed:
+#   CONFIG_ESPTOOLPY_FLASHFREQ_120M=y   <- the choice, what matters
+#   CONFIG_ESPTOOLPY_FLASHFREQ="80m"    <- correct, and stays 80m
+# The flash image header can only encode 80/40/26/20MHz and must stay ROM
+# readable, so 120M is applied at runtime by the MSPI tuning code. Reading the
+# string is what made this look like a setting that would not apply, twice.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=
+CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPIRAM_SPEED_80M=
+CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
+CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
+
+# USB-Serial-JTAG as the PRIMARY console, so serial INPUT works (#201).
+#
+# The board previously left the IDF default: UART0 primary, USB-Serial-JTAG
+# SECONDARY. A secondary console is OUTPUT ONLY -- Espressif's own Kconfig help
+# says so: "This secondary output currently only supports non-blocking mode
+# without using REPL. If you want to output in blocking mode with REPL or input
+# through this secondary port, please change the primary config to this port."
+#
+# That is the whole reason typed input never arrived on this board: TX flowed
+# over USB (secondary, output-only) while INPUT was taken from the primary,
+# UART0 -- whose RX is GPIO44 on the expansion header, unconnected and floating.
+# Hence a single stray byte in 150 seconds (`SERIAL rx=1 lines=0 partial=1`) and
+# a host write() that timed out having transferred ZERO bytes: nothing on the
+# device was ever reading that endpoint.
+#
+# It is NOT micropython#18581 (CDC-init-at-REPL), which is what this was first
+# diagnosed as -- TinyUSB is not even linked into this image (`tusb_init` and
+# `tud_cdc_rx_cb` are both absent from the elf). No TinyUSB is needed: the S3's
+# USB-Serial-JTAG peripheral is bidirectional on its own once it is primary.
+#
+# The fork build (deleted 2026-08-17) shared this misconfiguration -- but note
+# that fixing it there was measured as NOT sufficient: with an identical console
+# config and identical linked symbols it printed and still took no input
+# (CLAUDE.md's RX section). On THIS port the three changes together are the
+# whole fix, verified on glass.
+#
+# UART REPL stays on (mpconfigboard.h) -- it costs nothing and keeps the header
+# pins usable with a USB-UART adapter, which is how the P4 has always worked
+# (its CH343 is exactly that, soldered on).
+# REVERTED 2026-08-16 AFTER FLASHING IT: making USB-Serial-JTAG the PRIMARY
+# console fixed RX at the USB level -- a host write() went from timing out at 0
+# bytes to being ACCEPTED -- and then the board emitted NOTHING and stopped
+# booting. The primary console is BLOCKING (the same Kconfig help that says the
+# secondary cannot take input says the primary is the one that supports
+# "blocking mode with REPL"), so the desktop hangs on its first print when no
+# host is draining. Recovery needed esptool --before default_reset, which does
+# work on this board even with the app wedged.
+#
+# RESOLVED 2026-08-16, and the two halves explain each other. That hang happened
+# while MICROPY_HW_ESP_USB_SERIAL_JTAG was still 0 (USBDEV was on), so
+# MicroPython had NO tx path of its own and mp_hal_stdout_tx_strn fell through to
+# IDF's primary console -- which blocks. With USBDEV off (see mpconfigboard.h)
+# MicroPython uses its own usb_serial_jtag_tx_strn instead: an absent host costs
+# one 200ms timeout, then terminal_connected latches false and every later write
+# returns immediately. Non-blocking by construction.
+#
+# So neither change works alone -- promoting the console alone hangs the board,
+# linking the ISR alone leaves the console secondary and input-only-in-theory --
+# and that is why each was measured as a failure on its own. They ship together.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

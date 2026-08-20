@@ -11,11 +11,9 @@ the work it saved on a board whose flash reads at ~470KB/s: a 77KB decoded
 SOURCE (164ms per read), and #86's per-size crop sidecars (~66ms to read, the
 same as rebuilding from the blob, plus a ~30ms write per cover per size)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import moy_carts  # noqa: E402
 

@@ -17,7 +17,7 @@ Two packaging-only differences:
 This is the `experiments/lua_bridge` measurement spike (issue #6/#67), kept
 deliberately on stock Lua so it measures a *stock* VM. The shipped, modified
 copy lives in
-`firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/`.
+`native/moy_lua/lua/`.
 
 ## Verifying
 

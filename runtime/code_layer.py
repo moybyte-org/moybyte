@@ -1,12 +1,12 @@
 """The Python code editor (#24/#39), extracted from Workstation (runtime/console.py)
-as its own Layer -- docs/shell_layers_refactor_v1.md Phase 2 (the last surface).
+as its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2 (the last surface).
 
 The full-screen code view: the responsive text area (drawn on the SYSTEM canvas at the
 CodeLayout geometry), the syntax-highlighted line rendering, the coding-symbol palette
 (the T-Deck keyboard can't type `=[]{}<>%`, so a tappable palette supplies them), and
 the touch/keyboard editing.
 
-Stage-4 bar rollout (docs/shell_ux_technical_plan_v1.md): the code editor's OWN top
+Stage-4 bar rollout (docs/history/shell_ux_technical_plan_v1.md): the code editor's OWN top
 band -- the cart title + the RUN/SAVE/CLOSE icons -- is GONE. draw() now paints the
 unified zoned bar (the tab ladder + PLAY + X, no SAVE -- #111) over the top 18px like
 every other editor tab, so the body below it is fullscreen text + the symbol palette
@@ -37,6 +37,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+# The cart API's names, once (see runtime/cart_verbs.py) -- the syntax
+# highlighter's builtin class is derived from them below.
+try:
+    from cart_verbs import CART_VERBS as _CART_VERBS
+except ImportError:  # pragma: no cover - host fallback
+    from runtime.cart_verbs import CART_VERBS as _CART_VERBS
+
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
 # palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
 # label. Looked up LAZILY (not a top-level import): chrome.py imports THIS module for
@@ -57,6 +64,31 @@ def _glyph_known(kind):
             from runtime.chrome import _GLYPHS as _G
         _GLYPHS = _G
     return kind in _GLYPHS
+
+
+# The code editor draws its chrome in its OWN palette (`_tones`), not in the
+# theme's -- the frozen 320x240 branch is a set of literals with no token behind
+# it. `ui.row`/`ui.cell` take that palette through their `colors=` escape hatch;
+# `ui.chip` has none, so the tone map doubles as the `th` dict chip reads, by
+# carrying the four token names chip looks up. Nothing is invented here: every
+# alias points at a role this surface already had.
+def _as_theme(t):
+    """Add the ui-toolkit token aliases to a tone map, in place."""
+    edge = t["sym_edge"]
+    t["panel"] = t["sym_bg"]        # chip REST field
+    t["dim"] = edge                 # chip REST edge
+    t["accent"] = edge              # chip ON field  (the `active` look)
+    t["edge"] = edge                # chip ON edge
+    t["title_ink"] = t["sym_ink"]   # chip REST ink
+    return t
+
+
+def _chip_rect(r):
+    """The FIELD of a code-chrome chip: one pixel narrower and shorter than the
+    cell it is laid out in, so adjacent chips keep a 1px gutter. Frozen geometry
+    -- and the reason a chip's text label centres on the CELL (see `_btn_face`),
+    which is one pixel wider than the field it sits in."""
+    return (r[0], r[1], r[2] - 1, r[3] - 1)
 
 
 # -- code-editor geometry (single source; console.py imports these back) ------
@@ -102,15 +134,22 @@ _HL_LUA_KEYWORDS = (
     "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
     "then", "true", "until", "while",
 )
-# Cart-API verbs + the common builtins a kid actually types. Keep roughly in
-# sync with make_api (host_app / moy_runtime); an extra name here is harmless.
-_HL_BUILTINS = (
-    "cls", "pix", "pset", "line", "rect", "rectb", "circ", "circb", "spr",
-    "map", "mget", "mset",
-    "print", "btn", "btnp", "touch", "mouse", "key", "keyp", "time", "pmem",
-    "cfg", "col", "rnd", "flr", "abs", "min",
-    "max", "sin", "cos", "range", "len", "int", "str", "float", "round", "sqrt",
+# Cart-API verbs + the common builtins a kid actually types.
+#
+# The verb half is DERIVED (runtime/cart_verbs.CART_VERBS, pinned against
+# make_api's real namespace by a test) rather than retyped. It used to be a
+# hand-kept copy under a comment reading "keep roughly in sync with make_api";
+# it had drifted to 37 names against make_api's 62, and still highlighted
+# `pset`, which was renamed `pix` long enough ago that no cart uses it.
+#
+# The LANGUAGE builtins below stay local -- they are what a kid types that the
+# cart API does not define, so they are this module's own vocabulary and have
+# no business in a cart-verb list.
+_HL_LANG_BUILTINS = (
+    "abs", "min", "max", "sin", "cos", "range", "len", "int", "str", "float",
+    "round", "sqrt", "bool",
 )
+_HL_BUILTINS = tuple(_CART_VERBS) + _HL_LANG_BUILTINS
 
 
 def _is_alpha(ch):
@@ -298,8 +337,7 @@ class CodeLayer:
         h = strip + (len(lines) + 1) * 10 * fs + 14 * fs
         x = (cv.w - w) // 2
         y = max(20 * fs, (cv.h - h) // 3)
-        cv.rect(x, y, w, h, th["surface"])
-        cv.rectb(x, y, w, h, th["danger"])
+        _ui.dialog(cv, (x, y, w, h), ring=th["danger"], fill=th["surface"])
         cv.rect(x + 1, y + 1, w - 2, strip, th["danger"])
         cv.print(title, x + 4 * fs, y + 2 * fs, 7, 1)
         ty = y + strip + 4 * fs
@@ -836,27 +874,29 @@ class CodeLayer:
         # branch below carries the _HL_LIGHT syntax set, so code is exactly
         # "light and dark" on the small tier.
         if self.ws.code_layout._base and not self.ws.light_chrome():
-            return {"bg": NAMES["black"], "caret": NAMES["yellow"],
-                    "sym_bg": NAMES["dark_grey"], "sym_edge": NAMES["indigo"],
-                    "sym_ink": NAMES["white"], "hl": None,
-                    "sel": NAMES["indigo"], "find": NAMES["orange"],
-                    "gutter": NAMES["dark_grey"]}
+            return _as_theme({"bg": NAMES["black"], "caret": NAMES["yellow"],
+                              "sym_bg": NAMES["dark_grey"],
+                              "sym_edge": NAMES["indigo"],
+                              "sym_ink": NAMES["white"], "hl": None,
+                              "sel": NAMES["indigo"], "find": NAMES["orange"],
+                              "gutter": NAMES["dark_grey"]})
         th = self.ws.theme_colors
         if th.get("ink", NAMES["white"]) != 0:      # dark surface -> dark set
-            return {"bg": th.get("surface", NAMES["black"]),
-                    "caret": th.get("accent", NAMES["yellow"]),
-                    "sym_bg": NAMES["dark_grey"],
-                    "sym_edge": th.get("hilite", NAMES["indigo"]),
-                    "sym_ink": NAMES["white"], "hl": None,
-                    "sel": th.get("hilite", NAMES["indigo"]),
-                    "find": NAMES["orange"],
-                    "gutter": NAMES["dark_grey"]}
-        return {"bg": th["surface"], "caret": th["ink"],
-                "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
-                "sym_edge": th["border"], "sym_ink": th["ink"],
-                "hl": self._HL_LIGHT,
-                "sel": th.get("hilite", NAMES["indigo"]), "find": NAMES["orange"],
-                "gutter": th.get("border", NAMES["dark_grey"])}
+            return _as_theme({"bg": th.get("surface", NAMES["black"]),
+                              "caret": th.get("accent", NAMES["yellow"]),
+                              "sym_bg": NAMES["dark_grey"],
+                              "sym_edge": th.get("hilite", NAMES["indigo"]),
+                              "sym_ink": NAMES["white"], "hl": None,
+                              "sel": th.get("hilite", NAMES["indigo"]),
+                              "find": NAMES["orange"],
+                              "gutter": NAMES["dark_grey"]})
+        return _as_theme({"bg": th["surface"], "caret": th["ink"],
+                          "sym_bg": th.get("surface_alt", NAMES["dark_grey"]),
+                          "sym_edge": th["border"], "sym_ink": th["ink"],
+                          "hl": self._HL_LIGHT,
+                          "sel": th.get("hilite", NAMES["indigo"]),
+                          "find": NAMES["orange"],
+                          "gutter": th.get("border", NAMES["dark_grey"])})
 
     def _draw_code(self):
         # Responsive (#39 step 2): the code editor draws on the SYSTEM canvas at
@@ -1005,31 +1045,54 @@ class CodeLayer:
                 cv.rectb(tx0 + (vs - ed.left) * cell, y, (ve - vs) * cell, 8 * fs, color)
             start = i + (L if L > 0 else 1)
 
-    def _panel_btn(self, cv, lay, r, label, t, active=False, ink=None, glyph=None):
-        """One tool/find button: a filled, bordered cell with a centered label -- or,
-        when `glyph` names a known chrome glyph (#89 icon pass), a centered 12x12 icon
-        instead of the label. Uses the same sym_bg/sym_edge palette as the symbol strip
-        so it reads as chrome. A missing glyph kind falls through to the `label`."""
-        fs = lay.fs
-        cv.rect(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"] if active else t["sym_bg"])
-        cv.rectb(r[0], r[1], r[2] - 1, r[3] - 1, t["sym_edge"])
-        gink = ink if ink is not None else t["sym_ink"]
-        if glyph is not None and _glyph_known(glyph):
-            self.ws._glyph(glyph, (r[0], r[1], r[2] - 1, r[3] - 1), gink, cv)
-        elif label:
-            gx = r[0] + (r[2] - len(label) * 8 * fs) // 2
-            if gx < r[0] + fs:
-                gx = r[0] + fs
-            gy = r[1] + (r[3] - 8 * fs) // 2
-            cv.print(label, gx, gy, gink, 1)
+    # The tool/find buttons ARE `ui.chip`s (Phase 3d): the private `_panel_btn`
+    # copy is gone. What stays here is only the chip's FACE -- the part ui.py is
+    # deliberately blind to -- handed to `chip` as its `glyph_draw` callback, the
+    # same seam `game_icon_btn` already uses to keep the glyph vocabulary out of
+    # the leaf.
+
+    def _btn_spec(self, label, glyph):
+        """The face spec for one chip: the chrome glyph KIND when this button has
+        a known one (#89 icon pass), else its text label. One value, so the chip
+        call site passes one argument and `_btn_face` needs no unpacking."""
+        return glyph if (glyph is not None and _glyph_known(glyph)) else label
+
+    def _btn_face(self, spec, rect, ink, cv):
+        """Draw a chip's face -- `ui.chip`'s `glyph_draw` callback.
+
+        Two things are preserved verbatim from the `_panel_btn` this replaced,
+        because both are frozen pixels:
+
+          * the ink is the chrome's ONE `sym_ink` in BOTH looks (the field flips
+            for `active`, the ink does not), where chip's own `on` ink is black;
+          * a text label centres on the button CELL, which `_chip_rect` made one
+            pixel wider than the field the chip filled.
+        """
+        t = self._t
+        if t is not None:
+            ink = t["sym_ink"]
+        if _glyph_known(spec):
+            self.ws._glyph(spec, rect, ink, cv)
+            return
+        if not spec:
+            return
+        fs = self.ws.code_layout.fs
+        gx = rect[0] + (rect[2] + 1 - len(spec) * 8 * fs) // 2
+        if gx < rect[0] + fs:
+            gx = rect[0] + fs
+        cv.print(spec, gx, rect[1] + (rect[3] + 1 - 8 * fs) // 2, ink, 1)
 
     def _draw_tools(self, lay, ed, t):
         """The #89 chrome: the always-visible TLS toggle, the tool palette row (when
         open) and the find bar (when open). All overlay the code body -- drawn AFTER
         the text so they sit on top -- and never touch the frozen baseline geometry."""
         cv = self.ws.sys_canvas
-        self._panel_btn(cv, lay, self._tls_btn(lay), "TLS", t,
-                        active=self._tools_open, glyph="tools")
+        fs = lay.fs
+        # `glyph` carries the FACE spec (a glyph kind or the label text) and
+        # `_btn_face` draws it -- ui.py stays blind to the chrome vocabulary.
+        _ui.chip(cv, t, _chip_rect(self._tls_btn(lay)), "TLS",
+                 on=self._tools_open, glyph=self._btn_spec("TLS", "tools"),
+                 glyph_draw=self._btn_face, fs=fs)
         if self._tools_open:
             r = self._toolbar_rect(lay)
             n = len(self._TOOLS)
@@ -1039,9 +1102,11 @@ class CodeLayer:
                 active = (name == "sel" and self._select_mode) or \
                          (name == "find" and self._find_open) or \
                          (name == "gutter" and self._gutter)
-                self._panel_btn(cv, lay, (r[0] + i * bw, r[1], bw, r[3]),
-                                self._TOOL_LABEL[name], t, active=active,
-                                glyph=self._TOOL_GLYPH.get(name))
+                label = self._TOOL_LABEL[name]
+                _ui.chip(cv, t, _chip_rect((r[0] + i * bw, r[1], bw, r[3])),
+                         label, on=active,
+                         glyph=self._btn_spec(label, self._TOOL_GLYPH.get(name)),
+                         glyph_draw=self._btn_face, fs=fs)
         if self._find_open:
             self._draw_find(lay, ed, t)
         if self._cmp_open:
@@ -1054,16 +1119,17 @@ class CodeLayer:
         chrome palette, an optional accent title row, and the selected row tinted with
         the selection color. Labels are pre-clipped by the caller's width."""
         fs = lay.fs
-        cv.rect(panel[0], panel[1], panel[2] - 1, panel[3] - 1, t["sym_bg"])
-        cv.rectb(panel[0], panel[1], panel[2] - 1, panel[3] - 1, t["sym_edge"])
-        if title is not None:
-            cv.print(title, panel[0] + fs, panel[1] + fs, t["find"], 1)
+        # The shell IS a row too (field + edge + the optional accent title), and
+        # each entry is a plain list row: no field unless it is the selected one.
+        _ui.row(cv, t, _chip_rect(panel), title,
+                colors=(t["sym_bg"], t["find"], t["sym_edge"]),
+                pad=fs, text_dy=fs, fs=fs)
         maxch = max(1, (panel[2] - 2 * fs) // lay.cell)
         for i in range(len(rects)):
             r = rects[i]
-            if i == sel:
-                cv.rect(r[0], r[1], r[2] - 1, r[3] - 1, t["sel"])
-            cv.print(labels[i][:maxch], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
+            _ui.row(cv, t, _chip_rect(r), labels[i][:maxch],
+                    colors=(t["sel"] if i == sel else None, t["sym_ink"], None),
+                    edge=False, pad=fs, text_dy=fs, fs=fs)
 
     def _draw_completion(self, lay, ed, t):
         cv = self.ws.sys_canvas
@@ -1086,23 +1152,29 @@ class CodeLayer:
         r = self._find_rect(lay)
         btns = self._find_btns(lay)
         qright = btns["prev"][0]                  # the query field ends where the buttons start
-        cv.rect(r[0], r[1], qright - r[0] - 1, r[3] - 1, t["sym_bg"])
-        cv.rectb(r[0], r[1], qright - r[0] - 1, r[3] - 1, t["sym_edge"])
+        # The FIELD is a row; the query text + caret stay the caller's, because
+        # they are the field's live CONTENT (a tail slice plus a caret block) and
+        # `row` would re-clip the already-fitted string by its own symmetric pad.
+        _ui.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None,
+                colors=(t["sym_bg"], t["sym_ink"], t["sym_edge"]), fs=fs)
         # As much of the tail of the query as fits, then a caret block.
         avail = max(1, (qright - r[0]) // lay.cell - 2)
         shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
         cv.print(("F:" + shown)[-avail - 2:], r[0] + fs, r[1] + fs, t["sym_ink"], 1)
         cx = r[0] + fs + (len(shown) + 2) * lay.cell
         cv.rect(cx, r[1] + fs, fs, 8 * fs, t["caret"])
-        self._panel_btn(cv, lay, btns["prev"], "<", t)
-        self._panel_btn(cv, lay, btns["next"], ">", t)
-        self._panel_btn(cv, lay, btns["case"], "Aa", t, active=not self._find_ci)
-        self._panel_btn(cv, lay, btns["close"], "X", t)
+        _ui.chip(cv, t, _chip_rect(btns["prev"]), "<", glyph="<",
+                 glyph_draw=self._btn_face, fs=fs)
+        _ui.chip(cv, t, _chip_rect(btns["next"]), ">", glyph=">",
+                 glyph_draw=self._btn_face, fs=fs)
+        _ui.chip(cv, t, _chip_rect(btns["case"]), "Aa", on=not self._find_ci,
+                 glyph="Aa", glyph_draw=self._btn_face, fs=fs)
+        _ui.chip(cv, t, _chip_rect(btns["close"]), "X", glyph="X",
+                 glyph_draw=self._btn_face, fs=fs)
 
     def _draw_symbols(self):
         # Tappable coding-symbol palette (supplies what the keyboard can't type). On
         # the SYSTEM canvas; cell + text scale with the layout/font (#39 step 2).
-        NAMES = self._NAMES
         cv = self.ws.sys_canvas
         lay = self.ws.code_layout
         fs = lay.fs
@@ -1111,8 +1183,12 @@ class CodeLayer:
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
         syms = self._symbols()
+        colors = (t["sym_bg"], t["sym_ink"], t["sym_edge"])
         for i in range(len(syms)):
             x = lay.sym_area[0] + i * sc
-            cv.rect(x, sy, sc - 1, sh - 1, t["sym_bg"])
-            cv.rectb(x, sy, sc - 1, sh - 1, t["sym_edge"])
-            cv.print(syms[i], x + 6 * fs, sy + 6 * fs, t["sym_ink"], 1)
+            # A key is a grid CELL whose picture is the symbol itself: `cell`
+            # draws the frame and hands back where the picture goes (the frozen
+            # +6px offset is measured from that rect, not from the cell).
+            art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1), colors=colors,
+                           pad=0, caption_h=0, fs=fs)
+            cv.print(syms[i], art[0] + 6 * fs, art[1] + 6 * fs, t["sym_ink"], 1)

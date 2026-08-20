@@ -33,10 +33,10 @@ on:
   workflow_dispatch:
     inputs:
       board:
-        description: "Which board(s) to build"
+        description: "Which board(s) to build ('both' = all boards)"
         type: choice
         default: tdeck
-        options: [tdeck, p4, both]
+        options: [tdeck, p4, guition_s3, both]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -50,9 +50,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [tdeck, p4]
+        # The per-board facts every step below parameterizes on (#202 Phase A):
+        # adding a board = adding a row (dir + make target); no later step
+        # names a board. `patches/**` (repo root) rides every key because every
+        # build applies shared patches under one-shot marker guards.
+        include:
+          - board: tdeck
+            dir: firmware/lilygo_t_deck_plus_mainline
+            make_target: firmware-build-tdeck-mainline
+          - board: p4
+            dir: firmware/esp32_p4_wifi6_touch_lcd_7b
+            make_target: firmware-build-p4
+          - board: guition_s3
+            dir: firmware/guition_jc3248w535
+            make_target: firmware-build-guition-s3
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
-    # branch build does both boards; a dispatch honours the choice.
+    # branch build does all three boards in the matrix; a dispatch honours the
+    # choice.
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
@@ -65,6 +79,11 @@ jobs:
       # committed FIRMWARE_VERSION; unstable stamps a build epoch, so every beta
       # publish reads as newer than the last.
       MOYBYTE_OTA_CHANNEL: ${{ github.ref == 'refs/heads/master' && 'stable' || 'unstable' }}
+      # The browser console is BAKED INTO the image (moy_web), and a published
+      # image whose web console is missing is exactly the silent drift that
+      # baking it was meant to end -- so here it is a hard failure, not the
+      # warning a local flash gets. Set this to 0 to publish without one.
+      MOYBYTE_REQUIRE_WEB_BUNDLE: "1"
     steps:
       - name: Should this board run?
         id: gate
@@ -120,6 +139,28 @@ jobs:
           key: idf-${{ matrix.board }}-${{ runner.os }}-v1
           restore-keys: idf-${{ matrix.board }}-${{ runner.os }}-
 
+      # A restored ~/.espressif carries python_env/idf5.5_pyX.Y_env whose
+      # bin/python3 is a SYMLINK into /opt/hostedtoolcache. `Free disk space`
+      # above wipes that tool cache (tool-cache: true) and `Set up Python` then
+      # DOWNLOADS a fresh build, so the symlink dangles -- and `python -m venv`
+      # over a broken env exits 1 with NO stderr, which is exactly how both
+      # boards failed on 2026-08-17, twice, with warm caches. The tell is
+      # idf_tools printing "No such file or directory: .../bin/python3" and then
+      # failing to create the replacement.
+      #
+      # `make setup`'s own venv succeeds in the same job, which is what proves
+      # the interpreter is fine and the TARGET is what is broken.
+      - name: Drop a stale ESP-IDF python_env (dangling interpreter symlink)
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          shopt -s nullglob
+          for env in "$HOME"/.espressif/python_env/*/; do
+            if [ ! -x "${env}bin/python3" ]; then
+              echo "== removing broken ESP-IDF venv: ${env}"
+              rm -rf "${env}"
+            fi
+          done
+
       # pip wheels for `make setup` -- small, safe, keyed on the dependency spec.
       - name: Cache pip
         if: steps.gate.outputs.run == 'true'
@@ -131,7 +172,7 @@ jobs:
             pip-${{ runner.os }}-
 
       # The BIG win: cache the per-board `.build` UPSTREAM CLONES (esp-idf +
-      # micropython + lvgl_micropython). They are PINNED in build.sh, so an
+      # micropython). They are PINNED in build.sh, so an
       # otherwise-fresh runner re-clones ~1.5 GB of esp-idf on every run -- and for
       # the T-Deck that late esp-idf fetch is exactly why the build had to run
       # twice (the #43 patch can't land until esp-idf exists). Keyed on build.sh so
@@ -145,51 +186,64 @@ jobs:
       # same reason there is deliberately NO restore-keys here: a partial-key
       # fallback could restore a stale-patched tree that the marker then skips. Exact
       # key only -- any build.sh/patch change forces one clean (uncached) rebuild.
-      - name: Cache T-Deck build tree (esp-idf + micropython clones)
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
+      # ONE cache step for any board (the paths/keys come from the matrix row).
+      # The key hashes everything that determines the cached tree's patched
+      # state: the board's build.sh + its own patches dir (empty on boards
+      # without one), the SHARED patches/, and the shared build spine + stager
+      # (tools/esp32_build_lib.sh / board_config.py) that build.sh now runs
+      # through -- a lib edit must bust the cache exactly as a build.sh edit
+      # does, or a restored tree silently keeps the old patch under its marker.
+      - name: Cache board build tree (esp-idf + micropython clones)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: |
-            firmware/lilygo_t_deck_plus_micropython/.build
-            !firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/micropython/ports/esp32/build-*
-          key: build-tdeck-${{ runner.os }}-${{ hashFiles('firmware/lilygo_t_deck_plus_micropython/build.sh', 'firmware/lilygo_t_deck_plus_micropython/patches/**') }}
+            ${{ matrix.dir }}/.build
+            !${{ matrix.dir }}/.build/micropython/ports/esp32/build-*
+          key: build-${{ matrix.board }}-${{ runner.os }}-${{ hashFiles(format('{0}/build.sh', matrix.dir), format('{0}/patches/**', matrix.dir), 'patches/**', 'tools/esp32_build_lib.sh', 'tools/board_config.py') }}
 
-      - name: Cache ESP32-P4 build tree (esp-idf + micropython clones)
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
+      # The wasm toolchain, shared with the Pages workflow by key (~1.8 GB:
+      # emsdk + a micropython checkout, both pinned by web_runner/build.sh).
+      - name: Cache the wasm toolchain
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
-          path: |
-            firmware/esp32_p4_wifi6_touch_lcd_7b/.build
-            !firmware/esp32_p4_wifi6_touch_lcd_7b/.build/micropython/ports/esp32/build-*
-          key: build-p4-${{ runner.os }}-${{ hashFiles('firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh', 'firmware/esp32_p4_wifi6_touch_lcd_7b/patches/**') }}
+          path: firmware/web_runner/.build
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-${{ runner.os }}-
 
       - name: Host venv (make setup)
         if: steps.gate.outputs.run == 'true'
         run: make setup
 
-      - name: Build T-Deck (S3) firmware
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'tdeck'
-        run: |
-          # A from-scratch .build fetches esp-idf DURING the first pass, so the
-          # #43 PSRAM-TX-DMA patch only lands on the second run -> build twice
-          # (ccache makes the second pass fast) so the shipped image is patched.
-          # But when the `.build` cache above restored esp-idf, the patch lands on
-          # the FIRST pass, so the second full build is unnecessary -- skip it.
-          # NB: check esp-idf presence BEFORE the first build (the first build
-          # fetches it, so it always exists afterwards).
-          IDF=firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/esp-idf/export.sh
-          if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
-          make firmware-build-lilygo-micropython
-          if [ "$WARM" = "0" ]; then
-            echo "== cold .build: esp-idf was fetched mid-build, running a second (patched) pass"
-            make firmware-build-lilygo-micropython
-          else
-            echo "== warm .build cache: esp-idf present up front, single pass is patched -- skipping second build"
-          fi
+      # The firmware now CARRIES the browser console (moy_web), so the wasm
+      # head has to be built before the board image that embeds it -- otherwise
+      # the generator has nothing to bake and MOYBYTE_REQUIRE_WEB_BUNDLE fails
+      # the build. Deliberately NOT continue-on-error: an image published to
+      # the OTA channels must serve a console current with itself, which was
+      # the entire point (a board once served a bundle old enough to carry a
+      # bug fixed hours earlier, and nothing said so).
+      - name: Build the browser console (baked into the image)
+        if: steps.gate.outputs.run == 'true'
+        run: firmware/web_runner/build.sh
 
-      - name: Build ESP32-P4 firmware
-        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
-        run: make firmware-build-p4
+      # ONE build step for any board. The cold-cache double build is belt and
+      # braces: the shared spine clones esp-idf BEFORE the patch ladder runs,
+      # so a single pass should already be fully patched -- but a second pass
+      # on a cache miss is nearly free under ccache and guarantees it, on
+      # every board uniformly.
+      - name: Build ${{ matrix.board }} firmware
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          IDF=${{ matrix.dir }}/.build/esp-idf/export.sh
+          if [ -f "$IDF" ]; then WARM=1; else WARM=0; fi
+          make ${{ matrix.make_target }}
+          if [ "$WARM" = "0" ]; then
+            echo "== cold .build: esp-idf was fetched this pass -- second (guaranteed-patched) pass"
+            make ${{ matrix.make_target }}
+          else
+            echo "== warm .build cache: single pass is patched"
+          fi
 
       - name: Collect images
         if: steps.gate.outputs.run == 'true'
@@ -211,8 +265,9 @@ jobs:
           # that board and fell back to the committed FIRMWARE_VERSION, so every
           # P4 on beta was offered the same install forever, which is the exact
           # failure the paragraph above exists to prevent.
-          cp firmware/lilygo_t_deck_plus_micropython/dist/current/ota_build.json out/ 2>/dev/null || true
+          cp dist/tdeck_mainline/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
+          cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

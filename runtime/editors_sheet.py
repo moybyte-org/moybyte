@@ -5,6 +5,32 @@ editable top-bar icon theme), TileMap (grid of tile ids + map.moymap hex,
 #32 storage). Pure logic, dependency-free."""
 
 
+# moy SPEC.md 3.2 fixes a CART sheet at 128 x 256 pixels -- 16 cols x 32 rows of
+# 8x8 tiles, 512 tile ids. That is not a default anyone may re-pick: libmoy
+# addresses a sheet with the geometry BAKED IN (it takes no stride argument), so
+# every sheet-READING verb refuses anything else and draws NOTHING --
+# blit_map (map), blit_batch (spr/spr_batch), sspr, tline. The gate is
+# `mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h -- ONE predicate, which
+# both the usermod and runtime/moyhost_gfx.c include; set_batch_src is the one
+# that raises instead.
+#
+# Declining silently is the RIGHT call for a draw verb: throwing mid-frame takes
+# the cart down. But it means a wrong-shaped sheet is invisible at the only place
+# it is used, so it has to be caught where it is BUILT -- which is what the
+# `spec` flag below does. This class's default was 16x16 until 2026-08-15, i.e.
+# out of spec, i.e. a default-constructed sheet had ALWAYS drawn nothing through
+# those four verbs on both boards and in the browser (found by #161, which
+# pointed the host at this same C kernel; the old Python raster took any size).
+#
+# Not every SpriteSheet is a cart sheet -- IconSheet is 16px tiles for the system
+# bar, the paint editor is tile-size agnostic, the p8 importer normalizes a
+# 128x128 gfx region. Those pass `spec=False` and say so out loud.
+SHEET_COLS = 16
+SHEET_ROWS = 32
+SHEET_W = SHEET_COLS * 8          # 128 px
+SHEET_H = SHEET_ROWS * 8          # 256 px
+
+
 class _SheetSprite:
     """Minimal blittable returned by SpriteSheet.tile_image: both canvas
     backends' spr() read only .w/.h/.pix/.transparent, so it needs nothing more
@@ -21,11 +47,18 @@ class SpriteSheet:
     """An indexed sprite sheet: a grid of cols x rows 8x8 tiles, addressed by
     sprite id (row-major) for TIC-80-style spr(n, x, y). Pixels are 16-color
     indices (0-15, the shared base palette) and serialize to a PICO-8
-    __gfx__-style hex blob (one nibble per pixel) stored as `sprites.moygfx`."""
+    __gfx__-style hex blob (one nibble per pixel) stored as `sprites.moygfx`.
+
+    The default IS the spec shape (SPEC.md 3.2: 16 x 32 tiles, 128 x 256 px) and
+    any other shape must be asked for with `spec=False` -- see the module note:
+    libmoy draws NOTHING through a non-spec sheet, silently, so construction is
+    where that has to be caught."""
 
     TILE = 8
+    SPEC_COLS = SHEET_COLS
+    SPEC_ROWS = SHEET_ROWS
 
-    def __init__(self, cols=16, rows=16, pix=None):
+    def __init__(self, cols=SHEET_COLS, rows=SHEET_ROWS, pix=None, spec=True):
         self.cols = cols
         self.rows = rows
         self.w = cols * self.TILE
@@ -41,6 +74,21 @@ class SpriteSheet:
         # device's per-image RGB565 cache survive frames for the console's own tiles too.
         self._tile_cache = {}
         self._tile_cache_gen = 0
+        if spec and not self.is_spec_shape():
+            raise ValueError(
+                "sprite sheet must be %d x %d tiles of %dpx (%d x %d px) -- moy "
+                "SPEC.md 3.2; got %d x %d tiles of %dpx. libmoy bakes that geometry "
+                "in, so map/spr_batch/sspr/tline draw NOTHING through any other "
+                "sheet. Pass spec=False if this is deliberately not a cart sheet."
+                % (SHEET_COLS, SHEET_ROWS, 8, SHEET_W, SHEET_H,
+                   self.cols, self.rows, self.TILE))
+
+    def is_spec_shape(self):
+        """True iff this is a SPEC.md 3.2 CART sheet -- 8px tiles, 16 x 32 of them,
+        128 x 256 px. libmoy's sheet-reading verbs (map/spr_batch/sspr/tline) draw
+        nothing through anything else, so this is what they are really asking."""
+        return (self.TILE == 8 and self.cols == SHEET_COLS
+                and self.rows == SHEET_ROWS and len(self.pix) >= SHEET_W * SHEET_H)
 
     @property
     def count(self):
@@ -155,8 +203,12 @@ class SpriteSheet:
         )
 
     @classmethod
-    def from_hex(cls, text, cols=16, rows=16):
-        sheet = cls(cols, rows)
+    def from_hex(cls, text, cols=SHEET_COLS, rows=SHEET_ROWS, spec=True):
+        """Parse a .moygfx blob into a sheet of the given shape (the SPEC.md 3.2
+        cart shape by default). The blob does NOT carry its own dimensions -- it is
+        a flat hex grid -- so a short one (every pre-512 cart, every PICO-8 import)
+        lands in the TOP rows with tile ids unchanged and the rest stays blank."""
+        sheet = cls(cols, rows, spec=spec)
         w = sheet.w
         y = 0
         for line in text.split("\n"):
@@ -182,12 +234,20 @@ class IconSheet(SpriteSheet):
     automatic. The only overrides are the bigger TILE and a smaller default geometry
     (8 cols x 4 rows = 32 icon slots, a 128x64 sheet). Colors are still the 16-color
     base palette (c & 15), so an icon reads on the dark bar and theme files round-trip
-    through the same hex format as sprites.moygfx / shared.moygfx."""
+    through the same hex format as sprites.moygfx / shared.moygfx.
+
+    It is NOT a cart sheet and never reaches libmoy: the bar blits icons through
+    tile_image() -> spr(), which takes a blittable and never addresses the sheet,
+    so SPEC.md 3.2's fixed geometry does not apply. Hence spec=False -- that is the
+    whole point of the flag, and `is_spec_shape` stays False here for good."""
 
     TILE = 16
 
-    def __init__(self, cols=8, rows=4, pix=None):
-        SpriteSheet.__init__(self, cols, rows, pix)
+    def __init__(self, cols=8, rows=4, pix=None, spec=False):
+        # `spec` defaults FALSE here and is still forwarded: an icon sheet is never
+        # a cart sheet, but a caller who insists on spec=True should hear the same
+        # ValueError everyone else does rather than have it quietly swallowed.
+        SpriteSheet.__init__(self, cols, rows, pix, spec)
 
     @classmethod
     def from_hex(cls, text, cols=8, rows=4):
@@ -225,8 +285,9 @@ class TileMap:
     is genuinely blank. Serializes to a `map.moymap` text blob: a header line
     `w h` followed by `h` rows of `w * 2` hex digits (one byte per cell, "00"
     = empty), mirroring the PICO-8 __gfx__-style sprites.moygfx pattern. Tile ids
-    are capped at 254 (254 distinct tiles is ample for a kid level; the 16x16
-    sheet's id 255 simply can't be placed on the map)."""
+    are capped at 254 (254 distinct tiles is ample for a kid level; the ids above
+    that on a 512-tile SPEC.md 3.2 sheet simply can't be placed on the map, though
+    spr() still reaches them)."""
 
     EMPTY = -1
     MAX_ID = 254          # a cell stores id+1 in one byte, so 255 is the ceiling

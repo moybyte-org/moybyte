@@ -10,4 +10,11 @@ target_sources(usermod_moy_ppa INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/modmoy_ppa.c
 )
 
+# blit_crisp expands through moy_gfx's mg_blit565_scale (the ONE kernel body).
+# build.sh stages the shared moy_gfx beside this module before idf.py runs, so
+# the header is there whenever this file compiles.
+target_include_directories(usermod_moy_ppa INTERFACE
+    ${CMAKE_CURRENT_LIST_DIR}/../.staged/moy_gfx
+)
+
 target_link_libraries(usermod INTERFACE usermod_moy_ppa)

@@ -5,17 +5,20 @@ Boots into the cartridge **launcher**; open any cartridge (wallpaper / game) int
 the desktop shell, tweak it in "Make it mine", Run, Save, Home back to the
 gallery. No device needed. Drive it live (pygame) or headlessly via a script.
 
-  # Renders the SAME shared console as the T-Deck (320x240, petme128 font), with
-  # the device's two input devices emulated:
-  #   ARROWS = trackball  -> move the cursor; at the code edges the screen follows.
-  #   MOUSE  = touchscreen -> tap/drag to place the pointer + activate.
-  #   WASD   = keyboard buttons (launcher nav + gameplay).  Enter=run, Z=select,
-  #            X=B, BACKSPACE=home (Stage 5 EXIT key: HOLD ~700ms, or tap 3x, to exit a
-  #            running cart -- a plain key while playing otherwise), Esc=quit the sim.
-  #            The code editor is FULL-SCREEN: letters
-  #            type, the bottom symbol palette taps in = ( ) [ ] { } < > etc., ARROWS
-  #            move the caret (DRAG scrolls), and the top-bar play/save/X icons
-  #            run / save / close.
+  # Renders the SAME shared console as the T-Deck (320x240, petme128 font), on a
+  # DESKTOP keyboard + mouse -- the same arrangement the browser build uses, not
+  # an emulation of the T-Deck's trackball:
+  #   MOUSE  = the cursor. Moving it HOVERS (desk icons and card grids light up),
+  #            click/drag taps and drags. Nothing steers a cursor with the keys.
+  #   ARROWS = the d-pad (WASD also works). Z = A, X = B, SPACE = A too.
+  #            Enter = run, which is also "open this cart" in the launcher.
+  #            BACKSPACE = home, the EXIT key: HOLD ~700ms to leave a running
+  #            cart (a plain key while playing otherwise). Esc quits the sim.
+  #   The T-Deck's own keys differ ON PURPOSE (it has no arrows, and its Z/X sit
+  #   under the WASD thumb): there it is WASD + L/K. Same buttons, two keyboards.
+  #   The code editor is FULL-SCREEN: letters type, the bottom symbol palette
+  #   taps in = ( ) [ ] { } < > etc., ARROWS move the caret (DRAG scrolls), and
+  #   the top-bar play/save/X icons run / save / close.
   python tools/simulate_desktop.py
 
   # headless demo -> animated GIF of the whole tour
@@ -104,14 +107,32 @@ def parse_script(text):
 
 
 def run_script(driver, actions, dt):
+    """Drive the scripted tour. Returns (images, errors).
+
+    `errors` is why this returns a pair: the tour is the ONLY lane that boots
+    the console through the production import path rather than the test
+    harness's meta-path finder, so it is the gate for "does the shell actually
+    come up" -- and it used to print `Moybyte frame error: ...` and exit 0,
+    which is a gate that cannot fail. A cart crash sets `ws.cart_error` (the
+    Player's forwarding property) and the panel then clears it on recovery, so
+    sample it EVERY frame and keep the distinct strings; sampling once at the
+    end sees nothing.
+    """
     images = []
+    errors = []
+    seen = set()
+    ws = getattr(driver, "ws", None)
     for press in actions:
         if press:
             driver.press(press)
         driver.frame(dt)
+        err = getattr(ws, "cart_error", None) if ws is not None else None
+        if err and err not in seen:
+            seen.add(err)
+            errors.append(err)
         cv = driver.current_canvas() if hasattr(driver, "current_canvas") else driver.rt.canvas
         images.append((cv.w, cv.h, driver.rgb888()))
-    return images
+    return images, errors
 
 
 def save_gif(images, path, scale):
@@ -154,23 +175,36 @@ def run_live(driver, dt, scale):
     screen = pygame.display.set_mode((w * scale, h * scale))
     pygame.display.set_caption("Moybyte workstation")
     clock = pygame.time.Clock()
-    # Mirror the device's two input devices:
-    #   arrows = the TRACKBALL  -> move a (visible) cursor; at the code edges the
-    #            screen follows it (scrolls).
-    #   mouse  = the TOUCHSCREEN -> tap/drag places the pointer absolutely.
-    #   WASD   = the keyboard buttons (launcher nav + gameplay), like the T-Deck kb.
-    pan_keys = {pygame.K_LEFT: (-1, 0), pygame.K_RIGHT: (1, 0),
-                pygame.K_UP: (0, -1), pygame.K_DOWN: (0, 1)}
-    nav_keys = {pygame.K_a: "left", pygame.K_d: "right",
-                pygame.K_w: "up", pygame.K_s: "down"}
+    # THE MOUSE IS THE CURSOR on this tier, like the browser's and unlike the
+    # T-Deck's (whose cursor really is a trackball). An idle move hovers, a drag
+    # drags; the keyboard steers nothing but the game.
+    #
+    # ON A HOST WITH ARROW KEYS THE SCHEME IS ARROWS + Z/X (owner call
+    # 2026-08-14), which is PICO-8's and every emulator's. It is deliberately
+    # NOT the T-Deck's WASD + L/K: that board has no arrow keys at all, and Z/X
+    # sit on its bottom row under the same thumb WASD needs. Same console, two
+    # keyboards, two ergonomics -- the shared part is what the BUTTONS are.
+    #
+    # The browser page has done this since 2026-07-31 (page_core.html's AN/SC);
+    # this file did not, and steered the trackball with the arrows instead. That
+    # is the split being closed here: two hosts, one scheme.
+    arrow_keys = {pygame.K_LEFT: "left", pygame.K_RIGHT: "right",
+                  pygame.K_UP: "up", pygame.K_DOWN: "down"}
+    # WASD steers too, so a kid who learned on the T-Deck is not lost here.
+    # Aliasing a DIRECTION is cheap -- unlike a letter that also jumps, it
+    # steals nothing from a typing cart, and in the editor the arrows and the
+    # letters part ways (see the branch below).
+    nav_keys = dict(arrow_keys)
+    nav_keys.update({pygame.K_a: "left", pygame.K_d: "right",
+                     pygame.K_w: "up", pygame.K_s: "down"})
     # BACKSPACE = the device's one console key, now the Stage-5 EXIT key. It is mapped
     # as a HELD "home" button (below, like the WASD nav keys) -- NOT a one-shot press --
     # so a sustained hold reaches the Player's hold-to-exit (~700ms) for a game and a quick
     # tap is a single edge the cart reads. In text mode the branch above routes it as typed
     # 0x08 instead (DELETE for a tool). K_h is a host-only convenience alias for held "home".
     exit_keys = (pygame.K_BACKSPACE, pygame.K_h)
-    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a", pygame.K_x: "b"}
-    pan_held = set()
+    shortcuts = {pygame.K_RETURN: "run", pygame.K_z: "a",
+                 pygame.K_SPACE: "a", pygame.K_x: "b"}
     mouse_down = False
     running = True
     while running:
@@ -183,14 +217,26 @@ def run_live(driver, dt, scale):
             elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1:
                 mouse_down = False
                 driver.touch_up()
-            elif ev.type == pygame.MOUSEMOTION and mouse_down:
-                driver.touch_drag(ev.pos[0] // scale, ev.pos[1] // scale)
-            elif ev.type == pygame.KEYDOWN and ev.key in pan_keys:
-                pan_held.add(ev.key)                                   # trackball
-            elif ev.type == pygame.KEYUP and ev.key in pan_keys:
-                pan_held.discard(ev.key)
+            elif ev.type == pygame.MOUSEMOTION:
+                if mouse_down:
+                    driver.touch_drag(ev.pos[0] // scale, ev.pos[1] // scale)
+                else:
+                    # THE MOUSE IS THE CURSOR here, exactly as in the browser
+                    # (owner call): an idle move is a hover, so the desk icons
+                    # and card grids light up under it. Nothing steers a virtual
+                    # cursor with the keyboard on this tier any more.
+                    driver.hover(ev.pos[0] // scale, ev.pos[1] // scale)
+            elif ev.type == pygame.KEYDOWN and ev.key in arrow_keys \
+                    and driver.in_code_editor():
+                # ARROWS IN THE EDITOR still move the caret: they arrive as held
+                # direction buttons now, and ConsoleDriver.frame translates those
+                # back into a nav step while the code editor is open (host_api's
+                # "ARROWS ON A MOUSE TIER" block). ARROWS ONLY -- W/A/S/D must
+                # fall through to the typing branch below, or you cannot write
+                # `draw` in the editor without the caret running away.
+                driver.hold(arrow_keys[ev.key], True)
             elif ev.type == pygame.KEYDOWN and driver.in_code_editor():
-                # Code editor: letters type; arrows still pan; Esc closes.
+                # Code editor: letters type; Esc closes.
                 if ev.key == pygame.K_ESCAPE:
                     driver.escape()
                 elif ev.key == pygame.K_RETURN:
@@ -228,10 +274,8 @@ def run_live(driver, dt, scale):
                 driver.hold(nav_keys[ev.key], False)
             elif ev.type == pygame.KEYUP and ev.key in exit_keys:
                 driver.hold("home", False)
-        # held arrows -> a per-frame trackball nudge
-        dx = (1 if pygame.K_RIGHT in pan_held else 0) - (1 if pygame.K_LEFT in pan_held else 0)
-        dy = (1 if pygame.K_DOWN in pan_held else 0) - (1 if pygame.K_UP in pan_held else 0)
-        driver.pan(dx, dy)
+        # (No trackball nudge: this tier's cursor IS the mouse. ConsoleDriver.pan
+        # stays for backends that really have a trackball -- the T-Deck's own.)
         driver.frame(dt)
         surf = pygame.image.frombuffer(driver.rgb888(), (cv.w, cv.h), "RGB")
         screen.blit(pygame.transform.scale(surf, (cv.w * scale, cv.h * scale)), (0, 0))
@@ -264,6 +308,10 @@ def main():
     ap.add_argument("--gif", metavar="PATH")
     ap.add_argument("--script", default=None)
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit non-zero if the scripted tour hit any frame error "
+                         "(this is the only lane that boots through the production "
+                         "import path, so CI wants it)")
     ap.add_argument("--autoplay", dest="autoplay", action="store_true", default=None,
                     help="force games into attract/autoplay mode (default ON for --demo)")
     ap.add_argument("--no-autoplay", dest="autoplay", action="store_false",
@@ -308,16 +356,22 @@ def main():
 
     script = DEMO_SCRIPT if args.demo else args.script
     if script is not None:
-        images = run_script(driver, parse_script(script), dt)
+        images, errors = run_script(driver, parse_script(script), dt)
         if args.gif:
             save_gif(images, args.gif, args.scale)
         else:
             print("ran %d scripted frames" % len(images))
-        return
+        for err in errors:
+            print("  frame error: %s" % err)
+        if errors:
+            print("%d distinct frame error(s) during the tour" % len(errors))
+            if args.strict:
+                return 1
+        return 0
 
     ws.arm_splash()          # boot logo: show the moybyte mascot before the launcher
     run_live(driver, dt, args.scale)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

@@ -1,4 +1,4 @@
-"""Stage 6c guardrail (docs/shell_ux_technical_plan_v1.md Section 5): the WM's
+"""Stage 6c guardrail (docs/history/shell_ux_technical_plan_v1.md Section 5): the WM's
 visible/draw/overlay layer stack is MEMOIZED -- rebuilt only on a real change (a
 back-stack push/pop, a menu_view tab switch, or an overlay-gate/splash flip), so a
 static top-of-stack allocates NO new per-frame list.
@@ -12,11 +12,9 @@ and the accessors hand back the SAME list objects, and that a genuine change (na
 overlay gate / tab switch) DOES invalidate the memo.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app  # noqa: E402
 

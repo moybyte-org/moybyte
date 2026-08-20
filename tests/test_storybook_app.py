@@ -170,7 +170,10 @@ def test_bar_x_exit_commits_the_open_story(tmp_path):
     app._tap_row(1)
     _type(app, ws.input, "\nSaved by the X.")   # a fresh line (the 34-char line cap)
     xb = ws.layout.context_x_btn
-    app.handle_pointer(xb[0] + 2, xb[1] + 2, True)
+    ws.pointer.place(xb[0] + 2, xb[1] + 2)
+    ws.pointer.click = True
+    ws.handle_pointer()                   # the ROUTER owns the app bar contract
+    ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
     assert ws.input.text_mode is False
     deck = json.loads((Path(app.cart["path"]) / "deck.json").read_text())

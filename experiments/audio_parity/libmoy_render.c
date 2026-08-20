@@ -10,7 +10,7 @@
  * audio_parity.py renders the same scenario through the Python engine and
  * compares them.
  *
- * It builds against the VENDORED copy -- firmware/lilygo_t_deck_plus_micropython/
+ * It builds against the VENDORED copy -- firmware/lilygo_t_deck_plus_mainline/
  * native/moy_audio/libmoy/ -- not a moy-spec checkout, so the harness measures
  * the source the boards actually compile and works in a fresh clone:
  *

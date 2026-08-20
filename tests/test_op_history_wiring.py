@@ -8,11 +8,9 @@ Workstation), so these assert host == device behavior. The boundary shipped is t
 CLEAN one: in-RAM op steps until exhausted, THEN whole-commit journal steps (a
 commit re-baselines the History, so the two never double-count a stroke)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _make_ws_with_cart(tmp_path, src="def _draw():\n    cls(1)\n", title="Ops"):
@@ -606,11 +604,6 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
 # file(s), so a bar undo on one tab never reverts another tab's newest commit and
 # REDO only lights on the tab that actually has something ahead.
 # ==================================================================#
-
-def _cell_painted(ws):
-    ox, oy = ws.sheet.tile_origin(0)
-    return ws.sheet.pget(ox, oy)
-
 
 def test_active_tab_files_maps_each_tab(tmp_path):
     # The tab -> journal-file-set table the scoped walk routes through.

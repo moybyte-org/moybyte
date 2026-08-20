@@ -3,11 +3,9 @@ editor writes THROUGH while keeping its local behavior -- copy in the code tab
 pastes in Writer, a Writer line lands in a Sheets cell, and an editor with no
 workstation attached behaves exactly as before (the local-only contract)."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app
 from runtime.widgets import Clipboard

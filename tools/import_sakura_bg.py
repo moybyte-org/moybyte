@@ -48,7 +48,6 @@ import argparse
 import json
 import os
 import random
-import struct
 import sys
 import zlib
 
@@ -56,6 +55,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from runtime.palette import MOY64  # noqa: E402
+from tools import pngwrite  # noqa: E402
 
 W, H = 320, 240
 CARTS = ("sakura", "sakura_lua")
@@ -185,25 +185,14 @@ def emit_tables(pts):
 
 
 def write_png(path, buf, scale=1):
-    rows = bytearray()
+    rows = []
     for y in range(H * scale):
-        rows.append(0)
         base = (y // scale) * W
+        row = bytearray()
         for x in range(W * scale):
-            r, g, b = MOY64[buf[base + x // scale]]
-            rows += bytes((r, g, b))
-
-    def chunk(tag, data):
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
-
-    png = (b"\x89PNG\r\n\x1a\n"
-           + chunk(b"IHDR", struct.pack(">IIBBBBB", W * scale, H * scale,
-                                        8, 2, 0, 0, 0))
-           + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
-           + chunk(b"IEND", b""))
-    with open(path, "wb") as f:
-        f.write(png)
+            row += bytes(MOY64[buf[base + x // scale]])
+        rows.append(row)
+    pngwrite.write_png(path, rows, W * scale, H * scale)
 
 
 def encode_bg(buf):

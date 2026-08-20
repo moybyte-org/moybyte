@@ -1,7 +1,7 @@
 # HOW TO RUN (#63): build MicroPython's unix port with the real moy_gfx, then
 # run this under it -- the whole device engine (DeviceCanvas/make_api/C spr_gate)
 # executes under the real MicroPython VM + allocator on the PC, no hardware:
-#   cd firmware/lilygo_t_deck_plus_micropython/.build/lvgl_micropython/lib/micropython/ports/unix
+#   cd firmware/lilygo_t_deck_plus_mainline/.build/micropython/ports/unix
 #   make -j8 VARIANT=standard MICROPY_PY_BTREE=0 MICROPY_PY_FFI=0 MICROPY_PY_SSL=0 \
 #        USER_C_MODULES=<dir containing a symlink to native/moy_gfx>
 #   build-standard/micropython -X heapsize=16m tools/bench_unix_mp.py
@@ -23,7 +23,7 @@ import os
 # the micropython unix build runs this from wherever it likes.
 _ROOT = os.getenv("MOYBYTE_ROOT") or os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))
-sys.path.insert(0, _ROOT + "/firmware/lilygo_t_deck_plus_micropython/modules")
+sys.path.insert(0, _ROOT + "/device")
 
 import moy_gfx
 import moy_runtime as m
@@ -97,6 +97,10 @@ def run_cfg(label, canvas, sheet, use_gate, frames=60):
 
 
 def make_sheet():
+    # Spec-shaped by default now (16 x 32, SPEC.md 3.2). It has to be: the C gate
+    # lane flushes through moy_gfx.blit_batch, which REFUSES a non-spec sheet and
+    # draws nothing -- so while the default was 16x16 this bench's parity check was
+    # comparing an empty canvas against the python spr path's real one.
     sheet = SpriteSheet()
     px = sheet.pix
     for i in range(len(px)):

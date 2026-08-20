@@ -520,31 +520,33 @@ def _draw():
     # 8x8 tiles at scale 2 -> 16px world blocks. Destroyed bricks are empty cells.
     map(0, 0, MW, MH, sx, sy, 0, 2)
 
-    # every moving sprite (eagle + enemies + players + bullets + explosions) goes out
-    # in ONE native spr_batch call (#43) instead of N per-sprite spr() calls -- they're
-    # all colorkey=0, scale=2, so one batch covers them. Draw order = list order, so
-    # build the list in the old draw sequence (eagle, enemies, players, bullets, booms).
-    # This kills the per-sprite MP->C draw-call count that gated the explosion FPS dip.
-    batch = []
+    # Every moving sprite (eagle + enemies + players + bullets + explosions) is one
+    # spr() at colorkey 0, scale 2. This CONTIGUOUS run still leaves as ONE native
+    # blit_batch: the canvas's auto-batch gate (#63) coalesces a run of plain spr()
+    # calls and flushes on any state break, so the loop costs what the hand-packed
+    # spr_batch list used to -- minus the list, which was a per-frame allocation of
+    # ~40 tuples and is now gone. (spr_batch itself was deleted on 2026-08-14, plan
+    # 6.10: Lua could never call it, and this is what the Lua twin always did.)
+    # Draw order = call order, so keep the sequence: eagle, enemies, players,
+    # bullets, booms.
     # the eagle base (or its rubble) at the fortress center
     bx = BASE_CX * TS + sx
     by = BASE_CY * TS + sy
-    batch.append((EAGLE if base_alive else BROKEN, bx, by))
+    spr(EAGLE if base_alive else BROKEN, bx, by, 0, 2)
     # enemies
     for e in enemies:
         if e[3]:
-            batch.append((E_TANK[e[2]], int(e[0]) + sx, int(e[1]) + sy))
+            spr(E_TANK[e[2]], int(e[0]) + sx, int(e[1]) + sy, 0, 2)
     # players
     for p in players:
         if p[3]:
-            batch.append((P_TANK[p[2]], int(p[0]) + sx, int(p[1]) + sy))
+            spr(P_TANK[p[2]], int(p[0]) + sx, int(p[1]) + sy, 0, 2)
     # bullets
     for b in bullets:
-        batch.append((BULLET_TILE, int(b[0]) + sx - 4, int(b[1]) + sy - 4))
+        spr(BULLET_TILE, int(b[0]) + sx - 4, int(b[1]) + sy - 4, 0, 2)
     # explosions
     for bm in booms:
-        batch.append((EXP_B if bm[3] else EXP_S, int(bm[0]) - 8 + sx, int(bm[1]) - 8 + sy))
-    spr_batch(batch, 0, 2)
+        spr(EXP_B if bm[3] else EXP_S, int(bm[0]) - 8 + sx, int(bm[1]) - 8 + sy, 0, 2)
 
     # -- HUD (right strip) --
     hx = FIELD + 4

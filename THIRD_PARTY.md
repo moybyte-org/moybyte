@@ -25,14 +25,17 @@ separate question from what is committed.
 
 | Component | Where it lives here | Upstream | Licence | Modified? |
 |---|---|---|---|---|
-| Lua 5.4.7 (device VM) | `firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
+| Lua 5.4.7 (device VM) | `native/moy_lua/lua/` | [lua.org](https://www.lua.org/) | MIT | **Yes** — documented |
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
+| ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
+| AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
+| Guition JC3248W535 pin assignments | `firmware/guition_jc3248w535/board.toml` | the owner's own ESPHome definition for the board | facts; source cited | Transcribed |
 
 Build-time upstreams that end up inside shipped binaries are in §5.
 Development and optional dependencies that are *not* redistributed are in §6.
@@ -43,7 +46,7 @@ Development and optional dependencies that are *not* redistributed are in §6.
 
 ### 2.1 Lua 5.4 — the cart VM
 
-`firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/`
+`native/moy_lua/lua/`
 
 The `moy_lua` native module (issue #67) embeds a complete Lua interpreter so a
 cart can declare `"runtime": "lua"`. The same directory is staged into the
@@ -53,9 +56,9 @@ targets.
 - **Upstream:** Lua 5.4.7 — <https://www.lua.org/>, tarball
   <https://www.lua.org/ftp/lua-5.4.7.tar.gz> (the `src/` directory).
 - **Licence:** MIT. Copyright © 1994–2024 Lua.org, PUC-Rio.
-  Full text: [`.../moy_lua/lua/COPYRIGHT`](firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/COPYRIGHT).
+  Full text: [`.../moy_lua/lua/COPYRIGHT`](native/moy_lua/lua/COPYRIGHT).
 - **Modified: yes.** Two changes, both listed in
-  [`.../moy_lua/lua/MODIFICATIONS.md`](firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/MODIFICATIONS.md):
+  [`.../moy_lua/lua/MODIFICATIONS.md`](native/moy_lua/lua/MODIFICATIONS.md):
   a `#pragma GCC optimize("O2")` block added to 32 `.c` files, and
   `LUA_32BITS` flipped from `0` to `1` in `luaconf.h`. Nothing else differs
   from upstream; the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` /
@@ -102,7 +105,37 @@ The EK79007 MIPI-DSI controller driver for the Waveshare 7″ board (issue #58).
 - The board bring-up that *uses* the driver (`modmoy_dsi.c`,
   `micropython.cmake`, one level up) is Moybyte's own work.
 
-### 2.4 esptool-js — the website's board flasher
+### 2.4 ST7789 init register values — the T-Deck panel on mainline
+
+`firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c`
+(the `MOY_LCD_INIT` table and the MADCTL derivation above it)
+
+ESP-IDF's own ST7789 driver sends only `SLPOUT` / `MADCTL` / `COLMOD` and offers
+no hook to extend that, so the porch, gate/VCOM/power and gamma registers this
+panel needs have to be sent by us. Rather than re-derive them, the values are
+the ones already proven on this exact glass by the fork build.
+
+- **Upstream:** `api_drivers/common_api_drivers/display/st7789/_st7789_init.py`
+  in [`lvgl-micropython/lvgl_micropython`](https://github.com/lvgl-micropython/lvgl_micropython),
+  at commit `14ad6ce2c5555272398debeff77b69021ca7ddda` — the commit the deleted
+  fork build (removed 2026-08-17) had pinned.
+- **Licence:** MIT, © 2024–2025 Kevin G. Schlosser. The same project is already
+  listed in §5 as a build-time upstream of the shipping T-Deck image; this is
+  the one place its source is *carried* rather than fetched.
+- **Modified: yes** — this is a transcription, not a copy. The Python file is a
+  method that calls `self.set_params()`; here it is a static C table sent with
+  `esp_lcd_panel_io_tx_param()`. Three deliberate differences, all noted at the
+  code: the entries `esp_lcd_panel_init()` already sends are dropped, the
+  I80-8-lane-only `RAMCTRL` byte-swap branch is dropped (this is an SPI panel),
+  and its `import lvgl` — present only for orientation constants — is resolved
+  into the single MADCTL byte `0x68` via `swap_xy` + `mirror`, so nothing here
+  depends on LVGL.
+- The panel module around the table (SPI bus, esp_lcd wiring, the framebuffers,
+  the banded SRAM-bounce flush) is Moybyte's own work.
+- The Guition board's panel needs the same kind of entry for the same kind of
+  reason; it is §2.6.
+
+### 2.5 esptool-js — the website's board flasher
 
 `site/vendor/esptool-js/bundle.js`
 
@@ -127,6 +160,43 @@ board" section uses to write a firmware image to a board over Web Serial.
   whatever a CDN serves that day.
 - The flasher around it (`site/flash.js`, the board table in `site/build.py`)
   is Moybyte's own work.
+
+### 2.6 AXS15231B init register values — the Guition panel
+
+`firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c`
+(the `MOY_AXS_INIT` table and the INIT note above it)
+
+The §2.4 problem again, one board over, and worse: there is no public
+AXS15231B datasheet worth the name and ESP-IDF ships no driver for the part,
+so the three vendor commands this panel needs before it will accept pixels
+cannot be re-derived here. The only provenance available is a sequence already
+proven on this exact glass — ESPHome's `AXS15231` model, which the owner's
+working ESPHome build for this board runs — plus the standard DCS tail that
+component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
+`DISPON`).
+
+- **Upstream:** [`esphome/esphome`](https://github.com/esphome/esphome) —
+  `esphome/components/qspi_dbi/models.py`, the `DriverChip("AXS15231")` block
+  (`0xBB …5A A5` / `0xC1 0x33` / `0xBB …00 00`).
+- **Licence:** MIT, © 2019 ESPHome. Their licence is a split one and the
+  direction matters: the **C++/runtime** files are GPLv3 and *the Python
+  codebase and everything else is MIT*. This table comes from a `.py` file.
+- **Modified: yes** — a transcription, as §2.4 is. An ESPHome Python component
+  that emits writes becomes a static C command table sent over raw
+  `spi_master`, and the tail is spelled out rather than generated. Register
+  *values* for a part with no datasheet are hardware facts; nothing expressive
+  crossed.
+- The panel module around the table (the QSPI bus, the whole frame under one
+  CS assertion, the band/bounce/kick-pump-drain flush, the landscape
+  rotate-gather) is Moybyte's own work — see the module header for why that C
+  body is not shared with `moy_lcd`'s.
+- **The touch half is a protocol constant, not a table.** `device/axs_touch.py`
+  writes the same 11-byte read-touchpad command ESPHome's
+  `axs15231_touchscreen.cpp` declares — a C++ file, so GPLv3 on their side of
+  the split. What crossed is that byte string: the command a chip with no
+  datasheet answers to. No code did — the poller, its no-news contract and the
+  idle-filler lift detection are Moybyte's, written against the observed
+  behaviour of the part (`firmware/guition_jc3248w535/README.md` records it).
 
 ---
 
@@ -234,7 +304,7 @@ The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 ### 3.4 Board pin assignments — LilyGO T-Deck
 
 `docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
-`firmware/lilygo_t_deck_plus_micropython/modules/tdeck_board.py` /
+`firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` /
 `tdeck_display.py`. (The transcription originally landed in the `.moyproj`
 SDK's `moybyte_cli/boards.py` as `BOARD_PROFILES`, with its own `sources` list;
 that SDK was deleted on 2026-07-31 and git history has it. The board doc is the
@@ -250,6 +320,24 @@ These are hardware facts about a physical product, not expressive work, and no
 upstream code was copied — but the source is named here because the repository
 names it, and a reader deserves to know where the numbers came from.
 
+### 3.5 Board pin assignments — Guition JC3248W535
+
+`firmware/guition_jc3248w535/board.toml` and the constants derived from it in
+`firmware/guition_jc3248w535/native/moy_axs/` and `device/axs_touch.py`.
+
+Guition publishes no board file worth transcribing, so the pins came from a
+working **ESPHome** definition for this board that the owner already ran on
+the physical unit (`~/Documents/Work/esphome/JC3248W535.yaml`, not in this
+repo): QSPI clk/data/cs, the AXS15231 touch I²C pins, the backlight and
+battery-ADC GPIOs. That file is the owner's own configuration, not upstream
+work; ESPHome's contribution to it is the component vocabulary, covered by
+§2.6.
+
+Same reasoning as §3.4: GPIO numbers and an I²C address are hardware facts
+about a physical product, and none of the *tuning* beside them in that YAML
+was copied — that is deliberately re-derived on this glass, because per-board
+verdicts do not transfer (`sdkconfig.board` carries the argument).
+
 ---
 
 ## 4. Formats, protocols and behavioural parity — implemented, not copied
@@ -257,8 +345,10 @@ names it, and a reader deserves to know where the numbers came from.
 Listed so a reviewer does not have to wonder. Each of these reproduces a
 published format, protocol or behaviour; none contains third-party code.
 
-- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/import_p8.py`) — the
-  section layout (`__gfx__`, `__gff__`,
+- **PICO-8 `.p8` / `.p8.png` cart format** (`tools/p8_import.py`, vendored from
+  the project's own [moy-spec](https://github.com/moybyte-org/moy-spec) — same
+  authors, not third-party, so it is not listed in §2) — the section layout
+  (`__gfx__`, `__gff__`,
   `__map__`, `__sfx__`, `__music__`), the pre-0.2.0 `:c:` compression lookup
   table, and the steganographic 2-bit-per-channel PNG packing are format
   constants. The implementation is stdlib-only and written from the format
@@ -269,17 +359,17 @@ published format, protocol or behaviour; none contains third-party code.
 - **PICO-8 audio parity** (`runtime/audio.py`) — waveform numbering and the
   per-note effect column follow PICO-8's numbering so imported carts sound
   right. The synthesis is Moybyte's own.
-- **PNG decoding** (`tools/import_p8.py`) and **PNG encoding**
+- **PNG decoding** (`tools/p8_import.py`) and **PNG encoding**
   (`tools/render_icons.py`) — hand-written per the PNG specification, with
   `zlib` from the standard library for DEFLATE. The Paeth predictor is the
   spec's own pseudocode.
 - **WebSocket, RFC 6455** (`runtime/web_view_ws.py`,
-  `firmware/lilygo_t_deck_plus_micropython/modules/moy_webserver.py`,
-  `tools/web_console.py`) — handshake and framing written from the RFC.
+  `device/moy_webserver.py`) —
+  handshake and framing written from the RFC.
   `WS_GUID` is the RFC's magic constant. SHA-1 and Base64 come from the
   standard library.
 - **SHA-256** (`moy_ota.py`, `tools/gen_ota_manifest.py`) — `hashlib`.
-- **No third-party JavaScript.** `runtime/web_view_page.py`,
+- **No third-party JavaScript.** `firmware/web_runner/page_core.html`,
   `firmware/web_runner/page_tail.js` and `firmware/web_runner/harness.mjs`
   contain only hand-written code, with no CDN references and no bundled
   libraries.
@@ -295,11 +385,18 @@ WebAssembly web runner — contain compiled code from them, and those artifacts
 carry the upstreams' obligations wherever they are published.
 
 Since the project site gained its board flasher, "published" covers two more
-channels: the rolling `firmware-latest` release (both boards' images, replaced
-per board as they are rebuilt) and the website itself, which serves its own copy
-under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
+channels: the rolling `firmware-latest` release (all three boards' images,
+replaced per board as they are rebuilt) and the website itself, which serves its
+own copy under `_site/firmware/` for a browser to write. The per-board tables
+below — §5.2 (P4), §5.3 (T-Deck) and §5.5 (Guition) — apply to both.
 
-### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_micropython/build.sh`)
+### 5.1 LilyGO T-Deck Plus on the lvgl_micropython fork — HISTORICAL
+
+The fork build, **deleted 2026-08-17**. Nothing produces these images any more:
+the T-Deck ships from §5.3's mainline build, and the path this section used to
+be titled with is that build's, not this one's. The table stays because images
+built this way *were* published to `firmware-latest` and are on boards in the
+world, and those binaries carry these obligations wherever they went.
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -318,7 +415,21 @@ under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
 | MicroPython v1.28.0 | <https://github.com/micropython/micropython> | MIT |
 | ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
 
-### 5.3 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
+### 5.3 LilyGO T-Deck Plus on mainline (`firmware/lilygo_t_deck_plus_mainline/build.sh`)
+
+The same board as §5.1, built the way §5.2 is. Note what is *not* in this list
+next to §5.1's: LVGL, its MicroPython binding, pycparser and the fork itself.
+
+| Project | Upstream | Licence |
+|---|---|---|
+| MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
+| Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
+| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+
+The ST7789 register values this build sends are carried in-tree and are covered
+by §2.4, not by this table.
+
+### 5.4 Web runner, MicroPython-WASM (`firmware/web_runner/build.sh`)
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -329,6 +440,22 @@ under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains
 MicroPython, Emscripten runtime support and Lua — all MIT — and any page
 hosting them should carry those notices.
+
+### 5.5 Guition JC3248W535, ESP32-S3 (`firmware/guition_jc3248w535/build.sh`)
+
+The third board, built the way §5.2 and §5.3 are — the same
+`tools/esp32_build_lib.sh` clones the same two upstreams, stages the shared
+`native/` modules and this board's own `native/moy_axs`, and freezes the
+console.
+
+| Project | Upstream | Licence |
+|---|---|---|
+| MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
+| Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
+| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+
+The AXS15231B register values this build sends are carried in-tree and are
+covered by §2.6, not by this table.
 
 ### 6.4 `experiments/wasm_aot/build.sh` (experiment only, nothing shipped)
 
@@ -341,7 +468,7 @@ hand-written 8-opcode benchmark cores, not derived from any emulator.
 
 ### 6.5 Patches we apply to upstream sources
 
-`firmware/lilygo_t_deck_plus_micropython/patches/*.patch` and
+`patches/*.patch` and
 `firmware/esp32_p4_wifi6_touch_lcd_7b/patches/*.patch` are Moybyte-authored
 diffs against MicroPython and ESP-IDF (I²C GIL release, `MICROPY_OBJ_REPR_C`
 floats, native-code arena reclaim, T-Deck early board init, SPI PSRAM TX DMA,
@@ -364,8 +491,7 @@ Installed from PyPI; never vendored, never redistributed by this repository.
 | pygame | the simulator window (`sim`), imported lazily | **LGPL-2.1** |
 | esptool | flashing a board (`device`); `tools/esptool_no_modem.py` monkeypatches its reset strategy at runtime | **GPL-2.0-or-later** |
 | pyserial | serial I/O (`device`) | BSD-3-Clause |
-| lupa | host-side Lua carts (`runtime/lua_host.py`); optional, probed at import | MIT |
-| fontTools | `tools/make_petme_webfont.py` only | MIT |
+| fontTools | `tools/make_petme_webfont.py` only (install on demand; in no extra) | MIT |
 
 `pygame` (LGPL) and `esptool` (GPL) are the only copyleft-licensed software the
 project touches. Neither is copied into this repository and neither is part of

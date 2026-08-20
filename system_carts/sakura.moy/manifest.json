@@ -1,11 +1,12 @@
 {
   "format": "moy-1",
-  "version": 9,
+  "version": 10,
   "title": "Sakura",
   "type": "wallpaper",
   "runtime": "python",
   "main": "main.py",
   "system": true,
+  "order": 60,
   "canvas": "320x240",
   "permissions": ["graphics", "input"],
   "age_mode": "cards",

@@ -1,9 +1,10 @@
 # Moybyte on ESP32-P4 (Waveshare ESP32-P4-WIFI6-Touch-LCD-7B)
 
 The second device backend (#58): a 7" 1024×600 MIPI-DSI "desktop workstation"
-tier next to the T-Deck pocket handheld. **Not** an lvgl_micropython build —
-this is mainline MicroPython v1.28.0 (`ESP32_GENERIC_P4`, C6 WiFi variant baked
-into our out-of-tree board def) + our native modules via `USER_C_MODULES`.
+tier next to the T-Deck pocket handheld. Mainline MicroPython v1.28.0
+(`ESP32_GENERIC_P4`, C6 WiFi variant baked into our out-of-tree board def) +
+our native modules via `USER_C_MODULES` — the build strategy both boards share
+now (this board had it first; the T-Deck's port copied it).
 
 Status (2026-07-09): REPL / WiFi-via-C6 / GT911 touch / SD / DSI panel / **the
 console on glass** all hardware-confirmed. Launcher runs under `WindowedWM`;
@@ -17,7 +18,9 @@ async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
 for the living status.
 
 **BLE-HID keyboard support is hardware-paired (2026-07-13; latency fast path
-2026-07-14).** `p4_ble_keyboard.py` uses the C6_WIFI build's existing
+2026-07-14).** `device/ble_keyboard.py` (this board's `p4_ble_keyboard.py`
+until it was promoted to the shared device tree on 2026-08-19, when the
+Guition became its second consumer) uses the C6_WIFI build's existing
 MicroPython NimBLE central/GATT-client path over ESP-Hosted SDIO: it discovers
 HOGP service `0x1812`, bonds, prefers the profile's deterministic Boot Host path
 (writes Protocol Mode `0x00`, then subscribes only to Boot Keyboard Input), and
@@ -56,11 +59,21 @@ record:
   +2–5fps; full paints stay blocking (`blit_game(defer=not full)`) so chrome
   never races the DMA.
 
-`moy_runtime.run_ppa_smoke()` A/Bs the composite on glass. Perf follow-ups: the
-RENDER overlap (double game canvas + triple framebuffer) to lock 60 on the
-heaviest carts (Brick Siege 56, Letter Blitz 53); a PPA cover-crop for drags.
-Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311), OTA/web-view
-wiring.
+`moy_runtime.run_ppa_smoke()` A/Bs the composite on glass.
+
+**RENDER overlap is settled, not pending** — this list carried it as the next
+lever long after it had been decided on glass (2026-07-27). Half of it shipped:
+the **triple framebuffer**, `efcf5d1`. The other half, the **double game
+canvas**, was reverted the day it was built — `26e1f9f`, whose verdict survives
+as a NOTE at the defer site in `moy_runtime.py`, which is the copy to read
+before re-proposing it. And #159's L2 bump (`1665425`) then reached the target
+the whole lever existed for. Why, with numbers:
+`docs/perf_native_gap_v1.md` §6; per-cart fps: #58 and #66, never here.
+
+Perf follow-ups still open: a PPA cover-crop for drags; the editor-tab /
+transition draw cost (dispatch-bound); the #113 Phase 5 Settings partial
+repaint. Also open: wired USB-HID keyboard/mouse/gamepad, audio (ES8311),
+OTA/web-view wiring.
 
 ### Serial dev commands (the REPL-alive board's affordance)
 
@@ -121,10 +134,16 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
 - `native/micropython.cmake` — the `USER_C_MODULES` entry point: `moy_dsi` +
   the shared `moy_gfx`/`moy_alloc` staged from the T-Deck tree into
   `native/.staged/` by build.sh (single source of truth stays in
-  `firmware/lilygo_t_deck_plus_micropython/native/`; both are plain-C usermods
+  `native/`; both are plain-C usermods
   whose S3-only pieces are include-guarded, so they compile unchanged on the
   P4's RISC-V). `moy_gfx` grew `blit565_scale` for this port — the ONE-call
-  integer-upscale composite the windowed presentation needs.
+  integer-upscale composite the windowed presentation needs. `moy_web` is
+  staged the same way: it is the **browser console baked into the image**
+  (~573KB of pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
+  `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
+  a flashed board always serves a console current with its own firmware. A copy
+  pushed to `/moy/web` still WINS — `make p4-web-push` stays the sub-minute dev
+  loop — and `moy_webhost.start()` prints which of the two it is serving.
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
   - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the
@@ -137,7 +156,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
     1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
     lands mirrored).
-  - `p4_ble_keyboard.py` — pure-MicroPython BLE HID central over the hosted C6:
+  - `device/ble_keyboard.py` (SHARED, staged — it was this board's
+    `p4_ble_keyboard.py` until the Guition became its second consumer on
+    2026-08-19) — pure-MicroPython BLE HID central, here over the hosted C6:
     scan/pair/bond/discover/subscribe plus standard keyboard-report →
     `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
     forget; the preferred address + gate + bond keys persist in
@@ -149,12 +170,21 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     and `run_desktop()` — constructs the shared `Workstation` with a distinct
     1024×600 system canvas + the fixed 320×240 off-screen game canvas and
     installs **`WindowedWM`** (#73's tier, on its intended hardware). Carts
-    live on the internal-flash VFS (`/moybyte/carts`); SD is optional here.
-  - Staged at build (canonical sources elsewhere): the whole shared console
-    from `runtime/` (incl. `wm_windowed.py`, which is deliberately NOT staged
-    to the S3 build), `device_canvas`/`device_api`/`device_wifi`/`device_util`
-    + the `moybyte` input package from the T-Deck modules tree, and the
-    generated `carts_data.py`.
+    live on the internal-flash VFS at **`/moy/carts`** (`CARTS_ROOT`) — NOT
+    `/moybyte/...`, which shadows the frozen `moybyte.input` module and killed a
+    boot; see the constraint below. SD is optional here.
+  - Staged at build (canonical sources elsewhere), and **declared in
+    `board.toml`** since #161 Phase 3 rather than listed in `build.sh`: the
+    whole shared console from `runtime/` as a **denylist** — everything crosses
+    except the files that board file names, each with its reason, which is how
+    `wm_windowed.py` and its `surface.py` leaf come across here and are denied
+    on the S3 — plus `device_canvas`/`device_api`/`device_wifi`/`device_util`/
+    `moycore_glue`/`moy_ota`/`moy_webserver`/`moy_webhost` and the `moybyte`
+    input package from the T-Deck modules tree (an **allowlist**, and it stays
+    one: that is a board tree whose default answer is "no"), and the generated
+    `carts_data.py`. The stager prunes untracked strays it did not stage — the
+    frozen manifest freezes this whole directory, so an unstaged module used to
+    stay in the image indefinitely.
 
 ## Hard board constraints (hardware-confirmed; don't re-learn these)
 

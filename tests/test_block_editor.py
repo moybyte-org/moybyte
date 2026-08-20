@@ -12,11 +12,9 @@ The decided interaction is a structured outline: a vertical script of nested
 colored blocks, cursor nav, press A to insert from a category menu, no dragging.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import blocks  # noqa: E402
 from runtime import moy_carts  # noqa: E402
@@ -29,47 +27,7 @@ mk = blocks.make_block
 # Helpers
 # ----------------------------------------------------------------------------
 
-class _FakeAPI(dict):
-    """A cart namespace of recording stubs, so a compiled block program can exec +
-    run _init/_update/_draw headlessly (mirrors tests/test_blocks.py)."""
-
-    def __init__(self):
-        super().__init__()
-        self.calls = []
-        self["W"] = 320
-        self["H"] = 240
-        for name in ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-                     "spr", "print", "sfx", "beep", "music"):
-            self[name] = self._rec(name)
-        from runtime import palette
-        self["col"] = palette.color
-        self._btn = {}
-        self._btnp = {}
-        self._touch = None
-        self["btn"] = lambda d=None: self._btn.get(d, False)
-        self["btnp"] = lambda d=None: self._btnp.get(d, False)
-        self["touch"] = lambda: self._touch
-        self["rnd"] = lambda n=1.0: 0.0
-        self["flr"] = lambda x: int(x // 1)
-
-    def _rec(self, name):
-        def fn(*a, **k):
-            self.calls.append((name, a, k))
-        return fn
-
-
-def _run(src, frames=1, fake=None):
-    code = compile(src, "<cart>", "exec")
-    fake = fake or _FakeAPI()
-    exec(code, fake)
-    if fake.get("_init"):
-        fake["_init"]()
-    for _ in range(frames):
-        if fake.get("_update"):
-            fake["_update"](1 / 30)
-        if fake.get("_draw"):
-            fake["_draw"]()
-    return fake
+from blocks_helpers import run_cart as _run  # noqa: E402
 
 
 def _be():

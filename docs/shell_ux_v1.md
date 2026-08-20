@@ -325,7 +325,7 @@ the ladder, so the two views must coexist — and coexisting honestly means admi
 when they can't:
 
 - **Blocks are the beginner's source of truth and GENERATE the code.** (The compiler
-  exists: `moybyte_blocks` already does blocks → Python.) Edit blocks, flip to the
+  exists: `runtime/blocks.py` does blocks → Python.) Edit blocks, flip to the
   Code tab, and see what your program *is* — that flip is the single most valuable
   teaching gesture in the console.
 - **Blocks → code is always smooth.** Regenerate any time; the code view is never

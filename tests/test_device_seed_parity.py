@@ -26,49 +26,24 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+import gen_device_carts as _gdc  # noqa: E402
 
-FW = ROOT / "firmware" / "lilygo_t_deck_plus_micropython"
+ROOT = Path(__file__).resolve().parent.parent
+
+FW = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 SYSTEM_CARTS = ROOT / "system_carts"
 
 # Embedded CARTS title -> the system_carts folder it mirrors.
-TITLE_TO_FOLDER = {
-    "Space Desktop": "wallpaper_space",
-    "Ocean Desktop": "ocean",
-    "Moy Night": "moy_night",
-    "Open Machine": "open_machine",
-    "My Art": "my_art",
-    "Sakura": "sakura",
-    "Sakura Lua": "sakura_lua",
-    "Ray Test": "ray_test",
-    "Ray Lua": "ray_lua",
-    "Layer Test": "layer_test",
-    "Bullet Storm": "bullet_storm",
-    "Star Catcher": "star_catcher",
-    "Pixel Pet": "pet",
-    "Tiny Runner": "tiny_runner",
-    "Hop Quest": "platformer",
-    "Sky Run": "scroll_demo",
-    "Brick Siege": "brick_siege",
-    "Brick Siege Lua": "brick_siege_lua",
-    "Harpoon Pop": "harpoon_pop",
-    "Tap Only Red": "tap_red",
-    "Tap Game": "tap_game",
-    "Coin Quest": "coin_quest",
-    "Beeper": "beeper",
-    "Letter Blitz": "letter_blitz",
-    "Bench": "bench",
-    "Bench Lua": "bench_lua",
-    "Paint": "paint",
-    "Appearance": "theme_picker",
-    "Writer": "writer",
-    "Calc": "calc",
-    "Storybook": "storybook",
-    "Sheets": "sheets",
-    "Files": "files",
-    "WiFi": "wifi",
-}
+#
+# DERIVED, not written. This was a hand-maintained 34-entry map, and it was one
+# of the five lists that made adding a system app an eight-file job -- the only
+# one of the five that failed LOUDLY (a KeyError), which is why it survived
+# while the silent ones caused real on-glass bugs. The manifests carry the
+# titles; `gen_device_carts` reads them for the device seed, so the parity check
+# reads them from exactly the same place rather than from a second copy that can
+# drift. Proven equal to the hand-written map before it replaced it.
+TITLE_TO_FOLDER = _gdc.title_to_folder(str(SYSTEM_CARTS))
 
 
 def _load_moy_runtime():

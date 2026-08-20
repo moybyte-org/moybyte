@@ -30,21 +30,17 @@ reason as BlockEditorUI: console.py builds the one UpdateUI a Workstation holds)
 foundational-helper duplication BlockEditorUI's layout constants use), so the
 method bodies stay byte-for-byte identical to the pre-extraction versions.
 """
-import time
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
+try:
+    import ui as _ui
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import ui as _ui
 
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 class UpdateUI:
@@ -289,6 +285,29 @@ class UpdateUI:
                     self._upd_phase = "error"
                     self._upd_msg = "reset failed"
 
+    def _line(self, x, y, text, col):
+        """One status line on the update screen, through the toolkit's `row`.
+
+        Every line here is the same shape -- a coloured string at the panel's
+        left margin, stepping down -- so it goes through ONE kind instead of
+        forty hand-rolled prints. `row` with no field and no edge IS that shape
+        (its docstring: "a row that paints NO field ... is the common case"),
+        and it brings the clip this screen never had: the rect runs to the
+        panel's inner margin, so a long error string stops at the edge instead
+        of escaping the panel (#174).
+
+        NOT used by the two headline lines ("UPDATED!" / "IT WORKED!"): those
+        print at text scale 2 and `row` always prints at scale 1 -- the one gap
+        this conversion could not close from the caller side.
+        """
+        ws = self.ws
+        lay = ws.layout
+        fs = lay.fs
+        px, _py, pw, _ph = lay.settings_panel
+        _ui.row(ws.sys_canvas, ws.theme_colors,
+                (x, y, px + pw - 12 * fs - x, 8 * fs), text,
+                colors=(None, col, None), edge=False, pad=0, text_dy=0, fs=fs)
+
     def _draw_update(self, dt):
         """The firmware-update screen: confirm / progress / done / error. On the
         SYSTEM canvas, same panel chrome as Settings (host == device)."""
@@ -299,8 +318,7 @@ class UpdateUI:
         fs = lay.fs
         cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
-        cv.rect(px, py, pw, ph, th["surface"])
-        cv.rectb(px, py, pw, ph, th["edge"])
+        _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
         self.ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
         cv.print("UPDATE", px + 24, py + 4, th["ink"], 2)
         self.ws._mini_btn("X", lay.set_back, th["danger"], cv)
@@ -312,31 +330,31 @@ class UpdateUI:
         y = py + 28 * fs
         phase = self._upd_phase
         if phase == "checking":
-            cv.print("CHECKING ONLINE...", x, y, th["accent"], 1)
+            self._line(x, y, "CHECKING ONLINE...", th["accent"])
             y += 16 * fs
             beta = self.ws._ota_channel() == "unstable"
-            cv.print("channel: %s" % ("BETA" if beta else "STABLE"), x, y,
-                     NAMES["orange"] if beta else th["play"], 1)
+            self._line(x, y, "channel: %s" % ("BETA" if beta else "STABLE"),
+                       NAMES["orange"] if beta else th["play"])
             y += 14 * fs
-            cv.print("running: %s %s" % (slot, vlabel), x, y, th["ink_dim"], 1)
+            self._line(x, y, "running: %s %s" % (slot, vlabel), th["ink_dim"])
         elif phase == "nopublish":
             beta = self.ws._ota_channel() == "unstable"
-            cv.print("NOTHING NEW YET", x, y, th["play"], 1)
+            self._line(x, y, "NOTHING NEW YET", th["play"])
             y += 14 * fs
-            cv.print("no %s build for" % ("BETA" if beta else "STABLE"),
-                     x, y, th["ink"], 1)
+            self._line(x, y, "no %s build for" % ("BETA" if beta else "STABLE"),
+                       th["ink"])
             y += 12 * fs
-            cv.print("this console yet.", x, y, th["ink"], 1)
+            self._line(x, y, "this console yet.", th["ink"])
             y += 14 * fs
-            cv.print("running %s" % vlabel, x, y, th["ink_dim"], 1)
+            self._line(x, y, "running %s" % vlabel, th["ink_dim"])
             y += 16 * fs
-            cv.print("B = BACK", x, y, th["accent"], 1)
+            self._line(x, y, "B = BACK", th["accent"])
         elif phase == "uptodate":
-            cv.print("UP TO DATE", x, y, th["play"], 1)
+            self._line(x, y, "UP TO DATE", th["play"])
             y += 14 * fs
-            cv.print("firmware %s" % vlabel, x, y, th["ink"], 1)
+            self._line(x, y, "firmware %s" % vlabel, th["ink"])
             y += 18 * fs
-            cv.print("B = BACK", x, y, th["accent"], 1)
+            self._line(x, y, "B = BACK", th["accent"])
         elif phase == "confirm_online" and self._online_manifest:
             m = self._online_manifest
             newv = int(m.get("version", 0) or 0)
@@ -350,104 +368,106 @@ class UpdateUI:
             # Leading with the switch is deliberate: a kid who flipped the
             # channel by accident should meet that fact here, on the screen that
             # asks them to commit, rather than discover it after a reboot.
-            cv.print("SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
-                     x, y, th["ink_dim"], 1)
+            self._line(x, y,
+                       "SWITCH TO %s" % tgt_name if switch else "UPDATE AVAILABLE",
+                       th["ink_dim"])
             y += 12 * fs
             # Always from -> to. The switch case used to show only the target, so
             # the one screen where the move matters most was the one that never
             # said what you were leaving -- which is what an accidental flip
             # needs to see.
-            cv.print("%s ->" % vlabel[:20], x, y, th["ink_dim"], 1)
+            self._line(x, y, "%s ->" % vlabel[:20], th["ink_dim"])
             y += 11 * fs
-            cv.print(label[:22], x, y, NAMES["orange"] if beta else th["play"], 1)
+            self._line(x, y, label[:22], NAMES["orange"] if beta else th["play"])
             y += 13 * fs
             if kb:
-                cv.print("%d KB download" % kb, x, y, th["ink"], 1)
+                self._line(x, y, "%d KB download" % kb, th["ink"])
                 y += 14 * fs
             else:
                 y += 2 * fs
-            cv.print("A = DOWNLOAD", x, y, th["accent"], 1)
+            self._line(x, y, "A = DOWNLOAD", th["accent"])
             y += 12 * fs
-            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
+            self._line(x, y, "B = CANCEL", th["ink_dim"])
         elif phase == "downloading":
             done = u.dl_done if u is not None else 0
             total = u.dl_total if (u is not None and u.dl_total) else 0
-            cv.print("DOWNLOADING...", x, y, th["accent"], 1)
+            self._line(x, y, "DOWNLOADING...", th["accent"])
             y += 16 * fs
             frac = (done / total) if total else 0.0
             self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
             y += 16 * fs
             if total:
-                cv.print("%d / %d KB" % (done // 1024, total // 1024), x, y, th["ink"], 1)
+                self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024),
+                           th["ink"])
             else:
-                cv.print("%d KB" % (done // 1024), x, y, th["ink"], 1)
+                self._line(x, y, "%d KB" % (done // 1024), th["ink"])
             y += 16 * fs
-            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
+            self._line(x, y, "B = CANCEL", th["ink_dim"])
         elif phase == "confirm" and self._upd_bin:
             path, size = self._upd_bin
             name = path.rsplit("/", 1)[-1]
-            cv.print("FOUND ON SD:", x, y, th["ink_dim"], 1)
+            self._line(x, y, "FOUND ON SD:", th["ink_dim"])
             y += 12 * fs
-            cv.print(name[:24], x, y, th["play"], 1)
+            self._line(x, y, name[:24], th["play"])
             y += 12 * fs
-            cv.print("%d KB" % (size // 1024), x, y, th["ink"], 1)
+            self._line(x, y, "%d KB" % (size // 1024), th["ink"])
             y += 14 * fs
-            cv.print("running: %s" % slot, x, y, th["ink_dim"], 1)
+            self._line(x, y, "running: %s" % slot, th["ink_dim"])
             y += 18 * fs
-            cv.print("A = INSTALL", x, y, th["accent"], 1)
+            self._line(x, y, "A = INSTALL", th["accent"])
             y += 12 * fs
-            cv.print("B = CANCEL", x, y, th["ink_dim"], 1)
+            self._line(x, y, "B = CANCEL", th["ink_dim"])
         elif phase == "install":
             done = u.done if u is not None else 0
             total = u.total if (u is not None and u.total) else 1
-            cv.print("FLASHING...", x, y, th["accent"], 1)
+            self._line(x, y, "FLASHING...", th["accent"])
             y += 16 * fs
             self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
             y += 16 * fs
-            cv.print("%d / %d KB" % (done // 1024, (u.total // 1024) if u else 0),
-                     x, y, th["ink"], 1)
+            self._line(x, y, "%d / %d KB" % (done // 1024,
+                                             (u.total // 1024) if u else 0), th["ink"])
             y += 16 * fs
-            cv.print("DO NOT POWER OFF", x, y, th["danger"], 1)
+            self._line(x, y, "DO NOT POWER OFF", th["danger"])
         elif phase == "done":
-            cv.print("UPDATED!", x, y, th["play"], 2)
+            cv.print("UPDATED!", x, y, th["play"], 2)     # scale 2: see _line
             y += 20 * fs
-            cv.print("rebooting...", x, y, th["ink"], 1)
+            self._line(x, y, "rebooting...", th["ink"])
         elif phase == "updated":
             # The verdict from the PREVIOUS boot: the slot we were pointed at is
             # the one now running. This is the only place the machine ever says
             # the update truly took -- "done" above is a hope, this is a fact.
-            cv.print("IT WORKED!", x, y, th["play"], 2)
+            cv.print("IT WORKED!", x, y, th["play"], 2)   # scale 2: see _line
             y += 20 * fs
-            cv.print("new firmware:", x, y, th["ink_dim"], 1)
+            self._line(x, y, "new firmware:", th["ink_dim"])
             y += 12 * fs
-            cv.print((self._upd_msg or "?")[:26], x, y, th["ink"], 1)
+            self._line(x, y, (self._upd_msg or "?")[:26], th["ink"])
             y += 18 * fs
-            cv.print("B = BACK", x, y, th["accent"], 1)
+            self._line(x, y, "B = BACK", th["accent"])
         elif phase == "rolledback":
             # Voice: the machine did the right thing and should say so plainly.
             # Nothing was lost, the kid did nothing wrong, and the old firmware
             # is exactly the one they had -- so the tone is reassurance, not alarm.
-            cv.print("The new one didn't", x, y, th["danger"], 1)
+            self._line(x, y, "The new one didn't", th["danger"])
             y += 12 * fs
-            cv.print("start up.", x, y, th["danger"], 1)
+            self._line(x, y, "start up.", th["danger"])
             y += 14 * fs
-            cv.print("I put your old one", x, y, th["ink"], 1)
+            self._line(x, y, "I put your old one", th["ink"])
             y += 12 * fs
-            cv.print("back. Nothing lost.", x, y, th["ink"], 1)
+            self._line(x, y, "back. Nothing lost.", th["ink"])
             y += 14 * fs
-            cv.print((self._upd_msg or "?")[:26], x, y, th["ink_dim"], 1)
+            self._line(x, y, (self._upd_msg or "?")[:26], th["ink_dim"])
             y += 16 * fs
-            cv.print("B = BACK", x, y, th["accent"], 1)
+            self._line(x, y, "B = BACK", th["accent"])
         else:  # error
             # Voice: the rollback design means a failed update truly leaves the
             # running firmware untouched -- "Nothing changed." states that trust.
-            cv.print("Update didn't finish.", x, y, th["danger"], 1)
+            self._line(x, y, "Update didn't finish.", th["danger"])
             y += 12 * fs
-            cv.print("Nothing changed.", x, y, th["ink"], 1)
+            self._line(x, y, "Nothing changed.", th["ink"])
             y += 12 * fs
-            cv.print((self._upd_msg or "?")[:26], x, y, th["ink_dim"], 1)
+            self._line(x, y, (self._upd_msg or "?")[:26], th["ink_dim"])
             y += 18 * fs
-            cv.print("B = BACK", x, y, th["accent"], 1)
+            self._line(x, y, "B = BACK", th["accent"])
 
     def _draw_progress_bar(self, x, y, w, h, frac):
         th = self.ws.theme_colors

@@ -1,5 +1,5 @@
 """The desktop wallpaper backdrop (#28), extracted from Workstation
-(runtime/console.py) as a component -- docs/shell_layers_refactor_v1.md (Move 1a).
+(runtime/console.py) as a component -- docs/history/shell_layers_refactor_v1.md (Move 1a).
 
 Wallpaper isn't a screen like the surface Layers -- it's the SHARED backdrop the
 launcher home AND the Settings screen both draw behind their chrome (the Picotron
@@ -23,28 +23,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.audio import AudioBank, AudioEngine
 try:
-    from widgets import Pmem, _SilentAudio, _Blit
+    from widgets import Pmem, _SilentAudio, _Blit, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import Pmem, _SilentAudio, _Blit
+    from runtime.widgets import Pmem, _SilentAudio, _Blit, _err_text
 try:
     from moy_image import cover_sig, load_wallpaper_preview, save_wallpaper_preview
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (cover_sig, load_wallpaper_preview,
                                    save_wallpaper_preview)
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
 
 
 class Wallpaper:
@@ -105,7 +91,33 @@ class Wallpaper:
         if rl is not None:
             rl("wallpaper")
 
+    def _stock_bracket(self):
+        """The backdrop never follows a cart's private raster: while a per-run
+        cart canvas (SPEC.md 1/3.1) is bound, every live ws.canvas read in this
+        component must see the STOCK canvas the wallpaper world lives on. This
+        returns (restore_needed, previous) after pointing ws.canvas at stock --
+        pair with _stock_unbracket in a finally."""
+        ws = self.ws
+        stock = getattr(ws, "_run_canvas_stock", None)
+        if stock is None or ws.canvas is stock:
+            return (False, None)
+        prev = ws.canvas
+        ws.canvas = stock
+        return (True, prev)
+
+    def _stock_unbracket(self, bracket):
+        restore, prev = bracket
+        if restore:
+            self.ws.canvas = prev
+
     def compile(self, cart):
+        b = self._stock_bracket()
+        try:
+            self._compile(cart)
+        finally:
+            self._stock_unbracket(b)
+
+    def _compile(self, cart):
         """Compile a wallpaper cart into its own namespace + grab its _update/_draw,
         running its _init. Guarded: any failure leaves the backdrop on the solid
         fill (a broken wallpaper must never take down the desktop)."""
@@ -144,6 +156,13 @@ class Wallpaper:
                 and self._wp_draw is not None and dt > 0)
 
     def draw(self, dt):
+        b = self._stock_bracket()       # a bound cart canvas never hosts the backdrop
+        try:
+            self._paint(dt)
+        finally:
+            self._stock_unbracket(b)
+
+    def _paint(self, dt):
         """Paint the backdrop: run the wallpaper cart's _update/_draw, or a solid
         fill. Always fully clears the canvas so the foreground draws over a clean
         backdrop. Guarded so a misbehaving wallpaper degrades to a fill.
@@ -291,13 +310,51 @@ class Wallpaper:
         guarded degradation ladder as draw(): My Art direct -> cart frame ->
         solid fill.
 
-        A cart wallpaper shows its COMPUTED preview -- one identical behavior
-        on every tier (host, web, both boards; no live/static policy fork):
-        rendered once per cart source through the preview runner (the cart
-        compiled a second time over an offscreen pure-Python Canvas -- never
-        the game canvas) and cached like a thumbnail (RAM memo + the
-        thumbs/wp*.mct sidecar). A STILL, so the appearance screen closes the
-        redraw gate like any static UI."""
+        A cart wallpaper shows its COMPUTED preview: rendered once per cart
+        source through the preview runner (the cart compiled a second time onto
+        an OFFSCREEN canvas -- never the game canvas) and cached like a
+        thumbnail (RAM memo + the thumbs/wp*.mct sidecar). A STILL, so the
+        appearance screen closes the redraw gate like any static UI.
+
+        EVERY TIER -- and until 2026-08-15 that sentence was false on the two
+        that matter most, in a way nothing reported. The runner built its
+        offscreen surface from `runtime/canvas.py`, the pure-Python indexed
+        raster, whose import reached `runtime/palette.py` -> `colorsys`, which
+        MicroPython does not have. So on a board `_ensure_preview` took its
+        `return False` path on every call and this panel drew its black fill and
+        nothing else, from the day it shipped; every caller is guarded, so the
+        failure read as a feature that quietly did not exist. Reproduced on P4
+        glass (tests/test_staging_closure.py records the session).
+
+        Deleting that raster did not move the gate to a new place, and this
+        docstring said for a while that re-enabling the preview was a product
+        decision about a second raster in frozen flash. It is not: there is no
+        second raster left to decline. The runner draws on
+        `device_canvas.DeviceCanvas`, which every tier already runs, and it asks
+        the BACKEND for one through `ws.make_game_canvas` instead of importing a
+        per-tier module -- see _ensure_preview. So the tier branch is gone
+        rather than extended, and the degradation that remains (no factory -> a
+        black fill) is the honest one: a Workstation whose backend cannot build
+        an offscreen canvas at all.
+
+        What a board pays, once per cart and preview size: a 320x240 RGB565
+        scratch surface, the wallpaper's own _init/_update/_draw in interpreted
+        Python, and the reduction in _preview_indices. The .mct sidecar is what
+        holds it to once -- every later open reads the file and never builds a
+        runner at all."""
+        # Bracket to the STOCK canvas, like draw() and compile(): a per-run cart
+        # canvas (SPEC.md 3.1) can be bound over ws.canvas while the Appearance
+        # window is on screen (the windowed tier draws apps beside a live game),
+        # and the preview sizes both its render surface and its sidecar key off
+        # ws.canvas -- so without this a preview computed during a 128x120 run
+        # would be keyed and shaped to that cart's raster, not the wallpaper's.
+        _b = self._stock_bracket()
+        try:
+            self._draw_preview(cv, rect, dt)
+        finally:
+            self._stock_unbracket(_b)
+
+    def _draw_preview(self, cv, rect, dt):
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
@@ -332,25 +389,53 @@ class Wallpaper:
 
     def _ensure_preview(self):
         """Compile the current wallpaper cart into the preview runner (once per
-        selection; clear() invalidates). False when there's no cart, no host
-        Canvas (device build), or the compile fails."""
+        selection; clear() invalidates). False when there's no cart, no backend
+        canvas factory, or the compile fails.
+
+        THE FACTORY IS ASKED FOR, NOT IMPORTED, and that is the whole fix for
+        the board-side hole draw_preview describes. What stood here was an
+        import ladder -- `runtime.host_canvas`, then `web_canvas`, then give up
+        -- which named the two tiers that happen to expose a canvas factory as a
+        MODULE and silently excluded the two that inject one instead. Adding a
+        third rung (`import device_canvas`, which does resolve on a board) would
+        have worked and would also have made the host's behaviour depend on
+        import ORDER, because host_canvas.install() appends the T-Deck modules
+        directory to sys.path -- so `device_canvas` is importable there too, and
+        a rung tried too early would quietly render the host preview through a
+        different compositor than the host draws on.
+
+        `ws.make_game_canvas` has no such ambiguity: it is a backend attach
+        point like `make_api`, `(w, h) -> an offscreen DeviceCanvas of that
+        size`, injected by all four heads (runtime/host_app.py, web_boot.py and
+        both boards' moy_runtime.py) and pinned as a service by
+        tests/test_board_service_parity.py. Each head hands back a canvas over
+        ITS OWN compositor -- HostCompositor, WebCompositor, an moy_alloc-backed
+        _LayerComp in board PSRAM -- so there is nothing left to choose between
+        and no per-tier name in this file at all. It is the same factory
+        `Workstation.bind_run_canvas` uses to give a cart with a small raster
+        (SPEC.md 3.1) a canvas to play on, which is the same request: an
+        offscreen surface the size of a cart frame.
+
+        It can still answer None -- the T-Deck's returns None on a build with no
+        native kernel -- and a Workstation nobody injected one on (a bare test
+        fixture) has None outright. Both degrade to the black fill, which is the
+        behaviour the old ladder produced for a whole class of tier by
+        accident."""
         cart = self._wp_cart
         if cart is None:
             return False
         if self._pv_draw is not None and self._pv_for is cart:
             return True
-        try:
-            from canvas import Canvas
-        except ImportError:
-            try:
-                from runtime.canvas import Canvas
-            except ImportError:
-                return False            # no host canvas on this build
         ws = self.ws
+        make_canvas = getattr(ws, "make_game_canvas", None)
+        if make_canvas is None:
+            return False            # a backend with no offscreen canvas factory
         try:
             pv = self._pv_canvas
             if pv is None:
-                pv = Canvas(ws.canvas.w, ws.canvas.h)
+                pv = make_canvas(ws.canvas.w, ws.canvas.h)
+                if pv is None:      # a build with no native kernel to draw with
+                    return False
                 self._pv_canvas = pv
             else:
                 rl = getattr(pv, "reclaim_layers", None)
@@ -402,9 +487,10 @@ class Wallpaper:
     def _static_preview(self, w, h):
         """The COMPUTED (thumbnail-model) preview of the current wallpaper
         cart, sized to fit (w, h): RAM memo -> wp sidecar -> one offscreen
-        render (persisted). Returns a _Blit or None. General on every device:
-        the render needs only the staged pure-Python Canvas, and the result is
-        stamped against the cart's source so an edit recomputes it."""
+        render (persisted). Returns a _Blit or None. The render is the only
+        expensive rung and the only one that needs a canvas factory, so a tier
+        that cannot render still SHOWS a preview any tier once wrote; the
+        result is stamped against the cart's source, so an edit recomputes it."""
         cart = self._wp_cart
         if cart is None:
             return None
@@ -469,14 +555,62 @@ class Wallpaper:
             fb = getattr(pv, "flush_batch", None)
             if fb is not None:
                 fb()
-            if (vw, vh) == (pv.w, pv.h):
-                return bytes(pv.buf)
-            return self._sample(pv.buf, pv.w, pv.h, vw, vh)
+            return self._preview_indices(pv, vw, vh)
         except Exception as exc:  # noqa: BLE001 -- a broken cart has no preview
             print("Moybyte wallpaper preview error:", _err_text(exc))
             self._pv_ns = self._pv_update = self._pv_draw = None
             self._pv_for = None
             return None
+
+    @classmethod
+    def _preview_indices(cls, pv, vw, vh):
+        """The preview frame, resampled to exactly (vw, vh), as ONE PALETTE
+        INDEX PER BYTE. None on a build that cannot reduce.
+
+        WHY THE FORMAT CHANGES HERE, and nowhere downstream. Every tier's canvas
+        is RGB565 since runtime/canvas.py was deleted, so something has to
+        convert -- and everything past this point is index-native and should
+        stay that way: the `_Blit` this feeds, the `spr()` that draws it, and the
+        `thumbs/wp<w>x<h>.mct` sidecar, whose validator checks `len == w * h`
+        (moy_image.load_wallpaper_preview). Converting at the RENDER boundary
+        costs one pass over a small buffer and leaves all of that untouched.
+        Converting downstream instead would change a persisted on-disk format
+        and need a migration for every sidecar already written to a kid's card,
+        which is a lot of moving parts to buy nothing.
+
+        RESAMPLE FIRST, REDUCE SECOND, and the order is load-bearing rather than
+        incidental. Nearest-neighbour picks source pixels verbatim, so the two
+        orders produce byte-identical output (pinned by
+        tests/test_wallpaper_preview.py) -- but reducing first walks all 76,800
+        pixels of the canvas, where reducing the sample walks only the ~17,000
+        that survive it. Measured on the host for a 152x114 preview of a 320x240
+        canvas: 10.7ms reduce-then-sample against 3.8ms sample-then-reduce, 2.8x.
+        Both loops are interpreted Python, so a board pays the same ratio on a
+        far slower interpreter -- which is the difference between a pause and a
+        freeze, on the tier this only just started running on.
+
+        The reduction is EXACT -- MOY64's 64 entries resolve to 64 distinct 565
+        words -- but it runs `strict=False`: a wallpaper is arbitrary cart code,
+        and a single unmappable word (a cart that blits raw 565 in) should cost
+        that pixel, not the whole preview."""
+        gw, gh = pv.w, pv.h
+        buf = getattr(pv, "_buf", None)
+        if buf is None:
+            # An INDEXED canvas, if one ever comes back. A contract rather than
+            # a live lane: nothing in the tree publishes `.buf` today.
+            pix = bytes(pv.buf)
+            return (pix if (vw, vh) == (gw, gh)
+                    else bytes(cls._sample(pix, gw, gh, vw, vh)))
+        try:
+            from device_canvas import to_indices
+        except ImportError:                      # pragma: no cover
+            return None
+        stride = int(getattr(pv, "_stride", gw) or gw)
+        ox = int(getattr(pv, "_ox", 0) or 0)
+        oy = int(getattr(pv, "_oy", 0) or 0)
+        if (vw, vh) != (gw, gh) or stride != gw or ox or oy:
+            buf = cls._sample565(buf, gw, gh, vw, vh, stride, ox, oy)
+        return to_indices(buf, getattr(pv, "_wire", None), False)
 
     @staticmethod
     def _sample(pix, gw, gh, vw, vh):
@@ -491,6 +625,34 @@ class Wallpaper:
             o += vw
         return out
 
+    @staticmethod
+    def _sample565(buf, gw, gh, vw, vh, stride=None, ox=0, oy=0):
+        """`_sample` in the 565 domain: gw x gh RGB565 pixels to exactly vw x vh.
+
+        The twin exists because of the order argued in _preview_indices -- this
+        is what runs BEFORE the reduction, on the wide frame, so the reduction
+        only ever sees the pixels that survive.
+
+        `stride`/`ox`/`oy` describe a canvas drawing into a sub-rect of a wider
+        buffer (#155). Every backend's make_game_canvas returns a full-surface
+        canvas today, so they default to the simple case and cost one multiply
+        when they are not needed.
+
+        Two byte reads per pixel rather than a slice assignment: a slice would
+        allocate a fresh object per pixel, and this loop runs on MicroPython."""
+        stride = gw if stride is None else stride
+        xm = [(dx * gw // vw + ox) * 2 for dx in range(vw)]
+        out = bytearray(vw * vh * 2)
+        o = 0
+        for dy in range(vh):
+            base = (oy + dy * gh // vh) * stride * 2
+            for i in range(vw):
+                s = base + xm[i]
+                out[o] = buf[s]
+                out[o + 1] = buf[s + 1]
+                o += 2
+        return out
+
     def _view_bracket(self, ws):
         """Open a WM view bracket for a wallpaper cart drawing on a COMMAND-ONLY
         game canvas (#175): the cart's draw span is placed cover-style on the
@@ -499,11 +661,15 @@ class Wallpaper:
         _backdrop_blit computes for a real framebuffer. Returns True when a
         bracket was opened (the caller must close it).
 
-        No-op on every other tier: a raster game canvas has `buf` and keeps the
-        composite path, and the 320x240 tiers share one canvas object."""
+        No-op on every other tier: a raster game canvas keeps the composite
+        path, and the 320x240 tiers share one canvas object. A raster publishes
+        its framebuffer either as `buf` (palette indices) or as `_buf` (RGB565,
+        which every tier's canvas is since runtime/canvas.py was deleted) -- ask
+        for BOTH, or a 565 canvas reads as command-only and gets bracketed."""
         sc = ws.sys_canvas
         gc = ws.canvas
-        if sc is gc or getattr(gc, "buf", None) is not None:
+        if sc is gc or getattr(gc, "buf", None) is not None \
+                or getattr(gc, "_buf", None) is not None:
             return False
         view = getattr(sc, "view", None)
         if view is None:

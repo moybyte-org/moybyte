@@ -6,6 +6,13 @@
   "runtime": "python",
   "main": "main.py",
   "system": true,
+  "order": 310,
+  "app": {
+    "id": "storybook",
+    "entry": "storybook_app:StorybookAppLayer",
+    "text_mode": false,
+    "order": 40
+  },
   "canvas": "320x240",
   "permissions": [
     "graphics",

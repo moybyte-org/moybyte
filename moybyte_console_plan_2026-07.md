@@ -270,7 +270,7 @@ Progressive authoring, all editing the *same* cart:
 - **Icons → blocks → Python.** #29 shipped the block-language overhaul + a working single-object tap game.
 - **Blocks depth (#48)** is the path to real games in blocks, in leverage order: **lists** (the biggest gap — no collections ⇒ no multiple enemies/bullets/inventories), **custom blocks** (define/call with params), **control** (`repeat until`, `wait until`, `break`; fix frame-yielding `forever`), **operators** (`mod`, `round`, `abs`, `min/max`, comparisons).
 - **Blockly-in-browser (#22)** is the richer web-based block editor path.
-- The `.moyproj` SDK + block compiler is deliberately **kept** — it seeds the icons→blocks→code ladder even though `.moy` is the active console format.
+- The block compiler lives in `runtime/blocks.py`; the old `.moyproj` SDK around it was deleted 2026-07-31 (git history has it).
 
 ### 6.3 Quests & pedagogy (#20, see §7).
 
@@ -453,7 +453,7 @@ Serves the **running console** to a browser on the same WiFi via the **same draw
 
 ### 12.4 The perf ceiling (#43 → the #66 ledger)
 
-**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; don't fork the numbers into this doc). The shape of the ceiling (2026-07-04): the ~15–16ms SPI flush is hidden behind render by the double-buffer overlap and now streams from internal-SRAM bounce buffers (PSRAM contention can no longer corrupt it), so light carts sit at the ~45–50fps flush ceiling; float-physics carts run logic-bound but healthy (Sakura ~11ms logic → 36–38fps after the #63/#66 interpreter-tax fixes: native `spr_gate`, doubled caches, REPR_C unboxed floats); Python-prim-render-bound carts sit at 24–29 until native text #62 / map #32. Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the reference tier.
+**Current numbers, the frame-budget model, and the lever ledger live in issue #66** (the living performance ledger — edit its body when hardware numbers land; **don't fork the numbers into this doc**, which is why the per-cart snapshot that used to sit here is gone: it was quoting a roster that had since moved by ~2×, in the very sentence telling you not to). The SHAPE of the ceiling, which is what a plan doc is for and does not go stale: the SPI flush is hidden behind render by the double-buffer overlap and streams from internal-SRAM bounce buffers (PSRAM contention can no longer corrupt it), so light carts sit at a FLUSH ceiling; float-physics carts are logic-bound, after the #63/#66 interpreter-tax fixes (native `spr_gate`, doubled caches, REPR_C unboxed floats) rather than before them; and the Python-prim render bound that used to hold the third group down was retired by native text (#62) and map (#32). Remaining SPI-tier levers, in value order, are in #66. **On the One (P4/DSI), the flush ceiling is gone** — which is a core reason the One is the reference tier.
 
 ---
 

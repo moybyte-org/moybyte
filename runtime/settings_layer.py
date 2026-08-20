@@ -1,5 +1,5 @@
 """The Settings app (#28/#39/#53), extracted from Workstation (runtime/console.py) as
-its own Layer -- docs/shell_layers_refactor_v1.md Phase 2.
+its own Layer -- docs/history/shell_layers_refactor_v1.md Phase 2.
 
 Settings is the console's AGGREGATOR: a scrolling list of rows (APPEARANCE / font size /
 volume / brightness / name / EDIT ICONS / PERF DIAG, plus the injected OTA + web-view
@@ -9,9 +9,9 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json dict), ws.font_scale, ws.diag_live, ws.web_hook, the
+system.json dict), ws.font_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-cycle_font_scale / set_diag_live / _cycle_channel / _toggle_web_view / _persist_system).
+cycle_font_scale / set_diag_live / _cycle_channel / _persist_system).
 Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
 appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
@@ -48,7 +48,7 @@ class SettingsLayer:
     wallpaper backdrop. Owns the scroll window (set_msel/set_top) + row geometry +
     drawing; reads ws config/system state and dispatches every mutation to ws setters.
 
-    Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): Settings lends the
+    Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): Settings lends the
     top bar's left zone too, via draw_zone/zone_tap -- but it has nothing to put
     there today (its own panel already shows a title + row list below the bar), so
     both are no-ops and `zone_gen` is a constant. Wired now so a future "which
@@ -80,9 +80,13 @@ class SettingsLayer:
         # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
         # loop rate but render every SECOND frame -- halves the whole render-side
         # cost (per-draw-call dispatch, the measured tax) for 30Hz motion. Default
-        # OFF pending the on-glass feel verdict. Reads ws.frameskip (the "diag"
-        # kind's generic getattr ON/OFF rendering).
+        # OFF -- the on-glass feel pass kept it opt-in (2026-07-10, both boards).
+        # Reads ws.frameskip (the "diag" kind's generic getattr ON/OFF rendering).
         ("frameskip", "FRAMESKIP", "diag"),
+        # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME
+        # canvas, so on a small-canvas cart (celeste) it scales up with the
+        # composite -- 2x size -- which is what prompted the off switch.
+        ("show_fps", "SHOW FPS", "diag"),
         # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
         # player can FEEL on device -- the 30s forced GC sample and the periodic
         # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
@@ -130,9 +134,10 @@ class SettingsLayer:
         # per call, and this is called ~15x per frame).
         self._rows_cache = None
         self._rows_bt = False
-        self._rows_web = False
         self._rows_upd = False
         self._rows_onl = False
+        self._rows_web = False
+        self._rows_crisp = False
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -478,18 +483,27 @@ class SettingsLayer:
             except Exception:  # noqa: BLE001
                 pass
         th = ws.theme_colors
+        # The status ICON is an IconSheet sprite the caller owns (ui.py must not
+        # learn about the sheet), so it draws first and the label row takes the
+        # rest of the slot; the IP keeps its own fixed column.
         ws._icon("wifi" if connected else "wifi_off", x, y, cv)
         if connected:
-            cv.print(("ON  " + str(ssid))[:22], x + 20 * fs, y + 5, th["play"], 1)
+            _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
+                    colors=(None, th["play"], None), edge=False,
+                    pad=20 * fs, text_dy=5, fs=fs)
             if ip:
                 cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
         else:
-            cv.print("NOT CONNECTED", x + 20 * fs, y + 5, th["ink_dim"], 1)
+            _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED",
+                    colors=(None, th["ink_dim"], None), edge=False,
+                    pad=20 * fs, text_dy=5, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
-            cv.print(("PASSWORD FOR " + str(self.wifi_pick))[:30], x + 4, y + 5,
-                     th["ink"], 1)
+            _ui.row(cv, th, (x, y, w, h),
+                    ("PASSWORD FOR " + str(self.wifi_pick))[:30],
+                    colors=(None, th["ink"], None), edge=False, pad=4,
+                    text_dy=5, fs=fs)
             bx, by, bw2, bh2 = self._wifi_row_rect(1)
             cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
@@ -497,8 +511,9 @@ class SettingsLayer:
             cv.print(shown, bx + 4, by + 5, NAMES["yellow"], 1)
             cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
-            cv.print("ENTER = CONNECT   ESC = BACK", x + 4, y + 5,
-                     th["ink_dim"], 1)
+            _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
+                    colors=(None, th["ink_dim"], None), edge=False, pad=4,
+                    text_dy=5, fs=fs)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -507,10 +522,13 @@ class SettingsLayer:
                 if y + h > py + ph - 30 * fs:
                     break                          # keep clear of the button row
                 sel = (k == self.wifi_sel)
-                if sel:
-                    cv.rect(x, y, w, h, th["hilite"])
                 fg = th["selection_ink"] if sel else th["ink_dim"]
-                cv.print(str(ssid_k)[:16], x + 4, y + 5, fg, 1)
+                # Same split as the Settings rows: ui.row draws the selection
+                # fill + the name, the signal bars / lock / SAVED markers are
+                # this list's own per-row content at their fixed columns.
+                _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16], on=sel,
+                        colors=(th["hilite"] if sel else None, fg, None),
+                        edge=False, pad=4, text_dy=5, fs=fs)
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
                     c = th["play"] if s < bars else th["ink_dim"]
@@ -556,9 +574,9 @@ class SettingsLayer:
         enabled, state, name, _preferred, _error = status
         _ui.status_row(cv, th, status_r,
                        (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
-        cv.print(self.bt_msg[:max(1, msg_r[2] // fw - 1)],
-                 msg_r[0] + 3 * fs, msg_r[1] + (msg_r[3] - 8 * fs) // 2,
-                 th["ink_dim"], 1)
+        _ui.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
+                colors=(None, th["ink_dim"], None), edge=False, pad=3 * fs,
+                text_dy=(msg_r[3] - 8 * fs) // 2, fs=fs)
 
         self._bt_hits.clear()
         row_h = 24 * fs
@@ -569,8 +587,9 @@ class SettingsLayer:
         end = min(len(self.bt_devices), top + visible)
         if not self.bt_devices:
             label = "SCANNING..." if state == "scanning" else "NO KEYBOARDS FOUND"
-            cv.print(label, list_r[0] + 3 * fs, list_r[1] + 6 * fs,
-                     th["ink_dim"], 1)
+            _ui.row(cv, th, (list_r[0], list_r[1], list_r[2], row_h), label,
+                    colors=(None, th["ink_dim"], None), edge=False,
+                    pad=3 * fs, text_dy=6 * fs, fs=fs)
         for i in range(top, end):
             address, dev_name, rssi, preferred, connected = self.bt_devices[i]
             rect = (list_r[0], list_r[1] + (i - top) * row_h,
@@ -646,12 +665,13 @@ class SettingsLayer:
         cache exists to remove."""
         ws = self.ws
         bt = self._bt_service() is not None
-        web = ws.web_hook is not None
         upd = ws._update_available()
         onl = ws._online_update_available()
+        web = getattr(ws, "webhost", None) is not None
+        crisp = getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
         if (self._rows_cache is not None and bt == self._rows_bt
-                and web == self._rows_web and upd == self._rows_upd
-                and onl == self._rows_onl):
+                and upd == self._rows_upd and onl == self._rows_onl
+                and web == self._rows_web and crisp == self._rows_crisp):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -659,17 +679,32 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
-        if web:                               # device web view (#41): a WiFi browser feed
-            rows = rows + (("web", "WEB VIEW", "web"),)
+        if crisp:
+            # CRISP PIXELS (#204): nearest-neighbour game composite, only on boards
+            # whose hardware scaler is fixed bilinear (the P4's PPA). Sits by
+            # FRAMESKIP -- both are play-time quality/perf trades. Capability-
+            # gated like BLUETOOTH so the other tiers keep frozen pixels; the
+            # index lookup (rebuild-only, memoized) survives row reordering.
+            i = rows.index(("frameskip", "FRAMESKIP", "diag")) + 1
+            rows = rows[:i] + (("crisp_pixels", "CRISP PIXELS", "diag"),) \
+                + rows[i:]
+        if web:
+            # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
+            # board, so a browser on the same network opens YOUR carts. Its own
+            # kind rather than a "diag" ON/OFF because when it is on the useful
+            # thing to show is the ADDRESS -- an "ON" with no url is just an
+            # instruction to go find the IP somewhere else.
+            rows = rows + (("webhost", "WEB CONSOLE", "webhost"),)
         if upd:
             rows = rows + (("update", "UPDATE FW", "action"),)
         if onl:
             rows = rows + (("ota_channel", "CHANNEL", "channel"),)
             rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
         self._rows_bt = bt
-        self._rows_web = web
         self._rows_upd = upd
         self._rows_onl = onl
+        self._rows_web = web
+        self._rows_crisp = crisp
         self._rows_cache = rows
         return rows
 
@@ -696,6 +731,10 @@ class SettingsLayer:
             ws.set_diag_sd(not ws.diag_sd)
         elif key == "frameskip":
             ws.set_frameskip(not ws.frameskip)
+        elif key == "crisp_pixels":
+            ws.set_crisp_pixels(not ws.crisp_pixels)
+        elif key == "show_fps":
+            ws.set_show_fps(not ws.show_fps)
         else:
             ws.set_diag_live(not ws.diag_live)
 
@@ -715,11 +754,11 @@ class SettingsLayer:
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
-        if key == "web":                        # device web view ON <-> OFF (#41)
-            ws._toggle_web_view()
-            return
         if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
             self._toggle_diag_row(key)
+            return
+        if kind == "webhost":                   # WEB CONSOLE: serve / stop serving
+            ws.toggle_webhost()
             return
         if key == "ota_channel":                # OTA update channel STABLE <-> BETA
             ws._cycle_channel(d)
@@ -845,8 +884,6 @@ class SettingsLayer:
                 self.open_bluetooth()
             elif row[2] == "action":
                 self._activate_settings_action(row[0])
-            elif row[2] == "web":               # A/run also toggles the web view (#41)
-                ws._toggle_web_view()
             elif row[2] == "diag":              # ... and the ON/OFF gates (#68/#77)
                 self._toggle_diag_row(row[0])
         if i.pressed("b"):
@@ -922,8 +959,8 @@ class SettingsLayer:
                 if rows[i][2] == "action":
                     self._activate_settings_action(rows[i][0])  # EDIT ICONS / UPDATE FW
                     return True
-                if rows[i][2] == "web":            # web view: any tap flips ON/OFF (#41)
-                    ws._toggle_web_view()
+                if rows[i][2] == "webhost":        # WEB CONSOLE: any tap toggles
+                    self.ws.toggle_webhost()
                     return True
                 if rows[i][2] == "diag":           # ON/OFF gates: any tap flips (#68/#77)
                     self._toggle_diag_row(rows[i][0])
@@ -961,13 +998,14 @@ class SettingsLayer:
         _windowed = getattr(ws, "windowed_chrome", False)
         if _windowed:
             cv.cls(th["panel"])
-        else:
-            ws.wallpaper.draw(dt)
             # (windowed: cls above already laid this exact colour over the whole
             # buffer -- re-filling the panel rect would paint 272k of the same
-            # pixels a second time, ~9ms of pure duplicate fill.)
-            cv.rect(px, py, pw, ph, th["panel"])
-        cv.rectb(px, py, pw, ph, th["edge"])
+            # pixels a second time, ~9ms of pure duplicate fill, so this tier
+            # takes the ring alone rather than the whole ui.dialog shell.)
+            cv.rectb(px, py, pw, ph, th["edge"])
+        else:
+            ws.wallpaper.draw(dt)
+            _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["panel"])
         # Inside a WM window (#73) the title strip already says SETTINGS and carries
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
@@ -1031,10 +1069,20 @@ class SettingsLayer:
         key, label, kind = self._settings_rows()[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
-        if sel:
-            cv.rect(x, y, w, h, th["hilite"])
         fg = th["selection_ink"] if sel else th["chrome_ink_dim"]
-        cv.print(label, x + 4, y + 5, fg, 1)
+        # ui.row owns the ROW CHROME -- the selection fill, the label ink and its
+        # frozen (4, 5) placement, and the clip that keeps a long label inside the
+        # rect (#174). Everything below is this row's per-KIND content, drawn by
+        # the caller into the space `row` left: a value at the fixed value COLUMN
+        # (x + w - 78fs, not right-aligned, so `row`'s `value=` slot is the wrong
+        # shape), an icon, an OPEN affordance or a stepper.
+        # The palette rides `colors` because a Settings row is panel-CHROME
+        # coloured (hilite / selection_ink / chrome_ink_dim), not the row kind's
+        # token palette -- the documented escape hatch, and the one argument
+        # Phase 4 replaces with a skin entry.
+        _ui.row(cv, th, (x, y, w, h), label, on=sel,
+                colors=(th["hilite"] if sel else None, fg, None),
+                edge=False, pad=4, text_dy=5, fs=lay.fs)
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
             # affordance -- a tap / A opens the wifi panel, no stepper.
@@ -1096,25 +1144,37 @@ class SettingsLayer:
             beta = ws._ota_channel() == "unstable"
             cv.print("BETA" if beta else "STABLE", vx, y + 5,
                      NAMES["orange"] if beta else NAMES["green"], 1)
-        elif kind == "web":                # device web view (#41): ON/OFF + the URL
-            on = False
-            url = ""
-            try:
-                on = bool(ws.web_hook.enabled)
-                url = str(ws.web_hook.url() or "")
-            except Exception:  # noqa: BLE001 -- a backend hiccup just reads OFF
-                pass
-            cv.print("ON" if on else "OFF", vx, y + 5,
-                     NAMES["green"] if on else NAMES["dark_grey"], 1)
-            if on and url:
-                # The URL to open in a phone/desktop browser, under the row label.
-                cv.print(url[:34], x + 4, y + 6 + fw, NAMES["blue"], 1)
         elif kind == "diag":               # #68 diag gates: ON/OFF (key-driven)
             on = bool(getattr(ws, key, False))
             cv.print("ON" if on else "OFF", vx, y + 5,
                      NAMES["orange"] if on else NAMES["dark_grey"], 1)
+        elif kind == "webhost":            # WEB CONSOLE: the ADDRESS, not "ON"
+            # RIGHT-ALIGNED, not printed at the value column, because the value
+            # column is 78px = 9 characters and the thing this row exists to
+            # show is 18 ("192.168.1.155:8080"). It rendered as "192.168.1" on
+            # glass -- an address that is not merely ugly but WRONG, since a kid
+            # would type it into a browser and get nothing. Right-aligning lets
+            # it use the empty gap between the label and the edge, which is
+            # where the room already was; it stops at the label rather than
+            # overprinting it, and only then falls back to dropping :8080 (the
+            # default port a browser assumes for nothing, so it is the last
+            # resort and not the first).
+            lbl = ws.webhost_label()
+            col = (NAMES["orange"] if ws.webhost_serving()
+                   else NAMES["dark_grey"])
+            room = w - 84 * lay.fs         # gap after "WEB CONSOLE" at this scale
+            if len(lbl) * fw > room and lbl.endswith(":8080"):
+                lbl = lbl[:-5]
+            tx = x + w - len(lbl) * fw - 2
+            if tx < x + 84 * lay.fs:       # still too long: keep the tail, which
+                tx = x + 84 * lay.fs       # is the part that varies (the host)
+            cv.print(lbl, tx, y + 5, col, 1)
         # Mark not-yet-functional rows clearly (wifi + font + channel +
-        # web + diag + actions work).
+        # diag + actions work).
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
-                        "web", "diag"):
-            cv.print("soon", x + 4, y + 6 + fw, NAMES["dark_grey"], 1)
+                        "diag", "webhost"):
+            # A second label line inside the SAME row rect (one font row below
+            # the title), so it is the row kind again with its own text_dy.
+            _ui.row(cv, th, (x, y, w, h), "soon",
+                    colors=(None, NAMES["dark_grey"], None), edge=False,
+                    pad=4, text_dy=6 + fw, fs=lay.fs)

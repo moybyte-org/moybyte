@@ -11,11 +11,9 @@ Pins:
     the drag-partial streak (the retained ping-pong buffers are foreign).
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _ws(tmp_path):
@@ -26,15 +24,10 @@ def _ws(tmp_path):
     return ws
 
 
-def _drv(ws):
-    from runtime import host_app
-    return host_app.ConsoleDriver(ws)
+from ws_helpers import make_drv as _drv
 
 
-def _quiesce(ws):
-    ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+from ws_helpers import quiesce as _quiesce
 
 
 def _count_grid(ws):
@@ -76,11 +69,11 @@ def test_stamped_frame_matches_live_render(tmp_path):
     ws.go_home()
     _quiesce(ws)
     drv.frame(0.0)                                   # the stamped re-entry
-    stamped = bytes(ws.sys_canvas.buf)
+    stamped = bytes(ws.sys_canvas._buf)
     ws.launcher_layer._lib_key = None                # force the live path
     ws._dirty = True
     drv.frame(0.0)
-    live = bytes(ws.sys_canvas.buf)
+    live = bytes(ws.sys_canvas._buf)
     assert stamped == live
 
 

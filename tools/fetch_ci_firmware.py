@@ -54,7 +54,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-BOARDS = ("tdeck", "p4")
+BOARDS = ("tdeck", "p4", "guition_s3")
 WORKFLOW = "firmware-build.yml"
 ARTIFACT = "moybyte-firmware-%s"
 RELEASE_TAG = "firmware-latest"

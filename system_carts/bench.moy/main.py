@@ -18,13 +18,27 @@
 # no feel, same workload every time.
 
 PHASE_MICRO = 0
-PHASE_GAME = 1        # the scene, silent
-PHASE_GAME_SND = 2    # the SAME scene + a beep every ~0.4s: the audio-cost A/B
-PHASE_DONE = 3
+PHASE_IDLE = 1        # the floor: what a frame costs when the cart does nothing
+PHASE_LOGIC = 2       # IDLE + arithmetic only   -> LOGIC - IDLE = the language
+PHASE_DRAW = 3        # IDLE + draw calls only   -> DRAW  - IDLE = the draw path
+PHASE_GAME = 4        # the scene, silent
+PHASE_GAME_SND = 5    # the SAME scene + a beep every ~0.4s: the audio-cost A/B
+PHASE_DONE = 6
 
 GAME_FRAMES = 400          # ~10s at 40fps (the "GAME FRAMES" card overrides)
+SCENE_FRAMES = 200         # the three isolation phases (~5s each)
 REPS = 8                   # best-of per verb
 TARGET_MS = 25             # grow a batch until it costs at least this
+
+# The isolation phases exist because a whole-frame number cannot say WHERE the
+# time went, and the cross-language comparison kept stalling on exactly that:
+# per-verb costs said Lua should win the game scene and the measured frame said
+# it lost. So measure the floor, then add one ingredient at a time. IDLE is the
+# console's own frame -- routing, composite, flush -- and the other two are read
+# as deltas from it, which is the only way the two languages can be compared on
+# a term they both actually pay.
+LOGIC_ITERS = 3000         # per frame, in the LOGIC phase
+DRAW_OPS = 300             # per frame, in the DRAW phase
 
 state = {}
 
@@ -67,8 +81,11 @@ def _verbs():
     def v_spr(i):
         spr(i & 7, (i * 37) % 310, (i * 53) % 230)
 
-    def v_sprb(i):
-        spr_batch(state["sprb_items"])
+    # There was a "sprb" scene here (one spr_batch of 64 prebuilt tiles) until
+    # 2026-08-14. The verb is gone (plan 6.10) and so is the asymmetry it created:
+    # the Lua twin never had this scene, because a trampoline cannot marshal a
+    # list, so the two Bench carts disagreed by one row and every table taken from
+    # them had a hole in it. The "spr" scene above measures the same lane.
 
     def v_map(i):
         map(0, 0, 15, 8, (i * 7) % 40, (i * 11) % 40)
@@ -85,7 +102,7 @@ def _verbs():
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
-            ("tri", v_tri, 50), ("spr", v_spr, 500), ("sprb", v_sprb, 8),
+            ("tri", v_tri, 50), ("spr", v_spr, 500),
             ("map", v_map, 8), ("sspr", v_sspr, 50),
             ("tline", v_tline, 50)]
 
@@ -99,14 +116,6 @@ def _init():
             mset(x, y, (x + y) & 7)
             x += 1
         y += 1
-    # sprb's prebuilt items (64 tiles, LCG positions) -- built ONCE so the
-    # measure times the CALL, not per-frame list construction
-    items = []
-    i = 0
-    while i < 64:
-        items.append((i & 7, (i * 37) % 310, (i * 53) % 230))
-        i += 1
-    state["sprb_items"] = items
     state["phase"] = PHASE_MICRO
     state["verbs"] = _verbs()
     state["vi"] = 0            # which verb
@@ -115,13 +124,16 @@ def _init():
     state["best"] = None
     state["reps"] = []         # this verb's timed batches, ms
     state["micro"] = []        # (name, k, best_ms, med_ms, max_ms)
-    state["dts"] = []          # silent game-phase frame times, ms (floats)
-    state["dts_snd"] = []      # sound game-phase frame times, ms
+    state["dts"] = []          # the CURRENT phase's frame times, ms (floats)
     state["frame"] = 0
-    state["stats"] = None
-    state["stats_snd"] = None
+    state["stats"] = {}        # label -> stats, one entry per timed phase
+    state["scenes"] = _scenes()
+    state["sink"] = 0
     state["reported"] = False
     state["warm"] = 5          # skip the first frames (start spike)
+    pmem(3, 0)                 # arm the pmem report: a PREVIOUS run's done
+                               # flag persists (pmem is the save file), and a
+                               # harness polling cell 3 must not read it
 
 
 def _measure_one():
@@ -156,7 +168,7 @@ def _measure_one():
         state["reps"] = []
         state["best"] = None
         if state["vi"] >= len(state["verbs"]):
-            state["phase"] = PHASE_GAME
+            state["phase"] = PHASE_IDLE
             state["frame"] = 0
         else:
             state["k"] = state["verbs"][state["vi"]][2]
@@ -186,6 +198,51 @@ def _game_scene(f):
     print("BENCH GAME PHASE", 190, 6, 6)
 
 
+def _idle_scene(f):
+    """THE FLOOR. One clear, one label -- whatever this frame costs is the
+    console's own overhead, and every other phase is read as a delta from it."""
+    cls(1)
+    print("IDLE", 8, 6, 7)
+
+
+def _logic_scene(f):
+    """Arithmetic only, drawn exactly like IDLE, so LOGIC - IDLE is what the
+    LANGUAGE costs and nothing else.
+
+    Small-magnitude integer math on purpose: a multiply that overflowed 31 bits
+    would allocate a bignum on MicroPython, and this would end up measuring the
+    allocator. The float chain rides along because carts do float physics and
+    the two boards' VMs differ there (LUA_32BITS vs MicroPython's packed
+    floats)."""
+    cls(1)
+    x = 1 + (f & 15)
+    s = 0
+    fx = 0.5
+    i = 0
+    while i < LOGIC_ITERS:
+        x = (x * 37 + 11) % 1021
+        s = s + (x & 31) - 15
+        fx = fx + 0.25
+        if fx > 100.0:
+            fx = fx - 100.0
+        i += 1
+    state["sink"] = s + int(fx)      # keep the loop from being dead code
+    print("LOGIC", 8, 6, 7)
+
+
+def _draw_scene(f):
+    """Draw calls only, trivial arithmetic, drawn over the same IDLE floor, so
+    DRAW - IDLE is what the DRAW PATH costs at a per-frame call count a real
+    cart reaches. Deliberately the plainest verb there is: a rect is a memset
+    per row in every backend, so what is left in the delta is the crossing."""
+    cls(1)
+    i = 0
+    while i < DRAW_OPS:
+        rect((i * 37) % 290, (i * 53) % 225, 8, 6, 2 + (i & 15))
+        i += 1
+    print("DRAW", 8, 6, 7)
+
+
 def _pct(s, p):
     return s[min(len(s) - 1, (p * len(s)) // 100)]
 
@@ -208,32 +265,44 @@ def _stats_of(raw):
     return st
 
 
+def _scenes():
+    """phase -> (label, scene fn, frames). One table instead of a chain of
+    branches, because there are five timed phases now and the Lua twin has to
+    match this structure line for line."""
+    n = cfg("frames", GAME_FRAMES)
+    return {
+        PHASE_IDLE: ("idle", _idle_scene, SCENE_FRAMES),
+        PHASE_LOGIC: ("logic", _logic_scene, SCENE_FRAMES),
+        PHASE_DRAW: ("draw", _draw_scene, SCENE_FRAMES),
+        PHASE_GAME: ("silent", _game_scene, n),
+        PHASE_GAME_SND: ("sound", _game_scene, n),
+    }
+
+
 def _update(dt):
     ph = state["phase"]
-    if ph == PHASE_GAME or ph == PHASE_GAME_SND:
+    sc = state["scenes"].get(ph)
+    if sc is not None:
         now = time()
         prev = state.get("t_prev")
         state["t_prev"] = now
         if state["warm"] > 0:
             state["warm"] -= 1
         elif prev is not None:
-            dst = state["dts"] if ph == PHASE_GAME else state["dts_snd"]
-            dst.append(1.0 * (now - prev))
+            state["dts"].append(1.0 * (now - prev))
         if ph == PHASE_GAME_SND and state["frame"] % 15 == 0:
             # a fresh trigger every ~0.4s -- the brick-hit cadence. The mixer
             # then has an ACTIVE voice most of the phase, which is the load
             # being A/B'd against the silent phase.
             beep(220 + (state["frame"] // 15 % 8) * 55, 0.3)
         state["frame"] += 1
-        if state["frame"] >= cfg("frames", GAME_FRAMES):
-            if ph == PHASE_GAME:
-                state["stats"] = _stats_of(state["dts"])
-                state["phase"] = PHASE_GAME_SND
-                state["frame"] = 0
-                state["warm"] = 5
-            else:
-                state["stats_snd"] = _stats_of(state["dts_snd"])
-                state["phase"] = PHASE_DONE
+        if state["frame"] >= sc[2]:
+            state["stats"][sc[0]] = _stats_of(state["dts"])
+            state["dts"] = []
+            state["phase"] = ph + 1
+            state["frame"] = 0
+            state["warm"] = 5
+            state["t_prev"] = None
 
 
 def _draw():
@@ -245,12 +314,14 @@ def _draw():
                 if state["vi"] < len(state["verbs"]) else "")
         rect(0, 226, 320, 14, 0)
         print("BENCH MICRO " + name + " k=" + str(state["k"]), 8, 229, 7)
-    elif ph == PHASE_GAME or ph == PHASE_GAME_SND:
-        _game_scene(state["frame"])
-        if ph == PHASE_GAME_SND:
-            print("+ SOUND", 250, 226, 10)
     else:
-        _report()
+        sc = state["scenes"].get(ph)
+        if sc is None:
+            _report()
+        else:
+            sc[1](state["frame"])
+            if ph == PHASE_GAME_SND:
+                print("+ SOUND", 250, 226, 10)
 
 
 def _report():
@@ -264,19 +335,33 @@ def _report():
               + "ms  (" + str(int(us * 10) / 10.0) + "us/op)", 8, y, 7)
         y += 10                      # 13 verbs since 2026-08-04: tight rows
     y += 4
-    for label, s in (("SILENT", st), ("SOUND ", state["stats_snd"])):
-        if s is None:
+    # The isolation phases as ONE line: the floor absolute, the other two as
+    # deltas from it, because the delta is the whole point and 320px is 40
+    # characters. Full percentiles go to serial.
+    fl = st.get("idle")
+    lo = st.get("logic")
+    dr = st.get("draw")
+    if fl is not None:
+        line1 = "FLOOR " + _f1(fl["p50"])
+        if lo is not None:
+            line1 += "  LOGIC +" + _f1(lo["p50"] - fl["p50"])
+        if dr is not None:
+            line1 += "  DRAW +" + _f1(dr["p50"] - fl["p50"])
+        print(line1, 8, y, 14)
+        y += 11
+    for label, key in (("SILENT", "silent"), ("SOUND", "sound")):
+        sc = st.get(key)
+        if sc is None:
             continue
-        print(label + " n=" + str(s["n"]) + " fps=" + _f1(s["fps"]), 8, y, 11)
-        y += 12
-        print("  p50=" + _f1(s["p50"]) + " p90=" + _f1(s["p90"])
-              + " p99=" + _f1(s["p99"]) + " worst=" + _f1(s["worst"]), 8, y, 7)
-        y += 12
+        print(label + " n=" + str(sc["n"]) + " fps=" + _f1(sc["fps"])
+              + " p50=" + _f1(sc["p50"]) + " w=" + _f1(sc["worst"]), 8, y, 11)
+        y += 11
     y += 4
     print("HOLD BACK TO EXIT", 8, y, 6)
     if not state["reported"]:
         state["reported"] = True
         _serial_report()
+        _pmem_report()
 
 
 def _f1(v):
@@ -288,13 +373,54 @@ def _serial_report():
     for name, k, best, med, mx in state["micro"]:
         _p("BENCHCART verb=" + name + " k=" + str(k) + " best_ms=" + str(best)
            + " med_ms=" + str(med) + " max_ms=" + str(mx))
-    for label, s in (("silent", state["stats"]), ("sound", state["stats_snd"])):
+    for label in ("idle", "logic", "draw", "silent", "sound"):
+        s = state["stats"].get(label)
         if s is None:
             continue
         _p("BENCHCART phase=" + label + " n=" + str(s["n"])
            + " p50=" + _f1(s["p50"]) + " p90=" + _f1(s["p90"])
            + " p99=" + _f1(s["p99"]) + " worst=" + _f1(s["worst"])
            + " fps=" + _f1(s["fps"]))
+
+
+# PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
+# this cart, bench_lua.moy/main.lua, tools/p4_cart_bench.py). The Lua twin
+# has no serial print (SPEC sandbox), so the report also goes into pmem, which
+# a harness reads live through moycore.pmem_image; this cart writes the SAME
+# cells so the channel itself is A/B-able. Cells are the bench's own save
+# file; the numbers persisting is harmless and even handy.
+#   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
+#   8 + i*3:  verb_id, k, best_ms          (verb ids in _VERB_ID)
+#   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
+_VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
+            "rectb": 6, "circb": 7, "tri": 8, "spr": 9, "map": 10,
+            "sspr": 11, "tline": 12}
+_PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
+                ("silent", 3), ("sound", 4))
+
+
+def _pmem_report():
+    pmem(0, 45948)
+    pmem(1, 1)
+    pmem(2, len(state["micro"]))
+    for i, (name, k, best, med, mx) in enumerate(state["micro"]):
+        base = 8 + i * 3
+        pmem(base, _VERB_ID.get(name, -1))
+        pmem(base + 1, k)
+        pmem(base + 2, int(best))
+    for label, pid in _PHASE_ORDER:
+        s = state["stats"].get(label)
+        if s is None:
+            continue
+        base = 64 + pid * 8
+        pmem(base, pid)
+        pmem(base + 1, s["n"])
+        pmem(base + 2, int(s["p50"] * 10))
+        pmem(base + 3, int(s["p90"] * 10))
+        pmem(base + 4, int(s["p99"] * 10))
+        pmem(base + 5, int(s["worst"] * 10))
+        pmem(base + 6, int(s["fps"] * 10))
+    pmem(3, 1)
 
 
 def _p(line):

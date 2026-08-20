@@ -4,11 +4,9 @@ persistence adapter's additive `ops` field. Same shared modules the device
 freezes -- MicroPython-safe (plain classes, json-able ops)."""
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import op_history  # noqa: E402
 from runtime.op_history import History, OpCodec  # noqa: E402

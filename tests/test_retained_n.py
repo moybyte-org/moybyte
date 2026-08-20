@@ -8,19 +8,12 @@ Behavior at N<=2 is unchanged (the helper FLOORS at 2 -- the full suite is
 that regression net); these tests pin what N=3 must change.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    kw.setdefault("sys_size", (1024, 600))
-    kw.setdefault("font_scale", 2)
-    kw.setdefault("windowed", True)
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_desktop_ws as _ws
 
 
 def test_helper_floors_at_two(tmp_path):

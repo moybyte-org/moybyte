@@ -23,3 +23,12 @@ def test_docs_match_the_tree():
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "check_docs.py")],
                        cwd=str(ROOT), capture_output=True, text=True)
     assert r.returncode == 0, "\n" + r.stdout + r.stderr
+
+
+def test_archived_firmware_runtime_contract_names_the_lilygo_target():
+    # (Merged from the one-test test_docs.py, 2026-08-18.)
+    text = (ROOT / "docs" / "history" / "firmware_runtime_contract.md").read_text(
+        encoding="utf-8")
+    assert "LilyGO T-Deck Plus" in text
+    assert "moybyte check-portable" in text
+    assert "lilygo_t_deck_plus" in text

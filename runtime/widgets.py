@@ -31,21 +31,12 @@ Workstation constructs, or pull the whole glyph vocabulary out here, i.e. the ug
 cross-import web. It's cohesive with the launcher-home rendering, so it's left put.)
 """
 import json
-import time
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 def _err_text(exc):

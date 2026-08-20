@@ -12,14 +12,14 @@
 this only covers the unambiguous title/author half of the gap.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import moy_carts  # noqa: E402
 from runtime import host_app  # noqa: E402
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
 # ----------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def test_meta_modal_draws_without_crashing_and_reset_closes_it(tmp_path):
     ws.input.begin_frame()
     ws.frame(1 / 30)                                        # draws the modal, must not raise
     assert ws.cart_error is None
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
     ws.cards_layer.reset()                                  # switching cart must not leak it
     assert ws.cards_layer.meta is None

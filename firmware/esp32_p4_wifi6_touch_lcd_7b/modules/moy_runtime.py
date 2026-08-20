@@ -30,12 +30,21 @@ the SDIO slot + LDO4 power fix are a follow-up for removable-cart workflows).
 
 import time
 
-from console import Pointer, Workstation, draw_splash, wire_workstation_core
+from console import Pointer, Workstation, wire_workstation_core
+# The boot spine + frame pump, shared with the T-Deck (#161 Phase 4/5,
+# canonical: runtime/device_boot.py; board.toml stages it like every other
+# shared module). The steps that used to be written twice -- boot splash, cart
+# seed+scan, the Lua runtime probe, the OTA verdict + rollback confirm, the
+# frame cadence -- live there now, as do the idle screen blank (IdleBlank) and
+# the serial dev channel (runtime/dev_channel.py, one vocabulary for every
+# board -- this file adds only the P4-only extras: bt/union/cache). What stays
+# here is hardware: the DPI scan-out, the PPA composite, BLE HID.
+from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
+                         OtaHealth, apply_touch, poll_webhost)
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
-from device_canvas import (DeviceCanvas, _LayerComp, _FONT8, _FONT8_FIRST,
-                           _ST_FONT_SCALE, _COMPACT_MIN_PX)
+from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
 
 GAME_W, GAME_H = 320, 240
@@ -55,15 +64,25 @@ CARTS_ROOT = "/moy/carts"
 OTA_UPDATE_DIR = "/moy/update"
 
 
-class P4SystemCanvas(DeviceCanvas):
-    """The P4 SYSTEM canvas: DeviceCanvas over the DSI framebuffer + the system-
-    surface contract (#39/#73) -- font_scale text, font-scale layers, and the
-    native game/wallpaper composite hooks the shared WM/wallpaper probe for."""
+class P4SystemCanvas(SystemCanvas):
+    """The P4 SYSTEM canvas: the shared system-surface contract (#39/#73 --
+    font_scale text, font-scale layers, blit_cover: ONE body in device_canvas'
+    SystemCanvas) over the DSI framebuffer, plus what only this board has:
+    the PPA hardware-composite hooks the shared WM probes for."""
 
     # Hardware PPA (pixel accelerator) module, set by enable_ppa() once at boot;
     # a class attribute so the one system canvas AND its layers share it, and a
     # PPA error demotes to the CPU kernel globally. None = CPU-only (blit565).
     _ppa = None
+
+    # Game-composite filtering: the PPA's SRM scaler is fixed BILINEAR in
+    # silicon (no nearest mode, no flag -- 2026-08-20), which smears pixel-art
+    # carts. False = CRISP PIXELS (Settings row, persisted via
+    # console.set_crisp_pixels -> set_crisp_scale below): the composite goes
+    # nearest-neighbour through moy_ppa.blit_crisp's SRAM-bounce band pipeline,
+    # falling back to the CPU kernel. A class attribute like _ppa: the one
+    # system canvas and its layers share the mode.
+    _smooth = True
 
     @classmethod
     def enable_ppa(cls):
@@ -80,12 +99,7 @@ class P4SystemCanvas(DeviceCanvas):
         return False
 
     def __init__(self, comp, font_scale=1):
-        # BEFORE the base __init__: its _install_draw_gates (#155) seeds the C
-        # gate's state array from font_scale, and the native print gate renders
-        # at that scale. Setting it afterwards would gate every system surface
-        # at 1x until the next set_font_scale.
-        self.font_scale = max(1, int(font_scale))
-        DeviceCanvas.__init__(self, comp)
+        SystemCanvas.__init__(self, comp, font_scale=font_scale)
         # The root's staleness horizon = the panel's ACTUAL buffer rotation
         # (3 with the #58 render-overlap triple buffer, 2 on an older moy_dsi
         # build, 1 in the single-buffer degrade). Every partial-paint streak
@@ -94,27 +108,22 @@ class P4SystemCanvas(DeviceCanvas):
         if n:
             self.RETAINED_FRAMES = n
 
-    def set_font_scale(self, scale):
-        self.font_scale = max(1, int(scale))
-        st = self._gate_state
-        if st is not None:
-            st[_ST_FONT_SCALE] = self.font_scale
-
-    def print(self, s, x, y, c, scale=1):
-        # SystemCanvas.print (#39): petme128 at font_scale via the native text
-        # kernel's scale arg. The legacy per-call `scale` arg stays ignored,
-        # exactly like the host. framebuf fallback can't scale -- but a P4 build
-        # always carries moy_gfx, so that path only ever renders 1x.
-        fs = self.font_scale
-        if fs <= 1 or self._gfx_text is None:
-            DeviceCanvas.print(self, s, x, y, c)
-            return
-        self.flush_batch()
-        self._gfx_text(self._buf, self.w, self.h, str(s), int(x), int(y),
-                       self._col(c), _FONT8, _FONT8_FIRST, fs,
-                       self._cam_x, self._cam_y,
-                       self._clip_x0, self._clip_y0,
-                       self._clip_x1, self._clip_y1)
+    def set_crisp_scale(self, on):
+        """Settings -> CRISP PIXELS (probed by console.set_crisp_pixels): route
+        the game composite nearest-neighbour instead of the PPA's fixed
+        bilinear. Turning crisp OFF returns blit_crisp's SRAM bounce bands to
+        the internal heap -- that pool is the Lua allocator's first choice, so
+        a mode nobody has on must not tax it."""
+        on = bool(on)
+        P4SystemCanvas._smooth = not on
+        ppa = self._ppa
+        if not on and ppa is not None:
+            rel = getattr(ppa, "crisp_release", None)
+            if rel is not None:
+                try:
+                    rel()
+                except Exception:  # noqa: BLE001 -- freeing is best-effort
+                    pass
 
     # Below this many pixels a CPU fill wins outright: the rect is cache-resident
     # and the PPA's ~60us submit cost dominates. Measured on glass 2026-07-26 --
@@ -143,38 +152,13 @@ class P4SystemCanvas(DeviceCanvas):
             P4SystemCanvas._ppa = None
             return False
 
-    def new_layer(self, w, h, owner=None):
-        # Font-scale-carrying layers (mirrors host SystemCanvas.new_layer): the
-        # windowed WM's window buffers and the bar cache print through these, so
-        # they must scale like the surface they composite onto. Same body as
-        # DeviceCanvas.new_layer with the subclass constructed instead -- including
-        # its size gate on the COMPACT FIRST pre-collect, which matters MORE here:
-        # a collect on the P4 desk is ~55ms (mark scales with the live set), and
-        # this override is the one the bar's 1024x18 strip cache reaches, twice per
-        # gesture. See DeviceCanvas.new_layer for the full note.
-        if int(w) * int(h) >= _COMPACT_MIN_PX:
-            try:
-                import gc
-                gc.collect()
-            except Exception:  # noqa: BLE001
-                pass
-        lay = P4SystemCanvas(_LayerComp(int(w), int(h), self._gfx),
-                             font_scale=self.font_scale)
-        lay._nocache = True
-        # #113: ONE persistent buffer, so a blit-scrolling surface must measure
-        # against the LAST paint. The class default 2 describes the ROOT DPI
-        # ping-pong only. This line exists in DeviceCanvas.new_layer and was
-        # LOST when this subclass copied its body -- with the ring armed, a
-        # picker drag then shifted by ~twice the real delta and ghosted a second
-        # copy of every card (owner-reported on glass 2026-07-25).
-        lay.RETAINED_FRAMES = 1
-        comp = lay._comp
-        if owner is not None and comp.pooled:
-            lent = self._lent_layers
-            if lent is None:
-                lent = self._lent_layers = {}
-            lent.setdefault(owner, []).append((comp._buf, comp._nbytes))
-        return lay
+    # new_layer is DeviceCanvas.new_layer's one body (the SystemCanvas
+    # _make_layer hook constructs this class); its COMPACT-FIRST pre-collect
+    # matters MORE here -- a collect on the P4 desk is ~55ms and the bar's
+    # 1024x18 strip cache builds layers twice per gesture -- and the copy this
+    # class used to carry had lost the cart-palette rider AND (2026-07-25, on
+    # glass) once the RETAINED_FRAMES = 1 pin: a picker drag shifted by ~twice
+    # the real delta and ghosted every card. That is why there is no copy.
 
     # -- the native composite hooks (probed via getattr by the shared code) ----
 
@@ -201,8 +185,12 @@ class P4SystemCanvas(DeviceCanvas):
         """wm_windowed._blit_game's device path (#58/#73): integer-scale the
         320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
         ~2.6x faster than the CPU blit -- measured) when available, else the
-        moy_gfx CPU kernel. Both write the same RGB565 bytes (glass-verified
-        pixel-identical), so the fallback is graceful.
+        moy_gfx CPU kernel. NOTE the two do NOT write the same bytes: the PPA
+        scaler is fixed bilinear (smeared pixel art), the CPU kernel nearest --
+        which is what the CRISP PIXELS toggle (_smooth above) trades on. In
+        crisp mode moy_ppa.blit_crisp keeps nearest pixels at ~60% of the CPU
+        kernel's cost (SRAM bounce bands + 1:1 DMA ship, byte-exact vs the CPU
+        kernel -- glass-verified); any refusal falls back to the CPU kernel.
 
         defer=True (a QUIET game frame, where this is the frame's LAST framebuffer
         write) kicks the PPA async and hands the show to P4Compositor.flush ->
@@ -222,7 +210,23 @@ class P4SystemCanvas(DeviceCanvas):
         # fits (scale is derived from the window rect); only the cover-crop
         # backdrop overflows, and that takes the CPU path below. A non-fit is a
         # normal per-call condition, NOT a PPA failure -- don't demote for it.
-        if ppa is not None and ox >= 0 and oy >= 0 \
+        if ppa is not None and not P4SystemCanvas._smooth:
+            # CRISP PIXELS: nearest-neighbour banded composite. blit_crisp
+            # applies the same fit gate itself and returns False on any
+            # refusal (no SRAM bands / non-fit / hardware error), which falls
+            # through to the CPU kernel below -- identical pixels, slower.
+            # It never demotes _ppa: the bilinear path stays healthy.
+            bc = getattr(ppa, "blit_crisp", None)
+            if bc is not None:
+                try:
+                    if bc(self._buf, self.w, self.h, ox, oy,
+                          gc._buf, gc.w, gc.h, scale, 1 if defer else 0):
+                        if defer:
+                            self._comp._composite_pending = True
+                        return
+                except Exception as exc:  # noqa: BLE001 -- fall to the CPU
+                    print("Moybyte P4 crisp blit failed -> CPU:", exc)
+        elif ppa is not None and ox >= 0 and oy >= 0 \
                 and ox + gc.w * scale <= self.w and oy + gc.h * scale <= self.h:
             try:
                 if defer:
@@ -290,48 +294,18 @@ class P4SystemCanvas(DeviceCanvas):
                                      layer._buf, layer.w, layer.h)
         return True
 
-    def blit_cover(self, gc):
-        """wallpaper._backdrop_blit's device path (#58): the smallest integer
-        upscale of the 320x240 wallpaper frame that COVERS the whole desktop,
-        centered + cropped (dx/dy <= 0). The crop overflows the picture, which
-        the PPA can't do (it has no clip), so this stays on the CPU kernel --
-        it's a launcher-only backdrop (drag frames restore from the cache via
-        blit_copy, which IS the PPA), not a per-frame hot path."""
-        gw, gh = gc.w, gc.h
-        sw, sh = self.w, self.h
-        scale = max(1, (sw + gw - 1) // gw, (sh + gh - 1) // gh)
-        ox = (sw - gw * scale) // 2
-        oy = (sh - gh * scale) // 2
-        fb = getattr(gc, "flush_batch", None)
-        if fb is not None:
-            fb()
-        self.flush_batch()
-        g = self._gfx
-        if g is None:
-            return
-        g.blit565_scale(self._buf, self.w, self.h, int(ox), int(oy),
-                        gc._buf, gc.w, gc.h, int(scale))
+    # blit_cover is SystemCanvas's shared body -- CPU kernel by design: the
+    # cover-crop overflows the picture, which the PPA can't do (no clip), and
+    # it's a launcher-only backdrop, not a per-frame hot path.
 
 
-def _load_carts(progress=None):
-    """Load carts from the internal-flash store (seeding built-ins on first
-    boot); fall back to the embedded CARTS on any store failure.
-
-    `progress` is handed to seed_builtins so the boot splash can show a bar:
-    on a full-erase boot this call is 17.5 of the 25 seconds before anything
-    composes, and every second of it is seeding."""
-    try:
-        import moy_carts
-        moy_carts.ensure_dirs(CARTS_ROOT)
-        moy_carts.seed_builtins(CARTS, CARTS_ROOT, progress=progress)
-        carts = moy_carts.scan(CARTS_ROOT)
-        if carts:
-            print("Moybyte P4 loaded %d carts from flash" % len(carts))
-            return carts, CARTS_ROOT
-    except Exception as exc:  # noqa: BLE001
-        print("Moybyte P4 flash carts unavailable:", exc)
-    print("Moybyte P4 using built-in carts")
-    return [dict(c) for c in CARTS], None
+# Loading the carts is DeviceBoot.load_carts now (#161 Phase 4): the seed +
+# scan + built-in fallback is the same on both boards, and what differs here is
+# arguments -- the internal-flash root above, no storage SESSION at all (this
+# console has no SD card and the store races nobody), and the word "flash" in
+# the serial lines. On a full-erase boot that call is 17.5 of the 25 seconds
+# before anything composes, and every second of it is seeding -- which is what
+# the splash's progress bar is for.
 
 
 def run_touch_calibrate():
@@ -474,99 +448,6 @@ def run_ppa_smoke(scale=2, iters=60):
     print("PPA SMOKE done -> REPL")
 
 
-def _remote_state(ws):
-    """One-line JSON snapshot for the serial `state` command -- the on-glass
-    test harness's introspection half (tools/p4_autotest.py parses it). Every
-    field is best-effort: a broken subsystem reads as null, never a crash."""
-    st = {}
-    try:
-        st["screen"] = ws.screen
-        st["frames"] = getattr(ws, "_frames_drawn", None)
-        # Idle screen blank (#58): the harness has to be able to tell a blanked
-        # panel from a hung one -- they look identical from the host end.
-        st["psave"] = [bool(getattr(ws, "_psave_asleep", False)),
-                       getattr(ws, "_psave_ms", POWER_SAVE_MS) // 1000]
-        # Expensive-event counters (ws.note_cost): cache builds + storage reads.
-        # A cache that is silently missing shows up here as a count that tracks the
-        # frame count -- which is how the 2026-07-26 bar-strip thrash would have
-        # announced itself instead of taking a day to corner.
-        st["costs"] = dict(getattr(ws, "costs", {}) or {})
-        wm = ws.wm
-        desk = getattr(wm, "desk_open", None)
-        st["desk"] = bool(desk()) if desk is not None else None
-        st["order"] = list(getattr(wm, "_order", ()) or ())
-        st["focus"] = getattr(wm, "_focus", None)
-        wins = {}
-        for k in st["order"]:
-            win = wm._wins.get(k)
-            if win is not None:
-                wins[k] = [win.x, win.y, win.w, win.h, win.title_h,
-                           win.kind, bool(win.minimized)]
-        st["wins"] = wins
-        # #113: a window buffer is ONE retained surface -- 2 here means a
-        # blit-scroll would measure against the wrong paint and ghost.
-        st["win_retained"] = dict(
-            (k, getattr(wm._wins[k].buf, "RETAINED_FRAMES", None))
-            for k in st["order"]
-            if wm._wins.get(k) is not None and wm._wins[k].buf is not None)
-    except Exception as exc:  # noqa: BLE001
-        st["wm_err"] = str(exc)
-    try:
-        sl = ws.settings_layer
-        sr = sl.scroll
-        st["settings"] = {
-            "set_top": sl.set_top, "sel": sl.set_msel,
-            "rows": len(sl._settings_rows()),
-            "offset": None if sr is None else sr.offset,
-            "view": None if sr is None else list(sr.view),
-            "content": None if sr is None else sr.content,
-            "wifi_view": bool(sl.wifi_view), "bt_view": bool(sl.bt_view),
-        }
-        win = ws.wm._wins.get("settings") if hasattr(ws.wm, "_wins") else None
-        if win is not None and win.ctx is not None:
-            lay = win.ctx.layout
-            st["settings"]["lay"] = [lay.set_x, lay.set_row_y0,
-                                     lay.set_w, lay.set_row_h]
-    except Exception as exc:  # noqa: BLE001
-        st["settings_err"] = str(exc)
-    try:
-        if ws.wifi is not None:
-            st["wifi"] = list(ws.wifi.status())
-        else:
-            st["wifi"] = None
-    except Exception as exc:  # noqa: BLE001
-        st["wifi_err"] = str(exc)
-    try:
-        # Look the app cart up by TITLE, never by folder name: the device seeds
-        # from the title slug (appearance.moy) while the host store copies the
-        # source folder (theme_picker.moy) -- assuming either name is what broke
-        # is_app in the first place (on-glass 2026-07-25).
-        app = getattr(ws, "appearance_app", None)
-        cart = None
-        for c in ws._all_carts:
-            if c.get("title") == "Appearance":
-                cart = c
-                break
-        if cart is None:
-            st["appearance_cart"] = None
-        else:
-            st["appearance_cart"] = {
-                "title": cart.get("title"), "version": cart.get("version"),
-                "path": cart.get("path"),
-                "perms": list(cart.get("permissions") or ()),
-                "is_app": bool(app.is_app(cart)) if app is not None else None,
-            }
-        # Every registered system app's claim, so a harness run catches the
-        # whole class rather than just Appearance.
-        claims = {}
-        for _app, _text in getattr(ws, "_apps", ()):
-            claims[_app.id] = sum(1 for c in ws._all_carts if _app.is_app(c))
-        st["app_claims"] = claims
-    except Exception as exc:  # noqa: BLE001
-        st["appearance_err"] = str(exc)
-    return st
-
-
 # Idle screen blank (#58): milliseconds of NO INPUT before the panel goes dark,
 # so the board can sit plugged in for days without a lit screen. 0 disables it.
 # Overridable before boot (`import moy_runtime; moy_runtime.POWER_SAVE_MS = ...`)
@@ -588,7 +469,7 @@ def run_desktop(fps_cap=60):
     USB starvation on this board)."""
     from p4_display import P4Compositor, set_backlight
     from p4_input import Touch
-    from p4_ble_keyboard import BleHidKeyboard
+    from ble_keyboard import BleHidKeyboard
     from moybyte.input import InputState
     from wm_windowed import WindowedWM
     import moy_carts
@@ -603,65 +484,21 @@ def run_desktop(fps_cap=60):
     # if it fails to register.
     print("Moybyte P4 PPA:", "enabled" if P4SystemCanvas.enable_ppa() else "CPU-only")
 
-    # -- boot splash (#58) ------------------------------------------------
+    # -- the shared boot spine (#45/#58/#161) ------------------------------
+    # DeviceBoot owns the boot splash + its progress bar, the cart seed/scan,
+    # the Lua runtime probe and the "first frame in Nms" report -- one
+    # implementation, both boards. What differs here is its arguments: the
+    # serial prefix and this board's panel-light function.
+    #
     # The panel stays dark until a frame has composed (#45), which is right:
     # an uninitialised framebuffer is worse than black. But it makes a slow
     # boot indistinguishable from a dead board. Owner-reported after a full
     # erase: "screen is black", serial silent after its last boot line, on a
     # board that was in fact working and did light up eventually.
-    #
-    # WHY that boot was slow is still unmeasured -- a warm boot composes in
-    # ~23ms, so it is something the erase forced (re-seeding, cache rebuilds)
-    # and not the steady state. Naming it is what the timing line at the end of
-    # this function is for; this splash is so the wait is legible while it
-    # happens, on the glass and on the wire.
-    #
-    # So compose a real frame early and say what is happening on it. Navy
-    # rather than black on purpose: the point is to prove the panel is LIT.
-    # Each stage repaints one line, and the same text goes to the wire, so a
-    # boot that stalls says where it stalled on both channels.
-    _splash = {"lit": False}
-
-    def _boot_note(msg, frac=None):
-        if _splash.get("done"):
-            return                 # the desktop owns the glass now
-        if frac is None:
-            print("Moybyte P4 boot:", msg)   # a stage; the bar stays quiet
-        try:
-            w, h = sys_canvas.w, sys_canvas.h
-            # THE thing that makes this a loading screen rather than a strobe.
-            # The canvas caches its framebuffer pointer, and flush() rotates the
-            # back buffer (3 of them, #58 render overlap) -- so without this the
-            # splash repaints ONE buffer while the panel shows the other two,
-            # i.e. two frames in three are stale. The desktop loop calls this
-            # every frame for the same reason.
-            sys_canvas.sync_back()
-            # The SHIPPED boot logo (console.draw_splash -- Moy + the two-tone
-            # wordmark), with the bar and status under it. Deliberately the same
-            # picture the Workstation shows at #45's splash: a loading screen
-            # that looks like a different program makes the machine appear to
-            # start twice.
-            draw_splash(sys_canvas, frac=frac, status=msg)
-            comp.flush()
-            if not _splash["lit"]:
-                set_backlight(True)
-                _splash["lit"] = True
-        except Exception as exc:  # noqa: BLE001 -- a splash must never fail a boot
-            print("Moybyte P4 splash unavailable:", exc)
-
-    def _seed_progress(done, total, title):
-        # One repaint per cart: at ~550ms of flash writes each, 32 repaints of a
-        # static screen are free (measured: the boot stays at 25.4s), and this
-        # is the only 17 seconds of the boot that knows how much of itself is
-        # left. Every 8th also goes to the wire -- a repaint says nothing to
-        # someone watching over serial, which was half the original complaint,
-        # and one line per cart would drown the boot log.
-        if done % 8 == 0:
-            print("Moybyte P4 boot: loading cartridges %d/%d" % (done + 1, total))
-        _boot_note("loading cartridges  %d/%d" % (done + 1, total),
-                   frac=float(done) / total if total else 1.0)
-
-    _boot_note("starting")
+    # The splash makes the wait legible on the glass and on the wire; the
+    # timing line at the end of this function names where a slow boot went.
+    boot = DeviceBoot(sys_canvas, comp, set_backlight, "Moybyte P4")
+    boot.note("starting")
     # The fixed 320x240 GAME canvas (#39): off-screen RGB565 sharing the same
     # native kernel; the windowed WM composites it into the player window.
     # (#77: -O3 on moy_gfx and an internal-SRAM game canvas were A/B'd here --
@@ -675,28 +512,28 @@ def run_desktop(fps_cap=60):
     pointer = Pointer(sys_canvas.w, sys_canvas.h)
     inp.pointer = pointer          # touch-driven carts read it via the api touch()
 
-    _boot_note("loading cartridges")
-    carts, carts_root = _load_carts(progress=_seed_progress)
+    boot.note("loading cartridges")
+    carts, carts_root = boot.load_carts(moy_carts, CARTS, root=CARTS_ROOT,
+                                        media="flash")
     # P4 keyboard (#26): the C6_WIFI MicroPython variant already exposes NimBLE
     # central/GATT-client bindings over ESP-Hosted SDIO. Keep construction lazy
     # until /moy exists (the bond store lives beside the carts), and start the
     # radio after the Workstation has finished its boot allocations below.
     keyboard = BleHidKeyboard(inp, store_path="/moy/ble_keyboard.json",
                               auto_start=False)
-    _boot_note("building the desktop")
+    boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
-    # #67 Phase 1: the Lua cart runtime (shared glue in device_api.py) -- wired
-    # only when the moy_lua native module is in this build; without it a
-    # "runtime": "lua" cart opens the Player's runtime-missing panel.
-    lua_runtime = None
-    try:
-        import moy_lua as _moy_lua_probe  # noqa: F401 -- availability probe
-        from device_api import make_lua_runtime
-        lua_runtime = make_lua_runtime(ws)
-        print("Moybyte P4: lua runtime ON")
-    except ImportError:
-        pass
+    # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
+    # raster plays on its own off-screen canvas -- the exact constructor the
+    # boot `game` canvas uses -- and P4SystemCanvas.blit_game (PPA) upscales it
+    # like any game composite (a 128x120 view fills the 600px height at 5x).
+    ws.make_game_canvas = lambda w, h: DeviceCanvas(
+        _LayerComp(int(w), int(h), gfx))
+    # The #67 Lua cart runtime (DeviceBoot.lua_runtime -- one probe, both
+    # boards; see its docstring for why there is no chooser and what a build
+    # without the module does instead).
+    lua_runtime = boot.lua_runtime(ws)
     # The shared service wiring (console.wire_workstation_core -- one canonical
     # order for host + both boards; this used to be a hand-kept "same order as
     # host build_workstation" copy). P4 notes: can_manage's carts_root default is
@@ -728,6 +565,21 @@ def run_desktop(fps_cap=60):
         ws.reboot_hook = machine.reset
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: reboot hook unavailable:", exc)
+    # WEB CONSOLE (moycore plan 3.4 pull half): serve the wasm console from this
+    # board. Constructed, NOT started -- __init__ binds no socket, so injecting
+    # it only makes the Settings row appear. `ensure_online` returns the STA IP,
+    # which is what the row displays: 0.0.0.0 is the one address nobody can type
+    # into a browser.
+    try:
+        from moy_webhost import make_webhost, INTERNAL_WEB_DIR
+
+        # The link wait that used to be a closure here is moy_webhost.ensure_online
+        # now -- it was the same 25 lines the T-Deck needed, and writing it per
+        # board is how that board went without the feature entirely.
+        ws.webhost = make_webhost(ws, carts_root, INTERNAL_WEB_DIR,
+                                  autoconnect=autoconnect_wifi)
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: web console unavailable:", exc)
     # The P4 presentation tier (#73/#58, two worlds #105): the DESK is home
     # (make world, windows); the PLAY icon drops to the fullscreen Library.
     # Installed AFTER load_system (same order as host build_workstation) so the
@@ -736,474 +588,191 @@ def run_desktop(fps_cap=60):
     ws.open_desk()
     keyboard.start()               # failure is touch-only, never a boot failure
 
-    # Remote input over serial (#58 dev affordance): the CH343 REPL stays alive
-    # under the desktop (no USB starvation on this board), so complete LINES piped
-    # into the port drive the UI while the glass is watched:
-    #   tap <x> <y>   synthetic tap at system-canvas coords
-    #   tap sysmenu   tap a named bar button (any ws.layout.<name>_btn rect:
-    #                 sysmenu / wifi / batt / context_x)
+    # The serial dev channel (#58/#156): ONE implementation for every board --
+    # `dev_channel.DevChannel`, staged from runtime/ (state / tap / run / open /
+    # swipe / drag / diag / skip / gov / power / py / web / quit; the CH343 REPL
+    # stays alive under the desktop, so complete lines piped into the port
+    # drive the UI while the glass is watched). Ctrl-C still interrupts as
+    # before. This board's EXTRAS -- commands only its hardware or tier has:
     #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
-    #   quit          leave the desktop for the REPL
-    # Ctrl-C still interrupts as before (handled below the stdin read).
+    #   union 0|1   A/B the dirty-union gesture restore (pairs with `drag`)
+    #   cache 0|1   A/B the drag backdrop cache
+    #   crisp 0|1   A/B the CRISP PIXELS composite (non-persisting)
+    idle = IdleBlank(set_backlight, POWER_SAVE_MS)
+    ws._psave_ms = POWER_SAVE_MS   # `state` reports the LIVE timeout
+
+    def _bt_cmd(ws, parts, line):
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "scan":
+            print("REMOTE bt scan ->", keyboard.scan())
+        elif action == "forget":
+            keyboard.forget()
+            print("REMOTE bt forgot keyboard + local bonds")
+        elif action == "status":
+            print("REMOTE bt status state=%s name=%s passkey=%s "
+                  "protocol=%s interval_ms=%s notify=%s fast=%s "
+                  "dsi_underruns=%s error=%s"
+                  % (keyboard.status()[0], keyboard.status()[1],
+                     keyboard.status()[2], keyboard.protocol,
+                     keyboard._conn_interval_ms, keyboard._notify_count,
+                     keyboard.fast_status(), comp.underruns(),
+                     keyboard.error))
+        elif action == "trace":
+            on = not (len(parts) > 2 and parts[2] == "0")
+            print("REMOTE bt trace ->", keyboard.trace(on))
+        else:
+            print("REMOTE bt ? %s" % line)
+
+    def _union_cmd(ws, parts, line):
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.wm._union_disabled = not on
+        print("REMOTE union %s" % ("on" if on else "off"))
+
+    def _cache_cmd(ws, parts, line):
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.wm._backdrop_disabled = not on
+        print("REMOTE cache %s" % ("on" if on else "off"))
+
+    def _crisp_cmd(ws, parts, line):
+        # A/B the CRISP PIXELS composite from serial without persisting, so a
+        # measurement session never leaves the board on a non-default mode.
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.set_crisp_pixels(on, persist=False)
+        print("REMOTE crisp %s" % ("on" if on else "off"))
+
     try:
-        import sys
-        import select
-        _sin = select.poll()
-        _sin.register(sys.stdin, select.POLLIN)
-    except Exception:  # noqa: BLE001 -- remote input is optional sugar
-        _sin = None
+        from dev_channel import DevChannel
+        # env: what the `py` probe hook can reach beyond ws/wm/pointer --
+        # `pump.debt` and `boot.lit`/`boot.done` are the shared spine's only
+        # on-glass witnesses (pump joins the env right after it is created).
+        serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
+                            extra={"bt": _bt_cmd, "union": _union_cmd,
+                                   "cache": _cache_cmd, "crisp": _crisp_cmd},
+                            env={"comp": comp, "game": game, "boot": boot})
+    except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
+        print("Moybyte P4 serial channel unavailable:", exc)
+        serial = None
 
     import gc
     gc.collect()
     # Say what became of the last update before anything else can overwrite the
     # evidence (#53). The rollback CONFIRM does not happen here -- reaching this
     # line only proves the desktop was built, and an image that never paints has
-    # already shipped once (#56). It is fired from the frame loop below, after
-    # the console has actually drawn.
-    _ota = getattr(ws, "updater", None)   # cleared once the confirm below has fired
-    if _ota is not None:
-        try:
-            verdict = _ota.boot_check()
-            if verdict:
-                print("Moybyte P4 OTA: last update %s (%s)" % verdict)
-                ws.announce_update()      # and say so on the desktop, not just here
-        except Exception as exc:  # noqa: BLE001 -- never block the desktop
-            print("Moybyte P4 OTA: boot_check failed:", exc)
+    # already shipped once (#56). It is fired from the frame loop below
+    # (FramePump.tail), after the console has actually drawn.
+    _ota = OtaHealth(ws, log=lambda m: print("Moybyte P4 OTA: %s" % m))
+    _ota.boot_check()
     print("Moybyte P4 desktop running (Ctrl-C for REPL)")
     # The last thing before the loop, and the stage the silent wait was in:
     # everything above had already printed when the screen was reported black.
-    _boot_note("drawing the first frame")
-    _first_at = _ticks_ms()
-    frame_ms = 1000 // fps_cap
-    last = _ticks_ms()
-    # Dark until the first composed frame (#45) -- unless the splash already
-    # composed one, in which case the panel is lit and stays lit.
-    _backlight_on = _splash["lit"]
-    _ps_ms = POWER_SAVE_MS         # idle blank timeout (serial `power` retunes)
-    _asleep = False                # panel blanked by the idle timer
-    _ps_force = False              # serial `power off`: blank on the next frame
-    _idle_at = _ticks_ms()         # last frame that saw real input
-    _drag_script = None            # remote `drag` playback state (see below)
-    _swipe_script = None           # remote `swipe` playback state (see below)
+    # start_frames also arms the boot logo, but ONLY if the splash never came up
+    # (arming it otherwise replays the splash and delays the desktop).
+    boot.start_frames(ws)
+    # The shared frame pump (#161 Phase 5): the dt clock, the once-only
+    # first-frame/OTA housekeeping, and the cadence + pacing debt. Everything
+    # BETWEEN its head and its tail is this board's own hardware.
+    pump = FramePump(boot, _ota, fps_cap)
+    if serial is not None:
+        serial.env["pump"] = pump   # created just above; see the env note
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
     # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
-    # console's own draw/flush/logic/render/chrome EMAs (filled because
-    # perf_capture is on). Costs two tick reads per frame.
-    ws.perf_capture = True
-    _pf_at = _ticks_ms() + 2000
-    _pf_n = 0
-    _pf_busy = 0
-    _pf_drawn = 0
-    # NOT a second logo. arm_splash holds the boot picture for 1.5s once the
-    # desktop is ready, which is right on a board that boots straight into it --
-    # but here that same picture has been on the glass for the whole boot, so
-    # arming it just replays the splash and delays the desktop. Armed only if
-    # the splash never came up (its draw failed), which is the one case where
-    # the logo would otherwise never be seen.
-    if not _splash["lit"]:
-        ws.arm_splash()
-    while True:
-        now = _ticks_ms()
-        dt = max(0.0, min(0.1, _ticks_diff(now, last) / 1000.0))
-        last = now
-        # BLE notifications arrive asynchronously; applying their latest level
-        # state before begin_frame gives InputState clean press/release edges.
-        # poll() also advances scan/reconnect and flushes a newly-created bond
-        # once, outside the NimBLE IRQ.
+    # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
+    # per frame; the LINE is unconditional (its fps= field reads _frames_drawn,
+    # so it is valid with the meters off, and tools/p4_perf.py parses it).
+    #
+    # The METERS follow Settings -> PERF DIAG, exactly as on the T-Deck
+    # (#68 kid mode: perf_capture arms per-layer walk timing, per-op canvas
+    # timers and the EMA tail -- ~1-1.5ms of every frame there). This line read
+    # an unconditional True until 2026-08-15, so the toggle gated nothing at
+    # boot on this board and the shipping fps could not be measured without
+    # first issuing `diag 0` -- which tools/p4_perf.py already did, its
+    # docstring already claiming "DIAG IS OFF BY DEFAULT".
+    ws.perf_capture = bool(getattr(ws, "diag_live", False))
+    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
+
+    def _poll_inputs(now):
+        """This board's input sources: the BLE keyboard's async notifications
+        (applied before begin_frame so InputState gets clean press/release
+        edges; poll() also advances scan/reconnect and flushes a new bond once,
+        outside the NimBLE IRQ) and the GT911 pointer. The dev channel and the
+        idle blank run in the SHARED loop, in the one order that lets the
+        waking touch be swallowed."""
         try:
             keyboard.poll()
         except Exception as exc:  # noqa: BLE001 -- keyboard must fail touch-only
             print("Moybyte P4 BLE keyboard poll failed:", exc)
         inp.begin_frame()
-        click = False
-        _serial_cmd = False        # a dev command counts as activity (wakes it)
-        tp = touch.poll()
-        pointer.down = tp is not None
-        if tp is not None:
-            pointer.place(tp[0], tp[1])
-            if tp[2]:
-                click = True
-        if _sin is not None and _sin.poll(0):
-            line = ""
-            try:
-                line = sys.stdin.readline().strip()
-            except Exception:  # noqa: BLE001
-                pass
-            parts = line.split() if line else []
-            _serial_cmd = bool(parts)
-            if parts and parts[0] == "quit":
-                print("REMOTE quit -> REPL")
-                return
-            if parts and parts[0] == "bt":
-                action = parts[1] if len(parts) > 1 else "status"
-                if action == "scan":
-                    print("REMOTE bt scan ->", keyboard.scan())
-                elif action == "forget":
-                    keyboard.forget()
-                    print("REMOTE bt forgot keyboard + local bonds")
-                elif action == "status":
-                    print("REMOTE bt status state=%s name=%s passkey=%s "
-                          "protocol=%s interval_ms=%s notify=%s fast=%s "
-                          "dsi_underruns=%s error=%s"
-                          % (keyboard.status()[0], keyboard.status()[1],
-                             keyboard.status()[2], keyboard.protocol,
-                             keyboard._conn_interval_ms, keyboard._notify_count,
-                             keyboard.fast_status(), comp.underruns(),
-                             keyboard.error))
-                elif action == "trace":
-                    on = not (len(parts) > 2 and parts[2] == "0")
-                    print("REMOTE bt trace ->", keyboard.trace(on))
-                else:
-                    print("REMOTE bt ? %s" % line)
-            if parts and parts[0] == "tap":
-                r = None
-                if len(parts) == 3:
-                    try:
-                        r = (int(parts[1]), int(parts[2]))
-                    except ValueError:
-                        r = None
-                elif len(parts) == 2:
-                    rect = getattr(ws.layout, parts[1] + "_btn", None)
-                    if rect:
-                        r = (rect[0] + rect[2] // 2, rect[1] + rect[3] // 2)
-                if r is not None:
-                    pointer.place(r[0], r[1])
-                    pointer.down = True   # released next frame (touch reads None)
-                    click = True
-                    print("REMOTE tap %d %d" % r)
-                else:
-                    print("REMOTE ? %s" % line)
-            if parts and parts[0] == "run":
-                # `run <name>`: select the first cart whose title matches and RUN
-                # it (the launcher tap path) -- deterministic game launch without
-                # tile-hunting, for measuring the play + game-window-drag paths.
-                name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
-                items = getattr(ws.launcher, "items", [])
-                idx = None
-                for i in range(len(items)):
-                    it = items[i]
-                    if not it.get("path"):
-                        continue
-                    t = str(it.get("title") or "").lower()
-                    if not name:
-                        idx = i
-                        break
-                    if name in t:
-                        idx = i
-                        break
-                if idx is not None:
-                    ws.launcher.sel = idx
-                    ws.launch_selected()
-                    print("REMOTE run %s" % items[idx].get("title"))
-                else:
-                    print("REMOTE run: no cart match")
-            if parts and parts[0] == "diag":
-                # `diag 0|1`: toggle the diagnostic frame-eaters (perf_capture +
-                # the on-screen FPS chip) to measure the TRUE shipping fps. The
-                # fps= field of the PERF line reads _frames_drawn either way, so
-                # it stays valid with perf_capture off (only the ms EMAs go
-                # stale). Default here is ON (a measurement build).
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.perf_capture = on
-                ws.show_fps = on
-                ws._dirty = True
-                print("REMOTE diag %s" % ("on" if on else "off"))
-            if parts and parts[0] == "skip":
-                # `skip 0|1`: A/B the #77 frameskip gate (logic full-rate, render
-                # halved) without walking to Settings. persist=False: a serial A/B
-                # must not rewrite the kid's system.json.
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.set_frameskip(on, persist=False)
-                print("REMOTE skip %s" % ("on" if on else "off"))
-            if parts and parts[0] == "gov":
-                # `gov 0|1`: A/B the frame governor (#63 SNES rule) on glass --
-                # a GAME locks to its manifest fps (default 30) with the freed
-                # headroom absorbing GC/render spikes. frame_cap_fps() re-reads
-                # the module global every loop, so this takes effect immediately;
-                # the shipped default stays OFF (owner measurement mode).
-                on = not (len(parts) == 2 and parts[1] == "0")
-                import console as _console_mod
-                _console_mod.FPS_GOVERNOR = on
-                print("REMOTE gov %s" % ("on" if on else "off"))
-            if parts and parts[0] == "union":
-                # `union 0|1`: A/B the dirty-union gesture restore (#58; 1=on,
-                # 0=full-screen restore) -- pairs with `drag [frames]`.
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.wm._union_disabled = not on
-                print("REMOTE union %s" % ("on" if on else "off"))
-            if parts and parts[0] == "cache":
-                # `cache 0|1`: A/B the drag backdrop cache on glass (1=on).
-                on = not (len(parts) == 2 and parts[1] == "0")
-                ws.wm._backdrop_disabled = not on
-                print("REMOTE cache %s" % ("on" if on else "off"))
-            if parts and parts[0] == "power":
-                # `power`            -- report
-                # `power <seconds>`  -- retune the idle blank (0 disables)
-                # `power off`        -- blank NOW, without waiting out the timer
-                #                      (the board README wants exactly this
-                #                      reading to split SoC vs backlight draw)
-                # `power on`         -- wake now
-                _arg = parts[1] if len(parts) > 1 else ""
-                if _arg == "off":
-                    _ps_force = True
-                elif _arg == "on":
-                    _idle_at = now
-                    if _asleep:
-                        _asleep = False
-                        set_backlight(True)
-                        _backlight_on = True
-                        ws._psave_asleep = False
-                        ws._dirty = True
-                elif _arg:
-                    try:
-                        _ps_ms = max(0, int(_arg)) * 1000
-                        ws._psave_ms = _ps_ms
-                        _idle_at = now
-                    except ValueError:
-                        print("REMOTE power ? %s" % line)
-                print("REMOTE power timeout=%ds asleep=%s idle=%ds"
-                      % (_ps_ms // 1000, _asleep,
-                         _ticks_diff(now, _idle_at) // 1000))
-            if parts and parts[0] == "open":
-                # `open settings|picker`: pop an app window deterministically (no
-                # tile-hunting) so a drag can be measured against a known window.
-                # `open appearance` reports open_app's claim result (a False is
-                # the silent no-op the on-glass harness needs to SEE); `open
-                # wifi` deep-links Settings -> the wifi panel.
-                what = parts[1] if len(parts) > 1 else ""
-                if what == "appearance":
-                    ok = ws.open_app(ws.appearance_app)
-                    print("REMOTE open appearance -> %s" % ok)
-                elif what == "wifi":
-                    ws.open_settings()
-                    ws.settings_layer.open_wifi()
-                    print("REMOTE open wifi")
-                else:
-                    fn = {"settings": getattr(ws, "open_settings", None),
-                          "picker": getattr(ws, "open_picker", None)}.get(what)
-                    if fn is not None:
-                        fn()
-                        print("REMOTE open %s" % what)
-                    else:
-                        print("REMOTE open ? %s" % line)
-            if parts and parts[0] == "py" and len(parts) > 1:
-                # `py <code>`: eval/exec one line against the LIVE console (ws /
-                # wm / pointer in scope) between frames -- the harness's probe
-                # hook (attach counters, read gesture state, monkeypatch a
-                # surface under test). Dev-board serial only, like every
-                # command here.
-                _code = line.split(None, 1)[1]
-                _env = {"ws": ws, "wm": ws.wm, "pointer": pointer,
-                        "comp": comp, "game": game}
-                try:
-                    try:
-                        print("PY %r" % (eval(_code, _env),))
-                    except SyntaxError:
-                        exec(_code, _env)
-                        print("PY ok")
-                except Exception as exc:  # noqa: BLE001
-                    print("PY ERR %s: %s" % (type(exc).__name__, exc))
-            if parts and parts[0] == "state":
-                # `state`: one-line JSON snapshot (world/windows/settings scroll/
-                # wifi/cart claims) -- the harness's assertion source.
-                try:
-                    import json as _json
-                    print("STATE %s" % _json.dumps(_remote_state(ws)))
-                except Exception as exc:  # noqa: BLE001
-                    print("STATE {\"err\": \"%s\"}" % exc)
-            if parts and parts[0] == "swipe" and len(parts) >= 5:
-                # `swipe x0 y0 x1 y1 [frames]`: a synthetic touch gesture fed
-                # through the SAME pointer path as the glass (press edge at the
-                # start point, interpolated held move, release at the end), so
-                # the harness can exercise scroll/drag/fling on any surface.
-                try:
-                    _swipe_script = {"i": 0,
-                                     "x0": int(parts[1]), "y0": int(parts[2]),
-                                     "x1": int(parts[3]), "y1": int(parts[4]),
-                                     "n": max(2, int(parts[5]))
-                                     if len(parts) > 5 else 20}
-                    print("REMOTE swipe %d,%d -> %d,%d frames=%d"
-                          % (_swipe_script["x0"], _swipe_script["y0"],
-                             _swipe_script["x1"], _swipe_script["y1"],
-                             _swipe_script["n"]))
-                except ValueError:
-                    _swipe_script = None
-                    print("REMOTE swipe ? %s" % line)
-            if parts and parts[0] == "drag":
-                # `drag [frames]`: grab the TOP window's title strip and oscillate
-                # it for `frames` frames (default 120), so the PERF sampler reports
-                # DRAG-time fps -- the backdrop-cache lever's target. No window open
-                # -> a no-op note.
-                order = getattr(ws.wm, "_order", None) or []
-                if order:
-                    win = ws.wm._wins[order[-1]]
-                    n = 120
-                    step = 6
-                    if len(parts) >= 2:
-                        try:
-                            n = max(8, int(parts[1]))
-                        except ValueError:
-                            pass
-                    if len(parts) >= 3:
-                        try:
-                            step = max(1, int(parts[2]))  # px/frame amplitude scale
-                        except ValueError:
-                            pass
-                    _drag_script = {"i": 0, "n": n, "step": step,
-                                    "cx": win.x + 30,
-                                    "cy": win.y + max(6, win.title_h // 2)}
-                    print("REMOTE drag win=%s cx=%d cy=%d frames=%d step=%d"
-                          % (order[-1], _drag_script["cx"], _drag_script["cy"],
-                             n, step))
-                else:
-                    print("REMOTE drag: no window open")
-        if _drag_script is not None:
-            s = _drag_script
-            i = s["i"]
-            if i >= s["n"]:
-                pointer.down = False
-                _drag_script = None
-                print("REMOTE drag done")
-            else:
-                # Triangle wave around the grab point: continuous movement so the
-                # drag stays engaged and every frame is dirty (the drag path).
-                t = i % 40
-                tri = t if t < 20 else 40 - t          # 0..20..0
-                off = 0 if i == 0 else (tri - 10) * s["step"]  # amplitude = step*10
-                pointer.place(s["cx"] + off, s["cy"])
-                pointer.down = True
-                click = (i == 0)                        # frame 0 arms the drag
-                s["i"] = i + 1
-        if _swipe_script is not None:
-            s = _swipe_script
-            i = s["i"]
-            n = s["n"]
-            if i > n:
-                _swipe_script = None
-                print("REMOTE swipe done")
-            else:
-                # i==0 press edge at the start, i in 1..n-1 held interpolation,
-                # i==n the release sample at the end point (down=False so the
-                # gesture machines see a real release, fling velocity intact).
-                f = min(i, n - 1) / (n - 1)
-                x = s["x0"] + int((s["x1"] - s["x0"]) * f)
-                y = s["y0"] + int((s["y1"] - s["y0"]) * f)
-                pointer.place(x, y)
-                pointer.down = i < n
-                click = (i == 0)
-                s["i"] = i + 1
-        # -- idle screen blank (#58) -------------------------------------------
-        # Placed after EVERY input source has been read (touch, BLE keys, the
-        # serial dev channel) and before the pointer is handed to the console,
-        # which is what lets the waking touch be swallowed below.
-        _active = (tp is not None or bool(inp._held) or inp.last_key
-                   or _serial_cmd)
-        if _ps_force:
-            # `power off` arrives ON the serial channel, which is itself
-            # activity -- so an explicit blank has to outrank _active or it
-            # would wake again in the very same iteration.
-            _ps_force = False
-            _asleep = True
-            _idle_at = now
-            set_backlight(False)
-            _backlight_on = False
-            ws._psave_asleep = True
-        elif _active:
-            _idle_at = now
-            if _asleep:
-                _asleep = False
-                set_backlight(True)
-                _backlight_on = True
-                ws._psave_asleep = False
-                # The panel may hold a frame from before the blank, and the
-                # partial-paint machinery would happily leave it there.
-                ws._dirty = True
-                # The touch that WAKES the screen must not also press whatever
-                # it landed on -- otherwise a wake tap launches a cart.
-                pointer.down = False
-                click = False
-        elif (_ps_ms and not _asleep
-                and _ticks_diff(now, _idle_at) >= _ps_ms):
-            _asleep = True
-            set_backlight(False)
-            _backlight_on = False
-            ws._psave_asleep = True
-            print("Moybyte P4 power save: screen off (idle %ds)" % (_ps_ms // 1000))
-        pointer.click = click
-        pointer.tick(now)
-        # Present the PREVIOUS quiet game frame now (its async composite has been
-        # DMAing through the input poll above): wait the DMA, switch scan-out to
-        # it, free the other buffer. No-op unless the last frame deferred (#58
-        # composite-overlap). Must precede sync_back, which re-points at the freed
-        # buffer.
+        touched, click = apply_touch(touch, pointer)
+        return click, (touched or bool(inp._held) or bool(inp.last_key))
+
+    def _present():
+        # Present the PREVIOUS quiet game frame now (its async composite has
+        # been DMAing through the input poll above): wait the DMA, switch
+        # scan-out to it, free the other buffer. No-op unless the last frame
+        # deferred (#58 composite-overlap). Must precede sync_back, which
+        # re-points at the freed buffer.
         comp.present_pending()
         game.sync_back()           # off-screen: contract no-op
         sys_canvas.sync_back()     # double-buffer: re-point at the new BACK fb
-        try:
-            ws.handle_input()
-            ws.handle_pointer()
-            ws.frame(dt)           # draw + composite + flush (cache msync)
-        except KeyboardInterrupt:
-            raise                  # Ctrl-C -> moybyte_shell -> REPL
-        except Exception as exc:   # noqa: BLE001 -- one bad frame must not brick the boot
-            print("Moybyte P4 frame error:", exc)
-            gc.collect()
-        # First composed frame lights the panel (#45). `not _asleep` is load
-        # bearing: without it this fires the frame after the idle blank -- the
-        # blank clears _backlight_on and frames keep being drawn -- and the
-        # screen comes straight back on.
-        if not _backlight_on and not _asleep \
-                and getattr(ws, "_frames_drawn", 0) > 0:
-            set_backlight(True)
-            _backlight_on = True
-        # How long the desktop actually took to put something on the glass --
-        # the number that was missing when a black screen had to be diagnosed
-        # by guesswork. Reported once, then the splash hands over.
-        if not _splash.get("done") and getattr(ws, "_frames_drawn", 0) > 0:
-            _splash["done"] = True
-            print("Moybyte P4 first frame in %dms"
-                  % _ticks_diff(_ticks_ms(), _first_at))
-        # The OTA rollback confirm (#53), now that frames are really going out.
-        # Cheap (an int compare) and self-disarming after it fires once.
-        if _ota is not None:
-            try:
-                if _ota.confirm_when_healthy(getattr(ws, "_frames_drawn", 0)):
-                    print("Moybyte P4 OTA: marked app valid (slot %s)" % _ota.slot())
-                if _ota.confirmed:
-                    _ota = None       # fired (or a non-OTA build): stop asking
-            except Exception as exc:  # noqa: BLE001 -- never break a frame over this
-                print("Moybyte P4 OTA: confirm failed:", exc)
-                _ota = None
-        elapsed = _ticks_diff(_ticks_ms(), now)
-        _pf_n += 1
-        _pf_busy += elapsed
-        if _ticks_diff(_ticks_ms(), _pf_at) >= 0:
+
+    def _frame_error(exc):
+        print("Moybyte P4 frame error:", exc)
+        gc.collect()
+
+    def _tail(now):
+        poll_webhost(ws)               # see the helper for why the frame TAIL
+
+    def _account(now, elapsed, sleep_ms):
+        _pf["n"] += 1
+        _pf["busy"] += elapsed
+        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
             _drawn = getattr(ws, "_frames_drawn", 0)
-            # home(wp/grid/bar): the LAUNCHER frame's section split (stashed by
-            # the shared launcher_layer under perf_capture) -- names where a
-            # slow desktop repaint goes; empty when the last frame wasn't the
-            # home screen.
-            _home = getattr(ws, "_pf_home", None)
-            print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                  "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
-                  % ((_drawn - _pf_drawn) // 2, _pf_n // 2,
-                     _pf_busy // (_pf_n or 1),
-                     ws._draw_ms, ws._flush_ms, ws._upd_ms, ws._cart_ms,
-                     ws._chrome_ms,
-                     getattr(ws, "_pf_wm_restore", 0),   # drag backdrop restore ms
-                     getattr(ws, "_pf_wm_windows", 0),   # window-stack pass ms
-                     getattr(ws, "_pf_wm_stamp", 0),     # window content stamp ms
-                     (ws.cart or {}).get("title", "-"),
-                     (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
-            _pf_at = _ticks_ms() + 2000
-            _pf_n = 0
-            _pf_busy = 0
-            _pf_drawn = _drawn
-        try:
-            _fms = 1000 // ws.frame_cap_fps()
-        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
-            _fms = frame_ms
-        if _fms < frame_ms:
-            _fms = frame_ms
-        if elapsed < _fms:
-            time.sleep_ms(_fms - elapsed)
+            # GUARDED, like every diag helper on the T-Deck. This block reads a
+            # dozen Workstation internals owned by the SHARED runtime/console.py
+            # and sits OUTSIDE the frame try, so while the reads were bare,
+            # renaming one of them there dropped this board to the REPL about
+            # two seconds after boot -- a measurement killing the loop it
+            # measures. PRINTED rather than swallowed (2s cadence, live serial)
+            # so a stale sampler says so; the timer resets either way, so a
+            # broken sample cannot become a per-frame retry.
+            try:
+                # The meters follow Settings -> PERF DIAG live, so flipping it
+                # needs no reboot (T-Deck twin: the 3s diag tick in its tail).
+                _live = bool(getattr(ws, "diag_live", False))
+                if ws.perf_capture != _live:
+                    ws.perf_capture = _live
+                # home(wp/grid/bar): the LAUNCHER frame's section split (stashed
+                # by the shared launcher_layer under perf_capture) -- names
+                # where a slow desktop repaint goes; empty when the last frame
+                # wasn't the home screen.
+                _home = getattr(ws, "_pf_home", None)
+                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
+                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
+                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
+                         _pf["busy"] // (_pf["n"] or 1),
+                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
+                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
+                         getattr(ws, "_chrome_ms", 0),
+                         getattr(ws, "_pf_wm_restore", 0),  # drag backdrop restore ms
+                         getattr(ws, "_pf_wm_windows", 0),  # window-stack pass ms
+                         getattr(ws, "_pf_wm_stamp", 0),    # window content stamp ms
+                         (getattr(ws, "cart", None) or {}).get("title", "-"),
+                         (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
+            except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop
+                print("PERF sample failed: %s: %s"
+                      % (type(_pf_exc).__name__, _pf_exc))
+            _pf["at"] = _ticks_ms() + 2000
+            _pf["n"] = 0
+            _pf["busy"] = 0
+            _pf["drawn"] = _drawn
+
+    # The shared frame loop (#202 Phase B): the invariant order lives ONCE, in
+    # device_boot.FrameLoop -- including the #77/#161 pacing debt via
+    # pump.pace and the first-frame backlight gate (dark until the first
+    # composed frame, #45, unless the splash already lit it). Every hook above
+    # is this board's own hardware.
+    loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
+                     present=_present, tail=_tail, account=_account,
+                     frame_error=_frame_error,
+                     set_backlight=set_backlight, lit=boot.lit)
+    loop.run()

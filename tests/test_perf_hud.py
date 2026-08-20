@@ -9,11 +9,9 @@ prove the plumbing: the fields populate, the HUD toggles via an FPS-readout tap
 through the driver, drawing it doesn't crash, and it never forces an idle redraw.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import host_app  # noqa: E402
 

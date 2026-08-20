@@ -16,10 +16,35 @@ the redesign thread):
   * Colors come from the semantic theme tokens (chrome.THEMES -- surface/ink/
     focus/play/author/danger/...), so restyling an app means routing it
     through this module, not hunting literals.
+  * STYLE IS DATA, not code. Every per-state colour and every number a draw
+    used to hardcode -- pads, edge weights, strip heights, icon boxes, label
+    alignment -- lives in the two tables in the skin section below
+    (`DEFAULT_SPECS` / `DEFAULT_METRICS`), pre-flattened so a widget pays one
+    identity compare and two or three interned dict gets and allocates
+    nothing. `runtime/skin.py` installs alternates as DELTAS over them
+    (`set_skin`); the defaults ARE the shipped pixels, so nothing has to
+    import a skin for the console to look right. Four frozen quirks stayed
+    code and are recorded in NON_DATA_QUIRKS.
   * Geometry functions are PURE and separate from the draw functions, so a
     surface's tap handler hit-tests the exact rects the draw used (the
     `action_rects` pattern, generalized) -- a cached bar strip can draw once
     while taps keep resolving.
+  * INTERACTION STATE belongs to the registry; SEMANTICS belong to the caller.
+    Six states resolve in ONE place with the precedence
+    `disabled > pressed > hot > on > hover > rest`: `on`/`hot`/`disabled` stay
+    caller ARGUMENTS (they are meaning -- only the surface knows them), while
+    `hover`/`pressed` come from `Hits`'s pointer pump (they are interaction --
+    only the registry may write them). `rest` is byte-identical to what the
+    goldens already know: every state cue is a delta painted ON the rest look,
+    resolved through the theme's own semantic roles, never a new literal.
+  * `Hits` IS FOR BOUNDED WIDGET SETS -- toolbars, button rows, list rows --
+    and deliberately NOT for grids. That is MEASURED, not stylistic: making
+    the registry "the ONE state holder per surface" would have the P4's map
+    tab register ~395 rects per full draw (~9.3ms, 13% of that tab's frame)
+    where today it registers zero. A grid keeps its arithmetic hit-test
+    (`_cell_rect(i)` + `rect_in`) and feeds `cell(state=cell_state(i, hov,
+    prs))`; that is why `cell` takes no `hits` argument at all and therefore
+    CANNOT register one rect per cell. Do not "unify" this away.
 
 Min-size convention: a window-content layout may expose `MIN_W` / `MIN_H`
 constants; app registration adopts them and the windowed WM clamps resizes to
@@ -135,20 +160,574 @@ def vsplit(rect, n, gap=0):
 # (rect_in is widgets._in, imported at the top -- one hit-test definition.)
 
 
+# --- interaction state: the six-state model -----------------------------------
+#
+# One vocabulary, one precedence, one resolution point. The names are module
+# CONSTANTS so a comparison costs no allocation and a typo raises AttributeError
+# instead of silently comparing false forever.
+
+REST = "rest"
+HOVER = "hover"
+ON = "on"
+HOT = "hot"
+PRESSED = "pressed"
+DISABLED = "disabled"
+
+# Precedence, strongest first. `disabled` wins over everything (a widget that
+# cannot be used must never look armed, however the cursor is sitting on it);
+# `pressed` beats the semantics because on a TOUCH tier it is the only feedback
+# a finger ever gets; `hover` is the weakest and loses to every semantic state,
+# so a selected row does not flicker under a passing cursor.
+STATES = (DISABLED, PRESSED, HOT, ON, HOVER, REST)
+
+
+def widget_state(on=False, hot=False, disabled=False, interact=None):
+    """Resolve the six states to one, per STATES's precedence.
+
+    `on`/`hot`/`disabled` are the CALLER's semantics (a toggle, an armed
+    destructive action, an unusable verb); `interact` is whatever
+    `Hits.state_of` returned for this widget's id -- HOVER, PRESSED or None --
+    and the registry's pump is the only thing allowed to produce it.
+    """
+    if disabled:
+        return DISABLED
+    if interact == PRESSED:
+        return PRESSED
+    if hot:
+        return HOT
+    if on:
+        return ON
+    if interact == HOVER:
+        return HOVER
+    return REST
+
+
+# State tokens resolve through the SAME alias discipline chrome.THEMES uses for
+# its semantic roles (chrome._SEMANTIC_ALIAS). ui.py cannot import chrome -- that
+# would close the cycle ui -> chrome -> settings_layer -> ui -- so the chains a
+# state cue needs live here, over roles chrome already flattens into every theme
+# dict. A skin (or a theme) that names no state token still paints a correct cue,
+# which is what lets all 12 family x variant sets keep working unmodified with
+# zero per-state hand-tuning: the shelf's "janky" verdict was per-surface
+# improvisation, and the fix is one derivation, here.
+_STATE_ALIAS = {
+    "hover": ("dim",),                    # the shelf's hover field token
+    "hover_cue": ("focus", "accent"),     # the additive edge ring
+    "pressed": ("selection", "hilite"),   # the press wash
+    "pressed_ink": ("selection_ink", "ink"),
+    "disabled_ink": ("ink_dim",),
+    "disabled_edge": ("dim",),
+}
+
+
+def state_token(th, role, fallback=None):
+    """One state token: `role`, else its alias chain, else `fallback`. Never a
+    new colour literal -- every value comes out of the theme's own roles."""
+    v = th.get(role)
+    if v is not None:
+        return v
+    chain = _STATE_ALIAS.get(role)
+    if chain is not None:
+        for base in chain:
+            v = th.get(base)
+            if v is not None:
+                return v
+    return fallback
+
+
+# --- the skin: the LOOK and the NUMBERS, as data ------------------------------
+#
+# Phase 4 (docs/ui_refactor_2026-08.md Section 3; docs/ui_widgets_2026-08.md
+# Section 3.3). Everything a widget draw used to hardcode -- per-state colours,
+# pads, edge weights, strip heights, icon boxes, label alignment -- is two
+# tables here, and a skin is a DELTA over them:
+#
+#   _SPECS[kind][state] -> a (field, ink, edge) triple of token SPECS, resolved
+#       against one theme ONCE into _FLAT[kind][state], a triple of concrete
+#       palette indices. NESTED, never a flattened "kind:state" key: that would
+#       allocate a string per widget per frame on a board with ~23KB of
+#       internal SRAM free in play.
+#   _METRICS[kind] -> a TUPLE of ints indexed by the constants below. A tuple
+#       index, not a second dict get, because a widget reads three to six of
+#       them and one dict get per draw is the whole budget this phase has.
+#
+# The per-draw cost is therefore: one identity compare (`th is _FLAT_TH`), two
+# interned-key dict gets for the colours, one for the metrics tuple, and
+# integer indexing. No `th.get` chain, no comprehension, no tuple built -- the
+# triples handed back are the SHARED flattened ones, so a widget draw allocates
+# nothing at all in this path (it used to build a fresh tuple per call).
+#
+# A token spec is one of:
+#   * an int          -- a literal palette index (0-63)
+#   * a role name     -- resolved through `state_token`, i.e. through the
+#                        theme's own semantic roles AND the _STATE_ALIAS chains
+#   * a tuple         -- tried left to right, first thing that resolves wins
+#                        (the last element is conventionally an int fallback)
+#   * None            -- paint nothing here (no field / no edge)
+# Resolution happens at FLATTEN time, which is what lets all 12 theme
+# family x variant sets keep working under any skin with zero per-state
+# hand-tuning, while a widget draw never walks a chain.
+#
+# THE DEFAULT TABLES ARE THE CURRENT PIXELS, transcribed literal-by-literal out
+# of the draw functions they replaced, and pinned by
+# tests/test_ui_states.py::test_shipped_widgets_are_byte_identical (48 hashes,
+# 12 theme sets x 4 geometries) and tests/test_shell_goldens.py (87 hashes,
+# 5 configs). Not every quirk crossed -- see NON_DATA_QUIRKS below.
+#
+# runtime/skin.py holds the CATALOG (alternate skins as deltas over these
+# tables, plus `use(name)`). It imports ui; ui never imports it, so the cycle
+# ui -> chrome -> settings_layer -> ui stays impossible, this module stays a
+# leaf, and NOTHING has to import the skin at boot for the console to look
+# right -- the default skin is simply these tables.
+
+# Label alignment (a paint choice, never a geometry one: alignment moves the
+# label INSIDE the widget's rect and reflows nothing).
+ALIGN_LEFT = 0
+ALIGN_CENTER = 1
+ALIGN_RIGHT = 2
+
+# --- metric slots -------------------------------------------------------------
+# One tuple per kind; the constants are its indices. Numbers are in UNSCALED
+# units and the `* fs` stays in the draw -- font scaling is geometry, not style
+# -- EXCEPT the slots marked "px", which are the frozen unscaled literals the
+# goldens pin (see NON_DATA_QUIRKS).
+
+# button: label pad, icon box, glyph box, edge rings, label alignment
+BTN_PAD, BTN_ICON, BTN_GLYPH, BTN_EDGE, BTN_ALIGN = 0, 1, 2, 3, 4
+# chip: label clip pad (px), min label x (px), min label y (px), edge rings,
+#       label alignment
+CHIP_CLIP, CHIP_MINX, CHIP_MINY, CHIP_EDGE, CHIP_ALIGN = 0, 1, 2, 3, 4
+# row: side pad, icon box, glyph box, label/value gap in CHARS, edge rings
+ROW_PAD, ROW_ICON, ROW_GLYPH, ROW_GAP, ROW_EDGE = 0, 1, 2, 3, 4
+# cell: art pad, caption height, band label indent, icon box, glyph box, edge
+CELL_PAD, CELL_CAP, CELL_INDENT, CELL_ICON, CELL_GLYPH, CELL_EDGE = (
+    0, 1, 2, 3, 4, 5)
+# tab: inter-chip gap, chip pad, icon box
+TAB_GAP, TAB_PAD, TAB_ICON = 0, 1, 2
+# status row: top rule height, side pad, item gap in CHARS, baseline nudge
+ST_RULE, ST_PAD, ST_GAP, ST_DY = 0, 1, 2, 3
+# panel: border rings, content inset (px), title strip height, title pad
+PANEL_EDGE, PANEL_INSET, PANEL_STRIP, PANEL_PAD = 0, 1, 2, 3
+# focus ring: minimum ring count, gap between the rect and the first ring
+FOCUS_RINGS, FOCUS_GAP = 0, 1
+# scrollbar: bar width, minimum thumb length
+SB_W, SB_MIN = 0, 1
+#
+# The four kinds below take NO theme dict (they are the game-canvas vocabulary,
+# drawn over a cart's own colours), so their colours are theme-independent
+# literals -- which is the same category as a pad, and they live in the same
+# tuple rather than in a theme table they could never read.
+#
+# text field: pad x (px), pad y (px), caret w (px), caret h (px), then field /
+#             ring / ink / placeholder ink / caret colour
+TF_PADX, TF_PADY, TF_CARET_W, TF_CARET_H = 0, 1, 2, 3
+TF_FIELD, TF_RING, TF_INK, TF_HINT, TF_CARET = 4, 5, 6, 7, 8
+# game_btn: label pad, ring colour, ink
+GB_PAD, GB_RING, GB_INK = 0, 1, 2
+# game_icon_btn: glyph pad, glyph box, label x, ring colour, ink
+GI_PAD, GI_GLYPH, GI_LABEL, GI_RING, GI_INK = 0, 1, 2, 3, 4
+# mini_btn: pad x (px), pad y (px), ink
+MB_PADX, MB_PADY, MB_INK = 0, 1, 2
+# dialog: edge rings, default fill, default ring
+DLG_EDGE, DLG_FILL, DLG_RING = 0, 1, 2
+
+DEFAULT_METRICS = {
+    "button":        (2, 16, 12, 1, ALIGN_CENTER),
+    "chip":          (4, 2, 1, 1, ALIGN_CENTER),
+    "row":           (4, 16, 14, 1, 1),
+    "cell":          (2, 14, 2, 16, 14, 1),
+    "tab":           (2, 3, 16),
+    "status":        (1, 3, 2, 1),
+    "panel":         (1, 1, 12, 3),
+    "focus":         (2, 1),
+    "scrollbar":     (4, 8),
+    "text_field":    (4, 3, 6, 8, _BLACK, 6, _WHITE, 5, 10),
+    "game_btn":      (6, _WHITE, _BLACK),
+    "game_icon_btn": (2, 16, 19, _WHITE, _BLACK),
+    "mini_btn":      (2, 2, _BLACK),
+    "dialog":        (1, 2, _WHITE),
+}
+
+# --- the default state table --------------------------------------------------
+# Shared spec constants first, so the table below reads as the vocabulary it is
+# and a role appears exactly once. Each is the literal `th.get(...)` /
+# `state_token(...)` expression it replaced, fallback included.
+
+_PANEL = ("panel", 60)
+_TITLE = ("title", 13)
+_TITLE_INK = ("title_ink", _BLACK)
+_DIM = ("dim", 1)
+_EDGE = ("edge", 13)
+_ACCENT = ("accent", 10)
+_DANGER = ("danger", 8)
+_INK_DIM = ("ink_dim", 6)
+_BORDER = ("border", _BLACK)
+_SURFACE = ("surface", "panel", 60)
+_SELECTION = ("selection", "hilite", 13)
+_PRESS = ("pressed", "hilite", 13)            # state_token chain + its fallback
+_PRESS_INK = ("pressed_ink", _WHITE)
+_DIS_INK = ("disabled_ink", 6)
+_DIS_EDGE = ("disabled_edge", 1)
+_HOVER_CUE = ("hover_cue", "accent", 10)
+
+# The list-row / grid-cell palette: a quiet panel field with title ink and a
+# dim edge, lifting to the title field with the accent edge when selected --
+# exactly what `files_app._draw_rows` and `file_widgets.FileGridView.draw`
+# paint. Rows and cells SHARE it on purpose (one object, one flatten).
+_ROW_STATES = {
+    REST:     (_PANEL, _TITLE_INK, _DIM),
+    # Hover is ADDITIVE by construction: field and ink stay exactly at rest and
+    # only the edge takes the cue, so hover changes paint -- never geometry,
+    # and never legibility.
+    HOVER:    (_PANEL, _TITLE_INK, _HOVER_CUE),
+    ON:       (_TITLE, _TITLE_INK, _ACCENT),
+    HOT:      (_DANGER, _WHITE, _DIM),
+    # Quiet by default (SS7): pressed reuses the SELECTION wash rather than
+    # inventing a loud look; `hot` stays the only shouting state.
+    PRESSED:  (_PRESS, _PRESS_INK, _ACCENT),
+    DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE),
+}
+
+_CHIP_STATES = {
+    REST:     (_PANEL, _TITLE_INK, _DIM),
+    HOVER:    (_PANEL, _TITLE_INK, _HOVER_CUE),
+    ON:       (_ACCENT, _BLACK, _EDGE),
+    HOT:      (_DANGER, _WHITE, _DIM),
+    PRESSED:  (_PRESS, _PRESS_INK, _EDGE),
+    # What `writer_app._hist_btn` and `sheets_app._icon_btn` hand-roll: the
+    # quiet chip shell with the ink (and the edge) carrying the affordance,
+    # because there is no dimmed sprite -- only a dimmed colour.
+    DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE),
+}
+
+# The caption BAND of a grid cell (`cell(band=True)`) -- its own kind because
+# it is a second field inside one widget, not a state of the first.
+_CELL_BAND_STATES = {
+    REST:     (_TITLE, _TITLE_INK, None),
+    HOVER:    (_TITLE, _TITLE_INK, None),
+    ON:       (_ACCENT, _BLACK, None),
+    HOT:      (_DANGER, _TITLE_INK, None),
+    PRESSED:  (_TITLE, _TITLE_INK, None),
+    DISABLED: (_TITLE, _TITLE_INK, None),
+}
+
+
+def _button_states(bg, ink):
+    """One `button` variant's six states. The Open Machine STUDIO vocabulary:
+    a filled field with a hard BLACK edge, whose state deltas (accent when on,
+    the selection wash when pressed, dim ink when disabled, the cue ring on
+    hover) are the same for every variant -- only the rest field/ink differ.
+    HOT is unreachable (`button` passes hot=False) and mirrors rest."""
+    return {
+        REST:     (bg, ink, _BLACK),
+        HOVER:    (bg, ink, _HOVER_CUE),
+        ON:       (_ACCENT, _BLACK, _BLACK),
+        HOT:      (bg, ink, _BLACK),
+        PRESSED:  (_PRESS, _PRESS_INK, _BLACK),
+        DISABLED: (bg, _DIS_INK, _BLACK),
+    }
+
+
+# `button(kind=...)` -> the skin key. The mockup's vocabulary: PLAY is signal
+# green with cream ink, CHANGE/normal is the warm-light chip with dark ink,
+# authoring wears orange, danger red. An unknown kind is "normal", as it was.
+_BUTTON_KIND_KEY = {
+    "normal": "button",
+    "play": "button_play",
+    "author": "button_author",
+    "danger": "button_danger",
+}
+
+DEFAULT_SPECS = {
+    "row":           _ROW_STATES,
+    "cell":          _ROW_STATES,
+    "cell_band":     _CELL_BAND_STATES,
+    "chip":          _CHIP_STATES,
+    "button":        _button_states(("surface", _WHITE), ("ink", _BLACK)),
+    "button_play":   _button_states(("play", _WHITE), _WHITE),
+    "button_author": _button_states(("author", _WHITE), _BLACK),
+    "button_danger": _button_states(("danger", _WHITE), _WHITE),
+    # The stateless chrome kinds: one REST entry each, asked for by name.
+    "tab":           {ON: (_SELECTION, _TITLE_INK, None),
+                      REST: (None, _WHITE, None)},
+    "status":        {REST: (("surface_alt", "panel", 60), _INK_DIM, _BORDER)},
+    "panel":         {REST: (_SURFACE, None, _BORDER)},
+    "panel_title":   {REST: (_TITLE, _TITLE_INK, None)},
+    "toolbar":       {REST: (_TITLE, None, None)},
+    "scrollbar":     {REST: (_DIM, _INK_DIM, None)},   # trough, thumb
+    "focus":         {REST: (None, None, ("focus", 10))},
+}
+
+# The quirks that stayed CODE, and why (ui_widgets Section 3.3, "transcription
+# honesty"). Each is a per-kind BRANCH the skin table points at rather than a
+# number the table could express; a skin restyles around them, it cannot delete
+# them without moving the frozen pixels they exist to preserve.
+NON_DATA_QUIRKS = (
+    ("game_btn",
+     "at font scale 1 the label prints with the legacy scale-2 argument but "
+     "centres with height 8 -- an off-by-one-scale mismatch the shipped "
+     "pixels bake in. It is a BRANCH on fs, not a number."),
+    ("text_field",
+     "fixed 1x metrics: both block prompts draw on the game canvas, so the "
+     "pads, the caret box and the 8px caret advance never scale. The numbers "
+     "are data (TF_*), the absence of `* fs` is the quirk."),
+    ("mini_btn",
+     "unscaled label pads (2, 2): the Settings steppers' vocabulary predates "
+     "font scaling and its pads never grew. Data (MB_*), unscaled by branch."),
+    ("chip",
+     "unscaled label clip/min pads (4, 2, 1): a chip's label geometry is in "
+     "raw pixels while its glyph box is not. Data (CHIP_*), unscaled."),
+)
+
+
+def _token(th, spec):
+    """One token spec -> a concrete palette index, or None. FLATTEN TIME ONLY
+    -- it recurses and calls isinstance; nothing per draw may reach it."""
+    if spec is None:
+        return None
+    if isinstance(spec, int):
+        return spec
+    if isinstance(spec, str):
+        return state_token(th, spec)
+    for s in spec:
+        v = _token(th, s)
+        if v is not None:
+            return v
+    return None
+
+
+_SKIN = None                  # the Phase 3a callable seam: fn(th, kind, state)
+_SPECS = DEFAULT_SPECS        # the active token-spec table
+_METRICS = DEFAULT_METRICS    # the active metric table
+_FLAT = {}                    # kind -> {state: (field, ink, edge)}, for _FLAT_TH
+_FLAT_TH = None               # the theme dict _FLAT was resolved against
+# A tiny most-recent-first ring of (theme, flat) pairs behind the single-entry
+# fast path. Not belt-and-braces: several surfaces pass `self.theme or {}`, and
+# an EMPTY DICT IS A FRESH OBJECT every call, so a single-entry cache would let
+# one such call per frame wipe the real theme's flatten and re-resolve every
+# kind on the next widget. With the ring, the throwaway lands at the front and
+# the live theme stays resolved one slot behind it. Bounded, and it only ever
+# holds the theme dicts chrome already caches forever.
+_FLAT_RING = []
+_FLAT_RING_MAX = 4
+
+
+def set_skin(fn=None, specs=None, metrics=None):
+    """Install a skin. Call with no arguments to restore the built-in default.
+
+    Two seams, and they compose:
+
+      `fn`       the CALLABLE seam (Phase 3a): `fn(th, kind, state)` returns a
+                 (field, ink, edge) triple or None to fall through to the
+                 table. Consulted first; for arbitrary logic a table cannot
+                 express (a per-cart palette, a debug wash).
+      `specs`    a {kind: {state: (field, ink, edge) spec}} DELTA merged over
+                 DEFAULT_SPECS, so a skin names only what it changes and every
+                 kind stays resolvable.
+      `metrics`  a {kind: tuple} DELTA merged over DEFAULT_METRICS, same rule.
+
+    Installing re-binds `ScrollRegion.BAR_W` from the scrollbar metrics: the
+    bar width is the one metric that is ALSO a public class attribute, and a
+    caller reading `BAR_W` must never disagree with the pixels drawn.
+    """
+    global _SKIN, _SPECS, _METRICS, _FLAT, _FLAT_TH
+    _SKIN = fn
+    if specs is None:
+        _SPECS = DEFAULT_SPECS
+    else:
+        merged = dict(DEFAULT_SPECS)
+        merged.update(specs)
+        _SPECS = merged
+    if metrics is None:
+        _METRICS = DEFAULT_METRICS
+    else:
+        merged = dict(DEFAULT_METRICS)
+        merged.update(metrics)
+        _METRICS = merged
+    _FLAT = {}
+    _FLAT_TH = None
+    del _FLAT_RING[:]
+    ScrollRegion.BAR_W = _METRICS["scrollbar"][SB_W]
+
+
+def metrics(kind):
+    """The active skin's metric tuple for `kind` -- ONE dict get; the caller
+    indexes it with the slot constants above. (ui.py's own draws subscript
+    `_METRICS` directly; this is the accessor for surfaces and tests.)"""
+    return _METRICS[kind]
+
+
+def _flatten_kind(th, kind):
+    """Resolve one kind's specs against `th`: once per (skin, theme, kind).
+
+    Per-KIND rather than whole-table because the Appearance app previews other
+    themes card by card -- a whole-table flatten would resolve twenty kinds to
+    draw one cell."""
+    src = _SPECS.get(kind)
+    if src is None:
+        return None
+    out = {}
+    for state in src:
+        spec = src[state]
+        out[state] = (_token(th, spec[0]), _token(th, spec[1]),
+                      _token(th, spec[2]))
+    _FLAT[kind] = out
+    return out
+
+
+def _state_colors_slow(th, kind, state):
+    """The cold half: first touch of a kind under this theme, an unknown kind,
+    or a kind that names no entry for this state."""
+    ent = _FLAT.get(kind)
+    if ent is None:
+        ent = _flatten_kind(th, kind)
+    if ent is not None:
+        got = ent.get(state)
+        if got is not None:
+            return got
+        got = ent.get(REST)
+        if got is not None:
+            return got
+    if kind != "row":
+        # An unnamed kind gets the shared list-row palette -- which is what
+        # EVERY kind resolved to before this table existed, so a surface that
+        # invents a kind keeps working and merely styles as a row.
+        return state_colors(th, "row", state)
+    return (None, _BLACK, None)
+
+
+def state_colors(th, kind, state):
+    """(field, ink, edge) for widget `kind` in `state`, as concrete palette
+    indices, from the active skin's pre-flattened table.
+
+    The hot path is an identity compare plus two interned-key dict gets, and it
+    returns the SHARED tuple -- it allocates nothing. `field` may legitimately
+    be None: a row that paints NO field (Settings, the system menu) is the
+    common case, not an exception, and so is an edge-less kind.
+
+    Treat the result as READ-ONLY. It is the table's own tuple, handed to every
+    caller of this kind and state.
+    """
+    if _SKIN is not None:
+        out = _SKIN(th, kind, state)
+        if out is not None:
+            return out
+    if th is not _FLAT_TH:
+        _bind_theme(th)
+    try:
+        return _FLAT[kind][state]
+    except KeyError:
+        return _state_colors_slow(th, kind, state)
+
+
+def _bind_theme(th):
+    """Make `th` the active theme, reusing its flattened kinds when the ring
+    still has them. Kinds flatten lazily from here (`_flatten_kind`)."""
+    global _FLAT, _FLAT_TH
+    ring = _FLAT_RING
+    for i in range(len(ring)):
+        ent = ring[i]
+        if ent[0] is th:
+            _FLAT = ent[1]
+            _FLAT_TH = th
+            if i:
+                del ring[i]
+                ring.insert(0, ent)
+            return
+    _FLAT = {}
+    _FLAT_TH = th
+    ring.insert(0, (th, _FLAT))
+    del ring[_FLAT_RING_MAX:]
+
+
+def cell_state(index, hover_index=-1, pressed_index=-1):
+    """A GRID's arithmetic answer to `Hits.state_of` -- O(1), no registration.
+
+    See the module docstring: a grid must not put one hit rect per cell into
+    `Hits`. It already hit-tests arithmetically to find the cell under a tap
+    (`FileGridView.tap`, `cards_layer._choice_cells`); it feeds the two indices
+    it derived the same way here and pays nothing per cell.
+    """
+    # Grids spell "nothing selected" as -1 (FileGridView.sel), and so do the
+    # sentinels here -- so a negative index must never match itself into a cue.
+    if index < 0:
+        return None
+    if index == pressed_index:
+        return PRESSED
+    if index == hover_index:
+        return HOVER
+    return None
+
+
 # --- draw == tap: the Hits registry ------------------------------------------
 
+# Flag duplicate ids at registration. OFF in release (last registered wins, as
+# it always did); a dev/test build flips it and gets the ambiguity as an
+# exception at the draw that caused it, rather than as a cue attaching to the
+# wrong widget three surfaces later.
+HITS_DEBUG = False
+
+
 class Hits:
-    """Per-draw hit registry: the draw pass `add`s each interactive rect with a
-    verb (+ optional arg); the pointer handler resolves a tap with `at`. One
-    list, reused via clear() -- no per-frame churn."""
+    """Per-draw hit registry AND the surface's interaction-state holder.
+
+    The draw pass `add`s each interactive rect with a verb (+ optional arg);
+    the pointer handler resolves a tap with `at` and pumps hover/pressed with
+    `pointer_frame`; the next draw reads the states back with `state_of`. One
+    list, reused via `clear()` -- no per-frame churn.
+
+    SCOPE: bounded widget sets only (toolbars, button rows, list rows). A grid
+    must NOT register one rect per cell -- see the module docstring for the
+    measurement, and `cell_state` for what a grid does instead.
+
+    The rules below are each a #177 hover-shelf bug made structural, so that
+    the same four bugs cannot be rediscovered once per surface again:
+
+      * **Ids are the draw's `(verb, arg)` pairs.** Duplicates are harmless for
+        taps (topmost-at-point wins) but AMBIGUOUS for `state_of`, so
+        `HITS_DEBUG` raises on registering one; last registered wins in release.
+      * **Rects live from one full draw to the next.** `clear()` wipes them;
+        hover/pressed ids PERSIST across clears and re-resolve against the fresh
+        rects on the next pointer sample. So a parked cursor re-seeds on the
+        next SAMPLE (a repeat sample at the same point is enough) rather than on
+        first sighting -- which is the stale-after-relayout bug closed.
+      * **Coordinates are surface-local** -- exactly what the draw registered.
+        (Window-local vs screen coords was its own shelf bug.)
+      * **Hover requires a POINTING cursor**: `visible or hovering, and not
+        down`. Touch never hovers -- it places the pointer hidden -- but touch
+        DOES press. Pressed clears on release, and while the finger is outside
+        the rect it went down on.
+      * **Leave is the router's job.** Whichever component stops feeding a
+        surface pointer samples (`wm_windowed`, the fullscreen stack, an app
+        hosting sub-layouts) MUST call `pointer_leave()`, or the cue it left
+        behind is stale forever.
+      * **The pump is the ONLY writer** of `hover`/`pressed`.
+
+    What the pump deliberately does NOT own is hover-as-SELECTION. A surface
+    whose hover moves the selection (Settings rows, the file grids) is doing
+    app state: it repaints through the ordinary dirty path and keeps its own
+    small glue. The pump only says where the pointer is.
+    """
 
     def __init__(self):
         self._items = []
+        self.hover = None       # (verb, arg) under a resting pointing cursor
+        self.pressed = None     # (verb, arg) held down, pointer still inside
+        self._armed = None      # what the press EDGE landed on
+        self._down = False      # last sample's held state (for the edge)
 
     def clear(self):
         del self._items[:]
 
     def add(self, rect, verb, arg=None):
+        if HITS_DEBUG:
+            items = self._items
+            for i in range(len(items)):
+                it = items[i]
+                if it[1] == verb and it[2] == arg:
+                    raise ValueError(
+                        "duplicate Hits id (%r, %r): state_of() would be "
+                        "ambiguous" % (verb, arg))
         self._items.append((rect, verb, arg))
 
     def at(self, px, py):
@@ -160,65 +739,138 @@ class Hits:
                 return (verb, arg)
         return None
 
+    # -- the interaction pump --------------------------------------------------
+
+    def pointer_frame(self, px, py, pointer):
+        """ONE pump for hover AND pressed; True when either changed.
+
+        Call it once per pointer sample from the surface's pointer handler
+        (before or after the tap routing -- it reads, it never consumes), and
+        mark the surface dirty on True. `pointer` is duck-typed: `.down` and
+        `.visible`, plus the browser/mouse `.hovering` flag when a tier has one
+        (today's `widgets.Pointer` does not, so a tier hovers exactly when its
+        cursor is visible -- trackball and mouse yes, touch never).
+        """
+        down = bool(getattr(pointer, "down", False))
+        pointing = bool(getattr(pointer, "visible", False)
+                        or getattr(pointer, "hovering", False))
+        hit = self.at(px, py)
+        if down:
+            if not self._down:
+                self._armed = hit          # the press EDGE picks the target
+            armed = self._armed
+            new_pressed = armed if (armed is not None and hit == armed) else None
+            new_hover = None               # a pointer that is down never hovers
+        else:
+            self._armed = None
+            new_pressed = None
+            new_hover = hit if pointing else None
+        self._down = down
+        changed = (new_hover != self.hover) or (new_pressed != self.pressed)
+        self.hover = new_hover
+        self.pressed = new_pressed
+        return changed
+
+    def pointer_leave(self):
+        """The router stopped feeding this surface: drop both cues. True when
+        that changed anything, so a stale cue costs exactly one repaint and an
+        already-quiet surface costs none.
+
+        It forgets the press-edge HISTORY too: after a leave this surface has
+        no pointer past, so the next sample it receives is a fresh edge. That
+        is deliberate -- on a touch tier the first sample a newly-focused
+        surface sees IS the finger going down, and refusing to arm there would
+        cost exactly the feedback `pressed` exists to give.
+        """
+        changed = self.hover is not None or self.pressed is not None
+        self.hover = None
+        self.pressed = None
+        self._armed = None
+        self._down = False
+        return changed
+
+    def state_of(self, verb, arg=None):
+        """PRESSED / HOVER / None for one widget id, read back at draw. Takes
+        the id UNPACKED so a query allocates nothing (the ids themselves are
+        the two tuples the pump already built)."""
+        p = self.pressed
+        if p is not None and p[0] == verb and p[1] == arg:
+            return PRESSED
+        h = self.hover
+        if h is not None and h[0] == verb and h[1] == arg:
+            return HOVER
+        return None
+
 
 # --- widgets ------------------------------------------------------------------
-
-# button `kind` -> (bg token, ink literal-or-token). Tokens resolve through the
-# theme dict; literals are ints. The mockup's vocabulary: PLAY is signal green
-# with cream ink, CHANGE/normal is the warm-light chip with dark ink, authoring
-# wears orange, danger red.
-_BUTTON_KINDS = {
-    "normal": ("surface", "ink"),
-    "play": ("play", _WHITE),
-    "author": ("author", _BLACK),
-    "danger": ("danger", _WHITE),
-}
-
-
-def _resolve(th, token_or_literal, fallback):
-    if isinstance(token_or_literal, str):
-        return th.get(token_or_literal, fallback)
-    return token_or_literal
+#
+# Every draw below reads its look from `state_colors` and its numbers from
+# `_METRICS`. The only literals left in a draw body are the FONT CELL (8, the
+# petme128 advance -- geometry, not style) and the frozen quirks recorded in
+# NON_DATA_QUIRKS.
 
 
 def button(cv, th, rect, label, kind="normal", on=False, icon_img=None,
-           glyph=None, glyph_draw=None):
+           glyph=None, glyph_draw=None, disabled=False, state=None):
     """One themed chip button: filled field, thin dark edge, centered label
     (truncated to fit), optional 16x16 icon image or 12x12 glyph at the left.
     Glyphs require the caller's leaf-safe `glyph_draw(kind, rect, color, cv)`;
-    `on` swaps to the accent (the pressed/active look)."""
+    `on` swaps to the accent (the pressed/active look).
+
+    `disabled` + `state` are the six-state model (see `widget_state`): they
+    default to the untouched REST/`on` rendering the goldens pin, and only a
+    caller that opts in pays anything. `state` is what `Hits.state_of` returned
+    for this button's id.
+
+    The field/ink/edge come from the skin under the key `kind` maps to
+    (`_BUTTON_KIND_KEY`), the pads/boxes/alignment from `_METRICS["button"]`."""
     fs = _fs(cv)
     x, y, w, h = rect
-    bg_tok, ink_tok = _BUTTON_KINDS.get(kind, _BUTTON_KINDS["normal"])
-    bg = _resolve(th, bg_tok, _WHITE)
-    ink = _resolve(th, ink_tok, _BLACK)
-    if on:
-        bg = th.get("accent", 10)
-        ink = _BLACK
+    st = widget_state(on, False, disabled, state)
+    bg, ink, edge = state_colors(
+        th, _BUTTON_KIND_KEY.get(kind, "button"), st)
+    m = _METRICS["button"]
     cv.rect(x, y, w, h, bg)
-    cv.rectb(x, y, w, h, _BLACK)
+    n = m[BTN_EDGE]
+    if n > 0:
+        cv.rectb(x, y, w, h, edge)
+        i = 1
+        while i < n:                       # skins only; the default is 1 ring
+            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge)
+            i += 1
     fw = 8 * fs
-    pad = 2 * fs
+    pad = m[BTN_PAD] * fs
+    icon_box = m[BTN_ICON] * fs
     iw = 0
     has_glyph = glyph is not None and glyph_draw is not None
     if icon_img is not None or has_glyph:
-        iw = (16 if icon_img is not None else 12) * fs + pad
+        iw = (icon_box if icon_img is not None else m[BTN_GLYPH] * fs) + pad
     label = str(label)
     maxc = max(0, (w - 2 * pad - iw) // fw)
     if len(label) > maxc:
         label = label[:maxc]
     tw = iw + len(label) * fw
-    tx = x + max(pad, (w - tw) // 2)
+    align = m[BTN_ALIGN]
+    if align == ALIGN_CENTER:
+        off = (w - tw) // 2
+    elif align == ALIGN_RIGHT:
+        off = w - pad - tw
+    else:
+        off = pad
+    if off < pad:
+        off = pad
+    tx = x + off
     if icon_img is not None:
-        cv.spr(icon_img, tx, y + (h - 16 * fs) // 2, fs)
+        cv.spr(icon_img, tx, y + (h - icon_box) // 2, fs)
     elif has_glyph:
-        glyph_draw(glyph, (tx, y, 12 * fs, h), ink, cv)
+        glyph_draw(glyph, (tx, y, m[BTN_GLYPH] * fs, h), ink, cv)
     if label:
         cv.print(label, tx + iw, y + (h - 8 * fs) // 2, ink, 1)
 
 
 def chip(cv, th, rect, label, on=False, hot=False, fs=None,
-         glyph=None, glyph_draw=None):
+         glyph=None, glyph_draw=None, disabled=False, state=None,
+         colors=None):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
     Appearance/Writer/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
@@ -232,24 +884,33 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 
     `chip` vs `button`: chip is the PANEL-chrome vocabulary (toolbars inside
     the dark app chrome, theme-quiet); button is the Open Machine STUDIO
-    vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE)."""
+    vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE).
+
+    `disabled` + `state` are the six-state model (see `widget_state`), and both
+    default to the exact pixels the goldens pin. `disabled` is what the three
+    live private copies -- `writer_app._hist_btn`, `sheets_app._icon_btn`,
+    `code_layer._panel_btn` -- each dim by hand today.
+
+    `colors` is the same escape hatch `row` and `cell` carry: an explicit
+    (field, ink, edge) triple bypassing the skin, for a site whose pixels are
+    frozen off-token. `field` None paints no field, `edge` None no border."""
     if fs is None:
         fs = _fs(cv)
     x, y, w, h = rect
-    if hot:
-        bg = th.get("danger", 8)
-        ink = _WHITE
-        edge = th.get("dim", 1)
-    elif on:
-        bg = th.get("accent", 10)
-        ink = _BLACK
-        edge = th.get("edge", 13)
-    else:
-        bg = th.get("panel", 60)
-        ink = th.get("title_ink", _BLACK)
-        edge = th.get("dim", 1)
-    cv.rect(x, y, w, h, bg)
-    cv.rectb(x, y, w, h, edge)
+    st = widget_state(on, hot, disabled, state)
+    if colors is None:
+        colors = state_colors(th, "chip", st)
+    bg, ink, edge = colors
+    m = _METRICS["chip"]
+    if bg is not None:
+        cv.rect(x, y, w, h, bg)
+    n = m[CHIP_EDGE]
+    if n > 0 and edge is not None:
+        cv.rectb(x, y, w, h, edge)
+        i = 1
+        while i < n:
+            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge)
+            i += 1
     if glyph is not None and glyph_draw is not None:
         glyph_draw(glyph, rect, ink, cv)
         return
@@ -257,11 +918,293 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     label = str(label)
     # A label wider than the chip CLIPS (draw-what-fits, like label_row) --
     # overflow escaped the rect and landed ink-on-anything (#174).
-    maxc = max(0, (w - 4) // fw)
+    maxc = max(0, (w - m[CHIP_CLIP]) // fw)
     if len(label) > maxc:
         label = label[:maxc]
-    cv.print(label, x + max(2, (w - len(label) * fw) // 2),
-             y + max(1, (h - 8 * fs) // 2), ink, 1)
+    lw = len(label) * fw
+    minx = m[CHIP_MINX]
+    align = m[CHIP_ALIGN]
+    if align == ALIGN_CENTER:
+        ox = (w - lw) // 2
+    elif align == ALIGN_RIGHT:
+        ox = w - minx - lw
+    else:
+        ox = minx
+    if ox < minx:
+        ox = minx
+    oy = (h - 8 * fs) // 2
+    if oy < m[CHIP_MINY]:
+        oy = m[CHIP_MINY]
+    cv.print(label, x + ox, y + oy, ink, 1)
+
+
+# --- list rows and grid cells: the two shapes the tree hand-rolls ~29 times ----
+#
+# Designed from the real call sites, not from first principles. `row` answers
+# `settings_layer._draw_settings_row` (no field when unselected, a fixed label
+# pad, a right-hand value + a trailing icon), `files_app._draw_rows` (panel/
+# title field, dim/accent edge, a truncated name), `storybook_app._draw_rows`
+# (an off-token field, a vertically centred label), `system_menu_ui` (hilite on
+# the selected row only) and `achievements_ui._draw_achievements` (a leading
+# glyph, a locked/dim look that IS `disabled`). `cell` answers
+# `file_widgets.FileGridView.draw` (thumbnail + centred caption),
+# `appearance_app._draw_wall_card` (art + a filled caption BAND) and
+# `cards_layer._draw_choice_icons` / `_draw_bg_thumbs` (frame-only cells whose
+# picture is bespoke) -- which is why `cell` RETURNS the art rect instead of
+# trying to own every picture.
+
+
+def row(cv, th, rect, label, on=False, hot=False, disabled=False, state=None,
+        colors=None, icon_img=None, glyph=None, glyph_draw=None,
+        value=None, value_ink=None, edge=True, pad=None, text_dy=None,
+        hits=None, verb=None, arg=None, fs=None, pad_right=None, scale=1,
+        glyph_ink=None, glyph_size=None):
+    """One list row: [field] [edge] [icon|glyph] [label] ... [value].
+
+    Semantics are the caller's: `on` is the selection, `hot` the armed
+    destructive look, `disabled` the unusable one (dim ink AND no hit
+    registration -- an unusable row must not be tappable). Interaction comes
+    from the registry: pass `hits` + `verb` (+ `arg`) and the row registers its
+    own tap rect AND reads its own hover/pressed state back, so wiring a
+    surface up is the pump call plus nothing per row. `state` overrides that
+    read (what a grid-like surface with arithmetic hit-testing passes).
+
+    Knobs, each one a real site's frozen geometry:
+      `pad`      left inset (default `ROW_PAD * fs`; Settings' frozen literal 4
+                 and Storybook's `6 * fs` both pass their own).
+      `pad_right` right inset; defaults to `pad`. A site with a deep LEFT
+                 inset inside a narrow rect used to truncate its own text to
+                 zero because one number did both jobs (the achievements
+                 badge).
+      `text_dy`  label top offset inside the row; default is vertically centred
+                 (Storybook), Settings passes 5 and Files `6 * fs`.
+      `scale`    text scale for BOTH label and value (default 1). The width
+                 arithmetic follows it, so a scale-2 headline truncates at the
+                 right column instead of escaping the rect.
+      `edge`     draw the resolved edge as a border (Files/Storybook) or not
+                 (Settings, the system menu popup). Its WEIGHT is skin metrics.
+      `colors`   an explicit (field, ink, edge) triple, bypassing the skin --
+                 the escape hatch for sites whose pixels are frozen off-token
+                 (Storybook's literal 7/0 rows, `cards_layer`'s own palette).
+                 `field` None paints no field at all.
+      `glyph_ink`/`glyph_size`  the leading glyph's colour and box, when it is
+                 not the label's ink at the skin's box (a bright badge beside
+                 quiet text; a 16x16 egg).
+      `value`    a right-aligned secondary string (the Settings/WiFi value
+                 column); the label truncates to whatever is left, and the
+                 value itself truncates before it can escape the rect (#174).
+
+    Draws only; returns nothing -- deliberately. `row` is the most-drawn widget
+    in the shell and a return value is a tuple allocated per row per frame;
+    callers that need the content band call the PURE `row_content_rect`
+    instead (the `cell_art_rect` precedent).
+    """
+    if fs is None:
+        fs = _fs(cv)
+    x, y, w, h = rect
+    if state is None and hits is not None and verb is not None:
+        state = hits.state_of(verb, arg)
+    st = widget_state(on, hot, disabled, state)
+    if colors is None:
+        colors = state_colors(th, "row", st)
+    field, ink, edge_c = colors
+    m = _METRICS["row"]
+    if field is not None:
+        cv.rect(x, y, w, h, field)
+    if edge and edge_c is not None:
+        n = m[ROW_EDGE]
+        if n > 0:
+            cv.rectb(x, y, w, h, edge_c)
+            i = 1
+            while i < n:                   # skins only; the default is 1 ring
+                cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, edge_c)
+                i += 1
+    if pad is None:
+        pad = m[ROW_PAD] * fs
+    fw = 8 * fs * scale
+    th_ = 8 * fs * scale
+    tx = x + pad
+    right = x + w - (pad if pad_right is None else pad_right)
+    if icon_img is not None:
+        box = m[ROW_ICON] * fs
+        cv.spr(icon_img, tx, y + (h - box) // 2, fs)
+        tx += box + pad
+    elif glyph is not None and glyph_draw is not None:
+        box = (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs
+        glyph_draw(glyph, (tx, y + (h - box) // 2, box, box),
+                   ink if glyph_ink is None else glyph_ink, cv)
+        tx += box + pad
+    ty = y + ((h - th_) // 2 if text_dy is None else text_dy)
+    if value is not None:
+        value = str(value)
+        maxv = (right - tx) // fw
+        if maxv < 0:
+            maxv = 0
+        if len(value) > maxv:
+            value = value[:maxv]
+        if value:
+            cv.print(value, right - len(value) * fw, ty,
+                     ink if value_ink is None else value_ink, scale)
+            right -= (len(value) + m[ROW_GAP]) * fw   # a blank column between
+    if label:
+        label = str(label)
+        maxc = (right - tx) // fw
+        if maxc < 0:
+            maxc = 0
+        if len(label) > maxc:
+            label = label[:maxc]
+        if label:
+            cv.print(label, tx, ty, ink, scale)
+    # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
+    # point of the state -- the three sites that hand-roll disabled ink today
+    # all still accept taps, which is the bug the state absorbs.
+    if hits is not None and verb is not None and st != DISABLED:
+        hits.add(rect, verb, arg)
+
+
+def row_content_rect(rect, fs=1, pad=None, pad_right=None, icon=False,
+                     glyph=False, glyph_size=None):
+    """PURE geometry: the band a `row`'s label and value occupy, i.e. inside
+    the pads and after any leading icon/glyph.
+
+    Separate from `row` for the same reason `cell_art_rect` is separate from
+    `cell`: a caller that draws its own trailing content (a stepper pair, a
+    progress bar, a badge) needs the arithmetic WITHOUT the draw paying a tuple
+    allocation on every row of every frame."""
+    m = _METRICS["row"]
+    if pad is None:
+        pad = m[ROW_PAD] * fs
+    if pad_right is None:
+        pad_right = pad
+    x, y, w, h = rect
+    tx = x + pad
+    if icon:
+        tx += m[ROW_ICON] * fs + pad
+    elif glyph:
+        tx += (m[ROW_GLYPH] if glyph_size is None else glyph_size) * fs + pad
+    return (tx, y, max(0, x + w - pad_right - tx), h)
+
+
+def cell_art_rect(rect, fs=1, pad=None, caption_h=0):
+    """PURE geometry: the picture sub-rect of a grid cell -- inside `pad` on
+    three sides, above the caption zone at the bottom. Separate from `cell` so
+    a grid can size its thumbnail CACHE once, outside the loop, exactly as
+    `FileGridView.draw` derives `art_w`/`art_h` before iterating."""
+    if pad is None:
+        pad = _METRICS["cell"][CELL_PAD] * fs
+    x, y, w, h = rect
+    return (x + pad, y + pad, max(0, w - 2 * pad),
+            max(0, h - pad - caption_h))
+
+
+def cell(cv, th, rect, label=None, on=False, hot=False, disabled=False,
+         state=None, colors=None, band=False, band_fill=None, band_ink=None,
+         pad=None, caption_h=None, icon_img=None, glyph=None, glyph_draw=None,
+         fs=None, text_dx=None, text_dy=None, edge_last=False):
+    """One grid cell: [field] [caption] [edge] + a centred icon/glyph, and
+    RETURNS the art rect for the caller's own picture.
+
+    Returning the art rect is the load-bearing decision: a thumbnail, a
+    wallpaper preview, a sprite tile and a hand-painted background swatch are
+    four different pictures, and a `cell` that tried to draw them all would fit
+    none of them. It draws the FRAME -- which is the part that is copied 16
+    times -- and hands back where the picture goes.
+
+    There is deliberately NO `hits` argument. A grid registers no per-cell hit
+    rects (module docstring); it hit-tests arithmetically and passes
+    `state=cell_state(i, hover_i, pressed_i)`.
+
+      `pad`        inset of the art (default `CELL_PAD * fs`; `FileGridView` 2,
+                   the wallpaper cards `3 * fs`, a frame-only cell 0).
+      `caption_h`  height of the caption zone at the bottom; default
+                   `CELL_CAP * fs` when there is a label, else 0. The wallpaper
+                   cards pass `17 * fs`.
+      `band`       fill the caption zone (wallpaper cards) instead of printing
+                   the label straight onto the field (`FileGridView`); the
+                   label is left-aligned on a band and centred without one.
+      `text_dx`/`text_dy`  explicit label offsets inside the cell, overriding
+                   the band/centred choice -- `row`'s knobs, same meaning and
+                   same default-None semantics. A caption whose frozen baseline
+                   is `y + h - 13*fs` agrees with the band centre only at font
+                   scale 1, which is what kept `appearance_app._draw_wall_card`
+                   hand-rolled.
+      `edge_last`  paint the border AFTER the icon/glyph rather than before,
+                   so content that escapes the cell is clipped by its own
+                   frame. (It cannot come after the CALLER's art -- that is
+                   drawn once `cell` has returned; a caller that needs the
+                   frame on top of its picture passes `colors=(f, i, None)`
+                   and stamps the border itself.)
+      `colors`     an explicit (field, ink, edge) triple, as `row`.
+
+    Default draw order is field -> caption -> edge -> icon/glyph, so the
+    caller's art (drawn after, into the returned rect) never sits under the
+    border and the border never sits under the art -- which is what
+    `appearance_app._draw_wall_card` and `cards_layer._draw_bg_thumbs` both
+    already do by hand.
+    """
+    if fs is None:
+        fs = _fs(cv)
+    x, y, w, h = rect
+    st = widget_state(on, hot, disabled, state)
+    if colors is None:
+        colors = state_colors(th, "cell", st)
+    field, ink, edge_c = colors
+    m = _METRICS["cell"]
+    if pad is None:
+        pad = m[CELL_PAD] * fs
+    if caption_h is None:
+        caption_h = m[CELL_CAP] * fs if label is not None else 0
+    if field is not None:
+        cv.rect(x, y, w, h, field)
+    if label is not None and caption_h > 0:
+        cap_y = y + h - caption_h
+        cap_ink = ink
+        if band:
+            if band_fill is None or band_ink is None:
+                bf, bi, _be = state_colors(th, "cell_band", st)
+                if band_fill is None:
+                    band_fill = bf
+                if band_ink is None:
+                    band_ink = bi
+            cv.rect(x, cap_y, w, caption_h, band_fill)
+            cap_ink = band_ink
+        label = str(label)
+        maxc = max(0, (w - 2 * pad) // (8 * fs))
+        if len(label) > maxc:
+            label = label[:maxc]
+        if label:
+            lw = len(label) * 8 * fs
+            if text_dx is None:
+                lx = (x + pad + m[CELL_INDENT] * fs) if band else (
+                    x + (w - lw) // 2)
+            else:
+                lx = x + text_dx
+            ly = (cap_y + (caption_h - 8 * fs) // 2) if text_dy is None else (
+                y + text_dy)
+            cv.print(label, lx, ly, cap_ink, 1)
+    n = m[CELL_EDGE]
+    if edge_c is not None and n > 0 and not edge_last:
+        _cell_edge(cv, x, y, w, h, edge_c, n)
+    art = cell_art_rect(rect, fs, pad, caption_h)
+    ax, ay, aw, ah = art
+    if icon_img is not None:
+        box = m[CELL_ICON] * fs
+        cv.spr(icon_img, ax + (aw - box) // 2, ay + (ah - box) // 2, fs)
+    elif glyph is not None and glyph_draw is not None:
+        box = m[CELL_GLYPH] * fs
+        glyph_draw(glyph, (ax + (aw - box) // 2, ay + (ah - box) // 2,
+                           box, box), ink, cv)
+    if edge_c is not None and n > 0 and edge_last:
+        _cell_edge(cv, x, y, w, h, edge_c, n)
+    return art
+
+
+def _cell_edge(cv, x, y, w, h, c, n):
+    cv.rectb(x, y, w, h, c)
+    i = 1
+    while i < n:                           # skins only; the default is 1 ring
+        cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, c)
+        i += 1
 
 
 def tab_row_rects(rect, tabs, fs, gap=None):
@@ -270,13 +1213,18 @@ def tab_row_rects(rect, tabs, fs, gap=None):
     labeled row doesn't fit, every tab collapses to its icon-only chip; chips
     that still don't fit are dropped from the END (draw-what-fits, same as the
     frozen icon ladder). `tabs` is a sequence of (id, label) -- icons are the
-    draw pass's concern."""
+    draw pass's concern.
+
+    The gap/pad/icon-box are skin metrics, but they are the one group that
+    SIZES a widget: changing them reflows the tab ladder and re-baselines the
+    goldens. That is a deliberate versioned act, not a data tweak (Section 3.3)."""
+    m = _METRICS["tab"]
     if gap is None:
-        gap = 2 * fs
+        gap = m[TAB_GAP] * fs
     x0, y, w, h = rect
     fw = 8 * fs
-    pad = 3 * fs
-    icon_w = 16 * fs
+    pad = m[TAB_PAD] * fs
+    icon_w = m[TAB_ICON] * fs
 
     def chip_w(label, labels_on):
         if labels_on and label:
@@ -307,27 +1255,36 @@ def tab_row(cv, th, rect, tabs, active, icon_for=None, hits=None, ink=None):
     quiet on the field. Registers ("tab", id) hits; returns the geometry list
     so a cached-strip caller can hit-test without redrawing."""
     fs = _fs(cv)
+    m = _METRICS["tab"]
+    on_field, on_ink, _oe = state_colors(th, "tab", ON)
+    off_field, off_ink, _re = state_colors(th, "tab", REST)
+    if ink is not None:
+        off_ink = ink
     icons = {}
     slim = []
     for tid, label, icon_kind in tabs:
         slim.append((tid, label))
         icons[tid] = icon_kind
     rects = tab_row_rects(rect, slim, fs)
+    pad = m[TAB_PAD] * fs
+    box = m[TAB_ICON] * fs
     for tid, r, labels_on in rects:
         x, y, w, h = r
-        on = (tid == active)
-        if on:
-            cv.rect(x, y, w, h, th.get("selection", th.get("hilite", 13)))
-        ink_i = th.get("title_ink", _BLACK) if on else (
-            ink if ink is not None else _WHITE)
+        if tid == active:
+            if on_field is not None:
+                cv.rect(x, y, w, h, on_field)
+            ink_i = on_ink
+        else:
+            if off_field is not None:
+                cv.rect(x, y, w, h, off_field)
+            ink_i = off_ink
         img = icon_for(icons[tid]) if icon_for is not None else None
-        pad = 3 * fs
         if img is not None:
-            cv.spr(img, x + (pad if labels_on else (w - 16 * fs) // 2),
-                   y + (h - 16 * fs) // 2, fs)
+            cv.spr(img, x + (pad if labels_on else (w - box) // 2),
+                   y + (h - box) // 2, fs)
         if labels_on:
             cv.print(str(_tab_label(tabs, tid)),
-                     x + pad + 16 * fs + pad, y + (h - 8 * fs) // 2, ink_i, 1)
+                     x + pad + box + pad, y + (h - 8 * fs) // 2, ink_i, 1)
         if hits is not None:
             hits.add(r, "tab", tid)
     return rects
@@ -345,18 +1302,21 @@ def status_row(cv, th, rect, items):
     the alt surface with dim ink, items spaced left-to-right."""
     fs = _fs(cv)
     x, y, w, h = rect
-    cv.rect(x, y, w, h, th.get("surface_alt", th.get("panel", 60)))
-    cv.rect(x, y, w, 1 * fs, th.get("border", _BLACK))
-    ink = th.get("ink_dim", 6)
+    field, ink, rule = state_colors(th, "status", REST)
+    m = _METRICS["status"]
+    cv.rect(x, y, w, h, field)
+    if rule is not None and m[ST_RULE] > 0:
+        cv.rect(x, y, w, m[ST_RULE] * fs, rule)
     fw = 8 * fs
-    tx = x + 3 * fs
-    ty = y + (h - 8 * fs + 1 * fs) // 2
+    tx = x + m[ST_PAD] * fs
+    ty = y + (h - 8 * fs + m[ST_DY] * fs) // 2
+    gap = m[ST_GAP]
     for item in items:
         s = str(item)
         if tx + len(s) * fw > x + w:
             break
         cv.print(s, tx, ty, ink, 1)
-        tx += (len(s) + 2) * fw
+        tx += (len(s) + gap) * fw
 
 
 # --- the classic game-canvas button family -----------------------------------
@@ -365,19 +1325,27 @@ def status_row(cv, th, rect, items):
 # Workstation keeps thin delegates so every call site and test is untouched.
 # These are the EDITOR-body vocabulary (paint/map/music/blocks action bars and
 # the block prompts' pads): caller-colored fill, cream ring, black label.
+#
+# They take NO theme dict -- they draw over a cart's own colours -- so their
+# ring/ink are theme-independent literals living in the metrics tuple beside
+# their pads. That is the honest home for them: they are numbers a skin sets,
+# not roles a theme resolves.
 
 def game_btn(cv, rect, label, fill):
     """A labeled action button. Preserves the frozen baseline quirk VERBATIM:
     at font scale 1 the label prints with the legacy scale-2 arg but centers
-    with height 8 (byte-identical to the shipped pixels)."""
+    with height 8 (byte-identical to the shipped pixels) -- a BRANCH, not a
+    number, which is why it stays code (NON_DATA_QUIRKS)."""
     x, y, w, h = rect
     fs = _fs(cv)
+    m = _METRICS["game_btn"]
     cv.rect(x, y, w, h, fill)
-    cv.rectb(x, y, w, h, _WHITE)
+    cv.rectb(x, y, w, h, m[GB_RING])
     if fs <= 1:
-        cv.print(label, x + 6, y + (h - 8) // 2, _BLACK, 2)
+        cv.print(label, x + m[GB_PAD], y + (h - 8) // 2, m[GB_INK], 2)
     else:
-        cv.print(label, x + 6 * fs, y + (h - 8 * fs) // 2, _BLACK, 2)
+        cv.print(label, x + m[GB_PAD] * fs, y + (h - 8 * fs) // 2,
+                 m[GB_INK], 2)
 
 
 def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
@@ -385,51 +1353,85 @@ def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
     as a small secondary cue beside it."""
     x, y, w, h = rect
     fs = _fs(cv)
+    m = _METRICS["game_icon_btn"]
     cv.rect(x, y, w, h, fill)
-    cv.rectb(x, y, w, h, _WHITE)
+    cv.rectb(x, y, w, h, m[GI_RING])
     if glyph_draw is not None:
-        glyph_draw(kind, (x + 2 * fs, y, 16 * fs, h), _BLACK, cv)
+        glyph_draw(kind, (x + m[GI_PAD] * fs, y, m[GI_GLYPH] * fs, h),
+                   m[GI_INK], cv)
     if label:
-        cv.print(label, x + 19 * fs, y + (h - 8 * fs) // 2, _BLACK, 1)
+        cv.print(label, x + m[GI_LABEL] * fs, y + (h - 8 * fs) // 2,
+                 m[GI_INK], 1)
 
 
 def mini_btn(cv, rect, label, fill):
-    """A tiny labeled chip (no ring) -- the Settings steppers' vocabulary."""
+    """A tiny labeled chip (no ring) -- the Settings steppers' vocabulary. Its
+    pads are UNSCALED (NON_DATA_QUIRKS): the vocabulary predates font scaling
+    and its frozen pixels never grew with it."""
     x, y, w, h = rect
+    m = _METRICS["mini_btn"]
     cv.rect(x, y, w, h, fill)
-    cv.print(label, x + 2, y + 2, _BLACK, 1)
+    cv.print(label, x + m[MB_PADX], y + m[MB_PADY], m[MB_INK], 1)
 
 
 def toolbar(cv, th, rect):
     """The app toolbar band (Writer/Storybook): the theme's title surface --
     chips and status text draw over it in title_ink."""
     x, y, w, h = rect
-    cv.rect(x, y, w, h, th.get("title", 13))
+    field, _ink, _edge = state_colors(th, "toolbar", REST)
+    cv.rect(x, y, w, h, field)
     return rect
 
 
-def dialog(cv, rect, ring=_WHITE, fill=2):
+def dialog(cv, rect, ring=None, fill=None):
     """The dark MODAL panel shell (the blocks prompts/insert menu, the system
     menu, the graduation banner): dark-purple base + a colored frame. Geometry
     stays the caller's (their hit rects are test-pinned constants); only the
-    shell drawing is shared."""
+    shell drawing is shared. `ring`/`fill` default to the skin's."""
     x, y, w, h = rect
-    cv.rect(x, y, w, h, fill)
-    cv.rectb(x, y, w, h, ring)
+    m = _METRICS["dialog"]
+    cv.rect(x, y, w, h, m[DLG_FILL] if fill is None else fill)
+    c = m[DLG_RING] if ring is None else ring
+    n = m[DLG_EDGE]
+    if n > 0:
+        cv.rectb(x, y, w, h, c)
+        i = 1
+        while i < n:
+            cv.rectb(x + i, y + i, w - 2 * i, h - 2 * i, c)
+            i += 1
 
 
-def text_field(cv, rect, text, placeholder=""):
-    """The modal prompts' text-entry field at the game canvas's fixed 1x metrics
-    (both block prompts draw there): black field, light-grey ring, cream text or
-    a dim placeholder, and the yellow caret bar after the text."""
+def text_field(cv, rect, text, placeholder="", colors=None, fs=None):
+    """The modal prompts' text-entry field: black field, light-grey ring, cream
+    text or a dim placeholder, and the yellow caret bar after the text.
+
+    Its metrics are FIXED 1x by default (NON_DATA_QUIRKS): both block prompts
+    draw on the game canvas, so the pads, the caret box and the 8px caret
+    advance never scale. Pass `fs` to scale them (a system-surface field on a
+    font-scaled tier) and `colors` -- (field, ring, ink, placeholder, caret) --
+    to theme it; both default to the frozen rendering the goldens pin."""
     x, y, w, h = rect
-    cv.rect(x, y, w, h, _BLACK)
-    cv.rectb(x, y, w, h, 6)
+    m = _METRICS["text_field"]
+    if colors is None:
+        field, ring, ink = m[TF_FIELD], m[TF_RING], m[TF_INK]
+        hint, caret = m[TF_HINT], m[TF_CARET]
+    else:
+        field, ring, ink, hint, caret = colors
+    if fs is None:
+        fs = 1
+    px = m[TF_PADX] * fs
+    py = m[TF_PADY] * fs
+    if field is not None:
+        cv.rect(x, y, w, h, field)
+    if ring is not None:
+        cv.rectb(x, y, w, h, ring)
     if text:
-        cv.print(text, x + 4, y + 3, _WHITE, 1)
+        cv.print(text, x + px, y + py, ink, 1)
     elif placeholder:
-        cv.print(placeholder, x + 4, y + 3, 5, 1)
-    cv.rect(x + 4 + len(text) * 8, y + 3, 6, 8, 10)
+        cv.print(placeholder, x + px, y + py, hint, 1)
+    if caret is not None:
+        cv.rect(x + px + len(text) * 8 * fs, y + py,
+                m[TF_CARET_W] * fs, m[TF_CARET_H] * fs, caret)
 
 
 def panel(cv, th, rect, title=None, fs=None):
@@ -439,17 +1441,22 @@ def panel(cv, th, rect, title=None, fs=None):
     if fs is None:
         fs = _fs(cv)
     x, y, w, h = rect
-    cv.rect(x, y, w, h, th.get("surface", th.get("panel", 60)))
-    for i in range(fs):
-        cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, th.get("border", _BLACK))
-    content = inset(rect, 1, 1)
+    field, _ink, border = state_colors(th, "panel", REST)
+    m = _METRICS["panel"]
+    cv.rect(x, y, w, h, field)
+    n = m[PANEL_EDGE] * fs
+    i = 0
+    while i < n:                           # the border grows OUTWARD with fs
+        cv.rectb(x - i, y - i, w + 2 * i, h + 2 * i, border)
+        i += 1
+    content = inset(rect, m[PANEL_INSET], m[PANEL_INSET])
     if title:
-        strip_h = 12 * fs
-        strip, content = cut_top(content, strip_h)
+        strip, content = cut_top(content, m[PANEL_STRIP] * fs)
         sx, sy, sw, sh = strip
-        cv.rect(sx, sy, sw, sh, th.get("title", 13))
-        cv.print(str(title), sx + 3 * fs, sy + (sh - 8 * fs) // 2,
-                 th.get("title_ink", _BLACK), 1)
+        tf, ti, _te = state_colors(th, "panel_title", REST)
+        cv.rect(sx, sy, sw, sh, tf)
+        cv.print(str(title), sx + m[PANEL_PAD] * fs, sy + (sh - 8 * fs) // 2,
+                 ti, 1)
     return content
 
 
@@ -459,10 +1466,17 @@ def focus_ring(cv, th, rect, fs=None):
     if fs is None:
         fs = _fs(cv)
     x, y, w, h = rect
-    color = th.get("focus", 10)
-    for i in range(max(2, fs)):
-        d = fs + 1 + i
+    _f, _i, color = state_colors(th, "focus", REST)
+    m = _METRICS["focus"]
+    n = m[FOCUS_RINGS]
+    if n < fs:
+        n = fs
+    gap = m[FOCUS_GAP]
+    i = 0
+    while i < n:
+        d = fs + gap + i
         cv.rectb(x - d, y - d, w + 2 * d, h + 2 * d, color)
+        i += 1
 
 
 def fill_uncovered(cv, inner, outer, col):
@@ -472,7 +1486,7 @@ def fill_uncovered(cv, inner, outer, col):
     fills use the SAME colour and the panel sits almost entirely inside the body.
     On the P4's 1024x600 editor those two rects are ~450K and ~426K pixels, so the
     second fill was rewriting ~94% of the first in the same colour -- ~848KB of
-    redundant writes per frame, and `moy_gfx_fill_run` is a cached store loop, so
+    redundant writes per frame, and `mg_fill_run` is a cached store loop, so
     PSRAM's write-allocate doubles a fill's traffic. Settings hit the identical bug
     and deleting its duplicate fill was worth ~9ms (see settings_layer.draw).
 
@@ -509,7 +1523,7 @@ def fill_uncovered(cv, inner, outer, col):
 # --- scrolling ------------------------------------------------------------------
 
 # The largest physical-buffer rotation any canvas has (host 1, device
-# ping-pong 2, the P4's planned triple framebuffer 3 -- #58). The paint ring
+# ping-pong 2, the P4's triple framebuffer 3 -- shipped, efcf5d1). The paint ring
 # keeps this many entries so blit_shift can verify RETAINED_FRAMES consecutive
 # paints on ANY tier; raise it if a canvas ever rotates more buffers.
 _MAX_RETAINED = 3
@@ -524,7 +1538,11 @@ class ScrollRegion:
     same geometry -- along the right edge vertically, the bottom edge
     horizontally)."""
 
-    BAR_W = 4           # scaled by fs at draw
+    # Scaled by fs at draw. This is skin METRICS (`_METRICS["scrollbar"]`) and
+    # `set_skin` rebinds it, because the bar width is the one metric that is
+    # also a public class attribute -- a caller reading BAR_W and the pixels
+    # drawn must never disagree. Keep it equal to DEFAULT_METRICS' SB_W.
+    BAR_W = 4
     # Kinetic scrolling (#113 Phase 4). Velocities are px/ms so the tuning is
     # frame-rate independent; every dt is INJECTED (the loop's tick), never
     # read from a clock, so the physics is deterministic under test.
@@ -596,9 +1614,9 @@ class ScrollRegion:
         self._painted.insert(0, (frame_no, self.offset, key, stamp))
         # Keep _MAX_RETAINED entries: blit_shift needs RETAINED_FRAMES
         # consecutive paints, and note_painted has no canvas to read the real
-        # N from. Trimming below the largest N anywhere (the P4's planned
-        # triple framebuffer, #58) would silently disable scroll-as-blit
-        # there: len(_painted) < k forever.
+        # N from. Trimming below the largest N anywhere (the P4's triple
+        # framebuffer) would silently disable scroll-as-blit there:
+        # len(_painted) < k forever.
         del self._painted[_MAX_RETAINED:]
 
     def blit_shift(self, cv, frame_no, key=None):
@@ -703,7 +1721,8 @@ class ScrollRegion:
         if m <= 0 or vis <= 0:
             return None
         bw = self.BAR_W * fs
-        th_ = max(8 * fs, vis * vis // self.content)
+        th_ = max(_METRICS["scrollbar"][SB_MIN] * fs,
+                  vis * vis // self.content)
         tp = (vis - th_) * self.offset // m
         if self.horizontal:
             return (x + tp, y + h - bw, th_, bw)
@@ -716,11 +1735,14 @@ class ScrollRegion:
             return
         x, y, w, h = self.view
         bw = self.BAR_W * fs
-        if self.horizontal:
-            cv.rect(x, y + h - bw, w, bw, th.get("dim", 1))
-        else:
-            cv.rect(x + w - bw, y, bw, h, th.get("dim", 1))
-        cv.rect(r[0], r[1], r[2], r[3], th.get("ink_dim", 6))
+        trough, thumb, _e = state_colors(th, "scrollbar", REST)
+        if trough is not None:            # a skin may show the thumb alone
+            if self.horizontal:
+                cv.rect(x, y + h - bw, w, bw, trough)
+            else:
+                cv.rect(x + w - bw, y, bw, h, trough)
+        if thumb is not None:
+            cv.rect(r[0], r[1], r[2], r[3], thumb)
 
 
 class DragTap:

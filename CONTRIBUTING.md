@@ -69,7 +69,8 @@ see the per-board READMEs under `firmware/`.
 - **Host == device:** the console UI in `runtime/` runs on both the PC
   simulator and the device (the firmware build stages copies). Changes to
   drawing/canvas APIs must land in **both** backends and keep the API
-  identical (`runtime/canvas.py` + the device modules).
+  identical (one class: `device_canvas.DeviceCanvas`, built for the host by
+  `runtime/host_canvas.py`).
 - Firmware-touching changes: note in the PR whether you tested on hardware —
   untested-on-glass is fine, just say so (the maintainers flash and verify).
 - Match the surrounding code's style; tests go in `tests/`.

@@ -1,30 +1,59 @@
-"""Host == device pixel parity for the TIC-80 draw verbs (#11 cluster 2).
+"""The device canvas: its own invariants, its COMPOSITOR, and its fallback lane.
 
-clip / camera / spr-flip / pal / palt all change PIXELS, so the only honest proof
-that the two backends agree is to render the SAME scene through both and compare
-the resulting buffers byte-for-byte. The host `runtime.canvas.Canvas` works in
-palette indices; the device `moy_runtime.DeviceCanvas` works in RGB565 over the
-native `moy_gfx` C kernel + `framebuf`.
+WHAT THIS FILE WAS, TWICE OVER. First, host == device pixel parity for the
+TIC-80 draw verbs (#11 cluster 2): a scene through `runtime.canvas.Canvas` (the
+host's indexed Python raster) against the same scene through
+`device_canvas.DeviceCanvas` (RGB565 over `moy_gfx`). Two genuinely different
+programs, held together by a pin. Then `runtime/canvas.py` was deleted and the
+host began running `DeviceCanvas` too, so both sides became the same class and
+the only difference left was the kernel each was handed: `gfx_binding` (vendored
+libmoy, ctypes) on one side and `_FakeGfx` -- a ~650-line Python transcription
+of `native/moy_gfx/modmoy_gfx.c` -- on the other.
 
-This module makes `DeviceCanvas` runnable under CPython by injecting:
-  * a pure-Python `framebuf.FrameBuffer` stub (fill / fill_rect / pixel / line /
-    text / rect over an RGB565 bytearray), and
-  * a pure-Python `moy_gfx` stub that PORTS the C kernel logic (modmoy_gfx.c:
-    fill / fill_rect / blit565 / blit_map, including the new optional clip args)
-    line-for-line -- so this doubles as the cross-check of the C kernel against the
-    host rasterizer that #11 asks for. (The real C kernel is compiled into the
-    firmware and can't run here; keeping the Python port a faithful transcription is
-    what makes the parity meaningful, and is flagged UNVERIFIED-ON-DEVICE.)
+That transcription was the RIGHT call when it was written and is not any more,
+and the reason is worth keeping: at the time the host had no compiled kernel of
+its own, so a hand-written second opinion was the only second opinion available.
+It now has one. So the ~400 lines of it that re-implemented LIBMOY's nine verbs
+(blit_map, blit_batch, tline, text, sspr, tri, circ, circb, line) are gone --
+`_FakeGfx` forwards those to the binding -- and what replaced them is stronger:
+`tests/test_gfx_binding.py::test_matches_the_native_moy_gfx` runs the same ops
+through the binding AND through the REAL native module under a desktop
+MicroPython, byte for byte, clamping regimes included. Two compiled kernels, no
+transcription in between. (That check used to need a hand-built binary nothing
+produced, so it silently skipped everywhere but one machine; `make
+unix-micropython` builds it, CI runs it, and it FAILS rather than skips when the
+binary is missing. Fixing that is what made this deletion safe.)
 
-Host indices resolve to RGB565 via the SAME formula the device's PAL565 table was
-generated with (asserted equal in test_pal565_matches_host_palette), so a host
-buffer mapped through rgb565() is directly comparable to the device buffer.
+WHAT EACH COMPARISON HERE MEANS NOW. `_both(gfx)` builds a pair, and the two
+arms are different questions:
 
-Text (`print`) joined the parity suite with #62: the device's native moy_gfx.text
-rasterizes the SAME petme128 glyph blob (runtime/font.py, staged as moy_font) the
-host draws from, with camera + clip + pal honoured in C. The no-gfx fallback
-(framebuf.text -- same glyphs, screen-bounds clip only) matches except under an
-active clip rect, so the fallback tests avoid clip().
+  * `gfx=True` -- the compiled kernel against `_FakeGfx`, which still transcribes
+    moy_gfx's OWN COMPOSITOR: `fill`, `fill_rect`, `fill_spans`, `blit565`,
+    `blit_window`, `blit_indices`. libmoy has no counterpart for those, so this
+    is still two implementations, and it is what `cls`, `rect`, `pix`, layers,
+    strips and the span batch run through in nearly every test below.
+  * `gfx=False` -- the compiled kernel against `DeviceCanvas`'s OWN Python
+    fallback lanes (the no-`moy_gfx` build), plus `_FB`, a stand-in for
+    MicroPython's `framebuf` that CPython does not have. Those lanes are shipped
+    code and this file is the only thing that runs them; a `framebuf` stub is
+    not a copy of libmoy, so it stays.
+
+AND WHAT NEITHER ARM IS. Not a check of libmoy's raster -- read a difference in
+one of the nine verbs as impossible here, because both sides call the same
+function. That raster is pinned by the gfx-binding test above, by
+`tests/test_spec_conformance.py` against the spec's goldens, and by
+`tools/p4_conformance.py` on real glass. CLAUDE.md records why the last one
+matters: the board once failed `provisional_tline` against the golden while this
+suite was green.
+
+The reason the file stays is the rest of it: the device canvas's own invariants
+-- the PAL565 table, the auto-batch coalescing and its flush triggers, the map
+auto-cache and its opaque lane, the pal-tint bake cache, the layer pool, the
+spr_gate and lua-spr protocols, `pix()` as a read. Those have no other home.
+
+`DeviceCanvas` runs under CPython here by injecting `_FakeGfx` and `_FB` into
+`sys.modules`, plus `moy_font` (what build.sh stages runtime/font.py AS, so the
+native-text path activates).
 """
 
 import sys
@@ -33,14 +62,17 @@ import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import font as _host_font  # noqa: E402
+from runtime import gfx_binding  # noqa: E402
+from runtime import host_canvas  # noqa: E402
 from runtime import palette  # noqa: E402
-from runtime.canvas import Canvas, Image  # noqa: E402
 from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.moy_image import Image  # noqa: E402
 
-DEV = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules"
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
+DEV = ROOT / "device"
 
 
 def rgb565(rgb):
@@ -49,9 +81,50 @@ def rgb565(rgb):
 
 
 # --------------------------------------------------------------------------- #
-# Pure-Python moy_gfx -- a faithful transcription of native/moy_gfx/modmoy_gfx.c. #
+# A stand-in moy_gfx: the COMPOSITOR transcribed, libmoy's verbs forwarded.   #
 # --------------------------------------------------------------------------- #
 class _FakeGfx:
+    # THE NINE LIBMOY VERBS ARE NOT TRANSCRIBED HERE. They are the compiled
+    # kernel, reached through the host binding -- one line each instead of the
+    # ~400 that used to sit here.
+    #
+    # `blit_map`/`blit_batch`/`tline`/`text`/`sspr`/`tri`/`circ`/`circb`/`line`
+    # are CALLS into vendored libmoy in modmoy_gfx.c (see
+    # native/moy_gfx/libmoy/UPSTREAM.md for which crossed and why), so a Python
+    # copy of them here was a THIRD implementation of a raster that is supposed
+    # to have one -- and one that a re-vendor updated the C of and left behind.
+    # git log shows the tax being paid by hand as each verb crossed (80904fa,
+    # aa22c41, d6c405c, b9783f2).
+    #
+    # What replaced it is a STRONGER check, not a weaker one:
+    # tests/test_gfx_binding.py::test_matches_the_native_moy_gfx drives 131 ops
+    # through this same binding AND through the real native module under a
+    # desktop MicroPython, byte for byte -- two independently compiled kernels,
+    # including the clamping regimes (negative origins, oversize rects,
+    # capacity overruns, off-sheet sources) that a clipped caller never reaches.
+    # `make unix-micropython` builds the binary it needs; CI builds it on every
+    # push, and the test FAILS rather than skips when it is missing.
+    #
+    # Forwarding is signature-safe by construction: gfx_binding's argument
+    # order IS the native module's (that is the premise of the whole shim), and
+    # `_FakeGfx` is only ever reached through the same `self._gfx` attribute a
+    # board's kernel arrives on.
+    #
+    # NOT forwarded, and still transcribed below: `fill`/`fill_rect`/
+    # `fill_spans`/`blit565`/`blit_window`/`blit_indices`. Those are moy_gfx's
+    # OWN compositor -- viewport-aware fills, the RGB565 blits, the span batch --
+    # which libmoy has no counterpart for, so a second opinion on them still has
+    # somewhere to come from and nowhere else to live.
+    blit_map = staticmethod(gfx_binding.blit_map)
+    blit_batch = staticmethod(gfx_binding.blit_batch)
+    tline = staticmethod(gfx_binding.tline)
+    text = staticmethod(gfx_binding.text)
+    sspr = staticmethod(gfx_binding.sspr)
+    tri = staticmethod(gfx_binding.tri)
+    circ = staticmethod(gfx_binding.circ)
+    circb = staticmethod(gfx_binding.circb)
+    line = staticmethod(gfx_binding.line)
+
     @staticmethod
     def fill(buf, npix, color):
         mv = memoryview(buf).cast("H")
@@ -180,153 +253,6 @@ class _FakeGfx:
                 d[drow + tx] = p
 
     @staticmethod
-    def blit_map(dst, dw, dh, sx, sy, cells, map_w, map_h, mx, my, rw, rh,
-                 sheet, sheetw, sheeth, lut, palt, key, scale,
-                 cx0=None, cy0=None, cx1=None, cy1=None):
-        # Transcribed from libmoy's moy_map_draw -> moy_spr (#97), which is what
-        # the C now calls: the region walks cells, each non-empty one draws its
-        # tile from the INDEX sheet resolved through `lut`, and a pixel is
-        # transparent if it equals `key` or its palt entry is set. The old
-        # transcription read a pre-baked RGB565 atlas; that atlas is gone from
-        # this path. Camera is not applied -- the caller resolved the region's
-        # screen position into sx/sy, and the destination may be a cache layer.
-        d = memoryview(dst).cast("H")
-        # The LUT arrives as whatever _wire_pal() keeps it in -- an array('H')
-        # on the host, a cast memoryview on the device. Re-casting an already
-        # 16-bit view raises, so take it as it comes.
-        try:
-            L = memoryview(lut).cast("H")
-        except TypeError:
-            L = lut
-        dcap = len(d)
-        ccap = len(cells)
-        if dw <= 0 or dh <= 0 or map_w <= 0 or map_h <= 0 or rw <= 0 or rh <= 0:
-            return
-        if scale < 1:
-            scale = 1
-        cx0 = 0 if cx0 is None else cx0
-        cy0 = 0 if cy0 is None else cy0
-        cx1 = dw if cx1 is None else cx1
-        cy1 = dh if cy1 is None else cy1
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, dcap, cx0, cy0, cx1, cy1)
-        tile = 8
-        cols = sheetw // tile
-        step = tile * scale
-        if cols <= 0 or sheetw * sheeth > len(sheet):
-            return
-        for cy in range(rh):
-            myy = my + cy
-            if myy < 0 or myy >= map_h:
-                continue          # moy_mget: -1 for empty OR out of range
-            dy0 = sy + cy * step
-            for cx in range(rw):
-                mxx = mx + cx
-                if mxx < 0 or mxx >= map_w:
-                    continue
-                ci = myy * map_w + mxx
-                if ci >= ccap:
-                    continue
-                v = cells[ci]
-                if v == 0:
-                    continue
-                tid = v - 1
-                ox = (tid % cols) * tile
-                oy = (tid // cols) * tile
-                dx0 = sx + cx * step
-                for row in range(tile):
-                    base = (oy + row) * sheetw + ox
-                    for sub_y in range(scale):
-                        ty = dy0 + row * scale + sub_y
-                        if ty < cy0 or ty >= cy1:
-                            continue
-                        drow = ty * dw
-                        for col in range(tile):
-                            p = sheet[base + col]
-                            if p == key or (palt is not None and palt[p & 63]):
-                                continue
-                            wire = L[p & 63]
-                            bx = dx0 + col * scale
-                            for sub_x in range(scale):
-                                tx = bx + sub_x
-                                if tx < cx0 or tx >= cx1:
-                                    continue
-                                d[drow + tx] = wire
-
-    @staticmethod
-    def blit_batch(dst, dw, dh, items, sheet, sheetw, sheeth, lut, palt, key,
-                   scale, cam_x, cam_y, cx0, cy0, cx1, cy1):
-        # #43/#63: draw a run of sheet tiles in one call -- a faithful transcription
-        # of moy_gfx_blit_batch, which now walks the INDEX sheet through libmoy's
-        # moy_spr (#97) rather than copying from a pre-baked RGB565 atlas. Like the
-        # C, `items` is EITHER a list of (tile, x, y[, flip]) tuples OR the canvas
-        # batch array('h') [next, ck, scale, token, (tile x y flip)*N...] (#63
-        # spr_gate array mode) -- detected the same way (buffer protocol).
-        d = memoryview(dst).cast("H")
-        try:
-            L = memoryview(lut).cast("H")
-        except TypeError:
-            L = lut
-        dcap = len(d)
-        if dw <= 0 or dh <= 0:
-            return
-        if scale < 1:
-            scale = 1
-        tile = 8
-        cols = sheetw // tile
-        if cols <= 0 or sheetw * sheeth > len(sheet):
-            return
-        ntiles = cols * (sheeth // tile)
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, dcap, cx0, cy0, cx1, cy1)
-        quads = None
-        try:
-            mv = memoryview(items)
-            if mv.format in ("h", "H") or hasattr(items, "typecode"):
-                q = items
-                nxt = q[0]
-                if nxt < 4:
-                    nxt = 4
-                quads = [(q[k], q[k + 1], q[k + 2], q[k + 3])
-                         for k in range(4, nxt, 4)]
-        except TypeError:
-            quads = None
-        if quads is None:
-            quads = []
-            for it in items:
-                if len(it) < 3:
-                    continue
-                quads.append((it[0], it[1], it[2], it[3] if len(it) > 3 else 0))
-        for tid, ix, iy, flip in quads:
-            # moy_spr refuses an out-of-range tile itself.
-            if tid < 0 or tid >= ntiles:
-                continue
-            fx = flip & 1
-            fy = (flip >> 1) & 1
-            ox = (tid % cols) * tile
-            oy = (tid // cols) * tile
-            dx0 = ix - cam_x
-            dy0 = iy - cam_y
-            for row in range(tile):
-                ssy = (tile - 1 - row) if fy else row
-                base = (oy + ssy) * sheetw + ox
-                for sub_y in range(scale):
-                    ty = dy0 + row * scale + sub_y
-                    if ty < cy0 or ty >= cy1:
-                        continue
-                    drow = ty * dw
-                    for col in range(tile):
-                        ssx = (tile - 1 - col) if fx else col
-                        pv = sheet[base + ssx]
-                        if pv == key or (palt is not None and palt[pv & 63]):
-                            continue
-                        wire = L[pv & 63]
-                        bx = dx0 + col * scale
-                        for sub_x in range(scale):
-                            tx = bx + sub_x
-                            if tx < cx0 or tx >= cx1:
-                                continue
-                            d[drow + tx] = wire
-
-    @staticmethod
     def blit_window(dst, dw, dh, src, src_w, sx, sy):
         # #54 scroll engine: copy a dw x dh window of `src` (a wider pre-rendered
         # background, stride src_w) at (sx, sy) into `dst` (stride dw, contiguous) --
@@ -396,292 +322,6 @@ class _FakeGfx:
                 if p >= pcap:
                     continue
                 d[drow + tx] = pv[p]
-
-    @staticmethod
-    def _clip(dw, cap, cx0, cy0, cx1, cy1):
-        max_rows = cap // dw
-        if cx0 < 0:
-            cx0 = 0
-        if cy0 < 0:
-            cy0 = 0
-        if cx1 > dw:
-            cx1 = dw
-        if cy1 > max_rows:
-            cy1 = max_rows
-        return cx0, cy0, cx1, cy1
-
-    @staticmethod
-    def _put(d, dw, x, y, col, cam_x, cam_y, cx0, cy0, cx1, cy1):
-        x -= cam_x
-        y -= cam_y
-        if x < cx0 or x >= cx1 or y < cy0 or y >= cy1:
-            return
-        d[y * dw + x] = col
-
-    @staticmethod
-    def circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
-        d = memoryview(dst).cast("H")
-        if dw <= 0 or r < 0:
-            return
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
-        col = color & 0xFFFF
-        # The integer span walk, transcribed from the C (which took it from
-        # libmoy). Updated BEFORE the clip test and never after the `continue`:
-        # it is carried state, and skipping a row's update would shift every row
-        # below an off-screen one.
-        span = 0
-        for dy in range(-r, r + 1):
-            t = r * r - dy * dy
-            while (span + 1) * (span + 1) <= t:
-                span += 1
-            while span > 0 and span * span > t:
-                span -= 1
-            y = cy + dy - cam_y
-            if y < cy0 or y >= cy1:
-                continue
-            x0 = cx - span - cam_x
-            x1 = x0 + 2 * span + 1
-            if x0 < cx0:
-                x0 = cx0
-            if x1 > cx1:
-                x1 = cx1
-            base = y * dw
-            for x in range(x0, x1):
-                d[base + x] = col
-
-
-    @staticmethod
-    def tri(dst, dw, dh, x1, y1, x2, y2, x3, y3, color, cam_x, cam_y,
-            cx0, cy0, cx1, cy1):
-        # Faithful port of moy_gfx_tri (modmoy_gfx.c): camera on the vertices,
-        # floor-division edge walk, one clipped span per scanline.
-        mv = memoryview(dst).cast("H")
-        cap = len(mv)
-        max_rows = cap // dw
-        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
-        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
-        x1 -= cam_x; y1 -= cam_y
-        x2 -= cam_x; y2 -= cam_y
-        x3 -= cam_x; y3 -= cam_y
-        if y1 > y2: x1, x2, y1, y2 = x2, x1, y2, y1
-        if y1 > y3: x1, x3, y1, y3 = x3, x1, y3, y1
-        if y2 > y3: x2, x3, y2, y3 = x3, x2, y3, y2
-        dy_long = y3 - y1; dy_top = y2 - y1; dy_bot = y3 - y2
-        for y in range(y1, y3 + 1):
-            if y < cy0 or y >= cy1:
-                continue
-            if dy_long == 0:
-                xa = min(x1, x2, x3); xb = max(x1, x2, x3)
-            else:
-                xa = x1 + ((x3 - x1) * (y - y1)) // dy_long
-                if y < y2:
-                    xb = x1 + ((x2 - x1) * (y - y1)) // dy_top
-                elif dy_bot:
-                    xb = x2 + ((x3 - x2) * (y - y2)) // dy_bot
-                else:
-                    xb = x3
-                if xa > xb:
-                    xa, xb = xb, xa
-            xb += 1
-            xa = max(xa, cx0); xb = min(xb, cx1)
-            for x in range(xa, xb):
-                mv[y * dw + x] = color & 0xFFFF
-
-    @staticmethod
-    def sspr(dst, dw, dh, sheet, sheetw, sheeth, sx, sy, sw, sh,
-             dx, dy, ddw, ddh, ck, flip, lut, palt, cam_x, cam_y,
-             cx0, cy0, cx1, cy1):
-        # Faithful port of moy_gfx_sspr: index sheet + lut, colorkey on the RAW
-        # index, palt after masking, out-of-range sheet reads sample 0.
-        mv = memoryview(dst).cast("H")
-        cap = len(mv)
-        max_rows = cap // dw
-        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
-        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
-        if sw <= 0 or sh <= 0 or ddw <= 0 or ddh <= 0:
-            return
-        fx = flip & 1; fy = (flip >> 1) & 1
-        lv = memoryview(lut).cast("H") if not hasattr(lut, "typecode") else lut
-        for j in range(ddh):
-            v = (j * sh) // ddh
-            if fy:
-                v = sh - 1 - v
-            ty = dy + j - cam_y
-            if ty < cy0 or ty >= cy1:
-                # still identical: nothing to draw on this row
-                pass
-            for i in range(ddw):
-                u = (i * sw) // ddw
-                if fx:
-                    u = sw - 1 - u
-                ssx = sx + u; ssy = sy + v
-                if 0 <= ssx < sheetw and 0 <= ssy < sheeth:
-                    p = sheet[ssy * sheetw + ssx]
-                else:
-                    p = 0
-                if p == ck:
-                    continue
-                if palt is not None and palt[p & 63]:
-                    continue
-                tx = dx + i - cam_x
-                if cx0 <= tx < cx1 and cy0 <= ty < cy1:
-                    mv[ty * dw + tx] = lv[p & 63]
-
-    @staticmethod
-    def tline(dst, dw, dh, cells, mw, mh, sheet, sheetw, sheeth,
-              x0, y0, x1, y1, u, v, du, dv, ck, lut, palt,
-              cam_x, cam_y, cx0, cy0, cx1, cy1):
-        # Faithful port of moy_gfx_tline: reduce once, wrap by conditional
-        # subtract, id+1 cells, cursor advances for every walked pixel.
-        mv = memoryview(dst).cast("H")
-        cap = len(mv)
-        max_rows = cap // dw
-        cx0 = max(cx0, 0); cy0 = max(cy0, 0)
-        cx1 = min(cx1, dw); cy1 = min(cy1, max_rows)
-        tw = mw * 8; th = mh * 8
-        scols = sheetw >> 3
-        if tw <= 0 or th <= 0 or scols <= 0:
-            return
-        lv = memoryview(lut).cast("H") if not hasattr(lut, "typecode") else lut
-        tu = tw << 16; tvv = th << 16
-        uu = u % tu; vv = v % tvv
-        # C's % truncates; Python's floors -- both are valid representatives
-        # mod T and the two-sided wrap normalises them identically.
-        du %= tu; dv %= tvv
-        dxx = x1 - x0 if x1 > x0 else x0 - x1
-        dyy = y0 - y1 if y1 > y0 else y1 - y0
-        stx = 1 if x0 < x1 else -1
-        sty = 1 if y0 < y1 else -1
-        err = dxx + dyy
-        while True:
-            px = uu >> 16; py = vv >> 16
-            cell = cells[(py >> 3) * mw + (px >> 3)]
-            if cell:
-                tid = cell - 1
-                ssx = (tid % scols) * 8 + (px & 7)
-                ssy = (tid // scols) * 8 + (py & 7)
-                p = sheet[ssy * sheetw + ssx] if (ssx < sheetw and ssy < sheeth) else 0
-                if p != ck and (palt is None or not palt[p & 63]):
-                    tx = x0 - cam_x; ty = y0 - cam_y
-                    if cx0 <= tx < cx1 and cy0 <= ty < cy1:
-                        mv[ty * dw + tx] = lv[p & 63]
-            uu += du
-            if uu >= tu:
-                uu -= tu
-            vv += dv
-            if vv >= tvv:
-                vv -= tvv
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dyy:
-                err += dyy
-                x0 += stx
-            if e2 <= dxx:
-                err += dxx
-                y0 += sty
-
-    @staticmethod
-    def circb(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
-        d = memoryview(dst).cast("H")
-        if dw <= 0 or r < 0:
-            return
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
-        col = color & 0xFFFF
-        put = _FakeGfx._put
-        x = r
-        y = 0
-        err = 0
-        while x >= y:
-            for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
-                put(d, dw, cx + px, cy + py, col, cam_x, cam_y, cx0, cy0, cx1, cy1)
-            y += 1
-            if err <= 0:
-                err += 2 * y + 1
-            else:
-                x -= 1
-                err -= 2 * x + 1
-
-    @staticmethod
-    def line(dst, dw, dh, x0, y0, x1, y1, color, cam_x, cam_y, cx0, cy0, cx1, cy1):
-        d = memoryview(dst).cast("H")
-        if dw <= 0:
-            return
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
-        col = color & 0xFFFF
-        put = _FakeGfx._put
-        dx = abs(x1 - x0)
-        dy = -abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx + dy
-        while True:
-            put(d, dw, x0, y0, col, cam_x, cam_y, cx0, cy0, cx1, cy1)
-            if x0 == x1 and y0 == y1:
-                break
-            e2 = 2 * err
-            if e2 >= dy:
-                err += dy
-                x0 += sx
-            if e2 <= dx:
-                err += dx
-                y0 += sy
-
-    @staticmethod
-    def text(dst, dw, dh, s, x, y, color, font, first, scale,
-             cam_x, cam_y, cx0, cy0, cx1, cy1):
-        # Faithful transcription of moy_gfx_text in modmoy_gfx.c (#62): walk the
-        # string as bytes, each glyph 8 column-bytes (LSB = top row), each set bit
-        # a scale x scale block of `color`, camera-offset and clip-bounded.
-        d = memoryview(dst).cast("H")
-        fb = bytes(font) if not isinstance(font, (bytes, bytearray)) else font
-        nglyphs = len(fb) // 8
-        if dw <= 0 or nglyphs <= 0:
-            return
-        if scale < 1:
-            scale = 1
-        cx0, cy0, cx1, cy1 = _FakeGfx._clip(dw, len(d), cx0, cy0, cx1, cy1)
-        col = color & 0xFFFF
-        x -= cam_x
-        y -= cam_y
-        adv = 8 * scale
-        if y >= cy1 or y + adv <= cy0:
-            return
-        for ch in s.encode("utf-8") if isinstance(s, str) else bytes(s):
-            if x >= cx1:
-                break
-            if x + adv <= cx0:
-                x += adv
-                continue
-            gi = ch - first
-            if gi < 0 or gi >= nglyphs:
-                gi = 0
-            g = fb[gi * 8:gi * 8 + 8]
-            for j in range(8):
-                bits = g[j]
-                if bits == 0:
-                    continue
-                bx = x + j * scale
-                if bx >= cx1 or bx + scale <= cx0:
-                    continue
-                row = 0
-                while bits:
-                    if bits & 1:
-                        by = y + row * scale
-                        for sub_y in range(scale):
-                            ty = by + sub_y
-                            if ty < cy0 or ty >= cy1:
-                                continue
-                            base = ty * dw
-                            for sub_x in range(scale):
-                                tx = bx + sub_x
-                                if tx < cx0 or tx >= cx1:
-                                    continue
-                                d[base + tx] = col
-                    bits >>= 1
-                    row += 1
-            x += adv
-
 
 # --------------------------------------------------------------------------- #
 # Pure-Python framebuf.FrameBuffer stub (RGB565 over a bytearray).            #
@@ -797,9 +437,20 @@ W, H = 64, 48
 
 
 def _host_rgb565(cv):
-    """Resolve a host indexed Canvas buffer to a flat list of RGB565 ints."""
-    pal = [rgb565(c) for c in cv.palette]
-    return [pal[i] for i in cv.buf]
+    """The host canvas's framebuffer as canonical little-endian RGB565 ints.
+
+    Identical to `_dev_rgb565` now, and deliberately still a separate function:
+    the two sides are the same CLASS but not the same kernel, and naming them
+    apart is what keeps a failure message pointing at which one drew.
+
+    The swap-back is not optional. Under CPython `moy_dsi` is absent, so
+    device_canvas picks the T-Deck's byte-SWAPPED `PAL565_SW` as its wire table
+    -- on both sides, which is why they compare equal either way, but comparing
+    canonical words is what makes a printed `host=0x…` readable against
+    `palette.MOY64`.
+    """
+    cv.flush_batch()
+    return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(cv._buf).cast("H")]
 
 
 def _dev_rgb565(dc):
@@ -814,8 +465,27 @@ def _dev_rgb565(dc):
     return [((v << 8) | (v >> 8)) & 0xFFFF for v in memoryview(dc._buf).cast("H")]
 
 
+def Canvas(w, h):
+    """The C-kernel side: `DeviceCanvas` over libmoy compiled for the host.
+
+    Named `Canvas` because that is what every test below calls it, and it is
+    still the "reference" half of each pair -- only the reference stopped being
+    a second raster and became the same raster over the real kernel.
+    """
+    return host_canvas.make_canvas(w, h)
+
+
 def _both(use_gfx=True):
-    """A fresh (host Canvas, device DeviceCanvas) pair of the same size."""
+    """A fresh pair: the compiled kernel, and the stand-in beside it.
+
+    `use_gfx=True` gives the SECOND canvas `_FakeGfx` -- the compositor verbs
+    transcribed, libmoy's nine forwarded to the same binding the first one uses.
+    `use_gfx=False` drops it to its `framebuf` lane instead (the no-moy_gfx
+    fallback a board takes when the usermod is absent, and DeviceCanvas's own
+    Python lanes for every verb that has one), which is the only reason that
+    lane is exercised anywhere. See the module docstring for what each arm
+    proves; they are not the same question.
+    """
     m = _load_device_canvas()
     m._USE_GFX = use_gfx
     host = Canvas(W, H)
@@ -831,7 +501,8 @@ def _assert_same(host, dev, label=""):
         diff = sum(1 for x, y in zip(h, d) if x != y)
         first = next(i for i, (x, y) in enumerate(zip(h, d)) if x != y)
         raise AssertionError(
-            "%s: host != device in %d/%d px (first at %d,%d: host=%#06x dev=%#06x)"
+            "%s: the two rasters disagree in %d/%d px "
+            "(first at %d,%d: kernel=%#06x stand-in=%#06x)"
             % (label, diff, W * H, first % W, first // W, h[first], d[first]))
 
 
@@ -995,23 +666,8 @@ def test_text_bytes_do_not_shift_what_follows():
     _assert_same(host, dev, "bytes advance")
     # Host against host, so compare index buffers directly (_assert_same is the
     # host-vs-device RGB565 comparison).
-    assert bytes(host.buf) == bytes(host2.buf), \
+    assert bytes(host._buf) == bytes(host2._buf), \
         "0xff should occupy exactly one blank cell, like a space"
-
-
-def test_text_clip_rect_native():
-    # Arbitrary-rect clipping of text is the native kernel's NEW power (#62) --
-    # framebuf.text can't do it, so this case is gfx=True only (the documented
-    # fallback limitation).
-    m, host, dev = _both(True)
-    for c in (host, dev):
-        c.cls(0)
-        c.clip(12, 8, 24, 12)
-        c.print("CLIPPED WIDE", 0, 6, 14)   # crosses the clip rect on all sides
-        c.print("BELOW", 14, 30, 8)         # entirely outside -> nothing
-        c.clip()
-    _assert_same(host, dev, "text clip gfx=True")
-
 
 # --------------------------------------------------------------------------- #
 # spr flip: h / v / both mirror the sprite pixels (host == device).          #
@@ -1126,9 +782,15 @@ def _tilemap_scene(c, sheet, tm):
 def test_map_camera_clip_matches_host():
     for gfx in (True, False):
         m, host, dev = _both(gfx)
-        # Build a small sheet + tilemap (host + device share editors.py classes).
-        sheet_h = SpriteSheet(4, 4)
-        sheet_d = m.SpriteSheet(4, 4)
+        # Build a sheet + tilemap (both sides share editors.py classes).
+        # SPEC.md 3.2's 16 x 32 sheet, and NOT the smaller one this used to
+        # build. libmoy refuses a sheet that is not exactly 128 x 256 and draws
+        # NOTHING (`mg_is_moy_sheet` in native/moy_gfx/moy_gfx_kernels.h, which both
+        # C surfaces include; `_FakeGfx._is_moy_sheet` here) -- so every sheet verb
+        # has to be handed the shape a real cart has, or this compares two blank
+        # framebuffers and calls it agreement.
+        sheet_h = SpriteSheet(16, 32)
+        sheet_d = m.SpriteSheet(16, 32)
         for sh in (sheet_h, sheet_d):
             sh.tset(1, 0, 0, 8)
             sh.tset(1, 3, 3, 11)
@@ -1298,13 +960,14 @@ def test_blit_strip_matches_host():
 
 
 # --------------------------------------------------------------------------- #
-# spr_batch: the native moy_gfx.blit_batch collapses N sheet tiles into one    #
-# call. Prove it matches the host per-item reference (validates the stub).     #
+# Sheet fixtures for the auto-batch tests below.                              #
 # --------------------------------------------------------------------------- #
 def _batch_sheets(m):
-    # A small 4x4 sheet with three asymmetric, non-blank tiles (so flip + z-order show).
-    sheet_h = SpriteSheet(4, 4)
-    sheet_d = m.SpriteSheet(4, 4)
+    # Three asymmetric, non-blank tiles (so flip + z-order show) on the SPEC.md 3.2
+    # sheet -- 16 x 32 tiles. libmoy's blit_batch refuses any other shape and draws
+    # nothing at all; the tile ids used here address the same pixels either way.
+    sheet_h = SpriteSheet(16, 32)
+    sheet_d = m.SpriteSheet(16, 32)
     for sh in (sheet_h, sheet_d):
         # tile 1: an L of colours in a corner (asymmetric -> flip is visible)
         sh.tset(1, 0, 0, 8); sh.tset(1, 1, 0, 9); sh.tset(1, 0, 1, 10); sh.tset(1, 7, 7, 12)
@@ -1313,22 +976,6 @@ def _batch_sheets(m):
         # tile 3: a full-corner marker
         sh.tset(3, 0, 0, 6); sh.tset(3, 7, 0, 13)
     return sheet_h, sheet_d
-
-
-def test_spr_batch_matches_host_native_blit_batch():
-    # DeviceCanvas.spr_batch -> moy_gfx.blit_batch vs the host per-item spr() loop, with
-    # camera + clip + flip in play, byte-for-byte. This is the cross-backend proof for the
-    # native batch kernel the auto-batcher (#63) flushes through.
-    m, host, dev = _both(True)
-    sheet_h, sheet_d = _batch_sheets(m)
-    items = [(1, 4, 4), (2, 14, 4, 0), (1, 24, 6, 1), (3, 34, 8), (2, 44, 4, 3)]
-    for c, sh in ((host, sheet_h), (dev, sheet_d)):
-        c.cls(0)
-        c.camera(2, 1)
-        c.clip(6, 4, 50, 30)
-        c.spr_batch(sh, items, colorkey=-1, scale=2)
-    _assert_same(host, dev, "spr_batch native")
-
 
 # --------------------------------------------------------------------------- #
 # Fold 1 auto-batch (#63): a naive per-sprite spr_tile() loop must render       #
@@ -1342,7 +989,7 @@ def _stray_image(mk):
 
 
 def _drive_sprite_scene(c, sheet, img, use_batch):
-    """One scene that touches every flush trigger from docs/fast_by_default_drawing.md
+    """One scene that touches every flush trigger from docs/history/fast_by_default_drawing.md
     2.2. `use_batch` picks the auto-batch path (spr_tile) or the immediate reference
     (resolve the tile + spr() now). Both MUST paint the same pixels."""
     def stile(tile, x, y, ck=-1, scale=1, flip=0):
@@ -1395,27 +1042,17 @@ def _drive_sprite_scene(c, sheet, img, use_batch):
 
 def test_auto_batch_matches_immediate_on_host():
     # Batching invariance: the auto-batched scene == the same scene drawn immediately,
-    # pixel-for-pixel, on the host reference rasterizer.
+    # pixel-for-pixel, through the compiled kernel.
     m, _, _ = _both(True)
     sheet_h, _ = _batch_sheets(m)
     a = Canvas(W, H)
     b = Canvas(W, H)
     _drive_sprite_scene(a, sheet_h, _stray_image(Image.from_ascii), use_batch=False)
     _drive_sprite_scene(b, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
-    assert a.buf == b.buf, (
-        "auto-batch differs from immediate on host in %d px"
-        % sum(1 for x, y in zip(a.buf, b.buf) if x != y))
-    assert len(set(b.buf)) > 1                # sanity: it actually drew something
-
-
-def test_auto_batch_host_equals_device():
-    # Cross-backend parity of the auto-batched scene: the host indexed rasterizer and the
-    # device native path (spr_tile -> blit_batch / blit565) agree byte-for-byte.
-    m, host, dev = _both(True)
-    sheet_h, sheet_d = _batch_sheets(m)
-    _drive_sprite_scene(host, sheet_h, _stray_image(Image.from_ascii), use_batch=True)
-    _drive_sprite_scene(dev, sheet_d, _stray_image(m.Image.from_ascii), use_batch=True)
-    _assert_same(host, dev, "auto-batch host==device")
+    assert bytes(a._buf) == bytes(b._buf), (
+        "auto-batch differs from immediate on the C kernel in %d px"
+        % sum(1 for x, y in zip(_host_rgb565(a), _host_rgb565(b)) if x != y))
+    assert probe.drew_something(b)            # sanity: it actually drew something
 
 
 def test_rect_sprite_overlap_order():
@@ -1764,8 +1401,8 @@ def _mapcache_world(m):
     # A sheet + a WIDER-THAN-SCREEN tilemap (a Hop-Quest-style scroller) with EMPTY cells
     # (transparency) AND a colorkey'd tile (index-0 holes under colorkey=0), so the cache's
     # KEYED composite is exercised, not just an opaque background copy.
-    sheet_h = SpriteSheet(4, 4)
-    sheet_d = m.SpriteSheet(4, 4)
+    sheet_h = SpriteSheet(16, 32)                    # the SPEC sheet; see _batch_sheets
+    sheet_d = m.SpriteSheet(16, 32)
     for sh in (sheet_h, sheet_d):
         for ly in range(8):                          # tile 1: a solid block (no holes)
             for lx in range(8):
@@ -1800,7 +1437,17 @@ def _map_cache_on(m, monkeypatch):
     # Fold 2 ships DEFAULT OFF on device (the hardware A/B verdict lives on the
     # MAP_AUTO_CACHE comment); the cache tests force it ON so the logic stays
     # pinned for a future native keyed-blit kernel / the P4 (#58).
+    #
+    # BOTH module objects, because there are two: `m` is the copy this file
+    # execs per pair, and `device_canvas` is the one `runtime/host_canvas.py`
+    # imported for the C-kernel side. Patching only `m` leaves that side with
+    # the cache OFF, so a "the cache kicked in" counter reads 0 and a
+    # cached-vs-direct comparison silently compares direct against direct.
     monkeypatch.setitem(m.DeviceCanvas.__init__.__globals__, "MAP_AUTO_CACHE", True)
+    import device_canvas as _dc_host
+    if _dc_host is not m:
+        monkeypatch.setitem(_dc_host.DeviceCanvas.__init__.__globals__,
+                            "MAP_AUTO_CACHE", True)
 
 
 def test_map_autocache_host_equals_device_across_camera_and_edits(monkeypatch):
@@ -1841,9 +1488,10 @@ def test_map_autocache_equals_direct_raster(monkeypatch):
             direct = Canvas(W, H)
             _play_map(cached, sh_h, tm_h, cam)
             _play_map(direct, sh_h, tm_h, cam, direct=True)
-            assert cached.buf == direct.buf, (
-                "host cache != direct gfx=%s cam=%s in %d px"
-                % (gfx, cam, sum(1 for a, b in zip(cached.buf, direct.buf) if a != b)))
+            assert bytes(cached._buf) == bytes(direct._buf), (
+                "C-kernel cache != direct gfx=%s cam=%s in %d px"
+                % (gfx, cam, sum(1 for a, b in zip(_host_rgb565(cached),
+                                                   _host_rgb565(direct)) if a != b)))
             # Device (RGB565).
             dc_cached = m.DeviceCanvas(_FakeComp(W, H))
             dc_direct = m.DeviceCanvas(_FakeComp(W, H))
@@ -2043,13 +1691,15 @@ def test_pix_read_is_camera_relative_on_both():
 
 
 # --------------------------------------------------------------------------- #
-# SPEC.md 6.1 verbs (#167 shape B): tri / sspr / tline parity, native lane    #
-# (_FakeGfx ports of the C kernels) AND the Python fallbacks, against the     #
-# host canvas. The conformance golden (moy-spec provisional/_tline) pins the  #
-# same pixels a third way.                                                    #
+# SPEC.md 6.1 verbs (#167 shape B): tri / sspr / tline. All three are libmoy  #
+# calls now, so the gfx=True arm only re-checks the surrounding compositor;   #
+# the gfx=False arm is the one with content here -- DeviceCanvas's own Python #
+# fallbacks for these verbs, which nothing else in the tree runs. The kernel  #
+# itself is pinned by test_gfx_binding (two compiled kernels) and by the      #
+# conformance goldens (moy-spec provisional/_tline).                          #
 # --------------------------------------------------------------------------- #
 def _sheet_and_map():
-    sh = SpriteSheet()
+    sh = SpriteSheet(16, 32)                          # the SPEC sheet; see _batch_sheets
     for y in range(8):
         for x in range(8):
             sh.tset(1, x, y, 8)                       # solid

@@ -1,5 +1,5 @@
 """The unified 18px top bar + bottom dock (#46), extracted from Workstation
-(runtime/console.py) as its own surface -- docs/shell_layers_refactor_v1.md.
+(runtime/console.py) as its own surface -- docs/history/shell_layers_refactor_v1.md.
 
 This module is the SINGLE SOURCE of the bar/dock geometry constants (`_STATUS_H`,
 `_BAR_*`, the fixed 320x240 tool-switcher button rects `_HOME_BTN`/`_MENU_BTN`/...,
@@ -49,7 +49,7 @@ _BAR_CLOCK = (_BAR_WIFI[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _STATUS_H = 18          # unified top bar height (16px icons + 1px top/bottom margin)
 
 # -- the ZONED bar's fixed GAME-canvas right cluster (Stage 4 of
-# docs/shell_ux_technical_plan_v1.md, #46 macOS-menu-bar model): reused by the
+# docs/history/shell_ux_technical_plan_v1.md, #46 macOS-menu-bar model): reused by the
 # game-domain Editor tabs (cards/paint/map -- see EditorApp/cards_layer.py/
 # paint_layer.py/layers.py's _MapLayer) that draw on the SAME fixed 320x240 canvas
 # as the running-cart pause/crash bar above. This is a SEPARATE cluster from
@@ -75,24 +75,16 @@ _DOCK_LABEL = {"home": "HOME", "code": "CODE", "paint": "DRAW",
                "map": "MAP", "run": "RUN", "settings": "SET"}
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_diff
 
 
 class BarLayer:
     """The unified 18px top bar + bottom dock (#46), migrated out of Workstation as
-    its own surface (docs/shell_layers_refactor_v1.md Phase 2) and reshaped into a
-    ZONED bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, the macOS-menu-bar
+    its own surface (docs/history/shell_layers_refactor_v1.md Phase 2) and reshaped into a
+    ZONED bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, the macOS-menu-bar
     model): a RIGHT zone (OS-owned: clock/wifi/batt/gear + a slot reserved for the
     Stage-5 context X) drawn by the bar itself, and a LEFT zone LENT to whichever
     app is active -- `launcher_layer`/`settings_layer`/`editor_app` each implement
@@ -215,8 +207,14 @@ class BarLayer:
         """True for the surfaces that draw on the fixed 320x240 GAME canvas -- since
         the #39 step-3 conversions moved every Editor tab onto the responsive SYSTEM
         canvas, that's only the Part-4 "tool" bar (a running tool/app is on the game
-        canvas, like the running cart's crash chrome)."""
-        return where == "tool"
+        canvas, like the running cart's crash chrome).
+
+        The one exception is a RESPONSIVE app cart (#181): it drew on the SYSTEM
+        canvas, so its exitable strip has to be the responsive geometry too --
+        the fixed cluster would leave the context-X stranded 700px left of the
+        right edge on the P4. `app_full_canvas` is False for every game, every
+        fixed app cart and every shipped system app, so nothing else moves."""
+        return where == "tool" and not getattr(self.ws, "app_full_canvas", False)
 
     def _bar_canvas(self, where):
         if where == "desktop" or self._zone_is_game(where):
@@ -412,13 +410,19 @@ class BarLayer:
             # TITLE only, NO tab ladder (a tool isn't an editor with tabs). No owner.draw_zone
             # call here, so the play-frame guardrail (draw_zone never during a Player) holds.
             th = ws.theme_colors
-            cv.rect(0, 0, cv.w, _STATUS_H, th["bar"])
-            cv.rect(0, _STATUS_H - 1, cv.w, 1, th["bar_edge"])       # shelf edge line
+            # Both metrics go through the `where` helpers rather than the game
+            # constants, which is a NO-OP for the fixed case (_bar_h/_zone_rect
+            # return exactly _STATUS_H / _ZONE_LEFT_GAME while _zone_is_game is
+            # True) and is what lets a RESPONSIVE app cart's strip scale (#181).
+            bar_h = self._bar_h(where)
+            zone = self._zone_rect(where)
+            cv.rect(0, 0, cv.w, bar_h, th["bar"])
+            cv.rect(0, bar_h - 1, cv.w, 1, th["bar_edge"])           # shelf edge line
             self._render_right_zone(cv, where)                       # clock/wifi/batt/≡ + X
             title = (ws.cart.get("title") if ws.cart else "") or ""
-            maxc = _ZONE_LEFT_GAME[2] // 8                           # 8px cells in the lent rect
+            maxc = zone[2] // 8                                      # 8px cells in the lent rect
             if maxc > 0:
-                cv.print(title[:maxc], _ZONE_LEFT_GAME[0], 3, th["chrome_ink_dim"], 1)
+                cv.print(title[:maxc], zone[0], 3, th["chrome_ink_dim"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.

@@ -1,15 +1,13 @@
-"""Stage 7 (docs/shell_ux_technical_plan_v1.md Section 3): the durable undo/redo WALK
+"""Stage 7 (docs/history/shell_ux_technical_plan_v1.md Section 3): the durable undo/redo WALK
 driven through the console -- ws.undo()/ws.redo() restore the live file, rebuild the
 affected editor, and re-run the cart; plus the code-editor keyboard-shortcut UI trigger
 (Ctrl+Z / Ctrl+Y). A durable step = one COMMIT (not one keystroke); finer, in-session
 undo stays in the editor's RAM.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 V1 = "def _draw():\n    cls(1)  # one\n"
 V2 = "def _draw():\n    cls(2)  # two\n"

@@ -4,10 +4,10 @@ PYTHON ?= $(VENV)/bin/python
 MONITOR_SECONDS ?= 12
 LOG ?= /tmp/moybyte_lilygo_serial.log
 IDF_PYTHON ?= $(HOME)/.espressif/python_env/idf5.5_py3.10_env/bin/python
-MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_micropython
-MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/lvgl_micropython/lib/micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT
-MPY_APP_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-app.bin
-MPY_FULL_BIN ?= $(MPY_FW_DIR)/dist/current/moybyte-current-full-dio-0x0.bin
+MPY_FW_DIR ?= firmware/lilygo_t_deck_plus_mainline
+MPY_BUILD_DIR ?= $(MPY_FW_DIR)/.build/micropython/ports/esp32/build-MOYBYTE_TDECK
+MPY_APP_BIN ?= dist/tdeck_mainline/moybyte_tdeck_app.bin
+MPY_FULL_BIN ?= dist/tdeck_mainline/moybyte_tdeck.bin
 # OTA (#53): the bootable app partition is ota_0. With the dual-OTA table it sits at
 # 0x20000 (otadata shifted it up from the legacy 0x10000). The app-only cable flash
 # below writes here AND clears otadata (MPY_OTADATA_OFFSET) so the bootloader boots the
@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: setup test site site-firmware site-gifs site-hero firmware-build-lilygo-micropython firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-no-reset firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-run-lilygo-micropython firmware-monitor-lilygo-micropython firmware-build-p4 firmware-flash-p4 firmware-monitor-p4 firmware-stage-xiao-zero ota-manifest ota-serve ota-publish-unstable ota-publish-stable ota-host ota-serve-install ota-keygen release sync-issues vendor-libmoy check-venv
+.PHONY: check-venv firmware-build-guition-s3 firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -37,16 +37,34 @@ OTA_ROOT ?= $(HOME)/.moybyte-ota
 #                            venv setuptools (59.6 on 3.10, absent on 3.12+) failed
 #                            with "invalid command 'bdist_wheel'".
 # `sim` is installed too: tools/simulate_desktop.py (the first thing a new dev runs)
-# needs pygame. So is `lua` (lupa): the seed roster ships lua carts, and without it
-# they open the runtime-missing panel and every lua test silently skips -- including
-# in CI, which runs this target.
+# needs pygame. Lua needs no extra: the host builds the boards' own vendored
+# Lua 5.4 + libmoy binding on demand (runtime/lua_binding.py -- the lupa extra
+# was deleted 2026-08-14), so a C compiler is the requirement, same as host audio.
 setup:
 	$(SYSTEM_PYTHON) -m venv $(VENV)
 # A venv seeded by an older distro python can carry setuptools < 64, which has
 # no PEP 660 editable hook -- and there is no setup.py to fall back to since the
 # .moyproj SDK went. Upgrade first, then install.
 	$(PYTHON) -m pip install -q --upgrade pip setuptools
-	$(PYTHON) -m pip install -e '.[dev,sim,lua]'
+	$(PYTHON) -m pip install -e '.[dev,sim]'
+# THE HOST NEEDS A C COMPILER. Not for a nicety -- for the console. The host
+# draws on the same libmoy raster both boards run, ctypes-loaded from a .so this
+# builds (runtime/gfx_binding.py); the pure-Python raster that used to stand
+# behind it was deleted with runtime/canvas.py. So say it HERE, where the person
+# who can act on it is still watching, instead of letting them find out at the
+# first draw via `AttributeError: 'NoneType' object has no attribute 'hg_fill'`.
+# Non-fatal on purpose: the venv and the deps are installed and useful either
+# way, and firmware work needs the ESP-IDF toolchain rather than this one.
+	@$(PYTHON) -m runtime.native_build || { \
+	  echo ""; \
+	  echo "  ^^ make setup FINISHED, but the host console will not run until"; \
+	  echo "     a C compiler is installed. Re-run 'make setup' after that."; \
+	  echo ""; }
+# Host audio binding (#97 stage 0): compile vendored libmoy into the cached
+# .so the sim's AudioEngine loads. Never fails setup -- with no C compiler it
+# prints a note and the host runs silent (which, since the check above, is the
+# smaller half of what a missing compiler costs).
+	$(PYTHON) -m runtime.audio_binding
 
 # Without this, every venv-backed target below dies with a bare
 # "/bin/sh: .venv/bin/python: No such file or directory".
@@ -57,7 +75,7 @@ VENV_TARGETS := test \
                 site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
-                firmware-monitor-p4
+                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -97,6 +115,88 @@ PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 
 test:
 	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
+
+# ---------------------------------------------------------------------------
+# The desktop MicroPython that the COMPILED-VS-COMPILED checks run against.
+#
+# tests/test_gfx_binding.py::test_matches_the_native_moy_gfx drives the same
+# ops through the host's ctypes binding and through the REAL native moy_gfx,
+# and diffs the framebuffers. That is the only lane in `make test` where two
+# independently COMPILED kernels are compared -- everything else either
+# compares the host to itself or compares it to a transcription, and a
+# transcription can be right while the C is wrong (CLAUDE.md records the
+# provisional_tline day). The same binary carries `moycore` and `moy_audio`,
+# so tests/test_moycore_loop.py, tests/test_semantic_traces.py and
+# test_audio_parity's native pass are the other consumers.
+#
+# It used to be a HAND-BUILT artifact under firmware/.../.build (prose
+# instructions in native/moycore/README.md), gitignored and built by nobody --
+# so the check passed on the one machine that had it and SILENTLY SKIPPED
+# everywhere else, which is the exact failure mode a parity test exists to
+# prevent. Hence a real target, and a CI step that runs it.
+#
+# ~15s from cold (2s clone, 4s submodules, 2s mpy-cross, 5s compile on 12
+# cores) and under a second warm, which is why there is no cache to go stale --
+# a cache MISS that silently skipped the check is the failure being fixed here,
+# so the cheapest honest answer is to always build.
+#
+# The two overrides trim the standard variant's system dependencies down to a
+# compiler, because a build that needs more than that on some machine turns
+# back into a build that does not happen. MICROPY_PY_SSL=0 drops the only
+# submodule it would otherwise want (mbedtls); MICROPY_PY_FFI=0 drops libffi.
+# Nothing on either side of a raster/VM parity check speaks TLS or ctypes.
+UNIX_MP_TAG ?= v1.28.0
+UNIX_MP_DIR ?= .build/unix_micropython
+UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
+UNIX_MP_USERMODS := $(UNIX_MP_DIR)/usermods
+UNIX_MP := $(UNIX_MP_SRC)/ports/unix/build-moybyte/micropython
+UNIX_MP_NATIVE := native
+# Every native module that ships a Makefile fragment. moy_alloc/moy_sd have
+# none (ESP-IDF only) and are skipped by the port's own discovery anyway.
+# moy_web is here so the BAKED web console is exercised as code on a real
+# MicroPython -- its memoryview is handed straight at flash-mapped rodata and
+# must stay read-only, which is the kind of thing that otherwise fails first on
+# glass. Its blob table is generated (see the recipe below).
+UNIX_MP_MODULES ?= moy_gfx moy_lua moycore moy_audio moy_web
+UNIX_MP_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
+.PHONY: unix-micropython
+unix-micropython:
+	@mkdir -p $(UNIX_MP_DIR) $(UNIX_MP_USERMODS)
+# moy_web's blob table is build OUTPUT (gitignored): it .incbin's the web
+# runner's bundle, so on a tree that has never built one it has to exist as an
+# empty table or this build stops on a missing source file. REQUIRE=0 and quiet
+# on purpose: the generator is strict under CI, where this binary is built and
+# where no wasm bundle exists -- and "this image has no browser console" is not
+# news about a test binary that is not an image.
+	@MOYBYTE_REQUIRE_WEB_BUNDLE=0 $(PYTHON) tools/gen_web_blob.py --quiet >/dev/null
+	@test -d $(UNIX_MP_SRC)/.git || git clone --depth 1 --branch $(UNIX_MP_TAG) \
+	    --quiet https://github.com/micropython/micropython $(UNIX_MP_SRC)
+# Outside the clone guard on purpose (the web runner's build.sh learned the
+# same lesson): a checkout can exist WITHOUT its submodules if a previous run
+# died between the two, and a guarded init could never repair that.
+	@cd $(UNIX_MP_SRC) && git submodule update --init --depth 1 --quiet \
+	    lib/micropython-lib lib/berkeley-db-1.xx
+# Symlinks, not copies: the modules under test must be the working tree's, or
+# this proves the parity of a stale snapshot.
+	@for m in $(UNIX_MP_MODULES); do \
+	    ln -sfn $(abspath $(UNIX_MP_NATIVE))/$$m $(UNIX_MP_USERMODS)/$$m; done
+# The frozen bytecode carries a SUPPLEMENTARY qstr enum: every name the frozen
+# modules use that the compiled pool does not already have. A usermod that adds
+# or drops one of those names moves it across that boundary, and upstream's own
+# rule regenerates frozen_content.c from a pool that this same pass is still
+# rebuilding -- so the file goes stale, `redeclaration of enumerator MP_QSTR_x`
+# (or the reverse once it is gone), and re-running make does NOT converge. It
+# cost a confused half hour when moy_web landed with a `names()` verb.
+# Regenerating is ~5s and only happens when a usermod source actually changed.
+	@f=$(UNIX_MP_SRC)/ports/unix/build-moybyte/frozen_content.c; \
+	  if [ -f "$$f" ] && [ -n "$$(find -L $(UNIX_MP_USERMODS)/ -name '*.[ch]' \
+	      -newer "$$f" -print -quit 2>/dev/null)" ]; then rm -f "$$f"; fi
+	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
+	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
+	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
+	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
+	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 
 # Build the project site into _site/ (the GitHub Pages source). Embeds the web
 # runner's dist/ as the playable player, so build that first for a live page:
@@ -138,8 +238,25 @@ sync-issues:
 vendor-libmoy:
 	$(PYTHON) tools/vendor_libmoy.py $(if $(SPEC),--spec $(SPEC))
 
-firmware-build-lilygo-micropython:
-	bash firmware/lilygo_t_deck_plus_micropython/build.sh
+# Re-vendor moy-spec's PICO-8 asset converter (tools/p8_import.py), the same way
+# and for the same reason: SPEC.md 8.1 is what says what a converted note MEANS,
+# so the converter belongs upstream and travels HERE. It was a hand-copy once;
+# upstream corrected PICO-8's pitch offset, the copy never heard, and every cart
+# imported here played two octaves flat for ten days with a green suite.
+# tests/test_p8_import_vendor.py is what makes that loud now.
+#   make vendor-p8-import
+#   make vendor-p8-import SPEC=/path/to/moy-spec
+vendor-p8-import:
+	$(PYTHON) tools/vendor_p8_import.py $(if $(SPEC),--spec $(SPEC))
+
+# The T-Deck build (mainline MicroPython -- the only T-Deck build since the
+# fork's deletion, 2026-08-17). The `lilygo-micropython` names below are the
+# fork-era spelling, kept as aliases because the site, CI echoes and muscle
+# memory all use them.
+firmware-build-tdeck-mainline:
+	bash firmware/lilygo_t_deck_plus_mainline/build.sh
+
+firmware-build-lilygo-micropython: firmware-build-tdeck-mainline	## alias (fork-era name)
 
 # OTA (#53 Phase 3): emit dist/latest.json from the built image (auto size + sha256 +
 # version read from moy_ota.FIRMWARE_VERSION). Point it at your host with OTA_BASE_URL;
@@ -149,9 +266,11 @@ firmware-build-lilygo-micropython:
 ota-manifest:
 	$(PYTHON) tools/gen_ota_manifest.py $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
-# Serve dist/ (the .bin + latest.json) over plain HTTP for the device to pull from.
+# Serve the built T-Deck dist (the .bin + latest.json) over plain HTTP for the
+# device to pull from. (The build writes to a repo-root dist/ -- the board-local
+# dist/ this once served died with the fork.)
 ota-serve:
-	cd $(MPY_FW_DIR)/dist && $(PYTHON) -m http.server $(OTA_PORT)
+	cd dist/tdeck_mainline && $(PYTHON) -m http.server $(OTA_PORT)
 
 # The two OTA channels are the two BRANCHES, and CI publishes both (a push to master
 # rolls the `firmware-latest` release, a push to dev rolls `firmware-beta`; moy_ota's
@@ -221,10 +340,15 @@ firmware-flash-lilygo-micropython-no-reset:
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before no_reset --after no_reset write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m 0x0 $(MPY_BUILD_DIR)/bootloader/bootloader.bin 0x8000 $(MPY_BUILD_DIR)/partition_table/partition-table.bin $(MPY_APP_OFFSET) $(MPY_APP_BIN)
 
-firmware-flash-lilygo-micropython-full:
+# The canonical cable flash: facts (chip/offset/baud/otadata/reset strategy)
+# come from the board's board.toml [flash] section via tools/board_flash.py
+# (#202 Phase A) -- the Makefile no longer restates any of them.
+firmware-flash-tdeck-mainline:
 	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) -b 460800 --before default_reset --after hard_reset write_flash 0x0 $(MPY_FULL_BIN)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/lilygo_t_deck_plus_mainline --port $(PORT)
+
+firmware-flash-lilygo-micropython-full: firmware-flash-tdeck-mainline	## alias (fork-era name)
 
 firmware-flash-lilygo-micropython-full-erase:
 	$(REQUIRE_PORT)
@@ -236,16 +360,18 @@ firmware-run-lilygo-micropython:
 	$(REQUIRE_IDF)
 	$(IDF_PYTHON) tools/esptool_no_modem.py --chip esp32s3 -p $(PORT) --before no_reset --after hard_reset --no-stub run
 
-firmware-monitor-lilygo-micropython:
+firmware-monitor-tdeck-mainline:
 	$(REQUIRE_PORT)
-	$(REQUIRE_IDF)
-	$(IDF_PYTHON) -m serial.tools.miniterm $(PORT) 115200
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/lilygo_t_deck_plus_mainline --port $(PORT)
+
+firmware-monitor-lilygo-micropython: firmware-monitor-tdeck-mainline	## alias (fork-era name)
 
 # ESP32-P4 (Waveshare 7B, #58): mainline-MicroPython build via the board dir's
 # build.sh -> dist/p4/moybyte_p4.bin, flashed at 0x2000 (the P4's app offset).
 # Serial = CH343 (no native-takeover starvation, REPL stays alive), so plain
-# esptool auto-reset works; esptool comes from the project venv.
-P4_BIN ?= dist/p4/moybyte_p4.bin
+# esptool auto-reset works; esptool comes from the project venv. The image
+# path and every other flash fact live in the board's board.toml [flash].
 
 firmware-build-p4:
 	firmware/esp32_p4_wifi6_touch_lcd_7b/build.sh
@@ -256,23 +382,82 @@ firmware-build-p4:
 # image lands in the slot otadata is not pointing at. Clearing otadata makes the
 # bootloader fall back to ota_0, which is what was just written. The T-Deck has
 # always done this (#53); the P4 needed it the moment it could OTA at all.
-# Override P4_OTADATA_OFFSET= (empty) to skip, e.g. for a non-OTA image.
-P4_OTADATA_OFFSET ?= 0xd000
-P4_OTADATA_SIZE ?= 0x2000
+# The flash facts (chip/offset/baud/otadata region) live in the board's
+# board.toml [flash] section, read by tools/board_flash.py (#202 Phase A) --
+# including the otadata-first erase whose rationale the paragraph above
+# records. The 0xd000-vs-0x1d000 per-board difference lives THERE now.
 firmware-flash-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_ESPTOOL)
-	@[ -z "$(P4_OTADATA_OFFSET)" ] || $(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 --after no_reset erase_region $(P4_OTADATA_OFFSET) $(P4_OTADATA_SIZE)
-	$(PYTHON) -m esptool --chip esp32p4 --port $(PORT) --baud 921600 write_flash 0x2000 $(P4_BIN)
+	$(PYTHON) tools/board_flash.py flash firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
+	@$(MAKE) --no-print-directory p4-web-push PORT=$(PORT) WEB_PUSH_OPTIONAL=1
+
+# The web console the BOARD serves (`/moy/web`, reached over WiFi) RIDES THE
+# FIRMWARE IMAGE now (moy_web / tools/gen_web_blob.py): baking it was ruled out
+# while the bundle was ~1.13MB against ~1.04MB of headroom, and pre-gzipping it
+# (572,693 B) made it fit both slots. So a flashed board always serves a console
+# current with its own firmware, and this push is the OVERRIDE -- storage wins
+# over the image, which is what keeps the sub-minute dev loop alive without a
+# reflash. (When baking was decided the T-Deck could not be pushed to at all --
+# that board's serial RX was dead under the desktop until #201 fixed it on
+# 2026-08-16 -- so the image was the only way it could ever be current. It is
+# still the guarantee; this push is still the override.) The flash target still
+# pushes (optional -- a board with no WiFi must not fail a cable flash), and
+# `p4-web-stale` is the check you can run on its
+# own. p4_push_web.py compares byte-for-byte per file, so a re-push is
+# idempotent and cheap; running it is the verification.
+p4-web-push:
+	$(REQUIRE_PORT)
+	@if [ ! -f firmware/web_runner/dist/micropython.wasm ]; then \
+	  echo "no firmware/web_runner/dist -- build it with firmware/web_runner/build.sh"; \
+	  [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; \
+	else \
+	  $(MAKE) --no-print-directory p4-web-stale; \
+	  $(PYTHON) tools/p4_push_web.py --port $(PORT) \
+	    || { echo "web-console push FAILED (board on WiFi? bundle unchanged on the board)"; \
+	         [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; }; \
+	fi
+
+# Is the built bundle older than the console sources it was built from? This is
+# the staleness the push cannot detect -- p4_push_web only compares dist against
+# the BOARD, so a dist that is itself behind `runtime/` pushes a stale bundle and
+# reports "all files match".
+p4-web-stale:
+	@newer=$$(find runtime firmware/web_runner -name '*.py' -newer firmware/web_runner/dist/micropython.wasm 2>/dev/null | head -5); \
+	if [ -n "$$newer" ]; then \
+	  echo "WARNING: firmware/web_runner/dist is OLDER than console sources, e.g."; \
+	  echo "$$newer" | sed 's/^/    /'; \
+	  echo "  rebuild it (firmware/web_runner/build.sh) or you will push a stale console."; \
+	else \
+	  echo "web bundle is newer than every runtime/ and web_runner/ source."; \
+	fi
 
 firmware-monitor-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
-	$(PYTHON) -m serial.tools.miniterm $(PORT) 115200
+	$(PYTHON) tools/board_flash.py monitor firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
 
-# MoyByte Zero (Seeed XIAO ESP32-S3): pure-Python, no native build. One-time flash of stock
-# MicroPython is documented in firmware/seeed_xiao_esp32s3_zero/README.md; this stages the
-# shared console modules + the Zero backend over mpremote (PORT defaults to the first ttyACM*).
-firmware-stage-xiao-zero:
-	bash firmware/seeed_xiao_esp32s3_zero/stage.sh $(PORT)
+# Guition JC3248W535 (#202): the third board, provisioned through the port
+# kit -- build via the board dir's build.sh -> dist/guition_s3/, and the
+# flash/monitor facts live in its board.toml [flash]/[monitor].
+
+firmware-build-guition-s3:
+	firmware/guition_jc3248w535/build.sh
+
+firmware-flash-guition-s3:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/guition_jc3248w535 --port $(PORT)
+
+firmware-monitor-guition-s3:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc3248w535 --port $(PORT)
+
+# T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
+# CLICK is GPIO0: hold the trackball in while powering the board on, then
+# release, to reach the ROM loader when an image wedges the USB device.
+# (The build/flash/monitor targets live above, under their canonical
+# firmware-*-tdeck-mainline names; the image + otadata offsets are the MPY_*
+# variables at the top of this file.)
 

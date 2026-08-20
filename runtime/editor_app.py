@@ -1,4 +1,4 @@
-"""The EDITOR app (Stage 3 of docs/shell_ux_technical_plan_v1.md).
+"""The EDITOR app (Stage 3 of docs/history/shell_ux_technical_plan_v1.md).
 
 `EditorApp` is the console's authoring app: ONE app, opened on a `Project`, whose
 tabs ARE the already-extracted editor layers -- the view ladder ordered gentlest
@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import _BAR_ICON, _ZONE_LEFT_GAME
 
 
-# The Editor's lent left zone (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46
+# The Editor's lent left zone (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46
 # zoned bar): PROJECTS (back to the picker) + the tab ladder + UNDO/REDO + PLAY, in
 # the spec Section 6 order (Projects -> Config -> Blocks -> Code -> Sprites -> Map
 # -> Music -> UNDO -> REDO -> PLAY), rendered as icons inside the rect the bar lends

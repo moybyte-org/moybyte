@@ -42,7 +42,6 @@ import json
 import math
 import os
 import random
-import struct
 import sys
 import zlib
 
@@ -50,6 +49,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from runtime.palette import MOY64  # noqa: E402  (preview colours only)
+from tools import pngwrite  # noqa: E402
 
 W, H = 320, 240
 SEED = 20260729
@@ -524,21 +524,13 @@ def emit_tables(pts):
 
 
 def write_png(path, buf):
-    rows = bytearray()
+    rows = []
     for y in range(H):
-        rows.append(0)
+        row = bytearray()
         for x in range(W):
-            r, g, b = MOY64[buf[y * W + x]]
-            rows += bytes((r, g, b))
-    def chunk(tag, data):
-        return (struct.pack(">I", len(data)) + tag + data
-                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
-    png = (b"\x89PNG\r\n\x1a\n"
-           + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
-           + chunk(b"IDAT", zlib.compress(bytes(rows), 9))
-           + chunk(b"IEND", b""))
-    with open(path, "wb") as f:
-        f.write(png)
+            row += bytes(MOY64[buf[y * W + x]])
+        rows.append(row)
+    pngwrite.write_png(path, rows, W, H)
 
 
 def encode_bg(buf):

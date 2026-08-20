@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -28,28 +29,95 @@ import serial
 BAUD = 115200
 BOOT_BANNER = "desktop running"
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+P4_BOARD_DIR = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
+
+
+def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
+    """A board's upload chunk from its own [serial] block -- the same number
+    tools/push_cart.py reads, kept in ONE place beside the measurement that
+    produced it.
+
+    It is PER BOARD and the boards disagree for a hardware reason: the P4's
+    CH343 stdin is a ~256-byte ring with no flow control, while the two S3
+    boards' USB-Serial/JTAG backpressures and keeps 768. So this takes the
+    directory of the board being driven, and a suite that drives a USB board
+    passes its own -- a single class-wide constant is what went stale here.
+
+    Falls back to `default` if board.toml cannot be read, because a test driver
+    that refuses to start is worse than one on a stale constant."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import board_config
+        return int(board_config.load(board_dir).get("serial", {}).get("chunk")
+                   or default)
+    except Exception:  # noqa: BLE001 -- any parse/IO failure means "use default"
+        return default
+
 
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
-    def __init__(self, port, log=None, timeout=0.2):
+    def __init__(self, port, log=None, timeout=0.2, dtr=False, rts=False,
+                 chunk=None):
         self.log = log if log is not None else (lambda s: None)
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = BAUD
         self.ser.timeout = timeout
-        # dtr/rts LOW before open: opening must never glitch the CH343's
-        # auto-reset circuit (reset is explicit, below).
-        self.ser.dtr = False
-        self.ser.rts = False
+        # The line state AT OPEN is board-specific and load-bearing:
+        #   P4 (CH343, external USB-UART): dtr/rts LOW, so opening never
+        #     glitches the auto-reset circuit (reset is explicit, below).
+        #   T-Deck (USB-Serial/JTAG, on the SoC): the OPPOSITE -- an open with
+        #     both lines LOW is a CHIP RESET (rst:0x15 USB_UART_CHIP_RESET,
+        #     measured 2026-08-17), after which the USB device re-enumerates
+        #     under the open handle and every read returns nothing forever.
+        #     Opening with both HIGH (pyserial's default, what miniterm does)
+        #     attaches to the running console cleanly.
+        self.ser.dtr = dtr
+        self.ser.rts = rts
         self.ser.open()
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)
+        # Per instance, because the boards' rings differ (see declared_chunk).
+        if chunk:
+            self.CHUNK = int(chunk)
 
     def close(self):
         self.ser.close()
 
     # -- plumbing ---------------------------------------------------------
+
+    # UART boards have NO FLOW CONTROL: the P4's CH343 feeds a ~256-byte
+    # stdin ring that the console drains once per ~20ms frame, so a long line
+    # written in one burst (115200 baud = ~11.5 bytes/ms) overflows the ring
+    # mid-line and arrives corrupted -- measured 2026-08-17: 768-byte `py`
+    # lines failed 3/3 in one write and passed 3/3 sliced at 128B/20ms. The
+    # old device readline masked this by blocking mid-frame and draining
+    # continuously; the shared dev channel drains per frame, so the WRITER
+    # must respect the ring. Short lines (a burst under the ring size) go out
+    # in one write. USB boards (T-Deck) have host-side backpressure and never
+    # need this, but the pacing costs them nothing on short commands.
+    # 96B/40ms, not the 128B/20ms that first measured clean: under PERF DIAG
+    # the loop drops toward ~25fps (40ms frames), and two 128B slices landing
+    # inside one frame gap total 256B -- exactly the ring, zero margin. The
+    # suite's longest line (a 512-char junk-signature probe) failed right
+    # there. 96B per 40ms keeps the worst in-window arrival under half a ring
+    # at any loop rate the console actually runs.
+    PACE_SLICE = 96            # bytes per write burst (ring/2 - headroom)
+    PACE_GAP_S = 0.04          # a diag-slowed frame period between bursts
+
+    def _write_line(self, text):
+        data = text.encode() + b"\n"
+        if len(data) <= self.PACE_SLICE:
+            self.ser.write(data)
+            self.ser.flush()
+            return
+        for i in range(0, len(data), self.PACE_SLICE):
+            self.ser.write(data[i:i + self.PACE_SLICE])
+            self.ser.flush()
+            time.sleep(self.PACE_GAP_S)
+
 
     def _pump(self):
         chunk = self.ser.read(4096)
@@ -95,15 +163,13 @@ class P4Board:
         assignment or an exec of an already-uploaded buffer; the one place that
         was not -- pyexec's `ws._up += part` -- is now an indexed store for
         exactly this reason. Pass retry=False for anything that accumulates."""
-        self.ser.write(text.encode() + b"\n")
-        self.ser.flush()
+        self._write_line(text)
         if wait_for is None:
             wait_for = "REMOTE"
         line = self.wait_line(wait_for, timeout)
         if line is None and retry:
             self.log("no reply; resending: " + text[:60])
-            self.ser.write(text.encode() + b"\n")
-            self.ser.flush()
+            self._write_line(text)
             line = self.wait_line(wait_for, timeout)
         return line
 
@@ -124,8 +190,7 @@ class P4Board:
 
     def state(self, timeout=8.0):
         """The `state` snapshot as a dict (see moy_runtime._remote_state)."""
-        self.ser.write(b"state\n")
-        self.ser.flush()
+        self._write_line("state")
         line = self.wait_line("STATE ", timeout)
         if line is None:
             raise RuntimeError("no STATE reply")
@@ -173,10 +238,24 @@ class P4Board:
     # Re-measured, five tries per size: 120, 400, 512, 640, 768, 900 and 1000
     # all pass 5/5 -- and 256 passes 3/5. So the 2026-07-26 failure was not
     # length at all, it was the INTERMITTENT lost reply that shows up at every
-    # size. `cmd` retries once for that (below), and the chunk is now sized for
-    # round trips instead: 768 is 6x fewer, with 25% of headroom under the
-    # largest size that measured clean.
-    CHUNK = 768
+    # size. `cmd` retries once for that (below), and the chunk was sized for
+    # round trips instead: 768 is 6x fewer.
+    #
+    # 768 WAS WRONG, and the 5/5 above is why it survived a fortnight: this
+    # UART's stdin is a ~256-byte ring with NO flow control, so an over-long
+    # line is dropped as NOISE with no error -- the failure is silent, and it
+    # only bites once the frame loop is slow enough (a cart running, PERF diag
+    # streaming) that the ring fills between drains. The board.toml measurement
+    # of 2026-08-19 caught it on a 44KB cart push (five failures, a different
+    # bad hash each time; clean first try at 256), and the same size is what
+    # the conformance harness and the RSA-verifier test upload through -- both
+    # failed here as `SyntaxError: invalid syntax` / `ValueError: incorrect
+    # padding` from a corrupted chunk, which names nothing that is wrong.
+    #
+    # So the size is READ from the board's own [serial] declaration rather than
+    # kept as a second copy of the number. The literal below is only the
+    # fallback for a checkout where board.toml cannot be read.
+    CHUNK = declared_chunk()          # the P4's; USB boards pass their own
 
     def pyval(self, expr, timeout=30.0):
         """Evaluate a short expression on the device; returns the repr'd value

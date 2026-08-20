@@ -1,0 +1,141 @@
+#  Moybyte board definition -- the WEB RUNNER (MicroPython-WASM, #151)
+#  ===================================================================
+#
+#  The third target's board file, and the LAST hand-rolled staging list to go
+#  (#161): the boards moved their `cp` lists into board.toml in Phase 3, while
+#  this build kept an inline `DENY="..."` string in build.sh -- the very shape
+#  whose reasons live in commit messages instead of beside the data. The set
+#  below is that DENY, verbatim, with each exclusion's why written down;
+#  `tests/test_staging_closure.py` derives the web frozen set from THIS FILE
+#  now, exactly as it does for the boards.
+#
+#  What this file does NOT cover: the emscripten usermod staging (moy_gfx /
+#  moy_lua / moy_audio / moycore ride micropython.mk fragments into the wasm
+#  port, structurally unlike the boards' USER_C_MODULES cmake), the generated
+#  `palette.py` literal twin, and the runner's own authored modules
+#  (web_boot.py / web_canvas.py), which build.sh copies by name the way a
+#  board's tracked modules/ files simply exist.
+
+[board]
+name = "web_runner"
+chip = "wasm32"
+tier = "browser"
+tier_why = """
+The browser runs BOTH board arrangements: handheld (one canvas, system IS
+game) and desktop (big system canvas + a real 320x240 game canvas +
+blit_game), picked at boot. So unlike the S3 it stages wm_windowed.py and
+surface.py, and unlike both boards it keeps host_api.py -- deliberately
+portable, the wasm head's cart API -- and input.py, the host InputState
+web_input decodes into."""
+
+# ---------------------------------------------------------------------------
+
+[modules]
+# The stage dir is BUILD OUTPUT, demolished by build.sh (`rm -rf`) before every
+# stage -- so unlike the boards' gitignored-but-persistent modules/ there is
+# nothing for a prune to catch, and prune stays off.
+dest  = ".build/stage/modules"
+prune = false
+
+[modules.shared]
+source   = "runtime"
+strategy = "denylist"
+why = """
+Stage EVERY runtime/*.py; name the ones that must not cross, with the reason.
+The web runner had this policy FIRST (its build.sh glob predates #161) -- what
+moves here is the reasons, and the derivation tests/test_staging_closure.py
+performs over them."""
+
+# -- host-only: real code, real purpose, dead weight or wrong in the browser --
+
+[[modules.shared.deny]]
+file = "host_app.py"
+kind = "host-only"
+why  = """
+The simulator's glue: a pygame window, the mouse/trackball ConsoleDriver, and
+`build_workstation()`. The browser's boot is web_boot.py."""
+
+[[modules.shared.deny]]
+file = "lua_host.py"
+kind = "host-only"
+why  = """
+The host's Lua cart runner (lupa, a CPython extension). The browser runs
+moycore, compiled in as a usermod since 2026-08-13."""
+
+[[modules.shared.deny]]
+file = "gfx_binding.py"
+kind = "host-only"
+why  = """
+`moy_gfx` for CPython: compiles C at runtime and dlopens it through ctypes.
+The browser's moy_gfx is compiled in. This and the three below were swept into
+the image for months -- pure dead weight, "because a denylist includes
+whatever nobody excluded" -- until test_staging_closure noticed."""
+
+[[modules.shared.deny]]
+file = "lua_binding.py"
+kind = "host-only"
+why  = "ctypes over libmoy's Lua binding, compiled on demand. See gfx_binding."
+
+[[modules.shared.deny]]
+file = "audio_binding.py"
+kind = "host-only"
+why  = "ctypes over the vendored libmoy synth. The browser's is the moy_audio usermod."
+
+[[modules.shared.deny]]
+file = "native_build.py"
+kind = "host-only"
+why  = """
+The compile-and-cache helper the bindings above share: subprocess to a C
+compiler. There is no compiler in a wasm sandbox."""
+
+[[modules.shared.deny]]
+file = "host_canvas.py"
+kind = "host-only"
+why  = """
+Runs the boards' canvas class on CPython over the ctypes compositor. The
+browser runs device_canvas DIRECTLY (staged below) over web_canvas's
+WebCompositor -- no adapter needed where the real class already loads."""
+
+# -- generated instead: the file cannot cross, its CONTENT does ---------------
+
+[[modules.shared.deny]]
+file = "palette.py"
+kind = "never-on-a-board"
+why  = """
+Builds MOY64's indices 16-63 with CPython's `colorsys` at IMPORT time, which
+MicroPython (wasm included) does not have. Unlike the boards -- which read the
+baked device_canvas.PAL565 twin -- this build GENERATES a literal palette.py
+into the stage (build.sh runs the real module under the venv python and dumps
+its tables), because the web's recording-era consumers wanted the index-space
+palette by that name. The generation step stays in build.sh."""
+
+# -- staged under another name -----------------------------------------------
+
+[[modules.shared.rename]]
+file = "font.py"
+as   = "moy_font.py"
+why  = """
+The petme128 8x8 glyph blob (#62), staged under the name device_canvas imports
+before it will use the native moy_gfx.text kernel -- same rename as both
+boards, so browser text rasterizes from the same bytes."""
+
+# ---------------------------------------------------------------------------
+
+[modules.device]
+source   = "device"
+strategy = "allowlist"
+why = """
+The browser stages three files from the boards' shared device tier -- the
+allowlist call is the same as the boards': `device/` defaults to "no" because
+most of it drives hardware (SD, WiFi, OTA, I2S, diag rings) that a wasm
+sandbox does not have and web_boot never constructs."""
+
+[[modules.device.group]]
+files = ["moycore_glue.py", "device_canvas.py", "device_util.py"]
+why = """
+moycore_glue -- the host half of moycore: input snapshot in, audio queue out,
+pmem at the #66 boundaries. Board-agnostic by construction (it talks to ws and
+to the module, never to a panel), which is why the browser needs no twin.
+device_canvas -- THE RASTER (moycore stage 4): the browser runs the boards'
+own canvas class over web_canvas.WebCompositor. device_util -- the ticks
+helpers device_canvas imports."""

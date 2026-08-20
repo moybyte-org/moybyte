@@ -12,16 +12,12 @@ vertical slice:
 All driven through the same shared console the device runs (runtime.host_app),
 so these assert host==device behavior."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
-def _ws(tmp_path, **kwargs):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kwargs)
+from ws_helpers import build_ws as _ws
 
 
 def _home_layer(ws):
@@ -440,19 +436,13 @@ def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
 def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
     """Repeated Make-window resizes must not retain every derived indexed+RGB
     cover forever on the P4 heap."""
-    from runtime import console, moy_carts, web_view
+    from runtime import console, moy_carts
     ws = _ws(tmp_path, sys_size=(1024, 600))
     covered = next(it for it in ws.launcher.items
                    if it.get("path") and
                    moy_carts.load_image(it["path"], moy_carts.COVER_IMAGE))
     first = _cover_sync(ws, covered, 120, 90)
-    rec = web_view.DrawRecorder(1024, 600)
-    rec.self_contained = True
-    rec.spr(first, 0, 0)
-    # The paint fast wire, not the generic JSON pixel-list spr: covers are
-    # serial-NAMED now (#113), so they ride the ship-once imgref lane (the
-    # nameless inline "img" form remains the fallback for unnamed paint images).
-    assert rec._cmds[0][0] == "imgref"
+    assert first is not None
 
     for i in range(80):
         _cover_sync(ws, covered, 120 + i, 90 + i)

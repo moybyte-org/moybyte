@@ -6,6 +6,7 @@
   "runtime": "python",
   "main": "main.py",
   "system": true,
+  "order": 210,
   "canvas": "320x240",
   "permissions": [
     "graphics",

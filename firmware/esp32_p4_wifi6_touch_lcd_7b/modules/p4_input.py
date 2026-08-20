@@ -20,9 +20,10 @@ read which corner the mapped coords land in, set the knobs so mapped == target,
 then bake the winning values in here.
 """
 
+from gt911 import HeldPoint, REG_STATUS as _REG_STATUS, \
+    REG_POINT0 as _REG_POINT1        # x lo/hi, y lo/hi on THIS board's part
+
 GT911_ADDR = 0x5D
-_REG_STATUS = 0x814E
-_REG_POINT1 = 0x8150     # x lo/hi, y lo/hi (little-endian)
 
 # Live-tweakable mapping knobs (module globals, read per poll -- see docstring).
 # CALIBRATED on glass 2026-07-08 (run_touch_calibrate, 5-target pass): the GT911
@@ -34,13 +35,17 @@ FLIP_Y = True
 
 
 class Touch:
+    # The hold/stale/bound contract is gt911.HeldPoint now (#202 Phase C, one
+    # copy for every GT911 board) -- promoted after THIS driver proved the
+    # drift risk: it "had the hold and neither guard until 2026-08-15", holding
+    # the point without the staleness flag or the release bound.
+
     def __init__(self, w=1024, h=600, sda=7, scl=8, freq=400000):
         self.w = w
         self.h = h
         self.available = False
         self.raw = None          # last raw controller coords (pre-mapping), for calibrate
-        self._down = False
-        self._last = None
+        self._hp = HeldPoint()
         self._i2c = None
         try:
             from machine import I2C, Pin
@@ -50,9 +55,19 @@ class Touch:
         except Exception as exc:  # noqa: BLE001 -- input must never fail closed
             print("Moybyte P4 touch unavailable:", exc)
 
+    @property
+    def fresh(self):
+        # Read by the frame loop after every poll (pointer.fresh) -- the
+        # HeldPoint owns it.
+        return self._hp.fresh
+
     def poll(self):
-        """(x, y, press_edge) while a finger is on the glass, else None."""
+        """(x, y, press_edge) while a finger is on the glass, else None.
+
+        Sets `self.fresh` beside the return (gt911.HeldPoint's no-news
+        contract). T-Deck twin: device_input.Touch.poll."""
         if not self.available:
+            self._hp.fresh = True
             return None
         try:
             i2c = self._i2c
@@ -61,12 +76,11 @@ class Touch:
                 # No fresh buffer. The GT911 keeps reporting the held point only
                 # via fresh buffers, so "no news" between frames means the finger
                 # state is unchanged -- report release only when it says 0 points.
-                return None if not self._down else self._last
+                return self._hp.hold()
             n = status & 0x0F
             i2c.writeto_mem(GT911_ADDR, _REG_STATUS, b"\x00", addrsize=16)
             if n < 1:
-                self._down = False
-                return None
+                return self._hp.release()
             d = i2c.readfrom_mem(GT911_ADDR, _REG_POINT1, 4, addrsize=16)
             x = d[0] | (d[1] << 8)
             y = d[2] | (d[3] << 8)
@@ -81,9 +95,9 @@ class Touch:
                 x = self.w - 1
             if y >= self.h:
                 y = self.h - 1
-            edge = not self._down
-            self._down = True
-            self._last = (x, y, False)   # held-state repeat (no re-tap)
-            return (x, y, edge)
+            return self._hp.sample(x, y)
         except Exception:  # noqa: BLE001 -- a flaky read = one missed frame, not a crash
-            return None
+            # ...and "one missed frame" must mean NO NEWS, not a finger-up: this
+            # used to `return None`, which the caller reads as a release and
+            # which therefore ended any drag the flaky read landed in.
+            return self._hp.hold()

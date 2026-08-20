@@ -1,5 +1,5 @@
 """The console's Layer protocol + the self-contained surface adapters, extracted
-from Workstation (runtime/console.py) -- docs/shell_layers_refactor_v1.md.
+from Workstation (runtime/console.py) -- docs/history/shell_layers_refactor_v1.md.
 
 `Workstation` is the compositor/router over a z-ordered stack of Layers; this
 module holds the shell-side building blocks that are NOT the router itself:
@@ -24,7 +24,7 @@ identical source (build.sh stages it into modules/ like editors.py).
 
 
 class Layer:
-    """One composited surface of the console (docs/shell_layers_refactor_v1.md): it
+    """One composited surface of the console (docs/history/shell_layers_refactor_v1.md): it
     owns its own pixels, input, state, and constants, and plugs into Workstation's
     z-ordered layer stack. `Workstation` is the compositor/router over the stack; a
     Layer is a consumer of the shared draw toolkit (`_glyph`/`_icon`/`_btn`/...) and
@@ -64,7 +64,7 @@ class Layer:
 
 
 class _LegacyLayer(Layer):
-    """Phase-0 shim (docs/shell_layers_refactor_v1.md §5): a Layer whose draw / input /
+    """Phase-0 shim (docs/history/shell_layers_refactor_v1.md §5): a Layer whose draw / input /
     pointer just call the EXISTING Workstation `_draw_*` / input methods, so the router
     can drive the whole shell as a z-ordered stack while every surface's pixels + taps
     stay byte-identical. Each smeared surface is later promoted to a real Layer
@@ -102,7 +102,7 @@ class _LegacyLayer(Layer):
 
 
 class _PlayerLayer(Layer):
-    """The running cart (Stage 2 of docs/shell_ux_technical_plan_v1.md): a thin
+    """The running cart (Stage 2 of docs/history/shell_ux_technical_plan_v1.md): a thin
     adapter over `ws.player` -- the run-loop black box that starts a cart, ticks it
     each frame, feeds it input, and guarantees it exits. Game domain (drawn on the
     fixed 320x240 canvas, composited by the router). All the logic lives on the

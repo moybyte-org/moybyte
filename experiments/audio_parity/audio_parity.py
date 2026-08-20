@@ -1,30 +1,30 @@
-"""Audio parity: runtime/audio.py's synth vs. the vendored libmoy library (#97).
+"""Audio parity: the host AudioEngine's door into vendored libmoy (#97).
 
-The device and the web runner COMPILE libmoy (native/moy_audio/libmoy/), so their
-audio is SPEC.md 8 by construction. The host sim can't -- linking C would put a
-compiler in `make setup` -- so `runtime/audio.AudioEngine` is a hand-maintained
-Python twin of that exact file. This harness is what stops the twin drifting: it
-renders the same scenario through both and compares.
+Every tier compiles libmoy (native/moy_audio/libmoy/) now: the boards and the
+web runner natively, and -- since moycore stage 0 deleted the hand-maintained
+Python twin -- the host sim too, through the ctypes .so that
+runtime/audio_binding.py builds from the DOUBLE-WIDENED vendored source. This
+harness renders the same scenario through `runtime/audio.AudioEngine` (i.e.
+the binding) and through an independently-driven reference binary
+(libmoy_render.c) and compares; what it can catch is no longer synth drift --
+there is one synth -- but a mangled verb argument, the bank's one JSON
+crossing, or a broken render buffer.
 
 It checks two things, because there are two different questions.
 
-STRICT -- is the Python arithmetic the same arithmetic?
-    libmoy is single-precision throughout (the S3 and P4 FPUs are); CPython has
-    only doubles. Comparing them directly buries a real porting bug under an
-    unavoidable rounding difference, so this mode compiles the vendored source
-    at DOUBLE precision -- mechanically, two regexes over a copy in a temp dir,
-    never the vendored file -- and then demands that every single sample match
-    exactly. It does: all scenarios are bit-identical. That turns "the port is
-    faithful" from a judgement call into a boolean, and it is what caught the
-    last divergence in the original port (a closed-form 2**(n/12) in place of
-    libmoy's pitch table: inaudible on its own, but enough to walk a square-wave
-    edge a whole sample sideways after a few thousand phase accumulations).
+STRICT -- does the binding's door pass every byte through faithfully?
+    The reference is compiled at the binding's own DOUBLE precision
+    (mechanically, two regexes over a copy in a temp dir, never the vendored
+    file), so both sides are the same program and every sample must match
+    exactly. Historically this mode compared the Python twin and is what
+    proved it bit-identical to the widened C -- the fact that made stage 0's
+    swap provably sample-neutral.
 
-DEVICE PRECISION -- does it still sound the same at the precision that ships?
-    The same comparison against the source exactly as vendored. Bit-equality is
-    neither expected nor required here -- SPEC.md 8.3 says outright that two
-    hosts will not produce identical samples -- so this measures what 8.3 does
-    promise:
+DEVICE PRECISION -- does the host still sound like the boards?
+    The same comparison against the source exactly as vendored (float, as the
+    S3/P4 FPUs run it). Bit-equality is neither expected nor required here --
+    SPEC.md 8.3 says outright that two hosts will not produce identical
+    samples -- so this measures what 8.3 does promise:
 
       level  -- RMS overall and per block. Catches the calibrated instrument
                 loudness (square 0.25 vs triangle 0.5), vol/7, the master level,
@@ -55,8 +55,7 @@ import tempfile
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.normpath(os.path.join(_HERE, "..", ".."))
-_LIBMOY = os.path.join(_ROOT, "firmware", "lilygo_t_deck_plus_micropython",
-                       "native", "moy_audio", "libmoy")
+_LIBMOY = os.path.join(_ROOT, "native", "moy_audio", "libmoy")
 
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
@@ -168,6 +167,24 @@ def scenarios():
             _note(45, 0, 6), _note(47, 0, 6), _note(52, 0, 6), _note(55, 0, 6),
         ]}], "music": []}, ["sfx 0 0", f"render {int(RATE * 0.4)}"]))
 
+    # FRACTIONAL sfx speeds (2026-08-10): libmoy declares speed float,
+    # "fractions legal", and the p8 imports depend on it -- a 7.5-steps/s
+    # melody lasts exactly its 0.234-rows/s music row. The Python twin
+    # truncated these for years (max(1, int(speed))), so every ported phrase
+    # overran its row and got retriggered early -- audibly "sped up" on any
+    # host that plays the twin's bank while every clock measured exact. One
+    # bare fractional sfx + the row-retrigger composition, so both the step
+    # clock and the phrase/row interaction stay pinned.
+    out.append(("speed_frac", {"sfx": [{
+        "speed": 7.5, "loop": False, "steps": [
+            _note(40 + (i % 5), 1, 6) for i in range(8)
+        ]}], "music": []}, ["sfx 0 0", f"render {int(RATE * 1.2)}"]))
+    out.append(("speed_frac_row", {
+        "sfx": [{"speed": 7.5, "loop": False,
+                 "steps": [_note(38 + (i % 7), 2, 6) for i in range(16)]}],
+        "music": [{"speed": 0.46875, "loop": True, "pattern": [[0], [0]]}],
+    }, ["music 0", f"render {int(RATE * 5)}"]))
+
     return out
 
 
@@ -265,23 +282,24 @@ def render_native(mp_exe, workdir, name, bank, commands):
 
 
 def find_micropython():
-    """The unix-port binary built WITH the moy_audio usermod, if someone made
-    one. Returns None otherwise -- the native pass is then skipped, since
-    building MicroPython is not something a test run should do on its own."""
-    env = os.environ.get("MOYBYTE_MICROPYTHON")
-    if env and os.path.exists(env):
-        return env
-    cand = os.path.join(
-        _ROOT, "firmware", "lilygo_t_deck_plus_micropython", ".build",
-        "lvgl_micropython", "lib", "micropython", "ports", "unix",
-        "build-moyaudio", "micropython")
-    return cand if os.path.exists(cand) else None
+    """The desktop MicroPython built WITH the moy_audio usermod, if one exists.
+
+    Deliberately NOT its own path list: `make unix-micropython` builds that
+    binary and tests/unix_mp.py is the ONE place that knows where it lands, so
+    a copy here would be the thing that made this script report "no build" on a
+    machine whose test suite had just used one. (That module imports pytest
+    lazily, on purpose, so a plain script can share the lookup.)"""
+    sys.path.insert(0, os.path.join(_ROOT, "tests"))
+    from unix_mp import find_unix_mp
+    return find_unix_mp("moy_audio")
 
 
 # -- the Python engine -------------------------------------------------------
 
 def render_python(bank_dict, commands):
-    """Run one scenario through runtime/audio.AudioEngine; int16 samples."""
+    """Run one scenario through runtime/audio.AudioEngine -- since stage 0
+    that IS the ctypes binding over the double-widened vendored C, so this is
+    the host console's real playback path end to end; int16 samples."""
     from runtime.audio import AudioBank, AudioEngine
 
     engine = AudioEngine(AudioBank.from_dict(bank_dict), rate=RATE)
@@ -419,13 +437,15 @@ def run_parity(verbose=False, only=None):
         exe = build_reference(work)
         if exe is None:
             if verbose:
-                print("no C compiler -- skipping. (The device and the web "
-                      "runner COMPILE libmoy, so they are unaffected; this only "
-                      "checks the host's Python twin of it.)")
+                print("no C compiler -- skipping. (The boards and the web "
+                      "runner COMPILE libmoy, so they are unaffected; without "
+                      "a compiler the host binding is absent too and the sim "
+                      "is deliberately silent.)")
             return None
 
         if verbose:
-            print("== strict: bit-exact vs libmoy at CPython's precision ==")
+            print("== strict: binding bit-exact vs libmoy at its own "
+                  "(double) precision ==")
         strict_bad = run_strict(work, build_reference(work, double=True),
                                 only=only, verbose=verbose)
         if verbose and not strict_bad:
@@ -442,7 +462,7 @@ def run_parity(verbose=False, only=None):
         if mp_exe is None:
             if verbose:
                 print("no unix-port build with the usermod -- skipped. Build one:\n"
-                      "  ln -s $PWD/firmware/lilygo_t_deck_plus_micropython/native"
+                      "  ln -s $PWD/native"
                       "/moy_audio /tmp/usermods/moy_audio\n"
                       "  make -C <micropython>/ports/unix VARIANT=standard "
                       "BUILD=build-moyaudio USER_C_MODULES=/tmp/usermods\n")

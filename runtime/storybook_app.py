@@ -158,14 +158,28 @@ class StorybookAppLayer(ListShellApp):
     APP_TITLE = "Storybook"
     APP_PERM = "storybook"
     APP_FOLDER = "storybook.moy"
+    # The shell roles this app uses (runtime/app_context.py). Storybook is the
+    # ONE shipped app that authors CARTS -- which is exactly why ctx.carts is a
+    # role of its own and not folded into ctx.files (a story is executable
+    # content; a drawing is not).
+    NEEDS = ("surface", "theme", "damage", "carts", "nav", "artwork",
+             "clipboard")
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._store = ctx.carts    # ListShellApp's storage role: CARTS here
+        self._nav = ctx.nav
+        self._art = ctx.artwork
+        self._clip = ctx.clipboard
         self.names = names
         self._in = in_rect
-        self.layout = StorybookLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                      ws._effective_font_scale(),
-                                      ws.windowed_chrome)
+        cv = ctx.surface.canvas()
+        self.layout = StorybookLayout(cv.w, cv.h, self._surf.font_scale(),
+                                      self._surf.windowed())
         self.mode = "shelf"           # shelf | pages | page
         self.cart = None              # the open story cart dict
         self.deck = None              # its parsed deck.json
@@ -180,15 +194,15 @@ class StorybookAppLayer(ListShellApp):
         self._deck_dirty = False      # unsaved deck edits (commit no-ops when clean)
 
     # -- store -----------------------------------------------------------------
-    # (is_app / _store_ready / _load_blob: ListShellApp)
+    # (is_app / _store_ready / _load_json: ListShellApp)
 
     def _stories(self):
-        return [c for c in self.ws._all_carts
+        return [c for c in self._store.all()
                 if c.get("type") == STORY_TYPE and c.get("path")]
 
     def _load_deck(self, cart):
         # a bad deck opens as read-only code (guarded read: ListShellApp)
-        data = self._load_blob(lambda: self.ws.carts_store.load_deck(cart))
+        data = self._load_json(self._store.load_deck(cart))
         return data if isinstance(data, dict) else None
 
     def _commit_deck(self):
@@ -205,14 +219,29 @@ class StorybookAppLayer(ListShellApp):
         if not self._store_ready():
             self.status = "CAN'T SAVE HERE"
             return
-        ws = self.ws
-        try:
-            def _write():
-                ws.carts_store.save_deck(self.cart, json.dumps(self.deck))
-                return ws.carts_store.save_code(self.cart, src)
-            ws._with_sd(_write)
-        except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
-            self.status = ("CAN'T SAVE " + str(exc))[:28]
+        cart = self.cart
+        deck_blob = json.dumps(self.deck)
+
+        def _write(c):
+            c.save_deck(cart, deck_blob)
+            return c.save_code(cart, src)
+
+        _v, err = self._store.batch(_write)
+        if err is not None:      # surface, never crash the shell
+            self.status = ("CAN'T SAVE " + str(err))[:28]
+
+    def commit(self):
+        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
+        before routing a tap into this app's bar band -- the context-X there is
+        an exit path and must never lose a story."""
+        self._sync_editor()
+        self._commit_deck()
+
+    def close(self):
+        """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
+        this app comes off the screen by ANY route. `_commit_deck` syncs the page
+        editor itself and no-ops on a clean deck."""
+        self._commit_deck()
 
     def _sync_editor(self):
         ed = self.editor
@@ -226,7 +255,7 @@ class StorybookAppLayer(ListShellApp):
     # -- lifecycle ---------------------------------------------------------------
 
     def relayout(self, w, h, fs):
-        self.layout = StorybookLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = StorybookLayout(w, h, fs, self._surf.windowed())
         if self.editor is not None:
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 
@@ -243,33 +272,34 @@ class StorybookAppLayer(ListShellApp):
         self._ekey_prev = 0
         self._deck_dirty = False
         self.status = "MY STORIES"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- story verbs ---------------------------------------------------------------
 
     def _new_story(self):
         if not self._store_ready():
             self.status = "CAN'T MAKE STORIES HERE"
-            self.ws._dirty = True
+            self._damage.all()
             return
-        ws = self.ws
         title = "Story " + str(len(self._stories()) + 1)
         deck = {"format": "moydeck-v1", "art_seq": 0,
                 "pages": [{"bg": BGS[0], "art": None,
                            "text": ["Once upon a time..."]}]}
         src = deck_to_code(deck, title)
-        try:
-            def _make():
-                cart = ws.carts_store.create(title, ws.carts_root, src=src,
-                                             type=STORY_TYPE)
-                ws.carts_store.save_deck(cart, json.dumps(deck))
-                return cart, ws.carts_store.scan(ws.carts_root)
-            cart, items = ws._with_sd(_make)
-            ws._apply_items(items)
-        except Exception as exc:  # noqa: BLE001
-            self.status = ("NEW STORY FAILED " + str(exc))[:28]
-            self.ws._dirty = True
+        deck_blob = json.dumps(deck)
+
+        def _make(c):
+            cart = c.create(title, src=src, type=STORY_TYPE)
+            c.save_deck(cart, deck_blob)
+            return cart, c.scan()
+
+        got, err = self._store.batch(_make)
+        if err is not None:
+            self.status = ("NEW STORY FAILED " + str(err))[:28]
+            self._damage.all()
             return
+        cart, items = got
+        self._store.apply(items)
         # Open the freshly created story (find its scanned twin by path).
         for c in self._stories():
             if c.get("path") == cart.get("path"):
@@ -286,7 +316,7 @@ class StorybookAppLayer(ListShellApp):
             self.deck = {"format": "moydeck-v1", "pages": []}
             self.read_only = True
         else:
-            self.ws._rehydrate_cart(cart)
+            self._store.hydrate(cart)
             if bool(cart.get("graduated")):
                 self.read_only = True     # persisted (#78): already graduated
             else:
@@ -309,7 +339,7 @@ class StorybookAppLayer(ListShellApp):
         self._deck_dirty = False
         self.status = ("LEVELED UP TO CODE - EDIT IN MAKE" if self.read_only
                        else (cart.get("title") or "STORY"))
-        self.ws._dirty = True
+        self._damage.all()
 
     def _graduate_hand_edit(self, cart, baseline_src, diverged_src):
         """GRADUATE a story cart whose main.py diverged from what its deck would
@@ -323,27 +353,26 @@ class StorybookAppLayer(ListShellApp):
         diverged code already on disk). Best-effort: a store/journal hiccup
         still marks the RAM copy graduated (never re-offers a clobbering SAVE
         this session), it just won't persist until the next successful write."""
-        ws = self.ws
-        store = ws.carts_store
+        carts = self._store
         path = cart.get("path")
-        if store is not None and path and ws.can_manage and hasattr(store, "journal_append"):
+        if path and carts.ready() and carts.can_journal():
             mainf = cart.get("main", "main.py")
-            try:
-                def _write():
-                    store.journal_append(path, mainf, baseline_src, grad=0)
-                    store.journal_append(path, mainf, diverged_src, grad=1)
-                ws._with_sd(_write)
-            except Exception as exc:  # noqa: BLE001 -- never crash the shell over this
-                print("Moybyte story graduation failed:", exc)
+
+            def _write(c):
+                c.journal_append(path, mainf, baseline_src, grad=0)
+                c.journal_append(path, mainf, diverged_src, grad=1)
+
+            _v, err = carts.batch(_write)
+            if err is not None:  # never crash the shell over this
+                print("Moybyte story graduation failed:", err)
         cart["graduated"] = True
 
     def _play_story(self):
         if self.cart is None:
             return
         self._commit_deck()
-        ws = self.ws
-        ws._open_workspace(self.cart)
-        ws.run(ws.project, self)          # exit pops home (launcher root rule)
+        # exit pops home (launcher root rule)
+        self._nav.play(self.cart, self)
 
     def _back_to_shelf(self):
         self._commit_deck()
@@ -360,7 +389,7 @@ class StorybookAppLayer(ListShellApp):
         pages = self._pages()
         if len(pages) >= MAX_PAGES:
             self.status = "STORY FULL"
-            self.ws._dirty = True
+            self._damage.all()
             return
         pages.append({"bg": BGS[0], "art": None, "text": []})
         self._deck_dirty = True
@@ -375,7 +404,7 @@ class StorybookAppLayer(ListShellApp):
         lay = self.layout
         self.editor = CodeEditor("\n".join(pages[i].get("text") or []),
                                  lay.cols, lay.rows,
-                                 clip=getattr(self.ws, "clipboard", None))
+                                 clip=self._clip)
         # Typing continues the page: caret at the END of the words, not (0,0).
         self.editor.row = len(self.editor.lines) - 1
         self.editor.col = len(self.editor.lines[self.editor.row])
@@ -384,8 +413,8 @@ class StorybookAppLayer(ListShellApp):
         self.del_armed = False
         self._ekey_prev = 0
         self.status = "PAGE " + str(i + 1)
-        self.ws._set_text_mode(True)       # the page's words are typed
-        self.ws._dirty = True
+        self._nav.text_mode(True)       # the page's words are typed
+        self._damage.all()
 
     def _back_to_pages(self):
         self._sync_editor()
@@ -396,8 +425,8 @@ class StorybookAppLayer(ListShellApp):
         self.mode = "pages"
         self.del_armed = False
         self.status = (self.cart.get("title") or "STORY") if self.cart else "STORY"
-        self.ws._set_text_mode(False)
-        self.ws._dirty = True
+        self._nav.text_mode(False)
+        self._damage.all()
 
     def _cycle_bg(self):
         if self.read_only or not (0 <= self.page_i < len(self._pages())):
@@ -407,47 +436,45 @@ class StorybookAppLayer(ListShellApp):
         i = BGS.index(cur) if cur in BGS else 0
         p["bg"] = BGS[(i + 1) % len(BGS)]
         self._deck_dirty = True
-        self.ws._dirty = True
+        self._damage.all()
 
     def _attach_art(self):
         """USE MY PAINTING: copy the current shared Paint drawing onto this page
         (the Paint attach mechanism, one image per attach)."""
         if self.read_only or not (0 <= self.page_i < len(self._pages())):
             return
-        art = getattr(self.ws, "artwork", None)
+        art = self._art
         loaded = art.load() if art is not None else None
         if loaded is None:
             self.status = "PAINT SOMETHING FIRST"
-            self.ws._dirty = True
+            self._damage.all()
             return
         if not self._store_ready():
             self.status = "CAN'T SAVE HERE"
-            self.ws._dirty = True
+            self._damage.all()
             return
         w, h, idx = loaded
         w, h, idx = _fit_art(w, h, idx)
         seq = int(self.deck.get("art_seq") or 0) + 1
         self.deck["art_seq"] = seq
         name = "pg" + str(seq)
-        ws = self.ws
-        try:
-            blob = ws.carts_store.encode_moyimg(w, h, idx)
-            ws._with_sd(lambda: ws.carts_store.save_image(self.cart, name, blob))
-        except Exception as exc:  # noqa: BLE001
-            self.status = ("ART FAILED " + str(exc))[:28]
-            self.ws._dirty = True
+        blob = self._store.encode_image(w, h, idx)
+        _v, err = self._store.save_image(self.cart, name, blob)
+        if err is not None:
+            self.status = ("ART FAILED " + str(err))[:28]
+            self._damage.all()
             return
         self._pages()[self.page_i]["art"] = name
         self._deck_dirty = True
         self.status = "PAINTING ON PAGE " + str(self.page_i + 1)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _clear_art(self):
         if self.read_only or not (0 <= self.page_i < len(self._pages())):
             return
         self._pages()[self.page_i]["art"] = None
         self._deck_dirty = True
-        self.ws._dirty = True
+        self._damage.all()
 
     def _delete_page(self):
         pages = self._pages()
@@ -462,8 +489,8 @@ class StorybookAppLayer(ListShellApp):
         self.status = "PAGE TORN OUT"
         self._deck_dirty = True
         self._commit_deck()
-        self.ws._set_text_mode(False)
-        self.ws._dirty = True
+        self._nav.text_mode(False)
+        self._damage.all()
 
     # -- input -------------------------------------------------------------------------
 
@@ -479,8 +506,8 @@ class StorybookAppLayer(ListShellApp):
         ed = self.editor
         if ed is None or self.read_only:
             return
-        k = inp.last_key
-        if k and k != self._ekey_prev:
+        k = self._edge_key(inp)
+        if k:
             block = False
             if k in (0x0D, 0x0A) and len(ed.lines) >= MAX_TEXT_LINES:
                 block = True                       # a page holds 4 lines of words
@@ -491,15 +518,9 @@ class StorybookAppLayer(ListShellApp):
             elif ed.key(k):
                 self._deck_dirty = True
                 self.status = "PAGE " + str(self.page_i + 1)
-        self._ekey_prev = k
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            self._sync_editor()
-            self._commit_deck()                   # the X must never lose a story
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if not click:
             return True
         if self.mode == "shelf":
@@ -540,13 +561,13 @@ class StorybookAppLayer(ListShellApp):
             else:
                 self.del_armed = True
                 self.status = "TAP AGAIN TO TEAR OUT"
-                self.ws._dirty = True
+                self._damage.all()
             return True
         self.del_armed = False
         if (self.editor is not None and not self.read_only
                 and self._in(px, py, lay.text_area)):
             self.editor.place((px - lay.tx) // lay.cell, (py - lay.ty) // lay.lh)
-            self.ws._dirty = True
+            self._damage.all()
         return True
 
     def _tap_row(self, i):
@@ -567,14 +588,10 @@ class StorybookAppLayer(ListShellApp):
 
     # -- draw -------------------------------------------------------------------------
 
-    def _button(self, cv, label, r, hot=False):
-        # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
-
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.band_h))
         fs = lay.fs
@@ -598,8 +615,6 @@ class StorybookAppLayer(ListShellApp):
             self._button(cv, "MY ART", lay.btn3)
             self._button(cv, "TEAR OUT", lay.btn4, hot=self.del_armed)
             self._draw_page(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _page_label(self, p):
         text = (p.get("text") or [""])
@@ -609,26 +624,31 @@ class StorybookAppLayer(ListShellApp):
 
     def _draw_rows(self, cv, items, new_label, label_fn):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         rows = [new_label] + list(items) if new_label is not None else list(items)
+        black = self.names["black"]
         for i in range(self.top, min(self.top + lay.list_rows, len(rows))):
-            x, y, w, h = lay.row_rect(i - self.top)
+            r = lay.row_rect(i - self.top)
             selected = i == self.sel
-            item = rows[i]
+            edge = th["accent"] if selected else th["dim"]
             if new_label is not None and i == 0:
-                cv.rect(x, y, w, h, th["accent"] if selected else th["hilite"])
-                cv.print(new_label, x + 6 * fs, y + (h - 8 * fs) // 2,
-                         self.names["black"], 1)
+                # The + NEW row: a themed call-to-action field, black ink.
+                label = new_label
+                colors = (th["accent"] if selected else th["hilite"], black, edge)
             else:
-                cv.rect(x, y, w, h, 7)
-                cv.print(label_fn(item)[:max(1, w // (8 * fs) - 2)],
-                         x + 6 * fs, y + (h - 8 * fs) // 2, 0, 1)
-            cv.rectb(x, y, w, h, th["accent"] if selected else th["dim"])
+                # A deck row: cream paper with black ink -- frozen OFF-token
+                # pixels, which is exactly what ui.row's `colors` escape hatch
+                # is for. The label is truncated HERE because this site's frozen
+                # cap (`w // 8fs - 2`) is one column tighter than the toolkit's
+                # pad-derived one at some widths.
+                label = label_fn(rows[i])[:max(1, r[2] // (8 * fs) - 2)]
+                colors = (7, 0, edge)
+            _ui.row(cv, th, r, label, colors=colors, pad=6 * fs, fs=fs)
 
     def _draw_page(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         # Words box (the typed text), then a page preview strip below.
         ax, ay, aw, ah = lay.text_area

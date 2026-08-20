@@ -10,11 +10,9 @@ These build the SAME shared console the device runs (runtime.host_app) and drive
 it through ConsoleDriver -- mouse == touch, arrows == trackball -- exactly like
 tests/test_v04_userland.py."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _ws_with_carts(tmp_path, n):
@@ -179,7 +177,7 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     drv.touch_drag(lastx, cy)                 # one more eligible drag frame
     drv.frame(1 / 30)
     assert calls[0] == n_mid                  # partial: wallpaper NOT redrawn
-    partial = bytes(ws.sys_canvas.buf)
+    partial = bytes(ws.sys_canvas._buf)
     scroll = ws.launcher.scroll
     # Force the FULL path for the identical state and compare the pixels.
     ws.launcher_layer._full_streak = 0
@@ -188,7 +186,7 @@ def test_drag_partial_repaint_is_pixel_faithful(tmp_path):
     drv.frame(1 / 30)
     assert calls[0] == n_mid + 1              # the forced frame went FULL
     assert ws.launcher.scroll == scroll
-    full = bytes(ws.sys_canvas.buf)
+    full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * ws.layout.status_h    # compare below the bar (the
     assert full[row:] == partial[row:]            # clock may tick between)
     drv.touch_up()

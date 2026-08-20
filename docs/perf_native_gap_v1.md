@@ -94,7 +94,7 @@ build-tuning chapter is closed on both boards.
 API-preserving = the kid writes the same `.moy` cart. **Payoff** and **effort**
 are estimates; anything not "shipped/reverted" needs on-glass measurement.
 
-### Shipped this session (P4)
+### Shipped 2026-07-09 (P4) — this doc's own session
 
 | lever | payoff |
 |---|---|
@@ -165,7 +165,21 @@ call — on the fast S3 build most carts sit near 60 skip-OFF.
 |---|---|---|---|---|
 | **dual-core: audio (+input) on core 1** | frees core 0 for logic+render | P4 (unwired), T-Deck (tried, reverted) | real parallelism | med |
 | **FPS chip off by default** | overhead | both | ~1ms + cleaner kid UX | trivial |
-| **render-overlap (composite ∥ next render)** | composite fully hidden | P4 | ~5ms (lock 60 on heaviest) | high — double game canvas + triple framebuffer + async cadence; tearing needs eyes-on-glass |
+
+**Render-overlap is CLOSED, not open** (it sat in the table above until
+2026-08-15, which is how a 2026-08-09 perf hunt came to spend its last lead
+re-proposing it). The estimate was ~5ms and "lock 60 on the heaviest"; what
+happened on glass, in three steps:
+
+| step | date | result |
+|---|---|---|
+| **triple framebuffer** (`efcf5d1`) | 2026-07-27 | SHIPPED — the DMA fence leaves the drag path, drags 30→42.8fps |
+| **double game canvas** (copy-on-swap, so the deferred composite's fence could go fence-free; `26e1f9f` records the verdict at the defer site) | 2026-07-27 | BUILT, MEASURED, **REVERTED** — windowed Battle City 56→41fps. The fence it retires is ~FREE at this composite size (the DMA finishes inside the input poll), while the swap pays a ~150KB retention memcpy (4–5ms) EVERY quiet frame plus `_drain_pending` collision stalls once the fence-free show backlogs. 56–59 restored on revert |
+| **L2 cache 128→256KB** (#159, `1665425`) | 2026-07-27 | closed the chapter outright: Brick Siege busy 15.5→8.0ms, the whole cart roster at the 60 cap. 512KB does not boot (internal/DMA pool 0x101) |
+
+So the target the lever existed to reach was reached by a cache config line.
+Re-open it only with NEW arithmetic — a materially bigger composite would be
+one; the reverted design is in git history.
 
 ### Open — model / strategic (bigger, not API-flag-flip)
 

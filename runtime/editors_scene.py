@@ -22,9 +22,9 @@ project commit drain the SAME batch into its journal line, #111)."""
 import json
 
 try:
-    from op_history import History, OpCodec
+    from op_history import History, OpCodec, OpHistoryMixin
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpCodec
+    from runtime.op_history import History, OpCodec, OpHistoryMixin
 
 
 # A fresh actor's tag: a real word (not "") so the props row never shows an
@@ -144,7 +144,7 @@ class _SceneOps(OpCodec):
         doc.dirty = True
 
 
-class SceneEditor:
+class SceneEditor(OpHistoryMixin):
     """Placement state over one scene's actor rows (#85 Stage 2).
 
     `n` is the brush -- the sheet tile a placed actor gets; `sel` the selected
@@ -227,32 +227,15 @@ class SceneEditor:
             if 0 <= i < len(self.rows):
                 self.rows[i]["x"], self.rows[i]["y"] = ox, oy
 
-    # -- undo / redo (over the shared #111 op-history) ------------------------
+    # undo/redo/can_* are OpHistoryMixin's over self._hist (#111).
 
-    @property
-    def _undo(self):
-        return self._hist._undo          # the op undo stack (tests inspect it)
-
-    @property
-    def _redo(self):
-        return self._hist._redo
-
-    def can_undo(self):
-        return self._hist.can_undo()
-
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last recorded gesture; True iff a step was taken. Closes
-        any open drag first (an in-flight gesture can't be half-undone)."""
+    def _hist_before(self):
+        # An in-flight drag can't be half-undone: close it so it becomes the
+        # step's target. (The hand-copied facade closed only on undo; redo
+        # with an open drag is unreachable from the UI -- the pointer can't be
+        # on the bar and the canvas at once.)
         if self._pre is not None:
             self.end_edit()
-        return self._hist.undo() is not None
-
-    def redo(self):
-        """Re-apply the last undone gesture; True iff a step was taken."""
-        return self._hist.redo() is not None
 
     # -- placement / selection ----------------------------------------------
 

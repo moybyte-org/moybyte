@@ -15,11 +15,11 @@ The point of this step is host-verifiable:
   * Sprite/paint + map editors stay a 320x240 viewport (step 3) -- not touched here.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
 def _open_first_cart(ws):
@@ -61,9 +61,9 @@ def _ws_distinct_320(tmp_path):
     system-canvas path (vs. the shared-object degradation). Both must render pixel-
     identically -- that's the byte-for-byte degradation guarantee."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(320, 240, font_scale=1)
+    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
     ws.pointer = host_app.console.Pointer(320, 240)
     ws.input.pointer = ws.pointer
@@ -81,7 +81,7 @@ def _render_editor(ws, view):
     _enter(ws, view)
     _quiesce(ws)
     ws.frame(1 / 30)
-    return bytes(ws.sys_canvas.buf)
+    return bytes(ws.sys_canvas._buf)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def test_block_menu_320x240_is_byte_identical(tmp_path):
         ws.block_ui._blk_open_categories()          # open the modal insert menu
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -194,7 +194,7 @@ def test_code_editor_renders_without_error_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4                           # editor drew, not a flat fill
+    assert probe.distinct_pixels_in(buf, 3) > 4     # editor drew, not a flat fill
 
 
 def test_block_editor_renders_without_error_on_large_canvas(tmp_path):
@@ -206,7 +206,7 @@ def test_block_editor_renders_without_error_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ def test_paint_editor_320x240_is_byte_identical(tmp_path):
         ws._open_paint()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -372,7 +372,7 @@ def test_paint_editor_grid_grows_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_paint_editor_tap_paints_in_system_coords(tmp_path):
@@ -408,7 +408,7 @@ def test_map_editor_320x240_is_byte_identical(tmp_path):
         ws._open_map()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -447,7 +447,7 @@ def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_map_editor_tap_paints_in_system_coords(tmp_path):
@@ -479,7 +479,7 @@ def test_music_editor_320x240_is_byte_identical(tmp_path):
         ws._open_music()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]
 
 
@@ -509,7 +509,7 @@ def test_music_editor_shows_more_rows_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_music_editor_tap_works_in_system_coords(tmp_path):
@@ -562,7 +562,7 @@ def test_cards_editor_shows_more_cards_on_large_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3
-    assert len(set(buf)) > 4
+    assert probe.distinct_pixels_in(buf, 3) > 4
 
 
 def test_cards_editor_tap_steps_in_system_coords(tmp_path):
@@ -595,5 +595,5 @@ def test_theme_editor_320x240_is_byte_identical(tmp_path):
         ws.open_theme()
         _quiesce(ws)
         ws.frame(1 / 30)
-        bufs.append(bytes(ws.sys_canvas.buf))
+        bufs.append(bytes(ws.sys_canvas._buf))
     assert bufs[0] == bufs[1]

@@ -4,9 +4,13 @@
 pleasant, and the culture v0.4 targets); 16-63 are a generated HSV ramp so a
 cartridge has a full 64-color workspace. Colors are (r, g, b) 0-255.
 
-The canvas works in palette indices; `Canvas.to_rgb888()` resolves them through
-this table. On device these same indices map to the RGB565 framebuffer the
-native compositor flushes.
+The DRAWING API works in palette indices on every tier (SPEC.md 1); the canvas
+itself stores RGB565, resolving each index through this table at draw time --
+`device_canvas.PAL565` is this table pre-converted, and
+`HostSystemCanvas.to_rgb888` walks back through it for pygame and the GIF
+export. (Until 2026-08 the host had a second, INDEXED raster whose buffer held
+these indices one per byte; `runtime/canvas.py` is deleted and the boards' own
+canvas is now the only one.)
 """
 
 import colorsys

@@ -1,6 +1,7 @@
 # Surface model v1 — the presentation contract for every backend
 
-**Status: v1.1 LOCKED (2026-07-30).** Written, then put through the parallel
+**Status: v1.2 LOCKED (2026-08-12) — v1.1 plus the STAGE-4 AMENDMENT (§13),
+which retires the web annex.** Written, then put through the parallel
 adversarial architecture + perf review passes (verdicts: **LOCK AFTER FIXES**
 / **PERF CASE STANDS WITH FIXES**); all twenty findings are folded into this
 revision — **§12 is the finding-by-finding traceability ledger.**
@@ -15,7 +16,9 @@ content). It does not supersede `shell_ux_v1.md` (what the UI does) or
 
 **How to use this doc:** this is the contract. A new backend implements §4 and its
 annex in §5; it does not invent a new invalidation mechanism (Law L10). A change
-to the model is a change to THIS file first, reviewed the same way. §8 is the
+to the model is a change to THIS file first, reviewed the same way. **Read §13
+before §5.4 or §6** — the web transport those sections describe no longer
+exists, and the amendment says what replaced it. §8 is the
 graveyard — approaches already tried and buried with evidence; re-proposing one
 requires new evidence, not new enthusiasm. Performance statements in this doc are
 labeled **MEASURED** (with the source), **ESTIMATED** (arithmetic shown), or
@@ -299,10 +302,18 @@ placement-only-frame zero-ship assertion).
 
 ### 5.4 Web — one page protocol, three transports
 
+*(**RETIRED — see §13.** All three transports named below are gone: the device
+webserver's frame push and the host web console died in the 2026-08 streaming
+sunset (moycore plan §3.2), and the wasm runner stopped serving a command
+stream at stage 4 when it started rasterizing. The page protocol, the
+per-surface streams, the delta and the keyframe verb went with them. Text below
+kept as written, because the reasoning it records — especially the GC cliff
+measurement — outlived the transport.)*
+
 The device webserver (`moy_webserver.py`, WS push), the host web console
-(`tools/web_console.py`), and the wasm runner (`firmware/web_runner/`,
-worker-owned VM per #176) serve the same page protocol
-(`runtime/web_view_page.py` + `page_tail.js`).
+(the deleted `web_console` tool), and the wasm runner (`firmware/web_runner/`,
+worker-owned VM per #176) serve the same page protocol (the page generator that
+used to live beside `web_view` + `page_tail.js`).
 
 - **Content** = the surface's command stream, recorded in local space (L4),
   shipped when its gen moves. Deflayer (#54/#43) is the content half for
@@ -376,6 +387,11 @@ worker-owned VM per #176) serve the same page protocol
   it (it is L4 for the game surface, invented first).
 
 ## 6. Wire protocol delta (web)
+
+*(**RETIRED — see §13.** There is no wire protocol: the wasm head blits a
+framebuffer. The `scr` invariants below were the sharpest thinking in this
+section and are preserved as reasoning about retained surfaces generally, not
+as a shipped wire.)*
 
 **Current shape (corrected):** `frame_payload.surfaces` entries are dicts —
 `{"id", "domain", "cmds"}` or `{"id", "domain", "same": 1}` (`web_view.py`
@@ -559,3 +575,53 @@ F6 S3 gate wording + arithmetic → L6/§5.1; F7 GC contradiction → §5.4 A/B;
 F8 L8 cost/per-tier definition → L8; F9 compositor memory/"for free" →
 §5.4 ESTIMATED + phone gate + banked 8× blit win; F10 number wording →
 §5.4/§6 corrected.
+
+---
+
+## 13. Amendment: the web annex retires (2026-08-12, moycore stage 4)
+
+This doc is LOCKED, so its web half is retired by an explicit versioned
+amendment rather than by editing §5.4 and §6 into a shape the code never had.
+The tracker is #192; the reasoning is `docs/moycore_plan_2026-08.md` §3.2/§6.
+
+**What changed underneath.** §5.4 opened "the device webserver, the host web
+console, and the wasm runner serve the same page protocol". The first two were
+deleted in the 2026-08 streaming sunset. The third stopped needing a protocol
+at all: the wasm head now compiles the same `moy_gfx` + libmoy kernel the
+boards run, draws into its own RGB565 framebuffer, and hands the finished bytes
+to the page. The page expands 565 to RGBA through a lookup table and calls
+`putImageData`. There is no command stream, no replayer, no atlas, no
+per-surface slicing, no `{"same":1}` stub, no keyframe verb, no `/assets` pixel
+payload.
+
+**Therefore, retired:** §5.4 in full; §6 in full (protocol version, `place`/
+`gen`/`pgen` entries, the `scr` invariants as a *wire* rule); Phase B and
+Phase D of §9; and the delete-phases in §7 that named `SurfaceDelta`'s
+deep-compare and `WsClientState`'s latch as things to demote later — they are
+deleted, not demoted. `RETAINED_FRAMES = 0` as a web-tier rule retires with
+them: the runner's canvas holds one persistent buffer and declares 1, like any
+other raster surface.
+
+**Unchanged and still binding:** §1–§4 (the model, the laws, the compositor
+contract), §5.1–§5.3 (S3, P4, host), §8 (the graveyard), and the §2/L6 leaf
+discipline. A backend still implements §4 and invents no new invalidation
+mechanism; the wasm head complies as an ordinary raster tier, which is the
+point — it stopped being a special case.
+
+**One thing this amendment deliberately does NOT do: delete `runtime/surface.py`.**
+The registry (`Surface`/`SurfaceSet`, the monotonic mint, the epoch, the
+prefix-scoped sync) was reached only through `wm_windowed`'s
+`if not self._recording: return` guards, and nothing sets `_recording` any
+more — so on every shipping tier that code is now inert. It stays because it is
+Phase A/C groundwork for the raster tiers, which this stage does not touch;
+what died is its recording DRIVER, not the model. Stated here so the next
+reader finds the answer instead of discovering an unreachable branch and having
+to guess whether it was an oversight. Wiring it on raster, or deleting it, is
+Phase C's call to make with evidence.
+
+**What replaced the L8 stream-hash gate.** §5.4's accounting proved "every
+surface stream that changed was covered by a moved gen" — a pixel-less
+substitute for L8 that only the recording tier could run. The wasm head has
+pixels now, so it takes the same gate every other raster tier takes, and its
+screenshots are directly comparable to the host's (`pageshot.mjs`, which no
+longer reconstructs a replayer to produce them).

@@ -3,9 +3,9 @@ AudioBank. Split out of editors.py (which re-exports it); undo/redo rides the
 shared #111 op-history core (runtime/op_history.py)."""
 
 try:
-    from op_history import History, OpCodec
+    from op_history import History, OpCodec, OpHistoryMixin
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, OpCodec
+    from runtime.op_history import History, OpCodec, OpHistoryMixin
 
 
 _ME_REST = -1
@@ -69,7 +69,7 @@ class _MusicOps(OpCodec):
         doc.dirty = True
 
 
-class MusicEditor:
+class MusicEditor(OpHistoryMixin):
     """Tracker/step-editor state over a cart's AudioBank (#50) -- the sound analogue
     of MapEditor/PaintEditor. Pure logic: no canvas, no synth, no I/O, so the *same*
     file backs the host console and the frozen device console. The console wraps it
@@ -673,32 +673,7 @@ class MusicEditor:
         if post is not None and post != pre:
             self._hist.record([pre, post])
 
-    # -- undo / redo (over the shared #111 op-history) -------------------------
+    # undo/redo/can_* are OpHistoryMixin's over self._hist (#111).
 
-    @property
-    def _undo(self):
-        return self._hist._undo          # the op undo stack (tests inspect it)
-
-    @property
-    def _redo(self):
-        return self._hist._redo
-
-    def can_undo(self):
-        return self._hist.can_undo()
-
-    def can_redo(self):
-        return self._hist.can_redo()
-
-    def undo(self):
-        """Revert the last recorded edit; True iff a step was taken."""
-        took = self._hist.undo() is not None
-        if took:
-            self.bank.touch()       # undo edits the bank too (AudioBank.rev)
-        return took
-
-    def redo(self):
-        """Re-apply the last undone edit; True iff a step was taken."""
-        took = self._hist.redo() is not None
-        if took:
-            self.bank.touch()
-        return took
+    def _hist_after_step(self):
+        self.bank.touch()           # undo/redo edit the bank too (AudioBank.rev)

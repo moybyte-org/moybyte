@@ -8,16 +8,17 @@ ConsoleDriver (mouse == touch), so the tool buttons + keyboard undo run through 
 real pointer/input dispatch the device loop uses.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _pe(cols=16, rows=16):
+    # spec=False: a PaintEditor scratch sheet, not a cart sheet. The editor is
+    # tile-count agnostic and nothing here draws through libmoy, so a half-height
+    # sheet keeps these fixtures small -- see editors_sheet's SPEC.md 3.2 note.
     from runtime.editors import PaintEditor, SpriteSheet
-    return PaintEditor(SpriteSheet(cols=cols, rows=rows))
+    return PaintEditor(SpriteSheet(cols=cols, rows=rows, spec=False))
 
 
 def _region(pe):

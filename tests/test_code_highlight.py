@@ -143,9 +143,9 @@ def test_code_view_renders_error_without_raising(tmp_path):
     ws.screen = "menu"
     ws.editor.set_text("def _draw(:\n    cls(0)\n")
     ws.run_code()
-    blank = list(ws.canvas.buf)
+    blank = bytes(ws.canvas._buf)
     ws.frame(1 / 30)                       # draws highlight + inline marker, must not raise
-    assert ws.canvas.buf != blank
+    assert bytes(ws.canvas._buf) != blank
 
 
 def test_fixing_and_saving_clears_the_marker(tmp_path):

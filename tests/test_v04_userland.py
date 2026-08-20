@@ -1,33 +1,29 @@
-"""Tests for the v0.4 userland: the indexed canvas, the shared SpriteSheet /
-CodeEditor cores, the `.moy` store (moy_carts), and the shared console run on the
-host via host_app -- the same console code the device runs."""
+"""Tests for the userland: the canvas, the shared SpriteSheet / CodeEditor
+cores, the `.moy` store (moy_carts), and the shared console run on the host via
+host_app -- the same console code the device runs.
 
-import sys
+The canvas here is `runtime.host_canvas.make_canvas`, i.e. the BOARDS'
+`device_canvas.DeviceCanvas` over a host compositor: one raster, three
+architectures. Its buffer is RGB565, so a pixel is two bytes and never a palette
+index -- `cv.pix(x, y)` reads an index back, and `canvas_probe` reads the buffer
+at the canvas's real pixel width."""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import palette  # noqa: E402
-from runtime.canvas import Canvas, Image, SpriteSheet  # noqa: E402
-from runtime.editors import TileMap  # noqa: E402
+from runtime.editors import SpriteSheet, TileMap  # noqa: E402
+from runtime.host_canvas import make_canvas as Canvas  # noqa: E402
+from runtime.host_canvas import make_system_canvas as SysCanvas  # noqa: E402
+from runtime.moy_image import Image  # noqa: E402
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
 
-def _open_cart(ws, title):
-    """Open a seeded system cart by title in the shared console. Games/tools/apps live in
-    the launcher run-grid; a WALLPAPER leaves it (spec shell_ux_v1.md) but stays a real
-    editable cart in the store, so fall back to opening it by reference (as ws.open() does)."""
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
-    assert cart is not None, "seed cart not found: " + title
-    ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+from ws_helpers import open_cart as _open_cart
 
 
 # -- palette ---------------------------------------------------------------
@@ -45,9 +41,13 @@ def test_palette_has_64_valid_colors():
 # -- canvas ----------------------------------------------------------------
 
 def test_canvas_cls_pix_and_rgb_resolution():
-    cv = Canvas(20, 10)
+    # A SYSTEM canvas, because `to_rgb888` is part of the system-surface contract
+    # (HostSystemCanvas) rather than of the raster: only the host has a screen to
+    # hand to pygame or a GIF. At font_scale 1 it draws byte-identically to the
+    # plain game canvas, so nothing else about this test changes.
+    cv = SysCanvas(20, 10)
     cv.cls(1)
-    assert set(cv.buf) == {1}
+    assert set(probe.pixels(cv)) == probe.words_of({1}, cv)
     cv.pix(5, 5, 7)             # three args writes
     assert cv.pix(5, 5) == 7    # two args reads (TIC-80)
     cv.pix(-1, 0, 8)  # off-canvas is a no-op
@@ -87,14 +87,17 @@ def test_canvas_spr_scaled_blit_with_transparency():
 # -- sprite sheet ----------------------------------------------------------
 
 def test_sprite_sheet_tiles_and_hex_roundtrip():
-    sh = SpriteSheet(cols=4, rows=4)        # 32x32, 16 sprites
+    # spec=False: a 4x4 sheet keeps the tile/hex arithmetic below readable. This
+    # exercises tile_origin/tget/to_hex, none of which reach libmoy -- see
+    # editors_sheet's SPEC.md 3.2 note for what the shape is really for.
+    sh = SpriteSheet(cols=4, rows=4, spec=False)   # 32x32, 16 sprites
     assert sh.count == 16 and (sh.w, sh.h) == (32, 32)
     assert sh.is_blank()
     assert sh.tile_origin(5) == (8, 8)      # sprite 5 = col 1, row 1
     sh.tset(5, 1, 2, 9)                     # sprite 5, local (1,2) -> color 9
     assert sh.pget(9, 10) == 9 and sh.tget(5, 1, 2) == 9
     assert not sh.is_blank() and sh.dirty
-    sh2 = SpriteSheet.from_hex(sh.to_hex(), cols=4, rows=4)
+    sh2 = SpriteSheet.from_hex(sh.to_hex(), cols=4, rows=4, spec=False)
     assert sh2.pix == sh.pix and sh2.dirty is False
     img = sh.tile_image(5, transparent=0)
     assert (img.w, img.h, img.transparent) == (8, 8, 0)
@@ -131,7 +134,12 @@ def test_tilemap_clamps_tile_id_to_byte():
 def test_canvas_map_blits_tiles_at_scale():
     cv = Canvas(40, 40)
     cv.cls(0)
-    sheet = SpriteSheet()
+    # SPEC.md 3.2's sheet: 16 x 32 tiles. NOT the SpriteSheet default (16 x 16) --
+    # libmoy's sheet verbs (map/blit_map, spr_batch/blit_batch, sspr, tline) refuse
+    # a sheet that is not exactly 128 x 256 and draw NOTHING, on both boards and now
+    # on the host. The old pure-Python host raster accepted any size, which is how a
+    # test could pass here and have drawn nothing on glass.
+    sheet = SpriteSheet(16, 32)
     sheet.tset(7, 0, 0, 8)                   # tile 7: a single red pixel at its (0,0)
     sheet.tset(7, 7, 7, 9)                   # ... and green at (7,7)
     tm = TileMap(2, 2)
@@ -149,7 +157,7 @@ def test_map_mget_mset_via_make_api():
     from runtime import host_app
     cv = Canvas(40, 40)
     cv.cls(0)
-    sheet = SpriteSheet()
+    sheet = SpriteSheet(16, 32)          # the spec sheet -- see map's note above
     sheet.tset(3, 0, 0, 11)
     tm = TileMap(3, 3)
 
@@ -189,27 +197,28 @@ def test_make_layer_and_draw_layer_via_make_api():
 
     cv.cls(0)
     api["draw_layer"](bg, 0, 0)              # window at world x=0 -> all left half (8)
-    assert set(cv.buf) == {8}
+    assert set(probe.pixels(cv)) == probe.words_of({8}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, 20, 0)            # window at world x=20 -> all right half (11)
-    assert set(cv.buf) == {11}
+    assert set(probe.pixels(cv)) == probe.words_of({11}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, 999, 0)          # past the edge -> clamped to x=20 -> 11
-    assert set(cv.buf) == {11}
+    assert set(probe.pixels(cv)) == probe.words_of({11}, cv)
 
     cv.cls(0)
     api["draw_layer"](bg, -5, 0)           # negative -> clamped to x=0 -> 8
-    assert set(cv.buf) == {8}
+    assert set(probe.pixels(cv)) == probe.words_of({8}, cv)
 
 
-def test_spr_batch_matches_individual_spr_calls():
-    # spr_batch (#43) must draw the SAME pixels as the equivalent sequence of spr()
-    # calls (the device collapses it to one C call; the host is the per-item reference,
-    # and the two paths must agree pixel-for-pixel). Build two canvases, draw a few
-    # tiles (one flipped) via each path, and assert the buffers are identical.
-    sheet = SpriteSheet()
+def test_the_auto_batch_gate_matches_individual_spr_calls():
+    # Canvas.spr_batch is no longer a cart verb (deleted 2026-08-14, plan 6.10) but it
+    # is still the FLUSH the auto-batch gate calls when a run of plain spr()s ends, so
+    # its pixels still have to equal the per-item reference -- that equality is the
+    # whole promise of "just write the loop". Build two canvases, draw a few tiles (one
+    # flipped) through each path, and assert the buffers are identical.
+    sheet = SpriteSheet(16, 32)               # the spec sheet -- blit_batch gates on it
     sheet.tset(1, 0, 0, 8)                    # tile 1: red at (0,0)
     sheet.tset(1, 7, 0, 9)                    # ... and green at (7,0) (asymmetric -> flip shows)
     sheet.tset(2, 3, 3, 11)                   # tile 2: a centre pixel
@@ -226,15 +235,25 @@ def test_spr_batch_matches_individual_spr_calls():
         flip = it[3] if len(it) > 3 else 0
         cv_indiv.spr(sheet.tile_image(it[0], -1), it[1], it[2], 2, flip)
 
-    assert cv_batch.buf == cv_indiv.buf
-    assert len(set(cv_batch.buf)) > 1        # sanity: it actually drew something
+    assert probe.buffer_of(cv_batch) == probe.buffer_of(cv_indiv)
+    assert probe.drew_something(cv_batch)    # sanity: it actually drew something
 
 
-def test_spr_batch_no_op_when_sheet_is_none():
-    # make_api.spr_batch is a no-op (no crash) for a cart with no sheet.
+def test_the_batch_verbs_are_gone_from_the_cart_namespace():
+    """spr_batch / rect_batch / spans must not be reachable from a cart.
+
+    Deleted 2026-08-14 (plan 6.10): they bought <=1ms at realistic call counts and
+    cost a split vocabulary, because a Lua trampoline cannot marshal a list or a
+    span buffer -- so the same game in the two languages needed two draw loops.
+
+    This is a pin, not a formality. The verbs were closures inside make_api and the
+    namespace is a dict literal, so a re-add is one line in a 700-line function and
+    would read as a helpful restoration. The reason it must not come back is a
+    product decision, not a performance one, and nothing else in the suite states
+    it.
+    """
     from runtime import host_app
     cv = Canvas(20, 20)
-    cv.cls(0)
 
     class _Input:
         def held(self, n):
@@ -244,8 +263,9 @@ def test_spr_batch_no_op_when_sheet_is_none():
             return False
 
     api = host_app.make_api(cv, _Input(), {}, sheet=None)
-    api["spr_batch"]([(0, 0, 0)], 0, 2)      # must not raise
-    assert set(cv.buf) == {0}                 # nothing drawn
+    for gone in ("spr_batch", "rect_batch", "spans"):
+        assert gone not in api, gone
+    assert "spr" in api and "rect" in api      # the survivors, so this can't pass empty
 
 
 # -- code editor core ------------------------------------------------------
@@ -384,7 +404,7 @@ def test_console_runs_wallpaper_and_config_drives_content(tmp_path):
     for _ in range(10):
         ws.frame(1 / 30)
     assert len(ws.ns["stars"]) == ws.config.get("star_count", 80)  # config drove it
-    assert len(set(ws.canvas.buf)) > 1                             # drew something
+    assert probe.drew_something(ws.canvas)                         # drew something
 
 
 def test_console_runs_game_cart_and_scores(tmp_path):
@@ -496,7 +516,7 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
         if ws.ns.get("won", 0.0) > 0.0:
             won = True
     assert most == coins and won            # collected every coin and won the round
-    assert len(set(ws.canvas.buf)) > 1      # the map() blit drew the ground
+    assert probe.drew_something(ws.canvas)  # the map() blit drew the ground
 
 
 def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
@@ -527,7 +547,7 @@ def test_brick_siege_runs_with_tilemap_and_autoplay_progresses(tmp_path):
         states.add(ws.ns["state"])
     assert best_score > 0                   # destroyed at least one enemy (scored)
     assert states != {0}                    # reached a win or game-over (round ended)
-    assert len(set(ws.canvas.buf)) > 3      # the map()/sprites drew the battlefield
+    assert probe.distinct_pixels(ws.canvas) > 3   # the map()/sprites drew the battlefield
 
 
 def test_brick_siege_brick_crumbles_steel_stops(tmp_path):
@@ -588,7 +608,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
     assert (ws.canvas.w, ws.canvas.h) == (320, 240)     # same surface as the device
     assert ws.launcher.items                            # seeded system carts
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 1                   # launcher renders
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # launcher renders
     drv.press("run")
     drv.frame(1 / 30)
     assert ws.screen == "desktop"                       # opened a cart (plays)
@@ -610,7 +630,7 @@ def test_host_runs_shared_console_at_320x240(tmp_path):
         drv.frame(1 / 30)
     assert ws.editor.lines[0].startswith("Z=9")         # typed into the real source
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 1                   # code editor renders
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                   # code editor renders
 
 
 def test_code_view_arrows_move_caret_and_scroll(tmp_path):
@@ -946,7 +966,12 @@ def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
     # wrap ids into the next tile row -- the span clamps exactly like
     # tile_span_image, so the stamp still matches what spr() would draw.
     from runtime.editors import MapEditor
-    sheet = SpriteSheet()                    # 16x16 tiles
+    # spec=False: a 16-ROW sheet, deliberately. The clamp is pure geometry
+    # ((sheet.h - oy) // TILE), but the bottom-row half is only reachable through
+    # place() on a short sheet -- on the real 16x32 sheet the last row starts at
+    # id 496 and TileMap caps a placeable id at 254. The spec-sheet span is pinned
+    # at the end of this test.
+    sheet = SpriteSheet(16, 16, spec=False)  # 16x16 tiles
     tm = TileMap(20, 15)
     me = MapEditor(tm, sheet)
     me.size = 2
@@ -964,13 +989,21 @@ def test_map_editor_size_brush_clamps_at_map_and_sheet_edges():
     assert tm.mget(10, 10) == 240 and tm.mget(11, 10) == 241
     assert tm.mget(10, 11) == TileMap.EMPTY
 
+    # Same clamp on a real SPEC.md 3.2 sheet: its last tile row is 31, not 15.
+    spec_me = MapEditor(TileMap(20, 15), SpriteSheet())
+    spec_me.size = 2
+    spec_me.n = 30 * 16                      # a full row above the bottom -> 2x2 fits
+    assert spec_me.stamp_span() == (2, 2)
+    spec_me.n = 31 * 16                      # the sheet's last row -> clamps to 1 down
+    assert spec_me.stamp_span() == (2, 1)
+
 
 def test_map_size_stamp_renders_identical_to_spr_multitile():
     # #57 acceptance: the stamped block renders byte-identical to the code-drawn
     # spr(n, x, y, w=2, h=2) -- map() over the stamped cells vs one spr() of the
     # same tile span at the same pixel origin.
     from runtime.editors import MapEditor
-    sheet = SpriteSheet()
+    sheet = SpriteSheet(16, 32)              # the spec sheet -- map() gates on it
     for t, c in ((7, 1), (8, 2), (7 + 16, 3), (8 + 16, 4)):
         for py in range(8):
             for px in range(8):
@@ -1234,7 +1267,7 @@ def test_host_console_map_open_place_and_render(tmp_path):
     cx = ws.map_ui.mapedit.cam_x
     cy = ws.map_ui.mapedit.cam_y
     assert ws.tilemap.mget(cx, cy) == ws.map_ui.mapedit.n
-    assert len(set(drv.rgb888())) > 1                    # the map view rendered
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 1                    # the map view rendered
 
 
 def test_host_console_map_erase_and_pan(tmp_path):
@@ -1572,23 +1605,23 @@ def test_background_declares_color_and_image_backdrops():
     white = palette.color("white")
     api["background"](red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red and cv.buf[47 * 64 + 63] == red
+    assert cv.pix(0, 0) == red and cv.pix(63, 47) == red
     cv.rect(0, 0, 8, 8, white)                    # an actor scribbles the frame...
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red, "the color backdrop must reclaim the frame"
+    assert cv.pix(0, 0) == red, "the color backdrop must reclaim the frame"
     # An Image backdrop bakes to a hidden layer once and restores by window copy.
     img = api["image"](["##", "##"], {"#": white})
     api["background"](img)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == white, "the image pixels land at (0,0)"
+    assert cv.pix(0, 0) == white, "the image pixels land at (0,0)"
     cv.rect(0, 0, 4, 4, red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == white, "the image backdrop must reclaim the frame"
+    assert cv.pix(0, 0) == white, "the image backdrop must reclaim the frame"
     # background() clears the declaration -> the restore is a no-op.
     api["background"]()
     cv.rect(0, 0, 4, 4, red)
     api["_moy_restore_bg"]()
-    assert cv.buf[0] == red, "a cleared declaration must not repaint"
+    assert cv.pix(0, 0) == red, "a cleared declaration must not repaint"
 
 
 def test_player_restores_declared_background_each_frame(tmp_path):
@@ -1611,9 +1644,9 @@ def test_player_restores_declared_background_each_frame(tmp_path):
     ws.player.tick(1 / 30)
     red = palette.color("red")
     white = palette.color("white")
-    assert ws.canvas.buf[0] == white              # the actor drew over the backdrop
-    assert ws.canvas.buf[100 * 320 + 100] == red  # backdrop painted with NO cls in the cart
-    ws.canvas.buf[100 * 320 + 100] = white        # scribble...
+    assert ws.canvas.pix(0, 0) == white           # the actor drew over the backdrop
+    assert ws.canvas.pix(100, 100) == red         # backdrop painted with NO cls in the cart
+    ws.canvas.pix(100, 100, white)                # scribble...
     ws.player.tick(1 / 30)
-    assert ws.canvas.buf[100 * 320 + 100] == red, (
+    assert ws.canvas.pix(100, 100) == red, (
         "the declared background must reclaim the frame before each tick")

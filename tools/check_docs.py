@@ -65,22 +65,22 @@ def docs():
 # document's own directory (UPSTREAM.md files legitimately say `../foo`), and
 # against docs/history/ for links into the archive.
 
+# The leading `+` is the PLANNED MARKER: `+runtime/_bootstrap.py` means "a file
+# this document proposes to create". It lives AT the reference rather than in a
+# list over here, which is the whole point -- a central allowlist (this file
+# carried one until 2026-08-14) puts the fact that a path is aspirational
+# somewhere the reader of the document never looks.
 PATH_RE = re.compile(
-    r"`([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
+    r"`(\+?)([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
     r"\.(?:py|md|c|h|lua|json|sh|cmake|mk|yml|jsonl|service|patch|txt))`")
 
 # Where a relative path in a document may be rooted. The two board directories
 # are here because CLAUDE.md says `native/moy_gfx/...` and `modules/moy_ota.py`
 # throughout -- shorthand for "inside the firmware tree being discussed", which
 # is idiomatic in that file and not worth expanding a hundred times.
-ROOTS = ("", "firmware/lilygo_t_deck_plus_micropython",
+ROOTS = ("", "firmware/lilygo_t_deck_plus_mainline",
          "firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware/web_runner",
          "firmware/seeed_xiao_esp32s3_zero", "docs/history")
-
-# Modules a PLAN proposes rather than describes. A planning document naming the
-# file it intends to create is not stale; it is doing its job. Delete the entry
-# when the file lands -- an existing path makes it a no-op either way.
-PLANNED = ("runtime/present.py",)
 
 # Paths that are deliberately not in this repo. Each is a fact about the world,
 # not a reference we can resolve -- and each is documented where it appears.
@@ -99,6 +99,14 @@ NOT_OURS = (
     # The .moyproj SDK, deleted 2026-07-31. Several documents name its files on
     # purpose, to say they are gone; git history has them.
     "moybyte/", "moybyte_cli/", "moybyte_sim/", "moybyte_blocks/",
+    # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
+    # the recording stack that outlived it by a day (stage 4: the wasm head
+    # rasterizes, so the recorder + the page's JS replayer went too). The plan,
+    # CLAUDE.md and several READMEs name the dead files on purpose, to say they
+    # are gone -- git history has them.
+    "tools/web_console.py", "modules/device_webview.py", "device_webview.py",
+    "runtime/web_view.py", "runtime/web_view_page.py", "tests/webharness.py",
+    "tests/test_web_recording.py",
 )
 
 
@@ -118,8 +126,19 @@ def check_paths():
     for rel in docs():
         for i, line in enumerate(read(rel).splitlines(), 1):
             for m in PATH_RE.finditer(line):
-                p = m.group(1)
-                if any(t in p for t in NOT_OURS + PLANNED) or "*" in p or "..." in p:
+                planned, p = m.group(1), m.group(2)
+                if any(t in p for t in NOT_OURS) or "*" in p or "..." in p:
+                    continue
+                if planned:
+                    # A document naming the file it intends to create is not
+                    # stale, it is doing its job -- so a missing one is fine.
+                    # But the marker has to EXPIRE, or "planned" quietly becomes
+                    # a lie about shipped code: once the file lands, say so.
+                    if any(os.path.exists(os.path.join(ROOT, c))
+                           for c in _candidates(rel, p)):
+                        PROBLEMS.append(
+                            "%s:%d marks %s as planned (+), but it exists now "
+                            "-- drop the +" % (rel, i, p))
                     continue
                 # A two-letter stem is an attribute, not a file: `cv.w/cv.h` is
                 # a canvas's width and height, and the regex cannot know that.
@@ -154,9 +173,9 @@ DUP_BUDGET = {
     ("CLAUDE.md", "runtime/README.md"): 27,
     ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 18,
     ("CLAUDE.md",
-     "firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/UPSTREAM.md"): 16,
+     "native/moy_audio/libmoy/UPSTREAM.md"): 16,
     ("CLAUDE.md", "firmware/esp32_p4_wifi6_touch_lcd_7b/README.md"): 11,
-    ("CLAUDE.md", "firmware/lilygo_t_deck_plus_micropython/README.md"): 10,
+    ("CLAUDE.md", "firmware/lilygo_t_deck_plus_mainline/README.md"): 10,
     ("CLAUDE.md", "docs/perf_native_gap_v1.md"): 5,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
     ("CONTRIBUTING.md", "README.md"): 12,
@@ -164,10 +183,10 @@ DUP_BUDGET = {
     ("docs/backend_contract_v1.md", "docs/surface_model_v1.md"): 8,
     # Each vendored directory's UPSTREAM.md must stand alone beside its code, so
     # they share the vendoring rules deliberately.
-    ("firmware/lilygo_t_deck_plus_micropython/native/moy_audio/libmoy/UPSTREAM.md",
-     "firmware/lilygo_t_deck_plus_micropython/native/moy_gfx/libmoy/UPSTREAM.md"): 21,
+    ("native/moy_audio/libmoy/UPSTREAM.md",
+     "native/moy_gfx/libmoy/UPSTREAM.md"): 21,
     ("experiments/lua_bridge/components/lua/MODIFICATIONS.md",
-     "firmware/lilygo_t_deck_plus_micropython/native/moy_lua/lua/MODIFICATIONS.md"): 8,
+     "native/moy_lua/lua/MODIFICATIONS.md"): 8,
 }
 DUP_FLOOR = 4
 DUP_EXEMPT_DIRS = ("LICENSES/",)

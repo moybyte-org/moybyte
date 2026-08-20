@@ -20,7 +20,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 
 PORT = os.environ.get("MOYBYTE_P4_PORT")
@@ -268,7 +267,7 @@ def _extract_verifier():
     import ast
     import textwrap
 
-    path = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_ota.py"
+    path = ROOT / "device" / "moy_ota.py"
     src = path.read_text(encoding="utf-8")
     tree = ast.parse(src)
 
@@ -425,13 +424,36 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
     What is device-specific here is exactly what a host test cannot reach: this
     board has no SD, so `with_sd` is a plain call-through and the marker lands on
     the internal VFS -- the same path that has to hold a rollback's evidence
-    across a reboot."""
-    board.pyexec(
+    across a reboot.
+
+    The mkdir is not scaffolding, it is the firmware's own step: `update_dir`
+    does NOT exist on a board whose VFS has never taken an OTA, and `finish()`
+    and the download opener each create it before their first write. This test
+    writes the marker directly, so it has to do the same -- without it the test
+    passes only on a board that happens to have downloaded an update earlier,
+    and fails on any freshly-flashed one (a full cable flash wipes the VFS).
+    That is exactly how it failed on 2026-08-15 after the canvas-flip reflash.
+
+    AND IT HAS TO BE ITS OWN SHORT COMMAND, not a line of the snippet below.
+    `pyexec` uploads a multi-line snippet in chunks; `cmd` sends one line. A
+    real `os.mkdir` is a flash erase+write that stalls the frame loop for long
+    enough that, with PERF diag streaming (the module fixture sends `diag 1`),
+    a diag line interleaves into the chunk exchange and the reader parses the
+    fragment as a serial COMMAND instead of Python -- surfacing as the baffling
+    `PY ERR SyntaxError: invalid syntax for integer with base 10`. It reproduces
+    only when the mkdir actually creates something: with the directory already
+    present mkdir raises EEXIST immediately, never stalls, and the upload is
+    clean. Any device call that blocks on flash belongs outside a chunked
+    upload for the same reason."""
+    board.cmd("py (lambda: (__import__('os').mkdir(ws.updater.update_dir), 1)[1])()",
+              wait_for="PY", timeout=20)     # EEXIST if it is already there
+    assert board.pyexec(
         "import json\n"
         "f = open(ws.updater._pending_path(), 'w')\n"
         "f.write(json.dumps({'slot': 'nowhere', 'label': 'v99'}))\n"
         "f.close()\n"
-        "V = ws.updater.boot_check()\n")
+        "V = ws.updater.boot_check()\n"), \
+        "the device raised while writing the pending marker"
     verdict = board.pyval("eval('V', ws._g)")
     assert verdict[0] == "rolled_back", verdict
     # Reading it must NOT consume it: an image that reports and then dies has to
@@ -444,3 +466,87 @@ def test_a_pending_marker_becomes_a_verdict_on_this_board(board):
                  "ws._notice = None\n")
     assert "pending.json" not in board.pyval(
         "__import__('os').listdir(ws.updater.update_dir)")
+
+
+# -- the browser console baked into the image (moy_web) -----------------------
+
+
+def test_the_web_console_is_baked_into_this_image(board):
+    """The bundle is `.incbin`'d into flash rodata and handed out as a
+    memoryview at it, which is the one part of this that no host test can
+    reach: whether the linker put the blob where the table says it is.
+
+    Deliberately SELF-CONSISTENT rather than compared against this checkout's
+    `dist/` -- the board may legitimately be running an older build, and the
+    question here is "does the image's own console read back correctly", not
+    "is it today's". The stamp is what answers the second question, by eye.
+    """
+    stamp = board.pyval("__import__('moy_web').stamp()")
+    assert stamp and stamp != "0 0 none", (
+        "this image has NO baked web console (stamp %r) -- it was built with "
+        "no firmware/web_runner/dist" % (stamp,))
+    count, total = int(stamp.split()[0]), int(stamp.split()[1])
+    assert count == 4, stamp
+    assert total > 400000, "a bundle this small is not the wasm console"
+    names = board.pyval("__import__('moy_web').assets()")
+    assert set(names) == {"index.html.gz", "worker.js.gz",
+                          "micropython.mjs.gz", "micropython.wasm.gz"}, names
+    # Each blob read back at its recorded length, starting with the gzip magic.
+    # A misplaced symbol still gives plausible lengths -- it is the first bytes
+    # that say the pointer landed on the right thing.
+    got = board.pyval(
+        "[(n, len(__import__('moy_web').asset(n)), "
+        "bytes(__import__('moy_web').asset(n)[:3])) "
+        "for n in __import__('moy_web').assets()]")
+    assert sum(g[1] for g in got) == total, got
+    for name, size, magic in got:
+        assert magic == b"\x1f\x8b\x08", (name, magic)
+        assert size > 0, name
+
+
+def test_the_console_serves_the_image_when_storage_has_none(board):
+    """Storage WINS on purpose (a pushed copy is a human's explicit override),
+    so this asserts the fallback the way the handler sees it -- pointed at a
+    directory that cannot exist. If the real /moy/web has a pushed copy, that
+    is the correct answer for the live host and the reason `start()` prints
+    which source it is using."""
+    assert board.pyexec(
+        "import moy_webhost\n"
+        "H = moy_webhost.WebHost('/moy/carts', '/moy/no_such_web')\n"
+        "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
+    kind = board.pyval("eval('type(R).__name__', ws._g)")
+    assert kind == "BlobResponse", kind
+    head = board.pyval("eval('R.head()', ws._g)")
+    assert b"Content-Encoding: gzip" in head, head
+    assert b"200 OK" in head and b"no-store" in head
+    note = board.pyval("eval('H.source_note()', ws._g)")
+    assert "baked into this firmware" in note, note
+
+
+def test_a_cart_runs_and_exits(board):
+    """The 2026-08-17 blind-spot closer, same as the T-Deck suite's: a staged
+    regression once broke every cart start while this suite stayed green,
+    because nothing here ran one. Launch, assert it started clean, exit.
+
+    tools/p4_perf.py's idiom, exactly: ws.exit() first to clear whatever the
+    tour above left open (Settings + the picker windows -- a `run` from that
+    state opens the cart under the picker's project arrangement, where the
+    first draft's cart-quit exit did not pop), then run, then ws.exit() out.
+    The T-Deck suite's twin keeps the cart-quit path, so the kid-facing quit()
+    flag stays pinned on one board while this one pins the launch itself."""
+    for _ in range(3):                       # close settings/picker leftovers
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
+    line = board.cmd("run star", wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.5)
+    st = board.state()
+    assert st.get("cart"), "the cart never started: %r" % st
+    assert not st.get("cart_error"), st["cart_error"]
+    f0 = st["frames"]
+    board.drain(1.0)
+    assert board.state()["frames"] > f0, "the cart is not ticking"
+    board.cmd("py ws.exit()", wait_for="PY")
+    board.drain(1.5)
+    st = board.state()
+    assert not st.get("cart"), "exit did not end the run: %r" % st

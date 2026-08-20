@@ -19,7 +19,6 @@ code_layer, none of which import console/chrome -- so there is no cycle. Same
 bare-or-package fallback as those modules.
 """
 
-import time
 from array import array
 
 try:
@@ -28,9 +27,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors import CodeEditor, IconSheet
 
 try:
-    from widgets import _Blit, _in
+    from widgets import _Blit, _in, _err_text
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.widgets import _Blit, _in
+    from runtime.widgets import _Blit, _in, _err_text
 
 # The shared petme128 glyph source (#62) -- the Library shelf's display type
 # (_print_scaled) rasterizes it through plain rect blocks so it renders identically
@@ -67,51 +66,10 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
-
-
-def _ticks_us():
-    """Microsecond clock (#172/#184). The per-layer draw + pointer splits divide a
-    single-digit-ms cost across a handful of layers, where _ticks_ms's 1ms floor
-    would quantize most of it to zero. Same MicroPython-or-host shape as
-    _ticks_ms; _ticks_diff works on either (ticks_us wraps the same way)."""
-    try:
-        return time.ticks_us()
-    except AttributeError:
-        return int(time.perf_counter() * 1000000)
-
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
-
-
-# (_wrap + _exc_cart_line -- word-wrap the crash text + find a cart traceback line --
-# moved to player.py (Stage 2) with the crash panel + Player.start, their only users.)
-
-
-# (_Blit -- the minimal cursor/composite blittable -- moved to widgets.py, imported
-# back above; _from_ascii below + the #39 composite build it.)
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
 
 
 def _from_ascii(rows, mapping, transparent="."):
@@ -145,23 +103,10 @@ def color(name_or_index):
     return int(name_or_index) & 63
 
 
-# (The code-editor syntax highlighter -- _highlight + _HL_* -- moved to code_layer.py
-# with the rest of the code editor; it was code-only. The Pointer cursor +
-# CURSOR_IDLE_MS moved to widgets.py, imported back at the top of this file.)
-
-
 # --- Pointer UI layout (320x240) -------------------------------------------
-# The unified top bar's geometry (Stage 1) -- _STATUS_H, _BAR_ICON/_BAR_GAP/
-# _BAR_STRIDE/_BAR_Y, the fixed 320x240 tool-switcher button rects (_SYSMENU_BTN /
-# _HOME_BTN / _MENU_BTN / _PAINT_BTN / _MAP_BTN / _BLOCKS_BTN / _MUSIC_BTN),
-# _BAR_BATT / _BAR_WIFI / _BAR_CLOCK, and _DOCK_SLOTS / _DOCK_GLYPH / _DOCK_LABEL --
-# now lives in bar_layer.py (its own surface, #46) and is imported back at the top of
-# this file, so console._X still resolves for Layout + the golden harness/tests.
-# (The #71 pause-screen button geometry was retired in Stage 5 along with the pause
-# machinery -- the Player exits on hold-BACKSPACE now.)
-# The cards-menu geometry (_CARD_*) lives in cards_layer.py (its own surface, #3/#15)
-# and is imported back at the top of this file, so console._X still resolves for tests.
-# (GO/CODE/CLOSE dissolved into the unified bar in fix B -- PLAY/Code-tab/context X.)
+# Per-surface geometry lives with its surface (bar_layer/cards_layer/
+# settings_layer/code_layer/paint_layer/...) and is imported back at the top of
+# this file so console._X still resolves for Layout + the golden harness/tests.
 # --- Desktop shell (#28): home = wallpaper + cart icon grid + dock ----------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
 # grid of tappable cart icons, the unified 18px top bar (clock + wifi/batt/gear +
@@ -181,9 +126,6 @@ _ICON_GAP_Y = 6
 _ICON_X0 = 8            # left margin so the COLS tiles + gaps center in 320px
 _ICON_Y0 = _STATUS_H + 8
 _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
-# (The home NEW/DUP/DEL management icons are hit-tested via Layout's responsive
-# lay.new_btn/dup_btn/del_btn -- the old fixed _NEW_BTN/_DUP_BTN/_DEL_BTN placeholders
-# were dead, so they were dropped with the bar-geometry move to bar_layer.py.)
 # Page chevrons (when more carts than one page): tap to flip pages.
 _PAGE_PREV = (2, 110, 14, 24)
 _PAGE_NEXT = (304, 110, 14, 24)
@@ -194,29 +136,11 @@ _PAGE_NEXT = (304, 110, 14, 24)
 _DOCK_W = 52
 _DOCK_GAP = 1
 _DOCK_X0 = 2
-# Settings screen (#28) geometry (_SET_*) lives in settings_layer.py (its own surface)
-# and is imported back at the top of this file, so console._X still resolves for the
-# Layout class + tests.
-# Code editor (#24) geometry (_CODE_*/_ED_*/_SYM_*/_CODE_SYMBOLS) lives in code_layer.py
-# (its own surface) and is imported back at the top of this file, so console._X resolves
-# for the CodeLayout class + the crash panel (_CODE_LH) + tests. (_CODE_AREA is
-# re-exported too -- test_responsive_editors pins lay.code_area() against it.)
-# Paint editor (#4/#30) geometry (_PG_*/_SW*/_SPR_*/_PAINT_*) lives in paint_layer.py
-# (its own surface) and is imported back at the top of this file, so console._X still
-# resolves for tests + tools. (_PAINT_BTN -- the desktop overlay -- is in bar_layer.py.)
-# Map (tilemap) editor (#32) constants + MapEditorUI now live in map_editor_ui.py
-# (imported above) -- this used to be ~80 lines of module-level constants right here.
-# Block editor (#29 Part 2) constants, BlockLayout, and BlockEditorUI now live in
-# block_editor_ui.py (imported above) -- this used to be ~120 lines of module-level
-# constants + a class right here.
-# Music/sound editor (#50) constants + MusicEditorUI now live in music_editor_ui.py
-# (imported above) -- this used to be ~60 lines of module-level constants right here.
+# (_CODE_AREA is re-exported from code_layer -- test_responsive_editors pins
+# lay.code_area() against it.)
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
 # quadratic _CURSOR_ACCEL term adds light acceleration so a fast roll crosses the
 # 320px screen in far fewer pulses while a slow, single-pulse roll stays precise.
-# These are a FEEL tweak meant to be finalized on real hardware (the trackball's
-# pulses-per-revolution sets the true "rolls to cross").  Before: BASE=4, ACCEL=1
-# (1 pulse -> 5px, ~64 px/s at a steady 1 pulse/frame). After: BASE=7, ACCEL=2
 # (1 pulse -> 9px; a 6-pulse flick -> 6*7 + 2*36 = 114px, so ~3 brisk rolls cross).
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
@@ -1220,26 +1144,9 @@ def _clamp_scroll(top, cur, visible, count):
 # imported above and re-exported so console.py's `from chrome import _in` holds.)
 
 
-# (_line_cells -- the drag-to-draw Bresenham helper -- moved to paint_layer.py with
-# the rest of the paint editor; it was paint-only.)
-
-
-# (_TYPE_GLYPH / _TYPE_COLOR -- the launcher tile-type icon/color maps -- moved to
-# launcher_layer.py with the Launcher grid.)
-
-
-# (The Achievements milestone tracker (#21) + its ACHIEVEMENTS catalog moved to
-# widgets.py; ACHIEVEMENTS is imported back at the top of this file for the
-# AchievementsUI construction + tests.)
-
-
-# (The Launcher grid class moved to launcher_layer.py alongside LauncherHomeLayer;
-# its instance is still ws.launcher, built in __init__ -- the single source.)
-
-
-# (Pmem (cart persistent RAM), the _SilentAudio no-op backend, and the reusable
-# Popup dropdown primitive (#52) moved to widgets.py, imported back at the top of
-# this file.)
+# (Extracted helpers -- ACHIEVEMENTS, Popup, Pmem, _SilentAudio -- live in
+# widgets.py/launcher_layer.py/paint_layer.py and are imported back at the top
+# of this file where console._X must still resolve for tests.)
 
 
 # Boot logo: how long the moybyte splash (Moy + wordmark) holds before the launcher

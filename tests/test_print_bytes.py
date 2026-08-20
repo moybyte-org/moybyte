@@ -14,17 +14,21 @@ and still advance.
 
 Found by moy-spec's conformance suite (its text_bytes scene), which is the only
 thing that had ever printed a byte past ASCII.
+
+There used to be a third tier here: the WIRE, where non-ASCII crossed as a list
+of byte values because JSON cannot hold 0xFF inside a string and the browser's
+replayer would have counted codepoints where the device counts bytes. That wire
+is gone -- at moycore stage 4 the wasm head started rasterizing with the same
+kernel the device uses, so text reaches the browser as pixels and there is no
+encoding left to disagree about.
 """
 
-import sys
 import importlib.util
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import font as host_font  # noqa: E402
-from runtime import web_view  # noqa: E402
 
 
 def cells(s):
@@ -35,7 +39,7 @@ def cells(s):
 def _device_canvas_module():
     """device_canvas.py's module-level helpers, loaded without the firmware
     tree's import environment (they depend on nothing but builtins)."""
-    path = ROOT / "firmware/lilygo_t_deck_plus_micropython/modules/device_canvas.py"
+    path = ROOT / "device/device_canvas.py"
     src = path.read_text(encoding="utf-8")
     # Take just the two helpers, by their exact extent: importing the module
     # needs the device's framebuf / moy_gfx / device_util, none of which exist
@@ -79,28 +83,6 @@ def test_bytes_without_a_glyph_draw_nothing_but_still_advance():
     host_font.draw(lambda px, py: drawn.append((px, py)), b"\xff", 0, 0)
     assert drawn == []
     assert cells(b"\xff") == 1
-
-
-# --- the wire -------------------------------------------------------------
-
-def test_ascii_crosses_the_wire_as_a_plain_string():
-    # The common case, and virtually all traffic: unchanged on the wire.
-    assert web_view._wire_text("hello") == "hello"
-
-
-def test_non_ascii_crosses_the_wire_as_byte_values():
-    # JSON cannot hold 0xFF inside a string, and the replayer's charCodeAt over
-    # decoded text would yield a CODEPOINT -- one cell where the device spends
-    # two. Numbers settle both.
-    assert web_view._wire_text(b"G\xffH") == [71, 255, 72]
-    assert web_view._wire_text("café") == [99, 97, 102, 195, 169]
-
-
-def test_the_wire_carries_exactly_what_the_font_draws():
-    for s in ("hi", "café", b"G\xffH", b"\x00\x1f\x7f"):
-        wire = web_view._wire_text(s)
-        wire_bytes = bytes(wire) if isinstance(wire, list) else wire.encode("ascii")
-        assert wire_bytes == bytes(host_font.as_bytes(s))
 
 
 # --- the device -----------------------------------------------------------

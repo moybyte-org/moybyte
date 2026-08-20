@@ -20,11 +20,9 @@ A kid defines a reusable block ("define NAME p1 p2 ..." with a body) and calls i
 """
 
 import ast
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import blocks              # noqa: E402
 from runtime.editors import BlockEditor  # noqa: E402
@@ -54,41 +52,7 @@ def _call(name, args=None):
     return mk("call", {"name": name, "args": list(args or [])})
 
 
-class _FakeAPI(dict):
-    def __init__(self):
-        super().__init__()
-        self.calls = []
-        self["W"] = 320
-        self["H"] = 240
-        for name in ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-                     "spr", "print", "sfx", "beep", "music"):
-            self[name] = self._rec(name)
-        from runtime import palette
-        self["col"] = palette.color
-        self["btn"] = lambda d=None: False
-        self["btnp"] = lambda d=None: False
-        self["touch"] = lambda: None
-        self["rnd"] = lambda n=1.0: 0.0
-        self["flr"] = lambda x: int(x // 1)
-
-    def _rec(self, name):
-        def fn(*a, **k):
-            self.calls.append((name, a, k))
-        return fn
-
-
-def _run_cart(src, frames=1, fake=None):
-    code = compile(src, "<cart>", "exec")
-    fake = fake or _FakeAPI()
-    exec(code, fake)
-    if fake.get("_init"):
-        fake["_init"]()
-    for _ in range(frames):
-        if fake.get("_update"):
-            fake["_update"](1 / 30)
-        if fake.get("_draw"):
-            fake["_draw"]()
-    return fake
+from blocks_helpers import run_cart as _run_cart  # noqa: E402
 
 
 _FORBIDDEN = {"eval", "exec", "getattr", "setattr", "compile", "open",
@@ -278,16 +242,9 @@ def test_pre_v48_program_without_procs_is_unaffected():
     assert "def " in src  # (only lifecycle funcs)
     _assert_portable(src)
 
-
-def test_shipped_tap_game_still_compiles_byte_for_byte():
-    import json
-    base = str(ROOT / "system_carts" / "tap_game.moy")
-    with open(base + "/blocks.json") as f:
-        prog = json.loads(f.read())
-    with open(base + "/main.py") as f:
-        shipped = f.read()
-    # custom blocks must not alter the compiled output of an existing block cart.
-    assert blocks.compile_blocks(prog) == shipped
+# (the tap_game byte-for-byte pin lives ONCE, in test_blocks.py --
+# test_tap_game_blocks_json_compiles_to_shipped_main; two more verbatim
+# copies of it lived here until 2026-08-18)
 
 
 def test_bad_custom_block_names_raise_blockerror():

@@ -87,24 +87,39 @@ class FilesLayout(ListShellLayout):
 
 class FilesAppLayer(ListShellApp):
     id = "files"
+    RENAME_MAX = MAX_NAME     # 20 here -- narrower than the base's 24
     domain = "system"
     TITLE = "FILES"
     APP_TITLE = "Files"
     APP_PERM = "files"
     APP_FOLDER = "files.moy"
+    # The shell roles this app uses (runtime/app_context.py). `nav` carries the
+    # app-to-app jumps (a table opens in Sheets, a drawing in Paint) --
+    # app_api_v1 called that a v1 non-goal and it shipped anyway, because it is
+    # a real product need; `shell` is only the FileGridView duck-type.
+    NEEDS = ("surface", "theme", "damage", "files", "nav", "artwork", "shell")
 
     GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
     DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # docs/tables open in their app
     PLAIN_ACTIONS = ("NAME", "COPY", "DEL")     # kinds with no opener/reuse yet
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._store = ctx.files       # ListShellApp's storage role
+        self._nav = ctx.nav
+        self._art = ctx.artwork
+        self._shell = ctx.shell       # FileGridView's duck-type only
         self.names = names
         self._in = in_rect
-        self.layout = FilesLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                  ws._effective_font_scale(), ws.windowed_chrome)
+        cv = ctx.surface.canvas()
+        self.layout = FilesLayout(cv.w, cv.h, self._surf.font_scale(),
+                                  self._surf.windowed())
         self.mode = "kinds"           # kinds | grid | trash | rename | game
-        self.grid = FileGridView(ws, "drawings")
+        self.grid = FileGridView(ctx.shell, "drawings")
         self.counts = {}
         self.trash = ()
         self.status = "MY FILES"
@@ -120,47 +135,43 @@ class FilesAppLayer(ListShellApp):
         self.used_name = None
 
     def relayout(self, w, h, fs):
-        self.layout = FilesLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = FilesLayout(w, h, fs, self._surf.windowed())
 
     # -- store ----------------------------------------------------------------
 
-    def _store(self):
-        return self.ws.carts_store
-
     def _refresh_counts(self):
-        ws = self.ws
+        """Every kind's count + the trash listing in ONE storage session -- the
+        SD mount is the expensive part, which is what ctx.files.batch is for."""
         self.counts = {}
         self.trash = ()
-        if not self._store_ready():
-            return
-        try:
-            def _list():
-                store = self._store()
-                store.migrate_user_files(ws.carts_root)
-                counts = {}
-                for kind, _label in KIND_LABELS:
-                    counts[kind] = store.count_files(kind, ws.carts_root)
-                return counts, tuple(store.trash_list(ws.carts_root))
-            self.counts, self.trash = ws._with_sd(_list)
-        except Exception:  # noqa: BLE001 -- an unreadable store lists nothing
-            pass
+
+        def _list(f):
+            f.migrate()
+            counts = {}
+            for kind, _label in KIND_LABELS:
+                counts[kind] = f.count(kind)
+            return counts, tuple(f.trash_list())
+
+        got, err = self._store.batch(_list)
+        if err is None and got is not None:   # an unreadable store lists nothing
+            self.counts, self.trash = got
 
     def open(self):
         self.mode = "kinds"
         self._refresh_counts()
         self.status = "MY FILES"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- verbs ----------------------------------------------------------------
 
     def _enter_kind(self, kind):
         if self.grid.kind != kind:
-            self.grid = FileGridView(self.ws, kind)
+            self.grid = FileGridView(self._shell, kind)
         self.grid.refresh()
         self.grid.select(None)
         self.mode = "grid"
         self.status = kind.upper()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _enter_rows(self, mode):
         """Open one of the two row-list modes; their labels are built ONCE
@@ -180,7 +191,7 @@ class FilesAppLayer(ListShellApp):
         else:
             self._rows = tuple(self.project_names)
             self._rows_empty = "NO PROJECTS"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _action_labels(self):
         kind = self.grid.kind
@@ -190,27 +201,36 @@ class FilesAppLayer(ListShellApp):
             return self.DOC_ACTIONS
         return self.PLAIN_ACTIONS
 
+    # Which app owns which user-file kind (#108: "tap = open in owning app"),
+    # and who holds its "open this one next" pointer. Paint's lives on the
+    # ArtworkService (the model outlives the app layer); Writer's and Sheets'
+    # are `open_named` on the app itself. Resolved through ctx.nav by REGISTERED
+    # ID, so Files holds no reference to another app's class and a build without
+    # one degrades to the status line instead of an AttributeError.
+    _OWNERS = (("drawings", "artwork", "NO PAINT APP"),
+               ("docs", "writer", "NO WRITER APP"),
+               ("tables", "sheets", "NO SHEETS APP"))
+
     def _pick(self, name):
         """The grid's open gesture (second tap / A on the selection): open the
         file in its owning app -- drawings in Paint, docs in Writer, tables in
-        Sheets (#108: 'tap = open in owning app')."""
+        Sheets."""
         kind = self.grid.kind
-        if kind == "drawings":
-            self.ws.artwork.open_named(name)
-            if not self.ws.open_app(self.ws.artwork_app):
-                self.status = "NO PAINT APP"
-        elif kind == "docs":
-            self.ws.writer_app.open_named(name)
-            if not self.ws.open_app(self.ws.writer_app):
-                self.status = "NO WRITER APP"
-        elif kind == "tables":
-            self.ws.sheets_app.open_named(name)
-            if not self.ws.open_app(self.ws.sheets_app):
-                self.status = "NO SHEETS APP"
+        for owner_kind, app_id, missing in self._OWNERS:
+            if kind != owner_kind:
+                continue
+            if app_id == "artwork":
+                self._art.open_named(name)
+            app = self._nav.app(app_id)
+            point = getattr(app, "open_named", None)
+            if point is not None:
+                point(name)
+            if app is None or not self._nav.open_app(app):
+                self.status = missing
+            return
 
     def _act(self, verb, name):
-        ws = self.ws
-        store = self._store()
+        art = self._art
         if verb == "OPEN":
             self._pick(name)
             return
@@ -221,65 +241,57 @@ class FilesAppLayer(ListShellApp):
             self.status = "TYPE A NAME"
             return
         if verb == "COPY":
-            if self._persist(lambda: store.duplicate_file(
-                    self.grid.kind, name, ws.carts_root)):
+            if self._persist(self._store.duplicate(self.grid.kind, name)):
                 self.status = "COPIED"
                 self.grid.refresh()
         elif verb == "WALL":
-            if ws.artwork.set_wallpaper(name):
+            if art.set_wallpaper(name):
                 self.status = "WALLPAPER SET"
             else:
-                self.status = ws.artwork.last_error or "CAN'T SET"
+                self.status = art.last_error or "CAN'T SET"
         elif verb == "GAME":
-            self.project_names = ws.artwork.targets()
+            self.project_names = art.targets()
             self._enter_rows("game")
             self.status = "PICK A PROJECT"
         elif verb == "USE":
             # Provenance "used in:" list (#108 phase 2): the wallpaper + every
             # project bg copied from this drawing, stale copies flagged.
             self.used_name = name
-            self.used_rows = tuple(ws.artwork.usage(name))
+            self.used_rows = tuple(art.usage(name))
             self._enter_rows("used")
             self.status = ("USED IN " + str(len(self.used_rows))) \
                 if self.used_rows else "NOT USED YET"
         elif verb == "DEL":
-            if self._persist(lambda: store.delete_file(
-                    self.grid.kind, name, ws.carts_root)):
+            if self._persist(self._store.delete(self.grid.kind, name)):
                 self.status = "IN TRASH"
                 self.grid.invalidate(name)
                 self.grid.refresh()
                 self.grid.select(None)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _rename_commit(self):
         name = self.grid.sel_name()
-        store = self._store()
-        ws = self.ws
-        text = self.rename_text
-        new = [name]
-
-        def _do():
-            new[0] = store.rename_file(self.grid.kind, name, text, ws.carts_root)
-
-        if name and self._persist(_do):
-            # A renamed open drawing keeps Paint pointed at it.
-            if self.grid.kind == "drawings" and ws.artwork.doc_name() == name:
-                ws.artwork.open_named(new[0])
-            self.grid.invalidate(name)
-            self.grid.refresh()
-            self.grid.select(new[0])
-            self.status = new[0].upper()
+        if name:
+            res = self._store.rename(self.grid.kind, name, self.rename_text)
+            if self._persist(res):
+                new = res[0] or name
+                art = self._art
+                # A renamed open drawing keeps Paint pointed at it.
+                if self.grid.kind == "drawings" and art.doc_name() == name:
+                    art.open_named(new)
+                self.grid.invalidate(name)
+                self.grid.refresh()
+                self.grid.select(new)
+                self.status = new.upper()
         self.mode = "grid"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _restore(self, index):
-        ws = self.ws
-        store = self._store()
         try:
             kind, name = self.trash[index]
         except IndexError:
             return
-        if self._persist(lambda: store.restore_file(kind, name, ws.carts_root)):
+        if self._persist(self._store.restore(kind, name)):
             self.status = "RESTORED " + name.upper()[:14]
             self._refresh_counts()
             self._enter_rows("trash")
@@ -295,32 +307,32 @@ class FilesAppLayer(ListShellApp):
     def _resend(self, i):
         """Re-copy the drawing to one usage row -- the one-tap UPDATE / send-
         again (#108 phase 2). Stays in the list, re-scanned so the '*' clears."""
-        ws = self.ws
+        art = self._art
         if 0 <= i < len(self.used_rows) and self.used_name:
             row = self.used_rows[i]
-            if ws.artwork.resend(row, self.used_name):
+            if art.resend(row, self.used_name):
                 self.status = "SENT TO " + row["label"].upper()[:14]
             else:
-                self.status = ws.artwork.last_error or "CAN'T SEND"
-            self.used_rows = tuple(ws.artwork.usage(self.used_name))
+                self.status = art.last_error or "CAN'T SEND"
+            self.used_rows = tuple(art.usage(self.used_name))
             self._enter_rows("used")
-        self.ws._dirty = True
+        self._damage.all()
 
     def _game_pick(self, i):
-        ws = self.ws
+        art = self._art
         name = self.grid.sel_name()
         if 0 <= i < len(self.project_names) and name:
-            title = ws.artwork.attach(i, name)
+            title = art.attach(i, name)
             self.status = ("BG ADDED TO " + title) if title else \
-                (ws.artwork.last_error or "CAN'T ADD")
+                (art.last_error or "CAN'T ADD")
         self.mode = "grid"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- input ----------------------------------------------------------------
 
     def handle_input(self, inp):
         if self.mode == "rename":
-            self._typed_keys(inp)
+            self._typed_rename(inp)
             return True
         if self.mode in ("trash", "game", "used"):
             if self._rows:
@@ -333,23 +345,12 @@ class FilesAppLayer(ListShellApp):
                     self._pick(hit[1])
                 else:
                     self.status = hit[1].upper()
-                self.ws._dirty = True
+                self._damage.all()
                 return True
         if inp.pressed("b"):
             self._back()
         return True
 
-    def _typed_keys(self, inp):
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
-            self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
-            self.rename_text += chr(k)
-        self.ws._dirty = True
 
     def _back(self):
         if self.mode == "kinds":
@@ -361,13 +362,15 @@ class FilesAppLayer(ListShellApp):
         else:
             self.mode = "kinds"
             self._refresh_counts()
-        self.ws._dirty = True
+        self._damage.all()
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
+        # The grid's hover/pressed pump runs on EVERY sample, not just clicks --
+        # a press cue that only appeared on the click frame would never be seen.
+        if self.mode in ("grid", "rename") and self.grid.pointer_frame(
+                px, py, self._surf.pointer()):
+            self._damage.all()
         if not click:
             return True
         if self._in(px, py, lay.head):
@@ -379,7 +382,7 @@ class FilesAppLayer(ListShellApp):
             self._grid_tap(px, py)
         elif self.mode == "trash":
             if self._in(px, py, lay.head2):
-                if self._persist(lambda: self._store().empty_trash(ws.carts_root)):
+                if self._persist(self._store.empty_trash()):
                     self.status = "TRASH EMPTY"
                     self._refresh_counts()
                     self._enter_rows("trash")
@@ -390,7 +393,7 @@ class FilesAppLayer(ListShellApp):
         elif self.mode == "rename":
             if self._in(px, py, lay.head2):
                 self._rename_commit()
-        self.ws._dirty = True
+        self._damage.all()
         return True
 
     def _kinds_tap(self, px, py):
@@ -438,13 +441,13 @@ class FilesAppLayer(ListShellApp):
         return out
 
     def _chip(self, cv, label, r, on=False, hot=False):
-        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, hot=hot,
+        _ui.chip(cv, self._theme.colors(), r, label, on=on, hot=hot,
                  fs=self.layout.fs)
 
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.top_h))
@@ -479,8 +482,6 @@ class FilesAppLayer(ListShellApp):
         cv.rect(0, lay.h - lay.status_h, lay.w, lay.status_h, self.names["black"])
         cv.print(self.status[:max(1, lay.w // (8 * fs) - 1)], 4 * fs,
                  lay.h - lay.status_h + 3 * fs, self.names["yellow"], 1)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_kinds(self, cv):
         shown = self._shown_kinds()
@@ -499,7 +500,7 @@ class FilesAppLayer(ListShellApp):
 
     def _draw_rename(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         r = (lay.body[0], lay.action_y, lay.body[2], lay.action_h)
         cv.rect(r[0], r[1], r[2], r[3], self.names["white"])
@@ -509,7 +510,7 @@ class FilesAppLayer(ListShellApp):
 
     def _draw_rows(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         if not self._rows:
             cv.print(self._rows_empty, lay.body[0] + 8 * fs,
@@ -519,11 +520,5 @@ class FilesAppLayer(ListShellApp):
             i = self.top + row
             if i >= len(self._rows):
                 break
-            r = lay.row_rect(row)
-            on = i == self.sel
-            cv.rect(r[0], r[1], r[2], r[3], th["title"] if on else th["panel"])
-            cv.rectb(r[0], r[1], r[2], r[3],
-                     th.get("accent", 10) if on else th["dim"])
-            maxc = max(1, (r[2] - 8 * fs) // (8 * fs))
-            cv.print(self._rows[i][:maxc], r[0] + 4 * fs, r[1] + 6 * fs,
-                     th["title_ink"], 1)
+            _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
+                    pad=4 * fs, text_dy=6 * fs, fs=fs)

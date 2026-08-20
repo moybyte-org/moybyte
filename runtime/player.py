@@ -1,5 +1,5 @@
 """The cart PLAYER -- the run-loop black box (Stage 2 of
-docs/shell_ux_technical_plan_v1.md).
+docs/history/shell_ux_technical_plan_v1.md).
 
 `Player` is the one object that RUNS a cart: it starts a cart under the frozen
 `make_api`, feeds it input, presents its pixels, and guarantees it exits (a crash
@@ -49,7 +49,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import _CODE_LH
 
-import time
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
 # (MicroPython on device / unix; never host CPython), every top-level def in a
@@ -99,15 +98,21 @@ PMEM_FLUSH_MS = 60000
 # manifest "extensions" lists anything else is REFUSED at start -- the clean
 # §10 decline, never a mid-frame crash on a missing verb.
 #
-# The first two are the spec's STANDARD extensions. The rest are moybyte's own,
+# The first two are BACK-COMPAT names, not features this gate decides. Upstream
+# b9dbba1 (vendored 2026-08-19) made `make_layer`/`draw_layer`/`background` and
+# `view` CORE -- SPEC.md 6, installed unconditionally, because a verb that
+# degrades truthfully cannot be an extension. They stay listed here so a
+# manifest written against the older spec still starts: declaring them is now a
+# no-op, and REMOVING them from this tuple would refuse carts that already ship
+# with the declaration. The rest are moybyte's own,
 # namespaced `vendor.feature` exactly as §10 requires so they can never collide
 # with a future standard name -- a cart declaring one is non-portable by
 # construction, which is the honest trade its author is making. Before this
 # list existed the gate refused every namespaced name, so a cart that truthfully
 # declared what it used was rejected by the one console that implements it.
 SUPPORTED_EXTENSIONS = (
-    "layers",             # §10 standard: make_layer / draw_layer / background
-    "viewport",           # §10 standard: view(w, h)
+    "layers",             # CORE now (SPEC.md 6): make_layer/draw_layer/background
+    "viewport",           # CORE now (SPEC.md 6): view(w, h)
     "moybyte.scenes",     # #85/#109: scene/load_scene + the actor world
     "moybyte.docs",       # #78 Desk Lab interop: table(name) / text(name)
     "moybyte.images",     # #63: image(name) / Image paint-image assets
@@ -116,32 +121,21 @@ SUPPORTED_EXTENSIONS = (
 )
 
 
-def _ticks_ms():
-    try:
-        return time.ticks_ms()
-    except AttributeError:
-        return int(time.time() * 1000)
+try:                                    # device: ticks is frozen flat
+    from ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from widgets import _err_text
+except ImportError:                     # host: the runtime package
+    from runtime.ticks import _ticks_ms, _ticks_us, _ticks_diff
+    from runtime.widgets import _err_text
 
-
-def _ticks_diff(a, b):
-    try:
-        return time.ticks_diff(a, b)
-    except AttributeError:
-        return a - b
-
-
-def _err_text(exc):
-    """A short, kid-readable one-liner for an exception (type: message). Robust
-    on MicroPython, whose exceptions sometimes stringify oddly."""
-    try:
-        name = type(exc).__name__
-    except Exception:  # noqa: BLE001
-        name = "Error"
-    try:
-        msg = str(exc)
-    except Exception:  # noqa: BLE001
-        msg = ""
-    return (name + ": " + msg) if msg else name
+# USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter over
+# AppContext, plus the responsive opt-in probe. A leaf like the rest of what this
+# file imports -- it holds no Workstation, only the context FACTORY it is handed.
+try:
+    from system_api import make_system_api, manifest_error, wants_layout
+except ImportError:                     # host: the runtime package
+    from runtime.system_api import (make_system_api, manifest_error,
+                                     wants_layout)
 
 
 def _safe_len(obj):
@@ -269,7 +263,7 @@ def _wrap(text, cols):
     return out
 
 
-# The Player's EXIT gesture (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec
+# The Player's EXIT gesture (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec
 # Section 9): the #71 pause machinery is GONE. A running GAME owns the full 320x240
 # with NO chrome, and BACKSPACE is a plain key the cart reads. Exit is a single
 # deliberate gesture that pops to the run caller:
@@ -325,6 +319,15 @@ class Player:
         # chain) on the sacred play path. Combined with the live cart_error check at
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
+        # USER APP state (#181), all per-run and all reset in start():
+        self._app_layout = None       # the cart's `_layout(w, h, fs)`, when it opted into
+                                      # the RESPONSIVE canvas -- None for every game and
+                                      # every fixed-canvas app (the default)
+        self._app_wh = None           # the (w, h, fs) _layout was last told about, so a
+                                      # window resize / font-scale change re-runs it and a
+                                      # steady frame costs one tuple compare
+        self._app_id = None           # the crash guard's key for this run (#160), or None
+                                      # when the run is not guarded
         self._restore_bg = None       # #63: the api's declared-background restore hook
         self._lua = None              # #67: the running "lua" cart's runtime state (a
                                       # ws.lua_runtime handle; _close_lua() on exit so a
@@ -342,6 +345,22 @@ class Player:
         self._start_diag = None       # (reclaim,audio,api,compile,exec,init,total,free0,free1,alloc0,alloc1)
         self._slow_logic_next = 0
         self._native_fail = None      # reason for bytecode fallback, when auto-native fails
+
+    def _layout_args(self):
+        """`(w, h, fs)` for a responsive app cart's `_layout` (#181).
+
+        `w`/`h` come off the canvas the cart actually draws on -- the system
+        surface when `bind_app_canvas` took, the fixed game raster otherwise --
+        so a cart whose `_layout` was found but whose bind declined (the
+        shared-canvas T-Deck, or a cart that also declared a small SPEC canvas)
+        is told the truth rather than a size it cannot reach. `fs` is the shell's
+        effective font scale only where the app owns the system surface; on the
+        fixed game raster the cart draws its own pixels at 1x and the shell's
+        text size is none of its business."""
+        ws = self.ws
+        cv = ws.canvas
+        return (cv.w, cv.h,
+                ws._effective_font_scale() if ws.app_full_canvas else 1)
 
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the
@@ -413,6 +432,31 @@ class Player:
         # The dead run's `view(w, h)` must not outlive it: every fullscreen
         # surface shares viewport(), and a lingering view would crop chrome.
         self.ws.input.game_view = None
+        # Nor its per-run cart canvas (SPEC.md 1/3.1) -- whoever ran us draws
+        # on the boot raster, so the small canvas dies with the run. (Also the
+        # RESPONSIVE app-cart bind, #181: same field, same release.)
+        self.ws.release_run_canvas()
+        # A USER APP's crash-guard arming dies with its run. Any STRIKE it took
+        # stands -- an exit before the heal is precisely the evidence kept.
+        self._app_layout = None
+        self._app_wh = None
+        if self._app_id is not None:
+            self._app_id = None
+            self.ws.app_guard.release()
+        # Nor may its SOUND. The device mixer is a global the cart only ever
+        # posts notes to -- libmoy keeps sequencing a looping sfx or music track
+        # long after the run that started it is gone, so beeper's tones and
+        # celeste's music went on playing over whatever the kid did next
+        # (owner, T-Deck). Same category as the view and the palette above:
+        # state the run set on a shared surface, cleared where the run ends
+        # rather than wherever the next one happens to overwrite it.
+        au = getattr(self.ws, "audio", None)
+        if au is not None:
+            try:
+                au.music_stop()
+                au.sound_stop()
+            except Exception:  # noqa: BLE001 -- teardown must not raise
+                pass
         # A cart-supplied palette (spec 2.2) dies with its run -- the system
         # surfaces underneath get the default table back.
         self._restore_palette()
@@ -510,7 +554,12 @@ class Player:
         except Exception:  # noqa: BLE001 -- diagnostics must never affect play
             pass
 
-    def _maybe_diag_slow_logic(self, upd_ms, render_ms, audio_ms):
+    def _maybe_diag_slow_logic(self, upd_us, render_us, audio_us):
+        # Microseconds since 2026-08-14 (see the note at the call site); the gate
+        # and the printed line stay in ms so SLOWLOGIC reads as it always has.
+        upd_ms = upd_us // 1000
+        render_ms = render_us // 1000
+        audio_ms = audio_us // 1000
         if upd_ms < 10 or not self._diag_enabled():
             return
         now = _ticks_ms()
@@ -545,6 +594,12 @@ class Player:
         h0 = _hs()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        # USER APP per-run state (#181): cleared here rather than at the bind
+        # site below, so the early SPEC refusals (extensions / canvas) cannot
+        # leave a previous app's `_layout` armed against this cart.
+        self._app_layout = None
+        self._app_wh = None
+        self._app_id = None
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
                                        # pattern): a cart re-declares it each start
         # #85: a fresh run resets the active scene to the default, so a load_scene()
@@ -571,6 +626,64 @@ class Player:
             self.cart_error = "needs extension: " + ", ".join(missing)
             self.crash_line = None
             return False
+        # Cart canvas gate (SPEC.md 1/3.1): `canvas` is the other capability
+        # field -- an out-of-set size was carried raw by the loader and is
+        # refused here BY NAME, like an unknown runtime; an in-set size binds a
+        # real small canvas for the run (released in release_world). A tier
+        # with no factory refuses too: running a 128x128 cart on a 320x240
+        # canvas would letterbox it into a corner and lie about W/H.
+        cv = cart.get("canvas") if cart else None
+        if cv is not None and (not isinstance(cv, (tuple, list)) or len(cv) != 2):
+            # clip the repr: a malformed value can be an arbitrary object and
+            # the panel wraps 8px cells -- the NAME matters, not the whole blob
+            self.cart_error = 'no "%.32s" canvas (SPEC.md 3.1)' % (cv,)
+            self.crash_line = None
+            return False
+        ws.release_run_canvas()        # a straggler bind never leaks into this run
+        if cv is not None and not ws.bind_run_canvas(cv[0], cv[1]):
+            self.cart_error = "no %dx%d canvas on this screen yet" % (cv[0], cv[1])
+            self.crash_line = None
+            return False
+        # -- USER APPS (#181, ui_refactor_2026-08 Phases 7 + 8) ---------------
+        #
+        # A `type: "app"` cart no shell app claims is a USER APP: written by
+        # whoever owns the console, editable in the picker, and handed shell
+        # capabilities by MANIFEST PERMISSION (make_system_api, below).
+        if ws.is_user_app(cart):
+            # A manifest this build cannot honour AS WRITTEN is refused by
+            # name, like an unknown runtime or an out-of-set canvas -- and
+            # BEFORE the crash guard arms, because a mis-declared permission is
+            # not a crash and must not spend a strike. Today the only such rule
+            # is "at most one file kind"; the alternative was the silent
+            # last-one-wins grant this replaced.
+            _man = manifest_error(cart)
+            if _man is not None:
+                self.cart_error = _man
+                self.crash_line = None
+                return False
+            # CRASH ISOLATION FIRST, before a single line of the cart's code has
+            # been compiled, let alone run: the mark has to survive a death the
+            # interpreter never observes (a hang, an OOM, a native fault). See
+            # runtime/crash_guard.py. A cart that has used up its strikes is
+            # refused into the ORDINARY error panel, whose top bar carries
+            # EDIT/CODE -- so "this app is broken" and "here is how you fix it"
+            # are the same screen.
+            self._app_id = ws.app_cart_id(cart)
+            if not ws.app_guard.arm(self._app_id):
+                self.cart_error = ("app turned off after %d crashes - EDIT it"
+                                   % ws.app_guard.STRIKES)
+                self.crash_line = None
+                self._app_id = None
+                return False
+            # THE RESPONSIVE OPT-IN. Fixed is the DEFAULT and deliberately so:
+            # a kid cart hardcodes coordinates, and the manifest `canvas` (320x240
+            # unless it says otherwise) is what the WM centres and integer-scales.
+            # A cart that defines a top-level `_layout(w, h, fs)` is saying it can
+            # reflow, and gets the whole system surface instead. Probed from the
+            # SOURCE because the canvas has to be chosen before make_api closes
+            # over it -- see system_api.wants_layout.
+            if wants_layout(cart.get("src")):
+                ws.bind_app_canvas()
         # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
         # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
         # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
@@ -634,6 +747,17 @@ class Player:
         if (getattr(ws, "artwork", None) is not None
                 and ws.artwork.is_paint_app(cart)):
             ns["artwork"] = ws.artwork
+        # USER APP capability injection (#181): the cart's manifest permissions,
+        # intersected with `system_api`'s allowlist, become names in its
+        # namespace -- and a capability it did not declare has NO NAME AT ALL,
+        # exactly like `wifi` above. Same AppContext the shipped apps get,
+        # through the same `ws.app_context` factory; only the source of the
+        # `needs` tuple differs (a manifest here, a class constant there). The
+        # ungated riders (`ui`, `theme()`, `screen()`, `bar_h()`) are how an app
+        # draws, not what it may reach -- see runtime/system_api.py.
+        if self._app_id is not None:
+            ns.update(make_system_api(ws.app_context, cart, ws.canvas,
+                                      ws.app_bar_h))
         t_api = _ticks_diff(_ticks_ms(), t2)
         # Compile with the "<cart>" filename so a runtime traceback carries cart
         # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:
@@ -715,6 +839,14 @@ class Player:
             exec(code, ns)
             t_exec = _ticks_diff(_ticks_ms(), t5)
             t6 = _ticks_ms()
+            # A RESPONSIVE app cart (#181) is told its geometry BEFORE _init, so
+            # the cart's own state is built against the size it will draw at
+            # rather than against a default it then has to correct.
+            if self._app_id is not None:
+                self._app_layout = ns.get("_layout")
+                if self._app_layout is not None:
+                    self._app_wh = self._layout_args()
+                    self._app_layout(*self._app_wh)
             if ns.get("_init"):
                 ns["_init"]()
             t_init = _ticks_diff(_ticks_ms(), t6)
@@ -844,57 +976,86 @@ class Player:
             ws.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
             self._cart_key_prev = k
             try:
+                # A RESPONSIVE app cart follows its surface (#181): a window
+                # resize, a font-scale change or a world flip re-runs `_layout`
+                # BEFORE the frame that would draw against the new geometry.
+                # Costs a game exactly one `is not None`, and an app one tuple
+                # build plus a compare -- there is no clock and no probe here.
+                if self._app_layout is not None:
+                    _wh = self._layout_args()
+                    if _wh != self._app_wh:
+                        self._app_wh = _wh
+                        self._app_layout(*_wh)
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
                 # early-out) when the cart never called background(). Skipped on a
                 # frameskip logic-only tick (nothing draws over it this frame).
                 #
-                # TIMED, and charged to RENDER (#172, measured on glass
-                # 2026-08-02). This restore is the cart's own drawing -- it
-                # stands in for the cls() a cart would otherwise make as _draw's
-                # first call -- but it runs before the render bracket opens
-                # below, so its cost used to fall out of `draw - upd - cart -
-                # audio` as CHROME. On the T-Deck that put ~4.7ms of Brick
-                # Siege's frame under a bucket named for the shell: chrome read
-                # 7.03ms with CHROMEBRK naming none of it (bar=0.00 cmp=0.01
-                # cur=0.06), which is what sent #172 hunting the shell for a
-                # regression that was never there.
-                #
-                # The control is brick_siege_lua, the same game clearing
-                # explicitly inside _draw ("the draw stream is IDENTICAL either
-                # way", its own comment): desktop-minus-render 2.20ms vs the
-                # Python twin's 6.58ms, for identical pixels. Counting it here
-                # makes the two languages' splits comparable, which is the whole
-                # point of the bucket.
-                _tb = _ticks_ms() if _perf else 0
+                # TIMED, and charged to RENDER, not chrome (#172, on-glass
+                # 2026-08-02): this restore IS the cart's drawing (it stands in
+                # for its first cls()), and letting it fall out of the bracket
+                # once put ~4.7ms of Brick Siege's frame under CHROME and sent
+                # #172 hunting the shell for a regression that was never there.
+                _tb = _ticks_us() if _perf else 0
                 rb = self._restore_bg
                 if render and rb is not None:
                     rb()
-                bg = _ticks_diff(_ticks_ms(), _tb) if _perf else 0
+                bg = _ticks_diff(_ticks_us(), _tb) if _perf else 0
                 # Multiplayer (#65): deliver any inbound net.* messages to the cart's
                 # on_net handler BEFORE its _update runs (incoming shared state applied
                 # first -- the lockstep-friendly order). Every logic tick, incl. a
                 # frameskip logic-only frame. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
-                _ts = _ticks_ms() if _perf else 0
+                # MICROSECONDS, not ms (2026-08-14). These three brackets and the
+                # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
+                # is what is left after subtracting them from the frame -- so on a
+                # ms clock every one of them truncated toward zero and the
+                # remainder collected the whole error. Six quantized terms, each
+                # losing up to 1ms, is up to 6ms of PURE ARTEFACT in a bucket that
+                # read ~7.6ms and was being treated as a real cost to hunt.
+                # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
+                # at the EMA, so every public number stays in ms.
+                _ts = _ticks_us() if _perf else 0
                 if self._update:
                     self._update(dt)
-                _tm = _ticks_ms() if _perf else 0
+                _tm = _ticks_us() if _perf else 0
                 if render and self._draw:
                     self._draw()
-                _td = _ticks_ms() if _perf else 0
+                _td = _ticks_us() if _perf else 0
                 if ws.audio is not None:
                     ws.audio.tick(dt)      # advance/feed playback (#16)
                 if _perf:
                     upd = _ticks_diff(_tm, _ts)           # cart _update -> game LOGIC
                     cart = _ticks_diff(_td, _tm) + bg     # cart _draw + backdrop -> RENDERING
-                    aud = _ticks_diff(_ticks_ms(), _td)   # audio.tick (mixer feed)
+                    # A runtime that runs the WHOLE cart frame inside update()
+                    # (moycore: _update and _draw back to back in C) makes those
+                    # two clocks read `logic = everything, render = 0`. It can
+                    # still say where its own time went, in microseconds, so ask
+                    # -- otherwise every logic/render pair this project has
+                    # recorded since #67 becomes incomparable to the next one.
+                    _fs = getattr(self._lua, "frame_split", None)
+                    if _fs is not None:
+                        _sp = _fs()
+                        if _sp is not None:
+                            # frame_split keeps its ms contract (lua_host twins it);
+                            # this side is us, so convert rather than widening it.
+                            upd = int(_sp[0] * 1000.0)
+                            cart = int(_sp[1] * 1000.0) + bg
+                    aud = _ticks_diff(_ticks_us(), _td)   # audio.tick (mixer feed)
                     ws._pf_upd = upd
                     ws._pf_cart = cart
                     ws._pf_audio = aud
                     ws._pf_bg = bg        # the backdrop's share of cart, for DRAWBRK
                     self._maybe_diag_slow_logic(upd, cart, aud)
+                # CRASH GUARD heal (#160): a rendered frame that got here ran the
+                # cart's body, its _init, its _update and its _draw without
+                # raising. Outside the perf brackets above on purpose -- the
+                # HEALING frame pays one small settings write, and charging that
+                # to the cart's render slice would put a flash hitch in DRAWBRK
+                # under the cart's name.
+                if render and self._app_id is not None:
+                    ws.app_guard.frame()
             except Exception as exc:  # noqa: BLE001
                 # A cart that raises mid-frame must NOT escape the loop (the
                 # device would hang silently). Capture it, stop running the
@@ -1076,7 +1237,13 @@ class Player:
         if cv is None:
             cv = self.ws.canvas
         NAMES = self.NAMES
-        x, y, w, h = 14, 40, 292, 132
+        # Sized against the surface, not 320x240: a cart-declared small canvas
+        # (SPEC.md 1/3.1) still gets a panel that fits (chunky once upscaled,
+        # but readable and inside the raster).
+        w = min(292, cv.w - 12)
+        h = min(132, cv.h - 16)
+        x = (cv.w - w) // 2
+        y = min(40, (cv.h - h) // 2)
         cv.rect(x, y, w, h, NAMES["dark_purple"])
         cv.rectb(x, y, w, h, NAMES["red"])
         cv.rect(x, y, w, 14, NAMES["red"])
@@ -1098,7 +1265,7 @@ class Player:
         obscures the other."""
         cv = self.ws.canvas
         NAMES = self.NAMES
-        w, h = 128, 16
+        w, h = min(128, cv.w - 8), 16    # fits a cart-declared small canvas too
         x = (cv.w - w) // 2
         y = 6
         cv.rect(x, y, w, h, NAMES["black"])

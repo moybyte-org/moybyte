@@ -1,11 +1,12 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 7,
   "title": "Sakura Lua",
   "type": "game",
   "runtime": "lua",
   "main": "main.lua",
   "system": true,
+  "order": 130,
   "canvas": "320x240",
   "permissions": [
     "graphics",
@@ -64,5 +65,8 @@
       ],
       "card": "BLOSSOMS ARE {value}"
     }
+  ],
+  "extensions": [
+    "moybyte.images"
   ]
 }

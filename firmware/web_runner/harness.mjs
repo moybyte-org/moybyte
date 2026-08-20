@@ -56,30 +56,31 @@ const step = mp.globals.get("step_frame_json");
 const events = mp.globals.get("apply_events_json");
 const openCart = mp.globals.get("open_cart");
 
+// METADATA since moycore stage 4 -- the palette, font, sheet and images used to
+// ride here so the page could replay draw commands; it blits a framebuffer now.
 const a = JSON.parse(assets());
-if (!a.palette || a.palette.length !== 64 || !a.font || a.w !== 320 || a.h !== 240) {
-    throw new Error("bad assets payload: " + JSON.stringify(Object.keys(a)));
+if (a.w !== 320 || a.h !== 240 || typeof a.audio_rate !== "number" || !("swap" in a)) {
+    throw new Error("bad assets payload: " + JSON.stringify(a));
 }
-console.log("assets: ok (palette 64, font, " + a.w + "x" + a.h + ")");
+if (a.palette || a.font || a.sheet || a.images) {
+    throw new Error("assets still carry PIXELS: " + JSON.stringify(Object.keys(a)));
+}
+console.log("assets: ok (metadata only, " + a.w + "x" + a.h + ")");
 
 function run(label, frames, dt = 1 / 60) {
-    let drawn = 0, bytes = 0, cmds = 0, worst = 0;
+    let drawn = 0, worst = 0;
     const t = performance.now();
     for (let i = 0; i < frames; i++) {
         const f0 = performance.now();
         const f = step(dt);
         const el = performance.now() - f0;
         if (el > worst) worst = el;
-        if (f) {
-            drawn++;
-            bytes += f.length;
-            cmds += JSON.parse(f).cmds.length;
-        }
+        if (f && JSON.parse(f).paint) drawn++;
     }
     const ms = (performance.now() - t) / frames;
-    console.log(`${label}: ${frames} frames, ${drawn} drawn, ` +
-        `${(cmds / Math.max(1, drawn)).toFixed(0)} cmds/f, ` +
-        `${(bytes / Math.max(1, drawn) / 1024).toFixed(1)} KB/f, ` +
+    // No cmds/f or KB/f any more: a frame is a framebuffer of fixed size plus a
+    // few dozen bytes of metadata, so the interesting number is time.
+    console.log(`${label}: ${frames} frames, ${drawn} painted, ` +
         `${ms.toFixed(2)} ms/f avg, ${worst.toFixed(1)} worst`);
     return drawn;
 }

@@ -6,11 +6,11 @@ Driven through the SAME shared console the device runs (runtime.host_app +
 ConsoleDriver: mouse == touch, arrows == trackball), so these assert host==device
 behavior. The IconSheet/storage tests poke the cores directly."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
 def _ws(tmp_path):
@@ -107,24 +107,24 @@ def test_bar_is_18px_on_both_screens(tmp_path):
     # Launcher bar renders.
     assert ws.screen == "launcher"
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
     # Running-cart bar renders.
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     """A workstation with no icon sheet wired (icon_sheet is None) still draws the bar
     -- _icon falls back to the _glyph bitmap so nothing crashes."""
-    from runtime import console, moy_carts, host_app
+    from runtime import console, moy_carts, host_app, host_canvas
     carts_dir = str(tmp_path / "carts")
     moy_carts.ensure_dirs(carts_dir)
     moy_carts.create("Plain", carts_dir, src="def _draw():\n    cls(1)\n", type="app")
     carts = moy_carts.scan(carts_dir)
-    canvas = host_app.Canvas(320, 240)
+    canvas = host_canvas.make_system_canvas(320, 240)
     inp = host_app.InputState()
     ws = console.Workstation(host_app._NullComp(), canvas, inp, carts)
     ws.make_api = host_app.make_api
@@ -360,10 +360,10 @@ def test_launch_wifi_tool_is_a_noop_when_absent(tmp_path):
 # -- cached running-cart top bar (#43): render once, blit each frame ---------
 
 def _bar_rows(canvas):
-    """The top-bar band of the GAME canvas as a flat list of palette indices (the
+    """The top-bar band of the GAME canvas as a flat list of PIXELS (the
     _STATUS_H rows the bar occupies)."""
     from runtime import console as C
-    return list(canvas.buf[:canvas.w * C._STATUS_H])
+    return list(memoryview(canvas._buf).cast("H")[:canvas.w * C._STATUS_H])
 
 
 def _run_a_cart(tmp_path):
@@ -389,11 +389,12 @@ def test_cached_cart_bar_is_pixel_identical_to_direct_render(tmp_path):
     bar state. Drive a running-cart frame (cached path), snapshot the bar band, then
     render the bar straight onto a fresh game-sized canvas via the SAME _render_cart_bar
     body and compare the band byte-for-byte."""
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_system_canvas
     ws, drv = _run_a_cart(tmp_path)
     cached = _bar_rows(ws.canvas)                 # what the cache+blit produced
     # Direct render of the identical state onto a clean canvas.
-    direct = Canvas(ws.canvas.w, ws.canvas.h, ws.canvas.palette)
+    direct = make_system_canvas(ws.canvas.w, ws.canvas.h)
+    direct.palette = ws.canvas.palette
     ws.bar_layer._render_cart_bar(direct, ws.bar_layer._cart_bar_key())
     assert _bar_rows(direct) == cached
     # And it's a REAL picture (icons + glyph + text), not a blank band.
@@ -499,7 +500,7 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     assert ws.icon_sheet.to_hex() == other
 
 
-# -- the zoned bar (Stage 4 of docs/shell_ux_technical_plan_v1.md, #46): the
+# -- the zoned bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46): the
 # right zone (clock/wifi/batt/gear) is OS-owned, the left zone is LENT to the
 # active app (launcher_layer/settings_layer/editor_app). The #43 strip cache is
 # GENERALIZED (not duplicated) to cover home/settings/menu too -- these tests are
@@ -971,7 +972,7 @@ def test_zoned_bar_gear_opens_sysmenu_from_every_zoned_screen(tmp_path):
     assert ws.sysmenu.open
 
 
-# -- the context X (Stage 5 of docs/shell_ux_technical_plan_v1.md, spec Section 9):
+# -- the context X (Stage 5 of docs/history/shell_ux_technical_plan_v1.md, spec Section 9):
 # the right zone's X exits the active TASKBAR app back toward the launcher root. The
 # launcher IS the root -> it draws NO X; only the Editor / Settings get one.
 

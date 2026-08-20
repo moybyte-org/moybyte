@@ -6,11 +6,11 @@ backend-agnostic Achievements helper and the moy_carts achievements.json store -
 so these assert host==device behavior, not a host-only path.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 # host_app registers the bare `audio`/`editors` module aliases that console.py
 # imports (its frozen device names), so import it BEFORE console.
@@ -18,8 +18,7 @@ from runtime import host_app, moy_carts  # noqa: E402
 from runtime import console as C  # noqa: E402
 
 
-def _ws(tmp_path):
-    return host_app.build_workstation(str(tmp_path / "carts"))
+from ws_helpers import build_ws as _ws
 
 
 def _tap(drv, rect):
@@ -146,7 +145,7 @@ def test_toast_renders(tmp_path):
     ws.open()                                # raises the "First Steps" toast
     assert ws.ach.toast_active()
     drv.frame(1 / 30)                        # frame() draws the toast overlay
-    assert len(set(drv.rgb888())) > 4        # not a blank frame
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4        # not a blank frame
 
 
 def test_achievements_view_hides_secrets(tmp_path):
@@ -157,7 +156,7 @@ def test_achievements_view_hides_secrets(tmp_path):
     _tap(drv, C._SET_ACH)
     assert ws.show_achievements
     drv.frame(1 / 30)
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
     # A locked HIDDEN (Easter-egg) achievement must stay hidden in the catalog
     # contract: it carries hidden=True so the view shows "???" not its name.
     hidden = [a for a in C.ACHIEVEMENTS if a[3]]
@@ -180,7 +179,7 @@ def test_konami_egg_fires_and_awards(tmp_path):
     assert ws.ach.has("konami")              # hidden "Secret Coder" awarded
     assert ws.ach_ui.egg_msg is not None            # "OH! YOU FOUND ME!" popup is up
     drv.frame(1 / 30)                        # confetti + egg + toast all render
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
     # Persisted across reboot.
     ws2 = host_app.build_workstation(carts)
     assert ws2.ach.has("konami")

@@ -43,9 +43,15 @@ const assets = seen("assets");
 ok("assets pushed exactly once", assets.length === 1);
 if (assets.length) {
     const a = JSON.parse(assets[0].json);
-    ok("assets carry palette + font + size",
-       a.palette && a.palette.length === 64 && !!a.font && a.w > 0 && a.h > 0,
-       "w=" + a.w + " h=" + a.h);
+    // METADATA only since moycore stage 4: the palette, the font, the cart's
+    // sheet/tilemap/images and every shelf cover used to ride here so the page
+    // could replay draw commands. The page blits a framebuffer now, so the only
+    // things it cannot derive are the surface size, the title, the audio rate,
+    // the input hint and the framebuffer's byte order.
+    ok("assets carry the page's metadata, and no pixels",
+       a.w > 0 && a.h > 0 && typeof a.audio_rate === "number"
+       && "swap" in a && !a.palette && !a.font && !a.sheet && !a.images,
+       "w=" + a.w + " h=" + a.h + " keys=" + Object.keys(a).join(","));
     ok("desktop tier reports its panel size",
        search.includes("desktop") ? (a.w === 1024 && a.h === 600) : (a.w === 320),
        a.w + "x" + a.h);
@@ -64,10 +70,15 @@ if (search.includes("cart=")) {
     ok("frames flow after run", frames.length > 10,
        "got " + frames.length + " in 600ms");
 }
-ok("a frame is parseable JSON with cmds or surfaces", (() => {
+ok("a frame is parseable metadata + a transferred framebuffer", (() => {
     if (!frames.length) return false;
-    const d = JSON.parse(frames[frames.length - 1].s);
-    return Array.isArray(d.cmds) || Array.isArray(d.surfaces);
+    const m = frames[frames.length - 1];
+    const d = JSON.parse(m.s);
+    if (typeof d.paint !== "number") return false;
+    // Since moycore stage 4 the pixels ride as a transferred ArrayBuffer beside
+    // the metadata; a painted frame must carry one, a skipped one must not.
+    return d.paint ? (m.fb instanceof ArrayBuffer && m.fb.byteLength > 0)
+                   : !m.fb;
 })());
 const rate = frames.length / 0.6;
 if (search.includes("cart=")) {

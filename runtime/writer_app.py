@@ -137,21 +137,32 @@ class WriterAppLayer(ListShellApp):
 
     id = "writer"
     domain = "system"
+    RENAME_MAX = MAX_NAME
     TITLE = "WRITER"
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Writer"
     APP_PERM = "notebook"
     APP_FOLDER = "writer.moy"
     AUTOSAVE_S = 2.5
+    # The shell roles this app uses (runtime/app_context.py); `shell` is only
+    # the shared FileGridView's duck-type on the raw Workstation.
+    NEEDS = ("surface", "theme", "damage", "files", "clipboard", "shell")
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._store = ctx.files       # ListShellApp's storage role
+        self._clip = ctx.clipboard
         self.names = names
         self._in = in_rect
-        self.layout = WriterLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                   ws._effective_font_scale(), ws.windowed_chrome)
+        cv = ctx.surface.canvas()
+        self.layout = WriterLayout(cv.w, cv.h, self._surf.font_scale(),
+                                   self._surf.windowed())
         self.mode = "list"            # list | edit | rename
-        self.grid = FileGridView(ws, "docs")
+        self.grid = FileGridView(ctx.shell, "docs")
         self.doc_name = None          # the open doc's file name (None = none open)
         self.editor = None            # CodeEditor while mode == "edit"
         self.status = "MY DOCS"
@@ -166,7 +177,7 @@ class WriterAppLayer(ListShellApp):
         self._burst_before = None     # text() snapshot at the live burst's start
 
     # -- store ---------------------------------------------------------------
-    # (is_app / _store_ready / _load_blob / _persist / _edge_key: ListShellApp)
+    # (is_app / _store_ready / _load_json / _persist / _edge_key: ListShellApp)
 
     def open_named(self, name):
         """Point Writer at a named doc to open on its next open() -- the Files
@@ -187,10 +198,8 @@ class WriterAppLayer(ListShellApp):
         if not (ed.dirty or self._unsaved or force):
             return True
         body = ed.text()[:MAX_CHARS]
-        store = self.ws.carts_store
         name = self.doc_name
-        ok = self._persist(lambda: store.save_file(
-            "docs", name, _encode(body), self.ws.carts_root))
+        ok = self._persist(self._store.save("docs", name, _encode(body)))
         if ok:
             ed.dirty = False
             self._unsaved = False
@@ -198,6 +207,20 @@ class WriterAppLayer(ListShellApp):
             self.grid.invalidate(name)
             self._commit_history(name)
         return ok
+
+    def commit(self):
+        """The app-API hard-commit hook (docs/app_api_v1.md): the host calls it
+        before routing a tap into this app's bar band, because the context-X
+        there is an exit path and a doc still inside its idle-debounce window
+        would otherwise lose the last edit. Change-gated -- an untouched blank
+        doc is not written just to exit."""
+        self.flush()
+
+    def close(self):
+        """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
+        this app comes off the screen by ANY route. Change-gated and cheap --
+        `commit()` is the forced twin for an explicit exit gesture."""
+        self.flush()
 
     # -- op-history (#111 phase 3) --------------------------------------------
 
@@ -248,9 +271,8 @@ class WriterAppLayer(ListShellApp):
         ops = hist.flush()
         if not ops and kf is None:
             return
-        store = self.ws.carts_store
-        if self._persist(lambda: store.history_commit(
-                "docs", name, ops, keyframe=kf, root=self.ws.carts_root)):
+        if self._persist(self._store.history_commit("docs", name, ops,
+                                                    keyframe=kf)):
             if kf is not None:
                 hist.mark_keyframe()
 
@@ -264,11 +286,8 @@ class WriterAppLayer(ListShellApp):
         hist = self.history
         if hist is None or not self._store_ready():
             return
-        try:
-            recs = self.ws._with_sd(lambda: self.ws.carts_store.load_history(
-                "docs", name, self.ws.carts_root))
-        except Exception:  # noqa: BLE001 -- a bad/missing sidecar just starts undo-empty
-            recs = []
+        # a bad/missing sidecar just starts undo-empty (err -> recs None)
+        recs = self._store.history("docs", name)[0] or []
         ops = []
         for rec in recs:
             if rec.get("t") == "seg":
@@ -295,22 +314,17 @@ class WriterAppLayer(ListShellApp):
         self._unsaved = True
         self._idle = 0.0
         self.status = self.doc_name.upper() if self.doc_name else "DOC"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- lifecycle -----------------------------------------------------------
 
     def relayout(self, w, h, fs):
-        self.layout = WriterLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = WriterLayout(w, h, fs, self._surf.windowed())
         if self.editor is not None:
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 
     def open(self):
-        if self._store_ready():
-            try:
-                self.ws._with_sd(
-                    lambda: self.ws.carts_store.migrate_docs(self.ws.carts_root))
-            except Exception:  # noqa: BLE001 -- migration is best-effort
-                pass
+        self._store.migrate("docs")       # best-effort, err ignored by design
         self.grid.refresh()
         pending = self._pending_open
         self._pending_open = None
@@ -323,7 +337,7 @@ class WriterAppLayer(ListShellApp):
             self.history = None
             self._burst_before = None
             self.status = "MY DOCS"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- doc verbs -----------------------------------------------------------
 
@@ -331,14 +345,10 @@ class WriterAppLayer(ListShellApp):
         self.flush()
         blob = None
         if self._store_ready():
-            try:
-                blob = self.ws._with_sd(lambda: self.ws.carts_store.load_file(
-                    "docs", name, self.ws.carts_root))
-            except Exception:  # noqa: BLE001
-                blob = None
+            blob = self._store.load("docs", name)[0]
         lay = self.layout
         self.editor = CodeEditor(_body_of(blob) if blob else "", lay.cols, lay.rows,
-                                 clip=getattr(self.ws, "clipboard", None))
+                                 clip=self._clip)
         self.doc_name = name
         self.mode = "edit"
         self._unsaved = False
@@ -348,20 +358,16 @@ class WriterAppLayer(ListShellApp):
         self.history = History(self.editor, TextEditCodec())
         self._burst_before = None
         self._seed_history(name)          # #111: undo reaches past this open
-        self.ws._dirty = True
+        self._damage.all()
 
     def _new_doc(self):
         self.flush()
         name = None
         if self._store_ready():
-            try:
-                name = self.ws._with_sd(lambda: self.ws.carts_store.new_file_name(
-                    "docs", self.ws.carts_root))
-            except Exception:  # noqa: BLE001
-                name = None
+            name = self._store.new_name("docs")[0]
         lay = self.layout
         self.editor = CodeEditor("", lay.cols, lay.rows,
-                                 clip=getattr(self.ws, "clipboard", None))
+                                 clip=self._clip)
         self.doc_name = name or "doc_1"
         self.mode = "edit"
         self._unsaved = False           # written on first change (no empty litter)
@@ -370,7 +376,7 @@ class WriterAppLayer(ListShellApp):
         self.status = "NEW DOC"
         self.history = History(self.editor, TextEditCodec())   # fresh doc -> no sidecar to seed
         self._burst_before = None
-        self.ws._dirty = True
+        self._damage.all()
 
     def _back_to_list(self):
         self.flush()                    # change-gated: an untouched doc never litters
@@ -383,14 +389,13 @@ class WriterAppLayer(ListShellApp):
         self.grid.refresh()
         self.grid.select(keep)
         self.status = "MY DOCS"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _delete_doc(self):
         if self.doc_name is None:
             return
         name = self.doc_name
-        if self._persist(lambda: self.ws.carts_store.delete_file(
-                "docs", name, self.ws.carts_root)):
+        if self._persist(self._store.delete("docs", name)):
             self.grid.invalidate(name)
             self.status = "IN TRASH"
         self.editor = None
@@ -400,7 +405,7 @@ class WriterAppLayer(ListShellApp):
         self.mode = "list"
         self.grid.refresh()
         self.grid.select(None)
-        self.ws._dirty = True
+        self._damage.all()
 
     def _begin_rename(self):
         if self.doc_name is None:
@@ -409,23 +414,19 @@ class WriterAppLayer(ListShellApp):
         self._ekey_prev = 0
         self.mode = "rename"
         self.status = "TYPE A NAME"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _rename_commit(self):
         name = self.doc_name
-        text = self.rename_text
-        new = [name]
-
-        def _do():
-            new[0] = self.ws.carts_store.rename_file(
-                "docs", name, text, self.ws.carts_root)
-
-        if name and self._persist(_do):
-            self.grid.invalidate(name)
-            self.doc_name = new[0]
-            self.status = new[0].upper()
+        if name:
+            res = self._store.rename("docs", name, self.rename_text)
+            if self._persist(res):
+                new = res[0] or name
+                self.grid.invalidate(name)
+                self.doc_name = new
+                self.status = new.upper()
         self.mode = "edit"
-        self.ws._dirty = True
+        self._damage.all()
 
     # -- input -----------------------------------------------------------------
 
@@ -438,7 +439,7 @@ class WriterAppLayer(ListShellApp):
                 self.status = hit[1].upper()
             return True
         if self.mode == "rename":
-            self._typed_name(inp)
+            self._typed_rename(inp)
             return True
         self._typed_keys(inp)
         return True
@@ -461,17 +462,17 @@ class WriterAppLayer(ListShellApp):
             return
         # The clipboard lane (#132, code_layer's byte convention): Ctrl+A
         # selects all (Writer has no selection UI of its own -- this is the
-        # copy source), Ctrl+C/X/V copy/cut/paste through ws.clipboard so text
+        # copy source), Ctrl+C/X/V copy/cut/paste through ctx.clipboard so text
         # travels between Writer, the code tab and Sheets.
         if k == 0x01:
             ed.select_all()
             self.status = "ALL SELECTED"
-            self.ws._dirty = True
+            self._damage.all()
             return
         if k == 0x03:
             if ed.copy():
                 self.status = "COPIED"
-                self.ws._dirty = True
+                self._damage.all()
             return
         if k in (0x18, 0x16):
             if k == 0x16 and \
@@ -485,7 +486,7 @@ class WriterAppLayer(ListShellApp):
                 self._idle = 0.0
                 self.status = self.doc_name.upper() if self.doc_name else "DOC"
                 self._close_burst()      # a cut/paste is its own burst edge
-            self.ws._dirty = True
+            self._damage.all()
             return
         if len(ed.text()) >= MAX_CHARS and k not in (0x08, 0x7F):
             self.status = "PAGE FULL"
@@ -499,40 +500,13 @@ class WriterAppLayer(ListShellApp):
             if k in (0x0D, 0x0A) or (0x20 <= k <= 0x7E and chr(k) in _BURST_BREAK):
                 self._close_burst()           # Enter/punctuation is a burst edge
 
-    def _typed_name(self, inp):
-        k = self._edge_key(inp)
-        if not k:
-            return
-        if k in (0x0D, 0x0A):
-            self._rename_commit()
-        elif k in (0x08, 0x7F):
-            self.rename_text = self.rename_text[:-1]
-        elif 0x20 <= k < 0x7F and len(self.rename_text) < MAX_NAME:
-            self.rename_text += chr(k)
-        self.ws._dirty = True
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
+        # The LIST + RENAME modes are the shared shell's (app_shell), verbatim
+        # in Sheets too; what is left below is this app's own edit view.
+        if self._list_pointer(px, py, click, self._new_doc, self._open_doc):
+            return True
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            # The OS bar (context-X exits): flush FIRST so an exit never loses text
-            # (change-gated -- an untouched blank doc is not written just to exit).
-            self.flush()
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
-        if self.mode == "list":
-            if not click:
-                return True
-            if self._in(px, py, lay.new_btn):
-                self._new_doc()
-                return True
-            hit = self.grid.tap(px, py)
-            if hit and hit[0] in ("pick", "sel"):
-                self._open_doc(hit[1])       # the picker opens on one tap
-            return True
-        if self.mode == "rename":
-            if click and self._in(px, py, lay.del_btn):
-                self._rename_commit()
-            return True
         # -- edit view ---------------------------------------------------------
         self._page_drag(px, py)
         if not click:
@@ -554,14 +528,14 @@ class WriterAppLayer(ListShellApp):
             return True
         if self.editor is not None and self._in(px, py, lay.text_area):
             self.editor.place((px - lay.tx) // lay.cell, (py - lay.ty) // lay.lh)
-            self.ws._dirty = True
+            self._damage.all()
         return True
 
     def _page_drag(self, px, py):
         # Touch drag inside the page pans the text (content follows the finger).
         ed = self.editor
         lay = self.layout
-        if ed is None or not self.ws.pointer.down \
+        if ed is None or not self._surf.pointer().down \
                 or not self._in(px, py, lay.text_area):
             self._drag = None
             return
@@ -573,31 +547,14 @@ class WriterAppLayer(ListShellApp):
         if drows or dcols:
             ed.scroll(-drows, -dcols)
             self._drag = (px, py)
-            self.ws._dirty = True
+            self._damage.all()
 
     # -- draw --------------------------------------------------------------------
 
-    def _button(self, cv, label, r, hot=False):
-        _ui.chip(cv, self.ws.theme_colors, r, label, hot=hot, fs=self.layout.fs)
-
-    def _hist_btn(self, cv, kind, r, enabled):
-        """The UNDO/REDO toolbar pair (#111 phase 3): the same quiet chip shell
-        `_button` draws (theme panel/dim, so it matches DOCS/RENAME/TRASH),
-        with the shared #88 chrome glyph ('undo'/'redo') in place of a label,
-        dimmed to a flat grey via can_undo()/can_redo() -- there's no separate
-        dimmed sprite, so (like paint_layer._draw_tools and the Editor bar's
-        _draw_history_icon) the ink color carries the disabled affordance."""
-        th = self.ws.theme_colors
-        x, y, w, h = r
-        cv.rect(x, y, w, h, th.get("panel", self.names["black"]))
-        cv.rectb(x, y, w, h, th.get("dim", self.names["light_grey"]))
-        ink = th.get("title_ink", self.names["black"]) if enabled else self.names["dark_grey"]
-        self.ws._glyph(kind, r, ink, cv)
-
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         # The #108 autosave debounce (Paint's idle-flush model).
         if self.mode == "edit" and self._unsaved:
             self._idle += dt
@@ -613,8 +570,10 @@ class WriterAppLayer(ListShellApp):
             self._button(cv, "DOCS", lay.back_btn)
             self._button(cv, "RENAME", lay.name_btn)
             self._button(cv, "TRASH", lay.del_btn)
-            self._hist_btn(cv, "undo", lay.undo_btn, self.can_undo())
-            self._hist_btn(cv, "redo", lay.redo_btn, self.can_redo())
+            self._button(cv, "undo", lay.undo_btn, glyph="undo",
+                         enabled=self.can_undo())
+            self._button(cv, "redo", lay.redo_btn, glyph="redo",
+                         enabled=self.can_redo())
         right = lay.undo_btn[0] - 4 * lay.fs if self.mode == "edit" else lay.w
         label = self.status[:max(1, (right - lay.status_x) // (8 * lay.fs) - 1)]
         sx = lay.status_x if self.mode != "list" else lay.new_btn[0] + lay.new_btn[2] + 8 * lay.fs
@@ -626,12 +585,10 @@ class WriterAppLayer(ListShellApp):
             self._draw_rename(cv)
         else:
             self._draw_page(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_rename(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         fs = lay.fs
         r = lay.entry
         cv.rect(r[0], r[1], r[2], r[3], self.names["white"])

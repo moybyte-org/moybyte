@@ -9,11 +9,9 @@ Region-level tests drive ui.ScrollRegion/DragTap directly; console-level
 tests drive the real shared console through ConsoleDriver and prove the
 fling frames keep riding the #113 blit path with the redraw gate open."""
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 DT = 16.0        # injected ms per synthetic pointer frame
 
@@ -206,7 +204,7 @@ def test_fling_frame_is_pixel_faithful(tmp_path):
     for _ in range(4):                     # a few coasting frames
         drv.frame(1 / 30)
     assert ws.launcher.flinging
-    partial = bytes(ws.sys_canvas.buf)
+    partial = bytes(ws.sys_canvas._buf)
     off = ws.launcher.scroll
     ws.launcher._region.stop()             # freeze the coast at this offset
     ws.launcher_layer._full_streak = 0     # force the FULL path, same state
@@ -214,7 +212,7 @@ def test_fling_frame_is_pixel_faithful(tmp_path):
     ws.mark_dirty()
     drv.frame(1 / 30)
     assert ws.launcher.scroll == off
-    full = bytes(ws.sys_canvas.buf)
+    full = bytes(ws.sys_canvas._buf)
     row = ws.sys_canvas.w * ws.layout.status_h
     assert full[row:] == partial[row:]
 

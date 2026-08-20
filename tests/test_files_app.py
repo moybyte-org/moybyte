@@ -4,14 +4,13 @@ OPEN picker + autosave riding the same layer."""
 
 from pathlib import Path
 
-from runtime import host_app, moy_carts
+from runtime import moy_carts
 
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _ws(tmp_path, **kw):
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_ws as _ws
 
 
 def _open_app(ws, title):
@@ -73,9 +72,9 @@ def test_gallery_lists_rename_copy_trash_restore(tmp_path):
     assert app.mode == "rename"
     app.rename_text = ""
     for ch in "castle":
-        app._typed_keys(_FakeInp(ord(ch)))
-        app._typed_keys(_FakeInp(0))
-    app._typed_keys(_FakeInp(0x0D))
+        app._typed_rename(_FakeInp(ord(ch)))
+        app._typed_rename(_FakeInp(0))
+    app._typed_rename(_FakeInp(0x0D))
     assert app.mode == "grid"
     assert "castle" in app.grid.names
     assert "dragon_2" not in app.grid.names

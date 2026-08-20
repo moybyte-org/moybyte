@@ -27,6 +27,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.file_widgets import FileGridView, Bitmap, cover_indices
 
+try:
+    from app_context import NO_STORE
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.app_context import NO_STORE
+
 
 def _invalidate_bitmap(img):
     if img is None:
@@ -362,19 +367,30 @@ class PaintAppLayer:
              "LINE", "BOX", "CIRCLE", "SPRAY", "PAN")
     GLYPHS = ("P", "B", "E", "F", "I", "/", "#", "O", "*", "+")
     # Icon vocabulary for the tool buttons (chrome._GLYPHS kinds, drawn via
-    # ws._glyph); the single-letter GLYPHS above stay the guaranteed fallback.
+    # ctx.surface.glyph); the single-letter GLYPHS above stay the guaranteed
+    # fallback.
     TOOL_ICONS = ("edit", "paint", "eraser", "fill", "picker",
                   "line", "rect_tool", "circle", "spray", "move")
+    # The shell roles this app uses (runtime/app_context.py). The DOCUMENT model
+    # lives on the ArtworkService (ctx.artwork), which is why this app declares
+    # no storage role at all; `shell` is only the FileGridView duck-type.
+    NEEDS = ("surface", "theme", "damage", "artwork", "shell")
 
-    def __init__(self, ws, names, in_rect):
-        self.ws = ws
+    def __init__(self, ctx, names, in_rect):
+        self.ctx = ctx
+        # Roles bound ONCE (the hoist mandate, ui_refactor_2026-08 Section 2.4).
+        self._surf = ctx.surface
+        self._theme = ctx.theme
+        self._damage = ctx.damage
+        self._art = ctx.artwork
         self.names = names
         self._in = in_rect
-        desktop = ws.sys_canvas.w >= 640 and ws.sys_canvas.h >= 400
+        cv = ctx.surface.canvas()
+        desktop = cv.w >= 640 and cv.h >= 400
         self.doc = PaintDocument(512, 300) if desktop else PaintDocument()
         self._starter_pending = desktop
-        self.layout = PaintAppLayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                                     ws._effective_font_scale(), ws.windowed_chrome)
+        self.layout = PaintAppLayout(cv.w, cv.h, self._surf.font_scale(),
+                                     self._surf.windowed())
         self.tool = 0
         self.color = names["blue"]
         self.pal_page = 0
@@ -397,24 +413,25 @@ class PaintAppLayer:
         self._rng_state = 0x5EED123
         # Autosave (#108): drawings persist on an idle debounce -- a kid never
         # presses save. Marks set _unsaved; draw(dt) flushes after AUTOSAVE_S.
-        self.grid = FileGridView(ws, "drawings")
+        self.grid = FileGridView(ctx.shell, "drawings")
         self._unsaved = False
         self._idle = 0.0
 
     def relayout(self, w, h, fs):
-        self.layout = PaintAppLayout(w, h, fs, self.ws.windowed_chrome)
+        self.layout = PaintAppLayout(w, h, fs, self._surf.windowed())
         self.display = None
 
     def is_app(self, cart):
         """The app-API matcher (docs/app_api_v1.md): Paint's cartridge identity
         check lives on the ArtworkService; this delegates so the registry sees
         the uniform app protocol."""
-        return self.ws.artwork.is_paint_app(cart)
+        return self._art.is_paint_app(cart)
 
     def open(self):
-        loaded = self.ws.artwork.load()
+        art = self._art
+        loaded = art.load()
         if self.doc.load(loaded):
-            self.status = (self.ws.artwork.doc_name() or "DRAWING").upper()
+            self.status = (art.doc_name() or "DRAWING").upper()
         elif self._starter_pending:
             # Build the editable demo lazily on the first Paint launch, not at OS boot.
             self.doc.seed_desktop()
@@ -426,15 +443,16 @@ class PaintAppLayer:
             self.status = "NEW DRAWING"
         self._starter_pending = False
         self.mode = "paint"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _button(self, cv, label, r, on=False, glyph=None):
         # One shared implementation now (ui.chip) -- pixel-identical delegate.
-        # `glyph` draws a chrome._GLYPHS icon instead of the text (ws._glyph is
+        # `glyph` draws a chrome._GLYPHS icon instead of the text (the surface
+        # role's `glyph` is
         # the vocabulary bridge -- the game_icon_btn pattern); unknown kinds draw
         # nothing, so callers only pass kinds this build ships.
-        _ui.chip(cv, self.ws.theme_colors, r, label, on=on, fs=self.layout.fs,
-                 glyph=glyph, glyph_draw=self.ws._glyph)
+        _ui.chip(cv, self._theme.colors(), r, label, on=on, fs=self.layout.fs,
+                 glyph=glyph, glyph_draw=self._surf.glyph)
 
     def _display_spec(self):
         vx, vy, vw, vh = self.layout.view
@@ -481,16 +499,23 @@ class PaintAppLayer:
     RETRY_S = 30.0                     # a failing store retries slowly, not hot
 
     def _save(self):
-        if not self._unsaved and self.ws.artwork.doc_name() is not None:
+        art = self._art
+        if not self._unsaved and art.doc_name() is not None:
             return True                # unchanged since the last flush: no re-encode
-        if self.ws.artwork.save(self.doc.pix, self.doc.W, self.doc.H):
-            self.status = "SAVED " + (self.ws.artwork.doc_name() or "").upper()
+        if art.save(self.doc.pix, self.doc.W, self.doc.H):
+            self.status = "SAVED " + (art.doc_name() or "").upper()
             self._unsaved = False
             self._idle = 0.0
             return True
-        self.status = self.ws.artwork.last_error or "CAN'T SAVE"
+        self.status = art.last_error or "CAN'T SAVE"
         self._idle = self.AUTOSAVE_S - self.RETRY_S
         return False
+
+    def close(self):
+        """The app-API LEAVING hook (docs/app_api_v1.md): the host calls it when
+        this app comes off the screen by ANY route. `_save` is change-gated, so
+        an untouched drawing costs no write."""
+        self._save()
 
     def _mark_changed(self):
         self._unsaved = True
@@ -501,7 +526,7 @@ class PaintAppLayer:
         file), point the service at a fresh name, and blank the canvas
         (`seed` passes through to PaintDocument's starter art)."""
         self._save()
-        self.ws.artwork.new_doc(w, h)
+        self._art.new_doc(w, h)
         self.doc = PaintDocument(w, h, seed=seed)
         self._unsaved = False
         self._idle = 0.0
@@ -533,15 +558,15 @@ class PaintAppLayer:
             elif index == 3:
                 self._save()
                 # Only the open doc's pixels can have changed since last time.
-                self.grid.invalidate(self.ws.artwork.doc_name())
+                self.grid.invalidate(self._art.doc_name())
                 self.grid.refresh()
                 self.mode = "open"
             elif index == 4:
-                if self._save() and self.ws.artwork.set_wallpaper():
+                if self._save() and self._art.set_wallpaper():
                     self.status = "WALLPAPER SET"
             elif index == 5:
                 if self._save():
-                    self.project_names = self.ws.artwork.targets()
+                    self.project_names = self._art.targets()
                     self.project_top = 0
                     self.mode = "projects"
             elif index == 6:
@@ -551,7 +576,7 @@ class PaintAppLayer:
                 self.view_mode = {0: 1, 1: 2, 2: 4, 4: 0}[self.view_mode]
                 self.status = "FIT" if self.view_mode == 0 else str(self.view_mode) + "X"
         self.display = None
-        self.ws._dirty = True
+        self._damage.all()
 
     def handle_input(self, inp):
         if inp.pressed("b"):
@@ -559,18 +584,15 @@ class PaintAppLayer:
                 self.mode = "paint"
             else:
                 self._action(7)
-            self.ws._dirty = True
+            self._damage.all()
         return True
 
     def handle_pointer(self, px, py, click):
-        ws = self.ws
         lay = self.layout
-        if click and not ws.windowed_chrome and py < lay.bar_h:
-            return bool(ws.bar_layer.handle_bar_tap("tool", px, py))
         if self.mode == "show":
             if click:
                 self.mode = "paint"
-                ws._dirty = True
+                self._damage.all()
             return True
         if self.mode == "projects":
             if click:
@@ -589,7 +611,7 @@ class PaintAppLayer:
                 if self._in(px, py, r):
                     self.tool = i
                     self.status = self.TOOLS[i]
-                    ws._dirty = True
+                    self._damage.all()
                     return True
             count = 16 if lay.compact else 64
             for i in range(count):
@@ -598,20 +620,20 @@ class PaintAppLayer:
                 if self._in(px, py, (x, y, lay.pal_cell, lay.pal_cell)):
                     self.color = (self.pal_page * 16 + i) if lay.compact else i
                     self.status = "COLOR " + str(self.color)
-                    ws._dirty = True
+                    self._damage.all()
                     return True
             if lay.compact and self._in(px, py, lay.pal_page):
                 self.pal_page = (self.pal_page + 1) & 3
-                ws._dirty = True
+                self._damage.all()
                 return True
             for i, r in enumerate(lay.sizes):
                 if self._in(px, py, r):
                     self.size = (1, 2, 4)[i]
-                    ws._dirty = True
+                    self._damage.all()
                     return True
             if self._in(px, py, lay.fill):
                 self.shape_fill = not self.shape_fill
-                ws._dirty = True
+                self._damage.all()
                 return True
             if self._in(px, py, lay.preset):
                 if self.size_armed:
@@ -629,9 +651,9 @@ class PaintAppLayer:
                 else:
                     self.size_armed = True
                     self.status = "TAP SIZE AGAIN"
-                ws._dirty = True
+                self._damage.all()
                 return True
-        self._paint_pointer(px, py, click, bool(ws.pointer.down))
+        self._paint_pointer(px, py, click, bool(self._surf.pointer().down))
         return True
 
     def _paint_pointer(self, x, y, tapped, held):
@@ -642,7 +664,7 @@ class PaintAppLayer:
             elif held and self.pan_last is not None:
                 self._pan(self.pan_last[0] - x, self.pan_last[1] - y)
                 self.pan_last = (x, y)
-                self.ws._dirty = True
+                self._damage.all()
             elif not held:
                 self.pan_last = None
             return
@@ -669,13 +691,13 @@ class PaintAppLayer:
             else:
                 self.stroke_last = p
                 self._stroke(p, factor)
-            self.ws._dirty = True
+            self._damage.all()
         elif held:
             if self.tool in (5, 6, 7) and self.shape_start is not None:
                 self.shape_now = p
             elif self.stroke_last is not None:
                 self._stroke(p, factor)
-            self.ws._dirty = True
+            self._damage.all()
         else:
             self._release()
 
@@ -723,18 +745,19 @@ class PaintAppLayer:
         self.stroke_last = self.shape_start = self.shape_now = None
         self.status = "DRAWING CHANGED"
         self._mark_changed()
-        self.ws._dirty = True
+        self._damage.all()
 
     def _open_tap(self, x, y):
         lay = self.layout
         if y < lay.bar_h + lay.top_h:
             self.mode = "paint"
-            self.ws._dirty = True
+            self._damage.all()
             return
         hit = self.grid.tap(x, y)
         if hit and hit[0] in ("pick", "sel"):   # Paint's picker opens on one tap
-            self.ws.artwork.open_named(hit[1])
-            if self.doc.load(self.ws.artwork.load()):
+            art = self._art
+            art.open_named(hit[1])
+            if self.doc.load(art.load()):
                 self.status = hit[1].upper()
             else:
                 self.status = "CAN'T OPEN"
@@ -743,13 +766,13 @@ class PaintAppLayer:
             self.view_mode = 0
             self.display = None
             self.mode = "paint"
-        self.ws._dirty = True
+        self._damage.all()
 
     def _project_tap(self, x, y):
         lay = self.layout
         if y < lay.bar_h + lay.top_h:
             self.mode = "paint"
-            self.ws._dirty = True
+            self._damage.all()
             return
         row_h = 26 * lay.fs
         y0 = lay.bar_h + lay.top_h + 8 * lay.fs
@@ -760,14 +783,15 @@ class PaintAppLayer:
                 break
             if self._in(x, y, (10 * lay.fs, y0 + row * row_h,
                                lay.w - 20 * lay.fs, row_h - 2 * lay.fs)):
-                name = self.ws.artwork.attach(idx)
-                self.status = "BG ADDED TO " + name if name else self.ws.artwork.last_error
+                art = self._art
+                name = art.attach(idx)
+                self.status = "BG ADDED TO " + name if name else art.last_error
                 self.mode = "paint"
-                self.ws._dirty = True
+                self._damage.all()
                 return
 
     def draw(self, dt):
-        cv = self.ws.sys_canvas
+        cv = self._surf.canvas()
         if (self._unsaved and self.mode == "paint"
                 and not self.doc.action_live):
             self._idle += dt           # the #108 autosave debounce
@@ -784,12 +808,10 @@ class PaintAppLayer:
             self._draw_open(cv)
         else:
             self._draw_paint(cv)
-        if not self.ws.windowed_chrome:
-            self.ws.bar_layer._draw_status_strip("tool")
 
     def _draw_paint(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         cv.cls(th["panel"])
         cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
         action_labels = ("N", "U", "R", "OPEN", "WALL", "GAME", "SHOW",
@@ -863,7 +885,7 @@ class PaintAppLayer:
 
     def _draw_open(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         cv.cls(th["panel"])
         cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
@@ -876,7 +898,7 @@ class PaintAppLayer:
 
     def _draw_projects(self, cv):
         lay = self.layout
-        th = self.ws.theme_colors
+        th = self._theme.colors()
         cv.cls(th["panel"])
         cv.rect(0, lay.bar_h, lay.w, lay.top_h, 48)
         self._button(cv, "< PAINT", lay.actions[0], True)
@@ -898,13 +920,27 @@ class PaintAppLayer:
 
 
 class ArtworkService:
+    """Paint's DOCUMENT model + the wallpaper/project copy-on-use verbs.
+
+    Not a Layer, so it is not in `app_decls` -- but it sits on the APP side of
+    the shell seam, so it takes an `AppContext` exactly as an app does
+    (runtime/app_context.py). Its prefs namespace is "paint" and not its id:
+    `paint_doc` has been the key in real cards' system.json since #108."""
+
     MAX_W = 512
     MAX_H = 300
     WALL_TITLE = "My Art"
     PAINT_TITLE = "Paint"
+    NEEDS = ("files", "carts", "wallpaper", "prefs", "notify", "nav")
 
-    def __init__(self, ws):
-        self.ws = ws
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self._files = ctx.files
+        self._carts = ctx.carts
+        self._wall = ctx.wallpaper
+        self._prefs = ctx.prefs
+        self._notify = ctx.notify
+        self._nav = ctx.nav
         self.last_error = ""
         self._cached = None            # the OPEN doc's decoded (w, h, bytes)
         self._wall_decoded = None      # the wallpaper COPY's decoded tuple
@@ -914,9 +950,7 @@ class ArtworkService:
         self._thumb_key = None
 
     def _ready(self):
-        ws = self.ws
-        return bool(ws.carts_store is not None and ws.carts_root is not None
-                    and ws.can_manage)
+        return self._files.ready()
 
     @classmethod
     def is_paint_app(cls, cart):
@@ -931,7 +965,7 @@ class ArtworkService:
         return name == "paint.moy"
 
     def _wall_cart(self):
-        for cart in self.ws._all_carts:
+        for cart in self._carts.all():
             if cart.get("type") == "wallpaper" and cart.get("title") == self.WALL_TITLE:
                 return cart
         return None
@@ -943,17 +977,16 @@ class ArtworkService:
 
     def doc_name(self):
         """The open drawing's file name, or None before the first save."""
-        return self.ws.system.get("paint_doc")
+        return self._prefs.get("doc")
 
     def _set_doc_name(self, name):
-        ws = self.ws
-        if ws.system.get("paint_doc") == name:
+        prefs = self._prefs
+        if prefs.get("doc") == name:
             return
         if name is None:
-            ws.system.pop("paint_doc", None)
+            prefs.clear("doc")
         else:
-            ws.system["paint_doc"] = name
-        ws._persist_system()
+            prefs.set("doc", name)
 
     def open_named(self, name):
         """Point Paint at another drawing file (the Files app's OPEN verb, and
@@ -966,33 +999,31 @@ class ArtworkService:
         Resolves the doc pointer (running the one-shot #108 migration first):
         no pointer -> the newest drawing; an empty kind -> fresh canvas; a
         pointer at a since-deleted file -> a fresh canvas under that name."""
-        if not self._ready():
-            return None
-        ws = self.ws
-        try:
-            def _load():
-                store = ws.carts_store
-                store.migrate_user_files(ws.carts_root)
-                name = self.doc_name()
-                if name:
-                    return name, store.load_file("drawings", name, ws.carts_root)
-                names = store.list_files("drawings", ws.carts_root)
-                if names:
-                    return names[0], store.load_file("drawings", names[0],
-                                                     ws.carts_root)
-                return None, None
+        files = self._files
 
-            name, blob = ws._with_sd(_load)
-            if name is not None:
-                self._set_doc_name(name)
-            self._cached = ws.carts_store.decode_moyimg(blob) if blob else None
-            if (self._cached is not None and (self._cached[0] > self.MAX_W
-                                              or self._cached[1] > self.MAX_H)):
-                self._cached = None
-            return self._cached
-        except Exception as exc:  # noqa: BLE001 -- a bad/missing drawing is non-fatal
-            self.last_error = str(exc)
+        def _load(f):
+            f.migrate()
+            name = self.doc_name()
+            if name:
+                return name, f.load("drawings", name)
+            names = f.list("drawings")
+            if names:
+                return names[0], f.load("drawings", names[0])
+            return None, None
+
+        got, err = files.batch(_load)
+        if err is not None:      # a bad/missing drawing is non-fatal
+            if err is not NO_STORE:
+                self.last_error = str(err)
             return None
+        name, blob = got
+        if name is not None:
+            self._set_doc_name(name)
+        self._cached = files.decode_image(blob)
+        if (self._cached is not None and (self._cached[0] > self.MAX_W
+                                          or self._cached[1] > self.MAX_H)):
+            self._cached = None
+        return self._cached
 
     def save(self, indices, width=320, height=240):
         """Persist Paint's canvas to its named drawing file (auto-naming a
@@ -1006,26 +1037,24 @@ class ArtworkService:
         if w <= 0 or h <= 0 or w > self.MAX_W or h > self.MAX_H:
             self.last_error = "BAD SIZE"
             return False
-        ws = self.ws
-        store = ws.carts_store
-        try:
-            blob = store.encode_moyimg(w, h, indices)
-            name = self.doc_name()
+        files = self._files
+        blob = files.encode_image(w, h, indices)
+        name = self.doc_name()
 
-            def _write():
-                n = name or store.new_file_name("drawings", ws.carts_root)
-                store.save_file("drawings", n, blob, ws.carts_root)
-                return n
+        def _write(f):
+            n = name or f.new_name("drawings")
+            f.save("drawings", n, blob)
+            return n
 
-            self._set_doc_name(ws._with_sd(_write))
-            self._cached = (w, h, bytes(indices))
-            self.last_error = ""
-            if getattr(ws, "ach", None) is not None:
-                ws.ach.note("paint_save")
-            return True
-        except Exception as exc:  # noqa: BLE001 -- surface failure in the app
-            self.last_error = str(exc)
+        got, err = files.batch(_write)
+        if err is not None:      # surface failure in the app
+            self.last_error = str(err)
             return False
+        self._set_doc_name(got)
+        self._cached = (w, h, bytes(indices))
+        self.last_error = ""
+        self._notify.achieve("paint_save")
+        return True
 
     def new_doc(self, width, height):
         """Start a fresh auto-named drawing (the old one keeps its file). The
@@ -1034,12 +1063,9 @@ class ArtworkService:
         if not self._ready():
             self._set_doc_name(None)
             return None
-        ws = self.ws
-        try:
-            name = ws._with_sd(
-                lambda: ws.carts_store.new_file_name("drawings", ws.carts_root))
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = str(exc)
+        name, err = self._files.new_name("drawings")
+        if err is not None:
+            self.last_error = str(err)
             return None
         self._set_doc_name(name)
         self._cached = None
@@ -1058,28 +1084,30 @@ class ArtworkService:
         """Restore ``My Art/bg`` from the re-seed-proof wallpaper-copy file."""
         if not self._ready():
             return False
-        ws = self.ws
-        store = ws.carts_store
         wall = self._wall_cart()
         if wall is None or not wall.get("path"):
             return False
-        try:
-            def _sync():
-                blob = store.load_artwork(ws.carts_root)
-                if not blob:
-                    return False
-                current = store.load_images(wall["path"]).get("bg")
-                if current != blob:
-                    store.save_image(wall, "bg", blob)
-                return True
-            return bool(ws._with_sd(_sync))
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = str(exc)
+        blob, err = self._wall.load_copy()
+        if err is not None:
+            self.last_error = str(err)
             return False
+        if not blob:
+            return False
+
+        def _sync(c):
+            if c.images(wall).get("bg") != blob:
+                c.save_image(wall, "bg", blob)
+            return True
+
+        got, err = self._carts.batch(_sync)
+        if err is not None:
+            self.last_error = str(err)
+            return False
+        return bool(got)
 
     def _wallpaper_id(self):
         wall = self._wall_cart()
-        return self.ws._wp_id_for(wall) if wall is not None else None
+        return self._wall.id_for(wall) if wall is not None else None
 
     def set_wallpaper(self, name=None):
         """Copy the named drawing (default: the open one) into the wallpaper
@@ -1087,31 +1115,32 @@ class ArtworkService:
         if not self._ready():
             self.last_error = "STORAGE OFF"
             return False
-        ws = self.ws
-        store = ws.carts_store
+        files = self._files
         wall = self._wall_cart()
-        try:
-            def _copy():
-                n = name or self.doc_name()
-                blob = (store.load_file("drawings", n, ws.carts_root)
-                        if n else None)
-                if not blob:
-                    return False
-                # Provenance (#108 phase 2): the wallpaper copy remembers the
-                # drawing it came from + that drawing's signature now, so a later
-                # edit can offer "your drawing changed -> UPDATE".
-                stamped = store.stamp_provenance(
-                    blob, "drawings", n, store.content_sig(blob))
-                store.save_artwork(stamped, ws.carts_root)
-                if wall is not None and wall.get("path"):
-                    store.save_image(wall, "bg", stamped)
-                return True
-            if not ws._with_sd(_copy):
-                self.last_error = "SAVE FIRST"
-                return False
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = str(exc)
+        # THREE storage sessions where this was one, because the three writes
+        # belong to three different roles now (a user file is read, the
+        # backdrop's own copy is written, a CART's image is written). Cheap by
+        # construction: `_with_sd` is a call-through on the host and on the P4,
+        # and on the T-Deck `with_sd_live` mounts once and keeps the card
+        # resident for the session -- so a second call is a readiness check.
+        n = name or self.doc_name()
+        blob = files.load("drawings", n)[0] if n else None
+        if not blob:
+            self.last_error = "SAVE FIRST"
             return False
+        # Provenance (#108 phase 2): the wallpaper copy remembers the drawing it
+        # came from + that drawing's signature now, so a later edit can offer
+        # "your drawing changed -> UPDATE".
+        stamped = files.stamp(blob, "drawings", n, files.sig(blob))
+        _v, err = self._wall.save_copy(stamped)
+        if err is not None:
+            self.last_error = str(err)
+            return False
+        if wall is not None and wall.get("path"):
+            _v, err = self._carts.save_image(wall, "bg", stamped)
+            if err is not None:
+                self.last_error = str(err)
+                return False
         self._wall_decoded = None
         self._wall_bitmap = None
         self._wall_key = None
@@ -1121,7 +1150,7 @@ class ArtworkService:
         if wp_id is None:
             self.last_error = "NO WALLPAPER"
             return False
-        self.ws.select_wallpaper(wp_id, persist=True)
+        self._wall.select(wp_id, persist=True)
         self.last_error = ""
         return True
 
@@ -1138,14 +1167,11 @@ class ArtworkService:
             return self._wall_decoded or None
         if not self._ready():
             return None
-        ws = self.ws
-        try:
-            blob = ws._with_sd(
-                lambda: ws.carts_store.load_artwork(ws.carts_root))
-            data = ws.carts_store.decode_moyimg(blob) if blob else None
-        except Exception as exc:  # noqa: BLE001 -- a bad copy just draws nothing
-            self.last_error = str(exc)
+        blob, err = self._wall.load_copy()
+        if err is not None:      # a bad copy just draws nothing
+            self.last_error = str(err)
             return None
+        data = self._files.decode_image(blob)
         if data is not None and (data[0] > self.MAX_W or data[1] > self.MAX_H):
             data = None
         self._wall_decoded = data if data is not None else False
@@ -1200,9 +1226,9 @@ class ArtworkService:
     def _targets(self):
         # System-app identities (Paint itself, Files, Calc, ...) are not game
         # projects; offering them a bg copy would just be clutter.
-        return [cart for cart in self.ws._all_carts
+        return [cart for cart in self._carts.all()
                 if cart.get("type") in ("game", "app") and cart.get("path")
-                and not self.ws.is_system_app(cart)]
+                and not self._nav.is_system_app(cart)]
 
     def targets(self):
         """Project titles Paint can offer in its GAME background picker."""
@@ -1220,36 +1246,27 @@ class ArtworkService:
         except (IndexError, TypeError, ValueError):
             self.last_error = "NO PROJECT"
             return None
-        ws = self.ws
-        store = ws.carts_store
-        try:
-            def _attach():
-                n = name or self.doc_name()
-                blob = (store.load_file("drawings", n, ws.carts_root)
-                        if n else None)
-                if not blob:
-                    return False
-                # The signature is of the SOURCE file as it stands now (before
-                # any resize), so change-detection re-reads files/drawings/<n>
-                # and compares its content_sig to this stamp (#108 phase 2).
-                sig = store.content_sig(blob)
-                data = store.decode_moyimg(blob)
-                if data is None:
-                    return False
-                if data[0] != 320 or data[1] != 240:
-                    game = cover_indices(data[2], data[0], data[1], 320, 240)
-                    blob = store.encode_moyimg(320, 240, game)
-                store.save_image(target, "bg",
-                                 store.stamp_provenance(blob, "drawings", n, sig))
-                return True
-            if not ws._with_sd(_attach):
-                self.last_error = "SAVE FIRST"
-                return None
-            self.last_error = ""
-            return target.get("title", "PROJECT")
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = str(exc)
+        files = self._files
+        n = name or self.doc_name()
+        blob = files.load("drawings", n)[0] if n else None
+        data = files.decode_image(blob)
+        if not blob or data is None:
+            self.last_error = "SAVE FIRST"
             return None
+        # The signature is of the SOURCE file as it stands now (before any
+        # resize), so change-detection re-reads files/drawings/<n> and compares
+        # its content_sig to this stamp (#108 phase 2).
+        sig = files.sig(blob)
+        if data[0] != 320 or data[1] != 240:
+            game = cover_indices(data[2], data[0], data[1], 320, 240)
+            blob = files.encode_image(320, 240, game)
+        _v, err = self._carts.save_image(
+            target, "bg", files.stamp(blob, "drawings", n, sig))
+        if err is not None:
+            self.last_error = str(err)
+            return None
+        self.last_error = ""
+        return target.get("title", "PROJECT")
 
     # -- provenance: where a drawing is used (#108 phase 2) -------------------
 
@@ -1263,20 +1280,15 @@ class ArtworkService:
         matches nothing, so the affordance just never appears."""
         if not self._ready() or not name:
             return []
-        ws = self.ws
-        store = ws.carts_store
+        files = self._files
         src_key = "drawings/" + str(name)
-        try:
-            cur = ws._with_sd(lambda: store.content_sig(
-                store.load_file("drawings", name, ws.carts_root) or ""))
-        except Exception:  # noqa: BLE001 -- an unreadable source lists nothing
+        src, err = files.load("drawings", name)
+        if err is not None:      # an unreadable source lists nothing
             return []
+        cur = files.sig(src or "")
         rows = []
-        try:
-            wblob = ws._with_sd(lambda: store.load_artwork(ws.carts_root))
-        except Exception:  # noqa: BLE001
-            wblob = None
-        wsrc, wsig = store.read_provenance(wblob) if wblob else (None, None)
+        wblob = self._wall.load_copy()[0]
+        wsrc, wsig = files.provenance(wblob)
         if wsrc == src_key:
             rows.append({"label": "WALLPAPER", "kind": "wall", "index": -1,
                          "stale": wsig != cur})
@@ -1284,7 +1296,7 @@ class ArtworkService:
             blob = (cart.get("images") or {}).get("bg")
             if not blob:
                 continue
-            psrc, psig = store.read_provenance(blob)
+            psrc, psig = files.provenance(blob)
             if psrc == src_key:
                 rows.append({"label": cart.get("title", "PROJECT"),
                              "kind": "game", "index": i, "stale": psig != cur})

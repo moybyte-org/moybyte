@@ -1,15 +1,13 @@
-"""Stage 7 wiring (docs/shell_ux_technical_plan_v1.md Section 3): a Project commit
+"""Stage 7 wiring (docs/history/shell_ux_technical_plan_v1.md Section 3): a Project commit
 PERSISTS and JOURNALS. Drives the real console (host_app + Workstation) so the
 Project.commit_* verbs run, and checks each one leaves a durable undo-journal entry
 whose snapshot is byte-identical to what landed on disk.
 """
 
 import json
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 def _make_ws_with_cart(tmp_path, src, title="Journaled", type="app", edit=None):

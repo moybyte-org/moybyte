@@ -39,8 +39,11 @@ def _load_build():
 build = _load_build()
 
 
-def _fake_firmware(root, boards=("tdeck", "p4"), stamp=True):
-    """A stand-in for tools/fetch_ci_firmware.py's output tree."""
+def _fake_firmware(root, boards=None, stamp=True):
+    """A stand-in for tools/fetch_ci_firmware.py's output tree. Fakes every
+    board in the table by default, so board N+1 joins these checks by existing."""
+    if boards is None:
+        boards = tuple(b["id"] for b in build.BOARDS)
     src = os.path.join(root, "ci-firmware")
     for board in build.BOARDS:
         if board["id"] not in boards:
@@ -188,21 +191,19 @@ def test_offsets_match_the_cable_flash():
     """The Makefile writes these images over a cable; the site writes the same
     ones over USB from a browser. If the two offsets ever disagree, one of them
     bricks a boot -- so read the Makefile and compare."""
-    mk = open(os.path.join(ROOT, "Makefile"), encoding="utf-8").read()
+    # The cable flash reads its facts from each board.toml [flash] section
+    # (#202 Phase A) -- so compare the site's table against the DECLARATION,
+    # which is stronger than the old Makefile regex ever was.
+    from tools import board_config
     table = {b["id"]: b for b in build.BOARDS}
-
-    # p4:    esptool ... write_flash 0x2000 $(P4_BIN)
-    p4 = re.search(r"--chip esp32p4 .*?write_flash (0x[0-9a-fA-F]+) \$\(P4_BIN\)", mk)
-    assert p4, "the P4 cable flash moved -- re-read the Makefile"
-    assert int(p4.group(1), 16) == table["p4"]["offset"]
-
-    # tdeck: the merged full image goes to 0x0 (firmware-flash-...-full)
-    td = re.search(r"write_flash (0x[0-9a-fA-F]+) \$\(MPY_FULL_BIN\)", mk)
-    assert td, "the T-Deck full-image flash moved -- re-read the Makefile"
-    assert int(td.group(1), 16) == table["tdeck"]["offset"]
-    # and it is the SAME image file the site publishes.
-    full = re.search(r"MPY_FULL_BIN \?= .*/([^/\s]+\.bin)", mk)
-    assert full and full.group(1) == table["tdeck"]["images"][0]
+    dirs = {"tdeck": "firmware/lilygo_t_deck_plus_mainline",
+            "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b"}
+    for bid, d in dirs.items():
+        fl = board_config.load(os.path.join(ROOT, d))["flash"]
+        assert int(str(fl["offset"]), 16) == table[bid]["offset"], bid
+    # ...and the T-Deck image the site publishes is the one the flash writes.
+    fl = board_config.load(os.path.join(ROOT, dirs["tdeck"]))["flash"]
+    assert str(fl["image"]).split("/")[-1] == table["tdeck"]["images"][0]
 
 
 def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
@@ -217,6 +218,8 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     assert "name: moybyte-firmware-${{ matrix.board }}" in wf
     assert fetch.ARTIFACT % "tdeck" == "moybyte-firmware-tdeck"
     assert set(fetch.BOARDS) == {b["id"] for b in build.BOARDS}
-    # Every board of the matrix has a card on the site, and vice versa.
-    matrix = re.search(r"board: \[([^\]]+)\]", wf)
-    assert {b.strip() for b in matrix.group(1).split(",")} == set(fetch.BOARDS)
+    # Every board of the matrix has a card on the site, and vice versa. The
+    # matrix is include-rows since #202 Phase A (one row per board), so read
+    # the `- board:` row keys.
+    rows = re.findall(r"^\s+- board: (\S+)", wf, re.M)
+    assert set(rows) == set(fetch.BOARDS)

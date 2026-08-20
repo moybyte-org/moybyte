@@ -48,7 +48,6 @@ from p4_autotest import P4Board            # noqa: E402
 
 W, H = 320, 240
 FRAME_BYTES = W * H
-CART_ROOT = "/moy/carts"
 CHUNK = 4096                    # wire bytes per base64 read: each one is a
                                 # serial ROUND TRIP, and at 1024 the 76800-byte
                                 # raw frame cost 75 of them
@@ -56,10 +55,34 @@ CHUNK = 4096                    # wire bytes per base64 read: each one is a
 
 # --- getting the cart onto the board ----------------------------------------
 
+def carts_root(board):
+    """The cart store the CONSOLE says it uses, asked once per board session.
+
+    DISCOVERED, NOT DECLARED -- the rule tools/push_cart.py states and follows.
+    The store is not the same path on every board and on the Guition it is not
+    even the same path on every boot: a TF card, when present, IS the store
+    (/sd/carts), otherwise the internal VFS is (#202). A constant here would be
+    wrong on that board half the time and a second source of truth on the two
+    where it happens to be right."""
+    root = getattr(board, "_carts_root", None)
+    if root is None:
+        root = board.pyval("str(ws.carts_root)", timeout=20.0)
+        # A device path or nothing: `str()` keeps a lost reply and an unset
+        # store from arriving as the plausible-looking string "None".
+        if not isinstance(root, str) or not root.startswith("/"):
+            raise RuntimeError("could not read ws.carts_root from the board (%r)"
+                               % (root,))
+        root = root.rstrip("/")
+        board._carts_root = root
+    return root
+
+
 def push_cart(board, cart_dir, name, log=print):
-    """Write a cart folder into /moy/carts/<name>.moy and make the launcher see
-    it, without rebooting -- a reset costs ~40s and the suite has nine scenes."""
-    dst = "%s/%s.moy" % (CART_ROOT, name)
+    """Write a cart folder into <ws.carts_root>/<name>.moy and make the launcher
+    see it, without rebooting -- a reset costs ~40s and the suite has nine
+    scenes."""
+    root = carts_root(board)
+    dst = "%s/%s.moy" % (root, name)
     board.pyexec(
         "import os\n"
         "try:\n"
@@ -75,18 +98,34 @@ def push_cart(board, cart_dir, name, log=print):
         # base64 rather than a repr: a cart's main.lua may hold any byte (the
         # text_bytes scene prints 0xFF on purpose), and a repr of that is not
         # something to round-trip through a serial REPL.
+        #
+        # Each chunk decodes STRAIGHT into the open file. The first shape of
+        # this accumulated the whole file's base64 in one board-side string
+        # via repeated += -- O(n^2) reallocation in whatever RAM the running
+        # console left behind, which is how a 16KB map.moymap could fail to
+        # upload on a board with megabytes free. Three wire realities shape
+        # the replacement (all learned by tripping over them): the device's
+        # `py` handler builds a FRESH env per command, so state must hang on
+        # `ws`, never on a bare name or an import; cmd() RESENDS on a lost
+        # reply, so each write is seek-addressed (a resend rewrites the same
+        # bytes -- idempotent, per the p4_autotest warning); and chunks stay
+        # a multiple of 4 so every piece decodes independently.
         b64 = binascii.b2a_base64(blob).decode().strip()
-        board.pyexec("ws._blob = ''")
-        for i in range(0, len(b64), board.CHUNK - 40):
-            part = b64[i:i + board.CHUNK - 40]
-            if not board.pyexec("ws._blob += %r" % part):
-                raise RuntimeError("upload of %s failed" % fn)
-        ok = board.pyexec(
-            "import binascii\n"
-            "_f = open(%r, 'wb')\n"
-            "_f.write(binascii.a2b_base64(ws._blob))\n"
-            "_f.close()\n" % ("%s/%s" % (dst, fn)))
-        if not ok:
+        step = (board.CHUNK - 72) & ~3          # ~55-char prefix + margin
+        board.pyexec("ws._b2 = __import__('binascii')")
+        if not board.pyexec("ws._pf = open(%r, 'wb')" % ("%s/%s" % (dst, fn))):
+            raise RuntimeError("open of %s failed" % fn)
+        for i in range(0, len(b64), step):
+            part = ("(ws._pf.seek(%d), ws._pf.write(ws._b2.a2b_base64(%r)))"
+                    % (i // 4 * 3, b64[i:i + step]))
+            if not board.pyexec(part):
+                # one retry after a collect: a transient alloc failure mid-
+                # session is exactly what a gc pass clears
+                board.pyexec("__import__('gc').collect()")
+                if not board.pyexec(part):
+                    board.pyexec("ws._pf.close()")
+                    raise RuntimeError("upload of %s failed" % fn)
+        if not board.pyexec("ws._pf.close()"):
             raise RuntimeError("write of %s failed" % fn)
         log("    %-16s %d bytes" % (fn, len(blob)))
     # Rebuild the cart list in place. _all_carts is what the launcher's items
@@ -94,7 +133,7 @@ def push_cart(board, cart_dir, name, log=print):
     ok = board.pyexec(
         "import moy_carts\n"
         "ws._all_carts = moy_carts.scan(%r)\n"
-        "ws.launcher.items = ws._launcher_items(ws._all_carts)\n" % CART_ROOT)
+        "ws.launcher.items = ws._launcher_items(ws._all_carts)\n" % root)
     if not ok:
         raise RuntimeError("could not refresh the cart list")
 
@@ -287,6 +326,8 @@ def serve(port, sock_path, log):
             conn, _ = srv.accept()
             try:
                 req = json.loads(conn.makefile("r").readline() or "{}")
+                if not req:
+                    continue            # a probe (connect-and-close): not a scene
                 if req.get("op") == "stop":
                     conn.sendall(b'{"ok": true}\n')
                     break
@@ -310,7 +351,12 @@ def serve(port, sock_path, log):
                 # next one may well pass, and a dead server turns one bad scene
                 # into a whole suite that cannot run.
                 log("  ERROR: %s" % exc)
-                conn.sendall(json.dumps({"ok": False, "error": str(exc)}).encode() + b"\n")
+                try:
+                    conn.sendall(json.dumps({"ok": False,
+                                             "error": str(exc)}).encode() + b"\n")
+                except OSError:
+                    pass                # client gone: a dead pipe must not
+                                        # take the server down either
             finally:
                 conn.close()
     finally:

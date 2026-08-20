@@ -6,30 +6,18 @@ input contract (buttons + the touch() api). Kept in its own file so it doesn't
 collide with the existing test_v04_userland.py suite.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 SYSTEM_CARTS = ROOT / "system_carts"
 
 NEW_CARTS = ("Pixel Pet", "Tiny Runner", "Hop Quest", "Tap Only Red")
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            ws.open()
-            return
-    # Not in the launcher run-grid (a WALLPAPER leaves it, spec shell_ux_v1.md): still a
-    # real editable cart in the store, so open it by reference (as ws.open() does).
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
-    if cart is None:  # pragma: no cover - guards a typo in the title
-        raise AssertionError("seed cart not found: " + title)
-    ws._open_workspace(cart)
-    ws.run(ws.project, ws.launcher_layer)
+from ws_helpers import open_cart as _open_cart
 
 
 def _run(ws, frames, dt=1 / 30):
@@ -73,7 +61,7 @@ def test_all_new_carts_open_and_run_headless(tmp_path):
         assert ws.screen == "desktop", title  # _start succeeded (else still launcher)
         assert ws.ns is not None and ws._update and ws._draw
         _run(ws, 90)                            # attract-mode auto-play, no crash
-        assert len(set(ws.canvas.buf)) > 1, title + " drew nothing"
+        assert probe.drew_something(ws.canvas), title + " drew nothing"
         ws.go_home()
 
 
@@ -92,7 +80,7 @@ def test_carts_are_lively_in_attract_mode(tmp_path):
         for _ in range(120):
             ws.input.begin_frame()
             ws.frame(1 / 30)
-            snaps.add(bytes(ws.canvas.buf[::97]))   # cheap sparse snapshot
+            snaps.add(probe.pixel_sample(ws.canvas, 97))   # cheap sparse snapshot
         assert len(snaps) > 3, title + " is static in attract mode"
         ws.go_home()
 
@@ -251,7 +239,7 @@ PRIMITIVE_CARTS = ("tap_red",)
 
 
 def test_converted_carts_have_nonempty_sprite_sheets():
-    from runtime.canvas import SpriteSheet
+    from runtime.editors import SpriteSheet
 
     for folder, tiles in CONVERTED_SHEETS.items():
         f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"
@@ -286,7 +274,7 @@ def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
             assert ws.sheet.tile_image(n).pix.count(0) < 64, "%s tile %d blank" % (folder, n)
         _run(ws, 90)                                     # attract mode, no crash
         assert ws.cart_error is None, folder
-        assert len(set(ws.canvas.buf)) > 1, folder
+        assert probe.drew_something(ws.canvas), folder
         ws.go_home()
 
 
@@ -327,7 +315,7 @@ WALLPAPER_SHEETS = {
 
 
 def test_wallpaper_carts_have_nonempty_sprite_sheets():
-    from runtime.canvas import SpriteSheet
+    from runtime.editors import SpriteSheet
 
     for folder, tiles in WALLPAPER_SHEETS.items():
         f = SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx"
@@ -363,7 +351,7 @@ def test_wallpaper_carts_load_their_sheet_and_run_headless(tmp_path):
             assert ws.sheet.tile_image(n).pix.count(0) < 64, "%s tile %d blank" % (folder, n)
         _run(ws, 90)                                     # attract mode, no crash
         assert ws.cart_error is None, folder
-        assert len(set(ws.canvas.buf)) > 1, folder
+        assert probe.drew_something(ws.canvas), folder
         ws.go_home()
 
 
@@ -402,7 +390,7 @@ def test_harpoon_pop_opens_and_is_lively(tmp_path):
     for _ in range(150):
         ws.input.begin_frame()
         ws.frame(1 / 30)
-        snaps.add(bytes(ws.canvas.buf[::97]))            # bubbles always move -> lively
+        snaps.add(probe.pixel_sample(ws.canvas, 97))     # bubbles always move -> lively
     assert len(snaps) > 3, "Harpoon Pop is static in attract mode"
 
 

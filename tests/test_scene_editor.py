@@ -11,11 +11,9 @@ workspace, the Editor tab-ladder wiring, and the firmware staging pins."""
 
 import json
 import os
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime.editors_scene import SceneEditor, parse_rows  # noqa: E402
 from runtime import scene_editor_ui as SU                  # noqa: E402
@@ -385,10 +383,16 @@ def test_icon_and_glyph_vocabulary_carry_scene():
 def test_build_scripts_stage_the_new_modules():
     # Host == device: both boards freeze the new shared modules (the #85 Stage 2
     # staging pins, mirroring the music-editor build asserts).
-    tdeck = (ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "build.sh"
-             ).read_text(encoding="utf-8")
-    assert 'cp "${REPO_ROOT}/runtime/scene_editor_ui.py"' in tdeck
-    assert 'cp "${REPO_ROOT}/runtime/editors_scene.py"' in tdeck
-    p4 = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "build.sh"
-          ).read_text(encoding="utf-8")
-    assert "scene_editor_ui.py" in p4 and "editors_scene.py" in p4
+    #
+    # Asked of the STAGED SET rather than of a `cp` line in build.sh: since #161
+    # Phase 3 the boards stage every runtime/*.py minus their board.toml
+    # denylist, so there is no per-module line to grep for -- and the question
+    # was always "is this module frozen onto that board", never "does the shell
+    # script contain this string".
+    from tools.board_config import staged_modules
+
+    for board in ("lilygo_t_deck_plus_mainline",
+                  "esp32_p4_wifi6_touch_lcd_7b"):
+        staged = staged_modules(ROOT / "firmware" / board, ROOT)
+        assert "scene_editor_ui.py" in staged, board
+        assert "editors_scene.py" in staged, board

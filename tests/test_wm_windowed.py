@@ -18,19 +18,18 @@ presentation's contracts:
   * the game viewport == the player window's content rect (ws._game_xy).
 """
 
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+
+from ws_helpers import build_desktop_ws
 
 
 def _ws(tmp_path, **kw):
-    from runtime import host_app
-    kw.setdefault("sys_size", (1024, 600))
-    kw.setdefault("font_scale", 2)
-    kw.setdefault("windowed", True)
-    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
+    ws = build_desktop_ws(tmp_path, **kw)
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))
     return ws
@@ -45,6 +44,213 @@ def _quiesce(ws):
     ws.pointer.visible = False
     ws.ach.toast = None
     ws.ach.toast_until = 0
+
+
+# ---------------------------------------------------------------------------
+# The game composite belongs to its WINDOW
+# ---------------------------------------------------------------------------
+
+def test_a_game_window_does_not_black_out_the_desk(tmp_path):
+    """`blit_game` means two different things and this tier wants the quiet one.
+
+    The shared `DeviceCanvas.blit_game` is the T-Deck's, where the canvas IS the
+    glass: it paints four black LETTERBOX bands over everything outside the game
+    rect, and `FullscreenStackWM.composite_game` depends on that (it probes for
+    the verb and returns, so its own bezel fill never runs). Here the same call
+    places a cart inside a WINDOW, and those bands cover the desk, the icon
+    column, the OS bar and every other window.
+
+    It is not hypothetical: the host inherited that method the day its canvas
+    became the boards' (`runtime/canvas.py` deleted, 2026-08-15) and the desktop
+    went black behind the first game window opened on it. The P4 never felt it
+    because `P4SystemCanvas.blit_game` overrides the bands away and that board
+    only runs this WM; the host runs both tiers, so `build_workstation` tells
+    the canvas which meaning it serves.
+    """
+    ws = _ws(tmp_path)
+    drv = _drv(ws)
+    _quiesce(ws)
+    ws.open_desk()
+    drv.frame(1 / 30)
+    ws.open()                                    # a cart, in a player WINDOW
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.cart_error is None, ws.cart_error
+    win = ws.wm._wins["desktop"]
+    assert win is not None and win.w < ws.sys_canvas.w
+
+    sc = ws.sys_canvas
+    # Sample the desk WELL clear of the window: bands span the full width and
+    # the full height, so any of these catches them.
+    outside = [(2, sc.h - 3), (sc.w - 3, sc.h - 3), (2, win.y + win.h // 2),
+               (sc.w - 3, win.y + win.h // 2)]
+    for x, y in outside:
+        assert ws.wm._win_at(x, y) is None, (x, y)   # really outside every window
+    assert any(sc.pix(x, y) != 0 for x, y in outside), \
+        "the game composite letterboxed the whole desktop black"
+
+
+def test_the_fullscreen_tier_still_gets_its_letterbox(tmp_path):
+    """The other half of the same contract, so fixing one does not lose the
+    other: on the fullscreen tier `composite_game` returns straight after the
+    native call, so `blit_game` is the ONLY thing that paints the bezel."""
+    from runtime import wm as WM
+    ws = _ws(tmp_path, sys_size=(960, 600), windowed=False)
+    drv = _drv(ws)
+    _quiesce(ws)
+    ws.open()
+    for _ in range(3):
+        drv.frame(1 / 30)
+    assert ws.cart_error is None, ws.cart_error
+    ox, oy, _scale = ws.wm.viewport()
+    assert ox > 0 and oy > 0                     # there IS a letterbox here
+    # STAIN the bezel first. `_VIEWPORT_BEZEL` is 0 and a fresh RGB565 buffer
+    # reads back as index 0 everywhere, so the bare assertion below also passes
+    # on a corner nothing ever drew -- i.e. it passed with the bands turned off.
+    # The sentinel is what makes this a measurement of the fill.
+    ws.sys_canvas.cls(8)
+    drv.frame(1 / 30)
+    assert ws.sys_canvas.pix(0, 0) == WM._VIEWPORT_BEZEL
+
+
+def _web_canvas_module():
+    """`firmware/web_runner/web_canvas.py`, imported on CPython.
+
+    It stages `device_canvas` from the T-Deck tree exactly as the wasm build
+    does, so `host_canvas.install()` (which registers `moy_gfx`/`framebuf` and
+    puts that tree on the path) is all it needs -- the same trick that lets the
+    host run the boards' raster. Imported on demand, and the runner's directory
+    is dropped off sys.path again afterwards, so nothing else in the suite can
+    accidentally resolve a module out of it.
+    """
+    import importlib
+    from runtime import host_canvas
+    host_canvas.install()
+    runner = str(ROOT / "firmware" / "web_runner")
+    sys.path.append(runner)
+    try:
+        return importlib.import_module("web_canvas")
+    finally:
+        if runner in sys.path:
+            sys.path.remove(runner)
+
+
+def test_the_wasm_head_shares_the_same_two_meanings(tmp_path):
+    """The browser's half, on the REAL `WebSystemCanvas`.
+
+    The wasm head presents both tiers out of one binary (handheld 320x240 and
+    the windowed desk), so it needs both meanings of `blit_game` -- and it
+    shipped only one: it inherited `DeviceCanvas.blit_game` unchanged and its
+    desk went black behind every game window. Screenshotted through
+    `pageshot.mjs` before the fix.
+
+    Both halves are asserted here on one canvas, because it is the SAME method
+    now: the default letterboxes (the T-Deck's meaning, which
+    `FullscreenStackWM.composite_game` depends on) and clearing the flag leaves
+    everything outside the game rect untouched.
+    """
+    web_canvas = _web_canvas_module()
+    from device_canvas import DeviceCanvas
+
+    # The default is the letterboxing meaning: a canvas nobody told otherwise
+    # IS the glass. (The T-Deck's whole tier rests on this line.)
+    assert DeviceCanvas.letterbox_composite is True
+    assert web_canvas.WebSystemCanvas.letterbox_composite is True
+
+    sc = web_canvas.make_canvas(200, 120)
+    gc = web_canvas.WebSystemCanvas(web_canvas.WebCompositor(40, 30))
+    gc.cls(8)
+
+    sc.cls(12)                                   # "the desk", in one colour
+    sc.blit_game(gc, 20, 15, 2)
+    assert sc.pix(25, 20) == 8                   # the game landed
+    assert sc.pix(0, 0) == 0                     # ...and so did the bezel
+
+    sc.cls(12)
+    sc.letterbox_composite = False               # what web_boot does for the desk
+    sc.blit_game(gc, 20, 15, 2)
+    assert sc.pix(25, 20) == 8                   # the same composite...
+    assert sc.pix(0, 0) == 12, \
+        "the game composite letterboxed the whole desktop black"
+    assert sc.pix(199, 119) == 12 and sc.pix(199, 0) == 12
+
+
+# Every place a tier is chosen, and what it owes the flag. A file that builds a
+# WindowedWM either clears `letterbox_composite` in the same branch or carries a
+# reason it need not -- and the discovery test below fails on a fourth tier, so
+# the next presentation cannot inherit the black desk by saying nothing.
+_CLEARS = True
+WINDOWED_INSTALLERS = {
+    "runtime/host_app.py": _CLEARS,
+    "firmware/web_runner/web_boot.py": _CLEARS,
+    "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py":
+        "P4SystemCanvas overrides blit_game outright (its composite is the "
+        "hardware PPA) and paints no bands at all, so the shared flag never "
+        "reaches a fill on that board -- and it only ever runs this WM",
+}
+
+
+def _windowed_install_sites():
+    """Every module that CONSTRUCTS a WindowedWM, found rather than listed."""
+    import ast
+    import warnings
+    found = {}
+    # Parsing a whole tree re-raises every SyntaxWarning in it (stale regex
+    # escapes in vendored/staged sources); this walk is a search, not a lint.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for base in ("runtime", "firmware"):
+            for dirpath, dirnames, filenames in os.walk(ROOT / base):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".build", "__pycache__", "dist")]
+                for name in filenames:
+                    if not name.endswith(".py"):
+                        continue
+                    path = Path(dirpath) / name
+                    try:
+                        tree = ast.parse(path.read_text(encoding="utf-8",
+                                                        errors="replace"))
+                    except SyntaxError:
+                        continue
+                    for node in ast.walk(tree):
+                        if (isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Name)
+                                and node.func.id == "WindowedWM"):
+                            found[path.relative_to(ROOT).as_posix()] = (path,
+                                                                        tree)
+    return found
+
+
+def test_every_windowed_tier_answers_for_the_letterbox_flag():
+    """The ratchet. `blit_game` means two things and the INSTALL SITE is what
+    picks one, so the table above must cover every install site there is."""
+    found = _windowed_install_sites()
+    assert set(found) == set(WINDOWED_INSTALLERS), (
+        "a tier was added or moved -- say whether it clears "
+        "letterbox_composite: " + repr(sorted(set(found) ^ set(WINDOWED_INSTALLERS))))
+    for rel, verdict in WINDOWED_INSTALLERS.items():
+        if verdict is not _CLEARS:
+            assert isinstance(verdict, str) and verdict.strip(), rel
+            continue
+        import ast
+        _path, tree = found[rel]
+        # The clear must sit in the SAME branch that installs the WM: a clear
+        # somewhere else in the file is a clear that a future refactor drops.
+        branches = [n for n in ast.walk(tree)
+                    if isinstance(n, ast.If)
+                    and "WindowedWM" in ast.dump(n)]
+        assert branches, rel
+        inner = min(branches, key=lambda n: len(ast.dump(n)))
+        cleared = [
+            n for n in ast.walk(inner)
+            if isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Attribute)
+                    and t.attr == "letterbox_composite" for t in n.targets)
+            and isinstance(n.value, ast.Constant) and n.value.value is False
+        ]
+        assert cleared, (
+            rel + ": installs WindowedWM without clearing letterbox_composite "
+            "-- the desk goes black behind the first game window")
 
 
 # ---------------------------------------------------------------------------
@@ -391,13 +597,13 @@ def test_drag_backdrop_cache_matches_live_render(tmp_path):
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
     assert ws.wm._backdrop_valid
-    cached = bytes(ws.sys_canvas.buf)
+    cached = bytes(ws.sys_canvas._buf)
     # Force a live re-render of the identical frame (cache off), no window move.
     ws.wm._backdrop_valid = False
     ws._dirty = True
     drv.touch_drag(hx, hy)
     drv.frame(0.0)
-    live = bytes(ws.sys_canvas.buf)
+    live = bytes(ws.sys_canvas._buf)
     assert cached == live
 
 
@@ -911,8 +1117,9 @@ def test_union_restore_matches_full_restore_while_moving(tmp_path):
         for i in range(5):
             drv.touch_drag(hx + i * 17, hy + i * 9)
             drv.frame(0.0)
-            skip = 60 * ws.sys_canvas.w      # exclude the bar strip (live clock)
-            frames.append(bytes(ws.sys_canvas.buf[skip:]))
+            # 60 rows of PIXELS, two bytes each: exclude the bar strip (live clock)
+            skip = 60 * ws.sys_canvas.w * 2
+            frames.append(bytes(ws.sys_canvas._buf[skip:]))
         return frames
 
     a = run(True)
@@ -932,16 +1139,17 @@ def test_live_resize_body_follows_grip(tmp_path):
     ow, oh = win.w, win.h
     assert (cw, ch) != (ow, oh)              # the rubber actually grew
     assert win.w == ow and win.h == oh       # no mid-gesture relayout
-    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
-    # Focused border drawn at the RUBBER corner, not the old one.
-    corner = buf[(win.y + ch - 1) * W + (win.x + cw - 1)]
-    assert corner == _BORDER_TOP
+    sc = ws.sys_canvas
+    # Focused border drawn at the RUBBER corner, not the old one. pix() reads a
+    # palette INDEX back (the buffer holds RGB565), so a theme token compares
+    # directly.
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) == _BORDER_TOP
     # A grown-area probe (beyond the old width, inside the new content rect)
     # shows the panel field fill -- the content crop anchored top-left.
     px = win.x + ow + 10
     py = win.y + win.title_h + 20
     assert px < win.x + cw - 1
-    assert buf[py * W + px] == ws.theme_colors["panel"]
+    assert sc.pix(px, py) == ws.theme_colors["panel"]
     # Release applies the REAL resize (the existing apply-on-release contract).
     drv.touch_up()
     drv.frame(0.0)
@@ -957,13 +1165,13 @@ def test_resize_outline_fallback_without_rect_stamp(tmp_path):
     drv = _drv(ws)
     ws.sys_canvas.blit_strip_rect = None     # instance attr shadows the method
     win, cw, ch = _engage_resize(ws, drv)
-    buf, W = ws.sys_canvas.buf, ws.sys_canvas.w
+    sc = ws.sys_canvas
     # The accent outline is drawn at the rubber rect...
     accent = ws.theme_colors["accent"]
-    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] == accent
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) == accent
     # ... and the body was NOT drawn at the rubber size (the border at the
     # rubber corner would be _BORDER_TOP under live-body).
-    assert buf[(win.y + ch - 1) * W + (win.x + cw - 1)] != _BORDER_TOP
+    assert sc.pix(win.x + cw - 1, win.y + ch - 1) != _BORDER_TOP
 
 
 # ---------------------------------------------------------------------------
@@ -1142,10 +1350,10 @@ def test_skipping_is_pixel_identical_to_a_full_repaint(tmp_path):
         drv.frame(1 / 30)
 
     full(); full()
-    reference = bytes(ws.sys_canvas.buf)
+    reference = bytes(ws.sys_canvas._buf)
     ws.mark_dirty()
     drv.frame(1 / 30)                    # a frame free to skip settled windows
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_moving_a_window_voids_the_skip(tmp_path):
@@ -1262,10 +1470,10 @@ def test_chrome_freeze_is_pixel_identical(tmp_path):
         drv.frame(1 / 30)
 
     full(); full()
-    reference = bytes(ws.sys_canvas.buf)
+    reference = bytes(ws.sys_canvas._buf)
     ws.mark_dirty()
     drv.frame(1 / 30)                     # a frame free to freeze the chrome
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_taskbar_chips_freeze_and_refresh_on_focus_change(tmp_path):
@@ -1333,7 +1541,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
     for _ in range(30):
         ws_boot.mark_dirty()
         drv_boot.frame(1 / 30)
-    reference = bytes(ws_boot.sys_canvas.buf)
+    reference = bytes(ws_boot.sys_canvas._buf)
 
     ws = _ws(tmp_path, font_scale=2)
     drv = _drv(ws)
@@ -1352,7 +1560,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
         ws.mark_dirty()
         drv.frame(1 / 30)
 
-    assert bytes(ws.sys_canvas.buf) == reference
+    assert bytes(ws.sys_canvas._buf) == reference
 
 
 def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
@@ -1423,7 +1631,7 @@ def test_direct_render_matches_the_stamp_path_pixel_for_pixel(tmp_path):
         if not direct:
             ws.wm._direct_render = lambda win, dt: False   # force the stamp
         _scroll_frames(ws, drv)
-        return bytes(ws.sys_canvas.buf)
+        return bytes(ws.sys_canvas._buf)
 
     assert run(True, "a") == run(False, "b")
 
@@ -1450,7 +1658,7 @@ def test_direct_render_leaves_no_viewport_installed(tmp_path):
     _scroll_frames(ws, drv)
     root = ws.wm._root_canvas
     assert (root._ox, root._oy) == (0, 0)
-    assert (root.w, root.h) == (root._stride, len(root.buf) // root._stride)
+    assert (root.w, root.h) == (root._stride, len(root._buf) // 2 // root._stride)
 
 
 # -- the desk cache is keyed on the desk, not on gesturing (#155) -------------
@@ -1578,7 +1786,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
     for _ in range(6):
         ws._dirty = True
         drv.frame(1 / 30)
-    base = bytes(ws.sys_canvas.buf)
+    base = bytes(ws.sys_canvas._buf)
     ws.open_settings()
     for _ in range(4):
         drv.frame(1 / 30)
@@ -1587,7 +1795,7 @@ def test_closed_window_leaves_no_artifact_on_the_desk(tmp_path):
     ws.wm._close_window("settings")
     for _ in range(4):
         drv.frame(1 / 30)
-    after = bytes(ws.sys_canvas.buf)
+    after = bytes(ws.sys_canvas._buf)
     x, y, w, h = region
     stride = ws.sys_canvas.w
     bar = lay.status_h + 2

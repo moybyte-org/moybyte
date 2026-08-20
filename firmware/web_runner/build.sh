@@ -18,13 +18,9 @@
 #                           # staged sources into the VFS, which SHADOWS the
 #                           # frozen copies (sys.path puts /modules first) --
 #                           # so runtime/ edits are testable without a rebuild
-#
-# It used to also build `--spec`: a de-branded slim player (24 shell modules
-# AST-stubbed into absorbing no-ops, one cart, no HUD) vendored into moy-spec's
-# runner/. That is gone -- the spec builds its own player now, from libmoy
-# through emscripten (moy-spec/libmoy/port/wasm), which is a third the size and
-# does not need a Python VM to run a Lua cart. This build is Moybyte's own
-# browser console and nothing else's.
+
+# This build is Moybyte's own browser console and nothing else's (the spec repo
+# builds its own player from libmoy -- CLAUDE.md's web-runner section).
 #
 # Variant notes (variant/mpconfigvariant.*, copied into the port):
 #   - pyscript-shaped: GC_SPLIT_HEAP_AUTO -> collections defer to the JS<->Python
@@ -98,6 +94,29 @@ if [ "${STAGE_ONLY}" = "0" ]; then
   if ! grep -q '^JSFLAGS += -Os$' "${MK}"; then
     sed -i 's|^JSFLAGS += -s EXPORTED_FUNCTIONS="\\$|JSFLAGS += -Os\nJSFLAGS += -s EXPORTED_FUNCTIONS="\\|' "${MK}"
   fi
+  # A usermod cannot silence -Wunknown-pragmas by itself: py.mk folds
+  # CFLAGS_USERMOD into CFLAGS at its include (line ~32) and the port appends
+  # its own -Wall AFTER that (line ~48), which re-enables the warning -- and
+  # -Werror makes it fatal. moy_gfx's vendored kernels carry in-source
+  # `#pragma GCC optimize("O3")` pins that clang parses and ignores, so the
+  # suppression has to land here, after the -Wall. (moy_lua's own O2 pragmas
+  # survive only because -Wignored-pragma-optimize is on by DEFAULT rather than
+  # via -Wall, so its usermod-level -Wno- is not re-enabled.)
+  if ! grep -q 'moybyte usermod pragma suppressions' "${MK}"; then
+    sed -i 's|^CFLAGS += -Os -DNDEBUG$|# moybyte usermod pragma suppressions (see web_runner/build.sh)\nCFLAGS += -Wno-unknown-pragmas\n&|' "${MK}"
+  fi
+  # HEAPU8: how the finished FRAMEBUFFER leaves the VM (moycore stage 4). The
+  # worker reads the canvas buffer straight out of the wasm heap by address, so
+  # a painted frame costs one memcpy and no Python-side serialisation.
+  #
+  # It has to be PATCHED IN rather than passed as EXPORTED_RUNTIME_METHODS_EXTRA
+  # on the make command line: the port sets that variable itself with `+=`, and
+  # a command-line assignment overrides the makefile's entirely -- which silently
+  # unexported getValue/setValue/UTF8ToString and broke the VM's own JS wrapper
+  # at boot ("Module.getValue is not a function").
+  if ! grep -q 'HEAPU8' "${MK}"; then
+    sed -i 's|^EXPORTED_RUNTIME_METHODS_EXTRA += ,\\$|&\n\tHEAPU8,\\|' "${MK}"
+  fi
   "${PY}" - "${PORT_DIR}/library.js" <<'PYEOF'
 import sys
 p = sys.argv[1]
@@ -118,7 +137,7 @@ PYEOF
   USERMODS_DIR="${BUILD_DIR}/usermods"
   rm -rf "${USERMODS_DIR}"
   mkdir -p "${USERMODS_DIR}"
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_lua" \
+  cp -r "${REPO_ROOT}/native/moy_lua" \
         "${USERMODS_DIR}/moy_lua"
   cp "${SCRIPT_DIR}/moy_lua_micropython.mk" "${USERMODS_DIR}/moy_lua/micropython.mk"
 
@@ -127,8 +146,40 @@ PYEOF
   # implementation rather than a twin of it. Same source of truth as the T-Deck,
   # and unlike moy_lua it ships its OWN micropython.mk, so there is no fragment
   # for this script to supply.
-  cp -r "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/native/moy_audio" \
+  cp -r "${REPO_ROOT}/native/moy_audio" \
         "${USERMODS_DIR}/moy_audio"
+
+  # moy_gfx usermod (moycore stage 4): the RASTER. The browser stopped being the
+  # GPU here -- the wasm draws its own pixels with the SAME kernel the boards
+  # run (modmoy_gfx.c + vendored libmoy at MOY_PIXEL_RGB565), and the page just
+  # blits the finished framebuffer. Its ESP-IDF halves (async memcpy, membench)
+  # are __has_include-guarded and simply compile out here, which is why this
+  # needs no wasm fork of the module -- the same source builds for three
+  # architectures plus the unix test build.
+  #
+  # Its stock micropython.mk (the unix twin of micropython.cmake) is used
+  # as-is -- no runner-specific fragment, unlike moy_lua. The one clang
+  # accommodation it needs is a warning suppression that has to outrank the
+  # port's -Wall, so it lives in the Makefile patch above, not here.
+  cp -r "${REPO_ROOT}/native/moy_gfx" \
+        "${USERMODS_DIR}/moy_gfx"
+
+  # moycore usermod (stage 2/3): the cart's WHOLE frame in C. The browser was
+  # the last tier still running the trampoline registry -- ~40 Python closures
+  # installed as Lua globals, several hundred upcalls a frame -- while both
+  # boards and the host had moved to one upcall per frame. That is the drift
+  # this project exists to prevent: celeste in a browser and celeste on a P4
+  # would have been two different engines implementing the same spec.
+  #
+  # It ships its own micropython.mk (Makefile fragment) and needs no wasm
+  # variant of it: the fragment compiles only modmoycore.c + libmoy's Lua
+  # binding, and reaches its two SIBLINGS by relative path for the rest -- the
+  # raster from moy_gfx's vendored libmoy, the VM from moy_lua's vendored Lua
+  # 5.4. Both are staged directly above, so the sibling layout the boards get
+  # from ext_mod/ holds here too. The board allocator it prefers is
+  # __has_include-guarded on esp_heap_caps.h and compiles down to realloc.
+  cp -r "${REPO_ROOT}/native/moycore" \
+        "${USERMODS_DIR}/moycore"
 
 fi
 
@@ -143,27 +194,23 @@ fi
 echo "== staging runtime/ modules"
 rm -rf "${STAGE_DIR}"
 mkdir -p "${STAGE_DIR}/modules"
-DENY="host_app.py lua_host.py palette.py font.py __init__.py"
-for f in "${REPO_ROOT}/runtime/"*.py; do
-  base="$(basename "${f}")"
-  skip=0
-  for d in ${DENY}; do [ "${base}" = "${d}" ] && skip=1; done
-  [ "${skip}" = "1" ] || cp "${f}" "${STAGE_DIR}/modules/${base}"
-done
-# font.py stages as moy_font.py (the boards' name for it -- canvas.py's staged-tree
-# import path expects it).
-cp "${REPO_ROOT}/runtime/font.py" "${STAGE_DIR}/modules/moy_font.py"
-# The shared moy_lua cart-runtime glue (#67), staged from the T-Deck modules
-# tree like the P4 does -- canvas-agnostic, works over the CommandCanvas.
-cp "${REPO_ROOT}/firmware/lilygo_t_deck_plus_micropython/modules/moy_lua_glue.py" \
-   "${STAGE_DIR}/modules/moy_lua_glue.py"
+# WHAT crosses and WHY is declared in board.toml (#161 -- the last hand-rolled
+# staging list to convert; the boards went in Phase 3). The stager applies the
+# denylist over runtime/, the font.py -> moy_font.py rename, and the device/
+# allowlist (moycore_glue / device_canvas / device_util), into
+# .build/stage/modules per the file's `dest`. tests/test_staging_closure.py
+# derives the web frozen set from that declaration, same as the boards'.
+"${PY}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+# The runner's own AUTHORED modules -- the analogue of a board's tracked
+# modules/ files, copied by name because the stage dir is rebuilt from scratch.
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
+cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
 
 
 # palette.py: runtime/palette.py builds its HSV ramp with CPython's colorsys, so
 # generate a LITERAL twin (parity by construction -- same table object).
 "${PY}" - "${STAGE_DIR}/modules/palette.py" <<'PYEOF'
-import sys, os
+import inspect, sys, os
 sys.path.insert(0, os.environ["REPO_ROOT"])
 from runtime import palette as p
 out = ['"""MOY64 palette -- GENERATED by web_runner/build.sh from runtime/palette.py',
@@ -171,24 +218,14 @@ out = ['"""MOY64 palette -- GENERATED by web_runner/build.sh from runtime/palett
 out.append("MOY64 = %r" % (list(p.MOY64),))
 out.append("")
 out.append("NAMES = %r" % (p.NAMES,))
-out.append('''
-
-def color(name_or_index):
-    """Resolve a color name or index to a 0-63 palette index."""
-    if isinstance(name_or_index, str):
-        return NAMES.get(name_or_index, 7)
-    return int(name_or_index) & 63
-
-
-def rgb888_table(palette=MOY64):
-    """Flat bytes table [r,g,b]*len(palette) for fast index->RGB resolution."""
-    out = bytearray(len(palette) * 3)
-    for i, (r, g, b) in enumerate(palette):
-        out[i * 3] = r
-        out[i * 3 + 1] = g
-        out[i * 3 + 2] = b
-    return bytes(out)
-''')
+out.append("")
+# The verbs ride over VERBATIM (inspect.getsource) rather than as a second
+# hand-typed copy of their bodies -- an edit to the canonical file propagates
+# by construction.
+out.append("")
+out.append(inspect.getsource(p.color))
+out.append("")
+out.append(inspect.getsource(p.rgb888_table))
 open(sys.argv[1], "w").write("\n".join(out))
 PYEOF
 
@@ -198,11 +235,16 @@ PYEOF
 #    binary cache) is skipped. Lua twins stay out until the wasm Lua VM lands.
 # ---------------------------------------------------------------------------
 echo "== packing carts"
-# The WALLPAPER carts (moy_night + ocean/open_machine/wallpaper_space) ride
-  # along even though they never appear on the run-grid: they are the Appearance
-  # app's CARTS catalog, and shipping only moy_night left that tab with one
-  # choice (owner report 2026-07-31).
-  ROSTER="${MOYBYTE_WEB_CARTS:-star_catcher.moy sakura.moy tap_red.moy harpoon_pop.moy coin_quest.moy platformer.moy tiny_runner.moy brick_siege.moy brick_siege_lua.moy letter_blitz.moy scroll_demo.moy sakura_lua.moy ray_lua.moy moy_night.moy ocean.moy open_machine.moy wallpaper_space.moy paint.moy files.moy writer.moy sheets.moy storybook.moy calc.moy theme_picker.moy}"
+# The roster is DATA now (the UI refactor's Phase 5, 2026-08-19): every cart
+# ships everywhere unless its own manifest.json says otherwise, so this build
+# asks tools/gen_device_carts.py which folders declare a "web" target instead
+# of carrying a hand-written list that nothing compared against system_carts/.
+# (The WALLPAPER carts -- moy_night + ocean/open_machine/wallpaper_space --
+# ride along even though they never appear on the run-grid: they are the
+# Appearance app's CARTS catalog, and shipping only moy_night left that tab
+# with one choice, owner report 2026-07-31. Excluded here are the dev/test
+# carts and wifi.moy, each by a `"targets"` line in its OWN manifest.)
+ROSTER="${MOYBYTE_WEB_CARTS:-$("${PY}" "${REPO_ROOT}/tools/gen_device_carts.py" --roster web)}"
 "${PY}" - "${REPO_ROOT}/system_carts" "${STAGE_DIR}/carts.json" ${ROSTER} <<'PYEOF'
 import json, os, sys
 root, out = sys.argv[1], sys.argv[2]
@@ -242,19 +284,20 @@ print("  %d modules, %.1f KB" % (len(mods), sum(len(v) for v in mods.values()) /
 PYEOF
 
 # ---------------------------------------------------------------------------
-# 4. The driver page: the shared replayer core (runtime/web_view_page.PAGE_CORE)
-#    + the wasm transport tail (page_tail.js) + the module-script loader.
+# 4. The driver page: page_core.html (present + input + audio) + page_tail.js
+#    (the worker transport + the module-script loader) -- plain files in this
+#    directory.
 # ---------------------------------------------------------------------------
 echo "== generating index.html"
-REPO_ROOT="${REPO_ROOT}" "${PY}" - "${SCRIPT_DIR}/page_tail.js" "${STAGE_DIR}/index.html" <<'PYEOF'
-import os, sys
-sys.path.insert(0, os.environ["REPO_ROOT"])
-from runtime.web_view_page import PAGE_CORE
-core = PAGE_CORE
-tail = open(sys.argv[1], encoding="utf-8").read()
-open(sys.argv[2], "w", encoding="utf-8").write(
-    core + tail + "\n</script></body></html>")
-PYEOF
+# @MOY_BUILD@ becomes worker.js's CONTENT HASH, which the page appends to the
+# worker url. Browsers cache worker scripts hard enough that a hard reload of
+# the document keeps an old one, and the tier/boot logic lives in that file --
+# measured the slow way, with a board serving a correct console to a browser
+# running the previous worker. Content-addressed so the url changes when, and
+# only when, the worker does.
+MOY_BUILD="$(sha1sum "${SCRIPT_DIR}/worker.js" | cut -c1-12)"
+cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" \
+  | sed "s/@MOY_BUILD@/${MOY_BUILD}/" > "${STAGE_DIR}/index.html"
 
 # ---------------------------------------------------------------------------
 # 5. The FROZEN build (skipped with --stage-only): freeze the staged console
@@ -266,7 +309,7 @@ if [ "${STAGE_ONLY}" = "0" ]; then
 # GENERATED by web_runner/build.sh -- freezes the staged console (see stage/).
 freeze("${STAGE_DIR}/modules", opt=3)
 EOF
-  echo "== building MicroPython webassembly (moybyte variant + moy_lua, frozen console)"
+  echo "== building MicroPython webassembly (moybyte variant + moy_lua/moy_audio/moy_gfx/moycore, frozen console)"
   # shellcheck disable=SC1091
   source "${EMSDK_DIR}/emsdk_env.sh" >/dev/null 2>&1
   make -C "${MPY_DIR}/mpy-cross" -j"$(nproc)" >/dev/null
@@ -291,5 +334,19 @@ else
   cp "${PORT_DIR}/build-moybyte/micropython.wasm" "${DIST_DIR}/"
   rm -f "${DIST_DIR}/modules.json"
 fi
+# A PRE-GZIPPED copy beside each asset, for the BOARDS. They serve `<name>.gz`
+# with `Content-Encoding: gzip` and never compress anything themselves, so the
+# wire cost halves (1,155,953 B -> ~572,747 B) and the browser does the
+# inflating. Both copies ship: a plain static host (moybyte.com, serve.py) sets
+# no Content-Encoding, and a browser handed gzip bytes without that header sees
+# garbage -- so raw has to stay the default and .gz has to be opt-in by a server
+# that knows to advertise it.
+# -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
+# the push tool's per-file compare stays meaningful.
+for f in index.html worker.js micropython.mjs micropython.wasm; do
+  if [ -f "${DIST_DIR}/${f}" ]; then
+    gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
+  fi
+done
 echo "== dist/ ready:"
 ls -la "${DIST_DIR}"

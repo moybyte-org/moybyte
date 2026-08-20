@@ -1,7 +1,7 @@
 """The web runner's WORKER transport (#176), driven through its real protocol.
 
 The console moved off the browser's main thread into worker.js: it owns the VM,
-self-paces the frame loop and PUSHES frames, while the page only replays + blits.
+self-paces the frame loop and PUSHES frames, while the page only blits them.
 Nothing else in the suite executes that JS, so this fakes the Web Worker globals
 (`self` + `fetch`) in node and drives boot -> assets -> run -> frames -> input ->
 reload, for both presentation tiers plus the idle case.
@@ -40,46 +40,41 @@ def test_worker_protocol(search):
         search, p.stdout, p.stderr)
 
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-@pytest.mark.skipif(not _have_dist(), reason="web_runner dist/ not built")
-def test_dropped_frame_resync():
-    """A DROPPED frame must not strand the page (owner, 2026-07-31: on a tablet,
-    PLAY appeared to do nothing and a later drag showed the Library with the
-    desktop still around it).
+def test_the_framebuffer_transport_is_wired_end_to_end():
+    """The wiring no single-language test can see: the console publishes its
+    framebuffer's address, the worker copies it out of the wasm heap and
+    TRANSFERS it, and the page hands the buffer back to be refilled. Three
+    languages that only meet in a browser.
 
-    page_tail keeps only the newest frame per rAF, but the #76 delta ships
-    {"same":1} for surfaces it believes the client holds -- so the frame carrying
-    a surface in full is the only chance the page gets. The recovery is the page
-    reporting the drop; this drives the console through it."""
-    p = subprocess.run(["node", os.path.join(_RUNNER, "resync_test.mjs")],
-                       cwd=_RUNNER, capture_output=True, text=True, timeout=300)
-    assert p.returncode == 0, "resync contract failed:\n%s\n%s" % (p.stdout, p.stderr)
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-@pytest.mark.skipif(not _have_dist(), reason="web_runner dist/ not built")
-def test_assets_payload_is_never_stale():
-    """The /assets payload's non-image fields must track the console (owner,
-    2026-07-31: on a phone playing a buttons-only cart, the on-screen keyboard
-    button blinked every couple of seconds -- asset re-fetches were answering
-    with the LAUNCHER's payload, whose null input hint means 'show every
-    control', and the next frame's real hint hid it again)."""
-    p = subprocess.run(["node", os.path.join(_RUNNER, "assets_hint_test.mjs")],
-                       cwd=_RUNNER, capture_output=True, text=True, timeout=300)
-    assert p.returncode == 0, "assets hint contract failed:\n%s\n%s" % (p.stdout, p.stderr)
-
-
-def test_page_reports_dropped_frames_to_the_console():
-    """The wiring the node test cannot see: page drops a frame -> posts `resync`
-    -> the worker calls web_boot.request_keyframe. Static, because the three
-    pieces live in three languages and only ever meet in a browser."""
+    This replaces the dropped-frame resync contract, which is gone with the
+    delta protocol it protected: a frame carries all its own pixels now, so
+    losing one costs exactly one stale frame instead of stranding a surface
+    until the next keyframe.
+    """
     page = open(os.path.join(_RUNNER, "page_tail.js"), encoding="utf-8").read()
     worker = open(os.path.join(_RUNNER, "worker.js"), encoding="utf-8").read()
     boot = open(os.path.join(_RUNNER, "web_boot.py"), encoding="utf-8").read()
-    # The page notices the drop (the overwrite of an unrendered frame) and asks.
-    assert "dropped++" in page and 'postMessage({t:"resync"})' in page
-    # The worker routes the ask to the console...
-    assert 'm.t === "resync"' in worker and "request_keyframe" in worker
-    # ... which re-seeds this client: forget the cache, draw the next frame full.
-    assert "def request_keyframe" in boot
-    assert "delta.reset()" in boot and "arm_surface_keyframe" in boot
+    build = open(os.path.join(_RUNNER, "build.sh"), encoding="utf-8").read()
+    # The console publishes where the pixels are...
+    assert "def fb_addr" in boot and "uctypes.addressof" in boot
+    assert "def fb_len" in boot
+    # ...the worker reads them from the heap and transfers the copy...
+    assert "mp._module.HEAPU8" in worker and "fbAddr()" in worker
+    assert 'self.postMessage({ t: "frame", s: s, fb: fb }, [fb])' in worker
+    # ...which only works because HEAPU8 is an exported runtime method.
+    assert "HEAPU8" in build
+    # ...and the page returns the buffer so the ping-pong keeps its two halves.
+    assert 't:"fbret"' in page
+    assert 'm.t === "fbret"' in worker
+
+
+def test_the_resync_protocol_is_gone():
+    """The delta protocol's recovery path must not linger: a self-contained
+    frame has nothing to re-seed, and a leftover request_keyframe would be a
+    caller into a console verb that no longer exists."""
+    page = open(os.path.join(_RUNNER, "page_tail.js"), encoding="utf-8").read()
+    worker = open(os.path.join(_RUNNER, "worker.js"), encoding="utf-8").read()
+    boot = open(os.path.join(_RUNNER, "web_boot.py"), encoding="utf-8").read()
+    for name, text in (("page", page), ("worker", worker), ("web_boot", boot)):
+        assert "request_keyframe" not in text, name
+        assert '"resync"' not in text, name

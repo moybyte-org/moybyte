@@ -8,8 +8,9 @@ the old parallel SDK.
 
 **Source of truth (keep this doc in sync with them):** the API namespace is built by
 `make_api()` in `runtime/host_app.py` (host reference) and the identical
-`make_api()` in `firmware/lilygo_t_deck_plus_micropython/modules/moy_runtime.py`
-(device). The drawing ops live in `runtime/canvas.py`; the palette in
+`make_api()` in `firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py`
+(device). The drawing ops live in `device_canvas.DeviceCanvas` (the host builds
+it through `runtime/host_canvas.py`); the palette in
 `runtime/palette.py`; buttons in `runtime/input.py`. A cart runs **identically** on the
 PC simulator and on the device — same names, same pixels.
 
@@ -186,7 +187,6 @@ editor). Tiles are referenced by integer id.
 | call | does |
 |---|---|
 | `spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1)` | draw sheet tile `n` at `x,y`. `colorkey` = transparent index (`-1` = opaque). `scale` enlarges. `flip`: `0` none, `1` horizontal, `2` vertical, `3` both. `w,h>1` draws a multi-tile sprite (e.g. `w=2,h=2` = 16×16). `n` may also be an `Image` |
-| `spr_batch(items, colorkey=-1, scale=1)` | draw MANY 1×1 sheet tiles in one call. `items` = sequence of `(tile, x, y)` or `(tile, x, y, flip)`. The sprite analogue of `map()` — on device it's **one** native call for N sprites (draw-call count is the FPS bottleneck, so batch hot sprites) |
 | `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy` |
 | `mget(x, y)` / `mset(x, y, tile)` | read / write a tilemap cell (tile id; `mget` = `-1` if none) |
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
@@ -208,18 +208,26 @@ truth that drifts.
 still move, and §11's conformance suite does not yet count them. A cart using them is fine
 — the seed carts do — but they are the one corner of this API that could change under you.
 
-### `rect_batch` / `spans` — present, but you should not need them
+### The batch verbs are gone (`spr_batch`, `rect_batch`, `spans`)
 
-Moybyte also has `spans(n)` (a reusable flat `x, y, w, h, c` buffer) and
-`rect_batch(items, n=-1, ox=0, oy=0, c=-1)`, which draws many filled rects in one call.
+Moybyte used to have three verbs for handing the console a pre-packed list of sprites or
+rects. **They were deleted on 2026-08-14** and there is nothing to replace them with:
+write the plain loop.
 
-**Reach for a plain `rect` loop first.** These were built for software 3D and then
-measured out of a job: once the console gated its root canvas through C-side appends, an
-ordinary `rect` call costs ~26 µs on the slower board, and the raycaster that motivated the
-batch ships without it. moy core declined both verbs for that reason — *batching is the
-host's duty, and a cart is never asked to pre-pack its geometry* ([SPEC.md
-§6.1](https://github.com/moybyte-org/moy-spec)). They stay here because carts use them, not
-because they are the way to draw.
+```python
+for e in enemies:            # this IS the fast path
+    spr(e.tile, e.x, e.y, 0, 2)
+```
+
+Two reasons, and the second is the one that decided it. First, they bought almost nothing:
+the console coalesces a contiguous run of `spr()` calls into one native batch by itself,
+and an ordinary `rect` call is a few microseconds of dispatch, so a 160-wall raycaster
+frame spends under a millisecond on call overhead. Second, **Lua carts could never call
+them at all** — the bridge marshals numbers, not lists — so the same game written in the
+two languages needed two different draw loops. A verb that only half the carts can use is
+a split vocabulary, and moy core had already declined all three for the same reason:
+*batching is the host's duty, and a cart is never asked to pre-pack its geometry*
+([SPEC.md §6.1](https://github.com/moybyte-org/moy-spec)).
 
 ## Scroll layers (`#54`)
 
@@ -368,9 +376,8 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
    (Hop Quest and Sky Run both do exactly this — read their `_build_layer` /
    `_build_world`.)
 4. **Lots of sprites? Just call `spr()` in a loop.** The engine coalesces consecutive
-   `spr()` calls into one native batch automatically; `spr_batch()` is the manual form
-   when you already build a list. Likewise one `map()` call always beats drawing tiles
-   one by one.
+   `spr()` calls into one native batch automatically — there is no manual form and you
+   do not need one. Likewise one `map()` call always beats drawing tiles one by one.
 5. **Never wrap `spr()` in `pal()` every frame — bake tinted copies once.** The
    engine caches each image pre-baked at one scale under the current palette; a
    `pal()` call invalidates that cache, so a `pal(...)`/`spr(...)`/`pal()` sandwich
@@ -388,6 +395,35 @@ it's painting **more pixels than the frame needs**. Five habits keep any cart sm
 
 Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`.
 
+**Which key is which.** The buttons are the same everywhere; the *keys* differ, because
+a thumb keyboard and a desktop keyboard are not the same instrument:
+
+| button | T-Deck | a keyboard with arrows (sim, browser) |
+|---|---|---|
+| `up` `left` `down` `right` | **W A S D** | **arrows** (W A S D also work) |
+| `a` | **L** or **SPACE** | **Z** or **SPACE** |
+| `b` | **K** | **X** |
+| `run` | **ENTER** | **ENTER** |
+| `home` | **BACKSPACE** | **BACKSPACE** |
+| `stop` | — | **ESC** |
+
+On the T-Deck the left thumb steers and the right thumb fires, both on the home row.
+That board has **no arrow keys at all**, and its `Z`/`X` are bottom-row keys the left
+thumb has to leave `WASD` to reach — so it gets `L`/`K`. A desktop keyboard has arrows
+and comfortable `Z`/`X`, which is PICO-8's layout and every emulator's, so it gets
+those. `SPACE` is jump and `ENTER` is `run` on both.
+
+`run` is also the launcher's **open this cart**, so Enter confirms in menus.
+`home` is the **exit**: hold it ~700ms while a game is running.
+
+**Every other key is a plain character** a cart reads with `key()` / `keyp()`, firing
+no button — including `R`, `H`, `J`, `Q`, `E` and (on the T-Deck) `Z`/`X`, all of which
+used to be buttons. A typing game can use the whole keyboard without a letter also
+moving the player; a stolen letter is a bug you only find by playing.
+
+In **text mode** (`textmode(True)`, the code editor, a wifi password) no key fires a
+button at all — even Backspace, Enter and space arrive as plain characters to type.
+
 | call | returns |
 |---|---|
 | `btn(name, player=0)` | `True` while the button is **held**. `player=0` is this console's own controls (the default — every existing cart is unchanged). `player=1, 2, …` read **extra controllers** (see Multiplayer below) |
@@ -399,6 +435,16 @@ Buttons are named. The canonical set is `left, right, up, down, a, b, run, home`
 | `mouse()` | TIC-80 7-tuple `(x, y, left, middle, right, scrollx, scrolly)`; a tap = left. middle/right/scroll are always 0 on hardware |
 | `textmode(on=True)` | opt a running cart into clean text-keyboard input (for typing a name/password) so `key()/keyp()` return typeable ASCII; `textmode(False)` restores game mode (held WASD/arrows drive `btn()`). Auto-resets to game mode on exit |
 | `view(w, h)` | declare the cart's LOGICAL viewport: the console composites the centered `w`x`h` region of the 320x240 canvas at the biggest integer scale that fits the screen (a 128x128 PICO-8 port fills the P4 glass at 4x instead of the full canvas's 2x); touch coords stay in full canvas space. `view()` restores the full canvas; auto-resets each run |
+
+**Declaring a smaller canvas (SPEC.md 1/3.1):** `manifest.json` may carry
+`"canvas": "160x120"` or `"canvas": "128x128"` (default `"320x240"`) — the cart
+then plays on a genuinely smaller raster: `W`/`H` report it, every verb clips to
+it, and the console integer-scales it up centered on the screen. The set is
+**closed** (those three sizes only); anything else is refused at start, never run
+at the wrong dimensions. A 128x128 PICO-8 port that can spare 8 rows pairs this
+with `view(128, 120)` so the 4:3 glass fills its height (2x on the handheld, 5x
+on the P4) instead of letterboxing the square. Drawing a quarter of the pixels is
+also the single biggest speed lever a port has.
 
 **Declaring which input you use (`#42`):** `manifest.json` may carry an optional
 `"input"` list naming the input groups a cart actually reads — any of `"buttons"`
@@ -459,6 +505,40 @@ Both `net` and `on_net` are **only present** when the manifest grants
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
 > game logic off the wall clock — otherwise the two screens drift apart.
 
+## Turning a cart into an APP (`#181`)
+
+A cart whose manifest says `"type": "app"` is a tool rather than a game. The
+console runs it **with its own top bar** — a title and an X — so it can never trap
+you, and it can ask for a few of the console's own powers by naming them in
+`permissions`, exactly like `"multiplayer"` above:
+
+```json
+"type": "app",
+"permissions": ["graphics", "input", "files:docs", "prefs"]
+```
+
+| permission | what the cart gets |
+|---|---|
+| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Writer and Files show) |
+| `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
+| `appearance` | `set_theme(name)` / `themes()` |
+| `launch` | `open_app(id)` |
+
+Every app cart also gets four names with no permission needed, because they are
+how an app draws rather than what it may touch: **`screen()`** (the canvas),
+**`theme()`** (the console's live colors), **`bar_h()`** (how many rows the top
+bar owns — draw below them) and **`ui`**, the console's own widget toolkit
+(buttons, rows, panels, rect maths, `ui.Hits`). Storage answers `(value, error)`
+and never crashes, so there is no `try` to write.
+
+Anything you did not ask for **is not there** — no `carts`, no shell. Writing
+that name is an ordinary "name is not defined" error, like a typo.
+
+`system_carts/notes.moy` is a small worked example: it types, saves, and lists
+what it saved. The full rules (what is never grantable, and how to make an app
+reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
+320×240) are in `docs/app_api_v1.md`.
+
 ## Audio
 
 | call | does |
@@ -497,7 +577,17 @@ Since #170 the model is PICO-8-parity:
   untouched. (PICO-8 works this way, so ported slides land right.)
 
 Imported PICO-8 carts (`tools/import_p8.py` / `moy port`) carry all of this
-over verbatim — waves, effects and all four music channels.
+over verbatim — waves, effects, keyed rests and all four music channels. The
+two tools land on the *same* `sounds.json` because they are the same converter:
+moy-spec's `p8_import.py`, vendored here as `tools/p8_import.py`. They differ
+only in what they do with the cart's *code* — `moy port` writes Lua plus a p8
+compat shim, `tools/import_p8.py` writes a Python stub for you to port into.
+
+**One number worth knowing if you read a `.p8` by hand:** PICO-8's tracker
+labels its pitch `0` as "C0", but its synth tunes pitch `33` to 440 Hz, so its
+labels sit two octaves below concert naming. The import adds **24**, which is
+why a p8 `21` (33) arrives here as pitch `57` — A4, the same note you heard in
+PICO-8.
 
 **Instruments are not equally loud, on purpose.** The triangle family is about
 twice the square family, which is PICO-8's own mix; music is balanced against
@@ -549,7 +639,7 @@ device's native `moy_compositor` RGB565 framebuffer (indices → RGB565 via the
 palette), and the Lua cart VM (#67) — the "not even Python" clause is now shipping
 code. **A cart authored once runs on every tier** (Zero /
 Player / One). When you add a drawing
-feature, add it to **both** `runtime/canvas.py` and the device path and keep the name
+feature, add it to the ONE canvas class (`device_canvas.DeviceCanvas`) and keep the name
 identical.
 
 **Fuller example:** `system_carts/star_catcher.moy/main.py` (a complete game — sprites,

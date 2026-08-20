@@ -6,8 +6,9 @@
 Moybyte is the reference console, so it should be able to make that claim about
 itself in its own test run rather than from a sibling checkout. The suite is
 vendored (see spec_conformance/UPSTREAM.md for why); this replays each scene's
-recorded verb trace through `runtime.canvas.Canvas` and compares the SHA-256 of
-the resulting index framebuffer to the golden hash.
+recorded verb trace through the host's canvas -- `device_canvas.DeviceCanvas`
+over a `HostCompositor`, the same class both boards and the browser run -- and
+compares the SHA-256 of the resulting index framebuffer to the golden hash.
 
 WHAT A FAILURE HERE MEANS. Not "a test broke" -- the frames were rendered by
 moycore and independently confirmed by two other implementations, so a mismatch
@@ -15,11 +16,11 @@ is moybyte disagreeing with the spec about what a verb draws. That is either a
 regression or a spec change to follow, and `hashes.json`'s provenance field is
 what makes it arguable rather than a coin toss.
 
-WHAT IT DOES NOT REACH. This is the host raster only. The device draws the same
-scenes through the C `moy_gfx` kernel into an RGB565 framebuffer, which is a
-different program; `tests/test_device_canvas_parity.py` ties it to this one, and
-`tools/p4_conformance.py` runs these very carts on a board over serial, which is
-the only check that touches the real kernel and the real panel.
+WHAT IT DOES NOT REACH. The kernel under this canvas is `runtime/gfx_binding`:
+libmoy compiled RGB565 and reached by ctypes -- the same SOURCE the boards
+compile, but not the same binary, not MicroPython, and not a panel.
+`tools/p4_conformance.py` runs these very carts on a board over serial, and is
+the only check that touches the real kernel and the real glass.
 """
 
 import hashlib
@@ -28,8 +29,8 @@ import os
 
 import pytest
 
-from runtime import canvas as canvas_mod
 from runtime import editors_sheet
+from runtime import host_canvas
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     "spec_conformance")
@@ -133,17 +134,66 @@ def replay(calls, canvas, sheet=None, tilemap=None):
             raise ValueError("unknown trace verb %r" % (verb,))
 
 
-def render(scene):
+def _index_frame(c):
+    """The canvas as one byte of palette INDEX per pixel, whatever it stores.
+
+    THE GOLDENS ARE NOT OURS TO MOVE. `hashes.json` is vendored verbatim from
+    moy-spec and `test_the_vendored_suite_is_the_spec_suite_when_a_checkout_is_
+    present` below fails if it drifts, so when the host canvas becomes RGB565
+    the answer is to convert BACK here -- never to re-record.
+
+    The conversion is exact, not best-effort: MOY64's 64 entries map to 64
+    DISTINCT RGB565 words, so the reverse LUT is total (checked below, because
+    a collision would silently merge two colours into one hash). It reads the
+    canvas's own reverse table, which is built from PAL565_WIRE and is
+    therefore byte-order-correct by construction -- under CPython that order is
+    the T-Deck's byte-SWAPPED one, since `moy_dsi` is absent.
+
+    A word no palette index produced has no honest index to become. That should
+    be impossible in a trace replay (every verb here resolves through the
+    palette), so it RAISES rather than mapping to 0 -- a silent 0 would move
+    the hash and look like a raster bug. (`device_canvas.to_indices` is the
+    shipped version of this conversion and is strict for the same reason; the
+    loop stays open-coded here so the assertion messages can say WHICH pixel and
+    WHY, which is what makes a golden mismatch arguable.)
+    """
+    buf = getattr(c, "buf", None)
+    if buf is not None and len(buf) == W * H:
+        return bytes(buf)                       # already an index buffer
+    raw = getattr(c, "_buf", None)
+    if raw is None or len(raw) != W * H * 2:
+        raise AssertionError(
+            "canvas exposes neither a %dx%d index buffer nor a 565 one"
+            % (W, H))
+    import device_canvas as _dc
+    rev = _dc._PAL565_INDEX
+    assert len(rev) == 64, (
+        "the RGB565 reverse LUT holds %d of 64 entries -- two palette colours "
+        "share a word, so this conversion would merge them" % len(rev))
+    words = memoryview(raw).cast("H")
+    out = bytearray(W * H)
+    for i, w in enumerate(words):
+        idx = rev.get(w)
+        if idx is None:
+            raise AssertionError(
+                "pixel %d holds 0x%04X, which no palette index produces -- the "
+                "frame cannot be reduced to indices for the golden hash"
+                % (i, w))
+        out[i] = idx
+    return bytes(out)
+
+
+def render(scene, canvas=None):
     """Replay one scene and return its index framebuffer as bytes."""
     with open(os.path.join(HERE, "traces", scene + ".json")) as fh:
         calls = json.load(fh)
     sheet, tilemap = _build_assets(scene)
-    c = canvas_mod.Canvas(W, H)
+    c = canvas if canvas is not None else host_canvas.make_canvas(W, H)
     replay(calls, c, sheet, tilemap)
     flush = getattr(c, "flush_batch", None)
     if flush is not None:
         flush()          # the console auto-batches sprites; the goldens do not
-    return bytes(c.buf)
+    return _index_frame(c)
 
 
 @pytest.mark.parametrize("scene,core,golden",

@@ -1,19 +1,41 @@
 """Headless tests for the v0.4 audio core (#16): the shared sound data model +
-synth/mixer (runtime/audio.py), the host audio API surface (host_app.make_api +
-FakeAudio), the .moy sounds.json store (moy_carts), and the Beeper demo cart
-making sound through the fake backend on the shared console (host == device).
+the engine surface (runtime/audio.py), the host audio API surface
+(host_app.make_api + FakeAudio), the .moy sounds.json store (moy_carts), and
+the Beeper demo cart making sound through the fake backend on the shared
+console (host == device).
 
-No sound hardware: FakeAudio records calls AND drives the real AudioEngine, so the
-mixer is exercised under SDL_VIDEODRIVER=dummy.
+No sound hardware: FakeAudio records calls AND drives the real AudioEngine, so
+the mixer is exercised under SDL_VIDEODRIVER=dummy. Since moycore stage 0
+(#97) the engine IS vendored libmoy behind a ctypes binding, so the behavior
+tests below exercise the same C the boards compile; they skip without a C
+compiler (the engine is then deliberately silent). What used to be asserted by
+reaching into the Python twin's voice structs is asserted through the engine's
+active_channels() mask -- the same instrument the device module exposes -- or
+pinned sample-exactly by tests/test_audio_parity.py's scenarios.
 """
 
-import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 from runtime import audio  # noqa: E402
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
+
+
+def _synth_available():
+    try:
+        from runtime import audio_binding
+        return audio_binding.get() is not None
+    except Exception:   # noqa: BLE001
+        return False
+
+
+requires_synth = pytest.mark.skipif(
+    not _synth_available(),
+    reason="no C compiler -- the host engine is silence by design (#97)")
 
 
 # -- note math -------------------------------------------------------------
@@ -113,6 +135,7 @@ def test_render_into_idle_is_silent_and_returns_zero_for_empty():
     assert set(buf) == {0}
 
 
+@requires_synth
 def test_play_sfx_makes_nonzero_audio_then_finishes():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(0)
@@ -132,6 +155,7 @@ def test_out_of_range_sfx_is_silent_noop():
     assert set(eng.render(50)) == {0}
 
 
+@requires_synth
 def test_beep_plays_a_tone_without_a_bank_entry():
     eng = audio.AudioEngine(audio.AudioBank(), rate=8000)   # empty bank
     eng.play_beep(440, 0.05)
@@ -139,6 +163,7 @@ def test_beep_plays_a_tone_without_a_bank_entry():
     assert any(b != 0 for b in eng.render(400))
 
 
+@requires_synth
 def test_volume_zero_silences_output():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.set_volume(0.0)
@@ -149,6 +174,7 @@ def test_volume_zero_silences_output():
     assert any(b != 0 for b in eng.render(400))
 
 
+@requires_synth
 def test_music_loops_and_stops():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_music(0)
@@ -158,9 +184,10 @@ def test_music_loops_and_stops():
         eng.render(800)
     assert eng.is_active()
     eng.stop_music()
-    assert eng.track is None
+    assert not eng.active_channels() & (1 << 4)   # the track bit cleared
 
 
+@requires_synth
 def test_stop_all_silences_everything():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_sfx(0)
@@ -169,41 +196,24 @@ def test_stop_all_silences_everything():
     assert not eng.is_active()
 
 
-def test_voice_gen_bumps_on_every_trigger_and_stop():
-    # The device core-1 feed (#41) commits a voice to the C mixer only when its
-    # _Voice.gen counter changes -- this is the Brick Siege fix. The old detector
-    # used (id(steps), active), but the GC can reuse a freed list's address, so a
-    # rapid retrigger of the SAME sfx on the SAME channel read as "unchanged" and was
-    # never committed (silent). gen must increment on EVERY play()/stop(), so every
-    # trigger -- even an identical one onto a channel it already owns -- is detected.
+# (The _Voice.gen trigger-counter tests died with the Python twin (#97 stage 0).
+# Their consumer -- the old device core-1 voice-commit machinery, the Brick
+# Siege fix -- was deleted when libmoy took ownership of the voices, and the
+# retrigger semantics they guarded live in libmoy itself now, one copy.)
+
+
+@requires_synth
+def test_forced_channel_retrigger_keeps_sounding():
+    # The behavioral residue of the old gen-counter tests worth keeping: rapid
+    # retriggers of the SAME sfx onto the SAME forced channel must each take
+    # (the aliasing bug they pinned presented as a silently dropped retrigger).
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
-    v = eng.voices[0]
-    assert v.gen == 0
-    # Rapid retriggers of the same SFX on the same forced channel: gen strictly climbs.
-    seen = [v.gen]
     for _ in range(10):
         eng.play_sfx(0, chan=0)
-        assert v.gen > seen[-1], "play() must bump gen every time (Brick Siege fix)"
-        seen.append(v.gen)
-    # A stop is also a committable state change.
-    g = v.gen
+        assert eng.active_channels() & 1
+        eng.render(80)
     eng.stop(0)
-    assert v.gen > g
-    # The gen sequence has no duplicates -> every trigger is distinguishable.
-    assert len(set(seen)) == len(seen)
-
-
-def test_voice_gen_independent_per_channel():
-    # Each channel's gen advances independently, so committing one voice never looks
-    # like a change on another (the core-1 dirty scan is per-channel).
-    eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
-    g_before = [v.gen for v in eng.voices]
-    eng.play_sfx(0, chan=1)
-    for c, v in enumerate(eng.voices):
-        if c == 1:
-            assert v.gen > g_before[c]
-        else:
-            assert v.gen == g_before[c]
+    assert not eng.active_channels() & 1
 
 
 # -- host API surface (host_app.make_api + FakeAudio) ----------------------
@@ -218,7 +228,7 @@ class _Input:
 
 def test_make_api_exposes_audio_and_drives_engine():
     from runtime import host_app
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     fake = host_app.FakeAudio(eng)
     api = host_app.make_api(Canvas(32, 32), _Input(), {}, None, fake)
@@ -296,7 +306,7 @@ def test_cart_without_audio_backend_still_runs(tmp_path):
     # A Workstation with no make_audio injected falls back to _SilentAudio so a
     # cart's sfx()/beep() are harmless no-ops (and make_api stays callable).
     from runtime import console, moy_carts
-    from runtime.canvas import Canvas
+    from runtime.host_canvas import make_canvas as Canvas
     from runtime.input import InputState
     from runtime import host_app
     root = str(tmp_path / "carts")
@@ -773,7 +783,7 @@ def test_music_editor_opens_edits_previews_and_saves_on_console(tmp_path):
 
     # A frame in the music view draws without error.
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
     # Tap NOTE+ on the edit pad -> the current step's pitch rises + bank goes dirty.
     p0 = me.cur_step()[0]
@@ -817,7 +827,7 @@ def test_music_editor_view_toggle_and_song_path_on_console(tmp_path):
     ws.music_ui._music_click(C._MU_VIEW[0] + 2, C._MU_VIEW[1] + 2)
     assert me.view == me.SONG_VIEW
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
     # SFX+ pad button (song view, row 0 col 1) bumps the slot's SFX id.
     v0 = me.cur_slot_value()
     r = C._mu_pad_rect(1, 0)
@@ -866,7 +876,7 @@ def test_music_editor_ui_copy_paste_and_move_pad_buttons_sfx_view(tmp_path):
 
     # A frame still draws cleanly with the extra pad rows + bottom buttons.
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
 
 def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
@@ -898,7 +908,7 @@ def test_music_editor_ui_dup_and_move_pad_buttons_song_view(tmp_path):
     assert len(me.bank.music) == n + 1 and me.track_idx == n
 
     ws.frame(1 / 30)
-    assert len(set(ws.canvas.buf)) > 1
+    assert probe.drew_something(ws.canvas)
 
 
 def test_music_editor_ui_undo_redo_bottom_bar_buttons(tmp_path):
@@ -982,6 +992,7 @@ def test_music_editor_ui_held_ctrl_z_fires_undo_once(tmp_path):
 
 # -- p8-parity synth: 8 waves, effects, multi-channel music (#170) -----------
 
+@requires_synth
 def test_all_eight_waves_make_sound():
     for w in range(8):
         b = audio.AudioBank([audio.SFX([[57, w, 6]] * 4, speed=8)], [])
@@ -990,6 +1001,7 @@ def test_all_eight_waves_make_sound():
         assert any(x != 0 for x in eng.render(800)), "wave %d is silent" % w
 
 
+@requires_synth
 def test_each_effect_changes_the_output():
     def render(fx):
         steps = [[57, 0, 6], [69, 0, 6, fx] if fx else [69, 0, 6]]
@@ -1002,6 +1014,7 @@ def test_each_effect_changes_the_output():
         assert render(fx) != plain, "effect %d had no audible effect" % fx
 
 
+@requires_synth
 def test_fade_out_ends_silent_fade_in_starts_silent():
     def one_note(fx):
         eng = audio.AudioEngine(
@@ -1020,66 +1033,49 @@ def test_fade_out_ends_silent_fade_in_starts_silent():
     assert rms(inn, 14000, 16000) > 4 * rms(inn, 0, 2000)
 
 
-def test_slide_records_previous_note_and_survives_retrigger():
-    # Finishing a step records it as the channel's previous sounding note;
-    # start() must NOT clear that (a slide on the next music row glides from the
-    # previous row's note -- SPEC.md 8.1).
-    eng = audio.AudioEngine(
-        audio.AudioBank([audio.SFX([[30, 0, 6], [90, 0, 6, audio.FX_SLIDE]],
-                                   speed=2)], []), rate=8000)
-    eng.play_sfx(0, chan=0)
-    eng.render(6000)                     # into the slide step
-    v = eng.voices[0]
-    assert v.prev_pitch == 30 and v.prev_vol == 6
-    v.start(audio.SFX([[50, 0, 6]], speed=20), 1)
-    assert v.prev_pitch == 30            # retrigger keeps the channel memory
-
-
+@requires_synth
 def test_keyed_rest_is_a_slide_origin():
     # SPEC.md 8.1: a note with vol 0 but a real pitch is a KEYED REST -- silent,
     # but still the origin a following slide glides from (every PICO-8 tracker
-    # slot has a key, so ported slides depend on it). Only pitch -1 records
-    # nothing.
-    eng = audio.AudioEngine(
-        audio.AudioBank([audio.SFX([[30, 0, 0], [90, 0, 6, audio.FX_SLIDE]],
-                                   speed=2)], []), rate=8000)
-    eng.play_sfx(0, chan=0)
-    eng.render(6000)
-    assert eng.voices[0].prev_pitch == 30
-
-    eng2 = audio.AudioEngine(
-        audio.AudioBank([audio.SFX([[-1, 0, 0], [90, 0, 6, audio.FX_SLIDE]],
-                                   speed=2)], []), rate=8000)
-    eng2.play_sfx(0, chan=0)
-    eng2.render(6000)
-    assert eng2.voices[0].prev_pitch == -1      # a true rest records nothing
+    # slot has a key, so ported slides depend on it); only pitch -1 records
+    # nothing. Behaviorally: a slide preceded by a keyed rest at 30 must render
+    # differently from one preceded by a true rest (which glides from itself).
+    # The exact glide is pinned sample-for-sample by the parity suite's
+    # keyed_rest_slide scenario; retrigger-survival of the origin lives in
+    # libmoy itself now (voice_start keeps prev_pitch on purpose).
+    def render(first):
+        eng = audio.AudioEngine(
+            audio.AudioBank([audio.SFX([first, [90, 0, 6, audio.FX_SLIDE]],
+                                       speed=2)], []), rate=8000)
+        eng.play_sfx(0, chan=0)
+        return eng.render(8000)
+    assert render([30, 0, 0]) != render([-1, 0, 0])
 
 
+@requires_synth
 def test_multichannel_music_claims_voices_from_the_top():
     sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
     b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1, 2]], speed=1)])
     eng = audio.AudioEngine(b, rate=8000)
     eng.play_music(0)
     # row channel j -> voice MUSIC_CHANNEL - j; voice 0 stays free for sfx
-    assert eng._track_width == 3
-    assert all(eng.voices[c].active for c in (3, 2, 1))
-    assert not eng.voices[0].active
+    assert eng.active_channels() & 0x0F == 0b1110
     eng.play_sfx(3)                      # a game sfx avoids the claimed voices
-    assert eng.voices[0].active
+    assert eng.active_channels() & 0x0F == 0b1111
     eng.stop_music()                     # releases every claimed voice ...
-    assert not any(eng.voices[c].active for c in (1, 2, 3))
-    assert eng.voices[0].active          # ... but never the live game sfx
-    assert eng._track_width == 0
+    assert eng.active_channels() & 0x0F == 0b0001   # ... never the live game sfx
 
 
+@requires_synth
 def test_multichannel_row_minus_one_silences_that_voice():
     sfx = [audio.SFX([[40 + i, 0, 6]] * 8, speed=8) for i in range(4)]
     b = audio.AudioBank(sfx, [audio.MusicTrack([[0, 1], [0, -1]], speed=10)])
     eng = audio.AudioEngine(b, rate=8000)
     eng.play_music(0)
-    assert eng.voices[2].active
+    assert eng.active_channels() & 0b0100      # row ch 1 -> voice 2 sounding
     eng.render(1200)                     # 0.15 s -> exactly one slot advance
-    assert not eng.voices[2].active and eng.voices[3].active
+    m = eng.active_channels()
+    assert not (m & 0b0100) and (m & 0b1000)
 
 
 def test_music_track_rows_serialize_stably():
@@ -1090,16 +1086,15 @@ def test_music_track_rows_serialize_stably():
     assert audio.MusicTrack.from_dict(d).to_dict() == d
 
 
+@requires_synth
 def test_legacy_single_channel_music_behavior_unchanged():
     eng = audio.AudioEngine(audio.AudioBank.default(), rate=8000)
     eng.play_music(0)
-    assert eng._track_width == 1
-    assert eng.voices[audio.MUSIC_CHANNEL].active
-    assert not any(v.active for v in eng.voices[:audio.MUSIC_CHANNEL])
+    assert eng.active_channels() & 0x0F == 1 << audio.MUSIC_CHANNEL
     # sfx still round-robin 0..2 and never steal the music voice
     for _ in range(6):
         eng.play_sfx(0)
-    assert eng.voices[audio.MUSIC_CHANNEL].active
+    assert eng.active_channels() & (1 << audio.MUSIC_CHANNEL)
 
 
 def test_music_editor_slot_verbs_edit_channel_zero_of_list_rows():
@@ -1127,6 +1122,7 @@ def test_music_editor_slot_verbs_edit_channel_zero_of_list_rows():
 
 # -- p8-parity round 2 (#170): loop ranges + per-row durations ---------------
 
+@requires_synth
 def test_sfx_loop_start_roundtrips_and_voice_wraps_there():
     s = audio.SFX([[60, 0, 6], [62, 0, 6], [64, 0, 6]], speed=10,
                   loop=True, loop_start=1)
@@ -1138,11 +1134,11 @@ def test_sfx_loop_start_roundtrips_and_voice_wraps_there():
     eng = audio.AudioEngine(audio.AudioBank([s], []), rate=8000)
     eng.play_sfx(0, chan=0)
     eng.render(8000)          # 10 steps/s -> several wraps in 1 s
-    v = eng.voices[0]
-    assert v.active
-    assert 1 <= v.step <= 2    # wrapped to loop_start, never back to step 0
+    assert eng.active_channels() & 1   # still looping (the exact wrap point is
+    # pinned sample-for-sample by the parity suite's loop_start scenario)
 
 
+@requires_synth
 def test_music_row_secs_schedule_and_roundtrip():
     sfx = [audio.SFX([[40 + i, 0, 6]] * 4, speed=8) for i in range(3)]
     t = audio.MusicTrack([[0], [1], [2]], speed=4,
@@ -1150,26 +1146,27 @@ def test_music_row_secs_schedule_and_roundtrip():
     d = t.to_dict()
     assert d["row_secs"] == [0.25, 1.0, 0.75]
     assert audio.MusicTrack.from_dict(d).to_dict() == d
+    # Behaviorally: played non-looping, the track must live exactly its
+    # 0.25 + 1.0 + 0.75 = 2.0 s schedule -- the uniform speed clock (4 rows/s)
+    # would have ended it at 0.75 s. Row-by-row cursor motion is pinned
+    # sample-exactly by the parity suite's music_row_secs scenario.
     eng = audio.AudioEngine(audio.AudioBank(sfx, [t]), rate=8000)
-    eng.play_music(0)
-    assert eng._mrow == 0
-    eng.render(4000)                       # 0.5 s -> row 0 (0.25s) done
-    assert eng._mrow == 1
-    eng.render(4000)                       # 1.0 s total: row 1 lasts 1.0s
-    assert eng._mrow == 1            # still inside the long row
-    eng.render(4000)
-    assert eng._mrow == 2
+    eng.play_music(0, loop=False)
+    eng.render(int(8000 * 1.9))
+    assert eng.is_active()                 # still inside the schedule
+    eng.render(int(8000 * 0.3))
+    assert not eng.is_active()             # ended on time, not early
 
 
+@requires_synth
 def test_music_hold_forever_row_never_advances():
     riff = audio.SFX([[50, 0, 6], [-1, 0, 0]], speed=8, loop=True)
     t = audio.MusicTrack([[0], [0]], speed=4, row_secs=[0, 0.25])
     eng = audio.AudioEngine(audio.AudioBank([riff], [t]), rate=8000)
-    eng.play_music(0)
-    for _ in range(5):
-        eng.render(8000)                   # 5 s on a 0-duration row
-    assert eng._mrow == 0            # held
-    assert eng.is_active()
+    eng.play_music(0, loop=False)          # non-looping: if the 0-duration row
+    for _ in range(5):                     # ADVANCED, the track would end in
+        eng.render(8000)                   # 0.25 s -- 5 s later it must still
+    assert eng.is_active()                 # be holding row 0
     eng.stop_music()                       # still stoppable
     assert not eng.is_active()
 

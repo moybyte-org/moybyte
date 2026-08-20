@@ -1,7 +1,11 @@
-# moy_lua usermod fragment for the MicroPython webassembly build (#151/#67) --
+# The vendored Lua 5.4 VM for the MicroPython webassembly build (#151/#67) --
 # the Makefile-port twin of native/moy_lua/micropython.cmake (the boards are
 # cmake). build.sh stages native/moy_lua/ into .build/usermods/moy_lua/ and
 # drops this file in as micropython.mk.
+#
+# VM only: the MicroPython bridge that used to sit beside it is gone, because
+# moycore binds the same VM through libmoy's own binding. `import moy_lua` is
+# meant to fail; what this compiles is what native/moycore links against.
 #
 # Same source set as the cmake: the sandbox opens base/math/string/table only,
 # so the unused stdlibs -- and linit.c, whose luaL_openlibs references all of
@@ -13,8 +17,6 @@
 # Here the VM compiles at the port's -Os like everything else.
 
 MOY_LUA_MOD_DIR := $(USERMOD_DIR)
-
-SRC_USERMOD_C += $(MOY_LUA_MOD_DIR)/modmoy_lua.c
 
 MOY_LUA_VM_SRCS := $(filter-out \
 	$(MOY_LUA_MOD_DIR)/lua/linit.c \

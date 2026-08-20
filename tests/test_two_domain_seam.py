@@ -16,26 +16,19 @@ The whole point is host-verifiable:
     text live, and persists across a reboot.
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+
+import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
-def _ws(tmp_path, **kw):
-    from runtime import host_app
-    return host_app.build_workstation(str(tmp_path / "carts"), **kw)
+from ws_helpers import build_ws as _ws
 
 
 # ---------------------------------------------------------------------------
 # Graceful degradation: 320x240 system canvas == game canvas, pixel-identical.
 # ---------------------------------------------------------------------------
-
-def _run_n(drv, n, dt=1 / 30):
-    for _ in range(n):
-        drv.frame(dt)
-
 
 def test_default_build_shares_one_canvas(tmp_path):
     """The default (T-Deck) build has no distinct system canvas: the system canvas
@@ -50,11 +43,11 @@ def test_default_build_shares_one_canvas(tmp_path):
 
 def _ws_distinct_320(tmp_path):
     """A console with a DISTINCT 320x240 system canvas (forced -- build_workstation
-    shares one canvas at the default size, so we attach a SystemCanvas by hand)."""
+    shares one canvas at the default size, so we attach a system canvas by hand)."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(320, 240, font_scale=1)
+    ws._sys_canvas = make_system_canvas(320, 240, font_scale=1)
     ws._relayout()
     ws.pointer = host_app.console.Pointer(320, 240)
     ws.input.pointer = ws.pointer
@@ -70,7 +63,7 @@ def test_distinct_320x240_system_canvas_renders(tmp_path):
     assert ws._viewport() == (0, 0, 1)             # no letterbox / scaling
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
-    assert len(set(ws.sys_canvas.buf)) > 4         # the desktop drew
+    assert probe.distinct_pixels(ws.sys_canvas) > 4    # the desktop drew
 
 
 def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
@@ -89,7 +82,7 @@ def test_running_cart_composite_is_the_identity_at_320x240(tmp_path):
     ws.pointer.visible = False
     ws.ach.toast = None
     ws.frame(1 / 30)
-    assert bytes(ws.sys_canvas.buf) == bytes(ws.canvas.buf)
+    assert bytes(ws.sys_canvas._buf) == bytes(ws.canvas._buf)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +106,8 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 640 * 480 * 3
-    assert len(set(buf)) > 4                       # wallpaper + grid + dock drew
+    # rgb888() is 3 bytes per pixel, so count COLOURS and not bytes here too.
+    assert probe.distinct_pixels_in(buf, 3) > 4    # wallpaper + grid + dock drew
 
 
 def test_dock_and_strip_scale_with_the_canvas(tmp_path):
@@ -143,11 +137,11 @@ def test_running_cart_is_a_centered_integer_viewport(tmp_path):
     # The bezel corner (outside the viewport) is the solid bezel color.
     # (_VIEWPORT_BEZEL moved to wm.py with the viewport composite -- Stage 6.)
     from runtime import wm as WM
-    assert ws.sys_canvas.buf[0] == WM._VIEWPORT_BEZEL
+    # pix() reads the palette INDEX back, which is what _VIEWPORT_BEZEL is.
+    assert ws.sys_canvas.pix(0, 0) == WM._VIEWPORT_BEZEL
     # A pixel inside the viewport differs from the bezel for a drawing cart.
-    cx = (oy + 1) * 960 + (ox + 1)
     # (Not asserting a specific color -- just that the viewport area was written.)
-    assert isinstance(ws.sys_canvas.buf[cx], int)
+    assert isinstance(ws.sys_canvas.pix(ox + 1, oy + 1), int)
 
 
 # ---------------------------------------------------------------------------
@@ -168,30 +162,37 @@ def test_font_scale_cycles_through_1_2_3(tmp_path):
 def test_font_scale_resizes_text_live(tmp_path):
     """Raising the font scale enlarges petme128 on the system canvas: the same string
     covers more set pixels at 2x than at 1x."""
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     from runtime import console as C
-    sc = SystemCanvas(640, 480, font_scale=1)
+    sc = make_system_canvas(640, 480, font_scale=1)
     sc.cls(0)
     sc.print("HELLO", 10, 10, C.NAMES["white"], 1)
-    on1 = sum(1 for b in sc.buf if b == C.NAMES["white"])
+    # Count pixels that are not the cls background: the only thing drawn is the
+    # white text, so this IS the white count -- without asking whether a buffer
+    # cell holds a palette index (it did) or half of an RGB565 word (it will).
+    on1 = probe.painted_pixels(sc)
     sc.set_font_scale(2)
     sc.cls(0)
     sc.print("HELLO", 10, 10, C.NAMES["white"], 1)
-    on2 = sum(1 for b in sc.buf if b == C.NAMES["white"])
+    on2 = probe.painted_pixels(sc)
     assert on2 == on1 * 4                            # nearest-neighbor 2x = 4x pixels
 
 
 def test_font_scale_1x_is_identical_to_plain_canvas(tmp_path):
-    """A SystemCanvas at scale 1 renders text byte-identical to the plain game Canvas
-    (the degradation guarantee at the pixel level for text)."""
-    from runtime.canvas import Canvas, SystemCanvas
+    """A system canvas at scale 1 renders text byte-identical to the plain GAME
+    canvas (the degradation guarantee at the pixel level for text).
+
+    Both are `DeviceCanvas` now -- the difference is the HostSystemCanvas
+    subclass, whose `print` takes its own scaled lane above font_scale 1. This
+    pins that the lane it takes AT 1 is still the base class's."""
+    from runtime.host_canvas import make_canvas, make_system_canvas
     from runtime import console as C
-    plain = Canvas(320, 240)
-    sysc = SystemCanvas(320, 240, font_scale=1)
+    plain = make_canvas(320, 240)
+    sysc = make_system_canvas(320, 240, font_scale=1)
     for cv in (plain, sysc):
         cv.cls(3)
         cv.print("moybyte 0.4!", 5, 7, C.NAMES["yellow"], 1)
-    assert bytes(plain.buf) == bytes(sysc.buf)
+    assert bytes(plain._buf) == bytes(sysc._buf)
 
 
 def test_font_scale_persists_across_reboot(tmp_path):
@@ -224,7 +225,7 @@ def test_settings_font_row_renders(tmp_path):
     ws.open_settings()
     drv.frame(1 / 30)
     assert "font_scale" in [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
-    assert len(set(drv.rgb888())) > 4
+    assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4
 
 
 def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
@@ -254,15 +255,15 @@ def test_composite_safe_when_system_canvas_smaller_than_game(tmp_path):
     corrupt (resize) the system buffer -- the composite clips. build_workstation also
     clamps a too-small --size up to the game size, so this is belt-and-suspenders."""
     from runtime import host_app
-    from runtime.canvas import SystemCanvas
+    from runtime.host_canvas import make_system_canvas
     from runtime import console
     ws = host_app.build_workstation(str(tmp_path / "carts"))
-    ws._sys_canvas = SystemCanvas(300, 200, font_scale=1)   # forced sub-game canvas
+    ws._sys_canvas = make_system_canvas(300, 200, font_scale=1)  # forced sub-game
     ws._relayout()
     ws.launcher.sel = 0
     ws.open()
     ws.frame(1 / 30)                                        # composites a running cart
-    assert len(ws.sys_canvas.buf) == 300 * 200             # buffer NOT resized/corrupt
+    assert len(ws.sys_canvas._buf) == 300 * 200 * 2        # buffer NOT resized/corrupt
 
 
 def test_build_workstation_clamps_too_small_size(tmp_path):
@@ -273,44 +274,37 @@ def test_build_workstation_clamps_too_small_size(tmp_path):
     assert ws.sys_canvas.w >= 320 and ws.sys_canvas.h >= 240
 
 
-def test_web_console_font_scale_change_does_not_crash(tmp_path):
-    """Changing the font size on the web console (whose system canvas is a recording
-    CommandCanvas) must not raise -- the recorder honours set_font_scale and records
-    scaled text as rect blocks the replayer already understands."""
-    from tools.web_console import WebConsole
-    from runtime.web_view import replay_to_canvas
-    from runtime.canvas import Canvas
-    wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
-    wc.ws.open_settings()
-    wc.ws.cycle_font_scale(1)                              # 1x -> 2x (was the crash)
-    assert wc.ws.font_scale == 2
-    assert wc.canvas.font_scale == 2
-    cmds, _, _ = wc.step_frame()
-    cv = Canvas(640, 480)
-    replay_to_canvas(cmds, cv)                             # scaled text replays cleanly
-    assert len(set(cv.buf)) > 4
+def test_font_scale_change_on_a_big_system_canvas_does_not_crash(tmp_path):
+    """Changing the system font size on a large system canvas must not raise.
+
+    This began as a web-console test (its recording canvas was the only way to
+    get a 640x480 system surface in a test) and was rewritten onto the raster
+    path at moycore stage 4, when that transport was deleted -- the crash it
+    pins is in the shell's relayout, not in any transport."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
+    ws.open_settings()
+    ws.cycle_font_scale(1)                                 # 1x -> 2x (was the crash)
+    assert ws.font_scale == 2
+    assert ws.sys_canvas.font_scale == 2
+    ws.frame(1 / 60.0)                                     # and it still draws
+    assert probe.distinct_pixels(ws.sys_canvas) > 4
 
 
-def test_web_console_larger_canvas_streams_and_replays(tmp_path):
-    """The web console (#22) honours a larger SYSTEM canvas (#39): /assets reports
-    the bigger size, the launcher command stream replays to valid pixels, and a
-    running cart composites into the stream as a single spr viewport command."""
-    from tools.web_console import WebConsole
-    from runtime.web_view import replay_to_canvas
-    from runtime.canvas import Canvas
-    wc = WebConsole(str(tmp_path / "carts"), sys_size=(640, 480))
-    assert wc.assets()["w"] == 640 and wc.assets()["h"] == 480
-    cmds, _, _ = wc.step_frame()                       # the launcher (reflowed)
-    cv = Canvas(640, 480)
-    replay_to_canvas(cmds, cv)
-    assert len(set(cv.buf)) > 4                      # the desktop replayed
-    wc.ws.launcher.sel = 0
-    wc.ws.open()
-    cmds, _, _ = wc.step_frame()                       # a running cart
-    assert "spr" in [c[0] for c in cmds]            # the game viewport blit command
-    cv2 = Canvas(640, 480)
-    replay_to_canvas(cmds, cv2)
-    assert len(set(cv2.buf)) > 4
+def test_a_larger_system_canvas_draws_and_composites_a_cart(tmp_path):
+    """A bigger SYSTEM canvas (#39) reflows the shell and still composites the
+    fixed 320x240 game canvas into itself."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
+    assert (ws.sys_canvas.w, ws.sys_canvas.h) == (640, 480)
+    ws.frame(1 / 60.0)
+    assert probe.distinct_pixels(ws.sys_canvas) > 4        # the shell drew
+    ws.launcher.sel = 0
+    ws.open()
+    for _ in range(3):
+        ws.frame(1 / 60.0)
+    assert (ws.canvas.w, ws.canvas.h) == (320, 240)        # the cart's own surface
+    assert probe.distinct_pixels(ws.sys_canvas) > 4        # composited in
 
 
 def test_carts_api_unchanged_game_canvas_stays_320x240(tmp_path):

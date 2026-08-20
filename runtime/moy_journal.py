@@ -1,4 +1,4 @@
-# The per-project undo/redo journal (#7, Stage 7 of docs/shell_ux_technical_plan_v1.md),
+# The per-project undo/redo journal (#7, Stage 7 of docs/history/shell_ux_technical_plan_v1.md),
 # extracted from moy_carts.py (which re-exports every name here, so `store.journal_*`
 # call sites and tests are unchanged). MicroPython-safe (json + os only); file
 # primitives come from the shared moy_fs leaf. The ONE journal->store edge

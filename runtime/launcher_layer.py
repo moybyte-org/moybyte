@@ -1,5 +1,5 @@
 """The desktop home / launcher (#28), extracted from Workstation
-(runtime/console.py) as its own Layer -- docs/shell_layers_refactor_v1.md (Move 1b,
+(runtime/console.py) as its own Layer -- docs/history/shell_layers_refactor_v1.md (Move 1b,
 the last surface). Three classes:
 
   * `Launcher`     -- the cart icon GRID model + draw: items/sel/paging/nav + the
@@ -24,7 +24,7 @@ one shared toolkit fn, like bar_layer takes `_in`), and the launcher-only tile-t
 takes NAMES + `_in` injected too. No circular import: this is a leaf (the only console
 touch is a lazy Layout fallback for a bare Launcher() that no caller ever constructs).
 
-Stage 4 (#46 zoned bar, docs/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
+Stage 4 (#46 zoned bar, docs/history/shell_ux_technical_plan_v1.md): `LauncherHomeLayer` grows
 `draw_zone`/`zone_tap` (the lent left zone -- originally NEW/DUP/DEL + the selected
 cart's name, the old where=="home" branch of BarLayer._draw_status_strip) and a
 `zone_gen` property proxying `Launcher.zone_gen` -- an int the GRID bumps whenever its
@@ -852,13 +852,12 @@ class LauncherHomeLayer:
                 or ws.launcher.dragging or ws.launcher.flinging
                 or ws._animating(dt)):
             return False
-        # A RECORDING canvas (web console root / the device web-view tee, which
-        # can swap in at runtime) can't replay a framebuffer capture -- its
-        # stream would blit a layer no command ever defined. Two probes: the
-        # recording marker (begin_surface, same probe frame() uses) and the
-        # retention contract (web_view.TeeCanvas declares RETAINED_FRAMES = 0
-        # for exactly this reason; a canvas that retains nothing can't be
-        # captured from either).
+        # A RECORDING canvas (the wasm head's CommandCanvas root) can't replay
+        # a framebuffer capture -- its stream would blit a layer no command
+        # ever defined. Two probes: the recording marker (begin_surface, same
+        # probe frame() uses) and the retention contract (recording canvases
+        # declare RETAINED_FRAMES = 0 for exactly this reason; a canvas that
+        # retains nothing can't be captured from either).
         if (getattr(cv, "begin_surface", None) is not None
                 or getattr(cv, "RETAINED_FRAMES", 0) < 1):
             return False

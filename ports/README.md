@@ -3,9 +3,11 @@
 Carts in this folder are **conformance and stress tests for the #67 Lua cart
 runtime**, ported from other fantasy consoles with the moy-spec CLI's
 `moy port` (the one converter, spec-side — `p8_lua_port.py` there).
-They are deliberately **NOT seed carts**: nothing here is listed in
-`tools/gen_device_carts.py` `CART_ORDER`, baked into a firmware image, or
-seeded onto devices. To play one, copy the `.moy` folder into a cart store
+They are deliberately **NOT seed carts**: seeding is declared per cart now (a
+`system_carts/*/manifest.json` carries `"system": true` and an `"order"`, and
+`tools/gen_device_carts.py` reads those), and nothing here carries either
+declaration or lives in `system_carts/` — so none of it is baked into a
+firmware image or seeded onto a device. To play one, copy the `.moy` folder into a cart store
 (the tests do exactly that into a tmp store).
 
 ## celeste.moy — Celeste Classic

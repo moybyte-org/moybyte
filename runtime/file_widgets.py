@@ -8,10 +8,12 @@
 
 try:
     from moy_image import decode_moyimg
-    from ui import rect_in as _in
+    import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import decode_moyimg
-    from runtime.ui import rect_in as _in
+    from runtime import ui as _ui
+
+_in = _ui.rect_in
 
 
 class Bitmap:
@@ -47,6 +49,9 @@ def cover_indices(src, sw, sh, dw, dh):
 
 
 THUMB_CACHE_MAX = 24     # decoded tiles kept across draws (a few KB each)
+# The name strip under the art, in fs units -- ui.cell's own default for a
+# labelled cell, named here because the thumbnail cache is sized against it.
+_CAPTION_H = 14
 
 
 class FileGridView:
@@ -64,6 +69,14 @@ class FileGridView:
         self.page = 0
         self._thumbs = {}          # (name, w, h) -> Bitmap|None (None = broken blob)
         self._thumb_order = []
+        # ui.py's six-state model, GRID form: interaction is two INDICES fed to
+        # ui.cell_state, never one ui.Hits rect per cell (that is the measured
+        # ~395-rect / ~9.3ms shape the toolkit's docstring forbids). -1 = none,
+        # which is also what `sel` spells, so an empty grid cues nothing.
+        self.hover = -1
+        self.pressed = -1
+        self._armed = -1
+        self._down = False
         self.set_rect((0, 0, 0, 0), 1)   # real geometry arrives per draw
 
     # -- geometry --------------------------------------------------------------
@@ -125,6 +138,12 @@ class FileGridView:
                 self._thumb_order.remove(key)
         self.select(keep)
         self.page = max(0, min(self.page, self._pages() - 1))
+        # Newest-first reorders: an index-keyed cue would now point at a
+        # different file, so the pump starts over (the selection, keyed by
+        # NAME above, deliberately does not).
+        self.hover = -1
+        self.pressed = -1
+        self._armed = -1
 
     def invalidate(self, name=None):
         """Forget cached thumbs (for `name`, or all) after a content write."""
@@ -177,25 +196,22 @@ class FileGridView:
                      y + (h - 8 * fs) // 2, th.get("dim", 1), 1)
             return
         start = self.page * self._per_page()
-        art_w = self.cell_w - 4 * fs
-        art_h = self.cell_h - 16 * fs
+        # The thumbnail cache is sized ONCE, outside the loop, off the same pure
+        # geometry every cell will hand back (ui.cell_art_rect is separate from
+        # ui.cell for exactly this).
+        _ax, _ay, art_w, art_h = _ui.cell_art_rect(
+            (0, 0, self.cell_w, self.cell_h), fs, 2 * fs, _CAPTION_H * fs)
+        hover, pressed = self.hover, self.pressed
         for i in range(start, min(start + self._per_page(), len(self.names))):
             name = self.names[i]
-            cx, cy, cw, ch = self._cell_rect(i - start)
-            on = i == self.sel
-            cv.rect(cx, cy, cw, ch, th.get("title", 48) if on else th.get("panel", 60))
-            cv.rectb(cx, cy, cw, ch,
-                     th.get("accent", 10) if on else th.get("dim", 1))
-            ax, ay = cx + 2 * fs, cy + 2 * fs
+            ax, ay, _aw, _ah = _ui.cell(
+                cv, th, self._cell_rect(i - start), name, on=(i == self.sel),
+                state=_ui.cell_state(i, hover, pressed), fs=fs)
             bmp = self._thumb(name, art_w, art_h) if self.kind == "drawings" else None
             if bmp is not None:
                 cv.spr(bmp, ax, ay)
             else:
                 cv.rect(ax, ay, art_w, art_h, th.get("edge", 13))
-            maxc = max(1, (cw - 4 * fs) // (8 * fs))
-            label = name[:maxc]
-            cv.print(label, cx + (cw - len(label) * 8 * fs) // 2,
-                     cy + ch - 11 * fs, th.get("title_ink", 0), 1)
         if self._pages() > 1:
             prev_r, next_r = self._page_rects()
             ink = th.get("title_ink", 0)
@@ -204,6 +220,55 @@ class FileGridView:
             label = str(self.page + 1) + "/" + str(self._pages())
             cv.print(label, x + (w - len(label) * 8 * fs) // 2,
                      prev_r[1] + 3 * fs, th.get("dim", 1), 1)
+
+    def _index_at(self, px, py):
+        """Index of the tile under (px, py) on the current page, else -1 --
+        the ARITHMETIC hit-test that lets this grid feed ui.cell_state without
+        registering anything."""
+        start = self.page * self._per_page()
+        for i in range(start, min(start + self._per_page(), len(self.names))):
+            if _in(px, py, self._cell_rect(i - start)):
+                return i
+        return -1
+
+    def pointer_frame(self, px, py, pointer):
+        """The grid's twin of ui.Hits.pointer_frame -- same contract, index
+        form: pump hover AND pressed from one pointer sample, return True when
+        either moved (the embedder marks its surface dirty on True).
+
+        `pointer` is duck-typed (.down / .visible / an optional .hovering), so a
+        TOUCH tier -- which places the pointer hidden -- never hovers but does
+        press, which is the one cue a finger ever gets."""
+        down = bool(getattr(pointer, "down", False))
+        pointing = bool(getattr(pointer, "visible", False)
+                        or getattr(pointer, "hovering", False))
+        i = self._index_at(px, py)
+        if down:
+            if not self._down:
+                self._armed = i            # the press EDGE picks the target
+            armed = self._armed
+            pressed = armed if (armed >= 0 and i == armed) else -1
+            hover = -1                     # a pointer that is down never hovers
+        else:
+            self._armed = -1
+            pressed = -1
+            hover = i if pointing else -1
+        self._down = down
+        changed = (hover != self.hover) or (pressed != self.pressed)
+        self.hover = hover
+        self.pressed = pressed
+        return changed
+
+    def pointer_leave(self):
+        """The embedder stopped feeding this grid samples: drop both cues, and
+        the press-edge history with them (ui.Hits.pointer_leave's rule -- a
+        stale cue costs one repaint, a quiet grid none)."""
+        changed = self.hover >= 0 or self.pressed >= 0
+        self.hover = -1
+        self.pressed = -1
+        self._armed = -1
+        self._down = False
+        return changed
 
     def tap(self, px, py):
         """("sel", name) on a first tap, ("pick", name) on the already-selected
@@ -217,14 +282,13 @@ class FileGridView:
             if _in(px, py, next_r):
                 self.page = (self.page + 1) % self._pages()
                 return ("page", 1)
-        start = self.page * self._per_page()
-        for i in range(start, min(start + self._per_page(), len(self.names))):
-            if _in(px, py, self._cell_rect(i - start)):
-                if i == self.sel:
-                    return ("pick", self.names[i])
-                self.sel = i
-                return ("sel", self.names[i])
-        return None
+        i = self._index_at(px, py)
+        if i < 0:
+            return None
+        if i == self.sel:
+            return ("pick", self.names[i])
+        self.sel = i
+        return ("sel", self.names[i])
 
     def nav(self, inp):
         """Trackball verbs, speaking tap()'s vocabulary: arrows move the

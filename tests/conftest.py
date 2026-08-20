@@ -2,7 +2,7 @@
 resolve to the canonical runtime/ source, never a build-staged copy.
 
 Several test files put the firmware staging tree
-(firmware/lilygo_t_deck_plus_micropython/modules) on sys.path to import the
+(device) on sys.path to import the
 AUTHORED device modules (moy_webserver, device canvas parity, diag, ...). That
 same directory also holds BUILD-STAGED copies of the shared runtime/ sources
 (console.py, editors.py, web_view.py, web_view_page.py, ... -- gitignored,
@@ -36,8 +36,16 @@ import sys
 
 import pytest
 
-_RUNTIME_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runtime")
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ONE repo-root sys.path insert for the whole suite (2026-08-18). 83 test
+# files each carried the same four-line header for this; pytest imports
+# conftest before collecting any of them, so this is the only copy now. Test
+# files keep their OWN inserts only for EXTRA dirs some need (ROOT/"tools", a
+# board modules tree, an experiments dir).
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+_RUNTIME_DIR = os.path.join(_REPO_ROOT, "runtime")
 _SHARED = {
     f[:-3] for f in os.listdir(_RUNTIME_DIR)
     if f.endswith(".py") and f != "__init__.py"
@@ -86,7 +94,7 @@ class _SharedRuntimeAliasFinder(importlib.abc.MetaPathFinder):
 # copy can never shadow the source of truth.
 _DEVICE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "firmware", "lilygo_t_deck_plus_micropython", "modules")
+    "device")
 # `_ota_build` is EXCLUDED: build.sh writes it (gitignored) with this machine's
 # last build channel/version/label, and moy_ota imports it when present. Resolving
 # it here made the suite read differently on a machine that had built firmware than
@@ -147,3 +155,17 @@ class _DeviceModuleFinder(importlib.abc.MetaPathFinder):
 # Runtime aliasing first: a device module must never shadow a shared one.
 sys.meta_path.insert(0, _DeviceModuleFinder())
 sys.meta_path.insert(0, _SharedRuntimeAliasFinder())
+
+
+def pytest_addoption(parser):
+    """`--update-goldens` -- the explicit re-baseline switch for the shell
+    pixel goldens (tests/test_shell_goldens.py, UI refactor Phase 0).
+
+    Re-baselining must be a deliberate act, never a side effect of a run, so
+    the harness rewrites tests/shell_goldens/hashes.json ONLY when this flag
+    (or MOYBYTE_UPDATE_GOLDENS=1) is given. Registered here because pytest
+    accepts pytest_addoption in initial conftests only, and pyproject's
+    `testpaths = ["tests"]` makes this one initial for a bare `pytest` too."""
+    parser.addoption("--update-goldens", action="store_true", default=False,
+                     help="rewrite tests/shell_goldens/hashes.json from this "
+                          "run (shell pixel goldens; run with -p no:xdist)")

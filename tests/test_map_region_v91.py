@@ -12,18 +12,18 @@ Two layers, mirroring test_paint_tools_v90.py:
     drag, tap-to-stamp paste, the COPY/CUT/PASTE action strip).
 """
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # -- core: MapEditor region verbs -------------------------------------------
 
 def _me(w=10, h=10):
+    # spec=False: a MapEditor fixture sheet, not a cart sheet -- nothing here
+    # draws, only tile ids are placed (see editors_sheet's SPEC.md 3.2 note).
     from runtime.editors import MapEditor, TileMap, SpriteSheet
-    return MapEditor(TileMap(w, h), SpriteSheet(cols=16, rows=16))
+    return MapEditor(TileMap(w, h), SpriteSheet(cols=16, rows=16, spec=False))
 
 
 def _put(me, x, y, tile):

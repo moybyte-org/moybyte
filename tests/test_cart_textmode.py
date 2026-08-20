@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 # A text-input cart: opts into text mode and records every key()/keyp() it sees.
@@ -58,12 +57,7 @@ def _draw():
 """
 
 
-def _open_cart(ws, title):
-    for i, c in enumerate(ws.launcher.items):
-        if c["title"] == title:
-            ws.launcher.sel = i
-            break
-    ws.open()
+from ws_helpers import open_cart as _open_cart
 
 
 def _make_ws_with_carts(tmp_path):
@@ -241,7 +235,7 @@ def test_textmode_in_both_make_api_namespaces():
     sys.path.insert(0, str(ROOT / "tools"))
     import gen_device_carts
     sys.modules["carts_data"] = gen_device_carts.as_module(str(SYSTEM_CARTS))
-    fw = ROOT / "firmware" / "lilygo_t_deck_plus_micropython" / "modules" / "moy_runtime.py"
+    fw = ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules" / "moy_runtime.py"
     spec = importlib.util.spec_from_file_location("moy_runtime", fw)
     dev = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dev)

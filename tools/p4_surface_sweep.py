@@ -78,9 +78,6 @@ each):
            ws._apply_items(store.scan(root)).
   * There is no load_code(path); reading a cart's source goes through load(path).
 
-READ THE ROWS AS "cost of a drag frame", not "scroll". On Sprites and Map a
-vertical drag PAINTS rather than scrolls, so those measure the drawing gesture.
-
 STRUCTURAL NOTE (content-independent): the Editor tabs and the Desk Lab apps share
 NO scroll machinery -- not ui.ScrollRegion, not the #113 blit path. Only the
 launcher shelf, the picker and (partly) Settings do. So #113 does not correlate

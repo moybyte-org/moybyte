@@ -95,20 +95,10 @@ function tri(x1, y1, x2, y2, x3, y3, c) end
 ---@param c integer
 function trib(x1, y1, x2, y2, x3, y3, c) end
 
----Draw MANY filled rects in one call (the fast lane for software 3D /
----particle fields). `items` is FLAT: x, y, w, h, c repeated. DRAFT 6.1.
----@param items number[]|userdata flat quints, or a spans() buffer
----@param n? integer how many quints to read (-1 = all)
----@param ox? integer x offset applied to every rect
----@param oy? integer y offset applied to every rect
----@param c? integer colour override for every rect (-1 = per-rect)
-function rect_batch(items, n, ox, oy, c) end
-
----A reusable int16 buffer for rect_batch: n*5 slots (x,y,w,h,c per
----span). Allocate ONCE in _init, refill by index each frame. DRAFT 6.1.
----@param n integer span capacity
----@return userdata
-function spans(n) end
+-- rect_batch / spans were declared here and never existed in Lua: a trampoline
+-- cannot marshal a table or a span buffer, so a cart that believed these stubs
+-- got a runtime error. They are gone from the Python side too as of 2026-08-14
+-- (plan 6.10) -- a plain `rect` loop is what both languages write now.
 
 -- --- sprites / map ----------------------------------------------------------
 
@@ -120,14 +110,6 @@ function spans(n) end
 ---@param scale? integer integer scale (default 1)
 ---@param flip? integer 0 none, 1 horizontal, 2 vertical, 3 both
 function spr(n, x, y, colorkey, scale, flip) end
-
----Draw MANY sheet tiles in one call: items = {{tile,x,y}, {tile,x,y,flip}, ...}.
----DRAFT 6.1. You almost certainly want a plain `for` loop of spr() instead --
----the console already batches those natively, so the loop costs the same.
----@param items table
----@param colorkey? integer
----@param scale? integer
-function spr_batch(items, colorkey, scale) end
 
 ---Stretch-blit a sheet PIXEL region (sx,sy,sw,sh) to a dw x dh screen rect --
 ---arbitrary (non-integer) scaling; the textured-slice verb. DRAFT 6.1.
