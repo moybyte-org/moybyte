@@ -91,6 +91,7 @@ CHANNELS = {
 OTA_IMAGES = {
     "tdeck": "moybyte_tdeck_app.bin",
     "p4": "moybyte_p4_app.bin",
+    "guition_s3": "moybyte_guition_s3_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
@@ -211,6 +212,17 @@ def stage_ota_all(tag, channel, artifacts, workdir, repo=None):
 
     Returns {board: manifest}. A board absent from this run keeps whatever is
     already published for it, exactly like its flashable image."""
+    # A board that BUILT (its artifact folder is here) but is missing from
+    # OTA_IMAGES would silently never get a manifest -- the miss that kept the
+    # Guition's first beta off the channel on 2026-08-20 (the build emitted the
+    # app image and the stamp; this dict was two boards long). Say so loudly.
+    prefix = "moybyte-firmware-"
+    if os.path.isdir(artifacts):
+        for entry in sorted(os.listdir(artifacts)):
+            if entry.startswith(prefix) and entry[len(prefix):] not in OTA_IMAGES:
+                print("::warning::%s built images but has no OTA_IMAGES entry "
+                      "-- no OTA manifest will be published for it"
+                      % entry[len(prefix):])
     out = {}
     for board in sorted(OTA_IMAGES):
         got = stage_ota(tag, channel, artifacts, workdir, repo, board)
