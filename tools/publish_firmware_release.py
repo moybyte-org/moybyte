@@ -19,11 +19,11 @@ carries its own provenance beside it:
 
     firmware-latest/
       tdeck-moybyte_tdeck.bin
-      tdeck-source.json        <- commit, run, date for THAT image
+      tdeck-source.json          <- commit, run, date for THAT image
       p4-moybyte_p4.bin
       p4-source.json
-      tdeck-moybyte-current-app.bin   <- the OTA payload (app slot, not 0x0)
-      latest.json                     <- the OTA manifest pointing at it
+      tdeck-moybyte_tdeck_app.bin  <- the OTA payload (app slot, not 0x0)
+      latest-tdeck.json            <- the OTA manifest pointing at it
 
 The `<board>-` prefix is how flat release assets keep the per-board layout that
 tools/fetch_ci_firmware.py rebuilds on the way back down; board ids therefore

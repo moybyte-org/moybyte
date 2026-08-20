@@ -24,9 +24,10 @@ Two sources, in order:
 
 Either way the output is the same tree, which site/build.py reads:
 
-    dist/ci-firmware/
-      tdeck/moybyte-current-full-dio-0x0.bin
+    dist/ci-firmware/<variant>/
+      tdeck/moybyte_tdeck.bin
       tdeck/source.json                        <- run id/url, commit, date
+      tdeck/manifest.json                      <- the OTA manifest (its version)
       p4/moybyte_p4.bin
       p4/source.json
 
