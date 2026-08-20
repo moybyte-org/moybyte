@@ -1,5 +1,10 @@
 # The widget system 2026-08 — one vocabulary, swappable skins, hover as an overlay
 
+**SUPERSEDED 2026-08-19 by [`docs/ui_refactor_2026-08.md`](ui_refactor_2026-08.md)**,
+which folded this doc and cut about half of the combined program on evidence
+(its §1 is the ledger of what was cut and why). This one stays for what it IS —
+the measurements, the widget inventory and the review ledger the refactor cites.
+
 **Status: DRAFT v0.2 (2026-08-04)** — v0 went through the parallel adversarial
 architecture + perf review pass (verdicts: **REDESIGN (scoped)** / **PERF CASE
 NOT ESTABLISHED**); this revision folds all findings — **§12 is the

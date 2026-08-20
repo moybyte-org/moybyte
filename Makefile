@@ -398,10 +398,12 @@ firmware-flash-p4:
 # (572,693 B) made it fit both slots. So a flashed board always serves a console
 # current with its own firmware, and this push is the OVERRIDE -- storage wins
 # over the image, which is what keeps the sub-minute dev loop alive without a
-# reflash (and the T-Deck cannot be pushed to at all: its USB-CDC RX is dead
-# under the desktop, so baking was the only way that board could ever be
-# current). The flash target still pushes (optional -- a board with no WiFi must
-# not fail a cable flash), and `p4-web-stale` is the check you can run on its
+# reflash. (When baking was decided the T-Deck could not be pushed to at all --
+# that board's serial RX was dead under the desktop until #201 fixed it on
+# 2026-08-16 -- so the image was the only way it could ever be current. It is
+# still the guarantee; this push is still the override.) The flash target still
+# pushes (optional -- a board with no WiFi must not fail a cable flash), and
+# `p4-web-stale` is the check you can run on its
 # own. p4_push_web.py compares byte-for-byte per file, so a re-push is
 # idempotent and cheap; running it is the verification.
 p4-web-push:

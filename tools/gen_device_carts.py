@@ -31,12 +31,13 @@ Phase 5, 2026-08-19). A system cart declares, in its own `manifest.json`:
                                id / entry ("module:Class") / text_mode /
                                order (registration precedence) / min_size.
 
-Four hand-maintained lists used to hold that same information -- `CART_ORDER`
+Five hand-maintained lists used to hold that same information -- `CART_ORDER`
 here, the title->folder map in tests/test_device_seed_parity.py, the web
-runner's `ROSTER=` string, and console.py's import + construct + register_app
-block. Four of the five failed SILENTLY and on device only: forget `CART_ORDER`
-and the identity cart never seeds, so `is_app` never claims it, so the app is
-simply unreachable on hardware while working perfectly on the host. They are all
+runner's `ROSTER=` string, console.py's import + construct + register_app
+block, and host_app.py's alias table. Four of the five failed SILENTLY and on
+device only: forget `CART_ORDER` and the identity cart never seeds, so `is_app`
+never claims it, so the app is simply unreachable on hardware while working
+perfectly on the host. They are all
 derived from the declarations now (`runtime/app_decls.py` is this file's
 generated output for the frozen tiers, which have no `system_carts/`).
 

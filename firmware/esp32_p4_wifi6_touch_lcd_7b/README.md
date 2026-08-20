@@ -18,7 +18,9 @@ async-composite overlap. Brick Siege 35→51→56; most carts ~60fps. The
 for the living status.
 
 **BLE-HID keyboard support is hardware-paired (2026-07-13; latency fast path
-2026-07-14).** `p4_ble_keyboard.py` uses the C6_WIFI build's existing
+2026-07-14).** `device/ble_keyboard.py` (this board's `p4_ble_keyboard.py`
+until it was promoted to the shared device tree on 2026-08-19, when the
+Guition became its second consumer) uses the C6_WIFI build's existing
 MicroPython NimBLE central/GATT-client path over ESP-Hosted SDIO: it discovers
 HOGP service `0x1812`, bonds, prefers the profile's deterministic Boot Host path
 (writes Protocol Mode `0x00`, then subscribes only to Boot Keyboard Input), and
@@ -154,7 +156,9 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   - `p4_input.py` — GT911 polling driver (I2C0 SDA7/SCL8 @ 0x5D, native
     1024×600 coords; `FLIP_X`/`FLIP_Y` knobs for the 180° panel mount if touch
     lands mirrored).
-  - `p4_ble_keyboard.py` — pure-MicroPython BLE HID central over the hosted C6:
+  - `device/ble_keyboard.py` (SHARED, staged — it was this board's
+    `p4_ble_keyboard.py` until the Guition became its second consumer on
+    2026-08-19) — pure-MicroPython BLE HID central, here over the hosted C6:
     scan/pair/bond/discover/subscribe plus standard keyboard-report →
     `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
     forget; the preferred address + gate + bond keys persist in

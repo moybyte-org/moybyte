@@ -207,7 +207,7 @@ its `board.toml`, so a new `runtime/` module reaches every target by default and
 keeping it off one is a written decision. (This section used to say "both
 firmware `build.sh` module lists", which stopped being true when that landed.)
 
-The four lists this replaced were not merely tedious: **four of the five failed
+The five lists this replaced were not merely tedious: **four of the five failed
 silently, and on device only.** Forgetting `CART_ORDER` meant the identity cart
 never seeded, so `is_app` never claimed it, so the app was unreachable on
 hardware while working perfectly on the host.
@@ -285,7 +285,7 @@ calculator or a notepad, fixed is the right answer.
 `system_carts/notes.moy` is the worked example: a notepad that types, saves into
 the kid's documents (the same `docs` kind Writer and Files browse -- open one
 there and it is really the same file), lists what it saved and remembers which
-note was open. **~130 lines of cart, no shell code, no registration, no
+note was open. **200 lines of cart, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
 and re-runs on the device.
 

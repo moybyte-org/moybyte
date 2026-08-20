@@ -1,5 +1,11 @@
 # Shell decoupling — the `ws` service locator, and the order to dismantle it
 
+**SUPERSEDED 2026-08-19.** The sequence that actually shipped is
+[`docs/ui_refactor_2026-08.md`](ui_refactor_2026-08.md); read its §1 before
+re-proposing anything below, because rows 7-8, 9, 10 and 11 were all declined
+there with reasons. What survives here is the material that plan cites rather
+than repeats: the `ws` inventory, the per-row measurements, the numbers.
+
 **Status:** PLAN / OPEN — a sequenced refactor with a ratchet per step. Nothing here
 changes what the console *does*; every row is a move, a deletion, or a narrowing.
 **Measured:** 2026-08-14, against `dev` at a green baseline (1,990 passed, 22 skipped,

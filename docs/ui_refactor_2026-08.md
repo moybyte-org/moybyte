@@ -1,7 +1,9 @@
 # The UI refactor 2026-08 — one widget vocabulary, apps as data, user apps possible
 
-**Status: PLAN (2026-08-19).** This doc supersedes the *plans* in
-`docs/ui_widgets_2026-08.md` (DRAFT v0.2) and `docs/shell_decoupling_2026-08.md`
+**Status: LANDED 2026-08-19** — ten commits on `dev`, `bc2586a`…`3b22d5a`, one
+per phase (Phase 3's four sub-phases are four of them; Phases 7 and 8 share the
+last). Each phase below carries its own landing note. This doc supersedes the
+*plans* in `docs/ui_widgets_2026-08.md` (DRAFT v0.2) and `docs/shell_decoupling_2026-08.md`
 (PLAN/OPEN) by folding both, plus four parallel adversarial reviews run against
 them on 2026-08-19 (architecture / performance / app-authoring / execution).
 Those two docs stay as the **evidence and analysis** they are — their
@@ -117,7 +119,7 @@ into the toolkit — would land unguarded.
 
 Phase 0 builds it, and nothing else starts until it is green.
 
-### 2.2 The cost of a new app is six hand-maintained lists, and no plan row touched them
+### 2.2 The cost of a new app is five hand-maintained lists, and no plan row touched them
 
 `app_api_v1.md` advertises a 5-step checklist. The real cost is **8 files**, and
 the per-app tax is concentrated in registration lists that are *code pretending
@@ -180,7 +182,10 @@ the damage-model doc establishes:
 Each phase is one landed outcome, independently shippable and revertable, with a
 ratchet that makes the old road impossible and a gate that proves it.
 
-**Phase 0 — the shell golden harness.** SERIAL; blocks everything.
+**Phase 0 — the shell golden harness: LANDED 2026-08-19** (`bc2586a`). SERIAL;
+blocked everything. 87 stored hashes × 5 configs, joined later by 300
+sub-surface hashes (`tests/test_settings_layer_pixels.py`) for the states
+whole-screen rendering cannot reach.
 `tests/test_shell_goldens.py` + `tests/shell_goldens/hashes.json`: a hash of the
 rendered system canvas for the launcher, the picker, Settings, each Editor tab,
 each app, and the desk with one window. *Ratchet:* re-baselining requires an
@@ -228,8 +233,8 @@ it must include a **clean-interpreter boot test**, because `tests/conftest.py`
 installs the same finder at `sys.meta_path[0]` and every one of the 2,322 tests
 therefore passes whether the production finder works or not.
 
-**Phase 2 — the bar contract becomes a host guarantee** (`shell_decoupling`
-row 5). The router draws the strip after `draw()` and routes the tap before
+**Phase 2 — the bar contract becomes a host guarantee: LANDED 2026-08-19**
+(`18b28fc`; `shell_decoupling` row 5). The router draws the strip after `draw()` and routes the tap before
 `handle_pointer()`, deleting the "forget it and your app is unexitable" bug
 class.
 
@@ -242,7 +247,8 @@ registered apps only**; every other kind stays exactly where it is.
 never draws a strip, drive a frame, assert the strip drew and that a tap on the
 X exits; run it per registered app kind.
 
-**Phase 3 — the widget vocabulary.** This is the unification.
+**Phase 3 — the widget vocabulary: LANDED 2026-08-19** (`efb8734` = 3a, then
+`63399e8`/`c888991`/`79efabf` = 3b/3c/3d). This is the unification.
 - **3a (SERIAL, `runtime/ui.py` only):** add the `row` and `cell` kinds, the
   `disabled` state, and the precedence `disabled > pressed > hot > on > rest`.
   Absorb the three live private button copies (`writer_app._hist_btn`,
@@ -269,8 +275,8 @@ Two consequences, and neither is optional:
   is a separate, deliberate, re-baselined act; do not let a conversion agent do
   it by accident, and do not claim the T-Deck is unified until it is done.
 
-**Phase 4 — skins as data.** A new leaf `runtime/skin.py` (NOT in `chrome.py`,
-which would create the cycle `ui → chrome → settings_layer → ui`), with
+**Phase 4 — skins as data: LANDED 2026-08-19** (`939da2f`). A new leaf
+`runtime/skin.py` (NOT in `chrome.py`, which would create the cycle `ui → chrome → settings_layer → ui`), with
 **nested** pre-flattened tables `SKIN[kind][state]` — nested, because a single
 flattened `kind + ":" + state` key allocates a string per draw. Default skin is
 the current pixels, pinned by Phase 0. Then a second skin plus an Appearance row
@@ -278,13 +284,15 @@ as the falsifiable restyle proof. *Gate:* P4 editor-tab frame time within noise
 — the tabs are dispatch-bound, so a per-draw dict get is the one place this plan
 can lose P4 performance.
 
-**Phase 5 — the app registry becomes manifest data.** An `"app"` block in the
+**Phase 5 — the app registry becomes manifest data: LANDED 2026-08-19**
+(`24eae2f`). An `"app"` block in the
 identity cart's manifest (id, title, entry, min_size, text_mode, order,
 targets); one loader replaces the five hand-maintained lists. *Ratchet:*
 `CART_ORDER`, the title→folder map, the web roster and `console.py`'s app block
 contain no app names.
 
-**Phase 6 — `AppContext` with declared needs.** The corrected role set (§5),
+**Phase 6 — `AppContext` with declared needs: LANDED 2026-08-19** (`15bc03f`).
+The corrected role set (§5),
 with each app declaring `NEEDS = (...)` from day one and a test asserting it
 touches only what it declares — that is what turns `make_system_api` into a
 filter over an existing interface rather than a new axis invented later.
@@ -298,7 +306,7 @@ is in scope.
 **Phase 7 — user apps: LANDED 2026-08-19.** `runtime/system_api.py`
 (`make_system_api`) is the permission-keyed filter over `AppContext`; the shipped
 demo is `system_carts/notes.moy` -- a manifest, a `main.py` and one 8x8 tile,
-~130 lines of cart. The
+200 lines of cart. The
 permission table, the never-grantable list, the ungated draw globals and the
 canvas rule are documented once, in `docs/app_api_v1.md`'s USER APPS section, and
 argued at length in the module's own docstring; do not re-derive them here.
@@ -473,11 +481,15 @@ with measured wall-clock:
    Mandatory for any phase that adds, deletes, renames or re-imports a
    `runtime/` module.
 3. the new golden set + the touched files' own tests.
-4. `make test` — **31.7 s** under xdist (2,322 pass / 46 skip).
+4. `make test` — **31.7 s** under xdist (2,322 pass / 46 skip), measured at
+   plan time; ~2,580 pass / 46 skip on 2026-08-20, and the phases below are
+   most of the difference.
 5. `python tools/simulate_desktop.py --demo` — the only lane that uses the
-   *production* import path rather than conftest's finder. **Note it currently
-   exits 0 while printing frame errors**; treat any printed error as a failure
-   until that is fixed.
+   *production* import path rather than conftest's finder. Run it **`--strict`**:
+   since `6ea94b9` the tour samples `ws.cart_error` every frame and a frame
+   error is then a non-zero exit, so this is a gate that can fail. (Without the
+   flag it still only prints, which is what let it exit 0 while the shell was
+   erroring.)
 6. a real firmware build (`make firmware-build-p4`, `…-guition-s3`) after any
    phase that changes the frozen module set — it is also the only **size** gate,
    and the P4 has ~0.5 MB of app-slot headroom.

@@ -66,9 +66,10 @@ gesture-transition spike, which the feeder does not touch).
 QSPI protocol wants the whole frame under ONE CS assertion behind a 4-byte
 1-line opcode header (`0x32 00 2C 00`), which is the opposite of esp_lcd's
 per-call CS cycling. The band/bounce/kick-pump-drain machinery is moy_lcd's
-design carried over: bands of 48 rows memcpy'd PSRAM -> two internal-SRAM DMA
-bounce slots, queued with `SPI_TRANS_CS_KEEP_ACTIVE`, completion counted by a
-`post_cb` ISR. `modules/guition_panel.py` is the compositor over it
+design carried over: bands of 48 rows gathered PSRAM -> two internal-SRAM DMA
+bounce slots (a ROTATE-gather since the landscape call, not a memcpy -- see
+the 2026-08-19 entry below), queued with `SPI_TRANS_CS_KEEP_ACTIVE`, completion
+counted by a `post_cb` ISR. `modules/guition_panel.py` is the compositor over it
 (tdeck_panel's twin). Init sequence provenance: ESPHome's AXS15231 model plus
 its generated DCS tail -- the exact sequence the owner's ESPHome build runs on
 this exact glass.

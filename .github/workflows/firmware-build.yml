@@ -52,8 +52,8 @@ jobs:
       matrix:
         # The per-board facts every step below parameterizes on (#202 Phase A):
         # adding a board = adding a row (dir + make target); no later step
-        # names a board. `patches/**` (repo root) rides every key because both
-        # builds apply shared patches under one-shot marker guards.
+        # names a board. `patches/**` (repo root) rides every key because every
+        # build applies shared patches under one-shot marker guards.
         include:
           - board: tdeck
             dir: firmware/lilygo_t_deck_plus_mainline
@@ -65,7 +65,8 @@ jobs:
             dir: firmware/guition_jc3248w535
             make_target: firmware-build-guition-s3
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
-    # branch build does both boards; a dispatch honours the choice.
+    # branch build does all three boards in the matrix; a dispatch honours the
+    # choice.
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"

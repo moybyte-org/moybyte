@@ -16,7 +16,7 @@ lineup, the measured per-board bill, the phases, and the declines.
 | board | class | why |
 |---|---|---|
 | **Guition JC1060P470-class (P4 + C6)** | desktop tier | the COST path: ~$33–37 vs the Waveshare 7B's ~$80 (bom_pricing_2026-07: the $100 retail floor "needs the Guition board as the electronics core"). Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + 1024×600 DSI touch — so this is a **variant port**, and its job is to prove variants are cheap. The 2026-06 evaluation (#12) was closed by buying the Waveshare instead; the reason to want the Guition (price) never went away. |
-| **Guition JC3248W535 (S3)** | handheld tier | a ~$15-class 3.5" 320×480 S3 smart display. Same chip as the T-Deck, but a **new port class** on every other axis: QSPI panel (AXS15231B — not `moy_lcd`'s ST7789-over-SPI), touch on the same chip (no keyboard, no trackball), portrait 320×480. Its job is to prove the contracts, not the copies. |
+| **Guition JC3248W535 (S3)** | handheld tier | a ~$15-class 3.5" 320×480 S3 smart display. Same chip as the T-Deck, but a **new port class** on every other axis: QSPI panel (AXS15231B — not `moy_lcd`'s ST7789-over-SPI), touch on the same chip (no keyboard, no trackball), and — owner call at bring-up, 2026-08-18 — LANDSCAPE 480×320 off a portrait-native panel whose MADCTL MV is dead on this glass, so `moy_axs` rotates in its band copy. Its job is to prove the contracts, not the copies. |
 
 A working hardware definition for the JC3248W535 already exists at
 `~/Documents/Work/esphome/JC3248W535.yaml` (ESPHome, on the physical board):
@@ -87,9 +87,14 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
   * **The QSPI panel**: `moy_lcd`'s VALUE is not the ST7789 init table — it is
     the band/bounce/kick-pump-drain machinery and the hard-won DMA rules
     compiled into it. Whether the AXS15231B backend shares that C core
-    (parameterized io layer + init table) or stands alone is a bring-up
-    decision to make ON HARDWARE, not in this doc. Both esp_lcd and the
-    component registry carry AXS15231B references; start there.
+    (parameterized io layer + init table) or stands alone was a bring-up
+    decision to make ON HARDWARE, not in this doc. **ANSWERED 2026-08-18: it
+    STANDS ALONE** — `native/moy_axs`, raw `spi_master`, because the whole
+    frame ships under ONE CS assertion and no io-layer parameter over
+    `moy_lcd`'s body expresses that. The DESIGN crossed verbatim (bands, the
+    two internal-SRAM bounce slots, kick/pump/drain, DMA only from internal
+    SRAM) and the code did not — which is the shape Phase C's rule wants, and
+    the reason the copy is cheap to keep honest.
 
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
@@ -155,14 +160,20 @@ follows the CI matrix row.
 * **Input without a keyboard.** `moybyte/input.py` is the T-Deck keyboard
   matrix + InputState fused; a touch-only board needs the InputState core
   separable from the keyboard driver. Do this split AS the port needs it.
-* **A third system resolution on the fullscreen tier.** 320×480 portrait:
-  system UI responsive at native res (#39 — closed, the machinery exists), the
-  game a fixed 320×240 composited at 1:1 width. First fullscreen-tier board
-  where system canvas ≠ game canvas — the seam the P4 runs windowed, run
-  fullscreen. Expect `wm.composite_game` and the #39 layouts to carry it;
-  pin it with the board's on-glass suite.
+* **A third system resolution on the fullscreen tier.** 480×320 landscape
+  (owner call 2026-08-18, off the portrait-native 320×480 glass): system UI
+  responsive at native res (#39 — closed, the machinery exists), the game a
+  fixed 320×240 composited 1:1. First fullscreen-tier board where system
+  canvas ≠ game canvas — the seam the P4 runs windowed, run fullscreen.
+  **It carried**: the existing `SystemCanvas` + `wm.composite_game`, zero new
+  shared code, pinned by `tests/test_guition_on_glass.py`. What did NOT carry
+  is chrome legibility at this PPI — a font_scale 2 build was made and
+  REVERTED same-day on owner verdict (2026-08-19); the real fix is a PPI floor
+  on bar icons and menu rows, independent of font scale, deferred in #202.
 * **Backlight as PWM** (GPIO1) — `set_backlight` grows a duty, or stays
-  binary; owner call at bring-up.
+  binary; owner call at bring-up. **ANSWERED 2026-08-18: binary.** Every caller
+  in the console — the boot light-up fence, `IdleBlank`, the dev channel's
+  `bl` — asks for on/off, so the duty stays unbuilt until something wants it.
 
 ## Declined (recorded so it is not re-litigated)
 

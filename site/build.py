@@ -62,10 +62,11 @@ TIERS = [
 # Makefile's cable flash have to agree, so each field is the browser's copy of a
 # `make firmware-flash-*` argument -- change one, change the other:
 #
-#   tdeck  esptool --chip esp32s3 write_flash 0x0 <full-dio image>
-#   p4     esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
+#   tdeck    esptool --chip esp32s3 write_flash 0x0 <full-dio image>
+#   p4       esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
+#   guition  esptool --chip esp32s3 write_flash 0x0 moybyte_guition_s3.bin
 #
-# Both write a MERGED image (bootloader + partition table + app) whose header
+# All three write a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
 # the flasher passes "keep" for all three rather than re-deriving them here. The
 # partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
@@ -127,9 +128,9 @@ BOARDS = [
         "cli": "make firmware-flash-p4 PORT=/dev/ttyACM0",
     },
     {
-        # The Guition JC3248W535 (#202) -- port in bring-up; the entry exists
-        # so the release publisher has its row (it reads THIS table), and the
-        # site card renders honestly-empty until CI has published an image.
+        # The Guition JC3248W535 (#202, ported 2026-08-18): the third board,
+        # with its own CI matrix row, so the release publisher (which reads
+        # THIS table) has an image to hand the card.
         "id": "guition_s3",
         "label": "Guition JC3248W535 3.5&Prime;",
         "chip": "ESP32-S3",
@@ -142,9 +143,9 @@ BOARDS = [
         "done": "Done &mdash; the board is rebooting into this build.",
         "prep": "Plug into the board&rsquo;s USB-C port. The S3&rsquo;s own "
                 "USB-Serial/JTAG handles the reset into the loader and back.",
-        "erase": "Erase the whole chip first. This board keeps its cartridges "
-                 "on internal flash, so that deletes them along with their "
-                 "saves.",
+        "erase": "Erase the whole chip first. With a TF card in the slot the "
+                 "cartridges live on the card and survive it; with no card they "
+                 "are on internal flash, and this deletes them and their saves.",
         "manual": "Skip the reset &mdash; I have put the board in download "
                   "mode myself (hold <b>BOOT</b>, tap <b>RST</b>, release "
                   "BOOT). Try this if connecting fails.",
@@ -185,7 +186,7 @@ FEATURES = [
      "PPA with the DMA overlapping the next frame&rsquo;s input poll; scrolling "
      "shifts retained pixels instead of repainting them."),
     ("Sound",
-     "A C mixer on both boards and in the browser. PICO-8 imports are "
+     "A C mixer on the boards and in the browser. PICO-8 imports are "
      "full-fidelity &mdash; eight waveforms, the effect column, four-channel "
      "patterns, SFX loop ranges."),
     ("Cartridges are folders",
@@ -195,13 +196,17 @@ FEATURES = [
     ("Wireless",
      "WiFi setup lives in Settings, so it works while a game runs. Firmware "
      "updates over the air on two channels into an inactive OTA slot, with "
-     "bootloader rollback if the new image does not come up &mdash; confirmed on "
-     "hardware end to end, though it has not been exercised lately."),
-    ("Streams itself to a browser",
-     "The device can serve the running system over WiFi as draw commands rather "
-     "than pixels &mdash; the same protocol this page&rsquo;s player speaks. "
-     "Verified on a T-Deck: it works, and it is slow. The board&rsquo;s WiFi "
-     "moves about 72&nbsp;KB/s, which is the ceiling on how fast frames arrive."),
+     "bootloader rollback if the new image does not come up. This is not a "
+     "demo: it is how the T-Deck and the P4 actually get their updates &mdash; "
+     "download, install, and rolling a bad image back have all run on the real "
+     "hardware. The Guition's updater is wired and awaits its first release."),
+    ("The console in a browser",
+     "The same system also compiles to WebAssembly &mdash; it is what runs on "
+     "this page &mdash; and every board carries that build inside its firmware. "
+     "Switch it on and the board hands the console to any phone or laptop on "
+     "the same WiFi: it opens in a tab and runs there at full speed, drawing "
+     "every pixel itself. It is a second console rather than a window onto the "
+     "board&rsquo;s screen, and it does not save back to the board yet."),
 ]
 
 TARGETS = [
@@ -213,9 +218,15 @@ TARGETS = [
      "1024&times;600 over MIPI-DSI, mainline MicroPython with a vendored panel "
      "driver. The same system as a windowed desktop, with the game composite on "
      "the hardware PPA."),
+    ("Guition JC3248W535", "ESP32-S3",
+     "The ~$15 3.5&Prime; smart display, and the third board: a QSPI panel of "
+     "its own, touch only, landscape 480&times;320, and cartridges on the TF "
+     "card when there is one in the slot."),
     ("This browser tab", "WebAssembly",
-     "The system compiled to wasm. The page is the display &mdash; the OS "
-     "ships draw commands and never rasterizes a pixel itself."),
+     "The system compiled to wasm &mdash; MicroPython plus the same C drawing "
+     "kernels the boards run. The page draws every pixel itself, a locked "
+     "60&nbsp;fps in headless-Chrome runs, and nothing is streamed from "
+     "anywhere."),
     ("PC simulator", "pure Python",
      "The host reference and the fast dev loop. A pixel that moves here moves on "
      "glass: the firmware freezes copies of the same modules."),
@@ -224,13 +235,15 @@ TARGETS = [
 # Being straight about the state is the point of this section. Update it when
 # one of these lands -- a stale honesty list is worse than none.
 ROUGH = [
-    "Both boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
+    "All three boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
     "Open holes are filed rather than hidden: the system apps are not editable "
-    "yet, USB-HID keyboard and audio on the P4 are unbuilt, and the device web "
-    "view works but is bandwidth-bound rather than smooth.",
+    "yet, USB-HID keyboard and audio on the P4 are unbuilt, and the console in "
+    "a browser does not sync with a board yet &mdash; the one on this page "
+    "holds the built-in cartridges only, and a board-served one can read the "
+    "cartridges off that board but cannot save your changes home to it.",
 ]
 
 
@@ -356,7 +369,7 @@ def font_face():
 # The at-a-glance status list: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
-    ("ok", "The system", "boots on two ESP32 boards"),
+    ("ok", "The system", "boots on three ESP32 boards"),
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
@@ -646,7 +659,7 @@ footer a{margin-right:4px}
         on. The software is cartridges &mdash; games, wallpapers, tools, whatever you
         make &mdash; and you open, change and run any of them on the board itself,
         with no host computer in the loop.</p>
-      <p class="sub">It boots on two off-the-shelf boards today, and the same source
+      <p class="sub">It boots on three off-the-shelf boards today, and the same source
         tree is a PC simulator and the browser build below. Approachable enough for a
         ten-year-old (that is what the block editor is for) without being only that:
         underneath is a MicroPython firmware with native C kernels, a Lua VM, OTA
@@ -746,7 +759,7 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 firmware/web_runner/build.sh &amp;&amp; make site</pre>
   <footer>
     <a href="https://github.com/moybyte-org/moybyte">Source</a> &middot;
-    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.1)</a> &middot;
+    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.2)</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/blob/master/docs/moy_cart_api.md">Cart API</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>

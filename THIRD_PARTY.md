@@ -29,11 +29,13 @@ separate question from what is committed.
 | Lua 5.4.7 (measurement spike) | `experiments/lua_bridge/components/lua/` | [lua.org](https://www.lua.org/) | MIT | No |
 | `esp_lcd_ek79007` panel driver | `firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_dsi/vendor/` | [espressif/esp-iot-solution](https://github.com/espressif/esp-iot-solution) | Apache-2.0 | No |
 | ST7789 init register values (T-Deck panel) | `firmware/lilygo_t_deck_plus_mainline/native/moy_lcd/modmoy_lcd.c` | [lvgl-micropython/lvgl_micropython](https://github.com/lvgl-micropython/lvgl_micropython) | MIT | **Yes** — transcribed to C |
+| AXS15231B init register values (Guition panel) | `firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c` | [esphome/esphome](https://github.com/esphome/esphome) | MIT (their Python half) | **Yes** — transcribed to C |
 | esptool-js 0.6.0 (the site's board flasher) | `site/vendor/esptool-js/` | [espressif/esptool-js](https://github.com/espressif/esptool-js) | Apache-2.0 | No |
 | `font_petme128_8x8` glyph data | `runtime/font.py`; derived webfont `site/petme128.woff2` | [MicroPython](https://github.com/micropython/micropython) | MIT | No (re-encoded) |
 | PICO-8 base palette + colour names | `runtime/palette.py` (`_BASE16`, `NAMES`) | [PICO-8 / Lexaloffle](https://www.lexaloffle.com/pico-8.php) | CC-0 | No |
 | Pixelarticons icon shapes | `runtime/chrome.py` (`_GLYPHS` and siblings) | [halfmage/pixelarticons](https://github.com/halfmage/pixelarticons) | MIT | **Yes** — retraced |
 | T-Deck pin assignments | `docs/boards/lilygo_t_deck_plus.md` | [Xinyuan-LilyGO/T-Deck](https://github.com/Xinyuan-LilyGO/T-Deck) | facts; source cited | Transcribed |
+| Guition JC3248W535 pin assignments | `firmware/guition_jc3248w535/board.toml` | the owner's own ESPHome definition for the board | facts; source cited | Transcribed |
 
 Build-time upstreams that end up inside shipped binaries are in §5.
 Development and optional dependencies that are *not* redistributed are in §6.
@@ -130,6 +132,8 @@ the ones already proven on this exact glass by the fork build.
   depends on LVGL.
 - The panel module around the table (SPI bus, esp_lcd wiring, the framebuffers,
   the banded SRAM-bounce flush) is Moybyte's own work.
+- The Guition board's panel needs the same kind of entry for the same kind of
+  reason; it is §2.6.
 
 ### 2.5 esptool-js — the website's board flasher
 
@@ -156,6 +160,43 @@ board" section uses to write a firmware image to a board over Web Serial.
   whatever a CDN serves that day.
 - The flasher around it (`site/flash.js`, the board table in `site/build.py`)
   is Moybyte's own work.
+
+### 2.6 AXS15231B init register values — the Guition panel
+
+`firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c`
+(the `MOY_AXS_INIT` table and the INIT note above it)
+
+The §2.4 problem again, one board over, and worse: there is no public
+AXS15231B datasheet worth the name and ESP-IDF ships no driver for the part,
+so the three vendor commands this panel needs before it will accept pixels
+cannot be re-derived here. The only provenance available is a sequence already
+proven on this exact glass — ESPHome's `AXS15231` model, which the owner's
+working ESPHome build for this board runs — plus the standard DCS tail that
+component generates around it (`COLMOD` 0x55, `MADCTL`, `INVOFF`, `SLPOUT`,
+`DISPON`).
+
+- **Upstream:** [`esphome/esphome`](https://github.com/esphome/esphome) —
+  `esphome/components/qspi_dbi/models.py`, the `DriverChip("AXS15231")` block
+  (`0xBB …5A A5` / `0xC1 0x33` / `0xBB …00 00`).
+- **Licence:** MIT, © 2019 ESPHome. Their licence is a split one and the
+  direction matters: the **C++/runtime** files are GPLv3 and *the Python
+  codebase and everything else is MIT*. This table comes from a `.py` file.
+- **Modified: yes** — a transcription, as §2.4 is. An ESPHome Python component
+  that emits writes becomes a static C command table sent over raw
+  `spi_master`, and the tail is spelled out rather than generated. Register
+  *values* for a part with no datasheet are hardware facts; nothing expressive
+  crossed.
+- The panel module around the table (the QSPI bus, the whole frame under one
+  CS assertion, the band/bounce/kick-pump-drain flush, the landscape
+  rotate-gather) is Moybyte's own work — see the module header for why that C
+  body is not shared with `moy_lcd`'s.
+- **The touch half is a protocol constant, not a table.** `device/axs_touch.py`
+  writes the same 11-byte read-touchpad command ESPHome's
+  `axs15231_touchscreen.cpp` declares — a C++ file, so GPLv3 on their side of
+  the split. What crossed is that byte string: the command a chip with no
+  datasheet answers to. No code did — the poller, its no-news contract and the
+  idle-filler lift detection are Moybyte's, written against the observed
+  behaviour of the part (`firmware/guition_jc3248w535/README.md` records it).
 
 ---
 
@@ -279,6 +320,24 @@ These are hardware facts about a physical product, not expressive work, and no
 upstream code was copied — but the source is named here because the repository
 names it, and a reader deserves to know where the numbers came from.
 
+### 3.5 Board pin assignments — Guition JC3248W535
+
+`firmware/guition_jc3248w535/board.toml` and the constants derived from it in
+`firmware/guition_jc3248w535/native/moy_axs/` and `device/axs_touch.py`.
+
+Guition publishes no board file worth transcribing, so the pins came from a
+working **ESPHome** definition for this board that the owner already ran on
+the physical unit (`~/Documents/Work/esphome/JC3248W535.yaml`, not in this
+repo): QSPI clk/data/cs, the AXS15231 touch I²C pins, the backlight and
+battery-ADC GPIOs. That file is the owner's own configuration, not upstream
+work; ESPHome's contribution to it is the component vocabulary, covered by
+§2.6.
+
+Same reasoning as §3.4: GPIO numbers and an I²C address are hardware facts
+about a physical product, and none of the *tuning* beside them in that YAML
+was copied — that is deliberately re-derived on this glass, because per-board
+verdicts do not transfer (`sdkconfig.board` carries the argument).
+
 ---
 
 ## 4. Formats, protocols and behavioural parity — implemented, not copied
@@ -326,11 +385,18 @@ WebAssembly web runner — contain compiled code from them, and those artifacts
 carry the upstreams' obligations wherever they are published.
 
 Since the project site gained its board flasher, "published" covers two more
-channels: the rolling `firmware-latest` release (both boards' images, replaced
-per board as they are rebuilt) and the website itself, which serves its own copy
-under `_site/firmware/` for a browser to write. §5.1 and §5.2 apply to both.
+channels: the rolling `firmware-latest` release (all three boards' images,
+replaced per board as they are rebuilt) and the website itself, which serves its
+own copy under `_site/firmware/` for a browser to write. The per-board tables
+below — §5.2 (P4), §5.3 (T-Deck) and §5.5 (Guition) — apply to both.
 
-### 5.1 LilyGO T-Deck Plus, ESP32-S3 (`firmware/lilygo_t_deck_plus_mainline/build.sh`)
+### 5.1 LilyGO T-Deck Plus on the lvgl_micropython fork — HISTORICAL
+
+The fork build, **deleted 2026-08-17**. Nothing produces these images any more:
+the T-Deck ships from §5.3's mainline build, and the path this section used to
+be titled with is that build's, not this one's. The table stays because images
+built this way *were* published to `firmware-latest` and are on boards in the
+world, and those binaries carry these obligations wherever they went.
 
 | Project | Upstream | Licence |
 |---|---|---|
@@ -374,6 +440,22 @@ by §2.4, not by this table.
 The published `micropython.wasm` / `micropython.mjs` bundle therefore contains
 MicroPython, Emscripten runtime support and Lua — all MIT — and any page
 hosting them should carry those notices.
+
+### 5.5 Guition JC3248W535, ESP32-S3 (`firmware/guition_jc3248w535/build.sh`)
+
+The third board, built the way §5.2 and §5.3 are — the same
+`tools/esp32_build_lib.sh` clones the same two upstreams, stages the shared
+`native/` modules and this board's own `native/moy_axs`, and freezes the
+console.
+
+| Project | Upstream | Licence |
+|---|---|---|
+| MicroPython v1.28.0 + micropython-lib | <https://github.com/micropython/micropython> | MIT |
+| Berkeley DB 1.85 | <https://github.com/micropython/berkeley-db-1.xx> (MicroPython's `btree`) | BSD-style (4.4BSD, Regents of the University of California) |
+| ESP-IDF v5.5.1 | <https://github.com/espressif/esp-idf> | Apache-2.0 |
+
+The AXS15231B register values this build sends are carried in-tree and are
+covered by §2.6, not by this table.
 
 ### 6.4 `experiments/wasm_aot/build.sh` (experiment only, nothing shipped)
 

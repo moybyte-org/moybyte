@@ -36,8 +36,16 @@ while it was not draining, the harness resent the chunk it had heard nothing
 about, and the resend landed on the truncated remains as a SyntaxError. No chunk
 size fixes a multi-second stall -- but the board is already on WiFi and already
 knows how to pull, so the same downloader that carries a 1MB wasm carries a cart
-in one request. The serial tool still works for a one-file edit where standing
-up a server is the heavier half.
+in one request.
+
+That stall mechanism is real and still is. What it does NOT mean, and what this
+paragraph used to read as, is that serial cart push does not work. Dropping the
+chunk 768 -> 256 (the P4's UART stdin ring is ~256 bytes with no flow control;
+board.toml's [serial] block carries the measurement) took the same 44KB cart
+clean on the FIRST try, 2026-08-19 -- 88s there, 45s on the T-Deck, whose RX
+#201 fixed three days earlier. So tools/push_cart.py is the ordinary route for a
+cart on any of the three boards; THIS downloader stays the right answer for the
+~1MB web bundle, where one HTTP request beats thousands of base64 chunks.
 """
 
 from __future__ import annotations
