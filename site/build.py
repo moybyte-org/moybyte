@@ -20,9 +20,13 @@ Build the player first, or there is nothing to embed:
 The page also FLASHES a board over USB (site/flash.js, esptool-js over Web
 Serial). The images it writes are CI builds pulled down beforehand:
 
-    python3 tools/fetch_ci_firmware.py     # -> dist/ci-firmware/{tdeck,p4}/
+    python3 tools/fetch_ci_firmware.py --release firmware-latest \
+        --out dist/ci-firmware/stable      # -> stable/{tdeck,p4,guition_s3}/
+    python3 tools/fetch_ci_firmware.py --release firmware-beta \
+        --out dist/ci-firmware/beta        # the picker's other option
 
-with no images present, the flash section simply says there is no current build.
+A single flat dist/ci-firmware/<board>/ is still read, as `stable`. With no
+images present, the flash section simply says there is no current build.
 
 Everything under _site/ is generated. Edit this file, not the output.
 """
@@ -41,6 +45,24 @@ PLAYER_SRC = os.path.join(ROOT, "firmware", "web_runner", "dist")
 VENDOR_SRC = os.path.join(HERE, "vendor")
 FIRMWARE_SRC = os.path.join(ROOT, "dist", "ci-firmware")
 sys.path.insert(0, ROOT)
+
+# Which builds the flasher offers, in the order the picker shows them. Each is a
+# separate GitHub release that tools/fetch_ci_firmware.py pulls with --release
+# into its own subtree of FIRMWARE_SRC, because a browser CANNOT fetch a release
+# asset (no CORS headers) -- every image the page can flash has to be baked into
+# the site. That is also why this list stays short: each variant costs its own
+# copy of every board's image, ~11MB a variant across three boards.
+#
+# Older VERSIONS are deliberately not baked. They live as assets on their `v*`
+# tag, and the page reaches them the only way CORS allows: the visitor downloads
+# the .bin and hands it back through the file picker (site/flash.js), which
+# flashes it with the same offset and parameters as a baked one.
+VARIANTS = (
+    ("stable", "Latest", "firmware-latest",
+     "the tested release, and what the stable OTA channel serves"),
+    ("beta", "Dev", "firmware-beta",
+     "built from every push to dev -- newer, and not board-tested"),
+)
 
 
 def palette():
@@ -282,61 +304,103 @@ def moy_mark(pal, scale=3):
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
+def publish_image(board, folder, out, variant, vlabel):
+    """Copy one board's image for one variant into the site. -> record or None.
+
+    The record is what site/flash.js reads to flash it: where the file is, how
+    big it should be, what it should hash to, and the board's own write
+    parameters.
+    """
+    name = next((n for n in board["images"]
+                 if os.path.exists(os.path.join(folder, n))), None)
+    if not name:
+        return None
+
+    blob = open(os.path.join(folder, name), "rb").read()
+    # Variant in the PATH, so two channels' images can sit side by side under
+    # the same board without one overwriting the other.
+    dest = os.path.join(out, "firmware", variant, board["id"])
+    os.makedirs(dest, exist_ok=True)
+    with open(os.path.join(dest, name), "wb") as f:
+        f.write(blob)
+
+    def sidecar(name):
+        path = os.path.join(folder, name)
+        if not os.path.exists(path):
+            return {}
+        try:
+            return json.load(open(path, encoding="utf-8"))
+        except ValueError:
+            return {}                        # a corrupt sidecar is not fatal
+
+    source = sidecar("source.json")
+    # The OTA manifest, when the fetch came from a release: the only place the
+    # human version string lives.
+    ota = sidecar("manifest.json")
+    return {
+        "id": board["id"],
+        "label": board["label"],
+        "chip": board["chip"],
+        "variant": variant,
+        "variant_label": vlabel,
+        "file": name,
+        "url": "firmware/%s/%s/%s" % (variant, board["id"], name),
+        "size": len(blob),
+        "sha256": hashlib.sha256(blob).hexdigest(),
+        "offset": board["offset"],
+        "baud": board["baud"],
+        "reset": board["reset"],
+        "usb_otg": board["usb_otg"],
+        "after": board["after"],
+        "done": board["done"],
+        # Provenance: the page states which build it is about to write, so
+        # "the latest build" is checkable rather than a claim.
+        "commit": source.get("commit", ""),
+        "run_url": source.get("run_url", ""),
+        "run_number": source.get("run_number"),
+        "built": source.get("built", ""),
+        # What the DEVICE will call this once it is running -- the same string
+        # the update screen shows, so the page and the board agree.
+        "version": ota.get("label") or "",
+    }
+
+
 def firmware(src, out):
-    """Publish one flashable image per board, and describe what was published.
+    """Publish every available build of every board, and describe them.
 
-    `src` is tools/fetch_ci_firmware.py's output: a folder per board holding
-    that board's CI artifact plus the source.json saying which run it came from.
-    A board with nothing there is not an error -- the firmware workflow is
-    manual, artifacts expire, and the page renders the gap honestly.
+    `src` is tools/fetch_ci_firmware.py's output. Two layouts are accepted:
 
-    Returns the BOARDS table with each entry's "fw" set to the published image's
-    manifest record (or None). That record is what site/flash.js reads.
+        <src>/<variant>/<board>/...    one subtree per VARIANTS entry
+        <src>/<board>/...              the older single-channel layout
+
+    The flat one is read as `stable`, so a checkout that ran the fetch tool the
+    old way still builds a working page with one choice in the picker.
+
+    A board with nothing anywhere is not an error -- the firmware workflow is
+    dispatched by hand, artifacts expire, and the page renders the gap honestly.
+
+    Each card gets "builds" (every variant that had an image) and "fw" (the
+    first of them, which is what the page defaults to and what the older
+    single-build code paths still read).
     """
     cards = []
     for board in BOARDS:
-        card = dict(board, fw=None)
-        cards.append(card)
-        folder = os.path.join(src, board["id"])
-        name = next((n for n in board["images"]
-                     if os.path.exists(os.path.join(folder, n))), None)
-        if not name:
-            continue
-
-        blob = open(os.path.join(folder, name), "rb").read()
-        dest = os.path.join(out, "firmware", board["id"])
-        os.makedirs(dest, exist_ok=True)
-        with open(os.path.join(dest, name), "wb") as f:
-            f.write(blob)
-
-        source = {}
-        meta = os.path.join(folder, "source.json")
-        if os.path.exists(meta):
-            try:
-                source = json.load(open(meta, encoding="utf-8"))
-            except ValueError:
-                source = {}                  # a corrupt sidecar is not fatal
-        card["fw"] = {
-            "id": board["id"],
-            "label": board["label"],
-            "chip": board["chip"],
-            "file": name,
-            "url": "firmware/%s/%s" % (board["id"], name),
-            "size": len(blob),
-            "sha256": hashlib.sha256(blob).hexdigest(),
-            "offset": board["offset"],
-            "baud": board["baud"],
-            "reset": board["reset"],
-            "usb_otg": board["usb_otg"],
-            "after": board["after"],
-            "done": board["done"],
-            # Provenance: the page states which build it is about to write, so
-            # "the latest build" is checkable rather than a claim.
-            "commit": source.get("commit", ""),
-            "run_url": source.get("run_url", ""),
-            "run_number": source.get("run_number"),
-            "built": source.get("built", ""),
-        }
+        builds = []
+        for variant, vlabel, _tag, _note in VARIANTS:
+            folder = os.path.join(src, variant, board["id"])
+            if not os.path.isdir(folder):
+                continue
+            got = publish_image(board, folder, out, variant, vlabel)
+            if got:
+                builds.append(got)
+        if not builds:
+            # The pre-picker layout: no variant subtrees, board folders at the top.
+            folder = os.path.join(src, board["id"])
+            if os.path.isdir(folder):
+                got = publish_image(board, folder, out, VARIANTS[0][0], VARIANTS[0][1])
+                if got:
+                    builds.append(got)
+        cards.append(dict(board, builds=builds, fw=builds[0] if builds else None))
     return cards
 
 
@@ -394,21 +458,50 @@ def flash_cards(cards):
                       '<pre>%s</pre>' % c["cli"])
             out.append("\n".join(li) + "</li>")
             continue
-        bits = ["Built " + when(fw["built"])]
-        if fw["run_url"]:
-            bits.append('<a href="%s">run%s</a>'
-                        % (fw["run_url"],
-                           " #%s" % fw["run_number"] if fw["run_number"] else ""))
-        if fw["commit"]:
-            bits.append('<a href="%s/commit/%s">%s</a>'
-                        % (REPO, fw["commit"], fw["commit"][:7]))
-        bits.append("%s &rarr; 0x%x" % (size_mb(fw["size"]), fw["offset"]))
-        li.append('<p class="fwmeta">%s</p>' % " &middot; ".join(bits))
+        builds = c["builds"]
+        # The picker only earns its space when there is a choice to make.
+        if len(builds) > 1:
+            opts = "".join(
+                '<option value="%s"%s>%s%s</option>'
+                % (b["variant"], " selected" if i == 0 else "",
+                   b["variant_label"],
+                   " &mdash; %s" % b["version"] if b["version"] else "")
+                for i, b in enumerate(builds))
+            li.append('<label class="pick"><span>Build</span>'
+                      '<select class="variant">%s</select></label>' % opts)
+        # One meta line and one download link PER build, with the unselected ones
+        # hidden. Toggling beats rewriting: the meta carries links, and building
+        # those in JS would mean handing innerHTML strings to the page.
+        for i, b in enumerate(builds):
+            bits = ["Built " + when(b["built"])]
+            if b["run_url"]:
+                bits.append('<a href="%s">run%s</a>'
+                            % (b["run_url"],
+                               " #%s" % b["run_number"] if b["run_number"] else ""))
+            if b["commit"]:
+                bits.append('<a href="%s/commit/%s">%s</a>'
+                            % (REPO, b["commit"], b["commit"][:7]))
+            bits.append("%s &rarr; 0x%x" % (size_mb(b["size"]), b["offset"]))
+            li.append('<p class="fwmeta" data-variant="%s"%s>%s</p>'
+                      % (b["variant"], "" if i == 0 else " hidden",
+                         " &middot; ".join(bits)))
         li.append("<p>%s</p>" % c["prep"])
+        dls = "".join(
+            '<a class="btn dl" data-variant="%s" href="%s"%s download>'
+            'Download the .bin</a>' % (b["variant"], b["url"], "" if i == 0 else " hidden")
+            for i, b in enumerate(builds))
         li.append('<p class="act">'
                   '<button class="btn pri go" type="button">Flash this board</button>'
-                  '<a class="btn" href="%s" download>Download the .bin</a></p>'
-                  % fw["url"])
+                  '%s</p>' % dls)
+        # An older VERSION is not baked into the site (CORS -- see VARIANTS), so
+        # the way back to one is: download it from its tag, then hand the file
+        # over here. Same offset, same parameters, same flasher.
+        li.append('<details class="older"><summary>Flash a different version'
+                  '</summary><p>Every release keeps its images: pick a version '
+                  'from <a href="%s/releases">the releases</a>, download this '
+                  'board\'s <code>%s-*.bin</code>, then choose it here.</p>'
+                  '<label class="file"><input type="file" accept=".bin"></label>'
+                  '</details>' % (REPO, c["id"]))
         li.append('<label class="erase"><input type="checkbox">'
                   '<span>%s</span></label>' % c["erase"])
         if c["manual"]:
@@ -440,7 +533,10 @@ def page(pal, has_player, cards):
         for t, chip, b in TARGETS)
     rough = "\n".join("      <li>%s</li>" % r for r in ROUGH)
     boards = flash_cards(cards)
-    published = [c["fw"] for c in cards if c["fw"]]
+    # One manifest entry per BOARD, carrying every build the picker offers.
+    # The default build's fields stay at the top level so a reader that
+    # predates the picker still finds what it expects.
+    published = [dict(c["fw"], builds=c["builds"]) for c in cards if c["fw"]]
     # The flasher's 218 KB of vendored esptool-js is only worth loading when
     # there is something to write.
     # Only worth saying when there is a button to press. The "not proven on
@@ -614,6 +710,17 @@ body.noscroll{overflow:hidden}
 .boards pre{margin:12px 0 0;font-size:12px}
 .fwmeta{margin:0 0 9px;font:11px/1.7 var(--mono);color:var(--muted)}
 .fwmeta a{color:var(--muted)}
+/* The build picker: stable vs dev, when the site was built with both. */
+.pick{display:flex;gap:8px;align-items:center;margin:0 0 9px;
+  font-size:12px;color:var(--muted)}
+.pick select{font:12px var(--mono);color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);padding:3px 6px;flex:1 1 auto}
+/* Flashing a version the site does not carry -- folded away, because it is the
+   uncommon path and it asks the visitor to go and fetch a file first. */
+.older{margin:12px 0 0;font-size:12px;color:var(--muted)}
+.older summary{cursor:pointer}
+.older p{margin:8px 0 0}
+.older input{margin:8px 0 0;font-size:11px;color:var(--muted);max-width:100%%}
 .act{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 0}
 .act .btn{font-size:14px;padding:7px 13px}
 button.btn{appearance:none;cursor:pointer;font-family:inherit}
@@ -877,7 +984,10 @@ def main():
     # that writes them, and a manifest that says what each one is. All three
     # only ship when there is at least one image to flash.
     cards = firmware(os.path.abspath(args.firmware), out)
-    published = [c["fw"] for c in cards if c["fw"]]
+    # One manifest entry per BOARD, carrying every build the picker offers.
+    # The default build's fields stay at the top level so a reader that
+    # predates the picker still finds what it expects.
+    published = [dict(c["fw"], builds=c["builds"]) for c in cards if c["fw"]]
     if published:
         with open(os.path.join(out, "firmware", "manifest.json"),
                   "w", encoding="utf-8") as f:

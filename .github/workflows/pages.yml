@@ -8,8 +8,9 @@
 # so only a change to the build itself pays for it again.
 #
 # The page also FLASHES a board over USB, so this job carries the firmware too:
-# it pulls each board's image out of the rolling `firmware-latest` release and
-# site/build.py publishes it under _site/firmware/. That copy is not a
+# it pulls each board's image out of the rolling `firmware-latest` AND
+# `firmware-beta` releases -- the page's build picker offers both -- and
+# site/build.py publishes them under _site/firmware/<variant>/. That copy is not a
 # convenience -- GitHub serves neither Actions artifacts nor release assets with
 # CORS headers, so a browser cannot fetch a firmware image from anywhere but the
 # page's own origin (tools/fetch_ci_firmware.py explains it at length). This
@@ -35,11 +36,15 @@ on:
       - ".github/workflows/pages.yml"
   # A finished firmware build is new content for this site, so republish around
   # it instead of waiting for the next unrelated site push. (Only on success,
-  # and only off MASTER -- see the job's `if`; this event fires on every
-  # conclusion and every branch. The site flashes the STABLE channel, so a dev
-  # build changes nothing here: its images go to the `firmware-beta` release for
-  # the OTA channel, and rebuilding the whole wasm player around them would burn
-  # a long job to publish the same page.)
+  # and only off master or dev -- see the job's `if`; this event fires on every
+  # conclusion and every branch.)
+  #
+  # DEV COUNTS NOW. It did not use to: the page flashed the stable channel
+  # alone, so a beta build changed nothing here and rebuilding the wasm player
+  # around it would have burned a long job to publish the same page. The page
+  # offers a Dev build in its picker now, so a beta that does not republish is a
+  # picker serving a stale image under a version string that says otherwise --
+  # and the player build is cached, so the extra run is not the whole job.
   workflow_run:
     workflows: ["Firmware build"]
     types: [completed]
@@ -65,7 +70,8 @@ jobs:
     if: >-
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'master')
+       (github.event.workflow_run.head_branch == 'master' ||
+        github.event.workflow_run.head_branch == 'dev'))
     runs-on: ubuntu-latest
     outputs:
       player: ${{ steps.player.outcome }}
@@ -103,7 +109,18 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/fetch_ci_firmware.py --out dist/ci-firmware
+        # One subtree per build the flasher offers (site/build.py VARIANTS).
+        # The beta is fetched too now: the page lets a visitor pick between the
+        # tested release and the dev channel, and a browser cannot reach either
+        # release directly (no CORS), so both have to be baked in. The beta is
+        # best-effort -- a repo whose dev branch has never published still gets
+        # a site with the stable build in the picker.
+        run: |
+          python3 tools/fetch_ci_firmware.py \
+            --release firmware-latest --out dist/ci-firmware/stable
+          python3 tools/fetch_ci_firmware.py \
+            --release firmware-beta --out dist/ci-firmware/beta || \
+            echo "::warning::no beta images -- the picker will offer stable only"
 
       - name: Assemble the site
         run: python3 site/build.py --out _site --firmware dist/ci-firmware
