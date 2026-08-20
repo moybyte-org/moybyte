@@ -137,6 +137,7 @@ class SettingsLayer:
         self._rows_upd = False
         self._rows_onl = False
         self._rows_web = False
+        self._rows_crisp = False
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -667,9 +668,10 @@ class SettingsLayer:
         upd = ws._update_available()
         onl = ws._online_update_available()
         web = getattr(ws, "webhost", None) is not None
+        crisp = getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
         if (self._rows_cache is not None and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
-                and web == self._rows_web):
+                and web == self._rows_web and crisp == self._rows_crisp):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -677,6 +679,15 @@ class SettingsLayer:
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
+        if crisp:
+            # CRISP PIXELS (#204): nearest-neighbour game composite, only on boards
+            # whose hardware scaler is fixed bilinear (the P4's PPA). Sits by
+            # FRAMESKIP -- both are play-time quality/perf trades. Capability-
+            # gated like BLUETOOTH so the other tiers keep frozen pixels; the
+            # index lookup (rebuild-only, memoized) survives row reordering.
+            i = rows.index(("frameskip", "FRAMESKIP", "diag")) + 1
+            rows = rows[:i] + (("crisp_pixels", "CRISP PIXELS", "diag"),) \
+                + rows[i:]
         if web:
             # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
             # board, so a browser on the same network opens YOUR carts. Its own
@@ -693,6 +704,7 @@ class SettingsLayer:
         self._rows_upd = upd
         self._rows_onl = onl
         self._rows_web = web
+        self._rows_crisp = crisp
         self._rows_cache = rows
         return rows
 
@@ -719,6 +731,8 @@ class SettingsLayer:
             ws.set_diag_sd(not ws.diag_sd)
         elif key == "frameskip":
             ws.set_frameskip(not ws.frameskip)
+        elif key == "crisp_pixels":
+            ws.set_crisp_pixels(not ws.crisp_pixels)
         elif key == "show_fps":
             ws.set_show_fps(not ws.show_fps)
         else:

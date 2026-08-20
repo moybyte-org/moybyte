@@ -1254,6 +1254,14 @@ class Workstation:
         # until the on-glass feel verdict. _fs_phase is the alternation bit.
         self.frameskip = False
         self._fs_phase = False
+        # CRISP PIXELS: nearest-neighbour game composite on canvases whose
+        # hardware scaler is fixed bilinear (the P4's PPA -- the only such
+        # tier; every other composite is already nearest). Capability-gated:
+        # the Settings row shows only where sys_canvas exposes set_crisp_scale,
+        # so the other tiers keep their frozen Settings pixels. Default OFF --
+        # smooth is the shipped behavior; the trade is sharp pixel art vs a
+        # real per-frame CPU cost the async PPA path doesn't pay.
+        self.crisp_pixels = False
 
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
@@ -1583,6 +1591,9 @@ class Workstation:
         self.set_show_fps(self.system.get("show_fps", True), persist=False)
         # #77: apply the persisted frameskip gate (default OFF).
         self.set_frameskip(self.system.get("frameskip", False), persist=False)
+        # Apply the persisted crisp-composite gate (default OFF = smooth).
+        self.set_crisp_pixels(self.system.get("crisp_pixels", False),
+                              persist=False)
 
     def set_icon_sheet(self, sheet):
         """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
@@ -1855,6 +1866,22 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["frameskip"] = self.frameskip
+            self._persist_system()
+
+    def set_crisp_pixels(self, on, persist=True):
+        """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
+        persist it. The mode lives on the SYSTEM canvas (set_crisp_scale --
+        the P4's P4SystemCanvas routes the game composite nearest-neighbour
+        instead of the PPA's fixed-bilinear scaler); a canvas without the hook
+        never shows the row, so this setter is then only ever the boot apply
+        of a stale system.json key."""
+        self.crisp_pixels = bool(on)
+        hook = getattr(self.sys_canvas, "set_crisp_scale", None)
+        if hook is not None:
+            hook(self.crisp_pixels)
+        self._dirty = True
+        if persist:
+            self.system["crisp_pixels"] = self.crisp_pixels
             self._persist_system()
 
     def set_show_fps(self, on, persist=True):

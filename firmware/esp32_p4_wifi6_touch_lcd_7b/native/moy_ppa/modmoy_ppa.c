@@ -19,6 +19,13 @@
 
 #include "driver/ppa.h"
 #include "esp_cache.h"
+#include "esp_heap_caps.h"
+
+// The ONE nearest-neighbour expand kernel (blit_crisp below). Staged sibling:
+// build.sh places the shared moy_gfx at ../.staged/moy_gfx, and this module's
+// micropython.cmake adds that include dir -- so the compiler checks the
+// signature and the linker joins the single body; no transcribed twin.
+#include "moy_gfx_kernels.h"
 
 static ppa_client_handle_t s_srm = NULL;
 static ppa_client_handle_t s_fill = NULL;
@@ -78,7 +85,10 @@ static mp_obj_t moy_ppa_init(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_init_obj, moy_ppa_init);
 
+static void crisp_free_bands(void);
+
 static mp_obj_t moy_ppa_deinit(void) {
+    crisp_free_bands();
     if (s_srm != NULL) {
         ppa_unregister_client(s_srm);
         s_srm = NULL;
@@ -207,6 +217,173 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_async_obj, 9, 9,
                                            moy_ppa_blit_async);
 
 
+// -- CRISP composite: banded nearest-neighbour upscale over an SRAM bounce ----
+// (#204 carries the full measurement ledger and the refuted alternatives.)
+//
+// The PPA's SRM scaler is fixed BILINEAR in silicon (no nearest mode, no
+// flag), so a pixel-art cart composited by blit_scale comes out smeared. The
+// pure-CPU alternative (moy_gfx.blit565_scale straight into the PSRAM
+// framebuffer) measures 12.9ms at scale 2 on glass -- dominated not by the
+// arithmetic but by the cache's WRITE-ALLOCATE on the PSRAM destination (the
+// same mechanism the fill client's comment records: every "pure write" line
+// is read in first). Probed on glass 2026-08-20: the same expansion into an
+// internal-SRAM band costs 7.7ms, and a 1:1 PPA ship of the bands is
+// ~100MB/s and byte-exact.
+//
+// So blit_crisp pipelines: expand band i on the CPU (into SRAM -- cheap
+// writes) while band i-1's 1:1 PPA DMA ships to the framebuffer. The dest of
+// each ship is a BAND-SCOPED picture (the strip's first row, not the whole
+// framebuffer), because the driver invalidates the whole out-picture buffer
+// per submit -- handing it 1.2MB per band cost ~0.5ms x N bands when this ran
+// as Python moy_ppa calls, and scoping it is what a C body buys.
+//
+// Bands are allocated LAZILY on the first crisp composite and freed by
+// crisp_release() (the Settings toggle turning crisp off): internal SRAM is
+// the Lua allocator's preferred pool, so a mode nobody enabled must not tax
+// it. Any refusal (no PPA / no SRAM / geometry) returns False and the caller
+// falls back to the CPU kernel -- identical pixels, slower.
+
+#define CRISP_BAND_BYTES (64 * 1024)
+static uint16_t *s_band[2] = { NULL, NULL };
+static bool s_band_failed = false;
+
+static void crisp_free_bands(void) {
+    // An in-flight ship still READS a band: fence everything first.
+    while (s_done != s_submitted) { }
+    for (int i = 0; i < 2; i++) {
+        if (s_band[i] != NULL) {
+            heap_caps_free(s_band[i]);
+            s_band[i] = NULL;
+        }
+    }
+    s_band_failed = false;
+}
+
+// crisp_release(): return the bounce bands to the internal heap (crisp off).
+static mp_obj_t moy_ppa_crisp_release(void) {
+    crisp_free_bands();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_crisp_release_obj,
+                                 moy_ppa_crisp_release);
+
+// blit_crisp(dst, dw, dh, dx, dy, src, sw, sh, scale, defer) -> bool
+//   Nearest-neighbour sibling of blit_scale/blit_async. defer != 0 returns
+//   with the LAST band's DMA still in flight (the caller sets the
+//   compositor's composite-pending flag; present_pending's sync() is the
+//   fence, exactly the blit_async contract); defer == 0 fences before
+//   returning so following CPU chrome can never race the DMA.
+static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    if (s_srm == NULL || s_band_failed) {
+        return mp_const_false;
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t scale = mp_obj_get_int(args[8]);
+    bool defer = mp_obj_is_true(args[9]);
+    if (scale < 1 || sw <= 0 || sh <= 0) {
+        return mp_const_false;
+    }
+    int out_w = sw * scale, out_h = sh * scale;
+    // Same fit gate as the bilinear path: the scaled block must land inside
+    // the picture (the PPA cannot clip); a non-fit falls to the CPU kernel.
+    if (dx < 0 || dy < 0 || dx + out_w > dw || dy + out_h > dh) {
+        return mp_const_false;
+    }
+    // Each ship's out picture starts at a ROW of dst: that address and the
+    // strip size must be cache-line aligned or the driver rejects the op.
+    // (dw*2 == 2048 on the DSI framebuffer, so rows inherit its alignment.)
+    if (((uintptr_t)dst.buf & 63u) != 0 || (((size_t)dw * 2u) & 63u) != 0) {
+        return mp_const_false;
+    }
+    int band_rows = (int)(CRISP_BAND_BYTES / 2 / (size_t)out_w);
+    band_rows -= band_rows % scale;          // bands align to whole src rows
+    if (band_rows < scale) {
+        return mp_const_false;
+    }
+    for (int i = 0; i < 2; i++) {
+        if (s_band[i] == NULL) {
+            s_band[i] = heap_caps_aligned_alloc(
+                64, CRISP_BAND_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+            if (s_band[i] == NULL) {
+                s_band_failed = true;        // latch: don't re-probe per frame
+                crisp_free_bands();
+                return mp_const_false;
+            }
+        }
+    }
+    for (int y = 0, nb = 0; y < out_h; y += band_rows, nb++) {
+        int bh = out_h - y < band_rows ? out_h - y : band_rows;
+        uint16_t *band = s_band[nb & 1];
+        // Reuse fence: this band buffer may still feed the ship submitted two
+        // bands ago -- wait until at most ONE transaction is in flight.
+        while ((uint32_t)(s_submitted - s_done) > 1) { }
+        mg_blit565_scale(band, CRISP_BAND_BYTES / 2, out_w, bh, 0, 0,
+                         (const uint16_t *)src.buf + (size_t)(y / scale) * (size_t)sw,
+                         (size_t)(bh / scale) * (size_t)sw,
+                         sw, bh / scale, scale);
+        uint16_t *strip = (uint16_t *)dst.buf + (size_t)(dy + y) * (size_t)dw;
+        size_t strip_len = (size_t)dw * (size_t)bh * 2u;
+        ppa_srm_oper_config_t op = {
+            .in = {
+                .buffer = band,
+                .pic_w = (uint32_t)out_w,
+                .pic_h = (uint32_t)bh,
+                .block_w = (uint32_t)out_w,
+                .block_h = (uint32_t)bh,
+                .block_offset_x = 0,
+                .block_offset_y = 0,
+                .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+            },
+            .out = {
+                .buffer = strip,
+                .buffer_size = (uint32_t)strip_len,
+                .pic_w = (uint32_t)dw,
+                .pic_h = (uint32_t)bh,
+                .block_offset_x = (uint32_t)dx,
+                .block_offset_y = 0,
+                .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+            },
+            .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+            .scale_x = 1.0f,
+            .scale_y = 1.0f,
+            .mirror_x = false,
+            .mirror_y = false,
+            .rgb_swap = false,
+            .byte_swap = false,
+            .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
+            .mode = PPA_TRANS_MODE_NON_BLOCKING,
+        };
+        // srm_blit's cache contract, band-scoped: the driver invalidates the
+        // whole out picture at submit, so any dirty CPU line in the strip
+        // (window chrome beside the game content) must be written back first.
+        esp_cache_msync(strip, strip_len,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M
+                        | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        s_submitted++;
+        if (ppa_do_scale_rotate_mirror(s_srm, &op) != ESP_OK) {
+            s_submitted--;
+            while (s_done != s_submitted) { }   // fence what already flew
+            return mp_const_false;              // caller repaints via the CPU
+        }
+    }
+    if (!defer) {
+        while (s_done != s_submitted) { }
+    }
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_blit_crisp_obj, 10, 10,
+                                           moy_ppa_blit_crisp);
+
+
 // fill(dst, dw, dh, x, y, w, h, rgb565) -> True when the PPA took it.
 // Fills the (x, y, w, h) block of an RGB565 picture on the DMA engine, skipping
 // the CPU cache's write-allocate read (see init). Blocking: the caller wants the
@@ -285,6 +462,8 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_scale), MP_ROM_PTR(&moy_ppa_blit_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
+    { MP_ROM_QSTR(MP_QSTR_blit_crisp), MP_ROM_PTR(&moy_ppa_blit_crisp_obj) },
+    { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_done), MP_ROM_PTR(&moy_ppa_done_obj) },
 };

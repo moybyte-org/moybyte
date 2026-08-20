@@ -75,6 +75,15 @@ class P4SystemCanvas(SystemCanvas):
     # PPA error demotes to the CPU kernel globally. None = CPU-only (blit565).
     _ppa = None
 
+    # Game-composite filtering: the PPA's SRM scaler is fixed BILINEAR in
+    # silicon (no nearest mode, no flag -- 2026-08-20), which smears pixel-art
+    # carts. False = CRISP PIXELS (Settings row, persisted via
+    # console.set_crisp_pixels -> set_crisp_scale below): the composite goes
+    # nearest-neighbour through moy_ppa.blit_crisp's SRAM-bounce band pipeline,
+    # falling back to the CPU kernel. A class attribute like _ppa: the one
+    # system canvas and its layers share the mode.
+    _smooth = True
+
     @classmethod
     def enable_ppa(cls):
         """Probe + register the P4 PPA once (run_desktop calls this after the
@@ -98,6 +107,23 @@ class P4SystemCanvas(SystemCanvas):
         n = len(getattr(comp, "_fbs", ()) or ())
         if n:
             self.RETAINED_FRAMES = n
+
+    def set_crisp_scale(self, on):
+        """Settings -> CRISP PIXELS (probed by console.set_crisp_pixels): route
+        the game composite nearest-neighbour instead of the PPA's fixed
+        bilinear. Turning crisp OFF returns blit_crisp's SRAM bounce bands to
+        the internal heap -- that pool is the Lua allocator's first choice, so
+        a mode nobody has on must not tax it."""
+        on = bool(on)
+        P4SystemCanvas._smooth = not on
+        ppa = self._ppa
+        if not on and ppa is not None:
+            rel = getattr(ppa, "crisp_release", None)
+            if rel is not None:
+                try:
+                    rel()
+                except Exception:  # noqa: BLE001 -- freeing is best-effort
+                    pass
 
     # Below this many pixels a CPU fill wins outright: the rect is cache-resident
     # and the PPA's ~60us submit cost dominates. Measured on glass 2026-07-26 --
@@ -159,8 +185,12 @@ class P4SystemCanvas(SystemCanvas):
         """wm_windowed._blit_game's device path (#58/#73): integer-scale the
         320x240 game canvas into this surface at (ox, oy). Hardware PPA (DMA,
         ~2.6x faster than the CPU blit -- measured) when available, else the
-        moy_gfx CPU kernel. Both write the same RGB565 bytes (glass-verified
-        pixel-identical), so the fallback is graceful.
+        moy_gfx CPU kernel. NOTE the two do NOT write the same bytes: the PPA
+        scaler is fixed bilinear (smeared pixel art), the CPU kernel nearest --
+        which is what the CRISP PIXELS toggle (_smooth above) trades on. In
+        crisp mode moy_ppa.blit_crisp keeps nearest pixels at ~60% of the CPU
+        kernel's cost (SRAM bounce bands + 1:1 DMA ship, byte-exact vs the CPU
+        kernel -- glass-verified); any refusal falls back to the CPU kernel.
 
         defer=True (a QUIET game frame, where this is the frame's LAST framebuffer
         write) kicks the PPA async and hands the show to P4Compositor.flush ->
@@ -180,7 +210,23 @@ class P4SystemCanvas(SystemCanvas):
         # fits (scale is derived from the window rect); only the cover-crop
         # backdrop overflows, and that takes the CPU path below. A non-fit is a
         # normal per-call condition, NOT a PPA failure -- don't demote for it.
-        if ppa is not None and ox >= 0 and oy >= 0 \
+        if ppa is not None and not P4SystemCanvas._smooth:
+            # CRISP PIXELS: nearest-neighbour banded composite. blit_crisp
+            # applies the same fit gate itself and returns False on any
+            # refusal (no SRAM bands / non-fit / hardware error), which falls
+            # through to the CPU kernel below -- identical pixels, slower.
+            # It never demotes _ppa: the bilinear path stays healthy.
+            bc = getattr(ppa, "blit_crisp", None)
+            if bc is not None:
+                try:
+                    if bc(self._buf, self.w, self.h, ox, oy,
+                          gc._buf, gc.w, gc.h, scale, 1 if defer else 0):
+                        if defer:
+                            self._comp._composite_pending = True
+                        return
+                except Exception as exc:  # noqa: BLE001 -- fall to the CPU
+                    print("Moybyte P4 crisp blit failed -> CPU:", exc)
+        elif ppa is not None and ox >= 0 and oy >= 0 \
                 and ox + gc.w * scale <= self.w and oy + gc.h * scale <= self.h:
             try:
                 if defer:
@@ -551,6 +597,7 @@ def run_desktop(fps_cap=60):
     #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
     #   union 0|1   A/B the dirty-union gesture restore (pairs with `drag`)
     #   cache 0|1   A/B the drag backdrop cache
+    #   crisp 0|1   A/B the CRISP PIXELS composite (non-persisting)
     idle = IdleBlank(set_backlight, POWER_SAVE_MS)
     ws._psave_ms = POWER_SAVE_MS   # `state` reports the LIVE timeout
 
@@ -586,6 +633,13 @@ def run_desktop(fps_cap=60):
         ws.wm._backdrop_disabled = not on
         print("REMOTE cache %s" % ("on" if on else "off"))
 
+    def _crisp_cmd(ws, parts, line):
+        # A/B the CRISP PIXELS composite from serial without persisting, so a
+        # measurement session never leaves the board on a non-default mode.
+        on = not (len(parts) == 2 and parts[1] == "0")
+        ws.set_crisp_pixels(on, persist=False)
+        print("REMOTE crisp %s" % ("on" if on else "off"))
+
     try:
         from dev_channel import DevChannel
         # env: what the `py` probe hook can reach beyond ws/wm/pointer --
@@ -593,7 +647,7 @@ def run_desktop(fps_cap=60):
         # on-glass witnesses (pump joins the env right after it is created).
         serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
                             extra={"bt": _bt_cmd, "union": _union_cmd,
-                                   "cache": _cache_cmd},
+                                   "cache": _cache_cmd, "crisp": _crisp_cmd},
                             env={"comp": comp, "game": game, "boot": boot})
     except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
         print("Moybyte P4 serial channel unavailable:", exc)
