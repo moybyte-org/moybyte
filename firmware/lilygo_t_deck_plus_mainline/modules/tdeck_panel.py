@@ -11,11 +11,16 @@ THE ARITHMETIC ON THIS GLASS. 320x240x2 = 153,600 B is ~17 ms on this bus, and
   measured as flush=16.8..20.2 against the deleted fork build's 2.1 on the same
   panel, and worth ~2x across the cart roster. The overlap is what removes it.
 
-  Band geometry is 48 rows and the bounce pair 61,440 B of internal SRAM. That
-  was pinned by the retired 2 ms pump timer (a band had to outlast the timer's
-  period or the SPI starved between fires), and the floor is gone with it --
-  but so far no smaller band has won: 32-row bands measured 53.9 -> 51.8 fps on
-  Brick Siege (2026-08-21).
+  Band geometry is 32 rows and the bounce pair 40,960 B of internal SRAM. It
+  was 48 rows, pinned by the retired 2 ms pump timer -- a band had to outlast
+  the timer's period or the SPI starved between fires -- and under that timer
+  32-row bands measured 53.9 -> 51.8 fps on Brick Siege, a real 4% loss.
+
+  THE FEEDER REVERSED THAT VERDICT, and the ordering is the whole point: with
+  the flush on its core-0 task there is no timer to outrun, and the same 48->32
+  shrink measured 58.0 -> 58.6 fps for +16.1 KB of internal SRAM (both
+  2026-08-21, d9aa73e). A band-size number measured against the timer says
+  nothing about this build.
 
 WHAT IS NOT PORTED, deliberately: the #190 flush-bounce scale fold, which
   SYNTHESISES each band for a small-canvas game instead of copying the root
