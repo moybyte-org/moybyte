@@ -95,9 +95,11 @@ def test_rename_cap_lives_only_on_the_class(tmp_path):
     base's) and the seed slices THAT, so the two cannot drift apart."""
     for cls in (WriterAppLayer, SheetsAppLayer, FilesAppLayer):
         assert isinstance(cls.RENAME_MAX, int) and cls.RENAME_MAX > 0
-    assert WriterAppLayer.RENAME_MAX == ListShellApp.RENAME_MAX      # inherited
-    assert SheetsAppLayer.RENAME_MAX == ListShellApp.RENAME_MAX      # inherited
-    assert FilesAppLayer.RENAME_MAX == 20                            # its own, narrower
+    # All three inherit the base's cap. Files carried its own 20 until
+    # 2026-08-22 and renames the same docs and tables the other two do, so it
+    # silently truncated names they accept.
+    for cls in (WriterAppLayer, SheetsAppLayer, FilesAppLayer):
+        assert cls.RENAME_MAX == ListShellApp.RENAME_MAX
     import runtime.files_app, runtime.sheets_app, runtime.writer_app
     for mod in (runtime.files_app, runtime.sheets_app, runtime.writer_app):
         assert not hasattr(mod, "MAX_NAME"), mod.__name__

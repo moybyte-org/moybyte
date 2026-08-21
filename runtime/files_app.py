@@ -86,7 +86,6 @@ class FilesLayout(ListShellLayout):
 
 class FilesAppLayer(ListShellApp):
     id = "files"
-    RENAME_MAX = 20           # narrower than the base's 24
     domain = "system"
     TITLE = "FILES"
     APP_TITLE = "Files"
