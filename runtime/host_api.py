@@ -134,26 +134,48 @@ class FakeWifi:
         """List nearby networks as (ssid, signal, locked) tuples."""
         return [tuple(ap) for ap in self.FAKE_APS]
 
+    def _stored_password(self, ssid):
+        """The password wifi.json holds for `ssid`, else None.
+
+        DeviceWifi's helper of the same name, so both backends draw the same
+        distinction between "this network is open" and "the store could not
+        tell us".
+        """
+        if self._store is None or self._root is None:
+            return None
+        try:
+            for n in self._store.load_wifi(self._root):
+                if n["ssid"] == ssid:
+                    return n.get("password", "") or ""
+        except Exception:  # noqa: BLE001 -- a store hiccup reads as "unknown"
+            pass
+        return None
+
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
         report connected. Returns True. The connection persists across carts (it's
         system state) and the creds persist to disk for autoconnect. An EMPTY
         password resolves to the stored one first (the DeviceWifi contract): the
         panel's known-network reconnect passes "", and remembering that "" used
-        to overwrite the saved password in wifi.json."""
-        self._connected = True
+        to overwrite the saved password in wifi.json.
+
+        The remember condition is DeviceWifi's verbatim (stored when the radio
+        associated, or when it is a new non-blank password) so the rule has one
+        reading, not two -- the fake radio always associates, so it never bites
+        here."""
+        ok = True                       # the fake radio always associates
         self._ssid = str(ssid)
-        if self._store is not None and self._root is not None:
+        stored = self._stored_password(self._ssid)
+        if not password and stored:
+            password = stored
+        self._connected = ok
+        if (ok or (password and password != stored)) \
+                and self._store is not None and self._root is not None:
             try:
-                if not password:
-                    for n in self._store.load_wifi(self._root):
-                        if n["ssid"] == self._ssid:
-                            password = n.get("password", "") or ""
-                            break
                 self._store.remember_wifi(ssid, password, self._root)
             except Exception as exc:  # noqa: BLE001 -- a save failure must not crash the cart
                 print("Moybyte wifi remember failed:", exc)
-        return True
+        return ok
 
     def disconnect(self):
         self._connected = False

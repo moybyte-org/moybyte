@@ -353,3 +353,233 @@ def test_device_status_survives_an_unreadable_detail(tmp_path):
 
     dev.wlan = _Down()
     assert dev.status() == (False, None, None)
+
+
+# -- the blank-credential corruption ------------------------------------------
+#
+# The store is a read-modify-WRITE: every connect()/forget() loads the whole
+# known-networks list, edits it and republishes it. That makes the LOADER
+# load-bearing for durability -- a read that reports "nothing saved yet" for a
+# store that is merely half-published turns the very next save into permanent
+# data loss, because _write_atomic's crash safety lives entirely in the .bak it
+# leaves behind and the save after that deletes it.
+#
+# These pin the three states that window can leave (missing / truncated / wrong
+# shape), the mutations that must not rewrite the store at all, and the rule
+# keeping an unverified blank password out of wifi.json in the first place.
+
+
+def _wifi_files(carts):
+    """The wifi.json family actually on disk (store + its .bak/.tmp siblings)."""
+    import os
+    from runtime import moy_carts
+    d = os.path.dirname(moy_carts.wifi_store_path(carts))
+    return sorted(f for f in os.listdir(d) if f.startswith(moy_carts.WIFI_STORE_NAME))
+
+
+def _two_saved(tmp_path):
+    from runtime import moy_carts
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    moy_carts.remember_wifi("Home", "secretpw", carts)
+    moy_carts.remember_wifi("Work", "workpw", carts)
+    return carts
+
+
+def test_a_store_lost_in_the_write_window_is_recovered_not_reported_empty(tmp_path):
+    """_write_atomic rotates the good file to .bak and then publishes the new one.
+    A crash between those two renames leaves NO store -- and the previous good copy
+    right beside it. The loader must find it."""
+    import os
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    p = moy_carts.wifi_store_path(carts)
+    os.remove(p + ".bak")
+    os.rename(p, p + ".bak")            # exactly the state the window leaves
+
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
+    # ... and the recovery is HEALED back onto disk, not re-derived every read:
+    # the next save must not be the thing that finally deletes the only copy.
+    assert os.path.exists(p)
+    os.remove(p + ".bak")
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
+
+
+def test_a_truncated_store_falls_back_to_the_backup(tmp_path):
+    """The rename-unsupported _copy fallback publishes by truncating `path` and
+    writing into it, so a crash there leaves a HALF file rather than none. Garbage
+    must read as "use the backup", never as "no saved networks"."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    with open(moy_carts.wifi_store_path(carts), "w") as f:
+        f.write('{"networks": [{"ssi')     # torn mid-write
+
+    # .bak is the copy from before the second save, so Home is what survives.
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+    assert moy_carts.load_wifi(carts)[0]["password"] == "secretpw"
+
+
+def test_a_wrong_shaped_store_falls_back_to_the_backup(tmp_path):
+    """A document that parses but isn't a networks list is as unusable as garbage."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    with open(moy_carts.wifi_store_path(carts), "w") as f:
+        f.write('{"networks": "oops"}')
+
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+
+
+def test_a_deliberately_emptied_store_is_not_resurrected(tmp_path):
+    """The flip side: forgetting the last network leaves a VALID empty store, and
+    the .bak still holds the old one. An empty list is an answer, not a failure."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    moy_carts.forget_wifi("Work", carts)
+    moy_carts.forget_wifi("Home", carts)
+    assert moy_carts.load_wifi(carts) == []
+
+
+def test_a_save_after_a_corrupt_read_does_not_eat_the_other_networks(tmp_path):
+    """The blast radius, end to end: one unreadable read must not be laundered
+    into a permanent one-entry store by the next remember."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    with open(moy_carts.wifi_store_path(carts), "w") as f:
+        f.write("")                        # empty file: parses to nothing
+
+    moy_carts.remember_wifi("Guest", "guestpw", carts)
+    saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
+    assert saved["Home"] == "secretpw"     # NOT wiped by the unrelated save
+    assert saved["Guest"] == "guestpw"
+
+
+def _arm_write_probe(carts):
+    """Delete the store's .bak and hand back a "did anything republish the store?"
+    check. _write_atomic ALWAYS rotates an existing store to .bak before
+    publishing, so a reappeared .bak is proof of a rewrite -- an exact signal,
+    where an mtime comparison depends on the filesystem's timestamp granularity."""
+    import os
+    from runtime import moy_carts
+    bak = moy_carts.wifi_store_path(carts) + ".bak"
+    if os.path.exists(bak):
+        os.remove(bak)
+    return lambda: os.path.exists(bak)
+
+
+def test_forgetting_an_unknown_network_writes_nothing(tmp_path):
+    """A no-op forget must not rewrite the whole store to prove the absence --
+    that is a full atomic rewrite, and another crash window, for nothing."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    p = moy_carts.wifi_store_path(carts)
+    before = open(p).read()
+    rewrote = _arm_write_probe(carts)
+
+    assert [n["ssid"] for n in moy_carts.forget_wifi("Never Seen", carts)] == ["Work", "Home"]
+    assert open(p).read() == before
+    assert not rewrote()
+
+
+def test_a_blank_ssid_is_not_a_network(tmp_path):
+    """save_wifi drops a blank ssid, so remembering one can only burn a rewrite
+    and return a list whose first entry is not on disk."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    rewrote = _arm_write_probe(carts)
+
+    got = moy_carts.remember_wifi("", "junk", carts)
+    assert [n["ssid"] for n in got] == ["Work", "Home"]      # what is really stored
+    assert not rewrote()
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
+
+
+def test_re_remembering_the_front_network_writes_nothing(tmp_path):
+    """Every panel reconnect and every boot autoconnect re-remembers what is
+    already stored. Each rewrite is another window on the crash above."""
+    from runtime import moy_carts
+
+    carts = _two_saved(tmp_path)
+    rewrote = _arm_write_probe(carts)
+
+    moy_carts.remember_wifi("Work", "workpw", carts)         # already at the front
+    assert not rewrote()
+    moy_carts.remember_wifi("Home", "secretpw", carts)       # a real reorder
+    assert rewrote()
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home", "Work"]
+
+
+def test_an_unverified_blank_password_is_never_remembered(tmp_path):
+    """host == device: a blank password reaches connect() both for an OPEN network
+    and for one the store could not tell us about. Only an association proves which
+    -- so a blank the radio never accepted must not reach wifi.json, where it would
+    sit at the FRONT of the boot autoconnect list forever."""
+    from runtime import moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    moy_carts.remember_wifi("Home", "secretpw", carts)
+
+    dev = _device_wifi_class()(moy_carts, carts)
+    dev._ensure_wlan = lambda: None      # no radio under CPython -> connect fails
+
+    # The kid taps CONNECT on a locked network with the password field empty.
+    assert dev.connect("Cafe", "") is False
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+
+    # A typed password IS kept even though the link didn't come up inside the ~4s
+    # poll -- that is the late-association case ensure_online() waits for.
+    assert dev.connect("Cafe", "cafepw") is False
+    saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
+    assert saved == {"Cafe": "cafepw", "Home": "secretpw"}
+
+
+def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
+    """The reported corruption, end to end. The store goes unreadable for one
+    read; the panel's known-network reconnect passes "" and the service resolves
+    nothing. That "" must not be written back over a real password -- and the
+    save must not take every OTHER network with it."""
+    import os
+    from runtime import host_app, moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    w = host_app.FakeWifi(moy_carts, carts)
+    w.connect("Home", "secretpw")
+    w.connect("Work", "workpw")
+
+    p = moy_carts.wifi_store_path(carts)
+    os.remove(p + ".bak")
+    os.rename(p, p + ".bak")             # the write window, mid-session
+    assert sorted(w.known()) == ["Home", "Work"]
+
+    w.connect("Home", "")                # the panel's known-network reconnect
+    saved = {n["ssid"]: n["password"] for n in moy_carts.load_wifi(carts)}
+    assert saved == {"Home": "secretpw", "Work": "workpw"}
+
+
+def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
+    """system.json and achievements.json are the same read-modify-write over the
+    same _write_atomic. One loader, one rule."""
+    import os
+    from runtime import moy_carts
+
+    carts = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(carts)
+    moy_carts.save_system({"wallpaper": "moy_night"}, carts)
+    moy_carts.save_system({"wallpaper": "moy_night", "theme": "outline"}, carts)
+    moy_carts.save_achievements(["first_cart"], carts)
+    moy_carts.save_achievements(["first_cart", "first_edit"], carts)
+
+    for path in (moy_carts.system_store_path(carts),
+                 moy_carts.achievements_store_path(carts)):
+        os.remove(path)                  # the crash window, again
+
+    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night"}
+    assert moy_carts.load_achievements(carts) == ["first_cart"]

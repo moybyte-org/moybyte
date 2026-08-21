@@ -360,6 +360,37 @@ def _read_sibling(root, name):
         return None
 
 
+def _load_store_json(path, pick):
+    """A system JSON store's value, or None when nothing usable is on disk.
+
+    `pick(parsed)` pulls the value out of the parsed document and returns None for
+    "this isn't one", so MISSING, unparseable and wrong-shape all fall through to
+    the `<path>.bak` copy `_write_atomic` leaves behind; a usable backup is
+    republished as `path` (the heal `_read_recover` does for manifests) so the
+    recovery is durable rather than re-run on every read.
+
+    Every sibling store must read through this. `_write_atomic` is crash-safe only
+    BECAUSE of that .bak, so its window leaves the store missing or truncated -- and
+    a loader that reads either as "nothing saved yet" makes the loss permanent: the
+    next save rotates the one surviving good copy into .bak and the save after that
+    deletes it.
+    """
+    for src in (path, path + ".bak"):
+        try:
+            got = pick(json.loads(_read(src)))
+        except (OSError, ValueError, TypeError, AttributeError):
+            got = None
+        if got is None:
+            continue
+        if src != path:
+            try:
+                _copy(src, path)      # heal: republish the last known-good copy
+            except Exception:         # noqa: BLE001 -- still return what we recovered
+                pass
+        return got
+    return None
+
+
 def _write_sibling(root, name, text):
     """Persist a sibling store atomically (an interrupted write must never
     truncate system state). Ensures the parent dir exists."""
@@ -1265,17 +1296,13 @@ def wifi_store_path(root=CARTS_DIR):
     return _sibling_path(root, WIFI_STORE_NAME)
 
 
-def load_wifi(root=CARTS_DIR):
-    """Read the known-networks list: [{"ssid": str, "password": str}, ...].
-    Returns [] when nothing has been saved yet or the file is unreadable/garbage
-    (a corrupt store must never crash the boot autoconnect)."""
-    try:
-        data = json.loads(_read(wifi_store_path(root)))
-    except (OSError, ValueError):
-        return []
+def _wifi_networks(data):
+    """The known-networks list out of a parsed wifi.json, or None when the document
+    isn't one (so _load_store_json falls through to the backup). Entries with no
+    ssid are dropped (see save_wifi)."""
     nets = data.get("networks") if isinstance(data, dict) else None
     if not isinstance(nets, list):
-        return []
+        return None
     out = []
     for n in nets:
         if isinstance(n, dict) and n.get("ssid"):
@@ -1283,9 +1310,19 @@ def load_wifi(root=CARTS_DIR):
     return out
 
 
+def load_wifi(root=CARTS_DIR):
+    """Read the known-networks list: [{"ssid": str, "password": str}, ...].
+    Returns [] only when nothing usable has ever been saved: a corrupt store must
+    never crash the boot autoconnect, and must not be reported as an empty one
+    either -- see _load_store_json."""
+    return _load_store_json(wifi_store_path(root), _wifi_networks) or []
+
+
 def save_wifi(networks, root=CARTS_DIR):
     """Persist the known-networks list, atomically. Ensures the parent dir exists.
-    `networks` is a list of {"ssid", "password"} dicts."""
+    `networks` is a list of {"ssid", "password"} dicts. An entry with a BLANK ssid
+    is dropped: there is no such network, and one would sit at the front of the
+    list that boot autoconnect walks."""
     ensure_dirs(root)
     clean = [{"ssid": str(n["ssid"]), "password": str(n.get("password", ""))}
              for n in networks if n.get("ssid")]
@@ -1294,22 +1331,38 @@ def save_wifi(networks, root=CARTS_DIR):
 
 def remember_wifi(ssid, password, root=CARTS_DIR):
     """Add/replace one network in the store (by ssid) and persist. Returns the
-    updated list. The most-recently-remembered network is moved to the FRONT, so
-    autoconnect prefers the last one the kid joined."""
+    updated list -- what is actually STORED, so a caller can trust it. The
+    most-recently-remembered network is moved to the FRONT, so autoconnect prefers
+    the last one the kid joined.
+
+    A blank ssid, and a re-remember of the network already at the front with the
+    same password, both write NOTHING: save_wifi would drop the first anyway, the
+    second is what the panel's known-network reconnect and every boot autoconnect
+    do, and each rewrite is another _write_atomic crash window."""
     ssid = str(ssid)
-    nets = [n for n in load_wifi(root) if n["ssid"] != ssid]
-    nets.insert(0, {"ssid": ssid, "password": str(password or "")})
+    nets = load_wifi(root)
+    if not ssid:
+        return nets
+    password = str(password or "")
+    if nets and nets[0]["ssid"] == ssid and nets[0]["password"] == password:
+        return nets
+    nets = [n for n in nets if n["ssid"] != ssid]
+    nets.insert(0, {"ssid": ssid, "password": password})
     save_wifi(nets, root)
     return nets
 
 
 def forget_wifi(ssid, root=CARTS_DIR):
     """Drop one network from the store (by ssid) and persist. Returns the updated
-    list (unchanged if the ssid wasn't known)."""
+    list (unchanged if the ssid wasn't known). Forgetting a network that isn't
+    there writes NOTHING -- a full atomic rewrite, and its crash window, for a
+    no-op."""
     ssid = str(ssid)
-    nets = [n for n in load_wifi(root) if n["ssid"] != ssid]
-    save_wifi(nets, root)
-    return nets
+    nets = load_wifi(root)
+    kept = [n for n in nets if n["ssid"] != ssid]
+    if len(kept) != len(nets):
+        save_wifi(kept, root)
+    return kept
 
 
 # --- system settings (desktop shell, #28) -----------------------------------
@@ -1331,13 +1384,11 @@ def system_store_path(root=CARTS_DIR):
 
 
 def load_system(root=CARTS_DIR):
-    """Read the system settings dict. Returns {} when nothing has been saved yet
-    or the file is unreadable/garbage (a corrupt store must never crash boot)."""
-    try:
-        data = json.loads(_read(system_store_path(root)))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    """Read the system settings dict. Returns {} when nothing usable has ever been
+    saved (a corrupt store must never crash boot); recovers from the .bak like
+    load_wifi, so a half-published file is not read as "no settings"."""
+    return _load_store_json(system_store_path(root),
+                            lambda d: d if isinstance(d, dict) else None) or {}
 
 
 def save_system(settings, root=CARTS_DIR):
@@ -1366,17 +1417,12 @@ def achievements_store_path(root=CARTS_DIR):
     return _sibling_path(root, ACHIEVEMENTS_STORE_NAME)
 
 
-def load_achievements(root=CARTS_DIR):
-    """Read the unlocked achievement ids as a list. Returns [] when nothing has
-    been earned yet or the file is unreadable/garbage (a corrupt store must never
-    crash boot). Duplicates/non-strings are dropped so the loaded list is clean."""
-    try:
-        data = json.loads(_read(achievements_store_path(root)))
-    except (OSError, ValueError):
-        return []
+def _unlocked_ids(data):
+    """The unlocked-id list out of a parsed achievements.json, or None when the
+    document isn't one (so _load_store_json falls through to the backup)."""
     ids = data.get("unlocked") if isinstance(data, dict) else None
     if not isinstance(ids, list):
-        return []
+        return None
     out = []
     seen = {}
     for i in ids:
@@ -1384,6 +1430,14 @@ def load_achievements(root=CARTS_DIR):
             seen[i] = True
             out.append(i)
     return out
+
+
+def load_achievements(root=CARTS_DIR):
+    """Read the unlocked achievement ids as a list. Returns [] when nothing usable
+    has ever been saved (a corrupt store must never crash boot); recovers from the
+    .bak like load_wifi. Duplicates/non-strings are dropped so the loaded list is
+    clean."""
+    return _load_store_json(achievements_store_path(root), _unlocked_ids) or []
 
 
 def save_achievements(unlocked, root=CARTS_DIR):
