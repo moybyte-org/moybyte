@@ -11,7 +11,6 @@ import sys
 import types
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 # The driver is SHARED since 2026-08-19 (device/ble_keyboard.py -- promoted
 # from the P4's tree when the Guition S3 became its second consumer); the
@@ -104,10 +103,12 @@ def test_report_level_state_gives_real_hold_edges_and_text_mode_suppression():
     inp.text_mode = True
     keyboard._reports[7] = (0, (0x1A,))
     keyboard.poll()
+    inp.begin_frame()
     assert inp.last_key == ord("w")
     assert not inp.held("up")
     keyboard._reports[7] = (0, (0x50,))
     keyboard.poll()
+    inp.begin_frame()
     assert inp.last_key == 0
     assert inp.held("left")
 

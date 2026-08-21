@@ -12,6 +12,13 @@ only there; the shared held-set is their MERGE, computed in begin_frame():
     src.set_held("up", True)
     src.last_key = 0x1b
 
+A source write touches ONLY that source, and `begin_frame` is the union's one
+author -- so read `held()`/`pressed()`/`button_masks()` after begin_frame, the
+way the frame loop already does (poll every source, then begin_frame, then
+handle_input). A read between a source write and the next begin_frame answers
+for the frame that is still current, which is the point: a frame's input does
+not change under the code reading it.
+
 These two InputState classes are deliberately NOT one (different button
 vocabularies, different orders, different primary verb -- set_held here,
 set_button there), so the model lands in both, in step.
@@ -44,33 +51,17 @@ class InputSource:
     def release_all(self):
         """*I* hold nothing (my buttons, nobody else's).
 
-        Maintains the union INCREMENTALLY rather than re-merging: a driver
-        calls this every poll, and a full re-merge here made the frame pay for
-        two (44us each on the T-Deck's S3, measured on glass 2026-08-21).
-        begin_frame's merge stays the authority."""
-        h = self._held
-        if not h:
-            return
-        st = self.state
-        if st._only_holder(self):
-            st._held.clear()        # nobody else holds anything: the union IS mine
-            h.clear()
-        else:
-            self._release_shared(h, st._drop)
-
-    def _release_shared(self, h, drop):
-        """The rare half of release_all: another source is holding buttons too,
-        so each of mine leaves the union only if nobody else has it."""
-        while h:
-            drop(h.pop())
+        Writes THIS source and nothing else: begin_frame's merge is the
+        union's one author, so there is no second copy to keep in step (and a
+        driver calls this every poll, where clearing one set beats re-merging).
+        """
+        self._held.clear()
 
     def set_held(self, name, down):
         if down:
             self._held.add(name)
-            self.state._held.add(name)      # mirror: mid-frame reads see it
         else:
             self._held.discard(name)
-            self.state._drop(name)          # ...unless another source holds it
 
     # The device tier's spelling of the same verb, so a driver shared by both
     # tiers can write a source without knowing which InputState it landed on.
@@ -112,7 +103,8 @@ class InputState:
     BUTTONS = ("left", "right", "up", "down", "a", "b", "run", "home")
 
     def __init__(self):
-        self._held = set()   # DERIVED: the union of the sources
+        self._held = set()   # DERIVED: written by _merge() and release_all()
+                             # and by nothing else -- see the module docstring
         self._prev = set()
         self._pressed = set()
         self._released = set()
@@ -141,7 +133,8 @@ class InputState:
 
     def _merge(self):
         """Union the sources into _held (and the per-player buckets once two
-        sources disagree about `player`). The ONE place the union is computed."""
+        sources disagree about `player`). The ONE place the union is computed,
+        and begin_frame is its only caller."""
         h = self._held
         h.clear()
         for s in self._srcs:
@@ -167,15 +160,6 @@ class InputState:
         self._solo = 0 if solo is None else solo
         self._multi = multi
 
-    def _only_holder(self, src):
-        """True when no source OTHER than `src` is holding anything -- the
-        universal case, and what lets a driver's release_all drop the union
-        wholesale instead of testing every button against every source."""
-        for s in self._srcs:
-            if s is not src and s._held:
-                return False
-        return True
-
     def _merge_players(self):
         """The per-player buckets, once two sources disagree about `player`."""
         ph = {}
@@ -187,14 +171,6 @@ class InputState:
             if s._held:
                 b.update(s._held)
         self._p_held = ph
-
-    def _drop(self, name):
-        """A source let go of `name`: leave it in the union if anyone else
-        still holds it."""
-        for s in self._srcs:
-            if name in s._held:
-                return
-        self._held.discard(name)
 
     def set_held(self, name, down):
         """Legacy single-writer shim: writes the implicit default source."""
@@ -324,7 +300,13 @@ class InputState:
     def release_all(self):
         """EVERYBODY let go -- the modal's meaning (cards_layer,
         block_editor_ui). A driver saying "I hold nothing" wants
-        source.release_all()."""
+        source.release_all().
+
+        The one write to `_held` outside _merge, and not a second author of it:
+        it empties every SOURCE first, so the set it leaves behind is exactly
+        what the next merge would build. Immediate on purpose -- callers blank
+        the edge sets in the same breath, because the tap that opened the modal
+        must not also act inside it."""
         for s in self._srcs:
             s._held.clear()
         self._held.clear()

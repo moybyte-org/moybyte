@@ -138,9 +138,13 @@ def decode_raw(data):
 #
 # The shared `_held` is DERIVED: the union of the sources, computed in
 # begin_frame() (which is already the one place per-frame edges are worked
-# out) and nowhere else -- nothing unions per read. The source mutators also
-# mirror their change into the union so a mid-frame `held()` reads what it
-# always did; begin_frame's merge is the authority that heals any drift.
+# out) and nowhere else -- nothing unions per read. A source write touches ONLY
+# that source, so read held()/pressed()/button_masks() after begin_frame, the
+# way every frame loop already does (poll every source, then begin_frame, then
+# handle_input). A read between a source write and the next begin_frame answers
+# for the frame that is still current -- which is the point: a frame's input
+# does not change under the code reading it, and a report landing on a radio IRQ
+# cannot mutate a set the frame loop is walking.
 #
 # The physical keyboard is a source LIKE ANY OTHER. It is not privileged, and
 # that is the whole point: the owner's requirement is that any connected
@@ -196,35 +200,19 @@ class InputSource:
     def release_all(self):
         """*I* hold nothing (my buttons, nobody else's).
 
-        Maintains the union INCREMENTALLY rather than re-merging: a driver
-        calls this every poll, and a full re-merge here made the frame pay for
-        two (44us each on the T-Deck's S3, measured on glass 2026-08-21).
-        begin_frame's merge stays the authority."""
-        h = self._held
-        if not h:
-            return
-        st = self.state
-        if st._only_holder(self):
-            st._held.clear()        # nobody else holds anything: the union IS mine
-            h.clear()
-        else:
-            self._release_shared(h, st._drop)
-
-    def _release_shared(self, h, drop):
-        """The rare half of release_all: another source is holding buttons too,
-        so each of mine leaves the union only if nobody else has it."""
-        while h:
-            drop(h.pop())
+        Writes THIS source and nothing else: begin_frame's merge is the
+        union's one author, so there is no second copy to keep in step (and a
+        driver calls this every poll, where clearing one set beats re-merging).
+        """
+        self._held.clear()
 
     def set_button(self, name, held):
         if name not in BUTTONS:
             raise ValueError("unknown button: " + name)
         if held:
             self._held.add(name)
-            self.state._held.add(name)          # mirror: mid-frame reads see it
         else:
             self._held.discard(name)
-            self.state._drop(name)              # ...unless another source holds it
 
     # The host tier's spelling of the same verb (runtime/input.py:set_held), so
     # a driver shared by both tiers can write a source without knowing which
@@ -270,7 +258,9 @@ class InputSource:
 
 class InputState:
     def __init__(self):
-        self._held = set()          # DERIVED: the union of the sources
+        self._held = set()          # DERIVED: written by _merge() and
+                                    # release_all() and by nothing else --
+                                    # see the note above
         self._last = set()
         self._pressed = set()
         self._released = set()
@@ -302,8 +292,7 @@ class InputState:
     def _merge(self):
         """Union the sources into _held (and, when more than one player is
         assigned, into the per-player buckets). The ONE place the union is
-        computed -- called from begin_frame, and from a source's release_all
-        so a mid-frame read is never stale. In place: no per-frame set
+        computed, and begin_frame is its only caller. In place: no per-frame set
         allocation on top of the edge math below."""
         h = self._held
         h.clear()
@@ -330,15 +319,6 @@ class InputState:
         self._solo = 0 if solo is None else solo
         self._multi = multi
 
-    def _only_holder(self, src):
-        """True when no source OTHER than `src` is holding anything -- the
-        universal case, and what lets a driver's release_all drop the union
-        wholesale instead of testing every button against every source."""
-        for s in self._srcs:
-            if s is not src and s._held:
-                return False
-        return True
-
     def _merge_players(self):
         """The per-player buckets, once two sources disagree about `player`."""
         ph = {}
@@ -350,14 +330,6 @@ class InputState:
             if s._held:
                 b.update(s._held)
         self._p_held = ph
-
-    def _drop(self, name):
-        """A source let go of `name`: leave it in the union if anyone else
-        still holds it."""
-        for s in self._srcs:
-            if name in s._held:
-                return
-        self._held.discard(name)
 
     def begin_frame(self):
         self._merge()
@@ -389,7 +361,13 @@ class InputState:
     def release_all(self):
         """EVERYBODY let go -- the modal's meaning (cards_layer,
         block_editor_ui): entering a panel drops every button from every
-        source. A driver saying "I hold nothing" wants source.release_all()."""
+        source. A driver saying "I hold nothing" wants source.release_all().
+
+        The one write to `_held` outside _merge, and not a second author of it:
+        it empties every SOURCE first, so the set it leaves behind is exactly
+        what the next merge would build. Immediate on purpose -- callers blank
+        the edge sets in the same breath, because the tap that opened the modal
+        must not also act inside it."""
         for s in self._srcs:
             s._held.clear()
         self._held.clear()

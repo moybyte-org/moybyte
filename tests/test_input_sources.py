@@ -16,6 +16,10 @@ different orders, with a different primary verb -- runtime/input.py's
 `set_held` vs device/moybyte/input.py's `set_button`). A model that landed on
 one tier and not the other would be exactly the shape of failure
 `button_masks`'s docstring records: no crash, no failing test, no frame hash.
+
+The second thing pinned here: `begin_frame` is the union's SOLE author and
+consumers read after it. The tests below make both halves of that a failure
+rather than a convention.
 """
 
 import importlib.util
@@ -79,10 +83,9 @@ def test_one_sources_release_all_does_not_clear_the_other(tier):
     inp.begin_frame()
 
     kbd.release_all()
-    assert inp.held("a")            # ...immediately, not only after begin_frame
+    inp.begin_frame()               # the merge is what publishes it
+    assert inp.held("a")
     assert not inp.held("up")
-    inp.begin_frame()
-    assert inp.held("a") and not inp.held("up")
     assert inp.released("up") and not inp.released("a")
 
 
@@ -97,9 +100,8 @@ def test_a_button_two_sources_hold_survives_one_of_them_letting_go(tier):
     assert inp.held("up")
 
     _set(a, "up", False)
-    assert inp.held("up")           # b still holds it
     inp.begin_frame()
-    assert inp.held("up") and not inp.released("up")
+    assert inp.held("up") and not inp.released("up")    # b still holds it
 
     _set(b, "up", False)
     inp.begin_frame()
@@ -141,6 +143,201 @@ def test_todays_flat_api_keeps_working_through_an_implicit_default_source(tier):
     ble.release_all()
     inp.begin_frame()
     assert inp.held("up")
+
+
+# -- the union has exactly ONE author ---------------------------------------
+#
+# `_held` is DERIVED: a source write moves the SOURCE, and the frame's union is
+# whatever the last begin_frame merged.
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_a_source_write_does_not_move_the_union_until_begin_frame(tier):
+    """A mid-frame read answers for the frame that is still current -- which is
+    what keeps a report landing from a radio IRQ from changing the buttons
+    under the code already reading them."""
+    inp = _state(tier)
+    kbd = inp.source("kbd")
+
+    _set(kbd, "up")
+    assert not inp.held("up")               # the source has it; this frame does not
+    assert "up" in kbd._held
+    assert inp.button_masks(("up",)) == (0, 0)
+    inp.begin_frame()
+    assert inp.held("up") and inp.pressed("up")
+    assert inp.button_masks(("up",)) == (1, 1)
+
+    _set(kbd, "up", False)
+    assert inp.held("up")                   # ...and a release is just as lazy
+    inp.begin_frame()
+    assert not inp.held("up") and inp.released("up")
+
+    # A SOURCE's release_all is the same rule (it is a driver's every-poll
+    # verb, so this is the hot one).
+    _set(kbd, "a")
+    inp.begin_frame()
+    assert inp.held("a")
+    kbd.release_all()
+    assert inp.held("a")
+    assert not kbd._held
+    inp.begin_frame()
+    assert not inp.held("a")
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_the_shared_release_all_stays_immediate_and_stays_consistent(tier):
+    """The one write to the union outside the merge, and not a second author of
+    it: it empties every SOURCE first, so what it leaves behind is exactly what
+    the next merge would build. Its callers (cards_layer._open_meta,
+    block_editor_ui._blk_arm_prompt) blank the edge sets in the same breath and
+    need it to have taken effect."""
+    inp = _state(tier)
+    a = inp.source("a")
+    _set(a, "up")
+    inp.begin_frame()
+
+    inp.release_all()
+    assert not inp.held("up")               # immediately
+    before = set(inp._held)
+    inp._merge()                            # ...and the merge agrees
+    assert inp._held == before
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_no_source_mutator_writes_the_shared_union(tier):
+    """The ratchet: a mirror into the shared union is two lines, and exactly
+    the sort of line that comes back the next time someone wants a mid-frame
+    read to be live."""
+    path = (ROOT / "runtime" / "input.py") if tier == "host" \
+        else (ROOT / "device" / "moybyte" / "input.py")
+    src = path.read_text()
+    body = src[src.index("class InputSource"):src.index("class InputState")]
+    assert "state._held" not in body, "the union mirror is back in InputSource"
+    assert "_drop" not in body, "the incremental union drop is back"
+    # ...and its helpers stayed deleted rather than lingering unused.
+    for gone in ("def _drop(", "def _only_holder(", "def _release_shared("):
+        assert gone not in src, gone
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_the_merge_is_reached_only_through_begin_frame(tier):
+    """One caller, so `begin_frame` is a real frame boundary and not just the
+    usual one."""
+    path = (ROOT / "runtime" / "input.py") if tier == "host" \
+        else (ROOT / "device" / "moybyte" / "input.py")
+    src = path.read_text()
+    lines = [ln.split("#", 1)[0] for ln in src.splitlines()]
+    calls = [i for i, ln in enumerate(lines)
+             if "_merge()" in ln and "def _merge" not in ln]
+    assert len(calls) == 1, [lines[i] for i in calls]
+    at = calls[0]
+    assert lines[at].strip() == "self._merge()"
+    # ...and the enclosing def is begin_frame: walk back to the nearest one.
+    owner = next(ln for ln in reversed(lines[:at]) if ln.lstrip().startswith("def "))
+    assert owner.strip() == "def begin_frame(self):", owner
+
+
+# -- the frame loops read AFTER the merge -----------------------------------
+
+BOARD_RUNTIMES = {
+    "guition": "firmware/guition_jc3248w535/modules/moy_runtime.py",
+    "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
+    "tdeck": "firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
+}
+
+# Everything that WRITES an InputSource inside a board's _poll_inputs. The
+# trackball's `ball.poll()` is deliberately absent: it feeds the pointer and
+# ws.nav, never a button, so it legitimately runs after the merge.
+SOURCE_WRITERS = ("poller.consume()", "keyboard.poll()", "_ble.poll()")
+
+
+def _code_lines(src, start_at, stop_at):
+    """The CODE of one block: docstrings and comments stripped, because the
+    thing being measured is what runs, and both boards' `_poll_inputs`
+    docstrings say the words `inp.begin_frame()` before the call does."""
+    body = src[src.index(start_at):]
+    body = body[:body.index(stop_at, len(start_at))]
+    out = []
+    quoted = False
+    for ln in body.splitlines():
+        if ln.count('"""') == 1:
+            quoted = not quoted
+            continue
+        if quoted or ln.count('"""') == 2:
+            continue
+        out.append(ln.split("#", 1)[0])
+    return out
+
+
+def _line_of(lines, needle, board):
+    hits = [i for i, ln in enumerate(lines) if needle in ln]
+    assert hits, (board, needle)
+    return hits[0]
+
+
+@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
+def test_every_board_writes_every_source_before_begin_frame(board):
+    """The consumer half of the contract: with the union derived once per
+    frame, a source written AFTER the merge is read one frame late -- silently,
+    and only on that board."""
+    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
+    merge = _line_of(lines, "inp.begin_frame()", board)
+    seen = 0
+    for writer in SOURCE_WRITERS:
+        if any(writer in ln for ln in lines):
+            seen += 1
+            assert _line_of(lines, writer, board) < merge, (board, writer)
+    assert seen, board
+
+
+# The one shipped consumer that reads the union as a bare attribute. `active`
+# holds the backlight on (device_boot.IdleBlank), so a stale read here blanks
+# the screen under a held button -- on glass, with no host test failing. It is
+# safe only because it runs AFTER inp.begin_frame().
+ACTIVE_READ = "bool(inp._held)"
+
+
+@pytest.mark.parametrize("board", sorted(BOARD_RUNTIMES))
+def test_a_board_that_reads_the_union_for_its_idle_check_reads_it_after_the_merge(board):
+    src = (ROOT / BOARD_RUNTIMES[board]).read_text()
+    lines = _code_lines(src, "def _poll_inputs(", "\n    def ")
+    if not any(ACTIVE_READ in ln for ln in lines):
+        # The T-Deck spells its `active` differently (trackball counts + the
+        # streamed last_key, which a held raw-matrix key sets every frame), so
+        # it reads no union at all. Recorded, not required.
+        assert board == "tdeck", board
+        return
+    merge = _line_of(lines, "inp.begin_frame()", board)
+    assert _line_of(lines, ACTIVE_READ, board) > merge, board
+
+
+def test_the_boards_idle_check_still_sees_a_held_button_after_the_merge():
+    """...and the same thing behaviourally, through the real driver, in the
+    boards' own order: poll every source, merge, then read."""
+    inp = device_input.InputState()
+    inp.text_mode = False
+    kbd = _tdeck_keyboard(inp)
+
+    kbd._i2c.frame = bytes([0x00, 0x04, 0, 0, 0])     # 'd' -> the `right` button
+    kbd.poll()
+    inp.begin_frame()
+    assert bool(inp._held) and bool(inp.last_key)     # active -> backlight stays on
+
+    kbd._i2c.frame = b"\x00\x00\x00\x00\x00"
+    kbd.poll()
+    inp.begin_frame()
+    assert not inp._held and not inp.last_key         # idle -> the blank may arm
+
+
+def test_the_tdeck_keyboard_smoke_stage_polls_before_it_merges():
+    """A merge taken before the poll makes the button row lag the key by a
+    frame."""
+    src = (ROOT / "firmware" / "lilygo_t_deck_plus_mainline" / "modules"
+           / "tdeck_smoke.py").read_text()
+    lines = _code_lines(src, "def _run_phase(", "\ndef ")
+    merge = _line_of(lines, "inp.begin_frame()", "tdeck_smoke")
+    assert _line_of(lines, "kbd.poll()", "tdeck_smoke") < merge
+    assert _line_of(lines, "poller.consume()", "tdeck_smoke") < merge
 
 
 # -- last_key ---------------------------------------------------------------

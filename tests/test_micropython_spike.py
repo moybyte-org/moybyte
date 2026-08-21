@@ -600,6 +600,23 @@ def test_i2c_timeout_knob_engaged():
     assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
 
 
+# -- the console's input order, for the driver tests below -------------------
+#
+# `InputState._held` is the union of the sources and `begin_frame` is its one
+# author, so polling a driver and reading `state.held(...)` without merging
+# reads the PREVIOUS frame. These helpers are the loop's order: poll, then
+# merge.
+
+def _kbd_frame(keyboard, state):
+    keyboard.poll()
+    state.begin_frame()
+
+
+def _poller_frame(poller, state):
+    poller.consume()
+    state.begin_frame()
+
+
 def test_capped_stall_holds_state_and_never_kills_the_keyboard():
     # #69: with the timeout cap a stall RAISES. That must cost ONE STALE FRAME --
     # the last good matrix state is held (returning "no buttons" would fake a
@@ -630,21 +647,21 @@ def test_capped_stall_holds_state_and_never_kills_the_keyboard():
 
     i2c = FlakyI2C()
     keyboard._i2c = i2c
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # baseline: the key is down
     i2c.fail = True                                  # one capped stall...
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # ...held state survives the gap
     assert keyboard.available and keyboard.raw_mode  # nothing was disabled
     assert keyboard.stat_timeouts >= 1               # ...and it was counted
     i2c.fail = False
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # clean resume, no phantom edge
     assert keyboard._err_run == 0                    # the run counter reset
     # A genuinely dead keyboard still disables after a solid failure run.
     i2c.fail = True
     for _ in range(module.TDeckKeyboard.ERR_RUN_LIMIT):
-        keyboard.poll()
+        _kbd_frame(keyboard, state)
     assert not keyboard.available
 
 
@@ -694,15 +711,15 @@ def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     keys = [ord("d"), 0]
     keyboard._read_key = lambda: keys.pop(0)
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
     keyboard._held_until_ms = module._ticks_ms() - 1
     keyboard._read_key = lambda: 0
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert not state.held("right")
 
 
@@ -726,14 +743,14 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
     assert state.last_key == ord("d")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert not state.held("right")
     assert state.last_key == 0
 
@@ -762,7 +779,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
         keyboard.available = True
         keyboard.raw_mode = True
         keyboard._i2c = type("F", (), {"readfrom": lambda s, a, n: frame})()
-        keyboard.poll()
+        _kbd_frame(keyboard, state)
         return state
 
     st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace held
@@ -827,14 +844,14 @@ def test_input_poller_ascii_bytes_deliver_one_frame_each():
     p._poll_once()
     p._poll_once()
     p._poll_once()                          # two rapid 'a' presses now queued
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == ord("a")       # frame 1: first press
     assert state.held("left")               # ...with its latched button alias
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == 0              # frame 2: forced release gap
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == ord("a")       # frame 3: second press, not dropped
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == 0              # queue drained
 
 
@@ -857,13 +874,13 @@ def test_input_poller_raw_holds_state_across_a_stall():
     kbd._i2c = FlakyI2C()
     p = module.InputPoller(kbd, None)
     p._poll_once()
-    p.consume()
+    _poller_frame(p, state)
     assert state.held("left") and state.last_key == ord("a")
     p._poll_once()                          # capped stall -> hold, don't release
-    p.consume()
+    _poller_frame(p, state)
     assert state.held("left")
     p._poll_once()                          # clean empty matrix -> real release
-    p.consume()
+    _poller_frame(p, state)
     assert not state.held("left")
 
 
@@ -1110,7 +1127,7 @@ def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("left")
     assert state.last_key == ord("a")
     assert keyboard.raw_mode
@@ -1137,7 +1154,7 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
     assert state.last_key == ord("d")
     assert not keyboard.raw_mode
@@ -2644,12 +2661,24 @@ def test_micropython_offline_diag_wiring():
     assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in device_diag
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
-    # measure-first data for band size / pump period / third-slot tuning.
+    # measure-first data for band size / pump period / third-slot tuning, plus
+    # blocked= and timeouts=/errs=, which the C cannot raise and so can only be
+    # counted.
     compositor = _panel_base_src()   # shared body since 2026-08-21 (#206 item 1)
     assert "def bounce_stats(self):" in compositor
-    assert ('diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f '
-            'bands=%d fold=%d"' in device_diag)   # fold= is the #190 liveness proof
+    assert ('"pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "\n'
+            '                 "bands=%d fold=%d timeouts=%d errs=%d"'
+            in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
+    # fold= is the #190 liveness proof. Behaviour is pinned by
+    # tests/test_banded_panel.py; what a grep can pin is that the definition
+    # exists on the board with the lever and NOT on the one without it.
+    guition_panel = (Path("firmware/guition_jc3248w535/modules")
+                     / "guition_panel.py").read_text(encoding="utf-8")
+    assert "def fold_count(self):" in guition_panel
+    assert "fold_stats()[0]" in guition_panel
+    assert "fold_count" not in _panel_src()[0], (
+        "the T-Deck has no fold; absence is how a board says it lacks a lever")
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
     # so the 13-60ms keyboard stalls are sized across a session, not just inside
