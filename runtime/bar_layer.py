@@ -1,13 +1,22 @@
-"""The unified 18px top bar + bottom dock (#46), extracted from Workstation
+"""The unified 18px top bar (#46), extracted from Workstation
 (runtime/console.py) as its own surface -- docs/history/shell_layers_refactor_v1.md.
 
-This module is the SINGLE SOURCE of the bar/dock geometry constants (`_STATUS_H`,
-`_BAR_*`, the fixed 320x240 tool-switcher button rects `_HOME_BTN`/`_MENU_BTN`/...,
-and `_DOCK_SLOTS`/`_DOCK_GLYPH`/`_DOCK_LABEL`). They're consumed BOTH here (BarLayer's
-draw + hit-testing) AND by console.py's own chrome (the `Layout` class + a few derived
-constants + the golden harness/tests that read `console._HOME_BTN`), so rather than
-duplicate them (drift), console.py imports them back from here (re-exported under the
-same names) -- the same pattern block_editor_ui.py uses for its `_BLK_*`.
+This module is the SINGLE SOURCE of the bar geometry constants (`_STATUS_H`,
+`_BAR_*`, the fixed 320x240 tool-switcher button rects `_HOME_BTN`/`_MENU_BTN`/...).
+They're consumed BOTH here (BarLayer's draw + hit-testing) AND by console.py's own
+chrome (the `Layout` class + a few derived constants + the golden harness/tests that
+read `console._HOME_BTN`), so rather than duplicate them (drift), console.py imports
+them back from here (re-exported under the same names) -- the same pattern
+block_editor_ui.py uses for its `_BLK_*`.
+
+The BOTTOM DOCK this module used to own is GONE (2026-08-21): a six-slot
+HOME/CODE/DRAW/MAP/RUN/SET tool switcher left over from the pre-2026-07 shell,
+whose slots still routed into that shell's entry points. The 2026-07 shell
+navigates by the zoned bar, the Make tile and the context-X, and the launcher had
+already stopped drawing the dock in #46 -- Settings was its last caller, on the
+fullscreen tiers only (the windowed WM suppressed it). Do not re-grow it;
+`tests/test_desktop_shell.py::test_the_pre_2026_07_bottom_dock_is_gone` is the
+ratchet.
 
 `BarLayer` reaches everything else through its `self.ws` back-ref (the shared draw
 toolkit ws._glyph/_icon/_mini_btn stays on Workstation; the bar is a consumer). Only
@@ -19,7 +28,7 @@ BarLayer instance a Workstation holds. The trivial time helpers `_ticks_ms`/
 import time
 
 
-# -- bar/dock geometry (single source; console.py imports these back) ---------
+# -- bar geometry (single source; console.py imports these back) --------------
 # The running-cart top bar draws on the fixed 320x240 GAME canvas, so its icon/button
 # rects are fixed constants here; the launcher/Settings bar reflows via Layout on the
 # SYSTEM canvas. The hamburger (≡) is the LEFT-MOST icon (slot 0); the tool switchers
@@ -66,14 +75,6 @@ _ZONE_CONTEXT_X = (_ZONE_GEAR[0] - _BAR_STRIDE, _BAR_Y, _BAR_ICON, _BAR_ICON)
 _ZONE_CLOCK = (_ZONE_CONTEXT_X[0] - 2 - 5 * 8, 0, 5 * 8, 18)
 _ZONE_LEFT_GAME = (2, _BAR_Y, _ZONE_CLOCK[0] - 4, _BAR_ICON)     # the app-lent rect
 
-# Bottom dock (persistent tool switcher, TIC-80 style): six evenly-spaced slots. The
-# per-slot rects come from Layout (responsive); these are the slot vocabulary + labels.
-_DOCK_SLOTS = ("home", "code", "paint", "map", "run", "settings")
-_DOCK_GLYPH = {"home": "home", "code": "code", "paint": "paint",
-               "map": "map", "run": "run", "settings": "gear"}
-_DOCK_LABEL = {"home": "HOME", "code": "CODE", "paint": "DRAW",
-               "map": "MAP", "run": "RUN", "settings": "SET"}
-
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_diff
@@ -82,7 +83,7 @@ except ImportError:                     # host: the runtime package
 
 
 class BarLayer:
-    """The unified 18px top bar + bottom dock (#46), migrated out of Workstation as
+    """The unified 18px top bar (#46), migrated out of Workstation as
     its own surface (docs/history/shell_layers_refactor_v1.md Phase 2) and reshaped into a
     ZONED bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, the macOS-menu-bar
     model): a RIGHT zone (OS-owned: clock/wifi/batt/gear + a slot reserved for the
@@ -111,9 +112,9 @@ class BarLayer:
     render either the untouched desktop body or the new zoned-bar body.
 
     Boundary decisions (deliberate, see the doc):
-      * The button-rect + dock CONSTANTS are the module-level single source above --
-        the golden harness + tests reference console._HOME_BTN / _MENU_BTN /
-        _DOCK_SLOTS / ... (re-exported by console.py), and Layout also uses them.
+      * The button-rect CONSTANTS are the module-level single source above --
+        the golden harness + tests reference console._HOME_BTN / _MENU_BTN / ...
+        (re-exported by console.py), and Layout also uses them.
       * The shared draw toolkit (ws._glyph / ws._icon / ws._mini_btn / ws._bar_image)
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
       * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
@@ -124,10 +125,9 @@ class BarLayer:
     SYSTEM-domain on launcher/settings/the code+blocks editor tabs (drawn on
     sys_canvas) but GAME-domain on the running cart AND the cards/paint/map editor
     tabs (drawn on the fixed game canvas), and it draws at a fixed point inside each
-    content's paint. So the content draws call _draw_status_strip(where)/
-    _draw_dock(where) and the pointer methods delegate their bar slice to
-    handle_bar_tap(where, ...) / handle_home_tap / handle_cart_tap /
-    _dock_slot_at + _activate_dock.
+    content's paint. So the content draws call _draw_status_strip(where) and the
+    pointer methods delegate their bar slice to handle_bar_tap(where, ...) /
+    handle_home_tap / handle_cart_tap.
 
     (Stage-4 ROLLOUT: CODE now draws the SAME zoned bar too -- its title + RUN/SAVE/
     CLOSE band was dissolved into it (BLOCKS/MUSIC fold in next). CODE is on the SYSTEM
@@ -523,84 +523,6 @@ class BarLayer:
         self._clock_at = now_s
         self._clock_cache = s
         return s
-
-    def _draw_dock(self, where):
-        """The persistent bottom dock: a fixed five-tool subset (home / code / draw /
-        map / run / settings, predating the blocks/scene/music editors -- see
-        _DOCK_SLOTS) -- NOT the full editor roster; blocks/scene/music are reached
-        via the Editor's zoned bar (EditorApp draw_zone), not this dock. The active
-        slot (home on the desktop, settings in Settings) is highlighted; tool slots
-        that need an open cart read dimmed on the home desktop. Suppressed entirely
-        in the windowed WM (#73): the dock is desktop-level chrome, not something a
-        Settings WINDOW should carry a copy of."""
-        if getattr(self.ws, "windowed_chrome", False):
-            return
-        NAMES = self._NAMES
-        ws = self.ws
-        cv = ws.sys_canvas
-        lay = ws.layout
-        fw = lay.font_w                              # on-screen char-cell width (8*fs)
-        gh = lay.status_gh                           # glyph box (12*fs)
-        th = ws.theme_colors
-        cv.rect(0, lay.dock_y, cv.w, cv.h - lay.dock_y, th["bar_edge"])
-        cv.rect(0, lay.dock_y, cv.w, 1, th["bar"])
-        for k in range(len(_DOCK_SLOTS)):
-            slot = _DOCK_SLOTS[k]
-            x, y, w, h = self._dock_slot_rect(k)
-            is_active = (slot == "home" and where == "home") or \
-                        (slot == "settings" and where == "settings")
-            # On the home desktop the editor tools have no cart -> dim them.
-            enabled = slot in ("home", "settings", "run") or ws.cart is not None
-            if is_active:
-                cv.rect(x, y, w, h, th["hilite"])
-            gc = th["chrome_ink"] if enabled else (
-                th["chrome_ink_dim"] if th.get("bar_light") else NAMES["dark_blue"])
-            ws._glyph(_DOCK_GLYPH[slot], (x, y, w, gh), gc, cv)
-            label = _DOCK_LABEL[slot]
-            cv.print(label, x + (w - len(label) * fw) // 2, y + gh, gc, 1)
-
-    # -- dock geometry + taps ------------------------------------------------
-
-    def _dock_slot_rect(self, k):
-        return self.ws.layout.dock_slot_rect(k)
-
-    def _dock_slot_at(self, px, py):
-        """Which dock slot ("home"/"code"/.../"settings") was tapped, or None.
-        None in the windowed WM -- the dock isn't drawn there (#73)."""
-        if getattr(self.ws, "windowed_chrome", False):
-            return None
-        if py < self.ws.layout.dock_y:
-            return None
-        for k in range(len(_DOCK_SLOTS)):
-            if self._in(px, py, self._dock_slot_rect(k)):
-                return _DOCK_SLOTS[k]
-        return None
-
-    def _activate_dock(self, slot):
-        """Run a dock action. The dock is drawn on home + settings; from the home
-        desktop only home/settings/run apply (no open cart for the editors), but if
-        a cart is still open behind Settings the tool slots switch its active editor
-        (TIC-80 style). run = open the selected cart from home, or re-run the open
-        one from Settings."""
-        ws = self.ws
-        if slot == "home":
-            ws.go_home()
-        elif slot == "settings":
-            ws.open_settings()
-        elif ws.cart is not None:                # tool slots need an open cart
-            if slot == "code":
-                ws._open_menu()
-            elif slot == "paint":
-                ws._open_paint()
-            elif slot == "map":
-                ws._open_map()
-            elif slot == "run":
-                # #184: deferred -- the recompile + run happens behind the
-                # next painted frame (the crash-loop population: each PLAY on
-                # a broken cart cost ~2s inside this tap).
-                ws.defer(ws.run_code if ws.editor is not None else ws.apply)
-        elif slot == "run" and ws.launcher.selected() is not None:
-            ws.defer(ws.launch_selected)         # home run = RUN the selected cart
 
     def handle_bar_tap(self, where, px, py):
         """The zoned bar's tap slice (Stage 4), shared by every screen it draws on

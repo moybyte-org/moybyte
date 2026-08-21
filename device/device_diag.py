@@ -116,7 +116,7 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
 
 def _diag_drawbrk(diag, ws):
     """Log a DRAWBRK line splitting the frame's draw cost into cart _update (game
-    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the dock+cursor+
+    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the bar+cursor+
     overlays remainder) -- the breakdown that says where draw= goes (logic vs render
     vs audio vs chrome). Guarded -> a no-op on any failure (only meaningful while a
     cart runs)."""

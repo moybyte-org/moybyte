@@ -242,6 +242,30 @@ def run_desktop(fps_cap=60):
                           make_audio=make_audio,
                           lua_runtime=lua_runtime, before_slim=_before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+
+    # BLE HID keyboard (#26): a SECOND, optional input source on this board.
+    # On the P4 and the Guition a paired BLE keyboard is the only keyboard and
+    # becomes ws.keyboard outright; here the physical C3 keyboard keeps that
+    # slot and the BLE driver hangs off ws.ble_keyboard. Both write into the
+    # SAME InputState above, so nothing in the shared console needs to know
+    # which one a keypress came from -- and Settings finds it because
+    # settings_layer._bt_service() checks ws.ble_keyboard before ws.keyboard.
+    #
+    # auto_start=False deliberately: scanning is what makes BLE expensive, and
+    # a board whose keyboard already works should not pay for a radio nobody
+    # asked for. Settings starts it when the kid opens the panel.
+    #
+    # The bond store is on the INTERNAL VFS, not beside the carts the way the
+    # touch-only boards do it: this board's carts live on SD, whose writes have
+    # to go through the with_sd_live gate, and a pairing that fails because a
+    # card is missing would be a bad first experience for a feature whose whole
+    # point is "my keyboard works now".
+    try:
+        from ble_keyboard import BleHidKeyboard
+        ws.ble_keyboard = BleHidKeyboard(inp, store_path="/ble_keyboard.json",
+                                         auto_start=False)
+    except Exception as exc:  # noqa: BLE001 -- a build without the module, or no radio
+        print("Moybyte: BLE keyboard unavailable:", exc)
     if getattr(ws, "updater", None) is not None:
         try:
             ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))

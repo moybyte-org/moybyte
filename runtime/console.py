@@ -161,9 +161,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
         _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
 
-# The unified top bar + bottom dock surface (#46, extracted from this file -- see
-# bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar/dock geometry constants
-# (_STATUS_H / _BAR_* / the tool-switcher button rects / _DOCK_*); they're imported
+# The unified top bar surface (#46, extracted from this file -- see
+# bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar geometry constants
+# (_STATUS_H / _BAR_* / the tool-switcher button rects); they're imported
 # back here (re-exported under the same names) because console.py's own Layout + a few
 # derived constants + the golden harness/tests reference them as console._X -- rather
 # than duplicate them (drift), the same way block_editor_ui.py owns its _BLK_*. NAMES
@@ -172,12 +172,12 @@ try:
     from bar_layer import (
         BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
         _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
-        _BAR_CLOCK, _STATUS_H, _DOCK_SLOTS, _DOCK_GLYPH, _DOCK_LABEL)
+        _BAR_CLOCK, _STATUS_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.bar_layer import (
         BarLayer, _BAR_ICON, _BAR_GAP, _BAR_STRIDE, _BAR_Y, _SYSMENU_BTN, _HOME_BTN,
         _MENU_BTN, _PAINT_BTN, _MAP_BTN, _BLOCKS_BTN, _MUSIC_BTN, _BAR_BATT, _BAR_WIFI,
-        _BAR_CLOCK, _STATUS_H, _DOCK_SLOTS, _DOCK_GLYPH, _DOCK_LABEL)
+        _BAR_CLOCK, _STATUS_H)
 
 # The "Make it mine" config-card editor surface (#3/#15, extracted -- see
 # cards_layer.py). cards_layer.py is the single source of the card geometry constants
@@ -668,9 +668,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from chrome import (
         _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
-        _DOCK_Y, _DOCK_H, _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
+        _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
-        _DOCK_W, _DOCK_GAP, _DOCK_X0, _CURSOR_BASE, _CURSOR_ACCEL,
+        _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
@@ -679,9 +679,9 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
         _ticks_ms, _ticks_us, _ticks_diff, _err_text, _from_ascii, CURSOR, NAMES, color,
-        _DOCK_Y, _DOCK_H, _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
+        _ICON_COLS, _ICON_ROWS, _ICON_W, _ICON_H, _ICON_GAP_X,
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
-        _DOCK_W, _DOCK_GAP, _DOCK_X0, _CURSOR_BASE, _CURSOR_ACCEL,
+        _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
         _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
@@ -815,7 +815,7 @@ class Workstation:
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
         # canvas is the panel/window surface the desktop/launcher/settings + status
-        # strip + dock render on, responsive to its size + the system font scale; a
+        # strip render on, responsive to its size + the system font scale; a
         # running cart (and, for step 1, the editors) draw on the game canvas and are
         # composited as a fixed-aspect, integer-scaled, centered viewport into it.
         # When sys_canvas is None (or the same size, the T-Deck default) the system
@@ -992,7 +992,7 @@ class Workstation:
         self.picker.icon_for = self._icon_image_keyed
         self.picker.cover_for = self._cover_for
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
-        # icon grid + dock); "desktop" is a running cart; "menu" is the cards/code/
+        # icon grid); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
         # (Stage 6b) `screen` is now a read-only PROJECTION of the WM back-stack top
         # (self.wm.top_kind() -- see the property below), not a plain attribute: the
@@ -1143,9 +1143,9 @@ class Workstation:
         self.icon_sheet = None
         self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None); backs
                                       # ws._icon (the shared draw toolkit), so it stays here.
-        # The unified top bar + bottom dock (#46) is its own surface now (BarLayer, Phase 2
+        # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
-        # per-second clock cache (#66), the dock geometry, and the bar/dock tap slices live
+        # per-second clock cache (#66) and the bar tap slices live
         # on self.bar_layer; set_icon_sheet bumps its cache gen via bar_layer.invalidate().
         self.bar_layer = BarLayer(self, NAMES, _in)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
@@ -1209,7 +1209,7 @@ class Workstation:
         self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
         # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw
         # cost actually goes -- cart _update, cart _draw, and the console chrome
-        # (dock + cursor + overlays, the remainder). Surfaced via perf_breakdown().
+        # (bar + cursor + overlays, the remainder). Surfaced via perf_breakdown().
         self._upd_ms = 0.0            # smoothed cart _update(dt) ms (game LOGIC)
         self._cart_ms = 0.0           # smoothed cart _draw() ms (RENDERING)
         self._audio_ms = 0.0          # smoothed audio.tick(dt) ms (mixer feed)
@@ -1465,7 +1465,7 @@ class Workstation:
     @property
     def windowed_chrome(self):
         """True while the MAKE world (the windowed WM's desk, #105 two-worlds)
-        is open: in-window app bars suppress OS chrome, the dock is off, and
+        is open: in-window app bars suppress the OS right zone, and
         the bar's wifi icon deep-links to the Settings window. Always False in
         the PLAY world (fullscreen Library/games -- even on the windowed tier)
         and on the fullscreen-stack tiers, where the fullscreen chrome rules
@@ -5503,7 +5503,7 @@ class Workstation:
         if not self.perf_capture:
             return
         # DRAWBRK split: cart _update (logic) / cart _draw (render) / audio.tick /
-        # console chrome (remainder = dock + cursor + overlays).
+        # console chrome (remainder = bar + cursor + overlays).
         _chrome = _draw - _upd - _cart - _audio
         if _chrome < 0:
             _chrome = 0
@@ -5594,7 +5594,7 @@ class Workstation:
     def perf_breakdown(self):
         """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --
         cart _update (game LOGIC), cart _draw (RENDERING), audio.tick (mixer feed), and
-        console chrome (dock + cursor + overlays, the remainder). Used by the device
+        console chrome (bar + cursor + overlays, the remainder). Used by the device
         diag's DRAWBRK line to find where the per-frame draw cost actually goes (cart
         logic vs rendering vs audio vs chrome). Only meaningful while a cart runs with
         perf_capture/perf_hud on."""

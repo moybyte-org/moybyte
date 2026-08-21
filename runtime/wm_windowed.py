@@ -12,7 +12,7 @@ Picotron-style (owner direction, 2026-07-08):
     maximize / close), a border + drop shadow, draggable by the strip and
     resizable by the bottom-right grip;
   * a window's body is PURELY the app: in windowed mode the zoned bar suppresses
-    its OS right zone and the dock (ws.windowed_chrome -- see bar_layer.py), so
+    its OS right zone (ws.windowed_chrome -- see bar_layer.py), so
     an app window's own bar row is just its toolbar (the Editor's tab ladder),
     never a copied taskbar;
   * a RUNNING CART composites integer-scaled and centered in its window -- the

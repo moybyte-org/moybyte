@@ -119,9 +119,10 @@ class SettingsLayer:
         self.wifi_msg = ""
         self.wifi_known = []
         self._wifi_kprev = 0          # keyboard edge detect (password typing)
-        # P4-only Bluetooth keyboard panel.  It is capability-gated through
-        # keyboard.settings_capable, so the host and local T-Deck keyboard keep
-        # the exact Settings rows/pixels they have today.
+        # Bluetooth keyboard panel, capability-gated through _bt_service() --
+        # so a board with no BLE service keeps the exact Settings rows/pixels
+        # it has today. Was P4-only; the Guition joined it (#202) and the
+        # T-Deck can now pair one ALONGSIDE its physical keyboard (#26).
         self.bt_view = False
         self.bt_devices = []          # service rows; opaque address stays opaque
         self.bt_sel = 0
@@ -148,11 +149,27 @@ class SettingsLayer:
         if self.bt_view:
             self.close_bluetooth()
 
-    # -- BLUETOOTH KEYBOARD panel (P4 capability; visual identity v1) ---------
+    # -- BLUETOOTH KEYBOARD panel (capability-gated; visual identity v1) ------
 
     def _bt_service(self):
-        keyboard = getattr(self.ws, "keyboard", None)
-        return keyboard if getattr(keyboard, "settings_capable", False) else None
+        """The BLE keyboard service, or None on a board without one.
+
+        TWO SHAPES, because the boards genuinely differ. On the touch-only
+        tiers (P4, Guition) a paired BLE keyboard IS the only keyboard, so it
+        is `ws.keyboard` and the capability rides the keyboard itself. The
+        T-Deck has a physical C3 keyboard over I2C AND can pair a BLE one, so
+        `ws.keyboard` stays the local keyboard and the BLE service hangs off
+        `ws.ble_keyboard`; both drivers write into the SAME InputState, so
+        nothing above this line needs a notion of "which keyboard".
+
+        Checked in that order, and `settings_capable` is still what gates:
+        a board that sets neither keeps the exact Settings rows and frozen
+        320x240 pixels it has today."""
+        for svc in (getattr(self.ws, "ble_keyboard", None),
+                    getattr(self.ws, "keyboard", None)):
+            if getattr(svc, "settings_capable", False):
+                return svc
+        return None
 
     def open_bluetooth(self):
         """Open the Bluetooth keyboard picker without disrupting a live link."""
@@ -932,10 +949,10 @@ class SettingsLayer:
                 ws.ach_ui._tap_secret_door()
                 return True
         ws.ach_ui._secret_taps = 0
-        slot = ws.bar_layer._dock_slot_at(px, py)
-        if slot is not None:
-            ws.bar_layer._activate_dock(slot)
-            return True
+        # (The six-slot bottom dock that used to take taps below the panel was
+        # removed 2026-08-21 -- a pre-2026-07 tool switcher; Settings is left
+        # via the panel X / the bar's context-X. A tap in the band is swallowed
+        # so it can never reach the wallpaper behind the panel.)
         return True
 
     def _row_tap(self, px, py):
@@ -1018,12 +1035,10 @@ class SettingsLayer:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
             self._draw_wifi()
             ws.bar_layer._draw_status_strip("settings")
-            ws.bar_layer._draw_dock("settings")
             return
         if self.bt_view:
             self._draw_bluetooth()
             ws.bar_layer._draw_status_strip("settings")
-            ws.bar_layer._draw_dock("settings")
             return
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
@@ -1037,7 +1052,6 @@ class SettingsLayer:
                 self._draw_settings_row(i)
         self._draw_settings_more(rows)
         ws.bar_layer._draw_status_strip("settings")
-        ws.bar_layer._draw_dock("settings")
 
     def _draw_settings_more(self, rows):
         """Up/down chevrons at the panel's right edge when the Settings list scrolls

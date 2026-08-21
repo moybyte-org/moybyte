@@ -411,7 +411,7 @@ the Open Machine colorway: dark-blue construction field, navy dot grid/chrome,
 grape identity, green PLAY / orange authoring / yellow focus. "night" stays the
 byte-identical default. 2026-07-23: every theme family ships a **dark AND a
 light variant** (Appearance → THEMES → DARK/LIGHT chips, persisted
-`theme_variant`), and the tokens now reach the whole system: the OS bar + dock,
+`theme_variant`), and the tokens now reach the whole system: the OS bar,
 Settings rows + WiFi panel, the ≡ menu/About, achievements, the OTA screens,
 the windowed-WM strips/chips, and the editor tabs on every responsive tier —
 the frozen 320×240 `_base` branches keep their literals only in DARK chrome, so

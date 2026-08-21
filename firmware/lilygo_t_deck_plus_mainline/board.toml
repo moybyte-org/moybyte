@@ -396,3 +396,28 @@ sunset, plus the "serve the wasm console from this board" handler. Board-agnosti
 -- the web directory and the SD gate are constructor arguments. `moy_webserver`
 imports `web_view_ws`, which the shared denylist above stages; that pair is the
 whole reason `tests/test_staging_closure.py` exists."""
+
+[[modules.device.group]]
+files = ["ble_keyboard.py"]
+why = """
+STAGE 6. The BLE HID keyboard -- the shared driver (born on the P4, promoted to
+the device tree 2026-08-19 when the Guition became its second consumer). The
+S3's radio is on-chip and `import bluetooth` is already in this image
+(sdkconfig.ble).
+
+THIS BOARD IS THE ODD ONE, and the reason is worth stating: on the P4 and the
+Guition a paired BLE keyboard is the ONLY keyboard, so it becomes `ws.keyboard`
+outright. The T-Deck has a physical C3 keyboard over I2C, so here the BLE
+driver is a SECOND, optional input source -- `ws.ble_keyboard`, while
+`ws.keyboard` stays TDeckKeyboard. Both write into the same InputState, so
+nothing above `moy_runtime` needs a notion of "which keyboard"; Settings gates
+its Bluetooth panel on `settings_layer._bt_service()`, which checks
+`ws.ble_keyboard` before `ws.keyboard` for exactly this case.
+
+Affordable only since 2026-08-21: the NimBLE config was right-sized for one
+keyboard in the same session (sdkconfig.board), which took ACTIVATING BLE on
+this board from leaving 756 bytes free in the 227KB internal region to ~5,200 --
+and the core-0 flush feeder (d9aa73e) handed back another 20KB on top, so a
+cart, WiFi and BLE now coexist (measured 52.7 fps with all three up). At the
+old defaults staging this file would have shipped a keyboard nobody could turn
+on without starving the console."""
