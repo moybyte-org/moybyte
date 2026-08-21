@@ -33,34 +33,47 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 P4_BOARD_DIR = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
 
 
-def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
-    """A board's upload chunk from its own [serial] block -- the same number
-    tools/push_cart.py reads, kept in ONE place beside the measurement that
-    produced it.
+def declared_serial(board_dir=P4_BOARD_DIR):
+    """A board's [serial] block: the line state at open, whether it may be
+    reset at all, and the upload chunk.
 
-    It is PER BOARD and the boards disagree for a hardware reason: the P4's
-    CH343 stdin is a ~256-byte ring with no flow control, while the two S3
-    boards' USB-Serial/JTAG backpressures and keeps 768. So this takes the
-    directory of the board being driven, and a suite that drives a USB board
-    passes its own -- a single class-wide constant is what went stale here.
+    Every one of these is PER BOARD for a hardware reason and every one is
+    load-bearing (see the blocks themselves): an open with the wrong dtr/rts
+    chip-resets an S3 under its own handle, a reset pulse on a board that
+    declares attach_only strands it, and the P4's flow-control-free UART ring
+    silently drops an over-long line. tools/push_cart.py and the on-glass
+    suites read the SAME declaration -- hand-writing them per caller is what
+    put three copies of the same measurement in the tree.
 
-    Falls back to `default` if board.toml cannot be read, because a test driver
-    that refuses to start is worse than one on a stale constant."""
+    Missing keys fall back to the P4's, because a driver that refuses to start
+    is worse than one on a default."""
+    out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import board_config
-        return int(board_config.load(board_dir).get("serial", {}).get("chunk")
-                   or default)
-    except Exception:  # noqa: BLE001 -- any parse/IO failure means "use default"
-        return default
+        ser = board_config.load(board_dir).get("serial", {})
+    except Exception:  # noqa: BLE001 -- any parse/IO failure means "use defaults"
+        return out
+    out.update({k: v for k, v in ser.items() if k in out})
+    return out
+
+
+def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
+    """The board's upload chunk, or `default` if it declares none."""
+    return int(declared_serial(board_dir)["chunk"] or default)
 
 
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
-    def __init__(self, port, log=None, timeout=0.2, dtr=False, rts=False,
-                 chunk=None):
+    def __init__(self, port, log=None, timeout=0.2, dtr=None, rts=None,
+                 chunk=None, board_dir=None):
+        """`board_dir` supplies dtr/rts/chunk/attach_only from that board's
+        [serial] block; explicit arguments still win. Without one the P4's
+        defaults apply -- it is the board this driver was written for."""
+        ser = declared_serial(board_dir or P4_BOARD_DIR)
         self.log = log if log is not None else (lambda s: None)
+        self.attach_only = bool(ser["attach_only"])
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = BAUD
@@ -74,12 +87,13 @@ class P4Board:
         #     under the open handle and every read returns nothing forever.
         #     Opening with both HIGH (pyserial's default, what miniterm does)
         #     attaches to the running console cleanly.
-        self.ser.dtr = dtr
-        self.ser.rts = rts
+        self.ser.dtr = bool(ser["dtr"]) if dtr is None else dtr
+        self.ser.rts = bool(ser["rts"]) if rts is None else rts
         self.ser.open()
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)
-        # Per instance, because the boards' rings differ (see declared_chunk).
+        # Per instance, because the boards' rings differ (see declared_serial).
+        chunk = chunk or ser["chunk"]
         if chunk:
             self.CHUNK = int(chunk)
 
@@ -176,7 +190,17 @@ class P4Board:
     # -- lifecycle --------------------------------------------------------
 
     def reset(self, boot_timeout=40.0, settle=3.0):
-        """Hard-reset via the CH343 RTS pulse and wait for the desktop."""
+        """Hard-reset via the CH343 RTS pulse and wait for the desktop.
+
+        CH343-ONLY. On a board whose USB-Serial/JTAG is on the SoC the pulse
+        re-enumerates the USB device under this open handle and every read
+        afterwards returns nothing, forever -- indistinguishable from a dead
+        board. Those boards declare attach_only in their [serial] block."""
+        if self.attach_only:
+            raise RuntimeError(
+                "this board declares attach_only: it is attached to, never "
+                "reset (its USB serial is on the SoC -- a reset strands the "
+                "handle)")
         self.ser.rts = True
         time.sleep(0.1)
         self.ser.rts = False

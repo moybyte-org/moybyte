@@ -123,7 +123,7 @@ def main(argv=None):
     bin_path = Path(args.bin)
     if not bin_path.exists():
         ap.error("image not found: %s\n  build it first: "
-                 "MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-lilygo-micropython" % bin_path)
+                 "make firmware-build-lilygo-micropython" % bin_path)
 
     # Identity: CLI > the build stamp (ota_build.json) > moy_ota.FIRMWARE_VERSION/stable.
     bld = read_ota_build()

@@ -86,7 +86,6 @@ jobs:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
       MOYBYTE_BUILD_JOBS: "4"
-      MOYBYTE_SKIP_VFS_BOOT: "1"
       # The image's baked OTA identity (#53): build.sh stamps CHANNEL/VERSION/
       # LABEL into a generated _ota_build.py from this. Deriving it from the REF
       # is the whole point of the branch split -- an image built off dev must not

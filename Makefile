@@ -285,12 +285,12 @@ ota-serve:
 # device: Settings -> CHANNEL = BETA -> UPDATE ONLINE. The beta version is the build
 # epoch, so every publish reads as newer than the last.
 ota-publish-unstable:
-	MOYBYTE_SKIP_VFS_BOOT=1 MOYBYTE_OTA_CHANNEL=unstable $(MAKE) firmware-build-lilygo-micropython
+	MOYBYTE_OTA_CHANNEL=unstable $(MAKE) firmware-build-lilygo-micropython
 	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
 # Publish a STABLE build (normally from master) into OTA_ROOT/stable/.
 ota-publish-stable:
-	MOYBYTE_SKIP_VFS_BOOT=1 MOYBYTE_OTA_CHANNEL=stable $(MAKE) firmware-build-lilygo-micropython
+	MOYBYTE_OTA_CHANNEL=stable $(MAKE) firmware-build-lilygo-micropython
 	$(PYTHON) tools/gen_ota_manifest.py --root $(OTA_ROOT) $(if $(OTA_BASE_URL),--base-url $(OTA_BASE_URL)) --port $(OTA_PORT)
 
 # Serve OTA_ROOT (both channels) over HTTP for the device. Foreground; for a persistent

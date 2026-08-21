@@ -33,6 +33,7 @@ MODULE = ROOT / "native" / "moy_web"
 sys.path.insert(0, str(TDECK / "modules"))
 sys.path.insert(0, str(ROOT / "tools"))
 
+import board_config as bc                                         # noqa: E402
 import gen_web_blob as gwb                                        # noqa: E402
 import moy_webhost as wh                                          # noqa: E402
 
@@ -303,6 +304,39 @@ def test_staleness_is_a_warning_and_never_a_failure(tmp_path, capsys):
     rc, _ = _generate(tmp_path, d)
     assert rc == 0
     assert "OLDER than console sources" in capsys.readouterr().err
+
+
+def test_the_watch_list_is_derived_from_the_web_runner_board_file():
+    """It used to be a hand-written `runtime/*.py` glob, which could not see
+    `device/` -- and `device/device_canvas.py` IS the class the browser
+    rasterizes with since moycore stage 4. The one file whose staleness matters
+    most was the one file the check was structurally blind to.
+
+    So the set comes from the same staging declaration the build stages FROM
+    (firmware/web_runner/board.toml, #161), plus the runner's own authored
+    modules and page, which build.sh copies by name."""
+    watched = set(gwb.watched_sources())
+    assert "device/device_canvas.py" in watched
+    for src in bc.staged_modules(str(ROOT / "firmware" / "web_runner")).values():
+        rel = os.path.relpath(str(src), str(ROOT))
+        assert rel in watched, "%s is staged into the bundle and unwatched" % rel
+    for name in ("web_boot.py", "web_canvas.py"):
+        assert "firmware/web_runner/" + name in watched
+    # A denied module is not a source of this bundle, and the glob watched it.
+    assert "runtime/host_app.py" not in watched
+
+
+def test_a_stale_device_canvas_is_reported(tmp_path):
+    """The regression itself: `device/` newer than the bundle now says so."""
+    d = _dist(tmp_path)
+    for p in d.iterdir():
+        os.utime(p, (1, 1))          # ancient bundle: mtimes here tie otherwise
+    assets, _ = gwb.collect(str(d))
+    root = tmp_path / "root"
+    (root / "device").mkdir(parents=True)
+    (root / "device" / "device_canvas.py").write_text("x")
+    assert gwb.stale_sources(assets, root=str(root)) == [
+        "device/device_canvas.py"]
 
 
 # -- the module, and the two builds that carry it ----------------------------

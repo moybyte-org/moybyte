@@ -52,6 +52,8 @@ a declared absence cannot outlive the thing it excuses.
 """
 
 import ast
+import collections
+import functools
 from pathlib import Path
 
 import pytest
@@ -304,12 +306,19 @@ def _wire_param_map():
     return out
 
 
-def _func(path, name):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def _find(tree, name):
     for n in ast.walk(tree):
         if isinstance(n, ast.FunctionDef) and n.name == name:
             return n
-    raise AssertionError("%s has no %s()" % (path, name))
+    return None
+
+
+def _func(path, name):
+    fn = _find(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)),
+               name)
+    if fn is None:
+        raise AssertionError("%s has no %s()" % (path, name))
+    return fn
 
 
 # The workstation reaches a closure under whatever name that closure's
@@ -492,3 +501,320 @@ def test_the_webhost_row_is_the_one_this_file_was_written_for():
             "%s stopped injecting the web console -- the Settings row is gated "
             "on `getattr(ws, 'webhost', None) is not None`, so this board now "
             "silently does not offer it" % board)
+
+
+# -- the DRIVEN axis: attached is not the same as running ---------------------
+#
+# THE BUGS THIS HALF EXISTS TO MAKE IMPOSSIBLE (#26, fixed in ef7c915).
+#
+# The T-Deck's `ble_keyboard` row above read INJECTED and was true: the board
+# built the driver and hung it on `ws`. Two of the three faults behind "the BLE
+# keyboard does nothing on the T-Deck" were downstream of that line. Nothing
+# ever called `start()`, so the Settings panel opened onto a radio that had
+# never scanned; and `_poll_inputs` never called `poll()`, so even a paired
+# keyboard could not have produced a keypress. Both shipped. The table said
+# INJECTED and the table was right, which is exactly why it caught neither.
+#
+# So a service whose object has a LIFECYCLE declares it, per target, in the same
+# shape: either the wiring makes the call, or it says who does, or it says why
+# nobody does. An object nobody drives is a feature that is present and inert.
+
+DRIVEN = {
+    "keyboard": ("start", "poll"),
+    "ble_keyboard": ("start", "poll"),
+    # start() belongs to the Settings row -- injecting the webhost only makes
+    # the row appear, and the row is what brings the radio up. The poll is
+    # wiring: a bound socket nobody accepts on is a network fault.
+    "webhost": ("poll",),
+}
+
+_VERBS = {v for verbs in DRIVEN.values() for v in verbs}
+
+HERE = True     # the target's own wiring function makes the call
+
+# The call is made by a function the wiring CALLS. Both halves are checked, so
+# neither "the board stopped calling the helper" nor "the helper stopped making
+# the call" can pass.
+Via = collections.namedtuple("Via", "path func")
+
+# The call is made on DEMAND by a user action the wiring never reaches. Only
+# the delegate half can be checked from here, so the reason is required and the
+# ratchet below deletes it the day the target starts making the call itself.
+Lazy = collections.namedtuple("Lazy", "path func why")
+
+LIFECYCLE = {
+    "tdeck": {
+        ("keyboard", "start"): "TDeckKeyboard has no start(): the C3 is on I2C0 "
+                               "and answers from __init__, so poll() is the "
+                               "whole lifecycle",
+        ("keyboard", "poll"): HERE,
+        ("ble_keyboard", "start"): Lazy(
+            "runtime/settings_layer.py", "open_bluetooth",
+            "auto_start=False on purpose -- scanning is what makes BLE "
+            "expensive and this board's keyboard already works, so the radio "
+            "comes up when a kid opens the picker. The touch-only boards start "
+            "theirs at boot because a paired keyboard is their only way out of "
+            "a cart"),
+        ("ble_keyboard", "poll"): HERE,
+        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+    },
+    "p4": {
+        ("keyboard", "start"): HERE,
+        ("keyboard", "poll"): HERE,
+        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+    },
+    "guition": {
+        ("keyboard", "start"): HERE,
+        ("keyboard", "poll"): HERE,
+        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+    },
+}
+
+
+# -- extraction ---------------------------------------------------------------
+
+
+class _Handles:
+    """Which names in a module hold which Workstation service.
+
+    Follows the shapes the wiring actually uses -- `x = ws.svc`,
+    `getattr(ws, "svc", None)`, `for x in (<handles>)` and `x = helper()` where
+    helper returns one -- to a fixed point, so the service settings_layer
+    reaches through `self._bt_service()` resolves like a direct attribute.
+    Scopes are deliberately ignored: a name is a name, which can only ever make
+    this MORE willing to find a call, and a found call is the thing being
+    demanded.
+    """
+
+    def __init__(self, path, seed=None):
+        self.tree = ast.parse(path.read_text(encoding="utf-8"),
+                              filename=str(path))
+        self.names = {k: set(v) for k, v in (seed or {}).items()}
+        self.rets = {}
+        for _ in range(5):
+            if not self._pass():
+                break
+
+    def _pass(self):
+        grew = False
+        for n in ast.walk(self.tree):
+            if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                    and isinstance(n.targets[0], ast.Name)):
+                grew |= self._add(self.names, n.targets[0].id, self.of(n.value))
+            elif (isinstance(n, (ast.For, ast.AsyncFor))
+                  and isinstance(n.target, ast.Name)):
+                it = n.iter
+                elts = (it.elts if isinstance(it, (ast.Tuple, ast.List))
+                        else [it])
+                got = set()
+                for e in elts:
+                    got |= self.of(e)
+                grew |= self._add(self.names, n.target.id, got)
+            elif isinstance(n, ast.FunctionDef):
+                got = set()
+                for r in ast.walk(n):
+                    if isinstance(r, ast.Return) and r.value is not None:
+                        got |= self.of(r.value)
+                grew |= self._add(self.rets, n.name, got)
+        return grew
+
+    @staticmethod
+    def _add(table, key, vals):
+        cur = table.setdefault(key, set())
+        if not vals - cur:
+            return False
+        cur |= vals
+        return True
+
+    def of(self, node):
+        """The services `node` can evaluate to."""
+        if isinstance(node, ast.Attribute) and node.attr in SERVICES:
+            return {node.attr}
+        if isinstance(node, ast.Name):
+            return set(self.names.get(node.id, ()))
+        if isinstance(node, ast.Call):
+            f = node.func
+            if getattr(f, "id", None) == "getattr" and len(node.args) >= 2:
+                a = node.args[1]
+                if isinstance(a, ast.Constant) and a.value in SERVICES:
+                    return {a.value}
+            return set(self.rets.get(_called(node), ()))
+        return set()
+
+    def verbs(self, funcname):
+        """{(service, verb): per_frame} for `<handle>.<verb>()` under funcname.
+
+        per_frame is True when the call sits in a loop or inside a nested def
+        -- a frame hook, which is what `poll_inputs`/`tail` are handed to
+        device_boot.FrameLoop as. That distinction is the point: a poll() on a
+        board's boot path runs once and reads, in every static sense, exactly
+        like one that runs every frame.
+        """
+        root = _find(self.tree, funcname)
+        assert root is not None, "no %s() to read" % funcname
+        out = {}
+
+        def walk(node, per_frame):
+            sub = per_frame or isinstance(node, (ast.While, ast.For,
+                                                 ast.AsyncFor)) or (
+                node is not root and isinstance(node, (ast.FunctionDef,
+                                                       ast.Lambda)))
+            for c in ast.iter_child_nodes(node):
+                if (isinstance(c, ast.Call)
+                        and isinstance(c.func, ast.Attribute)
+                        and c.func.attr in _VERBS):
+                    for svc in self.of(c.func.value):
+                        key = (svc, c.func.attr)
+                        out[key] = out.get(key, False) or sub
+                walk(c, sub)
+
+        walk(root, False)
+        return out
+
+    def calls(self, funcname):
+        """Every function name called anywhere under funcname."""
+        root = _find(self.tree, funcname)
+        assert root is not None, "no %s() to read" % funcname
+        return {_called(n) for n in ast.walk(root) if isinstance(n, ast.Call)}
+
+
+def _called(node):
+    f = node.func
+    return f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+
+
+def _wire_seed(fn, param_map):
+    """{local name: {service}} for the handles a target hands to
+    wire_workstation_core.
+
+    `keyboard=keyboard` is the only thing that says the P4's BleHidKeyboard
+    local IS ws.keyboard, and without it every lifecycle call on those boards
+    reads as a call on an unrelated object."""
+    inv = {}
+    for attr, param in param_map.items():
+        inv.setdefault(param, attr)
+    order = [a.arg for a in _func(ROOT / "runtime" / "console.py",
+                                  "wire_workstation_core").args.args]
+    seed = {}
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Call) or _called(n) != "wire_workstation_core":
+            continue
+        pairs = [(order[i], a) for i, a in enumerate(n.args) if i < len(order)]
+        pairs += [(k.arg, k.value) for k in n.keywords if k.arg]
+        for param, val in pairs:
+            if isinstance(val, ast.Name) and param in inv:
+                seed.setdefault(val.id, set()).add(inv[param])
+    return seed
+
+
+@functools.lru_cache(maxsize=None)
+def _target_handles(target):
+    rel, fname = TARGETS[target]
+    path = ROOT / rel
+    return _Handles(path, _wire_seed(_func(path, fname), _wire_param_map()))
+
+
+@functools.lru_cache(maxsize=None)
+def _module_handles(rel):
+    return _Handles(ROOT / rel)
+
+
+def _required_cells(target):
+    """(service, verb) pairs this target owes a declaration for: every verb of
+    every DRIVEN service its row above says it injects."""
+    return {(s, v) for s in DRIVEN if WIRING[target].get(s) is INJECTED
+            for v in DRIVEN[s]}
+
+
+def _driven_here(target, service, verb):
+    """(found, per_frame) for the target's own wiring function."""
+    got = _target_handles(target).verbs(TARGETS[target][1])
+    return ((service, verb) in got, got.get((service, verb), False))
+
+
+# -- the tests ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("target", sorted(TARGETS))
+def test_every_driven_service_declares_its_lifecycle(target):
+    """No blanks on this axis either. A board that starts injecting a keyboard
+    fails here until it has said where start() and poll() happen."""
+    have = set(LIFECYCLE.get(target, {}))
+    need = _required_cells(target)
+    assert not need - have, "%s injects but does not declare: %s" % (
+        target, sorted(need - have))
+    assert not have - need, (
+        "%s declares a lifecycle for something it does not inject (or for a "
+        "verb DRIVEN does not list): %s" % (target, sorted(have - need)))
+
+
+@pytest.mark.parametrize("target", sorted(TARGETS))
+def test_every_lifecycle_absence_carries_a_reason(target):
+    for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
+        if value is HERE or isinstance(value, Via):
+            continue
+        why = value.why if isinstance(value, Lazy) else value
+        assert isinstance(why, str) and why.strip(), (
+            "%s/%s/%s: an absence must carry a reason, got %r"
+            % (target, service, verb, value))
+
+
+@pytest.mark.parametrize("target", sorted(TARGETS))
+def test_the_target_drives_exactly_what_the_lifecycle_says(target):
+    """THE PIN. An injected service with a lifecycle is inert until something
+    calls it, and both of ef7c915's silent bugs were exactly that line missing.
+    """
+    for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
+        found, per_frame = _driven_here(target, service, verb)
+        if value is HERE:
+            assert found, (
+                "%s declares it calls %s.%s() itself and does not -- the "
+                "service is attached and inert (wiring: %s -> %s)"
+                % (target, service, verb, TARGETS[target][0],
+                   TARGETS[target][1]))
+            assert verb != "poll" or per_frame, (
+                "%s calls %s.poll() on its BOOT PATH, not from a frame hook -- "
+                "it runs once and then never again" % (target, service))
+            continue
+        if isinstance(value, (Via, Lazy)):
+            assert (service, verb) in _module_handles(value.path).verbs(
+                value.func), (
+                "%s says %s.%s() happens in %s::%s, and that function does not "
+                "make the call" % (target, service, verb, value.path,
+                                   value.func))
+        if isinstance(value, Via):
+            assert value.func in _target_handles(target).calls(
+                TARGETS[target][1]), (
+                "%s delegates %s.%s() to %s and never calls it"
+                % (target, service, verb, value.func))
+
+
+def test_no_lifecycle_excuse_has_gone_stale():
+    """The ratchet. A delegated or excused call that the target now makes
+    itself must be re-declared HERE, not left wearing an argument that has
+    stopped being true."""
+    stale = []
+    for target in sorted(TARGETS):
+        for (service, verb), value in sorted(LIFECYCLE.get(target, {}).items()):
+            if value is HERE or isinstance(value, Via):
+                continue
+            if _driven_here(target, service, verb)[0]:
+                stale.append("%s/%s/%s" % (target, service, verb))
+    assert not stale, (
+        "these targets now make a call their row delegates or excuses -- set "
+        "the cell to HERE and delete the excuse:\n  %s" % "\n  ".join(stale))
+
+
+def test_the_ble_keyboard_rows_are_the_ones_this_half_was_written_for():
+    """The concrete regressions, kept as their own assertion so a refactor of
+    the machinery cannot lose them: the T-Deck polls its BLE keyboard EVERY
+    FRAME, and something really does start it."""
+    found, per_frame = _driven_here("tdeck", "ble_keyboard", "poll")
+    assert found and per_frame, (
+        "the T-Deck stopped polling ws.ble_keyboard from its frame hook -- a "
+        "paired keyboard cannot produce a keypress (#26)")
+    start = LIFECYCLE["tdeck"][("ble_keyboard", "start")]
+    assert ("ble_keyboard", "start") in _module_handles(start.path).verbs(
+        start.func), (
+        "nothing calls ble_keyboard.start() on the T-Deck -- the Bluetooth "
+        "panel opens onto a radio that has never scanned (#26)")

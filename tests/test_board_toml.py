@@ -20,6 +20,7 @@ rather than being skipped where it matters.
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -369,6 +370,39 @@ def test_push_cart_holds_no_per_board_branch():
     for marker in ('== "p4"', "== 'p4'", '== "tdeck"', "== 'tdeck'",
                    '== "guition"', "== 'guition'"):
         assert marker not in src, "push_cart.py branches on the board: %s" % marker
+
+
+def test_the_on_glass_suites_read_the_declaration_instead_of_retyping_it():
+    """The last hand-written copies of these facts (#206). Both suites drive a
+    real board, so they are hardware-gated and CI never runs them -- which is
+    exactly why what is typed inside them rots unseen. Each hand-wrote
+    `dtr=True, rts=True` under a comment restating the measurement its
+    board.toml already carries, and neither read `attach_only` at all: the fact
+    that stops a reset stranding the handle was data with no consumer."""
+    for suite, name in (("test_tdeck_on_glass.py", "lilygo_t_deck_plus_mainline"),
+                        ("test_guition_on_glass.py", "guition_jc3248w535")):
+        src = (ROOT / "tests" / suite).read_text()
+        assert 'board_dir=ROOT / "firmware" / "%s"' % name in src, (
+            "%s no longer points P4Board at %s/board.toml" % (suite, name))
+        for typed in ("dtr=", "rts=", "chunk="):
+            assert typed not in src, (
+                "%s retypes a [serial] fact (%s) the board file states" % (
+                    suite, typed))
+
+
+def test_attach_only_is_a_fact_with_teeth():
+    """Declaring it is not enough -- it has to REFUSE. `P4Board.reset()` pulses
+    RTS, which on a SoC-USB board re-enumerates the device under the open handle
+    and every read returns nothing forever, reading exactly like a dead board."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from p4_autotest import declared_serial
+    for name in ("tdeck", "guition-s3"):
+        assert declared_serial(_DEVICE_BOARDS[name])["attach_only"] is True
+    assert declared_serial(P4)["attach_only"] is False
+    src = (ROOT / "tools" / "p4_autotest.py").read_text()
+    body = src.split("def reset(", 1)[1].split("\n    def ", 1)[0]
+    assert "if self.attach_only:" in body and "raise" in body, (
+        "P4Board.reset() no longer refuses a board that declares attach_only")
 
 
 # -- the sdkconfig fragment, read as data --------------------------------------

@@ -37,18 +37,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def board():
-    # The driver is the P4's -- a plain line-pump over pyserial. dtr/rts must
-    # be HIGH on open here (the opposite of the P4): an open with both lines
-    # LOW chip-resets a USB-Serial/JTAG board and the handle goes stale on the
-    # re-enumeration -- measured 2026-08-17, and it reads exactly like a board
-    # that never boots. Only P4Board.reset() is CH343-specific; never called.
-    from p4_autotest import P4Board, declared_chunk
-    # Its own [serial] chunk, not the driver's P4 default: this board's
-    # USB-Serial/JTAG backpressures and keeps 768 (measured), where the P4's
-    # flow-control-free UART ring needs 256.
-    b = P4Board(PORT, dtr=True, rts=True,
-                chunk=declared_chunk(ROOT / "firmware"
-                                     / "lilygo_t_deck_plus_mainline"))
+    # The driver is the P4's -- a plain line-pump over pyserial -- pointed at
+    # THIS board's [serial] declaration: dtr/rts HIGH at open, attach_only, and
+    # a 768-byte chunk. Every one of those is a measurement (its board.toml
+    # carries the why), and the same block push_cart.py and the flash targets
+    # read. Encoding them here was three copies of one fact.
+    from p4_autotest import P4Board
+    b = P4Board(PORT, board_dir=ROOT / "firmware" / "lilygo_t_deck_plus_mainline")
     # The board is already running; a first drain absorbs whatever diag lines
     # are mid-flight before the first command's reply is awaited.
     b.drain(0.8)
