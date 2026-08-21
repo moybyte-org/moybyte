@@ -24,7 +24,10 @@ import os
 import sys
 import time
 
-import serial
+try:
+    import serial
+except ImportError:  # pyserial is the `device` extra -- hardware only. The
+    serial = None    # data half below must still import under a host suite.
 
 BAUD = 115200
 BOOT_BANNER = "desktop running"
@@ -74,6 +77,9 @@ class P4Board:
         ser = declared_serial(board_dir or P4_BOARD_DIR)
         self.log = log if log is not None else (lambda s: None)
         self.attach_only = bool(ser["attach_only"])
+        if serial is None:
+            raise RuntimeError(
+                "driving a board needs pyserial: pip install -e '.[device]'")
         self.ser = serial.Serial()
         self.ser.port = port
         self.ser.baudrate = BAUD
