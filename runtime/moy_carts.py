@@ -1944,14 +1944,30 @@ def history_append_segment(kind, name, ops, root=CARTS_DIR):
     prune_history(kind, name, root)
 
 
+_PRUNE_FAILS = 0
+
+
+def history_prune_fails():
+    """Sidecar prunes that failed since boot. Must stay 0. history_commit
+    swallows the failure to keep the commit honest, so this is the only place
+    a store that has stopped pruning is visible."""
+    return _PRUNE_FAILS
+
+
 def history_commit(kind, name, ops, keyframe=None, root=CARTS_DIR):
     """The one-call adapter for op_history: at the #108 autosave debounce a Desk
     Lab app passes History.flush() as `ops` and, when History.needs_keyframe(),
     History.keyframe() as `keyframe`. Writes the keyframe first (so it precedes
     the segment it bases), then the segment, then prunes once. A pure no-op
-    (no keyframe, empty ops) never touches SD."""
+    (no keyframe, empty ops) never touches SD.
+
+    The APPEND is the commit; the prune is housekeeping. A failed prune is
+    returned, never raised: raising made the caller skip mark_keyframe() for a
+    keyframe that was already on disk, so every later flush wrote another one.
+    Leaving records unpruned is safe because ops_since_keyframe reads only the
+    window after the last keyframe."""
     if keyframe is None and not ops:
-        return
+        return None
     _ensure_history_dir(kind, root)
     path = _history_path(kind, name, root)
     with open(path, "a") as f:
@@ -1959,7 +1975,13 @@ def history_commit(kind, name, ops, keyframe=None, root=CARTS_DIR):
             f.write(json.dumps({"t": "kf", "doc": keyframe}) + "\n")
         if ops:
             f.write(json.dumps({"t": "seg", "ops": list(ops)}) + "\n")
-    prune_history(kind, name, root)
+    try:
+        prune_history(kind, name, root)
+    except (OSError, ValueError) as exc:
+        global _PRUNE_FAILS
+        _PRUNE_FAILS += 1
+        return str(exc)
+    return None
 
 
 def prune_history(kind, name, root=CARTS_DIR, keep=HISTORY_KEEP):

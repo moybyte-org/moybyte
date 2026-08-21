@@ -85,6 +85,11 @@ def _remote_state(ws):
         # reads. A cache that is silently missing shows up here as a count that
         # tracks the frame count.
         st["costs"] = dict(getattr(ws, "costs", {}) or {})
+        # history_commit swallows a failed sidecar prune so the commit stays
+        # honest, so this count is the only sign a store stopped pruning.
+        store = getattr(ws, "carts_store", None)
+        fails = getattr(store, "history_prune_fails", None)
+        st["prune_fails"] = fails() if fails is not None else None
     except Exception as exc:  # noqa: BLE001
         st["ws_err"] = str(exc)
     try:

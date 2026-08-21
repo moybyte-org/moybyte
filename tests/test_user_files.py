@@ -3,6 +3,7 @@ registry, list/load/save/rename/duplicate verbs, the restorable trash, and the
 one-shot artwork.moyimg migration. Same shared runtime/moy_carts.py the device
 freezes."""
 
+import json
 import os
 from pathlib import Path
 
@@ -359,3 +360,44 @@ def test_history_dir_is_hidden_from_listing_and_is_not_a_kind(tmp_path):
         assert k in moy_carts.FILE_KINDS
     with pytest.raises(ValueError):
         moy_carts.list_files(".history", root)
+
+
+def test_a_failed_prune_does_not_fail_the_commit(tmp_path, monkeypatch):
+    """The append IS the commit. Failing it for a housekeeping error made the
+    app skip mark_keyframe() for a keyframe already on disk, so every later
+    flush wrote another one."""
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "story", "TEXT", root)
+    before = moy_carts.history_prune_fails()
+
+    def boom(*a, **k):
+        raise OSError(28, "no space")
+
+    monkeypatch.setattr(moy_carts, "prune_history", boom)
+    err = moy_carts.history_commit("docs", "story", [["ins", 0, "hi"]],
+                                   keyframe={"body": ""}, root=root)
+
+    # The records landed, the failure is reported rather than raised, and it
+    # is counted -- a swallowed error nothing can read is not an improvement.
+    assert [r["t"] for r in moy_carts.load_history("docs", "story", root)] \
+        == ["kf", "seg"]
+    assert err is not None and "no space" in err
+    assert moy_carts.history_prune_fails() == before + 1
+
+
+def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
+    """What makes the prune skippable: ops_since_keyframe reads only after the
+    last keyframe, so records the prune failed to drop change nothing."""
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "story", "TEXT", root)
+    recs = [{"t": "seg", "ops": [["old", 1]]},
+            {"t": "kf", "doc": {"body": "base"}},
+            {"t": "seg", "ops": [["new", 2]]}]
+    path = moy_carts.history_path("docs", "story", root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        for r in recs:
+            f.write(json.dumps(r) + "\n")
+    assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
+    on_disk = moy_carts.load_history("docs", "story", root)
+    assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
