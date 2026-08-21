@@ -73,6 +73,20 @@ class GuitionCompositor(BandedCompositor):
 
     # -- the game fold (#190's cousin; see __init__'s note) -------------------
 
+    @property
+    def fold_count(self):
+        """Flushes FOLDED since boot -- the fold's liveness proof.
+
+        A property, not a cached int: its readers take it as an attribute, and a
+        frozen value is the exact symptom (something disarming every frame) the
+        meter exists to distinguish from a healthy one.
+
+        Guition-only on purpose -- the T-Deck must not grow the attribute at
+        all, because absence is how a board says it lacks the lever and is what
+        lets `state`'s `fold` read None there rather than a 0 that looks like a
+        fold which never fires."""
+        return self._lcd.fold_stats()[0]
+
     def fold_fence(self):
         self._lcd.fold_fence()
 

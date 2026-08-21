@@ -1069,9 +1069,11 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_bars_obj, 0, 1, moy_axs_bars)
 // stats() -> (flushes, last_flush_us) and pump_stats() -> (pump, idle, gaps,
 // feed, bands, blocked, timeouts, errs). Both tuples are the shared engine's
 // (moy_flush.h documents every field, and both boards export them verbatim);
-// guition_panel.bounce_stats() hands the first five of pump_stats straight to
-// the PUMP diag line. `bands` is the FULL-frame count on purpose -- a play
-// frame ships fewer (THE GAME WINDOW), and fold_stats() is where that shows.
+// the shared BandedCompositor.bounce_stats() hands all eight of pump_stats up
+// -- on THIS board to the dev channel's `state` snapshot, not to a PUMP diag
+// line, because board.toml denies device_diag. `bands` is the FULL-frame count
+// on purpose -- a play frame ships fewer (THE GAME WINDOW), and fold_stats() is
+// where that shows, reached from Python as GuitionCompositor.fold_count.
 static mp_obj_t moy_axs_stats(void) {
     return moy_flush_stats_tuple();
 }

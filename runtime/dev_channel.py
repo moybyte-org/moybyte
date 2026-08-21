@@ -138,6 +138,35 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
     try:
+        # The banded flush's meters, for the boards that have one (absent on the
+        # P4, whose DSI panel scans and does not push). `pump` is the whole
+        # moy_flush tuple:
+        #
+        #   (pump_us, idle_us, idle_n, feed_us, bands, blocked_us,
+        #    timeouts, errs)
+        #
+        # This is the ONLY route on the Guition, which denies `device_diag` and
+        # so has no PUMP line -- and timeouts/errs are failures the C cannot
+        # raise (a drain must not throw into the frame loop), so without this
+        # field they are invisible there.
+        comp = getattr(ws, "comp", None)
+        bs = getattr(comp, "bounce_stats", None)
+        if bs is not None:
+            st["pump"] = list(bs())
+        # #190's scale fold. `None` and not 0 when a board lacks the lever: 0 is
+        # also what a fold that never fires looks like, so a default of 0 reads
+        # as "working, just quiet".
+        st["fold"] = getattr(comp, "fold_count", None)
+        # The P4's counterpart, same None-not-0 rule: a scanning panel has no
+        # pump but does have the async-PPA overlap (#58). `ppa` is the whole
+        # overlap_stats tuple, whose fields that method documents; `timeouts`
+        # is moy_ppa's `errs` -- a failure a fence cannot raise into the frame
+        # loop, so it shows up here or nowhere.
+        ov = getattr(comp, "overlap_stats", None)
+        st["ppa"] = list(ov()) if ov is not None else None
+    except Exception as exc:  # noqa: BLE001
+        st["pump_err"] = str(exc)
+    try:
         # Look system-app carts up by TITLE, never folder name: the device seeds
         # from the title slug and the host store copies the source folder, and
         # assuming either name is what broke `is_app` on the P4's glass.

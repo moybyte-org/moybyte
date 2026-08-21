@@ -320,8 +320,10 @@ mp_obj_t moy_flush_stats_tuple(void) {
 }
 
 // pump_stats() -> (pump_us, idle_us, idle_n, feed_us, bands, blocked_us,
-// timeouts, errs) for the last fully-shipped frame. The panel modules hand the
-// first five straight to the PUMP diag line (#66 lever 4):
+// timeouts, errs) for the last fully-shipped frame. `BandedCompositor.
+// bounce_stats()` hands ALL EIGHT up -- to the PUMP diag line (#66 lever 4) on
+// a board that has one, and to the dev channel's `state` snapshot on a board
+// that does not (the Guition denies device_diag):
 //   pump    CPU us inside the band feed -- the synthesis. Since the CORE-0
 //           FEEDER this runs on core 0 and is NOT billed to the frame; it
 //           stays reported because a rising value still means real work (and

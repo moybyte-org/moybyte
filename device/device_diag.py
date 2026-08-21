@@ -428,12 +428,18 @@ def _diag_loop(diag, ws, acc):
 
 def _diag_pump(diag, comp):
     """Log a PUMP line (#66 lever 4, measure-before-touching): the bounce-flush
-    feed pacing for the last shipped frame -- pump (CPU ms inside pump()), idle
-    (ms the SPI sat starved because every fired band completed before the next
-    was fed -- the tunable waste; ~0 means the flush ceiling is real transfer
-    time and band size / pump period / a third slot won't buy fps), gaps (how
-    many bands were fed late), feed (kick -> last band queued). The data that
-    decides whether the Sky Run 40-46 vs ~55-60fps gap is pacing or physics."""
+    feed pacing for the last shipped frame -- pump (CPU ms inside the band feed;
+    core-0 CPU since the feeder task, so not billed to the frame -- but a ZERO
+    means the feeder never ran), idle (ms the SPI sat starved because every
+    fired band completed before the next was fed -- the tunable waste; ~0 means
+    the flush ceiling is real transfer time and band size / a third slot won't
+    buy fps), gaps (how many bands were fed late), feed (kick -> last band
+    queued), blocked (ms the VM core spent waiting in drain).
+
+    `timeouts=` and `errs=` must both stay 0. `moy_flush` cannot RAISE a queue
+    error hit during a drain (a drain must not throw into the frame loop), so
+    `errs` is the only place such a failure is visible anywhere: a flush that is
+    quietly failing looks exactly like a healthy one until this number moves."""
     if diag is None:
         return
     try:
@@ -444,10 +450,15 @@ def _diag_pump(diag, comp):
         # live (a small-canvas game frame's bands were SYNTHESIZED, the root
         # composite skipped). Steadily climbing during play = every quiet
         # frame folds; frozen = something disarms each frame.
+        # A board with no fold reports 0 forever and that is CORRECT -- the
+        # T-Deck's `fold_supported` is absent on purpose.
         fold = getattr(comp, "fold_count", 0)
-        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d fold=%d"
+        diag.log("PUMP",
+                 "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "
+                 "bands=%d fold=%d timeouts=%d errs=%d"
                  % (st[0] / 1000.0, st[1] / 1000.0, st[2],
-                    st[3] / 1000.0, st[4], fold))
+                    st[3] / 1000.0, st[5] / 1000.0, st[4], fold,
+                    st[6], st[7]))
     except Exception:
         pass
 

@@ -746,9 +746,10 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_bars_obj, 0, 1, moy_lcd_bars)
 // stats() -> (flushes, last_flush_us) and pump_stats() -> (pump, idle, gaps,
 // feed, bands, blocked, timeouts, errs). Both tuples are the shared engine's
 // (moy_flush.h documents every field, and both boards export them verbatim);
-// tdeck_panel.bounce_stats() hands the first five of pump_stats straight to
-// the PUMP diag line (#66 lever 4). `bands` is the FULL-frame count, which on
-// this board is every frame -- the Guition is the one that windows.
+// the shared BandedCompositor.bounce_stats() hands all eight of pump_stats
+// straight to the PUMP diag line (#66 lever 4). `bands` is the FULL-frame
+// count, which on this board is every frame -- the Guition is the one that
+// windows.
 //
 // `last_flush_us` is the kick -> fully-out WALL span of the last completed
 // frame, i.e. the real cost of moving 153,600 B. It does NOT shrink when the

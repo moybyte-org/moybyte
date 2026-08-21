@@ -185,18 +185,30 @@ class BandedCompositor:
         return self._lcd.pump_stats()[0] if self._async else 0
 
     def bounce_stats(self):
-        """(pump_us, idle_us, idle_n, feed_us, bands) -- the PUMP diag line.
+        """The whole `moy_flush` pump tuple, all eight fields:
 
-        idle_us is the one to read: it is time the SPI sat starved because a band
-        was fed only after the previous one had already finished. ~0 means the
-        feeder is keeping up and the remaining flush cost is real transfer
-        time; a big number means the feeder is being preempted (a core-0 radio
-        burst) or the slot count is the wall. pump_us runs on core 0 now.
+            (pump_us, idle_us, idle_n, feed_us, bands,
+             blocked_us, timeouts, errs)
+
+        idle_us is the one to read for PACING: time the SPI sat starved because
+        a band was fed only after the previous one had already finished. ~0
+        means the flush ceiling is real transfer time; a big number means the
+        feeder is being preempted (a core-0 radio burst) or the slot count is
+        the wall. blocked_us is the CPU the VM core spent waiting in drain.
+
+        timeouts and errs must both stay 0. `moy_flush` cannot RAISE a queue
+        error hit during a drain -- a drain must not throw into the frame loop
+        -- so these counters are the only place such a failure is visible at
+        all: a flush that is quietly failing looks healthy from every other
+        angle.
         """
         if not self._async:
-            return (0, 0, 0, -1, 0)
+            # Serialized fallback: show() blocks, so there is no feed to pace
+            # and no drain to block in, and it raises its failures instead of
+            # banking them. feed_us keeps its -1 "never measured" sentinel.
+            return (0, 0, 0, -1, 0, 0, 0, 0)
         st = self._lcd.pump_stats()
-        return (st[0], st[1], st[2], st[3], st[4])
+        return (st[0], st[1], st[2], st[3], st[4], st[5], st[6], st[7])
 
     # -- board bits ----------------------------------------------------------
 
