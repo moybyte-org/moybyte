@@ -1901,6 +1901,29 @@ def load_history(kind, name, root=CARTS_DIR):
     return out
 
 
+def _last_keyframe(recs):
+    """Index of the newest "kf" record in `recs`, or -1 when there is none."""
+    last = -1
+    for i in range(len(recs)):
+        if recs[i].get("t") == "kf":
+            last = i
+    return last
+
+
+def ops_since_keyframe(recs):
+    """Every op recorded AFTER the last keyframe in `recs` (a load_history()
+    list), flattened oldest..newest -- the window prune_history keeps on disk,
+    and the seed for an op_history.History undo stack. A keyframe supersedes
+    the records before it, so a reader that skips this scan seeds ops the
+    keyframe already accounts for and over-counts History's keyframe cadence."""
+    recs = recs or []
+    ops = []
+    for rec in recs[_last_keyframe(recs) + 1:]:
+        if rec.get("t") == "seg":
+            ops.extend(rec.get("ops") or [])
+    return ops
+
+
 def history_write_keyframe(kind, name, doc_blob, root=CARTS_DIR):
     """Append a full keyframe record (the replay base) and prune. `doc_blob` is
     a JSON-able snapshot (an op_history.History.keyframe())."""
@@ -1948,10 +1971,7 @@ def prune_history(kind, name, root=CARTS_DIR, keep=HISTORY_KEEP):
     recs = load_history(kind, name, root)
     if not recs:
         return 0
-    last_kf = -1
-    for i in range(len(recs)):
-        if recs[i].get("t") == "kf":
-            last_kf = i
+    last_kf = _last_keyframe(recs)
     if last_kf >= 0:
         head = [recs[last_kf]]
         segs = [r for r in recs[last_kf + 1:] if r.get("t") == "seg"]

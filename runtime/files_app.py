@@ -43,7 +43,6 @@ KIND_LABELS = (
     ("tables", "TABLES"),
     ("recordings", "RECORDINGS"),
 )
-MAX_NAME = 20            # rename entry cap -- a label, not a paragraph
 
 
 class FilesLayout(ListShellLayout):
@@ -87,7 +86,7 @@ class FilesLayout(ListShellLayout):
 
 class FilesAppLayer(ListShellApp):
     id = "files"
-    RENAME_MAX = MAX_NAME     # 20 here -- narrower than the base's 24
+    RENAME_MAX = 20           # narrower than the base's 24
     domain = "system"
     TITLE = "FILES"
     APP_TITLE = "Files"
@@ -235,7 +234,7 @@ class FilesAppLayer(ListShellApp):
             self._pick(name)
             return
         if verb == "NAME":
-            self.rename_text = name[:MAX_NAME]
+            self.rename_text = name[:self.RENAME_MAX]
             self._ekey_prev = 0
             self.mode = "rename"
             self.status = "TYPE A NAME"

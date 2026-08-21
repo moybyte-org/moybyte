@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts, formula
+from runtime.op_history import MAX_OPS_PER_SEGMENT
 from runtime.sheets_app import SheetsAppLayer, SheetsLayout
+from tests.test_writer_app import _blocked_prune
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -568,3 +570,33 @@ def test_cart_folder_loaders_return_empty_without_assets(tmp_path):
     cart = moy_carts.load(str(d))
     assert cart["tables"] == {}
     assert cart["texts"] == {}
+
+
+def test_reopen_seeds_only_the_ops_after_the_last_keyframe(tmp_path, monkeypatch):
+    """The Writer twin (tests/test_writer_app.py): both apps read ONE sidecar
+    format through moy_carts.ops_since_keyframe, so a stale head left by a
+    failed prune seeds the same window on both sides."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_sheets(ws)
+    app._new_sheet()
+    name = app.sheet_name
+    app.cur_col, app.cur_row = 0, 0
+    _type(app, ws.input, "seed\n")
+    app.flush(force=True)                       # the segment the keyframe supersedes
+    for i in range(MAX_OPS_PER_SEGMENT):        # a REAL keyframe, at the shipped cap
+        app.cur_col, app.cur_row = 0, 0
+        _type(app, ws.input, "%d\n" % i)
+    assert app.history.needs_keyframe()
+    monkeypatch.setattr(moy_carts, "prune_history", _blocked_prune)
+    app.flush(force=True)
+
+    recs = moy_carts.load_history("tables", name, carts)
+    assert [r["t"] for r in recs] == ["seg", "kf", "seg"]
+    app2 = _open_sheets(host_app.build_workstation(carts))
+    app2._open_file(name)
+    assert app2.history._undo == moy_carts.ops_since_keyframe(recs)
+    assert len(app2.history._undo) == MAX_OPS_PER_SEGMENT
+    while app2.history.can_undo():
+        app2._undo()
+    assert app2.sheet.raw_at(0, 0) == "seed"    # the undo floor IS the keyframe

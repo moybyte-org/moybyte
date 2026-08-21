@@ -283,6 +283,19 @@ def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
     assert [r["ops"] for r in recs[1:]] == [[["s", 3]], [["s", 4]]]  # the newest two
 
 
+def test_ops_since_keyframe_is_the_one_sidecar_window():
+    """The ONE reader every undo-seeding app goes through (Writer, Sheets, the
+    Files role's history_ops): everything after the LAST keyframe, in order."""
+    kf = {"t": "kf", "doc": "X"}
+    seg = lambda *ops: {"t": "seg", "ops": list(ops)}
+    assert moy_carts.ops_since_keyframe([]) == []
+    assert moy_carts.ops_since_keyframe(None) == []
+    assert moy_carts.ops_since_keyframe([seg(1), seg(2, 3)]) == [1, 2, 3]   # no kf yet
+    assert moy_carts.ops_since_keyframe([seg(1), kf, seg(2), seg(3)]) == [2, 3]
+    assert moy_carts.ops_since_keyframe([seg(1), kf, seg(2), kf]) == []
+    assert moy_carts.ops_since_keyframe([seg(1), {"t": "seg"}]) == [1]      # ops-less seg
+
+
 def test_history_load_drops_a_torn_last_line(tmp_path):
     root = _root(tmp_path)
     moy_carts.save_file("drawings", "art", "X", root)

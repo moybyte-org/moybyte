@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts
+from runtime.op_history import MAX_OPS_PER_SEGMENT
 from runtime.writer_app import WriterAppLayer, WriterLayout, _body_of
 
 
@@ -345,3 +346,46 @@ def test_undo_redo_toolbar_taps(tmp_path):
     rb = app.layout.redo_btn
     assert app.handle_pointer(rb[0] + 2, rb[1] + 2, True) is True
     assert app.editor.text() == "tap me"
+
+
+def _blocked_prune(*_a, **_k):
+    # prune_history is a full _write_atomic rewrite, so a full disk leaves the
+    # superseded records on the sidecar for the next reader to trip over.
+    raise OSError("prune blocked")
+
+
+def test_reopen_seeds_only_the_ops_after_the_last_keyframe(tmp_path, monkeypatch):
+    """One on-disk format, one reader: a keyframe supersedes every record before
+    it, so a reopen seeds from it forward -- the same window Sheets reads from
+    the same bytes. Flattening EVERY segment instead looks right only while
+    prune_history keeps dropping the superseded ones on each append."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_writer(ws)
+    app._new_doc()
+    name = app.doc_name
+    _type(app, ws.input, "alpha.")
+    app.flush(force=True)                       # the segment the keyframe supersedes
+    for i in range(MAX_OPS_PER_SEGMENT):        # a REAL keyframe, at the shipped cap
+        _type(app, ws.input, "%d." % i)
+    assert app.history.needs_keyframe()
+    body = app.editor.text()
+    monkeypatch.setattr(moy_carts, "prune_history", _blocked_prune)
+    app.flush(force=True)
+    app._back_to_list()
+
+    recs = moy_carts.load_history("docs", name, carts)
+    assert [r["t"] for r in recs] == ["seg", "kf", "seg"]
+    assert recs[1]["doc"] == body                # TextEditCodec.snapshot really ran
+
+    ws2 = host_app.build_workstation(carts)
+    app2 = _open_writer(ws2)
+    app2._open_doc(name)
+    assert app2.editor.text() == body
+    assert app2.history._undo == moy_carts.ops_since_keyframe(recs)
+    assert len(app2.history._undo) == MAX_OPS_PER_SEGMENT   # "alpha." is superseded
+    assert app2.history._undo[0][3] == "0."
+
+    while app2.can_undo():
+        app2.history.undo()
+    assert app2.editor.text() == "alpha."        # the undo floor IS the keyframe
