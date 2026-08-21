@@ -42,6 +42,9 @@ def _store(tmp_path):
     (root / "hop.moy" / "journal" / "s" / "0001-main.py").write_text(
         "def _draw():\n    cls(7)\n")
     (root / "hop.moy" / "journal.jsonl").write_text("stray flat log\n")
+    # moy_fs._write_atomic's last-known-good rotations, one per file it saves.
+    (root / "hop.moy" / "main.py.bak").write_text("def _draw():\n    cls(2)\n")
+    (root / "hop.moy" / "manifest.json.bak").write_text('{"title": "Hop"}')
     (root / "hop.moy" / "pmem.json").write_text("[41, 0, 0]")
     (root / "sky.moy").mkdir()
     (root / "sky.moy" / "main.lua").write_text("function _draw() end\n")
@@ -84,6 +87,21 @@ def test_the_undo_journal_does_not_cross_the_wire(tmp_path):
     for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
         assert not [k for k in bundle if "journal" in k], (who, sorted(bundle))
         assert "hop.moy/main.py" in bundle, who      # the cart itself survives
+
+
+def test_the_atomic_write_backups_do_not_cross_the_wire(tmp_path):
+    """`<file>.bak` is `moy_fs._write_atomic`'s crash-recovery rotation: the
+    live file is already in the bundle, so every one of these is a second copy
+    of content the browser has, on a transport whose size is the whole problem.
+
+    Both walkers, like the journal cut above -- they are independent bodies.
+    """
+    root = _store(tmp_path)
+    packed = wh.pack_store(str(root))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
+        assert not [k for k in bundle if k.endswith(".bak")], (who, sorted(bundle))
+        assert bundle["hop.moy/main.py"].startswith("def _draw()"), who
 
 
 def test_a_kids_saves_still_cross_the_wire(tmp_path):

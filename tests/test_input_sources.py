@@ -145,6 +145,26 @@ def test_todays_flat_api_keeps_working_through_an_implicit_default_source(tier):
     assert inp.held("up")
 
 
+@pytest.mark.parametrize("tier", TIERS)
+@pytest.mark.parametrize("holder", ("state", "source"))
+@pytest.mark.parametrize("verb", ("set_held", "set_button"))
+def test_both_spellings_of_the_verb_exist_on_both_tiers(tier, holder, verb):
+    """The tiers keep different PRIMARY spellings on purpose, so every object a
+    shared driver can be handed carries both. `runtime/web_input.py` calls
+    `set_button` on whatever InputState it is given; the host state carried only
+    `set_held`, so the browser's hold events would have raised there. It was
+    unreached only because every real host path supplies `on_hold`.
+    """
+    inp = _state(tier)
+    target = inp if holder == "state" else inp.source("kbd")
+    getattr(target, verb)("up", True)
+    inp.begin_frame()
+    assert inp.held("up")
+    getattr(target, verb)("up", False)
+    inp.begin_frame()
+    assert not inp.held("up")
+
+
 # -- the union has exactly ONE author ---------------------------------------
 #
 # `_held` is DERIVED: a source write moves the SOURCE, and the frame's union is

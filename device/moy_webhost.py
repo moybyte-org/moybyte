@@ -95,6 +95,17 @@ SKIP_DIRS = ("thumbs", "__pycache__", "journal")
 # carries the same pair for the same reason.
 SKIP_FILES = ("journal.jsonl",)
 
+# `moy_fs._write_atomic`'s last-known-good rotations (`main.py.bak`,
+# `cursor.json.bak`, ...). Pure duplication on the wire: the live file is
+# already in the bundle, and a crash-recovery copy is a filesystem concern the
+# browser has no use for.
+SKIP_SUFFIX = ".bak"
+
+
+def _skip(name):
+    return (name in SKIP_DIRS or name in SKIP_FILES
+            or name.endswith(SKIP_SUFFIX))
+
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None):
     """The whole cart store as the page's bundle shape: {"<cart>/<rel>": text}.
@@ -117,7 +128,7 @@ def pack_store(carts_root, listdir=None, read=None, isdir=None):
 
 def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
     for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
-        if name in SKIP_DIRS or name in SKIP_FILES:
+        if _skip(name):
             continue
         full = path + "/" + name
         rel = prefix + "/" + name
@@ -153,11 +164,11 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
 
 
 def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
-    # Keep these exclusions identical to `_pack_dir`'s: the two walkers are
-    # independent bodies whose output must agree, so a skip added to one only
-    # makes packed and streamed diverge.
+    # The exclusions go through `_skip`, not a second copy of the test: these
+    # two walkers are independent bodies whose output must agree, and a skip
+    # added to one only makes packed and streamed diverge.
     for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
-        if name in SKIP_DIRS or name in SKIP_FILES:
+        if _skip(name):
             continue
         full = path + "/" + name
         rel = prefix + "/" + name

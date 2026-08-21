@@ -379,6 +379,11 @@ class InputState:
         """Legacy single-writer shim: writes the implicit default source."""
         self._default.set_button(name, held)
 
+    # Both spellings on the STATE too, not just on InputSource: shared code
+    # (runtime/web_input.py) calls one spelling against whichever InputState it
+    # was handed.
+    set_held = set_button
+
     _mask_order = None      # the tuple _mask_bit was built from (identity key)
     _mask_bit = None
 

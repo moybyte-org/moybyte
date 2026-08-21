@@ -645,11 +645,18 @@ class FrameLoop:
         # RENDERING while dark).
         if not self._lit and (self.idle is None or not self.idle.asleep) \
                 and getattr(ws, "_frames_drawn", 0) > 0:
-            if self.set_backlight is not None:
-                try:
+            # The same FENCE DeviceBoot.note's gate takes, for the same #45
+            # reason: on a banded backend flush() returns with most of the frame
+            # still going out, so lighting here would light power-on GRAM noise.
+            # Reached whenever the splash never lit the panel.
+            _sync = getattr(getattr(ws, "comp", None), "sync", None)
+            try:
+                if _sync is not None:
+                    _sync()
+                if self.set_backlight is not None:
                     self.set_backlight(True)
-                except Exception as exc:  # noqa: BLE001
-                    print("Moybyte backlight on failed:", exc)
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte backlight on failed:", exc)
             self._lit = True
         self.pump.tail(ws)
         if self.tail is not None:

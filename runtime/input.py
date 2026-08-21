@@ -176,6 +176,11 @@ class InputState:
         """Legacy single-writer shim: writes the implicit default source."""
         self._default.set_held(name, down)
 
+    # Both spellings on the STATE too, not just on InputSource: shared code
+    # (runtime/web_input.py) calls the device spelling against whichever
+    # InputState it was handed.
+    set_button = set_held
+
     def begin_frame(self):
         # Snapshot for edge detection; call once per frame before polling.
         self._merge()
