@@ -488,10 +488,20 @@ def test_button_masks_packs_one_players_sources_when_asked(tier):
     assert inp.button_masks(order, 2) == (0, 0)
 
 
-def test_the_device_source_still_refuses_an_unknown_button():
-    inp = device_input.InputState()
+@pytest.mark.parametrize("tier", TIERS)
+@pytest.mark.parametrize("verb", ("set_held", "set_button"))
+def test_an_unknown_button_is_refused_on_BOTH_tiers(tier, verb):
+    """The asymmetry this closes: the device raised and the host silently
+    accepted, so a typo'd name in shared code was a hard error on glass and a
+    no-op on the tier that is supposed to catch it first. Both spellings, and
+    the state-level shim as well as the source."""
+    inp = _state(tier)
     with pytest.raises(ValueError):
-        inp.source("kbd").set_button("zorp", True)
+        getattr(inp.source("kbd"), verb)("zorp", True)
+    with pytest.raises(ValueError):
+        getattr(inp, verb)("zorp", True)
+    inp.begin_frame()
+    assert not inp.held("zorp")
 
 
 # -- the two real drivers, on one InputState --------------------------------

@@ -58,6 +58,10 @@ class InputSource:
         self._held.clear()
 
     def set_held(self, name, down):
+        # Refused, not ignored -- the same as the device tier (its BUTTONS is a
+        # different tuple, but a name outside it is a bug on both).
+        if name not in InputState.BUTTONS:
+            raise ValueError("unknown button: " + name)
         if down:
             self._held.add(name)
         else:

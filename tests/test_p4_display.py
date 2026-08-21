@@ -425,6 +425,60 @@ def test_a_stamp_pending_never_blocks_and_is_no_game_fence(stepped):
             "the ~free done()-gated drain was billed as a blocking fence")
 
 
+def test_a_frame_with_both_a_stamp_and_a_game_composite_fences_blocking(stepped):
+    """The kind is decided by the frame's WEAKEST guarantee. The stamp kick
+    sets the same `_composite_pending` the game composite does, so filing the
+    entry on `stamp_kicked` alone downgraded a real game composite to the
+    non-blocking done() gate -- and the cart's next _draw overwrites the canvas
+    that DMA is reading."""
+    _dsi, ppa, ctx = build(done=False)
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        comp._composite_pending = True                    # blit_game(defer=True)
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+        assert comp._pend3[0][1] == "game"
+        comp.present_pending()
+        assert ppa.syncs == 1, "the game composite got the stamp's free gate"
+        game_n, game_us = comp.overlap_stats()[4:6]
+        assert (game_n, game_us > 0) == (1, True)
+
+
+def test_a_game_queued_BEHIND_a_stamp_still_fences_blocking(stepped):
+    """`_pend3` grows past one entry exactly when the non-blocking gate held a
+    present back, so the head is a "stamp" and the game sits behind it."""
+    _dsi, ppa, ctx = build(done=False)
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+        comp.flush()
+        comp.present_pending()                            # DMA still flying
+        assert (ppa.syncs, comp._pend3[0][1]) == (0, "stamp")
+        comp._composite_pending = True                    # next frame: a game
+        comp.flush()
+        assert [k for _fb, k in comp._pend3] == ["stamp", "game"]
+        comp.present_pending()
+        assert ppa.syncs == 1
+        assert comp.overlap_stats()[4] == 1
+
+
+def test_a_stamp_only_queue_keeps_its_free_gate(stepped):
+    """The upgrade is one-way: a frame with no game composite must not start
+    paying the blocking fence."""
+    _dsi, ppa, ctx = build(done=False)
+    with ctx as mod:
+        stepped(mod)
+        comp = mod.P4Compositor()
+        for _ in range(2):                 # two entries queued, both "stamp"
+            comp._stamp_pending = (FB(9), 8, 8, 0, 0, FB(8), 8, 8)
+            comp.flush()
+            comp.present_pending()
+        assert [k for _fb, k in comp._pend3] == ["stamp", "stamp"]
+        assert (ppa.syncs, comp.overlap_stats()[4]) == (0, 0)
+
+
 # -- where the numbers are readable --------------------------------------------
 
 

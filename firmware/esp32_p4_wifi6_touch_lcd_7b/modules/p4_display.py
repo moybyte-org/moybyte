@@ -119,6 +119,7 @@ class P4Compositor:
         return self._gfx
 
     def flush(self):
+        game_pending = self._composite_pending
         stamp_kicked = False
         if self._stamp_pending is not None:
             # Kick the registered drag stamp NOW -- every layer (incl. cursor)
@@ -151,8 +152,12 @@ class P4Compositor:
             # never waits on the fence. Deferred frames queue; present_pending
             # shows them when their DMA lands.
             if self._composite_pending:
-                self._pend3.append((self._back,
-                                    "stamp" if stamp_kicked else "game"))
+                # A frame carrying BOTH is a "game": the stamp kick sets the
+                # same flag, and the weaker done()-gated fence would let the
+                # cart's next _draw overwrite the composite's source canvas.
+                self._pend3.append(
+                    (self._back,
+                     "stamp" if stamp_kicked and not game_pending else "game"))
                 self._busy3.append(self._back)
                 self._composite_pending = False
                 self._deferred += 1
@@ -188,6 +193,15 @@ class P4Compositor:
         self._dsi.show(self._back)       # msync + zero-copy scan-out switch
         self._back ^= 1                  # next frame draws the other buffer
 
+    def _queued_game(self):
+        """Whether ANY queued show reads the game canvas -- not just the head:
+        a "stamp" head sits in front of a "game" whenever a slow DMA held a
+        present back for a loop."""
+        for _fb, kind in self._pend3:
+            if kind == "game":
+                return True
+        return False
+
     def _drain_pending(self):
         """Fence every in-flight PPA op, then show the queued frames in order
         (the last show wins the next VSYNC; earlier ones were sequential)."""
@@ -199,11 +213,11 @@ class P4Compositor:
 
     def present_pending(self):
         """Show a deferred (async-composited) frame. n >= 3: non-blocking for a
-        "stamp" pending (its source is frozen; if the DMA is still flying the
-        show just waits for the next loop -- painting continues into a third
-        buffer meanwhile), blocking for a "game" pending (the cart's next _draw
-        overwrites the composite's SOURCE canvas, so the fence must land before
-        the tick -- the double game canvas will retire this). n == 2: wait for
+        "stamp"-only queue (the source is frozen; if the DMA is still flying
+        the show just waits for the next loop -- painting continues into a
+        third buffer meanwhile), blocking once any queued show is a "game" (the
+        cart's next _draw overwrites the composite's SOURCE canvas, so the
+        fence must land before the tick). n == 2: wait for
         the PPA DMA, then switch scan-out and free the other buffer -- called
         by the desktop loop AFTER the input poll, so the poll overlapped the
         DMA. No-op when nothing was deferred."""
@@ -211,7 +225,7 @@ class P4Compositor:
             if not self._pend3:
                 return
             import moy_ppa
-            if self._pend3[0][1] == "game":
+            if self._queued_game():
                 t0 = _ticks_us()
                 self._drain_pending()
                 self._game_n += 1
