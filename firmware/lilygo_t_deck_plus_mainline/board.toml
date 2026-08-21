@@ -282,9 +282,13 @@ tools/board_config.py stage-native stages the copies and generates the
 .staged/micropython.cmake include list that the board's tracked
 native/micropython.cmake pulls in.
 
-This board denies NOTHING: the T-Deck drives all seven shared modules (moy_gfx,
-moy_alloc, moy_sd, moy_audio, moy_lua, moycore, moy_web) plus its own
-native/moy_lcd, which lives in the board tree and is not staged."""
+This board denies NOTHING: the T-Deck drives all eight shared modules (moy_gfx,
+moy_alloc, moy_sd, moy_audio, moy_lua, moycore, moy_web, moy_flush) plus its
+own native/moy_lcd, which lives in the board tree and is not staged. moy_flush
+is the odd one -- it registers no MicroPython module at all; it is the banded-
+flush engine moy_lcd and the Guition's moy_axs share, and it rides this
+declaration because this is where "which C crosses to which board" is written
+down."""
 
 # ---------------------------------------------------------------------------
 
@@ -320,6 +324,22 @@ file, so a new member of the package cannot go missing here.
 (Declared HERE, above the groups, and not at the end of the section: a bare key
 after a `[[modules.device.group]]` header belongs to that group's table, not to
 `[modules.device]`.)"""
+
+[[modules.device.group]]
+files = ["banded_panel.py"]
+why = """
+STAGE 1 (panel). `BandedCompositor` -- the compositor body this board's
+`modules/tdeck_panel.py` subclasses, and the Guition's `guition_panel.py`
+subclasses too. The Python twin of `native/moy_flush`: the transport stays
+per-board (esp_lcd/SPI here, raw QSPI there), the frame machine over it does
+not. Promoted out of this directory 2026-08-21 on Phase C's second-consumer
+rule (#206 item 1) -- it became shareable the day `d9aa73e` moved this board's
+band feed off its VM-core pump timer and onto the Guition's core-0 feeder.
+
+What stays in `tdeck_panel.py` is what is this board's: the `moy_lcd` import,
+WIDTH/HEIGHT, the ASYNC_FLUSH and LAYER_COPY_ASYNC revert flags, `sd_bracket`
+(no other board shares its panel bus with an SD card) and the module-level
+`set_backlight`."""
 
 [[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]

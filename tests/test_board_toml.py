@@ -258,11 +258,14 @@ def test_stage_native_produces_the_declared_tree(tmp_path, board):
 
 
 def test_the_p4_denies_exactly_its_missing_hardware():
-    """The two P4 denials are the hand-cp list build.sh used to encode
-    silently: no SD in play, ES8311 audio still open (#82). The T-Deck denies
+    """The P4's denials are the hand-cp list build.sh used to encode silently:
+    no SD in play, ES8311 audio still open (#82), and no banded flush at all --
+    its MIPI-DSI panel scans a PSRAM framebuffer continuously, so moy_flush's
+    feeder + bounce slots would be dead code and dead SRAM. The T-Deck denies
     nothing. If this changes, it should be because a board's hardware story
     changed -- update board.toml first, this pin second."""
-    assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_sd"]
+    assert sorted(board_config.native_denials(P4)) == [
+        "moy_audio", "moy_flush", "moy_sd"]
     assert board_config.native_denials(TDECK) == {}
     # The Guition's two denials are bring-up staging decisions (SD is stage 4,
     # audio stage 5 -- docs/board_ports_2026-08.md); each names its stage in

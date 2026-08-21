@@ -81,14 +81,20 @@ MICROPYTHON_BUILTINS = {
 NATIVE = {
     # The same shared usermods, plus this board's own panel backend -- and
     # NONE of the fork's lvgl/lcd_bus family, which is the point of the port.
+    # moy_flush is the odd member: it registers no MicroPython module at all
+    # (it is the banded-flush engine moy_lcd and moy_axs link), but it is
+    # STAGED like one, so it is declared like one.
     "tdeck-mainline": {"moy_gfx", "moy_alloc", "moy_sd", "moy_audio", "moy_lua",
-                       "moycore", "moy_web", "moy_lcd"},
+                       "moycore", "moy_web", "moy_flush", "moy_lcd"},
+    # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
+    # it denies moy_flush along with moy_sd and moy_audio.
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
-    # see its board.toml); moy_axs is its board-authored QSPI panel backend.
+    # see its board.toml); moy_axs is its board-authored QSPI panel backend,
+    # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
-                   "moy_axs"},
+                   "moy_flush", "moy_axs"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
 }
 

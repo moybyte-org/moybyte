@@ -467,8 +467,13 @@ and never pruned — which is why a new board module has to be whitelisted in
 
 The P4 scans a PSRAM framebuffer continuously (MIPI-DSI, DPI mode, no per-frame
 transfer). The T-Deck has to PUSH 320×240 RGB565 down SPI every frame, so the
-work LVGL and `lcd_bus` used to do has to live somewhere. It lives in one 837-line
-C file, and three things in it are load-bearing:
+work LVGL and `lcd_bus` used to do has to live somewhere. Since 2026-08-21 it
+lives in TWO files: `native/moy_flush` (shared with the Guition — the frame
+state machine, the core-0 feeder, the two internal-SRAM bounce slots and their
+pacing, the semaphore handoff and the PUMP/stats meters) and `moy_lcd` itself,
+which keeps the ST7789/esp_lcd transport and supplies the engine's three hooks.
+Read `moy_flush.h` for the concurrency; three things in `moy_lcd` are
+load-bearing:
 
 **IDF's own ST7789 driver is not enough.** `esp_lcd_panel_init()` sends exactly
 `SLPOUT` / `MADCTL` / `COLMOD`, and `esp_lcd_new_panel_st7789()` has no
@@ -602,15 +607,24 @@ amount of overlap machinery can remove it, because the CPU is the thing waiting.
 
 `TDeckCompositor` implements the same small interface `DeviceCanvas.__init__`
 and `moy_runtime.run_desktop` already call — `size` / `framebuffer` /
-`back_buffer` / `gfx` / `flush` / `sync` — the one `p4_display.P4Compositor` and
-`moy_compositor.Compositor` both implement, plus the two the diag layer probes
-for with `getattr` (`pump_if_pending`, `bounce_stats`). No new seam is invented
-(`docs/backend_contract_v1.md` L8: strategy stays the backend's).
+`back_buffer` / `gfx` / `flush` / `sync` — the one `p4_display.P4Compositor`
+also implements, plus the one the diag layer probes for with `getattr`
+(`bounce_stats`). No new seam is invented (`docs/backend_contract_v1.md` L8:
+strategy stays the backend's).
 
-It is thin on purpose: the ping-pong, the timer and the stats forwarding, over
-`moy_lcd`'s kick/pump/drain. Where the fork's compositor owns the bounce
-buffers, the completion counter and the pacing arithmetic in Python, all of that
-is C here, so a band never crosses the boundary.
+**Since 2026-08-21 it is a SUBCLASS** of `device/banded_panel.py`'s
+`BandedCompositor`, shared with the Guition (#206 item 1) — the Python twin of
+the `native/moy_flush` split one tier down, and promoted for the same reason:
+`d9aa73e` moved this board's band feed onto that board's core-0 feeder, which
+retired the soft pump timer and the draw-op pokes that were the last real
+difference between the two files. The base owns the ping-pong, the
+drain-swap-kick overlap and the meter forwarding; what is left in
+`tdeck_panel.py` is the `moy_lcd` import (kept here so the staging-closure
+check can see this board's C dependency), `WIDTH`/`HEIGHT`, the two revert
+flags, `sd_bracket` and the module-level `set_backlight()`. Where the deleted
+fork's compositor owned the bounce buffers, the completion counter and the
+pacing arithmetic in Python, all of that is C, so a band never crosses the
+boundary.
 
 **`ASYNC_FLUSH = False` is the one-flag fallback.** It restores the blocking
 `moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang

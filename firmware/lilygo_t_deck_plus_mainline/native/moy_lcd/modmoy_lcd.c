@@ -36,6 +36,18 @@
 //   reasons: heavy PSRAM traffic during a PSRAM-sourced transfer starves the SPI
 //   FIFO and clocks out garbage rows (the 2026-07-03 band artifacts), and a
 //   PSRAM-direct transfer would additionally need the esp-idf spi_master patch.
+//
+//   THE ENGINE IS SHARED: native/moy_flush (staged via board.toml) owns the
+//   frame state machine, the core-0 feeder, the bounce slots and their pacing,
+//   and the meters -- one body with the Guition's moy_axs since 2026-08-21,
+//   because when this board's flush moved onto that board's feeder design the
+//   concurrency half became a verbatim copy. READ moy_flush.h FIRST: the
+//   handoff protocol, the reset-order invariant and the feeder's placement all
+//   live there. What stays in this file is the ST7789/esp_lcd TRANSPORT --
+//   which is exactly what Phase C said could not share -- as the engine's three
+//   hooks (moy_lcd_frame_begin / _queue_band / _frame_end) plus this board's
+//   own SD guard.
+//
 //   Only the FIRST band carries a command (RAMWR); bands 2..N are sent with
 //   lcd_cmd = -1, i.e. no command phase at all. This is what "a full-screen
 //   flush must be a single tx_color" is really about: re-issuing a command
@@ -57,9 +69,9 @@
 //   ping-pong buffer, so a frame costs max(render, transfer) instead of their
 //   sum. The same three verbs are here now:
 //
-//     kick(n)   prepare the frame's bookkeeping and hand it to the CORE-0
-//               FEEDER task (the statics block below), which owns the whole
-//               flush: window arm, band copy+queue, tail wait. Returns in us.
+//     kick(n)   prepare the frame's bookkeeping and hand it to the shared
+//               engine's CORE-0 FEEDER, which owns the whole flush: window
+//               arm, band copy+queue, tail wait. Returns in us.
 //     pump()    a kept no-op since the feeder (2026-08-21) -- the band feed no
 //               longer needs the VM core at all. The verb survives for
 //               verb-set parity with moy_axs; nothing in the tree calls it
@@ -70,21 +82,18 @@
 //               already happened behind the render) and before any SD op --
 //               the card shares this SPI host.
 //
-//   WHO FEEDS THE BANDS: THE CORE-0 FEEDER (ported from moy_axs, where it
-//   shipped 2026-08-19). Until 2026-08-21 the feed ran on the VM core -- a
-//   2 ms machine.Timer through mp_sched plus pokes from the big native draw
-//   verbs -- which billed the band memcpys to every frame AND set a floor on
-//   band size: a band had to transfer LONGER than the 2 ms timer period or
-//   the SPI starved between fires (48 rows = 3.07 ms; 32-row bands measured
-//   53.9 -> 51.8 fps on Brick Siege under the timer, 2026-08-21). The feeder
-//   retires both: MicroPython's VM task is pinned to core 1 (mphalport.h
-//   MP_TASK_COREID), so the feed moves to a FreeRTOS task on core 0 (shared
-//   with the mostly-idle WiFi/BT stacks, priority BELOW both -- the two
-//   bounce slots absorb a radio burst), woken per-band by the done-ISR,
-//   itself pinned to core 0 via isr_cpu_id. The VM core neither copies bands
-//   nor fields per-band interrupts, and the band-size floor is gone (there is
-//   no timer to outlast). A dead feeder cannot degrade quietly: init() FAILS
-//   if the task cannot be created -- there is no feederless flush path.
+//   WHO FEEDS THE BANDS: THE CORE-0 FEEDER, which is moy_flush's (ported from
+//   moy_axs 2026-08-21, where it shipped 2026-08-19; shared as one body the
+//   day after). Until then the feed ran on the VM core -- a 2 ms machine.Timer
+//   through mp_sched plus pokes from the big native draw verbs -- which billed
+//   the band memcpys to every frame AND set a floor on band size: a band had
+//   to transfer LONGER than the 2 ms timer period or the SPI starved between
+//   fires (48 rows = 3.07 ms; 32-row bands measured 53.9 -> 51.8 fps on Brick
+//   Siege under the timer, 2026-08-21). The feeder retires both; the VM core
+//   neither copies bands nor fields per-band interrupts, and the band-size
+//   floor is gone (there is no timer to outlast). A dead feeder cannot degrade
+//   quietly: init() FAILS if moy_flush_start() does -- there is no feederless
+//   flush path.
 //
 //   show(n) remains kick+drain in one blocking call, because the bring-up smokes
 //   want one number and no ping-pong reasoning.
@@ -100,16 +109,17 @@
 //     touches the io.
 //   * tx_param recycles ALL queued color transactions before its polling
 //     command (spi_device_get_trans_result x num_trans_inflight, in the
-//     driver). Two things rest on that: the feeder arms the window BEFORE
-//     resetting the band counters, so a timed-out frame's stale bands have
-//     all completed -- and their completion ISRs run -- before s_done
-//     restarts at 0 (the pre-feeder kick kept the same order for the same
-//     recovery); and num_trans_inflight cannot creep across frames, because
-//     every frame's arm recycles the previous frame's bands.
+//     driver). Two things rest on that: the engine restarts the band counters
+//     AFTER frame_begin (moy_flush.h's RESET-ORDER INVARIANT), so a timed-out
+//     frame's stale bands have all completed -- and their completion ISRs run
+//     -- before moy_flush.done restarts at 0; and num_trans_inflight cannot
+//     creep across frames, because every frame's arm recycles the previous
+//     frame's bands. THIS BOARD IS WHY THAT INVARIANT IS WORDED THE WAY IT IS.
 //   * the done-ISR may (and must) yield itself: esp_lcd's spi post_cb IGNORES
 //     the on_color_trans_done bool return, so vTaskNotifyGiveFromISR +
 //     portYIELD_FROM_ISR happen inside the callback or a woken feeder waits
-//     out the rest of the FreeRTOS tick (10 ms at this build's HZ=100).
+//     out the rest of the FreeRTOS tick (10 ms at this build's HZ=100). That
+//     is moy_flush_band_done_from_isr(), static inline for the placement.
 //
 // SD BUS SHARING -- this module runs spi_bus_initialize() ONCE and never tears
 //   it down. The SD card attaches to the ALREADY-INITIALIZED host through
@@ -122,14 +132,7 @@
 
 #include "py/runtime.h"
 #include "py/objarray.h"
-#include "py/objtuple.h"
 #include "py/mphal.h"
-#include "py/mpthread.h"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "freertos/idf_additions.h"   // xTaskCreatePinnedToCore
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -140,13 +143,10 @@
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 
-// portYIELD_FROM_ISR's ARG form expands this IDF trace hook, whose empty
-// default lives at the tail of FreeRTOS.h -- which this TU's include order
-// (py/mpstate.h pulls freertos headers first) never reaches. Same empty
-// default, defensively. (moy_axs carries the identical guard.)
-#ifndef traceISR_EXIT_TO_SCHEDULER
-#define traceISR_EXIT_TO_SCHEDULER()
-#endif
+// The SHARED banded-flush engine (native/moy_flush, staged per board.toml).
+// It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
+// yield needs, and the state this file's verbs report on.
+#include "moy_flush.h"
 
 // ---- board facts (device/tdeck_*.py)
 #define MOY_LCD_W            320
@@ -191,15 +191,14 @@
 #define MOY_LCD_BAND_BYTES   (MOY_LCD_BAND_ROWS * MOY_LCD_ROW_BYTES)
 #define MOY_LCD_BOUNCE_SLOTS 2
 #define MOY_LCD_MAX_FBS      3
-#define MOY_LCD_FLUSH_TIMEOUT_US 500000  // a full frame is ~20ms; this is a bug fence
 
 // A BAND MUST BE ONE DMA CHUNK, and the margin is only 6.7%. esp_lcd caps a
 // transfer at MIN(max_transfer_sz, SPI_LL_DMA_MAX_BIT_LEN/8), and the S3's
 // SPI_LL_DMA_MAX_BIT_LEN is 1<<18 -- so 32768 B. At 52 rows or more each band
 // splits in two, and three things break QUIETLY: esp_lcd sets en_trans_done_cb
-// only on the LAST chunk (so s_done still counts bands, which hides it), the
-// first chunk carries SPI_TRANS_CS_KEEP_ACTIVE, and num_trans_inflight doubles
-// to 10 == trans_queue_depth, at which point tx_color takes its recycle branch
+// only on the LAST chunk (so moy_flush.done still counts bands, which hides
+// it), the first chunk carries SPI_TRANS_CS_KEEP_ACTIVE, and
+// num_trans_inflight doubles to 10 == trans_queue_depth, at which point tx_color takes its recycle branch
 // and BLOCKS on spi_device_get_trans_result(portMAX_DELAY). The pump would stop
 // being non-blocking with nothing to show for it but lost fps. The comment
 // above invites tuning this number; the assert is what makes that safe.
@@ -230,52 +229,16 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static uint8_t *s_fbs[MOY_LCD_MAX_FBS];
 static int s_nfbs;
-static uint8_t *s_bounce[MOY_LCD_BOUNCE_SLOTS];
-static volatile uint32_t s_done;       // bands whose DMA completed (ISR)
-static volatile uint32_t s_done_us;    // when the last one completed (ISR)
-static volatile uint32_t s_flushes;
-static volatile uint32_t s_last_flush_us;
 static bool s_bus_up;
 static uint8_t s_madctl;
 
 // --- the in-flight flush (see OVERLAP in the header) -------------------------
-// The band index and the queued count are separate because they are separately
-// paced: s_bnc_next is what the FEEDER has FED, s_target is what esp_lcd has
-// been HANDED, and s_done is what the panel has ACCEPTED. Band k may reuse
-// bounce slot k % SLOTS once band k-SLOTS has completed, i.e. once
-// s_done >= k-(SLOTS-1). Volatile where the FEEDER and the VM core both look:
-// these statics live in internal SRAM, which the S3 does not cache, so plain
-// in-order stores are visible cross-core -- volatile (plus the handoff
-// barrier below) only stops GCC from caching a pre-handoff read.
-static volatile int s_bnc_total;       // bands in the frame being shipped
-static volatile int s_bnc_next;        // next band to copy + queue
-static const uint8_t *s_bnc_src;       // the FRONT framebuffer (immutable while it ships)
-static uint32_t s_target;              // bands queued so far this frame (feeder-side)
-static bool s_in_pump;                 // reentrancy guard (feeder-only now; kept cheap)
-static volatile esp_err_t s_tx_err;    // a queue failure, reported by the next kick/show
-static int64_t s_flush_t0;             // kick -> fully-out span, for stats()
-static volatile uint32_t s_timeouts;
-static volatile uint32_t s_tx_errs;    // queue failures since boot (pump_stats)
-
-// --- THE CORE-0 FEEDER (ported from moy_axs, 2026-08-21; see the header).
-// MicroPython's VM task is pinned to core 1 (mphalport.h MP_TASK_COREID); the
-// feeder owns the whole flush -- window arm, band synthesis, tail wait -- on a
-// task pinned to core 0, priority BELOW the WiFi (23) and lwIP (18) tasks,
-// woken per-band by the done-ISR (also on core 0 via isr_cpu_id). Handoff
-// protocol, copied from moy_axs verbatim: kick may only run with the feeder
-// idle (its callers drain first); the feeder clears s_frame_busy LAST and
-// then gives s_done_sem; and kick clears a stale done credit before every
-// handoff, so the binary semaphore never carries a previous frame's give into
-// the next.
-#define MOY_LCD_FEED_CORE   0
-#define MOY_LCD_FEED_PRIO   12
-#define MOY_LCD_FEED_STACK  4096
-static TaskHandle_t volatile s_feed_task;
-static SemaphoreHandle_t s_kick_sem;   // MP -> feeder: a prepared frame waits
-static SemaphoreHandle_t s_done_sem;   // feeder -> MP: that frame finished
-static volatile bool s_frame_busy;     // the feeder owns the io + bookkeeping
-static volatile bool s_frame_clean = true;  // the finished frame's verdict
-static volatile bool s_task_exit;
+// The bookkeeping, the two internal-SRAM bounce slots, the CORE-0 FEEDER and
+// the handoff protocol are all `moy_flush`'s -- one body with the Guition's
+// moy_axs since 2026-08-21. READ moy_flush.h. What this file supplies is the
+// three transport hooks at the bottom of this section and the ops struct that
+// names them.
+//
 // SD SESSION GUARD (hardware-learned 2026-08-21, first flash of the feeder).
 // The SD card shares SPI2 with the panel, and the pre-feeder world kept the
 // two apart by CONSTRUCTION: SD polling transactions and band queue_trans all
@@ -295,35 +258,24 @@ static volatile bool s_task_exit;
 // commits) -- play frames never pay it.
 static volatile bool s_sd_guard;
 
-// The FEEDER handoff's compiler barrier. The hardware needs nothing (the
-// shared statics live in uncached internal SRAM and each core's stores are in
-// order); what must be stopped is GCC, which may legally cache a file-scope
-// static whose address never escapes ACROSS an external call -- i.e. read a
-// pre-semaphore copy after the wait. One clobber on each side of both
-// semaphores pins every handoff-crossing value.
-#define MOY_LCD_HANDOFF_BARRIER() __asm__ volatile ("" ::: "memory")
+// THE BOARD'S HALF of the engine (moy_flush.h): the ST7789/esp_lcd transport,
+// which is the one thing Phase C said the two S3 panels can never share. All
+// three run on the FEEDER task and so must never raise -- they return
+// esp_err_t and the engine latches it for the next kick/show to report.
+static esp_err_t moy_lcd_frame_begin(void);
+static esp_err_t moy_lcd_queue_band(uint8_t *slot, const uint8_t *src, int k,
+                                    int y, int rows, bool last);
+static void moy_lcd_frame_end(bool ok);
 
-static void moy_lcd_feed_task_fn(void *arg);
-
-// Feed PACING for the frame in flight, latched into the *_last pair at the next
-// kick (the frame is complete by then -- drain ran first). This is the data the
-// PUMP diag line prints, and the reason it exists is that "the flush is slow" and
-// "the flush is fed late" look identical from the outside: idle_us ~ 0 means the
-// ceiling is real transfer time and a bigger band / faster feeder buys nothing.
-static volatile uint32_t s_pump_us;    // FEEDER CPU us inside pump() this frame
-static volatile uint32_t s_idle_us;    // us the SPI sat starved waiting to be fed
-static volatile uint32_t s_idle_n;     // how many bands were fed that late
-static volatile int32_t s_feed_us = -1;  // frame start -> last band queued
-static uint32_t s_kick_us;             // when the feeder started (us, wrapping)
-static uint32_t s_block_us;            // VM CPU us BLOCKED in drain this frame
-static uint32_t s_pump_last_us;
-static uint32_t s_idle_last_us;
-static uint32_t s_idle_last_n;
-static int32_t s_feed_last_us = -1;
-static uint32_t s_block_last_us;
-
-static bool moy_lcd_drain_locked(void);   // defined below; deinit fences on it
-static mp_obj_t moy_lcd_deinit(void);     // init's feeder-failure unwind
+static const moy_flush_ops_t MOY_LCD_FLUSH_OPS = {
+    .frame_begin   = moy_lcd_frame_begin,
+    .queue_band    = moy_lcd_queue_band,
+    .frame_end     = moy_lcd_frame_end,
+    .task_name     = "moy_lcd_feed",
+    .band_rows     = MOY_LCD_BAND_ROWS,
+    .band_bytes    = MOY_LCD_BAND_BYTES,
+    .bounce_slots  = MOY_LCD_BOUNCE_SLOTS,
+};
 
 static void moy_lcd_check(esp_err_t err, const char *what) {
     if (err != ESP_OK) {
@@ -339,24 +291,14 @@ static void moy_lcd_require(void) {
 }
 
 // SPI completion ISR: one call per band (esp_lcd sets en_trans_done_cb only on
-// the last chunk of a tx_color, and a 30 KB band is one chunk). Both stores are
-// single 32-bit words, so the pump can read them without a lock; s_done_us is
-// deliberately the LOW 32 bits of the timer, because a 64-bit store would tear
-// against a reader and the only use is a wrap-safe uint32 subtraction.
+// the last chunk of a tx_color, and a 20 KB band is one chunk). The counting
+// and the feeder wake are the engine's, static inline so this callback keeps
+// its own placement; the `return false` is because esp_lcd's spi post_cb
+// IGNORES it, which is why the yield happens inside (THREADING above).
 static bool moy_lcd_trans_done(esp_lcd_panel_io_handle_t io,
                                esp_lcd_panel_io_event_data_t *edata, void *ctx) {
     (void)io; (void)edata; (void)ctx;
-    s_done++;
-    s_done_us = (uint32_t)esp_timer_get_time();
-    // Wake the FEEDER: a bounce slot just freed (or the tail completed). The
-    // yield must happen HERE -- esp_lcd's spi post_cb ignores this callback's
-    // return value (see THREADING in the header), so returning true wakes
-    // nobody until the next tick.
-    if (s_feed_task != NULL) {
-        BaseType_t hp = pdFALSE;
-        vTaskNotifyGiveFromISR((TaskHandle_t)s_feed_task, &hp);
-        portYIELD_FROM_ISR(hp);
-    }
+    moy_flush_band_done_from_isr();
     return false;
 }
 
@@ -408,18 +350,9 @@ static void moy_lcd_free_all(void) {
         if (s_fbs[i]) { heap_caps_free(s_fbs[i]); s_fbs[i] = NULL; }
     }
     s_nfbs = 0;
-    for (int i = 0; i < MOY_LCD_BOUNCE_SLOTS; i++) {
-        if (s_bounce[i]) { heap_caps_free(s_bounce[i]); s_bounce[i] = NULL; }
-    }
     // The band state points into buffers that no longer exist.
-    s_bnc_total = 0;
-    s_bnc_next = 0;
-    s_bnc_src = NULL;
-    s_done = 0;
-    s_target = 0;
-    s_tx_err = ESP_OK;
-    s_frame_busy = false;
-    s_frame_clean = true;
+    moy_flush_reset();
+    moy_flush.frame_clean = true;
 }
 
 // init(nfbs=2, pclk_hz=80000000) -> None
@@ -433,19 +366,13 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
 
     if (s_panel != NULL) {
         // Already up -- a second compositor, or a SOFT RESET, which wipes the
-        // Python side but not these statics (nor the FEEDER task, which
-        // survives a soft reset by design). Wait any in-flight FEEDER frame
-        // out, then clear the band bookkeeping: a leftover s_bnc_total would
-        // make the next frame re-feed a dead frame's bands into a window that
-        // no longer describes them.
-        moy_lcd_drain_locked();
-        s_bnc_total = 0;
-        s_bnc_next = 0;
-        s_bnc_src = NULL;
-        s_done = 0;
-        s_target = 0;
-        s_tx_err = ESP_OK;
-        s_frame_busy = false;
+        // Python side but not these statics (nor the FEEDER task and its
+        // bounce slots, which survive a soft reset by design). Wait any
+        // in-flight FEEDER frame out, then clear the band bookkeeping: a
+        // leftover bnc_total would make the next frame re-feed a dead frame's
+        // bands into a window that no longer describes them.
+        moy_flush_drain();
+        moy_flush_reset();
         return mp_const_none;
     }
     int nfbs = args[0].u_int;
@@ -478,12 +405,17 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         memset(s_fbs[i], 0, MOY_LCD_FB_BYTES);
     }
     s_nfbs = nfbs;
-    for (int i = 0; i < MOY_LCD_BOUNCE_SLOTS; i++) {
-        s_bounce[i] = heap_caps_malloc(MOY_LCD_BAND_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-        if (s_bounce[i] == NULL) {
-            moy_lcd_free_all();
-            mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: no internal DMA bounce"));
-        }
+    // THE SHARED ENGINE: the internal-SRAM bounce slots plus the core-0 feeder
+    // and its semaphores, all idempotent across a soft reset. Started HERE,
+    // before the bus, for the same reason the buffers were allocated here --
+    // a memory failure leaves nothing half-built -- and the task simply waits
+    // on its semaphore until the first kick(), which cannot happen until this
+    // function has returned. A dead feeder is fatal: there is no feederless
+    // flush path to fall back to.
+    if (!moy_flush_start(&MOY_LCD_FLUSH_OPS)) {
+        moy_lcd_free_all();
+        mp_raise_msg(&mp_type_MemoryError,
+                     MP_ERROR_TEXT("moy_lcd: no internal DMA bounce / feeder"));
     }
 
     spi_bus_config_t bus_cfg = {
@@ -552,30 +484,6 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
     moy_lcd_check(esp_lcd_panel_invert_color(s_panel, true), "invert");   // INVON
     moy_lcd_check(esp_lcd_panel_disp_on_off(s_panel, true), "disp_on");
     mp_hal_delay_ms(120);
-
-    // THE CORE-0 FEEDER: semaphores + task, created once, kept across soft
-    // resets (deinit stops the task; a failed create tears the whole init
-    // down -- there is no feederless flush path to fall back to, and the 2 ms
-    // timer the feeder replaced is gone from tdeck_panel).
-    if (s_kick_sem == NULL) {
-        s_kick_sem = xSemaphoreCreateBinary();
-    }
-    if (s_done_sem == NULL) {
-        s_done_sem = xSemaphoreCreateBinary();
-    }
-    bool feed_ok = (s_kick_sem != NULL && s_done_sem != NULL);
-    if (feed_ok && s_feed_task == NULL) {
-        s_task_exit = false;
-        feed_ok = xTaskCreatePinnedToCore(moy_lcd_feed_task_fn, "moy_lcd_feed",
-                                          MOY_LCD_FEED_STACK, NULL,
-                                          MOY_LCD_FEED_PRIO,
-                                          (TaskHandle_t *)&s_feed_task,
-                                          MOY_LCD_FEED_CORE) == pdPASS;
-    }
-    if (!feed_ok) {
-        moy_lcd_deinit();       // full unwind: panel, io, bus, buffers
-        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("moy_lcd: no feeder task"));
-    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_KW(moy_lcd_init_obj, 0, moy_lcd_init);
@@ -583,17 +491,10 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(moy_lcd_init_obj, 0, moy_lcd_init);
 static mp_obj_t moy_lcd_deinit(void) {
     // Never tear a driver down under a live DMA: the bounce buffers are freed
     // below and the SPI host is handed back, both of which an in-flight band
-    // would still be reading.
-    if (s_panel) { moy_lcd_drain_locked(); }
-    if (s_feed_task != NULL) {
-        // Stop the FEEDER before the panel io goes away under it.
-        s_task_exit = true;
-        xSemaphoreGive(s_kick_sem);
-        for (int i = 0; i < 100 && s_feed_task != NULL; i++) {
-            mp_hal_delay_ms(1);
-        }
-        s_task_exit = false;
-    }
+    // would still be reading. moy_flush_stop() waits the feeder out and frees
+    // the slots -- before the panel io goes away under it.
+    if (s_panel) { moy_flush_drain(); }
+    moy_flush_stop();
     if (s_panel) { esp_lcd_panel_del(s_panel); s_panel = NULL; }
     if (s_io) { esp_lcd_panel_io_del(s_io); s_io = NULL; }
     if (s_bus_up) { spi_bus_free(MOY_LCD_SPI_HOST); s_bus_up = false; }
@@ -621,9 +522,19 @@ static mp_obj_t moy_lcd_nfbs(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_nfbs_obj, moy_lcd_nfbs);
 
-// Runs on the FEEDER, so it may not raise: errors return, and the caller
-// latches them into s_tx_err for the next MP-side kick/show to report.
-static esp_err_t moy_lcd_arm_window(void) {
+// ---- the board's half of the shared engine (moy_flush.h) -------------------
+// All three hooks run on the FEEDER task, so none may raise: errors return and
+// the engine latches them into moy_flush.tx_err for the next MP-side kick() or
+// show() to report. This is the ST7789/esp_lcd TRANSPORT -- the one part Phase
+// C said the two S3 panels can never share.
+
+// frame_begin: arm the ST7789's write window for the whole frame.
+//
+// esp_lcd's tx_param also RECYCLES every stale in-flight color transaction
+// before its polling command, which is the timed-out-flush recovery this
+// board's THREADING note describes -- and the reason the engine restarts its
+// band counters only AFTER this returns (moy_flush.h's RESET-ORDER INVARIANT).
+static esp_err_t moy_lcd_frame_begin(void) {
     uint8_t p[4];
     p[0] = 0; p[1] = 0; p[2] = (MOY_LCD_W - 1) >> 8; p[3] = (MOY_LCD_W - 1) & 0xFF;
     esp_err_t err = esp_lcd_panel_io_tx_param(s_io, CMD_CASET, p, 4);
@@ -634,220 +545,41 @@ static esp_err_t moy_lcd_arm_window(void) {
     return esp_lcd_panel_io_tx_param(s_io, CMD_RASET, p, 4);
 }
 
+// queue_band: one 20 KB PSRAM -> SRAM memcpy into the slot the engine has
+// already verified is free, then one esp_lcd_panel_io_tx_color.
+//
+// Band 0 carries RAMWR; every continuation band sends NO command (lcd_cmd =
+// -1), which is what keeps esp_lcd from blocking on a drained queue and what
+// keeps the ST7789 streaming into the window armed at the frame's start. The
+// continuation bands also skip spi_device_acquire_bus entirely thanks to the
+// #66 no-acquire patch, so they queue and return instead of waiting out the
+// band before them. (`last` is the Guition's CS chain; this panel cycles CS
+// per transaction and has no use for it.)
+//
+// Cross-core PSRAM reads are coherent: the S3 has ONE dcache shared by both
+// cores, so the framebuffer core 1 just drew reads back exactly on core 0
+// (moy_axs proved this shape on glass first).
+static esp_err_t moy_lcd_queue_band(uint8_t *slot, const uint8_t *src, int k,
+                                    int y, int rows, bool last) {
+    (void)last;
+    size_t nbytes = (size_t)rows * MOY_LCD_ROW_BYTES;
+    memcpy(slot, src + (size_t)y * MOY_LCD_ROW_BYTES, nbytes);
+    return esp_lcd_panel_io_tx_color(s_io, (k == 0) ? CMD_RAMWR : -1,
+                                     slot, nbytes);
+}
+
+// frame_end: nothing to release. esp_lcd arbitrates the bus per transaction
+// (unlike moy_axs, which HOLDS it for the whole frame because its QSPI bridge
+// needs one CS assertion), so the window arm takes nothing back.
+static void moy_lcd_frame_end(bool ok) {
+    (void)ok;
+}
+
+// The board's FULL-frame band count -- what pump_stats() reports. The engine
+// derives the in-flight count from kick()'s row argument instead, because the
+// Guition windows some frames and this one never does.
 static int moy_lcd_bands(void) {
     return (MOY_LCD_H + MOY_LCD_BAND_ROWS - 1) / MOY_LCD_BAND_ROWS;
-}
-
-// Copy + queue every band whose bounce slot has freed. One 30 KB PSRAM->SRAM
-// memcpy and one esp_lcd_panel_io_tx_color per band, and the continuation
-// bands (lcd_cmd = -1) skip spi_device_acquire_bus entirely thanks to the #66
-// no-acquire patch, so they queue and return instead of waiting out the band
-// before them. Runs on the CORE-0 FEEDER task only since 2026-08-21 (it used
-// to run on the VM core, GIL held, poked from draw ops and a 2 ms soft timer
-// -- both retired with the feeder). Cross-core PSRAM reads are coherent: the
-// S3 has ONE dcache shared by both cores, so the framebuffer core 1 just drew
-// reads back exactly on core 0 (moy_axs proved this shape on glass first).
-//
-// Errors latch instead of raising -- this task has no MP context (an nlr
-// raise here would abort), and the latch also disarms the guard below.
-static void moy_lcd_pump_locked(void) {
-    if (s_in_pump || s_bnc_total == 0 || s_bnc_next >= s_bnc_total
-            || s_tx_err != ESP_OK) {
-        return;
-    }
-    s_in_pump = true;
-    uint32_t p0 = (uint32_t)esp_timer_get_time();
-    int k = s_bnc_next;
-    const int slots = MOY_LCD_BOUNCE_SLOTS;
-    while (k < s_bnc_total && (int32_t)s_done >= k - (slots - 1)) {
-        // Pacing probe: about to feed band k while everything already queued has
-        // COMPLETED means the SPI has been idle since that last completion. Band
-        // 0 follows a drained bus by design, so it is never a gap.
-        if (k > 0 && s_done >= s_target) {
-            uint32_t gap = (uint32_t)esp_timer_get_time() - s_done_us;
-            if (gap > 0 && gap < 1000000u) {   // a torn/absurd read is not a gap
-                s_idle_us += gap;
-                s_idle_n++;
-            }
-        }
-        int y = k * MOY_LCD_BAND_ROWS;
-        int rows = (y + MOY_LCD_BAND_ROWS <= MOY_LCD_H)
-                   ? MOY_LCD_BAND_ROWS : (MOY_LCD_H - y);
-        size_t nbytes = (size_t)rows * MOY_LCD_ROW_BYTES;
-        uint8_t *slot = s_bounce[k % slots];
-        memcpy(slot, s_bnc_src + (size_t)y * MOY_LCD_ROW_BYTES, nbytes);
-        // Band 0 carries RAMWR; every continuation band sends NO command, which
-        // is what keeps esp_lcd from blocking on a drained queue and what keeps
-        // the ST7789 streaming into the window armed at the frame's start.
-        esp_err_t err = esp_lcd_panel_io_tx_color(s_io, (k == 0) ? CMD_RAMWR : -1,
-                                                  slot, nbytes);
-        if (err != ESP_OK) {
-            // Do not raise: no MP context on the feeder. Latch it (which also
-            // disarms the pump above), count it, and let the next MP-side
-            // kick()/show() surface it as an exception on the frame that can
-            // actually report one.
-            s_tx_err = err;
-            s_tx_errs++;
-            break;
-        }
-        s_target++;
-        k++;
-        s_bnc_next = k;
-    }
-    uint32_t now = (uint32_t)esp_timer_get_time();
-    s_pump_us += now - p0;
-    if (s_bnc_next >= s_bnc_total && s_feed_us < 0) {
-        s_feed_us = (int32_t)(now - s_kick_us);
-    }
-    s_in_pump = false;
-}
-
-// MP-side kick: latch the last frame's diag, set up the band bookkeeping and
-// hand the frame to the CORE-0 FEEDER. No esp_lcd call happens on this thread
-// -- the window arm and every band are the feeder's -- so this returns in
-// microseconds. The caller must have drained first (kick/show do), which is
-// what makes the diag latch and the counter writes race-free here.
-static void moy_lcd_kick_locked(int n) {
-    // Latch the pacing of the frame that just finished (drain ran before this).
-    s_pump_last_us = s_pump_us;
-    s_idle_last_us = s_idle_us;
-    s_idle_last_n = s_idle_n;
-    s_feed_last_us = s_feed_us;
-    s_block_last_us = s_block_us;
-    s_pump_us = 0;
-    s_idle_us = 0;
-    s_idle_n = 0;
-    s_feed_us = -1;
-    s_block_us = 0;
-    // A new frame starts on a clean error slate -- the previous one's latched
-    // error has done its jobs by now (it disarmed the pump and stopped the
-    // feeder's loop, it is counted in s_tx_errs, and the caller raised it
-    // before calling here). Leaving it set would keep the pump disarmed.
-    s_tx_err = ESP_OK;
-    s_bnc_next = 0;
-    s_bnc_src = s_fbs[n];
-    s_bnc_total = moy_lcd_bands();
-    // s_done/s_target are NOT reset here: the feeder resets them after its
-    // window arm, whose tx_param recycles every stale in-flight band first
-    // (see THREADING in the header) -- the same arm-before-reset order the
-    // pre-feeder kick kept, for the same timed-out-flush recovery.
-    s_frame_clean = false;
-    // A stale done credit survives when drain's fast path never took the
-    // semaphore; clear it so the next give is THIS frame's (see the FEEDER
-    // handoff protocol).
-    xSemaphoreTake(s_done_sem, 0);
-    MOY_LCD_HANDOFF_BARRIER();
-    s_frame_busy = true;
-    xSemaphoreGive(s_kick_sem);
-}
-
-// FEEDER-side: one whole flush, on core 0 (THE CORE-0 FEEDER above). This is
-// what kick_locked + drain_locked used to do on the VM core: arm the window
-// (whose tx_param recycles the previous frame's transactions -- the recovery
-// point after a timed-out flush), then copy + queue every band as its bounce
-// slot frees -- SLEEPING on the completion ISR's task notify instead of
-// waiting on a 2 ms timer to fire -- then wait the tail out.
-static void moy_lcd_run_frame(void) {
-    esp_err_t werr = moy_lcd_arm_window();
-    if (werr != ESP_OK) {
-        s_tx_err = werr;
-        s_tx_errs++;
-        goto out;
-    }
-    // Every stale completion ISR has run (the arm recycled its transaction),
-    // so the counters restart clean.
-    s_done = 0;
-    s_target = 0;
-    s_flush_t0 = esp_timer_get_time();
-    s_kick_us = (uint32_t)s_flush_t0;
-    int64_t deadline = s_flush_t0 + MOY_LCD_FLUSH_TIMEOUT_US;
-    bool ok = true;
-    // A queue error stops the FEED (there is no point copying more bands into
-    // a stream esp_lcd refused) but the tail wait below still runs: already-
-    // queued bands are unaffected and still reading a bounce buffer.
-    while (s_bnc_next < s_bnc_total && s_tx_err == ESP_OK) {
-        int before = s_bnc_next;
-        moy_lcd_pump_locked();
-        if (s_bnc_next == before && s_tx_err == ESP_OK) {
-            if (esp_timer_get_time() > deadline) {
-                ok = false;
-                break;
-            }
-            // The done-ISR's notify is the wake; the tick timeout is only
-            // insurance. 2 ticks, NOT pdMS_TO_TICKS(a small ms): FREERTOS_HZ
-            // is 100 on this build, so pdMS_TO_TICKS(5) is ZERO ticks -- a
-            // busy spin (moy_axs's lesson, kept).
-            ulTaskNotifyTake(pdTRUE, 2);
-        }
-    }
-    // Whatever was QUEUED must finish before this frame may be handed back as
-    // done -- this is the promise the SD sync fence relies on.
-    while (ok && s_tx_err == ESP_OK && s_done < s_target) {
-        if (esp_timer_get_time() > deadline) {
-            ok = false;
-            break;
-        }
-        ulTaskNotifyTake(pdTRUE, 2);
-    }
-    if (ok && s_tx_err == ESP_OK) {
-        s_flushes++;
-        // kick -> LAST COMPLETION, taken from the ISR's own stamp, not from
-        // the clock now: this task is reached late under the overlap, so
-        // `now - s_flush_t0` would fold in scheduling latency. (The original
-        // form of this lesson: tdeck_smoke.panel() sleeps 120ms between
-        // flushes and would have reported the transfer as 120ms.)
-        s_last_flush_us = s_done_us - (uint32_t)s_flush_t0;
-        s_frame_clean = true;
-    } else if (!ok) {
-        s_timeouts++;
-    }
-out:
-    s_bnc_total = 0;
-    s_bnc_next = 0;
-    s_bnc_src = NULL;
-    // LAST: hand the frame back (the handoff protocol in the FEEDER prose).
-    MOY_LCD_HANDOFF_BARRIER();
-    s_frame_busy = false;
-    xSemaphoreGive(s_done_sem);
-}
-
-static void moy_lcd_feed_task_fn(void *arg) {
-    (void)arg;
-    for (;;) {
-        if (xSemaphoreTake(s_kick_sem, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-        if (s_task_exit) {
-            break;
-        }
-        MOY_LCD_HANDOFF_BARRIER();
-        moy_lcd_run_frame();
-    }
-    s_feed_task = NULL;
-    vTaskDelete(NULL);
-}
-
-// MP-side drain: wait the FEEDER's frame out. The fast path -- the frame
-// already finished, the ordinary overlap cadence -- is one volatile read;
-// otherwise the GIL is released across a semaphore wait. The feeder's own
-// deadline guarantees the wait terminates; the bounded loop is insurance
-// against a wedged feeder, sized never to fire. Returns false on a timeout
-// (bands may still be in flight -- the next frame's arm_window recovers,
-// because a command recycles the queue first).
-static bool moy_lcd_drain_locked(void) {
-    if (!s_frame_busy) {
-        MOY_LCD_HANDOFF_BARRIER();
-        return s_frame_clean;
-    }
-    uint32_t b0 = (uint32_t)esp_timer_get_time();
-    MP_THREAD_GIL_EXIT();
-    for (int i = 0; s_frame_busy && i < 4; i++) {
-        xSemaphoreTake(s_done_sem, pdMS_TO_TICKS(300));
-    }
-    MP_THREAD_GIL_ENTER();
-    MOY_LCD_HANDOFF_BARRIER();
-    s_block_us += (uint32_t)esp_timer_get_time() - b0;
-    return s_frame_clean && !s_frame_busy;
 }
 
 static int moy_lcd_fb_index(size_t n_args, const mp_obj_t *a) {
@@ -863,17 +595,13 @@ static int moy_lcd_fb_index(size_t n_args, const mp_obj_t *a) {
 static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
     moy_lcd_require();
     int n = moy_lcd_fb_index(n_args, a);
-    moy_lcd_drain_locked();         // defensive: kick without a flush() before it
+    moy_flush_drain();              // defensive: kick without a flush() before it
     // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
     // finished frame's before handing this one over.
-    if (s_tx_err != ESP_OK) {
-        esp_err_t e = s_tx_err;
-        s_tx_err = ESP_OK;
-        moy_lcd_check(e, "tx_color");
-    }
-    moy_lcd_kick_locked(n);
+    moy_lcd_check(moy_flush_take_err(), "tx_color");
+    moy_flush_kick(s_fbs[n], MOY_LCD_H);
     if (s_sd_guard) {
-        moy_lcd_drain_locked();     // SD session live: no overlap (see the guard)
+        moy_flush_drain();          // SD session live: no overlap (see the guard)
     }
     return mp_const_none;
 }
@@ -886,7 +614,7 @@ static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
     bool on = mp_obj_is_true(on_in);
     s_sd_guard = on;
     if (on && s_panel != NULL) {
-        moy_lcd_drain_locked();
+        moy_flush_drain();
     }
     return mp_const_none;
 }
@@ -911,7 +639,7 @@ static mp_obj_t moy_lcd_drain(void) {
     if (s_panel == NULL) {
         return mp_const_true;
     }
-    bool ok = moy_lcd_drain_locked();
+    bool ok = moy_flush_drain();
     return ok ? mp_const_true : mp_const_false;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_drain_obj, moy_lcd_drain);
@@ -919,7 +647,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_drain_obj, moy_lcd_drain);
 // pending() -> True while a flush is in flight (fed or not). What an SD op or a
 // teardown has to see as False.
 static mp_obj_t moy_lcd_pending(void) {
-    return s_frame_busy ? mp_const_true : mp_const_false;
+    return moy_flush.frame_busy ? mp_const_true : mp_const_false;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pending_obj, moy_lcd_pending);
 
@@ -928,15 +656,11 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pending_obj, moy_lcd_pending);
 static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     moy_lcd_require();
     int n = moy_lcd_fb_index(n_args, a);
-    moy_lcd_drain_locked();
-    s_tx_err = ESP_OK;              // show reports its OWN frame's errors
-    moy_lcd_kick_locked(n);
-    bool ok = moy_lcd_drain_locked();
-    if (s_tx_err != ESP_OK) {
-        esp_err_t e = s_tx_err;
-        s_tx_err = ESP_OK;
-        moy_lcd_check(e, "tx_color");
-    }
+    moy_flush_drain();
+    (void)moy_flush_take_err();     // show reports its OWN frame's errors
+    moy_flush_kick(s_fbs[n], MOY_LCD_H);
+    bool ok = moy_flush_drain();
+    moy_lcd_check(moy_flush_take_err(), "tx_color");
     if (!ok) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_lcd: flush timed out"));
     }
@@ -958,6 +682,11 @@ static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_backlight_obj, moy_lcd_backlight);
 static mp_obj_t moy_lcd_set_madctl(mp_obj_t v_in) {
     moy_lcd_require();
     uint8_t v = (uint8_t)mp_obj_get_int(v_in);
+    // THREADING: the io handle is not thread-safe, so never race a command
+    // into a frame the feeder is still shipping. (This drain was missing until
+    // 2026-08-21 -- the rule was written down two paragraphs from a verb that
+    // broke it, and moy_axs's twin verb had it from the start.)
+    moy_flush_drain();
     moy_lcd_check(esp_lcd_panel_io_tx_param(s_io, CMD_MADCTL, &v, 1), "madctl");
     s_madctl = v;
     return mp_const_none;
@@ -1014,50 +743,25 @@ static mp_obj_t moy_lcd_bars(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_bars_obj, 0, 1, moy_lcd_bars);
 
-// stats() -> (flushes, last_flush_us). `last_flush_us` is the kick -> fully-out
-// WALL span of the last completed frame, i.e. the real cost of moving 153,600 B.
-// It does NOT shrink when the overlap lands -- the transfer still takes what it
-// takes; what shrinks is how much of it the CPU waits for. That number is
-// pump_stats()[5], and the console's own `flush=` measures the same thing from
-// the Python side.
+// stats() -> (flushes, last_flush_us) and pump_stats() -> (pump, idle, gaps,
+// feed, bands, blocked, timeouts, errs). Both tuples are the shared engine's
+// (moy_flush.h documents every field, and both boards export them verbatim);
+// tdeck_panel.bounce_stats() hands the first five of pump_stats straight to
+// the PUMP diag line (#66 lever 4). `bands` is the FULL-frame count, which on
+// this board is every frame -- the Guition is the one that windows.
+//
+// `last_flush_us` is the kick -> fully-out WALL span of the last completed
+// frame, i.e. the real cost of moving 153,600 B. It does NOT shrink when the
+// overlap lands -- the transfer still takes what it takes; what shrinks is how
+// much of it the CPU waits for, which is pump_stats()[5], and the console's
+// own `flush=` measures the same thing from the Python side.
 static mp_obj_t moy_lcd_stats(void) {
-    mp_obj_t t[2] = {
-        mp_obj_new_int_from_uint(s_flushes),
-        mp_obj_new_int_from_uint(s_last_flush_us),
-    };
-    return mp_obj_new_tuple(2, t);
+    return moy_flush_stats_tuple();
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_stats_obj, moy_lcd_stats);
 
-// pump_stats() -> (pump_us, idle_us, idle_n, feed_us, bands, blocked_us,
-// timeouts) for the last fully-shipped frame. tdeck_panel.bounce_stats() hands
-// the first five straight to the PUMP diag line (#66 lever 4):
-//   pump    CPU us inside pump() -- the band memcpys. Since the CORE-0 FEEDER
-//           (2026-08-21) this runs on core 0 and is NOT billed to the frame;
-//           it stays reported because a rising value still means real work
-//           (and a zero means the feeder never ran)
-//   idle    us the SPI sat starved because a band was fed after the previous
-//           one had already finished. THE pacing number: ~0 means the ceiling is
-//           real transfer time and a faster feeder buys nothing
-//   gaps    how many bands were fed that late
-//   feed    frame start -> last band queued
-//   blocked us the VM CPU actually spent waiting in drain -- what the feeder
-//           is supposed to drive toward ~0 from the old kick+drain residue
-//   timeouts / errs  both must stay 0. A queue error that happens during a
-//           drain cannot be raised (drain must not throw into the frame loop),
-//           so `errs` is the only place it is visible at all.
 static mp_obj_t moy_lcd_pump_stats(void) {
-    mp_obj_t t[8] = {
-        mp_obj_new_int_from_uint(s_pump_last_us),
-        mp_obj_new_int_from_uint(s_idle_last_us),
-        mp_obj_new_int_from_uint(s_idle_last_n),
-        mp_obj_new_int(s_feed_last_us),
-        MP_OBJ_NEW_SMALL_INT(moy_lcd_bands()),
-        mp_obj_new_int_from_uint(s_block_last_us),
-        mp_obj_new_int_from_uint(s_timeouts),
-        mp_obj_new_int_from_uint(s_tx_errs),
-    };
-    return mp_obj_new_tuple(8, t);
+    return moy_flush_pump_stats_tuple(moy_lcd_bands());
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_pump_stats_obj, moy_lcd_pump_stats);
 

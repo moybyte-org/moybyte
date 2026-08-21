@@ -52,8 +52,10 @@ now runs the WHOLE flush on a FreeRTOS task pinned to core 0 (the CORE-0
 FEEDER block in the C carries the handoff protocol), woken per band by the
 SPI done-ISR, itself pinned to core 0. The 2ms soft pump timer and the
 DeviceCanvas draw-op pump pokes are retired on this board (`moy_axs.pump`
-survives as a no-op; tdeck_panel keeps both -- moy_lcd still feeds from the
-VM core). Measured on this glass: MP-side flush block 0ms, SPI starvation
+survives as a no-op). The T-Deck took the same design on 2026-08-21
+(`d9aa73e`) and the two feeders were merged into `native/moy_flush` the same
+day, so "this board feeds off the VM core and the T-Deck does not" is history.
+Measured on this glass: MP-side flush block 0ms, SPI starvation
 0us (was ~4ms), flush wall 9.4ms, 0 timeouts / 0 tx errors over a
 5,000-flush soak, `fold_test` re-proven at 0 mismatched bytes, on-glass
 suite 10/10. The remaining gap to the T-Deck's 60/50 is now the VM core's
@@ -65,12 +67,27 @@ gesture-transition spike, which the feeder does not touch).
 `native/moy_axs` -- raw `spi_master`, NOT esp_lcd, because the AXS15231B's
 QSPI protocol wants the whole frame under ONE CS assertion behind a 4-byte
 1-line opcode header (`0x32 00 2C 00`), which is the opposite of esp_lcd's
-per-call CS cycling. The band/bounce/kick-pump-drain machinery is moy_lcd's
-design carried over: bands of 48 rows gathered PSRAM -> two internal-SRAM DMA
-bounce slots (a ROTATE-gather since the landscape call, not a memcpy -- see
-the 2026-08-19 entry below), queued with `SPI_TRANS_CS_KEEP_ACTIVE`, completion
-counted by a `post_cb` ISR. `modules/guition_panel.py` is the compositor over it
-(tdeck_panel's twin). Init sequence provenance: ESPHome's AXS15231 model plus
+per-call CS cycling. That is the TRANSPORT, and since
+2026-08-21 it is all this module still owns. Everything under it -- the flush
+concurrency this file used to carry as its own copy of moy_lcd's design -- is
+**`native/moy_flush`**, one shared body with the T-Deck, promoted the day that
+board moved onto THIS board's core-0 feeder and the two halves became literal
+copies of one another. Read `moy_flush.h`; it is the authority, and nothing
+about the feeder or the handoff is restated here. What moy_axs supplies is
+three hooks: `frame_begin` (acquire the bus, arm the window, ship the pixel
+header), `queue_band` (the ROTATE-gather or the fold synthesis into the slot
+the engine hands it, queued with `SPI_TRANS_CS_KEEP_ACTIVE` on all but the
+last) and `frame_end` (retrieve the results, release the bus). Bands are 32
+physical rows; completion is counted by this module's `post_cb` ISR, whose
+body is the engine's `moy_flush_band_done_from_isr` -- static inline, so the
+callback keeps its IRAM placement. `modules/guition_panel.py` is the
+compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
+`device/banded_panel.py` (`BandedCompositor`, #206 item 1), the Python twin of
+the `moy_flush` split above. What is left in this file is the `moy_axs` import,
+WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag, `fold_supported` + the three
+`*_fold` verbs (no other board has the lever) and the module-level
+`set_backlight()`; there is no `sd_bracket` here, because nothing else is known
+to share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
 its generated DCS tail -- the exact sequence the owner's ESPHome build runs on
 this exact glass.
 

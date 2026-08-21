@@ -418,11 +418,35 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
 
 
 def _panel_src():
-    """The mainline panel backend: the Python compositor plus its native driver."""
+    """The mainline panel backend: this board's compositor SUBCLASS plus its
+    native driver. What is left in `tdeck_panel.py` since 2026-08-21 is this
+    board's alone -- the moy_lcd import, WIDTH/HEIGHT, the two revert flags,
+    `sd_bracket`, `set_backlight`; the shared body is `_panel_base_src()`."""
     return (
         (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8"),
         (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8"),
     )
+
+
+def _panel_base_src():
+    """The SHARED compositor body (device/banded_panel.py), which since
+    2026-08-21 owns the half of the Python panel glue that `tdeck_panel` and
+    the Guition's `guition_panel` had in common: the backend contract, the
+    kick/drain overlap, the ping-pong and the PUMP meters (#206 item 1). It is
+    the Python twin of `_flush_src()` one tier down, and it exists for the same
+    reason -- the two boards' feeds CONVERGED on `d9aa73e`. Greps that used to
+    read `tdeck_panel.py` for mechanism facts read this instead, and say so."""
+    return (DEVICE / "banded_panel.py").read_text(encoding="utf-8")
+
+
+def _flush_src():
+    """The SHARED banded-flush engine (native/moy_flush), which since
+    2026-08-21 owns the half of the flush that moy_lcd and the Guition's
+    moy_axs had in common: the core-0 feeder, the bounce slots and their
+    pacing, the kick/drain handoff and the PUMP meters. The panel modules keep
+    their transports. Greps that used to read modmoy_lcd.c for engine facts
+    read this instead -- and say so, so the next reader knows where to look."""
+    return (NATIVE / "moy_flush" / "moy_flush.c").read_text(encoding="utf-8")
 
 
 def test_panel_flush_dmas_only_from_internal_sram():
@@ -436,8 +460,13 @@ def test_panel_flush_dmas_only_from_internal_sram():
     """
     _py, c = _panel_src()
     assert "INTERNAL SRAM" in c or "internal SRAM" in c
-    assert "MALLOC_CAP_INTERNAL" in c, "the bounce slots must be internal-SRAM caps"
-    assert "s_bounce" in c
+    # The slots themselves are the SHARED engine's since 2026-08-21 (both S3
+    # boards allocate them through moy_flush_start), so the cap is pinned
+    # there; the panel driver keeps the reason it exists.
+    engine = _flush_src()
+    assert "MALLOC_CAP_INTERNAL" in engine, (
+        "the bounce slots must be internal-SRAM caps")
+    assert "moy_flush.bounce" in engine
 
 
 def test_only_the_first_band_carries_a_command():
@@ -486,10 +515,13 @@ def test_layer_copy_async_is_on_and_revertible():
 
 
 def test_panel_ping_pong_has_two_framebuffers():
-    """Two buffers and an explicit swap -- the tear-free half of the design."""
+    """Two buffers and an explicit swap -- the tear-free half of the design.
+
+    The board asks for two; the swap is the shared body's (#206 item 1).
+    """
     py, _c = _panel_src()
     assert "nfbs=2" in py or "nfbs = 2" in py
-    assert "_swap" in py
+    assert "_swap" in _panel_base_src()
 
 
 def test_bounce_pacing_is_measurable():
@@ -497,26 +529,42 @@ def test_bounce_pacing_is_measurable():
 
     The fork reported this as FLUSHBRK; the port reports PUMP. Either way the
     point is that the pacing is MEASURED -- an overlap you cannot see is an
-    overlap you cannot tell from a stall.
+    overlap you cannot tell from a stall. Both meters are the shared
+    compositor's since 2026-08-21, so BOTH S3 boards report them.
     """
-    py, _c = _panel_src()
-    assert "bounce_stats" in py
-    assert "pump_last_us" in py
+    base = _panel_base_src()
+    assert "bounce_stats" in base
+    assert "pump_last_us" in base
 
 
 def test_the_band_feed_runs_on_the_core0_feeder_task():
     """A band queued and then forgotten is a frame that never finishes.
 
     Under the 2ms machine.Timer that guarantee was the timer + the draw pokes
-    + the idle drain; since 2026-08-21 it is moy_lcd's core-0 FreeRTOS feeder
-    (ported from the Guition's moy_axs), which owns the whole flush -- so the
-    VM-side pump plumbing must be GONE (a half-retired timer would silently
-    double-feed a bounce slot) and the feeder must exist in the C.
+    + the idle drain; since 2026-08-21 it is a core-0 FreeRTOS feeder (ported
+    from the Guition's moy_axs), which owns the whole flush -- so the VM-side
+    pump plumbing must be GONE (a half-retired timer would silently double-feed
+    a bounce slot) and the feeder must exist.
+
+    It exists ONCE, in the shared engine: the port made the two boards'
+    concurrency halves literal copies, so native/moy_flush is where the feeder,
+    the handoff and the pacing live, and each panel module supplies only its
+    transport hooks. That split is pinned here too -- a feeder task
+    re-appearing inside a panel driver means somebody forked the protocol back
+    apart.
     """
     py, c = _panel_src()
-    assert "xTaskCreatePinnedToCore" in c
-    assert "moy_lcd_feed" in c
+    engine = _flush_src()
+    assert "xTaskCreatePinnedToCore" in engine
+    assert "moy_lcd_feed" in c, "the board names its feeder task in its ops"
+    assert "moy_flush_start" in c, "the panel driver must start the engine"
+    assert "xTaskCreatePinnedToCore" not in c, (
+        "the feeder belongs to moy_flush; a panel driver growing its own has "
+        "forked the handoff protocol back into two copies")
     assert "isr_cpu_id" in c, "the done-ISR must land on the feeder's core"
+    assert "moy_flush_band_done_from_isr" in c, (
+        "the done-ISR's counting/wake half is the engine's, static inline so "
+        "the callback keeps its own IRAM placement")
     # The Python compositor no longer feeds anything: no timer, no poke export.
     assert "self.pump_if_pending" not in py
     assert "machine import Timer" not in py
@@ -1158,8 +1206,9 @@ def test_device_canvas_uses_native_moy_gfx():
     # across frames so the cache is built once, not rebuilt every frame.
     assert "def _cache_rgb(self, img, scale, flip=0):" in device_canvas
     assert "tile_cache" in runtime
-    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
-    assert "def gfx(self):" in comp
+    # `gfx()` is the shared compositor's since 2026-08-21 (#206 item 1), so
+    # the kernel reaches DeviceCanvas the same way on both S3 boards.
+    assert "def gfx(self):" in _panel_base_src()
 
 
 def test_scroll_rect_wired_for_ui_blit_scroll():
@@ -1510,7 +1559,9 @@ def test_sram_bounce_flush_wired():
     # the GDMA layer copy tied to the same flag (it is only artifact-safe when
     # the panel DMA reads internal SRAM).
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    # The compositor half is the SHARED body since 2026-08-21 (#206 item 1) --
+    # this board subclasses it, so the meter and the fence are pinned there.
+    comp = _panel_base_src()
     assert (PATCHES / "esp_lcd_tx_color_noacquire.patch").exists()
     assert "esp_lcd_tx_color_noacquire.patch" in build
     assert 'grep -q "Moybyte #66"' in build
@@ -2594,7 +2645,7 @@ def test_micropython_offline_diag_wiring():
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
     # measure-first data for band size / pump period / third-slot tuning.
-    compositor = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    compositor = _panel_base_src()   # shared body since 2026-08-21 (#206 item 1)
     assert "def bounce_stats(self):" in compositor
     assert ('diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f '
             'bands=%d fold=%d"' in device_diag)   # fold= is the #190 liveness proof
