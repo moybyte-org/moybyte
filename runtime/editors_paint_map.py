@@ -41,8 +41,10 @@ def _hex2b(text):
 
 
 def _pe_line(x0, y0, x1, y1):
-    """Bresenham line points from (x0,y0) to (x1,y1) inclusive (mirrors the layer's
-    drag-stroke _line_cells; kept in the core so shapes stay dependency-free)."""
+    """Bresenham line points from (x0,y0) to (x1,y1) inclusive. The ONE line walker:
+    the LINE/shape tools and the freehand drag stroke (paint_layer, via editors)
+    both stamp into the same sprite, so a tie-break that differs between them makes
+    the same diagonal come out two ways."""
     pts = []
     dx = x1 - x0 if x1 >= x0 else x0 - x1
     dy = y1 - y0 if y1 >= y0 else y0 - y1

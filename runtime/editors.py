@@ -9,7 +9,8 @@ consumer and test keeps `from editors import X` / `editors.X`:
                        UndoRedoMixin pair was deleted 2026-08-18, unused)
   editors_code      -- CodeEditor (editable text buffer + cursor, #3)
   editors_sheet     -- _SheetSprite / SpriteSheet / IconSheet / TileMap
-  editors_paint_map -- PaintEditor (#4) + MapEditor (#32)
+  editors_paint_map -- PaintEditor (#4) + MapEditor (#32) + _pe_line (the ONE
+                       Bresenham walker; paint_layer's drag stroke uses it too)
   editors_block     -- BlockRow / BlockEditor (+ _clone_tree, #29 Part 2)
   editors_music     -- MusicEditor (#50/#92)
   editors_scene     -- SceneEditor (placed-actor placement, #85 Stage 2)
@@ -23,7 +24,7 @@ try:
     from editors_base import KeyEdge
     from editors_code import CodeEditor
     from editors_sheet import _SheetSprite, SpriteSheet, IconSheet, TileMap
-    from editors_paint_map import PaintEditor, MapEditor
+    from editors_paint_map import PaintEditor, MapEditor, _pe_line
     from editors_block import _BLK_UNDO_MAX, _clone_tree, BlockRow, BlockEditor
     from editors_music import (_ME_REST, _ME_PITCH_MIN, _ME_PITCH_MAX,
                                _ME_WAVE_MIN, _ME_WAVE_MAX, _ME_VOL_MIN,
@@ -35,7 +36,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.editors_base import KeyEdge
     from runtime.editors_code import CodeEditor
     from runtime.editors_sheet import _SheetSprite, SpriteSheet, IconSheet, TileMap
-    from runtime.editors_paint_map import PaintEditor, MapEditor
+    from runtime.editors_paint_map import PaintEditor, MapEditor, _pe_line
     from runtime.editors_block import (_BLK_UNDO_MAX, _clone_tree, BlockRow,
                                        BlockEditor)
     from runtime.editors_music import (_ME_REST, _ME_PITCH_MIN, _ME_PITCH_MAX,

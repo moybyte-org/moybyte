@@ -740,3 +740,58 @@ def _cell_center(C, lx, ly, dim):
     cell = C._PG_SPAN // dim
     return (C._PG_X0 + lx * cell + cell // 2,
             C._PG_Y0 + ly * cell + cell // 2)
+
+
+# -- ONE line walker (LINE tool == freehand drag stroke) ---------------------
+# `paint_layer`'s drag stroke and the LINE tool rasterise into the SAME sprite.
+# They used to be two hand-copied Bresenhams; a tie-break edited in one and not
+# the other made the same diagonal come out two ways, and each copy was covered
+# only against its own expectation.
+
+_LINE_CASES = (
+    (2, 2, 12, 12),    # 45 deg: e2 ties both branches every step
+    (2, 2, 12, 7),     # 2:1 -- err lands exactly on the -dy boundary
+    (2, 7, 12, 2),     # ...mirrored in y
+    (7, 2, 2, 12),     # ...and drawn right-to-left
+    (2, 2, 2, 12),     # vertical (dx == 0)
+    (2, 2, 12, 2),     # horizontal (dy == 0)
+    (5, 5, 5, 5),      # degenerate single cell
+    (12, 12, 2, 2),    # reversed endpoints
+)
+
+
+def test_the_line_tool_and_the_freehand_stroke_are_one_walker():
+    from runtime import paint_layer
+    from runtime import editors_paint_map
+    assert paint_layer._pe_line is editors_paint_map._pe_line
+
+
+def test_line_tool_and_freehand_stroke_paint_identical_pixels():
+    from runtime.editors_paint_map import _pe_line
+    for (x0, y0, x1, y1) in _LINE_CASES:
+        tool = _pe()
+        tool.color = 9
+        tool.tool = tool.LINE
+        tool.stamp_shape(x0, y0, x1, y1)
+
+        free = _pe()
+        free.color = 9
+        free.begin_stroke()
+        for cx, cy in _pe_line(x0, y0, x1, y1):
+            free.paint(cx, cy)
+        free.end_stroke()
+
+        assert _region(tool) == _region(free), (x0, y0, x1, y1)
+        assert any(v == 9 for v in _region(tool)), (x0, y0, x1, y1)
+
+
+def test_the_line_walker_is_integer_only():
+    """Host CPython and frozen MicroPython must produce byte-identical pixels, so
+    the walker may not divide or touch a float."""
+    import ast
+    src = (ROOT / "runtime" / "editors_paint_map.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.FunctionDef) and n.name == "_pe_line")
+    for node in ast.walk(fn):
+        assert not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Div)
+        assert not (isinstance(node, ast.Constant) and isinstance(node.value, float))

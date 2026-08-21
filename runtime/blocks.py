@@ -1557,28 +1557,54 @@ def _uses_any(trees, needles):
     return False
 
 
-def _uses(trees, needle):
-    """True if any block tree in `trees` (scripts and/or proc defs) contains a block
-    whose type id == needle. Walks child bodies ("c"), nested expression params ("p"),
-    and list-valued params such as a call's positional args (#48)."""
-    found = [False]
+def walk_tree(roots, visit):
+    """Call `visit(node)` on every block dict under `roots`, pre-order.
 
+    THE tree walk -- every schema container lives here and nowhere else, so a new
+    one reaches the compiler's scans and the editor's renamers together. Recurses
+    list-valued params (a call's positional args, #48), expression params ("p") and
+    child bodies ("c"). p-before-c is arbitrary: visitors act on the node they are
+    given, so the order is not observable (differentially checked, see
+    tests/test_block_walk.py)."""
     def walk(node):
-        if isinstance(node, list):                # e.g. a call's positional args (#48)
+        if isinstance(node, list):
             for it in node:
                 walk(it)
             return
         if not isinstance(node, dict):
             return
-        if node.get("t") == needle:
-            found[0] = True
-        for c in node.get("c", []) or []:
-            walk(c)
+        visit(node)
         for v in (node.get("p", {}) or {}).values():
             walk(v)
+        for c in node.get("c", []) or []:
+            walk(c)
 
-    for s in trees:
-        walk(s)
+    for r in roots:
+        walk(r)
+
+
+def all_roots(program, procs=None, objects=None):
+    """Every tree-walk root: global scripts + proc defs + every object's hats (#85/#93).
+
+    `procs`/`objects` default to the raw program lists -- the live editor must never
+    raise or drop mid-edit. The compiler passes its VALIDATED collections instead
+    (collect_procs raises on a bad name, collect_objects drops untagged entries)."""
+    roots = list(program.get("scripts", []) or [])
+    roots += list(program.get("procs", []) or []) if procs is None else list(procs)
+    for o in ((program.get("objects", []) or []) if objects is None else objects):
+        roots += list(o.get("scripts", []) or [])
+    return roots
+
+
+def _uses(trees, needle):
+    """True if any block tree in `trees` contains a block whose type id == needle."""
+    found = [False]
+
+    def visit(node):
+        if node.get("t") == needle:
+            found[0] = True
+
+    walk_tree(trees, visit)
     return found[0]
 
 
@@ -1782,24 +1808,13 @@ def _calls_in(body, names):
     """The set of proc names this body (a statement/expr tree) directly calls."""
     out = set()
 
-    def walk(node):
-        if isinstance(node, list):
-            for it in node:
-                walk(it)
-            return
-        if not isinstance(node, dict):
-            return
+    def visit(node):
         if node.get("t") == CALL:
             tgt = proc_name(node)
             if tgt in names:
                 out.add(tgt)
-        for c in node.get("c", []) or []:
-            walk(c)
-        for v in (node.get("p", {}) or {}).values():
-            walk(v)
 
-    for b in body:
-        walk(b)
+    walk_tree(body, visit)
     return out
 
 
@@ -1938,14 +1953,9 @@ def compile_blocks(program):
     pinfo = _proc_info(procs)
     objects = collect_objects(program)             # #85/#93: per-object scripts (validated)
     scripts = program.get("scripts", []) or []
-    # #85/#93: an object's scripts are hats too -- flatten them so helper detection
-    # + `global` hoisting see blocks used only inside a per-object script.
-    object_hats = []
-    for _o in objects:
-        object_hats.extend(_o["scripts"])
-    # Helper detection must see proc + object bodies too (a helper may be used only
-    # inside a custom block or a per-object script), so scan them all together.
-    use_trees = scripts + procs + object_hats
+    # Helper detection + `global` hoisting must see proc and per-object bodies too
+    # (a helper may be used only there), so scan every root together.
+    use_trees = all_roots(program, procs, objects)
 
     out = [BLOCK_MARKER + " Edit in the block editor (or graduate to code)."]
 
