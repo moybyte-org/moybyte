@@ -30,6 +30,55 @@ SHEET_ROWS = 32
 SHEET_W = SHEET_COLS * 8          # 128 px
 SHEET_H = SHEET_ROWS * 8          # 256 px
 
+# A .moygfx blob is one hex NIBBLE per pixel, and the only hex primitive either
+# VM implements in C (`bytes.fromhex`) hands back a BYTE per pair -- so these two
+# tables are what let a sheet be decoded by C instead of by the interpreter.
+# _NIBBLES splits a packed byte back into its two pixels; _INK is the hex digits
+# meaning "this pixel has colour", so `set(line) & _INK` answers is_blank()'s
+# question about a whole line in one C-level pass, decoding nothing.
+_NIBBLES = [bytes((_b >> 4, _b & 15)) for _b in range(256)]
+_INK = set("123456789abcdefABCDEF")
+
+
+def _fill_hex_grid(pix, w, h, text):
+    """Decode a flat .moygfx hex grid into `pix` (a w*h bytearray of palette
+    indices), for both from_hex classmethods -- a module-level function, not a
+    shared classmethod, because MicroPython has no __func__ rebinding.
+
+    A short blob lands in the TOP rows with tile ids unchanged and the rest
+    stays blank, which is what every pre-512 cart and every PICO-8 import
+    relies on."""
+    y = 0
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if y >= h:
+            break
+        n = min(w, len(line))
+        # Fast path: a whole line in one C call, declining anything the
+        # per-pixel path below would read differently -- a line wider than the
+        # grid, an odd length (fromhex takes pairs), and above all a line with
+        # EMBEDDED WHITESPACE, which `bytes.fromhex` SKIPS where the slow path
+        # reads it as a ValueError -> pixel 0, shifting every pixel after it.
+        # Bad hex raises and falls through, so a corrupt blob parses unchanged.
+        if n == len(line) and not (n & 1) and len(line.split()) == 1:
+            try:
+                packed = bytes.fromhex(line)
+            except ValueError:
+                packed = None
+            if packed is not None:
+                base = y * w
+                pix[base:base + n] = b"".join([_NIBBLES[c] for c in packed])
+                y += 1
+                continue
+        for x in range(n):
+            try:
+                pix[y * w + x] = int(line[x], 16)
+            except ValueError:
+                pass
+        y += 1
+
 
 class _SheetSprite:
     """Minimal blittable returned by SpriteSheet.tile_image: both canvas
@@ -209,22 +258,74 @@ class SpriteSheet:
         a flat hex grid -- so a short one (every pre-512 cart, every PICO-8 import)
         lands in the TOP rows with tile ids unchanged and the rest stays blank."""
         sheet = cls(cols, rows, spec=spec)
-        w = sheet.w
+        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text)
+        sheet.dirty = False
+        return sheet
+
+    @classmethod
+    def icon_from_hex(cls, text, n=0, tw=1, th=1, cols=SHEET_COLS,
+                      rows=SHEET_ROWS, transparent=-1):
+        """The launcher's grid icon for sprite `n` out of a .moygfx blob: the
+        same blittable `from_hex(text).tile_image(n)` returns (or
+        `tile_span_image(n, tw, th)` for a multi-tile icon), and None when the
+        sheet carries no art at all -- but WITHOUT materialising the sheet, which
+        `Workstation.slim_carts` would otherwise do once per cart at every boot.
+        Only the icon's own rows are decoded; every other line is read by one
+        `set` intersection, all `is_blank()` ever asked of it.
+
+        The `n` out of range -> tile 0 fallback is SPEC.md 3.4's: an icon naming
+        tiles this cart's sheet lacks is the host's choice.
+        """
+        if not text:
+            return None
+        tile = cls.TILE
+        w, h = cols * tile, rows * tile
+        if n < 0 or n >= cols * rows:
+            n, tw, th = 0, 1, 1
+        if tw < 1:
+            tw = 1
+        if th < 1:
+            th = 1
+        ox, oy = (n % cols) * tile, (n // cols) * tile
+        # Clamp the span to what fits to the right of / below the start tile,
+        # exactly as tile_span_image does.
+        tw = min(tw, (w - ox) // tile)
+        th = min(th, (h - oy) // tile)
+        pw, ph = tw * tile, th * tile
+        want = [None] * ph
+        ink = False
         y = 0
         for line in text.split("\n"):
             line = line.strip()
             if not line:
                 continue
-            if y >= sheet.h:
+            if y >= h:
                 break
-            for x in range(min(w, len(line))):
-                try:
-                    sheet.pix[y * w + x] = int(line[x], 16)
-                except ValueError:
-                    pass
+            if not ink and (set(line[:w]) & _INK):
+                ink = True
+            if oy <= y < oy + ph:
+                want[y - oy] = line[ox:ox + pw]
             y += 1
-        sheet.dirty = False
-        return sheet
+            # Both questions answered -- art found, icon rows in hand -- so the
+            # rest of the blob is never touched.
+            if ink and y >= oy + ph:
+                break
+        if not ink:
+            return None            # no art anywhere: the card draws its glyph
+        pix = []
+        for row in want:
+            if row:
+                for c in row:
+                    try:
+                        pix.append(int(c, 16))
+                    except ValueError:
+                        pix.append(0)
+                pad = pw - len(row)
+            else:
+                pad = pw           # a short blob leaves its missing rows blank
+            if pad > 0:
+                pix.extend([0] * pad)
+        return _SheetSprite(pw, ph, pix, transparent)
 
 
 class IconSheet(SpriteSheet):
@@ -251,25 +352,11 @@ class IconSheet(SpriteSheet):
 
     @classmethod
     def from_hex(cls, text, cols=8, rows=4):
-        # Same flat-grid parse as SpriteSheet (which is dimensioned off self.w/self.h,
-        # so it already handles 16px tiles); only the default geometry differs. The
-        # parse body is duplicated rather than delegating to SpriteSheet.from_hex so it
-        # stays a plain classmethod under MicroPython (no __func__ rebinding).
+        # Same flat-grid parse as SpriteSheet -- _fill_hex_grid is dimensioned off
+        # the sheet's own w/h, so 16px tiles need nothing of their own; only the
+        # default geometry differs.
         sheet = cls(cols, rows)
-        w = sheet.w
-        y = 0
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if y >= sheet.h:
-                break
-            for x in range(min(w, len(line))):
-                try:
-                    sheet.pix[y * w + x] = int(line[x], 16)
-                except ValueError:
-                    pass
-            y += 1
+        _fill_hex_grid(sheet.pix, sheet.w, sheet.h, text)
         sheet.dirty = False
         return sheet
 

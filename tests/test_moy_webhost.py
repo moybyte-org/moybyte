@@ -33,6 +33,16 @@ def _store(tmp_path):
     (root / "hop.moy" / "images" / "bg.moyimg").write_text("0,0,")
     (root / "hop.moy" / "thumbs").mkdir()
     (root / "hop.moy" / "thumbs" / "wp320x240.mct").write_text("CACHE")
+    # The durable undo history moy_journal writes after the first commit: the
+    # log, the per-file cursor, and one full-file SNAPSHOT per commit.
+    (root / "hop.moy" / "journal" / "s").mkdir(parents=True)
+    (root / "hop.moy" / "journal" / "journal.jsonl").write_text(
+        '{"seq": 1, "file": "main.py", "snap": "s/0001-main.py"}\n')
+    (root / "hop.moy" / "journal" / "cursor.json").write_text('{"bytes": 24}')
+    (root / "hop.moy" / "journal" / "s" / "0001-main.py").write_text(
+        "def _draw():\n    cls(7)\n")
+    (root / "hop.moy" / "journal.jsonl").write_text("stray flat log\n")
+    (root / "hop.moy" / "pmem.json").write_text("[41, 0, 0]")
     (root / "sky.moy").mkdir()
     (root / "sky.moy" / "main.lua").write_text("function _draw() end\n")
     (root / "loose.txt").write_text("not a cart")
@@ -58,6 +68,33 @@ def test_thumbs_do_not_cross_the_wire(tmp_path):
     own size anyway. It is also the largest thing in a cart folder."""
     b = wh.pack_store(str(_store(tmp_path)))
     assert not any("thumbs" in k for k in b), sorted(b)
+
+
+def test_the_undo_journal_does_not_cross_the_wire(tmp_path):
+    """The bulk of a real store, and inert at the far end: this endpoint is
+    READ-ONLY, so the browser's copy never syncs back and undo there runs off
+    op_history's in-RAM ops rather than a shipped log.
+
+    Both walkers, because they are independent bodies: a skip added to one only
+    is exactly the drift `test_the_streamed_json_equals_the_packed_dict` pins.
+    """
+    root = _store(tmp_path)
+    packed = wh.pack_store(str(root))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
+        assert not [k for k in bundle if "journal" in k], (who, sorted(bundle))
+        assert "hop.moy/main.py" in bundle, who      # the cart itself survives
+
+
+def test_a_kids_saves_still_cross_the_wire(tmp_path):
+    """The contrast that makes the journal cut a judgement and not a diet:
+    pmem.json is their score, their pet, where they got to, so a cart played in
+    the browser comes up holding their things."""
+    root = _store(tmp_path)
+    packed = wh.pack_store(str(root))
+    streamed = json.loads("".join(wh.stream_store_json(str(root))))
+    for bundle, who in ((packed, "pack_store"), (streamed, "stream_store_json")):
+        assert bundle.get("hop.moy/pmem.json") == "[41, 0, 0]", who
 
 
 def test_a_loose_file_beside_the_carts_is_not_a_cart(tmp_path):
@@ -370,16 +407,70 @@ def test_a_blob_goes_out_through_the_transports_dispatch(tmp_path, baked):
 
 def test_the_blob_send_pays_no_storage_gate(tmp_path, baked):
     """The T-Deck's SD gate exists because its card shares the panel's SPI host.
-    The baked bundle is in flash and races nothing, so a gate here would put an
-    unrelated mount in the path of every asset request."""
+    The baked bundle is in flash and races nothing, so the SEND takes no gate --
+    a mount in the path of every asset byte would be an unrelated cost.
+
+    The PROBE that chose the blob is a different question with the other answer:
+    storage wins over the image, so `_asset` stats `/sd/web/...` whether or not a
+    copy is there, and that stat has to be inside the gate (the test below) --
+    so the two are measured separately.
+    """
     baked({"worker.js.gz": b"\x1f\x8bx"})
     entered = []
     host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "nowhere"),
                       with_sd=lambda fn: (entered.append(1), fn())[1])
+    resp = host._asset("worker.js")        # the probe: gated, on purpose
+    del entered[:]                         # measure only the send
     conn = _Conn()
-    host._send_blob(conn, host._asset("worker.js"))
+    host._send_blob(conn, resp)
     assert not entered, "the baked bundle went through the SD gate"
     assert bytes(conn.sent).endswith(b"\x1f\x8bx")
+
+
+@pytest.mark.parametrize("pushed", [True, False])
+def test_the_asset_probe_never_stats_storage_outside_the_gate(tmp_path,
+                                                              monkeypatch,
+                                                              pushed):
+    """An asset request may not touch the card before it has taken the gate.
+
+    `handle_http` runs at the FRAME TAIL, whose panel fence is conditional
+    (`if not loop.drew: comp.sync()`), so on a frame that PAINTED there is a
+    flush still shipping. On the T-Deck `web_dir` is on the card sharing that
+    SPI host, and an sdspi transaction concurrent with band queueing from the
+    other core is the documented Cache/MMU panic; the gate is what drains the
+    flush and brackets the session.
+
+    A MISS costs the same directory read as a hit, so a board serving the BAKED
+    bundle is not exempt: both cases run here.
+    """
+    web = tmp_path / "web"
+    web.mkdir()
+    if pushed:
+        (web / "index.html").write_text("<!doctype html>")
+    depth = [0]
+    entries = []
+    probes = []
+
+    def gate(fn):
+        entries.append(1)
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    real_size = wh._file_size
+    monkeypatch.setattr(
+        wh, "_file_size",
+        lambda path: (probes.append(depth[0]), real_size(path))[1])
+    host = wh.WebHost(str(tmp_path / "carts"), str(web), with_sd=gate)
+    host.handle_http("GET", "/", b"")
+
+    assert probes, "the probe stopped touching storage -- retarget this test"
+    assert 0 not in probes, "an asset probe stat ran outside the storage gate"
+    # ONE session for both probes: every entry drains the panel, so a gate per
+    # file would pay the fence twice per request.
+    assert len(entries) == 1, entries
 
 
 def test_a_write_is_refused_in_a_way_a_newer_page_can_read(tmp_path):

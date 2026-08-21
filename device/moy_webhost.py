@@ -84,8 +84,16 @@ ASSETS = {
     "micropython.wasm": "application/wasm",
 }
 
-# Files inside a cart folder that must never leave the board with it.
-SKIP_DIRS = ("thumbs", "__pycache__")
+# Never shipped inside a cart folder. `journal/` is the durable undo history and
+# the bulk of this endpoint's payload; the browser copy is read-only (any method
+# but GET is a 405) so a shipped log can never be undone back onto the board, and
+# every reader already tolerates its absence -- a seed cart has none until its
+# first commit. `pmem.json` stays: it is the kid's saves.
+SKIP_DIRS = ("thumbs", "__pycache__", "journal")
+
+# Belt to the above's braces, for a flat log beside the cart. `moy_carts._dup_skip`
+# carries the same pair for the same reason.
+SKIP_FILES = ("journal.jsonl",)
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None):
@@ -109,7 +117,7 @@ def pack_store(carts_root, listdir=None, read=None, isdir=None):
 
 def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
     for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
-        if name in SKIP_DIRS:
+        if name in SKIP_DIRS or name in SKIP_FILES:
             continue
         full = path + "/" + name
         rel = prefix + "/" + name
@@ -145,8 +153,11 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
 
 
 def _stream_dir(path, prefix, _listdir, _isdir, _read, first):
+    # Keep these exclusions identical to `_pack_dir`'s: the two walkers are
+    # independent bodies whose output must agree, so a skip added to one only
+    # makes packed and streamed diverge.
     for name, isdir_ in sorted(_entries(path, _listdir, _isdir)):
-        if name in SKIP_DIRS:
+        if name in SKIP_DIRS or name in SKIP_FILES:
             continue
         full = path + "/" + name
         rel = prefix + "/" + name
@@ -234,6 +245,22 @@ def _file_size(path):
         return os.stat(path)[6]
     except OSError:
         return None
+
+
+def _pushed_copy(full):
+    """(path, size, encoding) for a PUSHED copy of `full`, or None.
+
+    Both probes in ONE call so `_asset` pays ONE storage session for them.
+    The pre-gzipped copy wins; raw is the fallback (a plain static host sets no
+    Content-Encoding, so `dist/` keeps both).
+    """
+    size = _file_size(full + ".gz")
+    if size is not None:
+        return (full + ".gz", size, "gzip")
+    size = _file_size(full)
+    if size is not None:
+        return (full, size, None)
+    return None
 
 
 def _baked(name):
@@ -389,14 +416,20 @@ class WebHost(WebServer):
         # pushed to still serves a console, and it is the one its firmware was
         # built from. (Which also means a HALF-pushed bundle is a mixed one --
         # push all four or none; p4_push_web does.)
+        #
+        # The PROBE must go through `_with_sd` too, not just the body: on the
+        # T-Deck `web_dir` is on the card sharing the panel's SPI host, and this
+        # runs at the frame tail where a painted frame has just kicked a flush
+        # the core-0 feeder is still shipping. A bare `os.stat` there is an
+        # sdspi transaction concurrent with band queueing from the other core --
+        # the Cache/MMU panic modmoy_lcd.c's SD SESSION GUARD exists for. A miss
+        # costs the same directory read as a hit, so a board serving the BAKED
+        # bundle is not exempt either.
         full = self.web_dir + "/" + name
-        size = _file_size(full + ".gz")
-        if size is not None:
-            return FileResponse(full + ".gz", size, ASSETS[name],
-                                encoding="gzip")
-        size = _file_size(full)
-        if size is not None:
-            return FileResponse(full, size, ASSETS[name])
+        pushed = self._with_sd(lambda: _pushed_copy(full))
+        if pushed is not None:
+            path, size, encoding = pushed
+            return FileResponse(path, size, ASSETS[name], encoding=encoding)
         blob = _baked(name + ".gz")
         if blob is not None:
             return BlobResponse(blob, ASSETS[name], encoding="gzip")

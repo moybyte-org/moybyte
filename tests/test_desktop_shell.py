@@ -1122,3 +1122,85 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     ws.input._pressed = {"right"}
     ws.handle_input()
     assert ws._dirty, "launcher nav key must repaint"
+
+
+def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path):
+    """Nothing the shell does while opening, running and quitting a cart may
+    reach the store except through `ws._with_sd`.
+
+    On the T-Deck the gate drains the panel and brackets the session because
+    that board's SD card shares the panel's SPI host: an sdspi transaction
+    overlapping band queueing from the core-0 feeder is the documented
+    Cache/MMU panic, and the frame tail's fence is conditional (`if not
+    loop.drew`), so a frame that painted leaves a flush in flight. Swept rather
+    than spot-checked because a per-call-site test cannot find the next
+    ungated read.
+    """
+    import builtins
+    import os
+    import traceback
+
+    from runtime import host_app, moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    ws.carts_root = carts_dir
+    ws.carts_store = moy_carts
+    ws.can_manage = True
+
+    depth = [0]
+    escapes = []
+
+    def gate(fn):
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    ws._with_sd = gate
+
+    def note(kind, path):
+        p = str(path)
+        if p.startswith(carts_dir) and depth[0] == 0:
+            frames = [ln for ln in traceback.format_stack(limit=8)[:-1]
+                      if "/runtime/" in ln or "/device/" in ln]
+            escapes.append("%s %s <- %s" % (
+                kind, p[len(carts_dir):],
+                frames[-3].strip() if len(frames) >= 3 else "?"))
+
+    real = {"open": builtins.open, "stat": os.stat, "listdir": os.listdir,
+            "remove": os.remove, "rename": os.rename, "mkdir": os.mkdir}
+    builtins.open = lambda p, *a, **k: (note("open", p),
+                                        real["open"](p, *a, **k))[1]
+    os.stat = lambda p, *a, **k: (note("stat", p), real["stat"](p, *a, **k))[1]
+    os.listdir = lambda p=".", *a, **k: (note("listdir", p),
+                                         real["listdir"](p, *a, **k))[1]
+    os.remove = lambda p, *a, **k: (note("remove", p),
+                                    real["remove"](p, *a, **k))[1]
+    os.rename = lambda a, b, *r, **k: (note("rename", a),
+                                       real["rename"](a, b, *r, **k))[1]
+    os.mkdir = lambda p, *a, **k: (note("mkdir", p),
+                                   real["mkdir"](p, *a, **k))[1]
+    try:
+        _open_game(ws)
+        for _ in range(3):
+            drv.frame(1 / 30)
+        ws._exit_to_caller()                      # the hold-BACKSPACE exit
+        for _ in range(8):
+            drv.frame(1 / 30)                     # ...and the repaint burst
+    finally:
+        builtins.open = real["open"]
+        os.stat = real["stat"]
+        os.listdir = real["listdir"]
+        os.remove = real["remove"]
+        os.rename = real["rename"]
+        os.mkdir = real["mkdir"]
+
+    assert not escapes, "the store was touched outside ws._with_sd:\n  " + \
+        "\n  ".join(sorted(set(escapes)))
+    # ...and the gate is never taken re-entrantly, because moy_lcd's sd_guard
+    # is a BOOL: an inner session's exit would clear the bracket while the
+    # outer one is still on the bus.
+    assert depth[0] == 0

@@ -2191,14 +2191,15 @@ class Workstation:
         cache = self._icon_cache
         if key in cache:
             return cache[key]
-        sheet = self._build_sheet(cart)             # shared sprite-load + fallback
-        img = None
-        if not sheet.is_blank():
-            n, tw, th = cart.get("icon") or (0, 1, 1)
-            img = (sheet.tile_image(n, -1) if tw == 1 and th == 1
-                   else sheet.tile_span_image(n, tw, th, -1))
-            if img is None:            # icon names tiles past this cart's sheet:
-                img = sheet.tile_image(0, -1)   # ignore it, host's choice (SPEC 3.4)
+        n, tw, th = cart.get("icon") or (0, 1, 1)
+        # ONE TILE, not the whole sheet: icon_from_hex carries the blank-sheet
+        # test and the SPEC 3.4 out-of-range fallback, so the picture is
+        # unchanged -- the shell goldens pin it.
+        try:
+            img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
+                                            cols=16, rows=32)
+        except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
+            img = None
         cache[key] = img
         return img
 
@@ -2368,7 +2369,12 @@ class Workstation:
         cover_name = getattr(store, "COVER_IMAGE", "cover")
         sig_fn = getattr(store, "cover_sig", None)
         self.note_cost("cover.blob.read")      # 58ms hit / 22ms miss on P4 flash
-        blob = loader(path, cover_name) if loader is not None else None
+        # Through the storage gate like every other store read here: this fires
+        # from the launcher's draw and the idle prefetch, i.e. around a repaint,
+        # where the T-Deck has a flush in flight over the SPI host its card
+        # shares -- an sdspi transaction there is the documented hang.
+        blob = self._with_sd(
+            lambda: loader(path, cover_name)) if loader is not None else None
         runs = None
         sig = None
         if blob:
@@ -3634,8 +3640,8 @@ class Workstation:
 
     # The four builders moved VERBATIM onto Project (Stage 1, project.py); these stay
     # as one-line forwards so ws._build_sheet(cart)/... keep working (the wallpaper
-    # runner + _icon_sheet_for call ws._build_sheet(cart), _start calls _build_audio,
-    # and open() calls all four -- all through self.project now).
+    # runner calls ws._build_sheet(cart), _start calls _build_audio, and open()
+    # calls all four -- all through self.project now).
     def _build_sheet(self, cart=None):
         return self.project._build_sheet(cart)
 
