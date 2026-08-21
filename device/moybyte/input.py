@@ -117,34 +117,294 @@ def decode_raw(data):
     return (tuple(buttons), key)
 
 
-class InputState:
-    def __init__(self):
+# -- multi-source input: every producer owns a source, the state is the MERGE --
+#
+# THE BUG THIS EXISTS FOR. InputState used to be one flat held-set plus one
+# `last_key`, and every driver wrote into it ASSERTING FULL AUTHORITY:
+# release_all() and then "here is everything that is down". That is correct
+# with exactly one writer and silently wrong with two. The T-Deck has two --
+# the physical C3 keyboard (TDeckKeyboard below) and an optional BLE HID
+# keyboard (ble_keyboard.py) whose reports land from a radio IRQ between polls
+# -- so the keyboard poll ERASED every BLE keypress within a frame: held
+# buttons died immediately, and `last_key` survived only as a race. The BLE
+# keyboard did nothing on this board, and this was why.
+#
+# THE MODEL. Each producer takes a named InputSource and writes only there:
+#
+#     src = inp.source("kbd")     # "ble", "touch", "net0", ...
+#     src.release_all()           # I hold nothing -- NOT "everybody let go"
+#     src.set_button("up", True)
+#     src.last_key = 0x1b
+#
+# The shared `_held` is DERIVED: the union of the sources, computed in
+# begin_frame() (which is already the one place per-frame edges are worked
+# out) and nowhere else -- nothing unions per read. The source mutators also
+# mirror their change into the union so a mid-frame `held()` reads what it
+# always did; begin_frame's merge is the authority that heals any drift.
+#
+# The physical keyboard is a source LIKE ANY OTHER. It is not privileged, and
+# that is the whole point: the owner's requirement is that any connected
+# controller can drive the console.
+#
+# PLAYERS. A source carries `player` (default 0), so the same merge answers
+# both reads the console needs: held(name) with no player is the union -- the
+# OS/shell view, which must not care which source or player -- and
+# held(name, player=n) is only that player's sources, which IS btn(name, n)
+# from #65. player_count() falls out as the number of distinct assigned slots.
+# (The method is NOT called players(): `inp.players` is already the #65
+# PlayerRouter attribute, and shadowing it with a method would make
+# console.wire_workstation_core's `is None` probe never attach the router.)
+
+
+def source_of(state, name):
+    """The named InputSource a driver should write, or `state` itself when it
+    is a pre-source fake (host tests, benches) -- the old flat behaviour."""
+    fn = getattr(state, "source", None)
+    return state if fn is None else fn(name)
+
+
+class InputSource:
+    """One producer's half of the input: its own held set and its own key.
+
+    `release_all` here means "I hold nothing", which is NOT the shared
+    object's "everybody let go" -- the two meanings were conflated in one
+    method and are separated on purpose. A driver clears ITS source; a modal
+    that wants every button dropped calls the shared InputState.release_all().
+    """
+
+    def __init__(self, state, name, player=0):
+        self.state = state
+        self.name = name
+        self._player = player
         self._held = set()
-        self._last = set()
-        self._pressed = set()
-        self._released = set()
-        self.last_key = 0
+        self._key = 0
 
-    def begin_frame(self):
-        self._pressed = self._held - self._last
-        self._released = self._last - self._held
-        self._last = set(self._held)
+    @property
+    def player(self):
+        return self._player
 
+    @player.setter
+    def player(self, value):
+        # A property so the state can re-scan WHO is on which slot exactly
+        # when that changes, instead of re-deriving it from every source on
+        # every frame. Assigning a player is a configuration event (a keyboard
+        # is paired, a pad is plugged in); the merge is a hot path.
+        self._player = value
+        self.state._rescan_players()
+
+    # -- what a producer writes ------------------------------------------
     def release_all(self):
-        self._held.clear()
+        """*I* hold nothing (my buttons, nobody else's).
+
+        Maintains the union INCREMENTALLY rather than re-merging: a driver
+        calls this every poll, and a full re-merge here made the frame pay for
+        two (44us each on the T-Deck's S3, measured on glass 2026-08-21).
+        begin_frame's merge stays the authority."""
+        h = self._held
+        if not h:
+            return
+        st = self.state
+        if st._only_holder(self):
+            st._held.clear()        # nobody else holds anything: the union IS mine
+            h.clear()
+        else:
+            self._release_shared(h, st._drop)
+
+    def _release_shared(self, h, drop):
+        """The rare half of release_all: another source is holding buttons too,
+        so each of mine leaves the union only if nobody else has it."""
+        while h:
+            drop(h.pop())
 
     def set_button(self, name, held):
         if name not in BUTTONS:
             raise ValueError("unknown button: " + name)
         if held:
             self._held.add(name)
+            self.state._held.add(name)          # mirror: mid-frame reads see it
         else:
             self._held.discard(name)
+            self.state._drop(name)              # ...unless another source holds it
+
+    # The host tier's spelling of the same verb (runtime/input.py:set_held), so
+    # a driver shared by both tiers can write a source without knowing which
+    # InputState it landed on.
+    set_held = set_button
+
+    @property
+    def last_key(self):
+        return self._key
+
+    @last_key.setter
+    def last_key(self, value):
+        """The merge rule, and the line the live bug was on: a source that did
+        not type MUST NOT zero another source's key.
+
+        Ownership moves on a NEW nonzero value, so the most recent keypress
+        wins and a source merely re-reporting a key it already holds does not
+        steal the slot from a fresher press. The owner re-asserts on every
+        write (so a stray direct write to `inp.last_key` heals next frame),
+        and only the OWNER going quiet hands the slot to whoever else is still
+        typing."""
+        value = value or 0
+        old = self._key
+        self._key = value
+        st = self.state
+        if value:
+            if value != old or st._key_src is None:
+                st._key_src = self
+                st.last_key = value
+            elif st._key_src is self:
+                st.last_key = value
+        elif st._key_src is self:
+            k = 0
+            owner = None
+            for s in st._srcs:
+                if s._key:
+                    k = s._key
+                    owner = s
+                    break
+            st._key_src = owner
+            st.last_key = k
+
+
+class InputState:
+    def __init__(self):
+        self._held = set()          # DERIVED: the union of the sources
+        self._last = set()
+        self._pressed = set()
+        self._released = set()
+        self.last_key = 0           # DERIVED, but a plain attribute: it is read
+                                    # several times a frame and a property get
+                                    # is ~10x a plain one on MicroPython
+        self._key_src = None        # which source owns last_key right now
+        self._srcs = []
+        self._by_name = {}
+        self._solo = 0              # the one player id, when there is only one
+        self._multi = False         # True once two sources disagree about player
+        self._p_held = None         # per-player views, built only when _multi
+        self._p_pressed = None
+        self._p_last = None
+        self._default = self.source("local")
+
+    # -- sources -----------------------------------------------------------
+    def source(self, name, player=0):
+        """The named source a producer writes through. Idempotent: the same
+        name always returns the same object, so a driver may re-resolve it."""
+        s = self._by_name.get(name)
+        if s is None:
+            s = InputSource(self, name, player)
+            self._by_name[name] = s
+            self._srcs.append(s)
+            self._rescan_players()
+        return s
+
+    def _merge(self):
+        """Union the sources into _held (and, when more than one player is
+        assigned, into the per-player buckets). The ONE place the union is
+        computed -- called from begin_frame, and from a source's release_all
+        so a mid-frame read is never stale. In place: no per-frame set
+        allocation on top of the edge math below."""
+        h = self._held
+        h.clear()
+        for s in self._srcs:
+            sh = s._held
+            if sh:
+                h.update(sh)
+        if self._multi:
+            self._merge_players()          # split out: see _player_edges
+
+    def _rescan_players(self):
+        """Which player slots the sources sit on. NOT part of the per-frame
+        merge: it changes when a source is created or reassigned, which is a
+        configuration event, and reading `player` off every source every frame
+        was pure tax on a path that runs at 60Hz."""
+        solo = None
+        multi = False
+        for s in self._srcs:
+            p = s._player
+            if solo is None:
+                solo = p
+            elif p != solo:
+                multi = True
+        self._solo = 0 if solo is None else solo
+        self._multi = multi
+
+    def _only_holder(self, src):
+        """True when no source OTHER than `src` is holding anything -- the
+        universal case, and what lets a driver's release_all drop the union
+        wholesale instead of testing every button against every source."""
+        for s in self._srcs:
+            if s is not src and s._held:
+                return False
+        return True
+
+    def _merge_players(self):
+        """The per-player buckets, once two sources disagree about `player`."""
+        ph = {}
+        for s in self._srcs:
+            b = ph.get(s._player)
+            if b is None:
+                b = set()
+                ph[s._player] = b
+            if s._held:
+                b.update(s._held)
+        self._p_held = ph
+
+    def _drop(self, name):
+        """A source let go of `name`: leave it in the union if anyone else
+        still holds it."""
+        for s in self._srcs:
+            if name in s._held:
+                return
+        self._held.discard(name)
+
+    def begin_frame(self):
+        self._merge()
+        held = self._held
+        self._pressed = held - self._last
+        self._released = self._last - held
+        self._last = set(held)
+        if self._multi:
+            self._player_edges()
+
+    # SPLIT OUT OF begin_frame ON PURPOSE, and measured: MicroPython sizes a
+    # call frame from the whole function, and one that needs enough locals
+    # spills it to the HEAP (the #63 call-frame tax). Inlining these seven
+    # names cost begin_frame 0.7us -> 11.6us PER FRAME on a path where the
+    # branch is not even taken -- a bigger regression than everything this
+    # model is for. Keep begin_frame small.
+    def _player_edges(self):
+        """Per-player press edges, for the frame the merge just built."""
+        prev = self._p_last or {}
+        pp = {}
+        pl = {}
+        for p, b in self._p_held.items():
+            old = prev.get(p)
+            pp[p] = (b - old) if old else set(b)
+            pl[p] = set(b)
+        self._p_pressed = pp
+        self._p_last = pl
+
+    def release_all(self):
+        """EVERYBODY let go -- the modal's meaning (cards_layer,
+        block_editor_ui): entering a panel drops every button from every
+        source. A driver saying "I hold nothing" wants source.release_all()."""
+        for s in self._srcs:
+            s._held.clear()
+        self._held.clear()
+        if self._p_held:
+            for b in self._p_held.values():
+                b.clear()
+
+    def set_button(self, name, held):
+        """Legacy single-writer shim: writes the implicit default source."""
+        self._default.set_button(name, held)
 
     _mask_order = None      # the tuple _mask_bit was built from (identity key)
     _mask_bit = None
 
-    def button_masks(self, order):
+    def button_masks(self, order, player=None):
         """(held, pressed) as bitmasks over `order`, in ONE call -- moycore's
         per-frame snapshot needs exactly these two integers and was building
         them with sixteen held/pressed calls (~6.35us each here).
@@ -160,26 +420,80 @@ class InputState:
         never looks at. Nothing failed: no crash, no test, no frame hash.
 
         So the ORDER belongs to the protocol, not to whoever is holding the
-        buttons. Callers pass lua_ext.MOY_BUTTONS. See the note there."""
+        buttons. Callers pass lua_ext.MOY_BUTTONS. See the note there.
+
+        `player` is an argument for exactly the same reason: which slot a
+        caller wants is the CALLER's business, and a mask silently packed for
+        the wrong player is the same shape of failure as a mask packed in the
+        wrong order -- no crash, no test, no frame hash. None means the union
+        (every source, every player), which is what moycore's snapshot asks
+        for and what it has always got: the two integers it reads are
+        unchanged."""
         if self._mask_order is not order:
             self._mask_order = order
             self._mask_bit = {n: 1 << i for i, n in enumerate(order)}
+        if player is None or not self._multi:
+            if player is not None and player != self._solo:
+                return 0, 0
+            held = self._held
+            pressed = self._pressed
+        else:
+            held = self._p_held.get(player)
+            pressed = self._p_pressed.get(player) if self._p_pressed else None
+            if held is None:
+                return 0, 0
+            if pressed is None:
+                pressed = ()
         h = p = 0
         bit = self._mask_bit
-        for n in self._held:
+        for n in held:
             h |= bit.get(n, 0)
-        for n in self._pressed:
+        for n in pressed:
             p |= bit.get(n, 0)
         return h, p
 
-    def held(self, name):
-        return name in self._held
+    # -- the two read views ------------------------------------------------
+    #
+    # player=None is the OS/shell view: the union of EVERY source, so any
+    # connected controller drives the console and no shell code has to know
+    # which one. player=n is the cart view (btn(name, n)).
+    def held(self, name, player=None):
+        if player is None or not self._multi:
+            if player is not None and player != self._solo:
+                return False
+            return name in self._held
+        b = self._p_held.get(player)
+        return b is not None and name in b
 
-    def pressed(self, name):
-        return name in self._pressed
+    def pressed(self, name, player=None):
+        if player is None or not self._multi:
+            if player is not None and player != self._solo:
+                return False
+            return name in self._pressed
+        b = self._p_pressed.get(player) if self._p_pressed else None
+        return b is not None and name in b
 
     def released(self, name):
         return name in self._released
+
+    def source_players(self):
+        """The distinct player slots the SOURCES are assigned to (always at
+        least (0,)). PlayerRouter.count() unions this with any transport slot,
+        so `players()` counts a BLE keyboard given `src.player = 1` without a
+        transport ever registering anything."""
+        if not self._multi:
+            return (self._solo,)
+        seen = []
+        for s in self._srcs:
+            if s._player not in seen:
+                seen.append(s._player)
+        return tuple(seen)
+
+    def player_count(self):
+        """How many distinct player slots the sources are assigned to (>=1)."""
+        if not self._multi:
+            return 1
+        return len(self.source_players())
 
 
 class TDeckKeyboard:
@@ -226,6 +540,14 @@ class TDeckKeyboard:
     # poller applies it between reads (apply_pending_mode).
     _poller_owned = False
     _want_game = None
+    # This keyboard is ONE SOURCE among however many the board has, and it is
+    # not a privileged one: it writes "kbd" and merges with the rest. It used
+    # to write the shared InputState directly, asserting full authority every
+    # poll -- which erased every BLE keypress within a frame. Bound lazily off
+    # self.input (a bench/test builds this class with __new__, and a host fake
+    # may still be the flat pre-source shape, in which case the fallback is
+    # the old behaviour verbatim).
+    src = None
 
     def __init__(self, input_state):
         self.input = input_state
@@ -285,20 +607,27 @@ class TDeckKeyboard:
         the shared InputState. Cheap (no I2C), always on the main thread, so the
         console's begin_frame edge math never races the poller's bus reads."""
         buttons, key = staged
-        self.input.last_key = key
+        src = self.src
+        if src is None:
+            src = self.src = source_of(self.input, "kbd")
+        src.last_key = key
         # Text mode (a cart's textmode(True) / the code editor): report the key but do
         # NOT also fire its game-button alias (w/a/s/d/z/x -> up/left/down/right/a/b),
         # or a typed password/name would also trigger d-pad + A/B shortcut actions
         # (#38/#42). Clear any latched buttons and stop here -- key()/keyp() still work.
         # (Raw mode is never active on a text screen; the guard keeps parity with the
         # old inline poll(), which only text-gated the ASCII path.)
+        #
+        # Both release_all() calls below are the PER-SOURCE meaning -- "I hold
+        # nothing" -- and used to be the shared object's "everybody let go",
+        # which is what wiped the other keyboard.
         if not self.raw_mode and getattr(self.input, "text_mode", False):
             self._held_buttons = ()
-            self.input.release_all()
+            src.release_all()
             return
-        self.input.release_all()
+        src.release_all()
         for button in buttons:
-            self.input.set_button(button, True)
+            src.set_button(button, True)
 
     def set_game_mode(self, on):
         """Switch the keyboard between raw-matrix (on=True: true held-state for a

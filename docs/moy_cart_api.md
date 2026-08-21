@@ -426,8 +426,8 @@ button at all — even Backspace, Enter and space arrive as plain characters to 
 
 | call | returns |
 |---|---|
-| `btn(name, player=0)` | `True` while the button is **held**. `player=0` is this console's own controls (the default — every existing cart is unchanged). `player=1, 2, …` read **extra controllers** (see Multiplayer below) |
-| `btnp(name, player=0)` | `True` on the frame it was **pressed** (the released→held edge). Takes the same optional `player` |
+| `btn(name, player=None)` | `True` while the button is **held**. With **no** `player` it means *any* controller — whatever is plugged in or paired drives your cart, which is what every single-player cart wants. `player=0` is this console's own controls, `player=1, 2, …` are **extra controllers** (see Multiplayer below) |
+| `btnp(name, player=None)` | `True` on the frame it was **pressed** (the released→held edge). Takes the same optional `player` |
 | `players()` | how many players are connected right now (**1** = just this console). Offer a 2-player mode when it's `>= 2` |
 | `key(code=None)` | with a code (`key(ord("a"))`): is that ASCII key down this frame. No arg: the last key code (`0` if none). *One key at a time* (T-Deck reports 1 byte/frame) |
 | `keyp(code=None)` | same, but only the press edge this frame |
@@ -461,6 +461,12 @@ zero regression) — only declare it once a cart's input is settled.
 > **Needs a second controller or console.** With only this console's own controls,
 > `players()` is `1` and `btn(name, p)` for `p > 0` is always `False`, so a cart that
 > reads `player=0` is a normal single-player cart — nothing changes.
+
+> **Where the players come from.** Every input producer — the built-in keyboard, a
+> paired Bluetooth keyboard, the touch screen, a radio peer — owns its own *source*,
+> and a source carries a player. Give one `player = 1` and it IS player 2: no
+> transport to register, no netcode. Until somebody does, every source is player 0
+> and `btn(name)`, `btn(name, 0)` and `players()` all answer exactly as before.
 
 There is **one** multiplayer API and the way the extra players arrive (a second USB
 gamepad, a phone over the web view, another Moybyte over the radio) is just a backend —

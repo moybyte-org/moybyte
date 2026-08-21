@@ -360,14 +360,19 @@ def run_desktop(fps_cap=60):
     # steady per-frame cost that never crosses HITCH_MS is invisible without it.
     _acc = [0] * 12
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
+    _ble = getattr(ws, "ble_keyboard", None)   # optional second keyboard (#26)
     boot.start_frames(ws)
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
-        fallback), the keyboard, the trackball (caret in the code editor,
-        cursor everywhere else), the GT911. Returns (click, active) for the
-        shared loop; the dev channel and idle blank run THERE, in the one
-        order that lets the waking touch be swallowed."""
+        fallback), the keyboard, the BLE keyboard, the trackball (caret in the
+        code editor, cursor everywhere else), the GT911. Returns (click,
+        active) for the shared loop; the dev channel and idle blank run THERE,
+        in the one order that lets the waking touch be swallowed.
+
+        The two keyboards each write their OWN InputSource and inp.begin_frame()
+        merges them, so the order they poll in carries no authority -- which is
+        the whole point of the multi-source model (device/moybyte/input.py)."""
         nonlocal poller
         # If the poller thread ever dies, detach and fall back to synchronous
         # polling -- input never goes dark.
@@ -383,6 +388,19 @@ def run_desktop(fps_cap=60):
                 keyboard.poll()
         except Exception:  # noqa: BLE001
             pass
+        # The BLE keyboard is this board's SECOND input source (#26). Its
+        # reports arrive on a radio IRQ; poll() is what turns them into held
+        # buttons + a key, and it also advances scan/reconnect and flushes a
+        # new bond outside the IRQ -- exactly the P4/Guition arrangement, where
+        # it IS the only keyboard. It was never called here, so even before the
+        # multi-source merge the driver could not have worked on this board:
+        # the physical keyboard's poll asserted full authority over the shared
+        # InputState, and nothing was writing the other half anyway.
+        if _ble is not None:
+            try:
+                _ble.poll()
+            except Exception as exc:  # noqa: BLE001 -- BLE must fail keyboard-only
+                print("Moybyte BLE keyboard poll failed:", exc)
         _t["kbd"] = _ticks_diff(_ticks_ms(), now)
         _t0 = _ticks_ms()
         inp.begin_frame()

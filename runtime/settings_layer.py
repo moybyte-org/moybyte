@@ -172,7 +172,27 @@ class SettingsLayer:
         return None
 
     def open_bluetooth(self):
-        """Open the Bluetooth keyboard picker without disrupting a live link."""
+        """Open the Bluetooth keyboard picker, STARTING the service if it is idle.
+
+        The start is not optional and it is easy to miss: the touch-only boards
+        construct their service with `auto_start=False` and then call `start()`
+        themselves at boot, because a paired keyboard is their only way out of a
+        cart. A board that already HAS a keyboard (the T-Deck) has no reason to
+        run a radio nobody asked for, so it constructs the service and starts
+        nothing -- which left this panel opening onto a service that was never
+        running, listing nothing and doing nothing (found on glass 2026-08-21).
+
+        Doing it here rather than at boot keeps that trade: the radio comes up
+        when a kid actually opens the picker. Safe on every tier because
+        `start()` early-returns on an already-available service and only
+        re-arms the scan when one is enabled-but-idle, so the boards that
+        started theirs at boot see a no-op and a live link is not disturbed."""
+        svc = self._bt_service()
+        if svc is not None:
+            try:
+                svc.start()
+            except Exception:  # noqa: BLE001 -- _bt_refresh reports the state
+                pass
         self.bt_view = True
         self.bt_msg = ""
         self._bt_state = None

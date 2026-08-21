@@ -485,19 +485,29 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     _held = input.held        # bound once: btn is the hottest verb a cart calls,
     _pressed = input.pressed  # and LOAD_ATTR per call is pure dispatch tax (#66)
 
-    def btn(name, player=0):
+    # NO player argument means ANY controller (the union of every source) --
+    # a one-player cart must respond to whatever is plugged in, which is the
+    # owner's requirement for the whole multi-source model. An EXPLICIT player
+    # addresses that slot, 0 included; with nothing assigned the two answers
+    # are the same set, so this only starts to differ once a source is given a
+    # player of its own.
+    def btn(name, player=None):
         if name not in CART_BUTTONS:
             return False
-        if player:
-            return _prouter.held(name, player) if _prouter is not None else False
-        return _held(name)
+        if player is None:
+            return _held(name)
+        if _prouter is None:
+            return _held(name) if not player else False
+        return _prouter.held(name, player)
 
-    def btnp(name, player=0):
+    def btnp(name, player=None):
         if name not in CART_BUTTONS:
             return False
-        if player:
-            return _prouter.pressed(name, player) if _prouter is not None else False
-        return _pressed(name)
+        if player is None:
+            return _pressed(name)
+        if _prouter is None:
+            return _pressed(name) if not player else False
+        return _prouter.pressed(name, player)
 
     def players():
         # The connected player count (>=1) so a cart can offer a 2P/co-op mode.

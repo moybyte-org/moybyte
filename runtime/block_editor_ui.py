@@ -1094,6 +1094,8 @@ class BlockEditorUI:
         carry the still-latched A/Enter/tap straight into commit/cancel (#29). Shared
         by every blk_kbd prompt (variable name, number, text)."""
         self.ws._set_text_mode(True)            # ASCII keyboard for typing
+        # EVERYBODY let go: the shared object's meaning (every source), not a
+        # driver's per-source "I hold nothing" -- see runtime/input.py.
         self.ws.input.release_all()             # drop held buttons (host + device)
         try:
             self.ws.input._pressed = set()

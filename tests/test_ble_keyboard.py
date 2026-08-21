@@ -30,43 +30,23 @@ def _load_module():
 blekbd = _load_module()
 
 
-class InputState:
-    BUTTONS = {
-        "up", "down", "left", "right", "a", "b", "run", "stop", "home",
-    }
+# THE REAL boards' InputState, not a fake of it. This driver is one SOURCE
+# among however many a board has (the T-Deck also has a physical keyboard), so
+# what these tests must pin is the MERGE -- and a hand-written stand-in would
+# be a second implementation of exactly the thing under test. It used to be
+# one, which is why nothing here noticed that the driver asserted full
+# authority over the shared state every poll.
+_INPUT_SOURCE = ROOT / "device" / "moybyte" / "input.py"
+_ispec = importlib.util.spec_from_file_location("moybyte_input_under_test",
+                                                _INPUT_SOURCE)
+_imod = importlib.util.module_from_spec(_ispec)
+_ispec.loader.exec_module(_imod)
 
+
+class InputState(_imod.InputState):
     def __init__(self):
-        self._held = set()
-        self._last = set()
-        self._pressed = set()
-        self._released = set()
-        self.last_key = 0
+        _imod.InputState.__init__(self)
         self.text_mode = False
-
-    def release_all(self):
-        self._held.clear()
-
-    def set_button(self, name, held):
-        if name not in self.BUTTONS:
-            raise ValueError(name)
-        if held:
-            self._held.add(name)
-        else:
-            self._held.discard(name)
-
-    def begin_frame(self):
-        self._pressed = self._held - self._last
-        self._released = self._last - self._held
-        self._last = set(self._held)
-
-    def held(self, name):
-        return name in self._held
-
-    def pressed(self, name):
-        return name in self._pressed
-
-    def released(self, name):
-        return name in self._released
 
 
 def test_advertisement_recognises_hid_service_and_name():

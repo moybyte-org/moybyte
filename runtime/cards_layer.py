@@ -786,7 +786,9 @@ class CardsLayer:
                      "author": str(cart.get("author") or "")[:24],
                      "field": 0, "msg": None, "armed": False}
         ws._set_text_mode(True)             # clean ASCII typing (device keyboard)
-        ws.input.release_all()
+        ws.input.release_all()               # EVERYBODY let go -- the shared
+                                             # meaning, not a source's "I hold
+                                             # nothing" (runtime/input.py)
         try:
             ws.input._pressed = set()
             ws.input._released = set()
