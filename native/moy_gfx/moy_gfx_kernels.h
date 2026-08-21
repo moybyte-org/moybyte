@@ -163,6 +163,41 @@ static inline void mg_canvas_solid(moy_canvas *c, uint16_t *dst, int dw,
     mg_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
 }
 
+/* ---- the PRE-KERNEL GUARDS, once ---------------------------------------
+ *
+ * These ran twice -- modmoy_gfx.c and moyhost_gfx.c -- and drifted, in exactly
+ * the way that arrangement drifts. `dh` IS DELIBERATELY NOT TESTED: the board
+ * marks the argument `(void)dh` and takes its row count from the buffer
+ * capacity, which is the only number that can be trusted, while the host used
+ * to refuse `dh <= 0` on line/circ/circb/tri/sspr/tline -- so a zero-height
+ * canvas drew NOTHING on the host and fourteen pixels on glass, and no test
+ * could see it (the goldens only ever replay a real canvas). Pinned by the
+ * `dh = 0` ops in tests/test_gfx_binding.py's clamp script.
+ */
+
+/* The solid-colour verbs' whole prologue (line/circ/circb/tri): refuse a
+ * degenerate width, clamp the clip to the buffer, borrow a one-colour canvas.
+ * 0 = nothing to draw. A function and not a macro so neither surface has to
+ * name its locals to match the other's. */
+static inline int mg_solid_prologue(moy_canvas *c, uint16_t *dst, int dw,
+                                    size_t cap, int col, int cam_x, int cam_y,
+                                    int *cx0, int *cy0, int *cx1, int *cy1)
+{
+    if (dw <= 0) return 0;
+    mg_clip(dw, cap, cx0, cy0, cx1, cy1);
+    mg_canvas_solid(c, dst, dw, cap, (uint16_t)col, cam_x, cam_y,
+                    *cx0, *cy0, *cx1, *cy1);
+    return 1;
+}
+
+/* The map verbs' cells guard (tline/blit_map). SPEC.md 3.3's bound is checked
+ * BEFORE the area, so mw * mh cannot overflow on the way to being compared. */
+static inline int mg_map_ok(int mw, int mh, size_t cells_len)
+{
+    return mw > 0 && mh > 0 && mw <= MOY_MAP_MAX && mh <= MOY_MAP_MAX
+           && (size_t)(mw * mh) <= cells_len;
+}
+
 /* ---- the compositor loops (moy_gfx_kernels.c) ------------------------- */
 
 /* fill(px, cap, npix, color) -- the first `npix` pixels, clamped to capacity. */

@@ -108,6 +108,49 @@ moybyte_patch_native_code_free() {
   fi
 }
 
+# REPR_C unboxed floats (#66). REPR_A boxes every float RESULT in 16 bytes of
+# heap (~73KB/frame measured in sakura), and the heap-wrap gc collect that
+# follows is a 130-175ms visible hitch. A GUARDED SED rather than a context
+# diff, so it survives the line moving between MicroPython releases -- and the
+# guard matters more than the edit, because a silent no-op here is a board that
+# quietly runs boxed floats again with nothing naming the cause. Reads MPY_DIR.
+#
+# Per-board, and OPT-IN: a board that does not call this declines it in its own
+# build.sh, in writing, the way board.toml's denials carry a `why`.
+moybyte_patch_repr_c() {
+  local h="${MPY_DIR}/ports/esp32/mpconfigport.h"
+  if ! grep -q "MICROPY_OBJ_REPR_C" "${h}"; then
+    sed -i 's|^#define MICROPY_OBJ_REPR  *(MICROPY_OBJ_REPR_A)|#define MICROPY_OBJ_REPR                    (MICROPY_OBJ_REPR_C) /* Moybyte #66: unboxed 30-bit floats */|' \
+      "${h}"
+    grep -q "MICROPY_OBJ_REPR_C" "${h}" || {
+      echo "!! REPR_C patch did not apply -- mpconfigport.h's MICROPY_OBJ_REPR line changed shape" >&2
+      exit 1
+    }
+    echo "== patched mpconfigport.h: MICROPY_OBJ_REPR_C (#66)"
+  fi
+}
+
+# PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
+# 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
+# for verified flash vendor IDs (0xC8/0x20) and otherwise returns
+# ESP_ERR_NOT_SUPPORTED from a SECONDARY ESP_SYSTEM_INIT_FN -- which aborts the
+# boot. The board then flashes cleanly, says NOTHING on serial and never reaches
+# the console, which reads exactly like a PSRAM timing failure and is not one
+# (measured 2026-08-16). The patch relaxes the vendor gate to warn-and-run and
+# turns the task's other brick path -- an abort() when the scanned points share
+# no temperature range -- into "stop adjusting", degrading to the un-mitigated
+# build rather than a dead one. Inert, not wrong, at 80MHz.
+#
+# ESP32-S3 only: the file it patches is the S3 port of the MSPI timing tuner.
+# Reads IDF_DIR, REPO_ROOT.
+moybyte_patch_psram_retune() {
+  local f="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
+  if [ -f "${f}" ] && ! grep -q "Moybyte #169" "${f}"; then
+    echo "== applying PSRAM temperature-retune vendor-gate patch (#169)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/esp_psram_temp_retune_any_vendor.patch"
+  fi
+}
+
 # Stage the shared native modules per board.toml [native.shared] and generate
 # the web-console blob INTO THE STAGED COPY (never into the shared native/
 # tree two builds read). Reads SCRIPT_DIR, REPO_ROOT, BUILD_PYTHON. A missing

@@ -143,11 +143,12 @@ def _remote_state(ws):
         # moy_flush tuple:
         #
         #   (pump_us, idle_us, idle_n, feed_us, bands, blocked_us,
-        #    timeouts, errs)
+        #    timeouts, errs, stop_fails)
         #
         # This is the ONLY route on the Guition, which denies `device_diag` and
-        # so has no PUMP line -- and timeouts/errs are failures the C cannot
-        # raise (a drain must not throw into the frame loop), so without this
+        # so has no PUMP line -- and timeouts/errs/stop_fails are failures the C
+        # cannot raise (a drain must not throw into the frame loop, and a deinit
+        # that gave up on the feeder keeps the console running), so without this
         # field they are invisible there.
         comp = getattr(ws, "comp", None)
         bs = getattr(comp, "bounce_stats", None)

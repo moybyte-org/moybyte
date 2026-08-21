@@ -436,10 +436,13 @@ def _diag_pump(diag, comp):
     buy fps), gaps (how many bands were fed late), feed (kick -> last band
     queued), blocked (ms the VM core spent waiting in drain).
 
-    `timeouts=` and `errs=` must both stay 0. `moy_flush` cannot RAISE a queue
-    error hit during a drain (a drain must not throw into the frame loop), so
-    `errs` is the only place such a failure is visible anywhere: a flush that is
-    quietly failing looks exactly like a healthy one until this number moves."""
+    `timeouts=`, `errs=` and `stopfail=` must all stay 0. `moy_flush` cannot
+    RAISE a queue error hit during a drain (a drain must not throw into the
+    frame loop), so `errs` is the only place such a failure is visible
+    anywhere: a flush that is quietly failing looks exactly like a healthy one
+    until this number moves. `stopfail=` is deinit giving up on the feeder and
+    leaving the bounce slots allocated rather than freeing them under a live
+    ISR -- also unraisable, for the same reason."""
     if diag is None:
         return
     try:
@@ -455,10 +458,10 @@ def _diag_pump(diag, comp):
         fold = getattr(comp, "fold_count", 0)
         diag.log("PUMP",
                  "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "
-                 "bands=%d fold=%d timeouts=%d errs=%d"
+                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"
                  % (st[0] / 1000.0, st[1] / 1000.0, st[2],
                     st[3] / 1000.0, st[5] / 1000.0, st[4], fold,
-                    st[6], st[7]))
+                    st[6], st[7], st[8]))
     except Exception:
         pass
 

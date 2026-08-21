@@ -570,6 +570,56 @@ def test_the_band_feed_runs_on_the_core0_feeder_task():
     assert "machine import Timer" not in py
 
 
+def test_a_stop_that_is_not_acknowledged_frees_nothing():
+    """`moy_flush_stop()` used to wait ~100ms for the feeder, give up SILENTLY,
+    and then free the bounce slots and reset the bookkeeping anyway -- with the
+    task handle still non-NULL, so `moy_flush_band_done_from_isr` could notify a
+    task mid-delete against slots that had just been freed. It was the only wait
+    in the engine with no latch and no counter, and both boards' deinit comments
+    asserted a guarantee it did not make.
+
+    So: a bound past the frame deadline (a timed-out frame is still unwinding
+    and giving up on it buys nothing), and on failure NOTHING is handed back --
+    the free and the reset must sit AFTER the early return, the exit latch stays
+    armed, and start() refuses to re-arm over the zombie."""
+    engine = _flush_src()
+    body = engine[engine.index("bool moy_flush_stop(void)"):]
+    body = body[:body.index("\nvoid moy_flush_reset")]
+    assert "MOY_FLUSH_STOP_TIMEOUT_MS" in body, "the bound must be a named fence"
+    fail = body.index("moy_flush.stop_fails++")
+    give_up = body.index("return false;", fail)
+    assert give_up < body.index("moy_flush_free_bounce()"), (
+        "a stop that gave up must return BEFORE freeing memory an ISR may "
+        "still touch")
+    assert "task_exit = false" not in body[:give_up], (
+        "the exit latch stays armed so the feeder leaves when it can")
+    header = (NATIVE / "moy_flush" / "moy_flush.h").read_text(encoding="utf-8")
+    assert "MOY_FLUSH_STOP_TIMEOUT_MS ((MOY_FLUSH_TIMEOUT_US / 1000)" in header
+    assert "moy_flush.stop_fails" in engine and "stop_fails)" in engine, (
+        "the counter must reach the pump_stats tuple -- a failure nobody can "
+        "read is the one that gets explained away")
+    start = engine[engine.index("bool moy_flush_start"):]
+    assert "moy_flush.task != NULL && moy_flush.task_exit" in start[:start.index("s_ops = ops;")], (
+        "start() must refuse to re-arm over a feeder that never stopped")
+    # ...and the two boards' deinit must honour the answer, which is what makes
+    # their comments true: the transport may not go away under a live feeder.
+    for mod in (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c",
+                Path("firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c")):
+        src = mod.read_text(encoding="utf-8")
+        assert "if (!moy_flush_stop()) {" in src, (
+            "%s deinit ignores a failed stop" % mod)
+
+
+def test_the_sd_guard_is_a_nesting_depth_not_a_flag():
+    """SD sessions nest, and a boolean guard's INNER close lifts the bracket
+    while the outer session is still on the shared SPI host -- which is the
+    Cache/MMU panic the guard exists to prevent, with nothing pointing at it.
+    """
+    _, c = _panel_src()
+    assert "static volatile int s_sd_guard;" in c, "the guard must be a depth"
+    assert "s_sd_guard++" in c and "s_sd_guard--" in c
+
+
 def test_kid_mode_gates_diag_frame_eaters():
     # #68 kid mode: Settings -> PERF DIAG (default OFF, persisted) gates the two
     # felt diag costs -- the forced GC sample and the periodic diag->SD write --
@@ -673,6 +723,34 @@ def test_blit565_opaque_row_fast_lane():
     c = (NATIVE / "moy_gfx"
          / "moy_gfx_kernels.c").read_text(encoding="utf-8")
     assert "OPAQUE fast lane" in c
+
+
+def test_the_pre_kernel_guards_are_one_body():
+    """The two moy_gfx surfaces must not re-grow their own guard sets.
+
+    They had one drift already: the host refused `dh <= 0` on five verbs and the
+    board never did, so a zero-height canvas drew nothing here and fourteen
+    pixels on glass, and no test could see it. The clamping branches are exactly
+    the ones the conformance goldens never reach, so the only defence is that
+    there is nothing to diverge -- mg_solid_prologue / mg_map_ok / mg_is_moy_sheet
+    in moy_gfx_kernels.h, called by both."""
+    header = (NATIVE / "moy_gfx" / "moy_gfx_kernels.h").read_text(encoding="utf-8")
+    for fn in ("mg_solid_prologue", "mg_map_ok"):
+        assert "static inline int %s(" % fn in header
+    surfaces = {
+        "modmoy_gfx.c": (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8"),
+        "moyhost_gfx.c": (Path("runtime") / "moyhost_gfx.c").read_text(encoding="utf-8"),
+    }
+    for name, src in surfaces.items():
+        # tri/circ/circb/line, both sides.
+        assert src.count("mg_solid_prologue(") == 4, (
+            "%s: the solid-verb prologue is written out again" % name)
+        # tline/blit_map on both sides (the device adds DrawCtx.set_map_src).
+        assert src.count("mg_map_ok(") >= 2, (
+            "%s: the map-cells guard is written out again" % name)
+        assert "MOY_MAP_MAX" not in src, (
+            "%s: the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
+            "before mw * mh can overflow" % name)
 
 
 def test_seed_carts_model_the_fast_draw_habits():
@@ -1629,6 +1707,34 @@ def test_hitch_logger_wired():
     assert "20000 if ws.cart is not None else 5000" in runtime
 
 
+def _esp32_builds():
+    """Every board `build.sh` that builds on tools/esp32_build_lib.sh.
+
+    DISCOVERED, not listed: this test used to read ROOT's build.sh alone, and
+    the Guition's byte-identical copies of the two blocks below were asserted by
+    nothing at all -- so a rot in one of them left `make test` green and the
+    board silently shipping REPR_A (the 16B-per-float boxing whose heap-wrap
+    collect is #66's 130-175ms hitch, with no symptom naming the cause).
+    """
+    out = [p for p in sorted(Path("firmware").glob("*/build.sh"))
+           if "esp32_build_lib.sh" in p.read_text(encoding="utf-8")]
+    assert len(out) >= 3, "board discovery found %d build.sh" % len(out)
+    return out
+
+
+def _opts_in(build, fn):
+    """A board opts into a shared patch by CALLING it, and opts out by naming it
+    in a `# DECLINED <fn>` line whose reason follows -- board.toml's `[[deny]]
+    why=` in the one file that is not board.toml. Silence is neither."""
+    src = build.read_text(encoding="utf-8")
+    called = ("\n%s\n" % fn) in src
+    declined = ("# DECLINED %s " % fn) in src
+    assert called != declined, (
+        "%s: %s must be either called or declined in writing, exactly one"
+        % (build, fn))
+    return called
+
+
 def test_repr_c_unboxed_floats_wired():
     # #66 micro-stutter root cause: REPR_A boxes EVERY float result (16B heap
     # alloc); sakura's 120-petal _update measured 73KB/frame of garbage -> the
@@ -1640,11 +1746,46 @@ def test_repr_c_unboxed_floats_wired():
     # between MicroPython releases. So this asserts the edit and its guard, not
     # a patch file -- and the guard matters more than the edit: a silent
     # no-op here is a board that quietly runs boxed floats again.
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "MICROPY_OBJ_REPR_C" in build
-    assert "REPR_C patch did not apply" in build, (
+    lib = Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert "moybyte_patch_repr_c() {" in lib
+    assert "MICROPY_OBJ_REPR_C" in lib
+    assert "REPR_C patch did not apply" in lib, (
         "the sed lost its verification -- a shape change upstream would pass silently")
-    assert "exit 1" in build
+    assert "exit 1" in lib
+    # ...and it is ONE body: no board may re-grow an inline copy of the sed.
+    opted = [b for b in _esp32_builds() if _opts_in(b, "moybyte_patch_repr_c")]
+    assert len(opted) >= 2, "both S3 boards run REPR_C"
+    for build in _esp32_builds():
+        assert "MICROPY_OBJ_REPR" not in build.read_text(encoding="utf-8"), (
+            "%s carries its own REPR sed again" % build)
+
+
+def test_psram_temperature_retune_wired():
+    # #169: at 120MHz octal MSPI, IDF only STARTS the temperature retune for
+    # verified flash vendor ids and otherwise returns ESP_ERR_NOT_SUPPORTED from
+    # a SECONDARY ESP_SYSTEM_INIT_FN, which aborts the boot -- a board that
+    # flashes cleanly, says nothing on serial, and reads exactly like a PSRAM
+    # timing failure. Untested on either board's glass by any suite; this is the
+    # only thing standing between the patch and a silent removal.
+    lib = Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert "moybyte_patch_psram_retune() {" in lib
+    assert "mspi_timing_by_mspi_delay.c" in lib
+    assert "esp_psram_temp_retune_any_vendor.patch" in lib
+    assert Path("patches/esp_psram_temp_retune_any_vendor.patch").exists()
+    opted = [b for b in _esp32_builds()
+             if _opts_in(b, "moybyte_patch_psram_retune")]
+    assert len(opted) >= 2, "both S3 boards run the retune patch"
+    for build in opted:
+        # The patch is REQUIRED BY the 120MHz MSPI profile, not optional beside
+        # it: a board that opts in must actually be running that profile, and a
+        # board that drops back to 80M should drop the patch with it.
+        sdk = board_config.sdkconfig_path(build.parent).read_text(encoding="utf-8")
+        assert "CONFIG_SPIRAM_SPEED_120M=y" in sdk, (
+            "%s takes the #169 patch but is not on the 120MHz MSPI profile"
+            % build)
+    for build in _esp32_builds():
+        assert "mspi_timing_by_mspi_delay.c" not in build.read_text(
+            encoding="utf-8"), ("%s carries its own #169 patch again" % build)
 
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
@@ -2662,12 +2803,12 @@ def test_micropython_offline_diag_wiring():
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
     # measure-first data for band size / pump period / third-slot tuning, plus
-    # blocked= and timeouts=/errs=, which the C cannot raise and so can only be
-    # counted.
+    # blocked= and timeouts=/errs=/stopfail=, which the C cannot raise and so
+    # can only be counted.
     compositor = _panel_base_src()   # shared body since 2026-08-21 (#206 item 1)
     assert "def bounce_stats(self):" in compositor
     assert ('"pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "\n'
-            '                 "bands=%d fold=%d timeouts=%d errs=%d"'
+            '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
             in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
     # fold= is the #190 liveness proof. Behaviour is pinned by

@@ -610,9 +610,14 @@ static MP_DEFINE_CONST_FUN_OBJ_KW(moy_axs_init_obj, 0, moy_axs_init);
 
 static mp_obj_t moy_axs_deinit(void) {
     // moy_flush_stop() waits the feeder out and frees the bounce slots --
-    // before the SPI device goes away under them.
+    // before the SPI device goes away under them. When it CANNOT, it frees
+    // nothing and says so, and this must not proceed either: the feeder is
+    // still queueing bands on the device that is about to be removed.
     if (s_dev_up) { moy_flush_drain(); }
-    moy_flush_stop();
+    if (!moy_flush_stop()) {
+        mp_raise_msg(&mp_type_OSError,
+                     MP_ERROR_TEXT("moy_axs: feeder still running"));
+    }
     if (s_dev_up) { spi_bus_remove_device(s_dev); s_dev = NULL; s_dev_up = false; }
     if (s_bus_up) { spi_bus_free(MOY_AXS_SPI_HOST); s_bus_up = false; }
     moy_axs_free_all();
@@ -1067,9 +1072,9 @@ static mp_obj_t moy_axs_bars(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_bars_obj, 0, 1, moy_axs_bars);
 
 // stats() -> (flushes, last_flush_us) and pump_stats() -> (pump, idle, gaps,
-// feed, bands, blocked, timeouts, errs). Both tuples are the shared engine's
-// (moy_flush.h documents every field, and both boards export them verbatim);
-// the shared BandedCompositor.bounce_stats() hands all eight of pump_stats up
+// feed, bands, blocked, timeouts, errs, stopfails). Both tuples are the shared
+// engine's (moy_flush.h documents every field, and both boards export them
+// verbatim); the shared BandedCompositor.bounce_stats() hands all nine up
 // -- on THIS board to the dev channel's `state` snapshot, not to a PUMP diag
 // line, because board.toml denies device_diag. `bands` is the FULL-frame count
 // on purpose -- a play frame ships fewer (THE GAME WINDOW), and fold_stats() is

@@ -125,6 +125,11 @@
 // A full frame is ~15-20 ms on either board; this is a bug fence, not a knob.
 #define MOY_FLUSH_TIMEOUT_US 500000
 
+// How long stop() waits for the feeder to acknowledge. PAST the frame deadline
+// on purpose: a frame that has already timed out is still unwinding, and the
+// only thing giving up early buys is the failure path below.
+#define MOY_FLUSH_STOP_TIMEOUT_MS ((MOY_FLUSH_TIMEOUT_US / 1000) + 100)
+
 // THE CORE-0 FEEDER's placement, shared design on both S3 boards:
 // MicroPython's VM task is pinned to core 1 (mphalport.h MP_TASK_COREID), so
 // the feeder runs on core 0 -- shared with the mostly-idle WiFi/BT stacks,
@@ -189,6 +194,7 @@ typedef struct {
     int64_t flush_t0;
     volatile uint32_t timeouts;
     volatile uint32_t tx_errs;
+    volatile uint32_t stop_fails;      // stop() gave up on the feeder
     // The internal DMA-capable bounce slots (the panel DMA never reads PSRAM
     // -- #66, and the reason this whole band machinery exists).
     uint8_t *bounce[MOY_FLUSH_MAX_SLOTS];
@@ -230,7 +236,15 @@ bool moy_flush_start(const moy_flush_ops_t *ops);
 // Stop the feeder and free the bounce slots before the transport goes away
 // under them (deinit). The caller drains first. The semaphores are kept, as
 // they are across a soft reset.
-void moy_flush_stop(void);
+//
+// FALSE = the feeder did not acknowledge inside MOY_FLUSH_STOP_TIMEOUT_MS, and
+// then NOTHING is freed and nothing is reset: that task's queue_band still
+// writes the bounce slots and the done-ISR still notifies its handle, so
+// handing either back is the one thing a failed stop may not do. The exit
+// latch stays ARMED (the task leaves at whatever loop iteration it reaches),
+// stop_fails counts it, and start() refuses to re-arm until it is gone. The
+// CALLER must then leave its transport up too -- both boards' deinit does.
+bool moy_flush_stop(void);
 
 // Clear the band bookkeeping (soft reset / free-all): a leftover bnc_total
 // would make the next frame re-feed a dead frame's bands into a window that
@@ -258,9 +272,9 @@ bool moy_flush_drain(void);
 esp_err_t moy_flush_take_err(void);
 
 // The (flushes, last_flush_us) and (pump, idle, gaps, feed, bands, blocked,
-// timeouts, errs) tuples both boards export verbatim. `bands` is the board's
-// full-frame band count -- a REPORTED constant, passed in because the Guition
-// windows some frames.
+// timeouts, errs, stopfails) tuples both boards export verbatim. `bands` is
+// the board's full-frame band count -- a REPORTED constant, passed in because
+// the Guition windows some frames.
 mp_obj_t moy_flush_stats_tuple(void);
 mp_obj_t moy_flush_pump_stats_tuple(int bands);
 
@@ -269,11 +283,14 @@ mp_obj_t moy_flush_pump_stats_tuple(int bands);
 // it keeps the caller's IRAM placement; the yield happens here because
 // esp_lcd's spi post_cb ignores the callback's return value.
 static inline void moy_flush_band_done_from_isr(void) {
+    // ONE read of the handle: it is volatile and the feeder NULLs it as it
+    // leaves, so a test-then-use would notify whatever the second read saw.
+    TaskHandle_t t = (TaskHandle_t)moy_flush.task;
     moy_flush.done++;
     moy_flush.done_us = (uint32_t)esp_timer_get_time();
-    if (moy_flush.task != NULL) {
+    if (t != NULL) {
         BaseType_t hp = pdFALSE;
-        vTaskNotifyGiveFromISR((TaskHandle_t)moy_flush.task, &hp);
+        vTaskNotifyGiveFromISR(t, &hp);
         portYIELD_FROM_ISR(hp);
     }
 }

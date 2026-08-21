@@ -185,6 +185,13 @@ bool moy_flush_start(const moy_flush_ops_t *ops) {
             || ops->bounce_slots > MOY_FLUSH_MAX_SLOTS) {
         return false;
     }
+    // A stop that was never acknowledged leaves the old feeder alive with its
+    // exit latch armed, still holding the OLD ops. Re-arming over it would
+    // publish s_ops out from under a running frame and then hand the zombie
+    // the next kick, which it would answer by exiting.
+    if (moy_flush.task != NULL && moy_flush.task_exit) {
+        return false;
+    }
     s_ops = ops;
     for (int i = 0; i < ops->bounce_slots; i++) {
         if (moy_flush.bounce[i] == NULL) {
@@ -220,17 +227,28 @@ bool moy_flush_start(const moy_flush_ops_t *ops) {
     return true;
 }
 
-void moy_flush_stop(void) {
+bool moy_flush_stop(void) {
     if (moy_flush.task != NULL) {
         moy_flush.task_exit = true;
         xSemaphoreGive(moy_flush.kick_sem);
-        for (int i = 0; i < 100 && moy_flush.task != NULL; i++) {
+        for (int i = 0; i < MOY_FLUSH_STOP_TIMEOUT_MS
+                        && moy_flush.task != NULL; i++) {
             mp_hal_delay_ms(1);
+        }
+        if (moy_flush.task != NULL) {
+            // GIVING UP FREES NOTHING. That task's queue_band still writes the
+            // bounce slots and its done-ISR still notifies its handle, so the
+            // slots stay allocated, the bookkeeping stays as the feeder left
+            // it, and the exit latch stays ARMED so the task leaves whenever it
+            // reaches its loop top. start() refuses to re-arm until it has.
+            moy_flush.stop_fails++;
+            return false;
         }
         moy_flush.task_exit = false;
     }
     moy_flush_free_bounce();
     moy_flush_reset();
+    return true;
 }
 
 void moy_flush_reset(void) {
@@ -320,10 +338,10 @@ mp_obj_t moy_flush_stats_tuple(void) {
 }
 
 // pump_stats() -> (pump_us, idle_us, idle_n, feed_us, bands, blocked_us,
-// timeouts, errs) for the last fully-shipped frame. `BandedCompositor.
-// bounce_stats()` hands ALL EIGHT up -- to the PUMP diag line (#66 lever 4) on
-// a board that has one, and to the dev channel's `state` snapshot on a board
-// that does not (the Guition denies device_diag):
+// timeouts, errs, stop_fails) for the last fully-shipped frame.
+// `BandedCompositor.bounce_stats()` hands ALL NINE up -- to the PUMP diag line
+// (#66 lever 4) on a board that has one, and to the dev channel's `state`
+// snapshot on a board that does not (the Guition denies device_diag):
 //   pump    CPU us inside the band feed -- the synthesis. Since the CORE-0
 //           FEEDER this runs on core 0 and is NOT billed to the frame; it
 //           stays reported because a rising value still means real work (and
@@ -338,8 +356,12 @@ mp_obj_t moy_flush_stats_tuple(void) {
 //   timeouts / errs  both must stay 0. A queue error that happens during a
 //           drain cannot be raised (drain must not throw into the frame loop),
 //           so `errs` is the only place it is visible at all.
+//   stopfails  deinit gave up waiting for the feeder and left the bounce slots
+//           allocated rather than free memory an ISR may still touch. Also
+//           must stay 0, and also cannot be raised: deinit refuses to tear the
+//           transport down after one, so the console keeps running.
 mp_obj_t moy_flush_pump_stats_tuple(int bands) {
-    mp_obj_t t[8] = {
+    mp_obj_t t[9] = {
         mp_obj_new_int_from_uint(moy_flush.pump_last_us),
         mp_obj_new_int_from_uint(moy_flush.idle_last_us),
         mp_obj_new_int_from_uint(moy_flush.idle_last_n),
@@ -348,6 +370,7 @@ mp_obj_t moy_flush_pump_stats_tuple(int bands) {
         mp_obj_new_int_from_uint(moy_flush.block_last_us),
         mp_obj_new_int_from_uint(moy_flush.timeouts),
         mp_obj_new_int_from_uint(moy_flush.tx_errs),
+        mp_obj_new_int_from_uint(moy_flush.stop_fails),
     };
-    return mp_obj_new_tuple(8, t);
+    return mp_obj_new_tuple(9, t);
 }

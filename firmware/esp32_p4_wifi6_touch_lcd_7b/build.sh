@@ -78,14 +78,19 @@ moybyte_idf_component esp_driver_ppa
 #     just later (bigger internal pool).
 moybyte_patch_native_code_free
 
-# NOT applied here, and that is an OPEN QUESTION rather than a decision
-# (recorded 2026-08-17 so nobody mistakes the absence for a verdict): the
-# T-Deck's REPR_C unboxed-floats sed (#66 -- its step 2b) has never been tried
-# or measured on this board. The S3's case was a measured 130-175ms gc hitch
-# from float boxing; whether the P4's bigger pools and different GC cadence
-# (#67 recorded 19-24ms GC spikes under Python carts) make it worth the same
-# object-layout change is an on-glass A/B someone has to run -- per-board
-# verdicts don't transfer in either direction. Tracked in #58's port list.
+# DECLINED moybyte_patch_repr_c -- an OPEN QUESTION rather than a verdict
+# (recorded 2026-08-17 so nobody mistakes the absence for one): the unboxed-
+# floats sed (#66) has never been tried or measured on this board. The S3's case
+# was a measured 130-175ms gc hitch from float boxing; whether the P4's bigger
+# pools and different GC cadence (#67 recorded 19-24ms GC spikes under Python
+# carts) make it worth the same object-layout change is an on-glass A/B someone
+# has to run -- per-board verdicts don't transfer in either direction. Tracked
+# in #58's port list.
+
+# DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
+# ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
+# the file does not exist in its build. Its PSRAM constraint is a different one
+# entirely (200MHz or the DSI scan-out underruns -- see this dir's README).
 
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared] -- the two

@@ -256,7 +256,12 @@ static uint8_t s_madctl;
 // requires ("the caller never flushes the panel mid-transaction"). The cost
 // is a synchronous ~17 ms per paint during SD sessions only (boot progress,
 // commits) -- play frames never pay it.
-static volatile bool s_sd_guard;
+//
+// A DEPTH, not a flag: sessions nest (a bracketed op that itself brackets),
+// and an inner sd_guard(False) that cleared the bracket would leave the OUTER
+// session running unserialized against the feeder -- the panic above, with
+// nothing to point at it.
+static volatile int s_sd_guard;
 
 // THE BOARD'S HALF of the engine (moy_flush.h): the ST7789/esp_lcd transport,
 // which is the one thing Phase C said the two S3 panels can never share. All
@@ -492,9 +497,14 @@ static mp_obj_t moy_lcd_deinit(void) {
     // Never tear a driver down under a live DMA: the bounce buffers are freed
     // below and the SPI host is handed back, both of which an in-flight band
     // would still be reading. moy_flush_stop() waits the feeder out and frees
-    // the slots -- before the panel io goes away under it.
+    // the slots -- before the panel io goes away under it. When it CANNOT, it
+    // frees nothing and says so, and this must not proceed either: the feeder
+    // is still queueing bands on the io that is about to be deleted.
     if (s_panel) { moy_flush_drain(); }
-    moy_flush_stop();
+    if (!moy_flush_stop()) {
+        mp_raise_msg(&mp_type_OSError,
+                     MP_ERROR_TEXT("moy_lcd: feeder still running"));
+    }
     if (s_panel) { esp_lcd_panel_del(s_panel); s_panel = NULL; }
     if (s_io) { esp_lcd_panel_io_del(s_io); s_io = NULL; }
     if (s_bus_up) { spi_bus_free(MOY_LCD_SPI_HOST); s_bus_up = false; }
@@ -608,13 +618,17 @@ static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_kick_obj, 0, 1, moy_lcd_kick);
 
 // sd_guard(on): bracket an SD session (see the SD SESSION GUARD note above).
-// Turning it ON also drains, so a frame already in the feeder's hands cannot
-// straddle the session start.
+// Nesting-safe: the bracket lifts on the OUTERMOST close. Turning it on also
+// drains, so a frame already in the feeder's hands cannot straddle the session
+// start.
 static mp_obj_t moy_lcd_sd_guard(mp_obj_t on_in) {
-    bool on = mp_obj_is_true(on_in);
-    s_sd_guard = on;
-    if (on && s_panel != NULL) {
-        moy_flush_drain();
+    if (mp_obj_is_true(on_in)) {
+        s_sd_guard++;
+        if (s_panel != NULL) {
+            moy_flush_drain();
+        }
+    } else if (s_sd_guard > 0) {
+        s_sd_guard--;
     }
     return mp_const_none;
 }
@@ -744,10 +758,10 @@ static mp_obj_t moy_lcd_bars(size_t n_args, const mp_obj_t *a) {
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_bars_obj, 0, 1, moy_lcd_bars);
 
 // stats() -> (flushes, last_flush_us) and pump_stats() -> (pump, idle, gaps,
-// feed, bands, blocked, timeouts, errs). Both tuples are the shared engine's
-// (moy_flush.h documents every field, and both boards export them verbatim);
-// the shared BandedCompositor.bounce_stats() hands all eight of pump_stats
-// straight to the PUMP diag line (#66 lever 4). `bands` is the FULL-frame
+// feed, bands, blocked, timeouts, errs, stopfails). Both tuples are the shared
+// engine's (moy_flush.h documents every field, and both boards export them
+// verbatim); the shared BandedCompositor.bounce_stats() hands all nine of
+// pump_stats straight to the PUMP diag line (#66 lever 4). `bands` is the FULL-frame
 // count, which on this board is every frame -- the Guition is the one that
 // windows.
 //

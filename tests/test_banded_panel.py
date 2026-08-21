@@ -58,7 +58,7 @@ class BlockingLcd:
     WIDTH = 480
     HEIGHT = 320
 
-    def __init__(self, nfbs=2, pump=(10, 20, 30, 40, 50, 60, 70, 80),
+    def __init__(self, nfbs=2, pump=(10, 20, 30, 40, 50, 60, 70, 80, 90),
                  stats=(1234, 5678)):
         self._nfbs = nfbs
         self._fbs = [FB(i) for i in range(nfbs)]
@@ -347,14 +347,15 @@ def test_stats_is_the_panel_modules_wall_span_untouched():
     assert comp.stats() == lcd._stats
 
 
-# -- the meters: all EIGHT moy_flush fields ------------------------------------
+# -- the meters: all NINE moy_flush fields -------------------------------------
 #
 # `native/moy_flush/moy_flush.c`'s pump_stats tuple is
-#   (pump_us, idle_us, idle_n, feed_us, bands, blocked_us, timeouts, errs)
+#   (pump_us, idle_us, idle_n, feed_us, bands, blocked_us, timeouts, errs,
+#    stop_fails)
 # and every value in the fixture below is distinct, so a transposed or dropped
 # index cannot pass by coincidence.
 
-PUMP = (10, 20, 30, 40, 50, 60, 70, 80)
+PUMP = (10, 20, 30, 40, 50, 60, 70, 80, 90)
 
 
 def test_bounce_stats_carries_every_field_the_C_exports():
@@ -362,26 +363,32 @@ def test_bounce_stats_carries_every_field_the_C_exports():
     assert comp.bounce_stats() == PUMP
 
 
-def test_the_three_fields_that_reached_nobody_are_carried():
+def test_the_four_fields_that_reached_nobody_are_carried():
     """blocked_us is the CPU the VM core spent waiting in drain; timeouts is a
     band that never reported done inside the feeder's bound; errs is a queue
     error DURING a drain, which `moy_flush` cannot raise (a drain must not throw
     into the frame loop), so that counter is the only place such a failure is
-    visible anywhere."""
+    visible anywhere; stop_fails is deinit having given up on the feeder and
+    LEFT the bounce slots allocated rather than free them under a live ISR --
+    equally unraisable, for the same reason."""
     lcd, comp = build()
-    lcd._pump = (1, 2, 3, 4, 5, 1400, 9, 7)
-    blocked_us, timeouts, errs = comp.bounce_stats()[5:]
+    lcd._pump = (1, 2, 3, 4, 5, 1400, 9, 7, 2)
+    blocked_us, timeouts, errs, stop_fails = comp.bounce_stats()[5:]
     assert blocked_us == 1400
     assert timeouts == 9
     assert errs == 7
+    assert stop_fails == 2
 
 
 def test_a_serialized_compositor_reports_the_no_overlap_sentinel():
-    """Eight fields either way, so no consumer has to branch on length.
-    feed_us keeps its -1 "never measured" sentinel; the counters are honestly
-    0, because a blocking show() raises its failures instead of banking them."""
+    """Nine fields either way, so no consumer has to branch on length -- and an
+    asymmetry here would be invisible on whichever board you happened to be
+    looking at. feed_us keeps its -1 "never measured" sentinel; the counters are
+    honestly 0, because a blocking show() raises its failures instead of banking
+    them."""
     _lcd, comp = build(async_flush=False)
-    assert comp.bounce_stats() == (0, 0, 0, -1, 0, 0, 0, 0)
+    assert comp.bounce_stats() == (0, 0, 0, -1, 0, 0, 0, 0, 0)
+    assert len(comp.bounce_stats()) == len(build()[1].bounce_stats())
 
 
 def test_pump_last_us_is_the_first_field_and_zero_without_an_overlap():
@@ -531,11 +538,11 @@ class FoldingComp(BandedCompositor):
         self.fold_count = folded
 
 
-def test_the_PUMP_line_carries_blocked_timeouts_and_errs():
+def test_the_PUMP_line_carries_blocked_timeouts_errs_and_stopfail():
     """Every value distinct, and blocked= is converted from us to ms like the
     other durations on the line."""
     lcd, comp = build()
-    lcd._pump = (1000, 2000, 3, 4000, 5, 1400, 9, 7)
+    lcd._pump = (1000, 2000, 3, 4000, 5, 1400, 9, 7, 2)
     diag = FakeDiag()
     _device_diag()._diag_pump(diag, comp)
 
@@ -543,6 +550,7 @@ def test_the_PUMP_line_carries_blocked_timeouts_and_errs():
     assert "blocked=1.40" in line
     assert "timeouts=9" in line
     assert "errs=7" in line
+    assert "stopfail=2" in line
     # ...and the fields that were already there did not shift meaning.
     assert "pump=1.00" in line and "idle=2.00" in line
     assert "gaps=3" in line and "feed=4.00" in line and "bands=5" in line
@@ -609,9 +617,9 @@ def test_state_carries_the_whole_pump_tuple():
     """The Guition denies `device_diag` in its board.toml, so `state` is the
     only place its flush meters can surface."""
     lcd, comp = build()
-    lcd._pump = (1, 2, 3, 4, 5, 1400, 9, 7)
+    lcd._pump = (1, 2, 3, 4, 5, 1400, 9, 7, 2)
     st = _remote_state(FakeWS(comp))
-    assert st["pump"] == [1, 2, 3, 4, 5, 1400, 9, 7]
+    assert st["pump"] == [1, 2, 3, 4, 5, 1400, 9, 7, 2]
 
 
 def test_state_reports_fold_as_None_when_the_board_has_no_fold():
