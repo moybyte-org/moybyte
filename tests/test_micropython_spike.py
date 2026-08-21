@@ -504,10 +504,22 @@ def test_bounce_pacing_is_measurable():
     assert "pump_last_us" in py
 
 
-def test_the_pump_runs_on_a_timer_between_draw_ops():
-    """A band queued and then forgotten is a frame that never finishes."""
-    py, _c = _panel_src()
-    assert "PUMP_TIMER_MS" in py
+def test_the_band_feed_runs_on_the_core0_feeder_task():
+    """A band queued and then forgotten is a frame that never finishes.
+
+    Under the 2ms machine.Timer that guarantee was the timer + the draw pokes
+    + the idle drain; since 2026-08-21 it is moy_lcd's core-0 FreeRTOS feeder
+    (ported from the Guition's moy_axs), which owns the whole flush -- so the
+    VM-side pump plumbing must be GONE (a half-retired timer would silently
+    double-feed a bounce slot) and the feeder must exist in the C.
+    """
+    py, c = _panel_src()
+    assert "xTaskCreatePinnedToCore" in c
+    assert "moy_lcd_feed" in c
+    assert "isr_cpu_id" in c, "the done-ISR must land on the feeder's core"
+    # The Python compositor no longer feeds anything: no timer, no poke export.
+    assert "self.pump_if_pending" not in py
+    assert "machine import Timer" not in py
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -1503,12 +1515,10 @@ def test_sram_bounce_flush_wired():
     assert "esp_lcd_tx_color_noacquire.patch" in build
     assert 'grep -q "Moybyte #66"' in build
     assert "pump_last_us" in comp, "the C-side pump is unmeasurable from Python"
-    assert "_pump_timer" in comp and "PUMP_TIMER_ID" in comp, (
-        "the bounce pump lost its timer -- a queued band nothing drains "
-        "is a frame that never finishes")
-    # the timer is a soft feeder; the drain must be the correctness fallback
-    assert "PUMP_TIMER_MS" in comp
-    assert "drain" in comp, "the flush lost its drain fallback"
+    # 2026-08-21: the 2ms machine.Timer feeder is RETIRED -- moy_lcd's core-0
+    # feeder task owns the band feed (test_the_band_feed_runs_on_the_core0_
+    # feeder_task pins it); drain stays the VM-side fence.
+    assert "drain" in comp, "the flush lost its drain fence"
     # hardware round 2 (#66): bands must outlast the 2ms pump timer (24-row
     # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)

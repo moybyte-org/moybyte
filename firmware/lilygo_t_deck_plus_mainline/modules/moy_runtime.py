@@ -153,10 +153,29 @@ def run_desktop(fps_cap=60):
 
     sram_census("rd-entry")
     boot.note("loading cartridges")
+
+    def _sd_session(fn):
+        """Every SD session on this board: drained first, and the panel
+        SERIALIZED for the session's whole span (comp.sd_bracket -> moy_lcd's
+        sd_guard). The bracket exists because the seed/scan below PAINTS a
+        progress frame per cart INSIDE the session, and since the core-0
+        feeder (2026-08-21) an unbracketed paint queues panel bands from core
+        0 while the VM sits inside an sdspi transaction on the same SPI host
+        -- measured as a Cache/MMU panic at "loading cartridges 1/35"."""
+        comp.sync()
+        _b = getattr(comp, "sd_bracket", None)
+        if _b is not None:
+            _b(True)
+        try:
+            return moybyte_sd.with_sd_live(fn)
+        finally:
+            if _b is not None:
+                _b(False)
+
     # SD shares the panel's SPI host, so the mount must bracket the whole
     # seed+scan; `with_sd_live` attaches once and keeps the card resident.
     carts, carts_root = boot.load_carts(moy_carts, CARTS,
-                                        session=moybyte_sd.with_sd_live,
+                                        session=_sd_session,
                                         media="SD")
     sram_census("carts")
     boot.note("building the desktop")
@@ -195,15 +214,13 @@ def run_desktop(fps_cap=60):
         Costs nothing when quiet: SD sessions happen on commits, not per frame.
         """
         if not SD_TRACE:
-            comp.sync()
-            return moybyte_sd.with_sd_live(fn)
+            return _sd_session(fn)
         print("SD > sync")
         _t = _ticks_ms()
-        comp.sync()
         print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), _t))
         _t = _ticks_ms()
         try:
-            return moybyte_sd.with_sd_live(fn)
+            return _sd_session(fn)
         finally:
             print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
             _sd_traced[0] = True
@@ -382,14 +399,14 @@ def run_desktop(fps_cap=60):
 
         # THE IDLE-BAND DRAIN (#40/#66). The overlapped flush RETURNS with bands
         # still queued, and `console.frame()`'s redraw gate returns BEFORE
-        # comp.flush() on a frame that changes nothing -- so a UI that goes quiet
-        # right after a paint leaves the last frame partly on the glass, with the
-        # 2ms pump timer as the only thing that finishes it. That is a real
-        # dependency on a feeder whose constructor is allowed to fail (see
-        # tdeck_panel): if the timer never started, the bottom of the screen
-        # would sit stale until the next repaint. So when THIS frame did not
-        # draw, drain. It fires once per idle stretch (the drain zeroes the band
-        # state) and is a no-op the rest of the time.
+        # comp.flush() on a frame that changes nothing. Under the 2ms pump
+        # timer this drain was LOAD-BEARING (the timer's constructor was
+        # allowed to fail, and without it the bottom of the screen sat stale
+        # until the next repaint); since moy_lcd's core-0 feeder (2026-08-21)
+        # the flush always completes without VM-side help, so this is now a
+        # cheap fence -- one volatile read once the feeder is idle -- kept so
+        # an idle console still GUARANTEES nothing is in flight before
+        # whatever comes next (SD, sleep, serial py snippets).
         if not loop.drew:
             try:
                 comp.sync()

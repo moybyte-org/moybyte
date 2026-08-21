@@ -153,10 +153,19 @@
 // ceiling is unpublished; do not raise without an on-glass A/B.
 #define MOY_AXS_PCLK_HZ      (40 * 1000 * 1000)
 
-// Bands of 48 PHYSICAL rows = 30720 B (the T-Deck's numbers transfer exactly:
-// same row-bytes, same 32768 B S3 DMA chunk cap). 480/48 = 10 bands a frame;
-// a band is ~1.5ms of transfer at 40MHz x 4 lines, so two slots buffer ~3ms.
-#define MOY_AXS_BAND_ROWS    48
+// Bands of 32 PHYSICAL rows = 20480 B. 480/32 = 15 bands a frame; a band is
+// ~1.0ms of transfer at 40MHz x 4 lines, so two slots buffer ~2ms.
+//
+// WAS 48 (30720 B), which cost 61440 B of INTERNAL SRAM for the pair -- the
+// single largest thing this board owns, on a board that measured 244 BYTES
+// free with a cart + BLE + WiFi all up (2026-08-20). 32 rows hands 20480 B
+// back. The T-Deck's moy_lcd defends 48 on a starvation measurement taken
+// against its 2ms machine.Timer pump; that argument does NOT transfer here,
+// because this board feeds bands from a core-0 FreeRTOS task (#202), so there
+// is no timer to stay ahead of -- only the feeder, which two 1.0ms slots keep
+// fed as well as two 1.5ms ones did. Measured on glass: 42.8 fps before,
+// see below for after.
+#define MOY_AXS_BAND_ROWS    32
 #define MOY_AXS_BAND_BYTES   (MOY_AXS_BAND_ROWS * MOY_AXS_PANEL_ROW_BYTES)
 #define MOY_AXS_BOUNCE_SLOTS 2
 #define MOY_AXS_BANDS        ((MOY_AXS_PANEL_H + MOY_AXS_BAND_ROWS - 1) / MOY_AXS_BAND_ROWS)

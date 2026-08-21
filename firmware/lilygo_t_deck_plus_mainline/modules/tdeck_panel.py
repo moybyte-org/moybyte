@@ -35,20 +35,19 @@ THE FLUSH OVERLAPS THE NEXT FRAME'S RENDER (#66/#43).
   The residue is what the console's `flush=` reports, and it is the number that
   should fall.
 
-WHO FEEDS THE REST. Two feeders, both needed, both proven on the fork:
-  * a PUMP_TIMER_MS machine.Timer -- esp32 timers schedule through mp_sched, so
-    the callback lands between bytecodes. That is the only feeder during a
-    cart's long Python `_update`, which has no other hook point.
-  * `pump_if_pending`, poked by DeviceCanvas after each big native draw op (and,
-    on a gated canvas, by moy_gfx's own draw context every GATE_PUMP_EVERY ops).
-    The soft timer CANNOT fire while the interpreter sits inside one 15 ms C
-    fill, which measured as PUMP idle=2-6 ms of starved SPI on the fork.
-
-  Both are pure optimisations of WHEN the bands are fed. If the timer never
-  starts and every poke is missed, `drain()` feeds them all itself and the flush
-  is simply serialised again -- the pre-overlap cost, never a glitch. The front
-  buffer is immutable while it ships (that is what the ping-pong is for), so the
-  bands are tear-free by construction.
+WHO FEEDS THE REST: moy_lcd's CORE-0 FEEDER task (ported from the Guition's
+  moy_axs, 2026-08-21), woken per-band by the SPI done-ISR. So this compositor
+  has NO pump timer and does NOT export `pump_if_pending`: the 2 ms soft-timer
+  feeder and DeviceCanvas's every-N-ops draw pokes are retired on this board
+  (they fed a pump that no longer needs the VM core; `moy_lcd.pump` survives
+  as a no-op for the verb-set shape). What the timer's retirement also buys:
+  the band size no longer has a 2 ms floor to outlast -- under the timer a
+  band had to transfer LONGER than the pump period or the SPI starved between
+  fires (32-row bands measured 53.9 -> 51.8 fps on Brick Siege, 2026-08-21),
+  which is what pinned BAND_ROWS at 48 and the bounce pair at 61,440 B of
+  internal SRAM. The front buffer is immutable while it ships (that is what
+  the ping-pong is for), so the bands are tear-free by construction, exactly
+  as before -- only WHERE the memcpys run moved.
 
 WHAT IS NOT PORTED, deliberately: the #190 flush-bounce scale fold, which
   SYNTHESISES each band for a small-canvas game instead of copying the root
@@ -117,14 +116,6 @@ ASYNC_FLUSH = True
 # be attributed to the flush or to the copy by flipping one at a time.
 LAYER_COPY_ASYNC = True
 
-# Soft-timer pump period. 2 ms is the fork's shipped value, arrived at on
-# hardware: a band is ~3 ms of transfer, so a 2 ms feeder stays ahead of the two
-# buffered slots. Timer 3 of the S3's four (2 groups x 2); nothing else in this
-# image takes one. 0 disables the timer and leaves the draw-verb poke + drain.
-PUMP_TIMER_MS = 2
-PUMP_TIMER_ID = 3
-
-
 class TDeckCompositor:
     """RGB565 framebuffer(s) in PSRAM, pushed to the ST7789 by moy_lcd."""
 
@@ -158,27 +149,11 @@ class TDeckCompositor:
             and hasattr(moy_lcd, "kick")
         # `bounce_flush` is what device_diag._diag_pump gates the PUMP line on.
         self.bounce_flush = self._async
-        self._pump_timer = None
-        if self._async:
-            # The C function itself, not a bound method: DeviceCanvas stores this
-            # and calls it after every big native op, and moy_gfx's draw context
-            # mp_call_function_0's it from inside C. One call, no Python frame.
-            self.pump_if_pending = moy_lcd.pump
-            if PUMP_TIMER_MS:
-                try:
-                    from machine import Timer
-                    self._pump_timer = Timer(PUMP_TIMER_ID)
-                    # The callback is handed the timer object; moy_lcd.pump takes
-                    # 0 or 1 args precisely so it can be wired here directly.
-                    self._pump_timer.init(period=PUMP_TIMER_MS,
-                                          mode=Timer.PERIODIC,
-                                          callback=moy_lcd.pump)
-                except Exception as exc:  # noqa: BLE001
-                    # Not fatal, and worth saying out loud: the flush still works,
-                    # it just loses the feeder that covers a cart's Python logic.
-                    print("Moybyte panel: pump timer unavailable "
-                          "(draw-poke + drain only):", exc)
-                    self._pump_timer = None
+        # No pump timer and no pump_if_pending here -- moy_lcd's CORE-0 FEEDER
+        # owns the whole band feed (see the module docstring). DeviceCanvas
+        # getattrs `pump_if_pending`, finds nothing, and skips its draw pokes;
+        # moy_gfx's set_pump is never armed. The machine.Timer this replaced
+        # (id 3, 2 ms) is free again for whoever needs one.
 
     # -- the contract --------------------------------------------------------
 
@@ -211,7 +186,7 @@ class TDeckCompositor:
         #    which the drain above just made safe to overwrite.
         front = self._back
         self._swap()
-        # 3. Queue the first bands and return.
+        # 3. Hand the frame to moy_lcd's core-0 feeder and return.
         lcd.kick(front)
 
     def _swap(self):
@@ -232,12 +207,30 @@ class TDeckCompositor:
         """
         self._lcd.drain()
 
+    def sd_bracket(self, on):
+        """Bracket an SD session: while on, every flush waits its frame out.
+
+        The core-0 feeder made "no panel flush may overlap an SD session" a
+        rule the VM-side sync() alone can no longer keep -- a paint DURING a
+        session (boot's per-cart progress, a commit's toast) hands bands to
+        core 0 while the VM sits inside an sdspi transaction on the same SPI
+        host, which was measured 2026-08-21 as a Cache/MMU panic within
+        seconds of cart loading. moy_lcd.sd_guard serializes exactly those
+        frames (they still ship through the feeder; the kick just waits).
+        `run_desktop`'s session wrappers call this around every session.
+        """
+        g = getattr(self._lcd, "sd_guard", None)
+        if g is not None:
+            g(bool(on))
+
     # -- diagnostics (#66 lever 4) -------------------------------------------
 
     @property
     def pump_last_us(self):
-        """CPU us spent feeding bands during the last shipped frame (HITCH's
-        `pump=`). A property because device_diag reads it as an attribute."""
+        """us spent feeding bands during the last shipped frame (HITCH's
+        `pump=`). Since the core-0 feeder this is CORE-0 CPU, not billed to
+        the frame; it stays reported because a zero means the feeder never
+        ran. A property because device_diag reads it as an attribute."""
         return self._lcd.pump_stats()[0] if self._async else 0
 
     def bounce_stats(self):
@@ -245,8 +238,9 @@ class TDeckCompositor:
 
         idle_us is the one to read: it is time the SPI sat starved because a band
         was fed only after the previous one had already finished. ~0 means the
-        feeders are keeping up and the remaining flush cost is real transfer
-        time; a big number means the pump period or the slot count is the wall.
+        feeder is keeping up and the remaining flush cost is real transfer
+        time; a big number means the feeder is being preempted (a core-0 radio
+        burst) or the slot count is the wall. pump_us runs on core 0 now.
         """
         if not self._async:
             return (0, 0, 0, -1, 0)
