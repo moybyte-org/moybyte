@@ -86,14 +86,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 7            # v7: Three-board release: the Guition JC3248W535 joins the T-Deck and the P4. The UI refactor lands (one widget vocabulary, apps as data, user-installable apps, a pickable skin, shell pixel goldens). Crisp pixels on the P4. Nine libmoy verbs vendored into the raster. Fixes: the on-glass harness uploads at the size each board declares; an installed OTA no longer hoards its payload.
+FIRMWARE_VERSION = 8            # v8: Hardening: every async lever now has a meter that reads. The S3 fold counter had printed 0 on every board since the fold shipped, and the P4's overlap had none at all. Fixes: the shared flush engine no longer frees bounce slots the done-ISR can still reach; an interrupted WiFi-store write no longer destroys every other saved network; the P4 stops taking the non-blocking fence for a game composite; the board accepts all six connections a browser opens, not four. Perf: the console stops decoding a 32,768-pixel sheet per cart at boot (browser first paint 431 -> 152ms, and the same wiring runs on every board). Build: a board's sdkconfig facts are stated once and the build derives them, which caught an advertising-buffer setting IDF had been silently refusing on both S3 boards.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.10"
+FIRMWARE_NAME = "0.11"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
