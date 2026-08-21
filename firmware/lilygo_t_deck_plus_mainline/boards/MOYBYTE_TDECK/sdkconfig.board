@@ -162,3 +162,79 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- TCP throughput: Espressif's "Iperf rank" set, which is ATOMIC ---------
+# Measured on this board 2026-08-20, pinned to ONE access point with power save
+# interleaved: 400 -> 2121 KB/s, a 5.3x, and the 541KB wasm bundle goes from
+# ~1.35s to ~0.26s. Pinning the AP is not a detail: the two saved networks here
+# differ 2.6x on identical firmware, and an unpinned A/B produced three
+# confident wrong answers before that was noticed.
+#
+# THESE MOVE TOGETHER OR NOT AT ALL. Raising the two lwIP buffers alone
+# (5760 -> 32768) with the WiFi driver left at stock measured 20x SLOWER than
+# stock on a direct board-to-board link (1100-1240 -> 42-72 KB/s): a big TCP
+# window puts ~22 segments in flight against an 802.11n reorder window
+# (RX_BA_WIN) still sized 6, and everything past it is dropped and
+# retransmitted. Half the set is far worse than none of it.
+#
+# STATIC_RX_BUFFER_NUM is 16 and not Espressif's 24 because 16 MEASURED FASTER
+# (2121 vs 2040) while leaving 13KB more internal SRAM -- 16 is past the knee.
+# It is the one buffer here that must be DMA-capable internal SRAM, the same
+# pool a running cart needs ~31KB of, so it is the knob to watch.
+# TRY_ALLOCATE_WIFI_LWIP is load-bearing: it moves the lwIP buffers into PSRAM,
+# which is why the whole set costs no internal SRAM at all (49,304B free while
+# serving vs stock's 46,424; 18,112B with a cart running vs stock's ~17,600).
+#
+# THIS BOARD ONLY, and the Guition is the proof. Flashed with this same set
+# (2026-08-20) its WiFi would not initialise at all -- scan() returned nothing
+# three times and connect() raised OSError: Wifi Internal State Error --
+# because its main internal region had 268 BYTES free against this board's
+# 49,432. Its moy_axs panel pays the same ~61KB bounce cost on a bigger panel,
+# so it had nothing to give. It stays stock until it has headroom; do not copy
+# this block there without measuring idf_heap_info FIRST. The P4 is unaffected
+# by construction -- its WiFi is ESP-Hosted on a C6 over SDIO, so ESP_WIFI_* on
+# the host configures a driver that is not there, and its lwIP window is
+# already 65534.
+#
+# NOT enabled, deliberately: ESP_WIFI_IRAM_OPT / RX_IRAM_OPT / EXTRA_IRAM_OPT,
+# which Espressif's iperf profile also sets. On the S3 IRAM aliases DRAM, so
+# those three would cost ~32KB of the very internal SRAM this set is careful
+# not to spend.
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_RX_BA_WIN=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+
+# --- BLE right-sized for ONE keyboard --------------------------------------
+# This board does not activate BLE today (its keyboard is the on-board C3 over
+# I2C, and ble_keyboard.py is not staged here), so the stack sits linked but
+# idle. That is exactly why this is worth setting NOW rather than when someone
+# first pairs a keyboard: measured 2026-08-21 on this board, calling
+# bluetooth.BLE().active(True) with WiFi up takes the main internal region from
+# 49,432 bytes free to 756. A cart needs ~31KB, so cart + BLE + WiFi would fail
+# outright -- the capability is currently safe only because nobody uses it.
+#
+# The stack ships at MicroPython's generic defaults: four simultaneous
+# connections, six radio activities, 24x255B of ACL buffers. A console that
+# talks to one HID keyboard needs none of that. Same block as the Guition's,
+# where it took an ACTIVE, SCANNING stack from 98,700 bytes down to ~50,400 and
+# was the difference between "WiFi cannot initialise" and a working web host.
+#
+# Roles are deliberately NOT trimmed: dropping PERIPHERAL/BROADCASTER is likely
+# the biggest remaining win, but MicroPython's modbluetooth compiles its gatts_*
+# half unconditionally, so that is a build risk to test on its own.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=2
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_ACL_BUF_COUNT=8
+CONFIG_BT_NIMBLE_HCI_EVT_HI_BUF_COUNT=10
+CONFIG_BT_NIMBLE_HCI_EVT_LO_BUF_COUNT=4
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
+CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20

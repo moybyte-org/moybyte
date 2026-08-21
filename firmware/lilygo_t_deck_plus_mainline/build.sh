@@ -186,6 +186,7 @@ moybyte_partition_and_sdkconfig_guard \
   "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig" \
   'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"' \
   'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y' \
+  'CONFIG_ESP_WIFI_RX_BA_WIN=32' \
   'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
   'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
   'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y' \

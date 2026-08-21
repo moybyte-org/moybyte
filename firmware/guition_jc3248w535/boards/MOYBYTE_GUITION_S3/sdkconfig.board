@@ -85,3 +85,60 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- BLE right-sized for ONE keyboard (EXPERIMENT 2026-08-20) --------------
+# This board activates BLE at boot (it is the game-exit path, #202) and the
+# stack ships at MicroPython's generic defaults: four simultaneous connections,
+# six radio activities, 24x255B of ACL buffers, 100 advertising-report buffers.
+# A console that talks to exactly one HID keyboard needs none of that.
+#
+# Why it matters beyond tidiness: measured 2026-08-20, an ACTIVE BLE stack
+# leaves this board FOUR BYTES free in the 227KB internal region (98,704 free
+# with BLE off), so WiFi cannot initialise at all -- scan() returns nothing and
+# connect() raises OSError: Wifi Internal State Error. That is true on STOCK
+# firmware; this board's WiFi has never worked. WiFi needs ~50KB (the T-Deck
+# goes 96.7KB -> 46.4KB when it associates), so the question is whether BLE can
+# be made to fit in ~48KB.
+#
+# Roles are deliberately NOT trimmed here: dropping PERIPHERAL/BROADCASTER
+# would likely be the biggest single win, but MicroPython's modbluetooth
+# compiles its gatts_* half unconditionally, so that is a build risk to test
+# separately rather than fold into a measurement.
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_MAX_BONDS=2
+CONFIG_BT_NIMBLE_MAX_CCCDS=4
+CONFIG_BT_NIMBLE_ACL_BUF_COUNT=8
+CONFIG_BT_NIMBLE_HCI_EVT_HI_BUF_COUNT=10
+CONFIG_BT_NIMBLE_HCI_EVT_LO_BUF_COUNT=4
+CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
+CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20
+
+# --- TCP throughput: Espressif's "Iperf rank" set, which is ATOMIC ---------
+# Measured on the T-Deck (same SoC) 2026-08-20, pinned to one AP: 400 -> 2121
+# KB/s, a 5.3x, and the 541KB wasm bundle goes from ~1.35s to ~0.26s.
+#
+# THESE MOVE TOGETHER OR NOT AT ALL. Raising the two lwIP buffers alone, with
+# the WiFi driver left at stock, measured 20x SLOWER than stock on a direct
+# board-to-board link -- a big window puts ~22 segments in flight against an
+# 802.11n reorder window (RX_BA_WIN) still sized 6.
+#
+# The set is RAM-POSITIVE, which is why it belongs on this tight board at all:
+# TRY_ALLOCATE_WIFI_LWIP moves the lwIP buffers into PSRAM (~12.7KB saved),
+# more than paying for STATIC_RX 10 -> 16 (~9.6KB). On the T-Deck the net was
+# +2,880 bytes free while serving (46,424 stock -> 49,304 tuned).
+#
+# It did break this board once, on 2026-08-20, before the BLE block above
+# existed: with BLE at stock defaults there were 4 bytes free and WiFi could
+# not initialise, so a +3KB change could not rescue it. BLE was the problem,
+# not this.
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_RX_BA_WIN=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
