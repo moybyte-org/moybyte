@@ -35,6 +35,7 @@ Usage from a test:
     staged_modules(TDECK)      # {"console.py": Path(".../runtime/console.py")}
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -380,6 +381,124 @@ def stage_native(board_dir, root=ROOT, quiet=False):
 
 
 # ---------------------------------------------------------------------------
+# The board's sdkconfig fragment, read as DATA.
+#
+# `boards/<BOARD>/sdkconfig.board` is the ONE store of every ESP-IDF setting
+# this repo decided for a board, prose included; the build's stale-sdkconfig
+# guard derives its option list from here rather than restating a subset. It
+# matters that there is no second copy: IDF only generates a build's sdkconfig
+# when the file is ABSENT, so a setting the guard does not know about silently
+# does nothing on a warm build dir.
+# ---------------------------------------------------------------------------
+
+
+_SETTING = re.compile(r"^(CONFIG_[A-Za-z0-9_]+)=(.*)$")
+
+
+class Setting:
+    """One decided ESP-IDF option: the assignment, and the prose beside it.
+
+    `why` is the comment block above the setting in the fragment, shared by
+    every option in its block; the build prints it when the option does not
+    take.
+    """
+
+    __slots__ = ("option", "value", "why", "line")
+
+    def __init__(self, option, value, why, line):
+        self.option, self.value, self.why, self.line = option, value, why, line
+
+    @property
+    def assignment(self):
+        """The literal line ESP-IDF writes into a generated sdkconfig when the
+        setting takes -- what the guard greps for."""
+        return "%s=%s" % (self.option, self.value)
+
+    @property
+    def disables(self):
+        """`CONFIG_X=` -- a bool/choice member turned OFF.
+
+        NOT checkable in a generated sdkconfig: an unset bool renders as
+        `# CONFIG_X is not set`, but a choice member whose choice is hidden is
+        omitted ENTIRELY, so a grep for either form false-alarms. Disables ride
+        the fragment stamp instead."""
+        return self.value == ""
+
+    def __repr__(self):
+        return "Setting(%s=%s @%d)" % (self.option, self.value, self.line)
+
+
+def sdkconfig_path(board_dir):
+    """The fragment of `board_dir`, which may be the firmware dir or the board
+    def dir inside it (build.sh has both; callers should not have to care)."""
+    board_dir = Path(board_dir)
+    direct = board_dir / "sdkconfig.board"
+    if direct.exists():
+        return direct
+    found = sorted(board_dir.glob("boards/*/sdkconfig.board"))
+    if len(found) != 1:
+        raise ValueError(
+            "%s: expected exactly one boards/*/sdkconfig.board, found %d"
+            % (board_dir, len(found)))
+    return found[0]
+
+
+def sdkconfig_settings(board_dir):
+    """The board's decided settings, in file order, LAST ASSIGNMENT WINS.
+
+    Last-wins is not a nicety: both S3 fragments set FLASHFREQ_80M=y up top as
+    the board fact and turn it off again in the 120MHz MSPI block, so a guard
+    reading the first would demand a line the build must not have.
+    """
+    path = sdkconfig_path(board_dir)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    out = {}
+    for i, raw in enumerate(lines):
+        m = _SETTING.match(raw.strip())
+        if not m:
+            continue
+        value = m.group(2).strip()
+        if value[:1] not in ('"', "'") and "#" in value:
+            value = value.split("#", 1)[0].strip()
+        out[m.group(1)] = Setting(m.group(1), value, _why_above(lines, i), i + 1)
+    return list(out.values())
+
+
+def _why_above(lines, i):
+    """The comment block above the setting at `lines[i]`, walking up over the
+    other settings in its group (one block explains the whole block)."""
+    j = i - 1
+    while j >= 0 and _SETTING.match(lines[j].strip()):
+        j -= 1
+    end = j
+    while j >= 0 and lines[j].lstrip().startswith("#"):
+        j -= 1
+    if j == end:
+        return ""
+    block = []
+    for k in range(j + 1, end + 1):
+        text = lines[k].lstrip()[1:]            # drop the '#'
+        block.append((text[1:] if text[:1] == " " else text).rstrip())
+    return "\n".join(block).strip()
+
+
+def sdkconfig_required(board_dir):
+    """The `CONFIG_X=value` lines a generated sdkconfig must carry -- the list
+    build.sh used to spell out by hand."""
+    return [s for s in sdkconfig_settings(board_dir) if not s.disables]
+
+
+def sdkconfig_get(board_dir, option):
+    """One setting's value, unquoted. The build reads the partition-table CSV
+    name this way -- CONFIG_PARTITION_TABLE_CUSTOM_FILENAME has to name it
+    anyway, so nothing else should."""
+    for s in sdkconfig_settings(board_dir):
+        if s.option == option:
+            return s.value.strip('"')
+    raise KeyError("%s sets no %s" % (sdkconfig_path(board_dir), option))
+
+
+# ---------------------------------------------------------------------------
 # Staging (what build.sh calls).
 # ---------------------------------------------------------------------------
 
@@ -466,6 +585,22 @@ def main(argv):
         for name in native_modules(argv[2]):
             print(name)
         return 0
+    if len(argv) >= 3 and argv[1] == "sdkconfig-required":
+        # The stale-sdkconfig guard's list, derived from the board's fragment.
+        for s in sdkconfig_required(argv[2]):
+            print(s.assignment)
+        return 0
+    if len(argv) >= 4 and argv[1] == "sdkconfig-get":
+        print(sdkconfig_get(argv[2], argv[3]))
+        return 0
+    if len(argv) >= 4 and argv[1] == "sdkconfig-why":
+        for s in sdkconfig_settings(argv[2]):
+            if s.option == argv[3]:
+                print("%s:%d" % (sdkconfig_path(argv[2]), s.line))
+                if s.why:
+                    print(s.why)
+                return 0
+        return 1
     if len(argv) >= 3 and argv[1] == "get":
         # `get <board_dir> a.b.c` -- one scalar, for a build script.
         cfg = load(argv[2])
@@ -477,6 +612,8 @@ def main(argv):
     print(__doc__.strip().splitlines()[0], file=sys.stderr)
     print("usage: board_config.py stage|list <board_dir>", file=sys.stderr)
     print("       board_config.py get <board_dir> <dotted.key>", file=sys.stderr)
+    print("       board_config.py sdkconfig-required|sdkconfig-get|"
+          "sdkconfig-why <board_dir> [OPTION]", file=sys.stderr)
     return 2
 
 

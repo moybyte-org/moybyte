@@ -1014,11 +1014,11 @@ class LauncherHomeLayer:
         Picotron model (wallpaper shows through the chrome). All on the SYSTEM canvas,
         reflowed to its size + font scale (#39).
 
-        The bottom in-cart tool dock is NOT drawn here (#46): on the launcher the
-        code/draw/map/run slots have no cart to act on, so the dock was a dead row.
-        It returns the moment a cart is open (the in-cart top-bar buttons / Settings'
-        dock). Settings stays reachable via the gear button in the status strip; the
-        cart grid reclaims the freed bottom band (Layout.grid_bottom)."""
+        There is no bottom tool dock: the launcher dropped it in #46 (its
+        code/draw/map/run slots had no cart to act on, so it was a dead row) and it
+        was deleted outright on 2026-08-21 -- see bar_layer.py. Settings is reached
+        via the gear in the status strip; the cart grid keeps the freed bottom band
+        (Layout.grid_bottom)."""
         ws = self.ws
         cv = ws.sys_canvas
         self._paint_continuity()              # foreign paints void the buffers
@@ -1211,8 +1211,8 @@ class LauncherHomeLayer:
         # on RELEASE (Launcher.pointer_frame), so drag-to-scroll on the grid can
         # never launch a cart. Trackball hover still previews the icon under it
         # (pointer-up only -- a touch drag must not re-select under the finger).
-        # The bottom in-cart dock is no longer drawn on the launcher (#46), so it's
-        # not hit-tested here; Settings is reached via the gear in the status strip.
+        # There is no bottom dock to hit-test (#46 dropped it here, 2026-08-21
+        # deleted it); Settings is reached via the gear in the status strip.
         ws = self.ws
         down = ws.pointer.down
         if click:

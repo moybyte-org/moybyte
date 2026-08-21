@@ -173,3 +173,40 @@ def test_button_names_pinned_to_the_shared_table():
     .BUTTON_NAMES) -- the launcher-nav + gameplay logical names."""
     assert set(web_input.BUTTON_NAMES) == {"left", "right", "up", "down", "a", "b",
                                           "run", "home"}
+
+
+def test_button_names_is_the_host_input_state_table_itself():
+    """Not a second copy of it. A ninth OS button added to InputState.BUTTONS
+    used to be dropped silently by the browser: apply_events gates `hold` events
+    on BUTTON_NAMES membership, so an unlisted name is discarded as junk with no
+    error anywhere."""
+    from runtime.input import InputState
+    assert web_input.BUTTON_NAMES is InputState.BUTTONS
+
+
+def test_a_new_host_button_reaches_the_browser_decoder(monkeypatch):
+    from runtime.input import InputState
+    monkeypatch.setattr(InputState, "BUTTONS", InputState.BUTTONS + ("menu",))
+    import importlib
+    importlib.reload(web_input)
+    try:
+        held = {}
+
+        class Input:
+            def set_button(self, name, down):
+                held[name] = down
+
+        web_input.apply_events([{"type": "hold", "name": "menu", "down": True}],
+                               Input(), object())
+        assert held.get("menu") is True
+    finally:
+        monkeypatch.undo()             # before the reload, or the 9th name sticks
+        importlib.reload(web_input)
+
+
+def test_the_board_input_state_is_deliberately_not_this_table():
+    """The device tier's BUTTONS is 15 names in libmoy's enum order and asserting
+    the two tiers equal would be WRONG -- tests/test_moy_button_order.py is the
+    file that explains why. This pins that web_input took the HOST one."""
+    assert len(web_input.BUTTON_NAMES) == 8
+    assert web_input.BUTTON_NAMES[:4] == ("left", "right", "up", "down")

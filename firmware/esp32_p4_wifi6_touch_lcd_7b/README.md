@@ -197,9 +197,13 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   desktop working set (Brick Siege busy 15.5→8.0ms on the flip alone); 512KB
   force-carves so much internal SRAM that MicroPython's internal/DMA pool
   reservation fails at boot (`main_task: Could not reserve internal/DMA pool
-  (error 0x101)` → abort → reboot loop). NB `build.sh`'s stale-sdkconfig guard
-  greps for the 256KB line — a new `sdkconfig.board` option MUST be added to
-  that grep list or a warm build ships a stale image (this bit once).
+  (error 0x101)` → abort → reboot loop). A new `sdkconfig.board` option used to
+  need adding by hand to `build.sh`'s guard list or a warm build shipped a
+  stale image (this bit once, and again on the S3 boards' WiFi work); since
+  2026-08-21 `moybyte_sdkconfig_guard` derives what it checks from
+  `sdkconfig.board` itself, so writing the option down here is the whole
+  step — and it also reports a setting ESP-IDF's Kconfig REFUSED, which is
+  how the S3 boards' out-of-range BLE knob was found.
 - **The SD slot is powered from the P4's internal LDO channel 4** — stock
   MicroPython never enables it, so `machine.SDCard` times out card-or-no-card.
   Until the board-init owns this, the pure-Python poke (verified):

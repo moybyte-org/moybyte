@@ -732,14 +732,14 @@ def test_keyboard_goes_to_focused_window(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_window_bars_suppress_os_chrome(tmp_path):
-    """Inside a window the zoned bar drops its OS right zone and the dock never
-    draws -- the desktop's full-width bar is the one taskbar (owner feedback)."""
+    """Inside a window the zoned bar drops its OS right zone -- the desktop's
+    full-width bar is the one taskbar (owner feedback). (It also used to prove the
+    bottom dock never drew here; the dock was deleted 2026-08-21.)"""
     ws = _ws(tmp_path)
     assert ws.windowed_chrome
     bar = ws.bar_layer
     assert bar._in_window("menu") and bar._in_window("settings")
     assert not bar._in_window("home")          # the desktop bar keeps OS chrome
-    assert bar._dock_slot_at(10, ws.sys_canvas.h - 4) is None   # dock is gone
 
 
 def test_title_strip_buttons_min_max_close(tmp_path):

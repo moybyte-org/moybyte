@@ -252,6 +252,18 @@ the T-Deck's wiring and nothing here would construct it -- device_audio.py is
 not in this board's device allowlist either. Flip both together when #82
 lands."""
 
+[[native.shared.deny]]
+module = "moy_flush"
+why = """
+There is no flush on this board to feed. moy_flush is the banded-flush engine
+the two S3 boards share (core-0 feeder, two internal-SRAM bounce slots, the
+kick/drain handoff) -- it exists because an SPI panel has to PUSH every frame.
+The P4's panel is MIPI-DSI in DPI mode: the peripheral scans a PSRAM
+framebuffer continuously, so there is no per-frame transfer, no band, no
+bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
+DMA-SRAM allocation into the image for code nothing calls. A DSI board that
+ever needs a push path is a new decision, not a flip of this one."""
+
 # ---------------------------------------------------------------------------
 
 [modules.device]

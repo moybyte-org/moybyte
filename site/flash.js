@@ -36,7 +36,40 @@ class Card {
     this.progress = el.querySelector(".prog");
     this.log = el.querySelector(".log");
     this.state = el.querySelector(".state");
+    // The build picker (site/build.py VARIANTS). A card with one build has no
+    // <select>, so `builds` falls back to the board's own default record and
+    // everything below reads the same shape either way.
+    this.picker = el.querySelector("select.variant");
+    this.file = el.querySelector(".older input[type=file]");
+    this.builds = (this.board && this.board.builds && this.board.builds.length)
+      ? this.board.builds : [this.board];
     if (this.go) this.go.addEventListener("click", () => this.flash());
+    if (this.picker) this.picker.addEventListener("change", () => this.showBuild());
+    if (this.file) this.file.addEventListener("change", () => this.showBuild());
+  }
+
+  // Which build the buttons act on: the picked variant, or a file the visitor
+  // downloaded from a release tag (older versions are not baked into the site
+  // -- see VARIANTS -- so handing the file back is how they get flashed).
+  build() {
+    const want = this.picker ? this.picker.value : null;
+    return this.builds.find((b) => b && b.variant === want) || this.builds[0];
+  }
+
+  chosenFile() {
+    return this.file && this.file.files && this.file.files[0];
+  }
+
+  // Show the selected build's provenance and download link, hide the rest.
+  // Toggling rather than rewriting: those lines carry links, and generating
+  // them here would mean building markup in JS.
+  showBuild() {
+    const want = this.build().variant;
+    for (const el of this.el.querySelectorAll("[data-variant]"))
+      el.hidden = el.dataset.variant !== want;
+    const file = this.chosenFile();
+    if (this.go)
+      this.go.textContent = file ? "Flash " + file.name : "Flash this board";
   }
 
   say(line) {
@@ -110,16 +143,34 @@ class Card {
   // over HTTPS makes corruption unlikely, but a half-cached 4 MB file is
   // exactly the thing you want to catch BEFORE it is on the board.
   async image() {
-    const res = await fetch(this.board.url, { cache: "no-store" });
+    const b = this.build();
+    // A file the visitor downloaded from a release tag. There is no expected
+    // size or hash for it -- the site was not built with it -- so it is checked
+    // the two ways that still work: it must LOOK like an ESP32 app image, and
+    // the chip check after connect still refuses another board's build.
+    const picked = this.chosenFile();
+    if (picked) {
+      const buf = await picked.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      if (!bytes.length) throw new Error("that file is empty");
+      if (bytes[0] !== 0xe9)
+        throw new Error("that file does not start like an ESP32 image (0x"
+                        + bytes[0].toString(16) + ") — pick the board's .bin "
+                        + "from a release, not a .zip or a manifest");
+      this.say("flashing " + picked.name + " from your machine ("
+               + bytes.length + " bytes, not checksummed by this page)");
+      return bytes;
+    }
+    const res = await fetch(b.url, { cache: "no-store" });
     if (!res.ok) throw new Error("could not download the image (HTTP " + res.status + ")");
     const buf = await res.arrayBuffer();
-    if (buf.byteLength !== this.board.size)
-      throw new Error("the image is " + buf.byteLength + " bytes, expected " + this.board.size);
+    if (buf.byteLength !== b.size)
+      throw new Error("the image is " + buf.byteLength + " bytes, expected " + b.size);
     if (crypto.subtle) {
       const digest = await crypto.subtle.digest("SHA-256", buf);
       const hex = [...new Uint8Array(digest)]
-        .map((b) => b.toString(16).padStart(2, "0")).join("");
-      if (hex !== this.board.sha256) throw new Error("the image failed its checksum");
+        .map((x) => x.toString(16).padStart(2, "0")).join("");
+      if (hex !== b.sha256) throw new Error("the image failed its checksum");
       this.say("image verified: sha256 " + hex.slice(0, 16) + "…");
     }
     return new Uint8Array(buf);
@@ -127,7 +178,7 @@ class Card {
 
   async flash() {
     if (busy) return;
-    const b = this.board;
+    const b = this.build();
     let port, transport, loader;
     try {
       // Must be the first thing after the click: requestPort() needs the user

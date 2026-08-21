@@ -45,7 +45,11 @@ import importlib.util
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import board_config                                              # noqa: E402
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB_RUNNER = os.path.join(ROOT, "firmware", "web_runner")
 TDECK_MODULES = os.path.join(
     ROOT, "device")
 DEFAULT_DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
@@ -183,6 +187,40 @@ def render(assets, dist):
     return "\n".join(L) + "\n"
 
 
+def watched_sources(root=ROOT):
+    """Every source the bundle is built FROM, relative to the repo root.
+
+    DERIVED from the web runner's own `board.toml` staging declaration, never
+    globbed. A hand-written `runtime/*.py` glob cannot see `device/`, and that
+    tree holds `device_canvas.py` -- the class the browser RASTERIZES with since
+    moycore stage 4. The single most consequential file in the bundle was the
+    one file the staleness check could not look at.
+
+    Plus the runner's own authored modules and page (`web_boot.py`,
+    `web_canvas.py`, the driver html/js), which build.sh copies by name and no
+    board file describes -- its header says so.
+    """
+    rels = set()
+    try:
+        staged = board_config.staged_modules(WEB_RUNNER, root=ROOT)
+        pkgs = board_config.staged_packages(WEB_RUNNER, root=ROOT)
+    except Exception:  # a broken board file is a build failure, not this warning
+        staged, pkgs = {}, {}
+    for src in staged.values():
+        rels.add(os.path.relpath(str(src), ROOT))
+    for pkg in pkgs.values():
+        for base, _dirs, names in os.walk(str(pkg)):
+            for n in names:
+                if n.endswith(".py"):
+                    rels.add(os.path.relpath(os.path.join(base, n), ROOT))
+    web = os.path.join("firmware", "web_runner")
+    d = os.path.join(root, web)
+    for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if name.endswith((".py", ".js", ".html")):
+            rels.add(os.path.join(web, name))
+    return sorted(rels)
+
+
 def stale_sources(assets, root=ROOT, limit=3):
     """Console sources NEWER than the bundle about to be baked in.
 
@@ -200,16 +238,15 @@ def stale_sources(assets, root=ROOT, limit=3):
         return []
     oldest = min(os.path.getmtime(a[1]) for a in assets)
     out = []
-    for sub, exts in (("runtime", (".py",)),
-                      (os.path.join("firmware", "web_runner"),
-                       (".py", ".js", ".html"))):
-        d = os.path.join(root, sub)
-        for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
-            if name.endswith(exts) and os.path.getmtime(
-                    os.path.join(d, name)) > oldest:
-                out.append(os.path.join(sub, name))
-                if len(out) >= limit:
-                    return out
+    for rel in watched_sources(root):
+        try:
+            newer = os.path.getmtime(os.path.join(root, rel)) > oldest
+        except OSError:
+            continue
+        if newer:
+            out.append(rel)
+            if len(out) >= limit:
+                break
     return out
 
 

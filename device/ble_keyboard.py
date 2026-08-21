@@ -246,6 +246,14 @@ class BleHidKeyboard:
     def __init__(self, input_state, ble=None, store_path="/moy/ble_keyboard.json",
                  auto_start=True):
         self.input = input_state
+        # This keyboard is ONE SOURCE among however many the board has (#26):
+        # on the T-Deck it shares the console with the physical C3 keyboard,
+        # which used to assert full authority over the shared InputState every
+        # poll and erase every BLE press within a frame. Writing a named
+        # source is what makes both keyboards work at once. (`getattr` because
+        # a host test fake may still be the flat pre-source shape.)
+        _src = getattr(input_state, "source", None)
+        self.src = _src("ble") if _src is not None else input_state
         self.store_path = store_path
         self.ble = ble
         self.available = False
@@ -565,7 +573,9 @@ class BleHidKeyboard:
         self._pending_modifiers = 0
         self._pending_usages.clear()
 
-        self.input.release_all()
+        # PER-SOURCE "I hold nothing", not the shared "everybody let go".
+        src = self.src
+        src.release_all()
         text_mode = bool(getattr(self.input, "text_mode", False))
         buttons = set()
         for usage in usages:
@@ -578,7 +588,7 @@ class BleHidKeyboard:
                     buttons.add(button)
         for button in buttons:
             try:
-                self.input.set_button(button, True)
+                src.set_button(button, True)
             except ValueError:
                 pass
 
@@ -589,7 +599,7 @@ class BleHidKeyboard:
             key_out = usage_to_keycode(usage, modifiers, self._caps)
             if key_out:
                 break
-        self.input.last_key = key_out
+        src.last_key = key_out
 
         if self._trace_on:
             try:
@@ -875,8 +885,8 @@ class BleHidKeyboard:
         self._pending_usages.clear()
         self._pending_modifiers = 0
         try:
-            self.input.release_all()
-            self.input.last_key = 0
+            self.src.release_all()      # this keyboard's buttons only
+            self.src.last_key = 0
         except Exception:
             pass
 

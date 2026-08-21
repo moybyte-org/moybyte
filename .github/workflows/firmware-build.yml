@@ -25,10 +25,25 @@ name: Firmware build
 on:
   push:
     branches: [master, dev]
+    # Every tree an image is BUILT FROM. The three obvious ones were here from
+    # the start and the rest were not, which is a silent failure: a change to
+    # device/ or native/ is firmware -- every board freezes device/*.py and
+    # compiles native/ into its image -- so it produced no build at all, and the
+    # beta channel simply never received it. Caught 2026-08-20, when the OTA
+    # payload fix (device/moy_ota.py) pushed to dev and nothing was built; it
+    # only reached an image because the release merge dragged firmware paths in
+    # with it. A path missing here fails by publishing NOTHING, which is the
+    # kind of nothing nobody notices.
     paths:
       - "firmware/**"
       - "runtime/**"
       - "system_carts/**"
+      - "device/**"           # frozen onto every board
+      - "native/**"           # the C modules compiled into every image
+      - "patches/**"          # applied to IDF/MicroPython at build time
+      - "tools/esp32_build_lib.sh"   # the shared half of all three build.sh
+      - "tools/board_config.py"      # decides what each board stages
+      - "tools/gen_web_blob.py"      # bakes the web console into the image
       - ".github/workflows/firmware-build.yml"
   workflow_dispatch:
     inputs:
@@ -71,7 +86,6 @@ jobs:
       WANT: ${{ github.event.inputs.board || 'both' }}
       IDF_CCACHE_ENABLE: "1"
       MOYBYTE_BUILD_JOBS: "4"
-      MOYBYTE_SKIP_VFS_BOOT: "1"
       # The image's baked OTA identity (#53): build.sh stamps CHANNEL/VERSION/
       # LABEL into a generated _ota_build.py from this. Deriving it from the REF
       # is the whole point of the branch split -- an image built off dev must not

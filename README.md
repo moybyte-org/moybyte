@@ -268,7 +268,7 @@ Plus is a keyboard handheld; the P4 board is a 7″ desktop; the Guition is a
 Build and flash:
 
 ```bash
-MOYBYTE_SKIP_VFS_BOOT=1 make firmware-build-tdeck-mainline   # needs ESP-IDF 5.5
+make firmware-build-tdeck-mainline              # needs ESP-IDF 5.5
 make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4 && make firmware-flash-p4 PORT=/dev/ttyACM0
 ```

@@ -47,9 +47,9 @@ except ImportError:  # pragma: no cover - host fallback
 # bar_layer/settings_layer/code_layer OWN these (see their modules); imported here the
 # same way console.py imports them, so Layout/CodeLayout reflow off the same numbers.
 try:
-    from bar_layer import _STATUS_H, _DOCK_SLOTS, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.bar_layer import _STATUS_H, _DOCK_SLOTS, _BAR_ICON, _BAR_GAP, _BAR_Y
+    from runtime.bar_layer import _STATUS_H, _BAR_ICON, _BAR_GAP, _BAR_Y
 
 try:
     from settings_layer import (_SET_ROW_H, _SET_X, _SET_W, _SET_ROW_Y0,
@@ -107,16 +107,14 @@ def color(name_or_index):
 # Per-surface geometry lives with its surface (bar_layer/cards_layer/
 # settings_layer/code_layer/paint_layer/...) and is imported back at the top of
 # this file so console._X still resolves for Layout + the golden harness/tests.
-# --- Desktop shell (#28): home = wallpaper + cart icon grid + dock ----------
+# --- Desktop shell (#28): home = wallpaper + cart icon grid -----------------
 # The home screen is now a Picotron/TIC-80-style desktop: a wallpaper backdrop, a
-# grid of tappable cart icons, the unified 18px top bar (clock + wifi/batt/gear +
-# NEW/DUP/DEL management icons), and (in Settings) the bottom dock. The top bar's
-# icons are 16x16 sprites from the editable IconSheet (Stage 1); the rest of the
-# chrome uses the indexed API + petme128 font + the _glyph vocabulary, so host ==
-# device. (_STATUS_H lives in bar_layer.py, imported back at the top of this file.)
-_DOCK_Y = 218           # bottom dock strip top
-_DOCK_H = 22
-# Cart icon grid: a page of COLS x ROWS tiles between the status strip and dock.
+# grid of tappable cart icons and the unified 18px top bar (clock + wifi/batt/gear
+# + NEW/DUP/DEL management icons). The top bar's icons are 16x16 sprites from the
+# editable IconSheet (Stage 1); the rest of the chrome uses the indexed API +
+# petme128 font + the _glyph vocabulary, so host == device. (_STATUS_H lives in
+# bar_layer.py, imported back at the top of this file.)
+# Cart icon grid: a page of COLS x ROWS tiles below the status strip.
 _ICON_COLS = 4
 _ICON_ROWS = 2
 _ICON_W = 70            # tile footprint (icon box + label)
@@ -129,13 +127,19 @@ _ICON_BOX = 40          # the inner art box of a tile (the tappable icon proper)
 # Page chevrons (when more carts than one page): tap to flip pages.
 _PAGE_PREV = (2, 110, 14, 24)
 _PAGE_NEXT = (304, 110, 14, 24)
-# Bottom dock (persistent tool switcher, TIC-80 style): one tap to jump between
-# home / code / draw / map / run / settings. Six evenly-spaced slots across 320px.
-# (_DOCK_SLOTS/_DOCK_GLYPH/_DOCK_LABEL live in bar_layer.py, imported back above;
-# the per-slot width/gap/geometry below stays here for Layout.)
-_DOCK_W = 52
-_DOCK_GAP = 1
-_DOCK_X0 = 2
+# The band the retired bottom dock used to occupy (2026-08-21: a pre-2026-07
+# six-slot tool switcher, see bar_layer.py) is now the Settings panel's bottom
+# inset: 22px of dock + its 2px gap. The panel KEEPS that spacing rather than
+# reclaiming it, deliberately, for two reasons. (1) Settings is an inset DIALOG
+# over the wallpaper, so 24*fs at the bottom simply reads against the 20*fs at the
+# top -- removing the dock moved only the dock's own pixels, and not one row of the
+# panel. (2) The `_base` branch below is frozen VERBATIM at 320x240/fs1 by
+# contract, so it could not follow a reclaim; growing the panel on the responsive
+# tiers alone would leave the T-Deck's Settings proportioned differently from every
+# other tier's for no reason but that one branch is a literal. (The launcher grid
+# is the other half of the story: it reclaimed its share back in #46, when the
+# launcher stopped drawing the dock, and still runs to grid_bottom.)
+_PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
 # (_CODE_AREA is re-exported from code_layer -- test_responsive_editors pins
 # lay.code_area() against it.)
 # Trackball cursor sensitivity (#2). _CURSOR_BASE is the per-pulse step; the
@@ -155,7 +159,7 @@ _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 
 class Layout:
     """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,
-    page chevrons, management buttons, bottom dock, and Settings rows derived from
+    page chevrons, management buttons, and Settings rows derived from
     the SYSTEM canvas size (w, h) + the system font scale (1/2/3) -- instead of the
     hand-placed 320x240 constants. The desktop reflows to fill a larger panel and
     the chrome scales with the font.
@@ -178,33 +182,21 @@ class Layout:
         self.font_w = _FONT_W * fs
         self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
 
-        # -- status strip + dock (heights/positions scale with the font) --------
+        # -- status strip (height/position scales with the font) ----------------
         self.status_h = _STATUS_H * fs
-        self.dock_h = _DOCK_H * fs
-        self.dock_y = self.h - self.dock_h
-        n = len(_DOCK_SLOTS)
-        if self._base:
-            self.dock_w, self.dock_gap, self.dock_x0 = _DOCK_W, _DOCK_GAP, _DOCK_X0
-        else:
-            self.dock_gap = _DOCK_GAP * fs
-            # Fill the width with n evenly-spaced slots, snug to the edges.
-            self.dock_w = max(_FONT_W,
-                              (self.w - 2 * _DOCK_X0 - (n - 1) * self.dock_gap) // n)
-            span = n * self.dock_w + (n - 1) * self.dock_gap
-            self.dock_x0 = max(0, (self.w - span) // 2)
 
         # -- cart icon grid (reflows COLS x ROWS to fill the band) ---------------
-        # The launcher/home screen no longer draws the bottom dock (#46), so the cart
-        # grid reclaims the height below the status strip down to the canvas floor
-        # (grid_bottom), not just down to the dock. (Settings keeps the dock, so its
-        # panel still stops at dock_y -- that bound is unchanged.)
+        # The launcher/home screen stopped drawing the bottom dock in #46, so the
+        # cart grid reclaims the height below the status strip down to the canvas
+        # floor (grid_bottom). (The dock itself is gone entirely since 2026-08-21;
+        # the Settings panel keeps its _PANEL_FLOOR inset -- see above.)
         self.icon_w = _ICON_W * fs
         self.icon_h = _ICON_H * fs
         self.icon_gap_x = _ICON_GAP_X * fs
         self.icon_gap_y = _ICON_GAP_Y * fs
         self.icon_box = _ICON_BOX * fs
         self.icon_y0 = self.status_h + 8 * fs
-        self.grid_bottom = self.h - 4 * fs           # launcher grid floor (no dock)
+        self.grid_bottom = self.h - 4 * fs           # launcher grid floor
         self.icon_x0 = _ICON_X0 if self._base else _ICON_X0 * fs   # legacy attr
         # The Library SHELF (visual identity v1's library concept mockup) on EVERY
         # tier -- the T-Deck's 320x240 baseline included (owner call, 2026-07-13:
@@ -259,9 +251,7 @@ class Layout:
         # -- unified top bar: icon size + clusters (Stage 1) -------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
         # 18px bar -> y = _BAR_Y). Icons scale with the font (24px at fs=2, etc.) so
-        # the bar grows on a larger system canvas. status_gh stays the 12*fs glyph box
-        # the non-bar chrome (dock/settings/toasts) still uses via _glyph.
-        self.status_gh = 12 * fs                      # legacy glyph box (dock/settings)
+        # the bar grows on a larger system canvas.
         ic = _BAR_ICON * fs                           # bar icon side, scaled
         stride = ic + _BAR_GAP * fs                   # left-edge step between bar icons
         self.bar_icon = ic
@@ -327,9 +317,10 @@ class Layout:
             self.set_ach = _SET_ACH
             self.set_title_hit = _SET_TITLE_HIT
         else:
-            # The Settings panel fills the band between the status strip and dock.
+            # The Settings panel fills the band between the status strip and the
+            # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
             py0 = self.status_h + 2 * fs
-            ph = self.dock_y - py0 - 2 * fs
+            ph = self.h - _PANEL_FLOOR * fs - py0
             self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
             self.set_x = self.settings_panel[0] + 10 * fs
             self.set_w = self.settings_panel[2] - 20 * fs
@@ -341,10 +332,6 @@ class Layout:
                                   10 * self.font_w, 16 * fs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
-    def dock_slot_rect(self, k):
-        x = self.dock_x0 + k * (self.dock_w + self.dock_gap)
-        return (x, self.dock_y + 1, self.dock_w, self.dock_h - 2)
-
     def settings_row_rect(self, i):
         return (self.set_x, self.set_row_y0 + i * self.set_row_h,
                 self.set_w, self.set_row_h - 2)
@@ -490,7 +477,7 @@ _GLYPHS = {
     # "scene": the placement editor (#85 Stage 2) -- a viewport frame with two
     # placed actors inside (one low-left, one high-right): things ON a stage.
     "scene":  (0x000, 0x7FE, 0x402, 0x40E, 0x40E, 0x402, 0x582, 0x582, 0x402, 0x7FE, 0x000, 0x000),
-    # Desktop-shell dock icons (#28). "code" = angle brackets </>; "gear" = a
+    # Desktop-shell icons (#28). "code" = angle brackets </>; "gear" = a
     # settings cog; "note" = a music note (the #16 music slot, greyed until it
     # lands); "app" = a generic window (default cart icon).
     "code":   (0x000, 0x048, 0x08C, 0x118, 0x230, 0x230, 0x118, 0x08C, 0x048, 0x000, 0x000, 0x000),
@@ -1026,7 +1013,7 @@ _SEMANTIC_STATIC = (("ink", 7), ("ink_dim", 6),      # white / light-grey text
                     # Ink on a selection/hilite fill (every dark theme's hilite
                     # is a dark tint -- white ink; light pastel fills flip it).
                     ("selection_ink", 7),
-                    # The OS bar/dock band: frozen black + dark-grey shelf edge
+                    # The OS bar band: frozen black + dark-grey shelf edge
                     # on every dark theme.
                     ("bar", 0), ("bar_edge", 5),
                     ("play", 11),                    # signal green: PLAY/healthy
@@ -1062,7 +1049,7 @@ def theme_colors(name, variant=DEFAULT_VARIANT):
         if variant == "light":
             tokens = dict(_LIGHT_COMMON)
             tokens.update(THEME_LIGHT[resolved])
-            # The OS bar/dock band follows the light panel tone unless a theme
+            # The OS bar band follows the light panel tone unless a theme
             # says otherwise (dark themes keep the frozen black band, below).
             tokens.setdefault("bar", tokens["panel"])
             tokens.setdefault("bar_edge", tokens["dim"])

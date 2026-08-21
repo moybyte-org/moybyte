@@ -197,15 +197,11 @@ class BlockEditor(OpHistoryMixin):
         self.reflow()
 
     def _all_roots(self):
-        """Every top-level script root -- global scripts + procs + EVERY object's hats.
-        Used by the tree-wide walks (locate-for-move, variable rename, proc rename) so
-        a global rename rewrites references inside per-object scripts too, and a MOVE
-        can find its block whichever script set is active."""
-        roots = list(self.program.get("scripts", []) or [])
-        roots += list(self.program.get("procs", []) or [])
-        for o in (self.program.get("objects", []) or []):
-            roots += list(o.get("scripts", []) or [])
-        return roots
+        """Every top-level script root, for the tree-wide walks (locate-for-move,
+        variable rename, proc rename) -- so a global rename rewrites references
+        inside per-object scripts too. Raw (unvalidated): the live editor must not
+        raise or drop a root mid-edit."""
+        return self.blocks.all_roots(self.program)
 
     def _flatten_block(self, rows, parent, index, depth):
         b = parent[index]
@@ -647,27 +643,17 @@ class BlockEditor(OpHistoryMixin):
         """Walk the tree and rewrite every slot of `slot_type` whose value equals `old`
         to `new` (statements' params, nested expression params, child bodies). Shared by
         the variable and list renamers (#48)."""
-        def walk(node):
-            if isinstance(node, list):            # a call's positional args (#48)
-                for it in node:
-                    walk(it)
-                return
-            if not isinstance(node, dict):
-                return
+        def visit(node):
             d = self.blocks.block_def(node.get("t"))
+            if d is None:
+                return
             params = node.get("p", {}) or {}
-            if d is not None:
-                for slot in d["slots"]:
-                    nm = slot["name"]
-                    if slot["type"] == slot_type and params.get(nm) == old:
-                        params[nm] = new
-            for v in params.values():
-                walk(v)                       # nested expression blocks in expr slots
-            for c in node.get("c", []) or []:
-                walk(c)
+            for slot in d["slots"]:
+                nm = slot["name"]
+                if slot["type"] == slot_type and params.get(nm) == old:
+                    params[nm] = new
 
-        for s in self._all_roots():               # #85/#93: rename inside objects too
-            walk(s)
+        self.blocks.walk_tree(self._all_roots(), visit)
 
     def variables(self):
         return list(self.program.get("vars", []) or [])
@@ -823,22 +809,12 @@ class BlockEditor(OpHistoryMixin):
 
     def _rewrite_call_names(self, old, new):
         """Rewrite every call targeting `old` to target `new` (after a proc rename)."""
-        def walk(node):
-            if isinstance(node, list):
-                for it in node:
-                    walk(it)
-                return
-            if not isinstance(node, dict):
-                return
+        def visit(node):
             if node.get("t") == self.blocks.CALL and \
                     self.blocks.proc_name(node) == old:
                 node.setdefault("p", {})["name"] = new
-            for v in (node.get("p", {}) or {}).values():
-                walk(v)
-            for c in node.get("c", []) or []:
-                walk(c)
-        for s in self._all_roots():               # #85/#93: rename inside objects too
-            walk(s)
+
+        self.blocks.walk_tree(self._all_roots(), visit)
 
     def enclosing_proc(self):
         """The proc_def whose body contains the cursor row (or None). Lets the editor

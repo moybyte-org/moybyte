@@ -418,11 +418,35 @@ def test_micropython_cart_quit_verb_pops_to_the_caller():
 
 
 def _panel_src():
-    """The mainline panel backend: the Python compositor plus its native driver."""
+    """The mainline panel backend: this board's compositor SUBCLASS plus its
+    native driver. What is left in `tdeck_panel.py` since 2026-08-21 is this
+    board's alone -- the moy_lcd import, WIDTH/HEIGHT, the two revert flags,
+    `sd_bracket`, `set_backlight`; the shared body is `_panel_base_src()`."""
     return (
         (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8"),
         (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c").read_text(encoding="utf-8"),
     )
+
+
+def _panel_base_src():
+    """The SHARED compositor body (device/banded_panel.py), which since
+    2026-08-21 owns the half of the Python panel glue that `tdeck_panel` and
+    the Guition's `guition_panel` had in common: the backend contract, the
+    kick/drain overlap, the ping-pong and the PUMP meters (#206 item 1). It is
+    the Python twin of `_flush_src()` one tier down, and it exists for the same
+    reason -- the two boards' feeds CONVERGED on `d9aa73e`. Greps that used to
+    read `tdeck_panel.py` for mechanism facts read this instead, and say so."""
+    return (DEVICE / "banded_panel.py").read_text(encoding="utf-8")
+
+
+def _flush_src():
+    """The SHARED banded-flush engine (native/moy_flush), which since
+    2026-08-21 owns the half of the flush that moy_lcd and the Guition's
+    moy_axs had in common: the core-0 feeder, the bounce slots and their
+    pacing, the kick/drain handoff and the PUMP meters. The panel modules keep
+    their transports. Greps that used to read modmoy_lcd.c for engine facts
+    read this instead -- and say so, so the next reader knows where to look."""
+    return (NATIVE / "moy_flush" / "moy_flush.c").read_text(encoding="utf-8")
 
 
 def test_panel_flush_dmas_only_from_internal_sram():
@@ -436,8 +460,13 @@ def test_panel_flush_dmas_only_from_internal_sram():
     """
     _py, c = _panel_src()
     assert "INTERNAL SRAM" in c or "internal SRAM" in c
-    assert "MALLOC_CAP_INTERNAL" in c, "the bounce slots must be internal-SRAM caps"
-    assert "s_bounce" in c
+    # The slots themselves are the SHARED engine's since 2026-08-21 (both S3
+    # boards allocate them through moy_flush_start), so the cap is pinned
+    # there; the panel driver keeps the reason it exists.
+    engine = _flush_src()
+    assert "MALLOC_CAP_INTERNAL" in engine, (
+        "the bounce slots must be internal-SRAM caps")
+    assert "moy_flush.bounce" in engine
 
 
 def test_only_the_first_band_carries_a_command():
@@ -486,10 +515,13 @@ def test_layer_copy_async_is_on_and_revertible():
 
 
 def test_panel_ping_pong_has_two_framebuffers():
-    """Two buffers and an explicit swap -- the tear-free half of the design."""
+    """Two buffers and an explicit swap -- the tear-free half of the design.
+
+    The board asks for two; the swap is the shared body's (#206 item 1).
+    """
     py, _c = _panel_src()
     assert "nfbs=2" in py or "nfbs = 2" in py
-    assert "_swap" in py
+    assert "_swap" in _panel_base_src()
 
 
 def test_bounce_pacing_is_measurable():
@@ -497,17 +529,95 @@ def test_bounce_pacing_is_measurable():
 
     The fork reported this as FLUSHBRK; the port reports PUMP. Either way the
     point is that the pacing is MEASURED -- an overlap you cannot see is an
-    overlap you cannot tell from a stall.
+    overlap you cannot tell from a stall. Both meters are the shared
+    compositor's since 2026-08-21, so BOTH S3 boards report them.
     """
-    py, _c = _panel_src()
-    assert "bounce_stats" in py
-    assert "pump_last_us" in py
+    base = _panel_base_src()
+    assert "bounce_stats" in base
+    assert "pump_last_us" in base
 
 
-def test_the_pump_runs_on_a_timer_between_draw_ops():
-    """A band queued and then forgotten is a frame that never finishes."""
-    py, _c = _panel_src()
-    assert "PUMP_TIMER_MS" in py
+def test_the_band_feed_runs_on_the_core0_feeder_task():
+    """A band queued and then forgotten is a frame that never finishes.
+
+    Under the 2ms machine.Timer that guarantee was the timer + the draw pokes
+    + the idle drain; since 2026-08-21 it is a core-0 FreeRTOS feeder (ported
+    from the Guition's moy_axs), which owns the whole flush -- so the VM-side
+    pump plumbing must be GONE (a half-retired timer would silently double-feed
+    a bounce slot) and the feeder must exist.
+
+    It exists ONCE, in the shared engine: the port made the two boards'
+    concurrency halves literal copies, so native/moy_flush is where the feeder,
+    the handoff and the pacing live, and each panel module supplies only its
+    transport hooks. That split is pinned here too -- a feeder task
+    re-appearing inside a panel driver means somebody forked the protocol back
+    apart.
+    """
+    py, c = _panel_src()
+    engine = _flush_src()
+    assert "xTaskCreatePinnedToCore" in engine
+    assert "moy_lcd_feed" in c, "the board names its feeder task in its ops"
+    assert "moy_flush_start" in c, "the panel driver must start the engine"
+    assert "xTaskCreatePinnedToCore" not in c, (
+        "the feeder belongs to moy_flush; a panel driver growing its own has "
+        "forked the handoff protocol back into two copies")
+    assert "isr_cpu_id" in c, "the done-ISR must land on the feeder's core"
+    assert "moy_flush_band_done_from_isr" in c, (
+        "the done-ISR's counting/wake half is the engine's, static inline so "
+        "the callback keeps its own IRAM placement")
+    # The Python compositor no longer feeds anything: no timer, no poke export.
+    assert "self.pump_if_pending" not in py
+    assert "machine import Timer" not in py
+
+
+def test_a_stop_that_is_not_acknowledged_frees_nothing():
+    """`moy_flush_stop()` used to wait ~100ms for the feeder, give up SILENTLY,
+    and then free the bounce slots and reset the bookkeeping anyway -- with the
+    task handle still non-NULL, so `moy_flush_band_done_from_isr` could notify a
+    task mid-delete against slots that had just been freed. It was the only wait
+    in the engine with no latch and no counter, and both boards' deinit comments
+    asserted a guarantee it did not make.
+
+    So: a bound past the frame deadline (a timed-out frame is still unwinding
+    and giving up on it buys nothing), and on failure NOTHING is handed back --
+    the free and the reset must sit AFTER the early return, the exit latch stays
+    armed, and start() refuses to re-arm over the zombie."""
+    engine = _flush_src()
+    body = engine[engine.index("bool moy_flush_stop(void)"):]
+    body = body[:body.index("\nvoid moy_flush_reset")]
+    assert "MOY_FLUSH_STOP_TIMEOUT_MS" in body, "the bound must be a named fence"
+    fail = body.index("moy_flush.stop_fails++")
+    give_up = body.index("return false;", fail)
+    assert give_up < body.index("moy_flush_free_bounce()"), (
+        "a stop that gave up must return BEFORE freeing memory an ISR may "
+        "still touch")
+    assert "task_exit = false" not in body[:give_up], (
+        "the exit latch stays armed so the feeder leaves when it can")
+    header = (NATIVE / "moy_flush" / "moy_flush.h").read_text(encoding="utf-8")
+    assert "MOY_FLUSH_STOP_TIMEOUT_MS ((MOY_FLUSH_TIMEOUT_US / 1000)" in header
+    assert "moy_flush.stop_fails" in engine and "stop_fails)" in engine, (
+        "the counter must reach the pump_stats tuple -- a failure nobody can "
+        "read is the one that gets explained away")
+    start = engine[engine.index("bool moy_flush_start"):]
+    assert "moy_flush.task != NULL && moy_flush.task_exit" in start[:start.index("s_ops = ops;")], (
+        "start() must refuse to re-arm over a feeder that never stopped")
+    # ...and the two boards' deinit must honour the answer, which is what makes
+    # their comments true: the transport may not go away under a live feeder.
+    for mod in (ROOT / "native" / "moy_lcd" / "modmoy_lcd.c",
+                Path("firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c")):
+        src = mod.read_text(encoding="utf-8")
+        assert "if (!moy_flush_stop()) {" in src, (
+            "%s deinit ignores a failed stop" % mod)
+
+
+def test_the_sd_guard_is_a_nesting_depth_not_a_flag():
+    """SD sessions nest, and a boolean guard's INNER close lifts the bracket
+    while the outer session is still on the shared SPI host -- which is the
+    Cache/MMU panic the guard exists to prevent, with nothing pointing at it.
+    """
+    _, c = _panel_src()
+    assert "static volatile int s_sd_guard;" in c, "the guard must be a depth"
+    assert "s_sd_guard++" in c and "s_sd_guard--" in c
 
 
 def test_kid_mode_gates_diag_frame_eaters():
@@ -540,6 +650,23 @@ def test_i2c_timeout_knob_engaged():
     assert "timeout=self.I2C_TIMEOUT_US" in inp_mod
 
 
+# -- the console's input order, for the driver tests below -------------------
+#
+# `InputState._held` is the union of the sources and `begin_frame` is its one
+# author, so polling a driver and reading `state.held(...)` without merging
+# reads the PREVIOUS frame. These helpers are the loop's order: poll, then
+# merge.
+
+def _kbd_frame(keyboard, state):
+    keyboard.poll()
+    state.begin_frame()
+
+
+def _poller_frame(poller, state):
+    poller.consume()
+    state.begin_frame()
+
+
 def test_capped_stall_holds_state_and_never_kills_the_keyboard():
     # #69: with the timeout cap a stall RAISES. That must cost ONE STALE FRAME --
     # the last good matrix state is held (returning "no buttons" would fake a
@@ -570,21 +697,21 @@ def test_capped_stall_holds_state_and_never_kills_the_keyboard():
 
     i2c = FlakyI2C()
     keyboard._i2c = i2c
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # baseline: the key is down
     i2c.fail = True                                  # one capped stall...
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # ...held state survives the gap
     assert keyboard.available and keyboard.raw_mode  # nothing was disabled
     assert keyboard.stat_timeouts >= 1               # ...and it was counted
     i2c.fail = False
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")                       # clean resume, no phantom edge
     assert keyboard._err_run == 0                    # the run counter reset
     # A genuinely dead keyboard still disables after a solid failure run.
     i2c.fail = True
     for _ in range(module.TDeckKeyboard.ERR_RUN_LIMIT):
-        keyboard.poll()
+        _kbd_frame(keyboard, state)
     assert not keyboard.available
 
 
@@ -596,6 +723,34 @@ def test_blit565_opaque_row_fast_lane():
     c = (NATIVE / "moy_gfx"
          / "moy_gfx_kernels.c").read_text(encoding="utf-8")
     assert "OPAQUE fast lane" in c
+
+
+def test_the_pre_kernel_guards_are_one_body():
+    """The two moy_gfx surfaces must not re-grow their own guard sets.
+
+    They had one drift already: the host refused `dh <= 0` on five verbs and the
+    board never did, so a zero-height canvas drew nothing here and fourteen
+    pixels on glass, and no test could see it. The clamping branches are exactly
+    the ones the conformance goldens never reach, so the only defence is that
+    there is nothing to diverge -- mg_solid_prologue / mg_map_ok / mg_is_moy_sheet
+    in moy_gfx_kernels.h, called by both."""
+    header = (NATIVE / "moy_gfx" / "moy_gfx_kernels.h").read_text(encoding="utf-8")
+    for fn in ("mg_solid_prologue", "mg_map_ok"):
+        assert "static inline int %s(" % fn in header
+    surfaces = {
+        "modmoy_gfx.c": (NATIVE / "moy_gfx" / "modmoy_gfx.c").read_text(encoding="utf-8"),
+        "moyhost_gfx.c": (Path("runtime") / "moyhost_gfx.c").read_text(encoding="utf-8"),
+    }
+    for name, src in surfaces.items():
+        # tri/circ/circb/line, both sides.
+        assert src.count("mg_solid_prologue(") == 4, (
+            "%s: the solid-verb prologue is written out again" % name)
+        # tline/blit_map on both sides (the device adds DrawCtx.set_map_src).
+        assert src.count("mg_map_ok(") >= 2, (
+            "%s: the map-cells guard is written out again" % name)
+        assert "MOY_MAP_MAX" not in src, (
+            "%s: the SPEC 3.3 bound belongs in mg_map_ok, where it is checked "
+            "before mw * mh can overflow" % name)
 
 
 def test_seed_carts_model_the_fast_draw_habits():
@@ -634,15 +789,15 @@ def test_tdeck_keyboard_latches_event_keys_for_hold_window():
     keys = [ord("d"), 0]
     keyboard._read_key = lambda: keys.pop(0)
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
     keyboard._held_until_ms = module._ticks_ms() - 1
     keyboard._read_key = lambda: 0
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert not state.held("right")
 
 
@@ -666,14 +821,14 @@ def test_tdeck_keyboard_reads_raw_matrix_for_real_holds():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
     assert state.last_key == ord("d")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert not state.held("right")
     assert state.last_key == 0
 
@@ -702,7 +857,7 @@ def test_tdeck_raw_backspace_is_the_one_console_key():
         keyboard.available = True
         keyboard.raw_mode = True
         keyboard._i2c = type("F", (), {"readfrom": lambda s, a, n: frame})()
-        keyboard.poll()
+        _kbd_frame(keyboard, state)
         return state
 
     st = poll_frame(bytes([0, 0, 0, 0, 0x08]))    # backspace held
@@ -767,14 +922,14 @@ def test_input_poller_ascii_bytes_deliver_one_frame_each():
     p._poll_once()
     p._poll_once()
     p._poll_once()                          # two rapid 'a' presses now queued
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == ord("a")       # frame 1: first press
     assert state.held("left")               # ...with its latched button alias
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == 0              # frame 2: forced release gap
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == ord("a")       # frame 3: second press, not dropped
-    p.consume()
+    _poller_frame(p, state)
     assert state.last_key == 0              # queue drained
 
 
@@ -797,13 +952,13 @@ def test_input_poller_raw_holds_state_across_a_stall():
     kbd._i2c = FlakyI2C()
     p = module.InputPoller(kbd, None)
     p._poll_once()
-    p.consume()
+    _poller_frame(p, state)
     assert state.held("left") and state.last_key == ord("a")
     p._poll_once()                          # capped stall -> hold, don't release
-    p.consume()
+    _poller_frame(p, state)
     assert state.held("left")
     p._poll_once()                          # clean empty matrix -> real release
-    p.consume()
+    _poller_frame(p, state)
     assert not state.held("left")
 
 
@@ -1050,7 +1205,7 @@ def test_tdeck_keyboard_keeps_raw_mode_for_physical_a_bit():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("left")
     assert state.last_key == ord("a")
     assert keyboard.raw_mode
@@ -1077,7 +1232,7 @@ def test_tdeck_keyboard_falls_back_when_raw_mode_is_ignored():
 
     keyboard._i2c = FakeI2C()
 
-    keyboard.poll()
+    _kbd_frame(keyboard, state)
     assert state.held("right")
     assert state.last_key == ord("d")
     assert not keyboard.raw_mode
@@ -1146,8 +1301,9 @@ def test_device_canvas_uses_native_moy_gfx():
     # across frames so the cache is built once, not rebuilt every frame.
     assert "def _cache_rgb(self, img, scale, flip=0):" in device_canvas
     assert "tile_cache" in runtime
-    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
-    assert "def gfx(self):" in comp
+    # `gfx()` is the shared compositor's since 2026-08-21 (#206 item 1), so
+    # the kernel reaches DeviceCanvas the same way on both S3 boards.
+    assert "def gfx(self):" in _panel_base_src()
 
 
 def test_scroll_rect_wired_for_ui_blit_scroll():
@@ -1498,17 +1654,17 @@ def test_sram_bounce_flush_wired():
     # the GDMA layer copy tied to the same flag (it is only artifact-safe when
     # the panel DMA reads internal SRAM).
     build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    comp = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    # The compositor half is the SHARED body since 2026-08-21 (#206 item 1) --
+    # this board subclasses it, so the meter and the fence are pinned there.
+    comp = _panel_base_src()
     assert (PATCHES / "esp_lcd_tx_color_noacquire.patch").exists()
     assert "esp_lcd_tx_color_noacquire.patch" in build
     assert 'grep -q "Moybyte #66"' in build
     assert "pump_last_us" in comp, "the C-side pump is unmeasurable from Python"
-    assert "_pump_timer" in comp and "PUMP_TIMER_ID" in comp, (
-        "the bounce pump lost its timer -- a queued band nothing drains "
-        "is a frame that never finishes")
-    # the timer is a soft feeder; the drain must be the correctness fallback
-    assert "PUMP_TIMER_MS" in comp
-    assert "drain" in comp, "the flush lost its drain fallback"
+    # 2026-08-21: the 2ms machine.Timer feeder is RETIRED -- moy_lcd's core-0
+    # feeder task owns the band feed (test_the_band_feed_runs_on_the_core0_
+    # feeder_task pins it); drain stays the VM-side fence.
+    assert "drain" in comp, "the flush lost its drain fence"
     # hardware round 2 (#66): bands must outlast the 2ms pump timer (24-row
     # 1.5ms bands starved the SPI -> -30% fps) and the band copy must be the C
     # memcpy (memoryview slice-assign measured ~1ms+/band = FLUSHBRK setup 2.5ms)
@@ -1551,6 +1707,34 @@ def test_hitch_logger_wired():
     assert "20000 if ws.cart is not None else 5000" in runtime
 
 
+def _esp32_builds():
+    """Every board `build.sh` that builds on tools/esp32_build_lib.sh.
+
+    DISCOVERED, not listed: this test used to read ROOT's build.sh alone, and
+    the Guition's byte-identical copies of the two blocks below were asserted by
+    nothing at all -- so a rot in one of them left `make test` green and the
+    board silently shipping REPR_A (the 16B-per-float boxing whose heap-wrap
+    collect is #66's 130-175ms hitch, with no symptom naming the cause).
+    """
+    out = [p for p in sorted(Path("firmware").glob("*/build.sh"))
+           if "esp32_build_lib.sh" in p.read_text(encoding="utf-8")]
+    assert len(out) >= 3, "board discovery found %d build.sh" % len(out)
+    return out
+
+
+def _opts_in(build, fn):
+    """A board opts into a shared patch by CALLING it, and opts out by naming it
+    in a `# DECLINED <fn>` line whose reason follows -- board.toml's `[[deny]]
+    why=` in the one file that is not board.toml. Silence is neither."""
+    src = build.read_text(encoding="utf-8")
+    called = ("\n%s\n" % fn) in src
+    declined = ("# DECLINED %s " % fn) in src
+    assert called != declined, (
+        "%s: %s must be either called or declined in writing, exactly one"
+        % (build, fn))
+    return called
+
+
 def test_repr_c_unboxed_floats_wired():
     # #66 micro-stutter root cause: REPR_A boxes EVERY float result (16B heap
     # alloc); sakura's 120-petal _update measured 73KB/frame of garbage -> the
@@ -1562,11 +1746,46 @@ def test_repr_c_unboxed_floats_wired():
     # between MicroPython releases. So this asserts the edit and its guard, not
     # a patch file -- and the guard matters more than the edit: a silent
     # no-op here is a board that quietly runs boxed floats again.
-    build = (ROOT / "build.sh").read_text(encoding="utf-8")
-    assert "MICROPY_OBJ_REPR_C" in build
-    assert "REPR_C patch did not apply" in build, (
+    lib = Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert "moybyte_patch_repr_c() {" in lib
+    assert "MICROPY_OBJ_REPR_C" in lib
+    assert "REPR_C patch did not apply" in lib, (
         "the sed lost its verification -- a shape change upstream would pass silently")
-    assert "exit 1" in build
+    assert "exit 1" in lib
+    # ...and it is ONE body: no board may re-grow an inline copy of the sed.
+    opted = [b for b in _esp32_builds() if _opts_in(b, "moybyte_patch_repr_c")]
+    assert len(opted) >= 2, "both S3 boards run REPR_C"
+    for build in _esp32_builds():
+        assert "MICROPY_OBJ_REPR" not in build.read_text(encoding="utf-8"), (
+            "%s carries its own REPR sed again" % build)
+
+
+def test_psram_temperature_retune_wired():
+    # #169: at 120MHz octal MSPI, IDF only STARTS the temperature retune for
+    # verified flash vendor ids and otherwise returns ESP_ERR_NOT_SUPPORTED from
+    # a SECONDARY ESP_SYSTEM_INIT_FN, which aborts the boot -- a board that
+    # flashes cleanly, says nothing on serial, and reads exactly like a PSRAM
+    # timing failure. Untested on either board's glass by any suite; this is the
+    # only thing standing between the patch and a silent removal.
+    lib = Path("tools/esp32_build_lib.sh").read_text(encoding="utf-8")
+    assert "moybyte_patch_psram_retune() {" in lib
+    assert "mspi_timing_by_mspi_delay.c" in lib
+    assert "esp_psram_temp_retune_any_vendor.patch" in lib
+    assert Path("patches/esp_psram_temp_retune_any_vendor.patch").exists()
+    opted = [b for b in _esp32_builds()
+             if _opts_in(b, "moybyte_patch_psram_retune")]
+    assert len(opted) >= 2, "both S3 boards run the retune patch"
+    for build in opted:
+        # The patch is REQUIRED BY the 120MHz MSPI profile, not optional beside
+        # it: a board that opts in must actually be running that profile, and a
+        # board that drops back to 80M should drop the patch with it.
+        sdk = board_config.sdkconfig_path(build.parent).read_text(encoding="utf-8")
+        assert "CONFIG_SPIRAM_SPEED_120M=y" in sdk, (
+            "%s takes the #169 patch but is not on the 120MHz MSPI profile"
+            % build)
+    for build in _esp32_builds():
+        assert "mspi_timing_by_mspi_delay.c" not in build.read_text(
+            encoding="utf-8"), ("%s carries its own #169 patch again" % build)
 
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
@@ -2583,12 +2802,24 @@ def test_micropython_offline_diag_wiring():
     assert 'diag.log("CHROMEBRK", "bar=%.2f cmp=%.2f cur=%.2f other=%.2f"' in device_diag
 
     # PUMP (#66 lever 4): bounce-feed pacing -- SPI idle gaps + feed time, the
-    # measure-first data for band size / pump period / third-slot tuning.
-    compositor = (ROOT / "modules" / "tdeck_panel.py").read_text(encoding="utf-8")
+    # measure-first data for band size / pump period / third-slot tuning, plus
+    # blocked= and timeouts=/errs=/stopfail=, which the C cannot raise and so
+    # can only be counted.
+    compositor = _panel_base_src()   # shared body since 2026-08-21 (#206 item 1)
     assert "def bounce_stats(self):" in compositor
-    assert ('diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f '
-            'bands=%d fold=%d"' in device_diag)   # fold= is the #190 liveness proof
+    assert ('"pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "\n'
+            '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
+            in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
+    # fold= is the #190 liveness proof. Behaviour is pinned by
+    # tests/test_banded_panel.py; what a grep can pin is that the definition
+    # exists on the board with the lever and NOT on the one without it.
+    guition_panel = (Path("firmware/guition_jc3248w535/modules")
+                     / "guition_panel.py").read_text(encoding="utf-8")
+    assert "def fold_count(self):" in guition_panel
+    assert "fold_stats()[0]" in guition_panel
+    assert "fold_count" not in _panel_src()[0], (
+        "the T-Deck has no fold; absence is how a board says it lacks a lever")
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
     # so the 13-60ms keyboard stalls are sized across a session, not just inside

@@ -335,7 +335,7 @@ bar / bar_edge / bar_light   (the OS bar band -- frozen black band on dark theme
 title_active / title_inactive (the WM strip pair, aliased to title/panel)
 ```
 
-The Phase 5 system-app pass landed with it: the zoned bar + dock, Settings (rows +
+The Phase 5 system-app pass landed with it: the zoned bar, Settings (rows +
 Wi-Fi panel), the ≡ system menu, About, achievements, the OTA update screens, and
 the editor tab surfaces (block/map/paint/scene/music/code/cards) read tokens on
 every responsive tier — the token gate is no longer machine-only. Each surface's

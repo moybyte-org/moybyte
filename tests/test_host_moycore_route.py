@@ -160,9 +160,8 @@ def test_button_masks_agree_with_the_per_name_walk():
         assert inp.button_masks(names) == (want_h2, 0), combo
 
     # A name outside the order must not corrupt the mask (the held set can hold
-    # keys the button table has never heard of -- "home" is one of them).
+    # buttons the libmoy table has never heard of -- "home" is one of them).
     inp = InputState()
-    inp.set_held("zorp", True)
     inp.set_held("home", True)
     inp.set_held("a", True)
     inp.begin_frame()

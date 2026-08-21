@@ -47,7 +47,6 @@ except ImportError:  # pragma: no cover - direct host import
 
 
 MAX_CHARS = 8000        # per doc -- bounds the SD write + device memory
-MAX_NAME = 24           # rename entry cap -- a label, not a paragraph
 PAPER = 7               # white -- same paper index Paint uses
 INK = 0                 # black
 
@@ -137,7 +136,6 @@ class WriterAppLayer(ListShellApp):
 
     id = "writer"
     domain = "system"
-    RENAME_MAX = MAX_NAME
     TITLE = "WRITER"
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Writer"
@@ -278,21 +276,16 @@ class WriterAppLayer(ListShellApp):
 
     def _seed_history(self, name):
         """Rebuild undo DEPTH (not the doc -- it's already loaded from the
-        current save) from the #111 sidecar on doc open: flatten every kept
-        segment's ops, oldest .. newest, straight onto the fresh History's
-        undo stack via History.seed(). Cheap -- it's a JSON read + list
-        concat, no apply()/invert() runs until a kid actually presses undo --
-        so this ships EAGER on open rather than lazy-on-first-undo."""
+        current save) from the #111 sidecar on doc open: the ops recorded
+        since its last keyframe, oldest .. newest, straight onto the fresh
+        History's undo stack via History.seed(). Cheap -- it's a JSON read +
+        list concat, no apply()/invert() runs until a kid actually presses undo
+        -- so this ships EAGER on open rather than lazy-on-first-undo."""
         hist = self.history
         if hist is None or not self._store_ready():
             return
-        # a bad/missing sidecar just starts undo-empty (err -> recs None)
-        recs = self._store.history("docs", name)[0] or []
-        ops = []
-        for rec in recs:
-            if rec.get("t") == "seg":
-                ops.extend(rec.get("ops") or [])
-        hist.seed(ops)
+        # a bad/missing sidecar just starts undo-empty (err -> ops None)
+        hist.seed(self._store.history_ops("docs", name)[0] or [])
 
     def _do_undo(self):
         if self.history is None or self.editor is None:
@@ -410,7 +403,7 @@ class WriterAppLayer(ListShellApp):
     def _begin_rename(self):
         if self.doc_name is None:
             return
-        self.rename_text = self.doc_name[:MAX_NAME]
+        self.rename_text = self.doc_name[:self.RENAME_MAX]
         self._ekey_prev = 0
         self.mode = "rename"
         self.status = "TYPE A NAME"

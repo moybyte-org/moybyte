@@ -116,7 +116,7 @@ def _diag_hitch(diag, ws, comp, elapsed, kbd_ms, inp_ms, sb_ms, ws_ms,
 
 def _diag_drawbrk(diag, ws):
     """Log a DRAWBRK line splitting the frame's draw cost into cart _update (game
-    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the dock+cursor+
+    LOGIC) / cart _draw (RENDERING) / audio.tick / console chrome (the bar+cursor+
     overlays remainder) -- the breakdown that says where draw= goes (logic vs render
     vs audio vs chrome). Guarded -> a no-op on any failure (only meaningful while a
     cart runs)."""
@@ -428,12 +428,21 @@ def _diag_loop(diag, ws, acc):
 
 def _diag_pump(diag, comp):
     """Log a PUMP line (#66 lever 4, measure-before-touching): the bounce-flush
-    feed pacing for the last shipped frame -- pump (CPU ms inside pump()), idle
-    (ms the SPI sat starved because every fired band completed before the next
-    was fed -- the tunable waste; ~0 means the flush ceiling is real transfer
-    time and band size / pump period / a third slot won't buy fps), gaps (how
-    many bands were fed late), feed (kick -> last band queued). The data that
-    decides whether the Sky Run 40-46 vs ~55-60fps gap is pacing or physics."""
+    feed pacing for the last shipped frame -- pump (CPU ms inside the band feed;
+    core-0 CPU since the feeder task, so not billed to the frame -- but a ZERO
+    means the feeder never ran), idle (ms the SPI sat starved because every
+    fired band completed before the next was fed -- the tunable waste; ~0 means
+    the flush ceiling is real transfer time and band size / a third slot won't
+    buy fps), gaps (how many bands were fed late), feed (kick -> last band
+    queued), blocked (ms the VM core spent waiting in drain).
+
+    `timeouts=`, `errs=` and `stopfail=` must all stay 0. `moy_flush` cannot
+    RAISE a queue error hit during a drain (a drain must not throw into the
+    frame loop), so `errs` is the only place such a failure is visible
+    anywhere: a flush that is quietly failing looks exactly like a healthy one
+    until this number moves. `stopfail=` is deinit giving up on the feeder and
+    leaving the bounce slots allocated rather than freeing them under a live
+    ISR -- also unraisable, for the same reason."""
     if diag is None:
         return
     try:
@@ -444,10 +453,15 @@ def _diag_pump(diag, comp):
         # live (a small-canvas game frame's bands were SYNTHESIZED, the root
         # composite skipped). Steadily climbing during play = every quiet
         # frame folds; frozen = something disarms each frame.
+        # A board with no fold reports 0 forever and that is CORRECT -- the
+        # T-Deck's `fold_supported` is absent on purpose.
         fold = getattr(comp, "fold_count", 0)
-        diag.log("PUMP", "pump=%.2f idle=%.2f gaps=%d feed=%.2f bands=%d fold=%d"
+        diag.log("PUMP",
+                 "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "
+                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"
                  % (st[0] / 1000.0, st[1] / 1000.0, st[2],
-                    st[3] / 1000.0, st[4], fold))
+                    st[3] / 1000.0, st[5] / 1000.0, st[4], fold,
+                    st[6], st[7], st[8]))
     except Exception:
         pass
 

@@ -96,6 +96,52 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     SRAM) and the code did not — which is the shape Phase C's rule wants, and
     the reason the copy is cheap to keep honest.
 
+    **AMENDED 2026-08-21: the answer split in two, and half of it flipped.**
+    The TRANSPORT verdict stands unchanged and is not re-litigated — one CS
+    for the whole frame is still not an io-layer parameter over esp_lcd's
+    per-call CS cycling. But the day the T-Deck's flush moved onto the
+    Guition's core-0 feeder (`d9aa73e`), the "design crossed verbatim, code did
+    not" half stopped being true: the feeder, the two-slot pacing, the
+    semaphore handoff and its documented races, the reset-order invariant and
+    the PUMP meters became LITERAL copies — `modmoy_lcd.c` said so in its own
+    comments ("handoff protocol, copied from moy_axs verbatim"). A protocol
+    with documented races that lives twice is a protocol whose next fix lands
+    once, so that half is now **`native/moy_flush`**: a shared support library
+    (registers no MicroPython module) that owns the frame state machine, the
+    feeder, the bounce slots and the meters, with each panel module supplying
+    three transport hooks (`frame_begin` / `queue_band(slot, src, k, y, rows,
+    last)` / `frame_end(ok)`). It rides `[native.shared]` like any other C
+    module; the P4 denies it, because DPI scans PSRAM continuously and has no
+    bands to feed. Measured on glass the same day: T-Deck 59.0 → 58.9 fps and
+    the Guition 44.7 → 45.1 (Brick Siege, fresh boot, both inside noise),
+    `idle=0 gaps=0 timeouts=0 errs=0` on both, and the Guition's `fold_test`
+    still 0 differing bytes. Note which way the promotion ran: the SECOND
+    consumer is what made it shareable, exactly as Phase C's rule says — the
+    trigger was not a third board but the two boards CONVERGING.
+
+  * **The panel compositor (Python)**: `device/banded_panel.py`, promoted the
+    same day and for the same reason (#206 item 1). It is the twin of the C
+    split one tier up — the frame machine shared, the transport not. What #206
+    listed as the genuine per-board difference was "the T-Deck's soft pump
+    timer and draw-op pokes"; `d9aa73e` retired those, and the two files were
+    left with twelve identical methods and two constructors differing by an
+    import, so the extraction is a consequence of the feeder port rather than
+    a fresh judgement call. `BandedCompositor` owns the backend contract, the
+    drain-swap-kick overlap, the ping-pong and the meters; each board's
+    subclass imports its native module (**in its own `__init__`, so
+    `tests/test_staging_closure.py` can still see which board depends on which
+    C module**), passes it in, and adds only what is its own — geometry, the
+    `ASYNC_FLUSH` revert flag, the module-level `set_backlight()`, the
+    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's fold verbs.
+    Note what did NOT move: `set_backlight()` as a module function exists for
+    callers holding no compositor, so routing it through the class would undo
+    its reason to exist, and two two-line copies are cheaper than the
+    indirection. Nor did `fold_supported` become a base-class probe — the
+    T-Deck must carry no such attribute at all, which is how a board says it
+    lacks a lever. Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
+    44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
+    `idle=0 gaps=0` on both, suites 9/9 and 10/10.
+
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
 (the most recent board to walk all six stages, 2026-08-16) after Phases A–C
@@ -125,10 +171,21 @@ hardware exists.
 
 **Stage 1 — panel.** The board's compositor (implementing
 `docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
-native panel module. Smoke: colour bars + checker, printed flush µs. The
+native panel module. A board that PUSHES frames writes neither half from
+scratch: **subclass `device/banded_panel.py`'s `BandedCompositor`** (allowlist
+it in `[modules.device]`) and give it a native module exporting the
+`init`/`fb`/`nfbs`/`kick`/`drain`/`show`/`stats`/`pump_stats`/`backlight` verb
+set, which is `native/moy_flush` plus three transport hooks. The subclass
+should be an import, a flag and this board's own levers; if it grows a second
+copy of the ping-pong or the meters, something is being re-discovered. Smoke: colour bars + checker, printed flush µs. The
 MADCTL / byte-order / rotation table in the T-Deck README's stage-1 section is
 the debug map. Decide the panel driver's share-or-stand-alone question ON THIS
-GLASS (moy_lcd's band/bounce machinery vs. a new io layer).
+GLASS (moy_lcd's band/bounce machinery vs. a new io layer) — and note the
+question is now narrower than it was: a board that PUSHES frames should TAKE
+`native/moy_flush` (the feeder, the bounce slots, the handoff, the meters) and
+write only its three transport hooks, so "stands alone" means the transport,
+not the concurrency. A board whose panel scans continuously (DPI) denies
+moy_flush in `board.toml` and has no stage-1 flush at all.
 
 **Stage 2 — touch.** Start from `device/gt911.py` if the part matches (the
 byte-order caveat: read the dump, never assume); calibrate with a
@@ -180,9 +237,24 @@ follows the CI matrix row.
 * **A driver registry / ABI / swappable UI backends** — PURR's own F14 is the
   bill (17 backend-macro call sites, icons silently gone on three apps).
   #161's verdict stands: take the board file, leave the ABI.
-* **Full sdkconfig codegen** — the option lists are data fed to the shared
-  guard; `sdkconfig.board` stays the store, with the learned prose beside each
-  value, exactly as the PURR board-file lesson wants.
+* **Full sdkconfig codegen** — `sdkconfig.board` stays the store, with the
+  learned prose beside each value, exactly as the PURR board-file lesson
+  wants. The decline STANDS and was re-affirmed 2026-08-21 rather than
+  re-litigated: generating the fragment from `board.toml` would move 13KB of
+  measured prose into TOML strings and put a generated file in the build's
+  input path, for no fact that is not already in one place.
+  What the entry always said should be data — "the option lists are data fed
+  to the shared guard" — was NOT true in practice: each `build.sh` handed
+  `moybyte_partition_and_sdkconfig_guard` a hand-typed SUBSET of its own
+  fragment, and an option missing from that subset silently no-ops on a warm
+  build dir (IDF only generates a build's sdkconfig when the file is absent).
+  `082fb9e` exercised it live. So the guard now DERIVES its list from the
+  fragment (`board_config.py sdkconfig-required`), stamps the fragment +
+  `mpconfigboard.cmake` + `MPY_TAG` to decide staleness exactly, reads the
+  partition-table filename out of `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME`
+  instead of taking it as a second argument, and reports any decided setting
+  Kconfig REFUSED. One store, no copies, nothing to assert in a test — which
+  is why this is a build mechanism and not a ratchet suite.
 * **A board scaffold generator** — before three ports have walked the
   checklist, a generator is a guess about what varies.
 * Everything here assumes ESP-IDF. `esp32_build_lib.sh` is IDF-specific by

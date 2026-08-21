@@ -74,6 +74,22 @@ class DeviceWifi:
             print("Moybyte wifi scan failed:", exc)
             return []
 
+    def _stored_password(self, ssid):
+        """The password wifi.json holds for `ssid`, else None.
+
+        None also covers a store that could not be read: "unknown" is not the
+        same as "open", and connect() below turns on that distinction.
+        """
+        if self._store is None or self._root is None:
+            return None
+        try:
+            for n in self._store.load_wifi(self._root):
+                if n["ssid"] == ssid:
+                    return n.get("password", "") or ""
+        except Exception:  # noqa: BLE001 -- a store hiccup reads as "unknown"
+            pass
+        return None
+
     def connect(self, ssid, password=""):
         """Associate with `ssid`, remember the creds, and report whether the link
         came up. An EMPTY password resolves to the stored one first -- the panel's
@@ -83,16 +99,20 @@ class DeviceWifi:
         The connect()/isconnected() poll below gives up after ~4s; a saved network
         that comes up later is caught by moy_ota's ensure_online() ONLINE_WAIT_MS
         (measured 1.5s late on glass, 2026-08-02 -- the wait deliberately lives
-        there, not here, so a wrong password never freezes the desktop)."""
+        there, not here, so a wrong password never freezes the desktop).
+
+        A credential is stored only when the radio ASSOCIATED, or when it is a
+        non-blank password that differs from what is on disk. Never a blank one
+        the radio did not verify: the resolve above yields "" both for an open
+        network and for one the store could not tell us about, so remembering it
+        unconditionally lets a single unreadable load rewrite wifi.json as one
+        empty-password entry and drop every other saved network. Storing a
+        non-blank password even on FAILURE is deliberate -- the ~4s poll giving
+        up is the late-association case ensure_online() waits for."""
         ssid = str(ssid)
-        if not password and self._store is not None and self._root is not None:
-            try:
-                for n in self._store.load_wifi(self._root):
-                    if n["ssid"] == ssid:
-                        password = n.get("password", "") or ""
-                        break
-            except Exception:  # noqa: BLE001 -- a store hiccup falls back to ""
-                pass
+        stored = self._stored_password(ssid)
+        if not password and stored:
+            password = stored
         ok = False
         if self._ensure_wlan() is not None:
             try:
@@ -110,7 +130,8 @@ class DeviceWifi:
                 ok = False
         if ok:
             self._ssid = ssid
-        if self._store is not None and self._root is not None:
+        if (ok or (password and password != stored)) \
+                and self._store is not None and self._root is not None:
             try:
                 self._store.remember_wifi(ssid, password, self._root)
             except Exception as exc:  # noqa: BLE001 -- save failure must not crash the cart

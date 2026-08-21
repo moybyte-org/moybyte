@@ -16,7 +16,7 @@
     "editor_scene": "ccaf62165434cf8081d92147de5ee32ea6d40814e91482e2cd92e2aecc0ada73",
     "launcher": "e006367ac1476dd74a5c69ddb3172288652910f0226b0ddfec7d52f377107086",
     "picker": "bd1b97b465272f46174e0fc8080a8f9c2a4e78b52c28b0baa65b8ccef1a53dbe",
-    "settings": "d1b5b5b5b9a2a6da3e132fc964fa50810b7f684d301e1efa667b5393316097d6"
+    "settings": "1871705d8b41aa4fa719953765c781d26be56b680dd03b55e079d9da93468bc7"
   },
   "guition_480x320_fs1_dark": {
     "app_appearance": "e53ec9c6df39221c0a7a6908217a90331ef1097c966248d9d4a9c29384834bb5",
@@ -35,7 +35,7 @@
     "editor_scene": "7e8b396f273ad346fb1dd6b5febfd57832cfd836cbb74a4e3e98a32fa0f68357",
     "launcher": "f62a80a0d8fd89a724247367acd8a150ad208eebb938c01ba3177c5643ff8c98",
     "picker": "1ae1bd7375ec4fbff536d5e2a089b3ca040f80576ab3adaba019521072cce6cb",
-    "settings": "e2830f471f823069e337ff7d06092a881e838da0f261eef339ce7859839f895e"
+    "settings": "754e65c0b54331a1a0d71541cddecc08b7cb49b326ab769610000b0320f87da2"
   },
   "p4_1024x600_fs2_windowed": {
     "app_appearance": "44294bd9c86e40694b00a768c9d4a176089ad4aac18e9cb11c023178ea00a63c",
@@ -56,7 +56,7 @@
     "editor_scene": "a6466de61618e5ea83e47f4147f142486ad706e9daead1acbca8410a47d4b147",
     "launcher": "91b16bf396ad82ca0d947af0d9cb0f356365e7d7b732c8d667b9347be36e97c4",
     "picker": "2065afe3ac99a6e9e688df7337f2567d8a2d954828f7a56b26197ad15a8ba52e",
-    "settings": "d0eaae85cf0fb78b615979485a134b3bf3340f0ccb027b529494bd3fbe42522d"
+    "settings": "65cfd476eaa0cd2c82d7fd2100874c8c3ad6d83ec9d6d160eda3a790174691bd"
   },
   "tdeck_320x240_fs1_dark": {
     "app_appearance": "553a27cd631e86b3e440c48784cb6e57faddd554a38490381738154dc8cec284",
@@ -75,7 +75,7 @@
     "editor_scene": "a18ccf89fa8c475b18996f898df1e2f567db26c5cfef91bcff2d648ae515f329",
     "launcher": "9a9b99030ee229bf4cdf85a8cef3c13c77957458e1f43153800bb9ebb4a721b3",
     "picker": "6dd81d0ddf4a53f9ee7c15300f4e2adc9c46125b1cff223c1a9a7b5389731580",
-    "settings": "06726b8087fd80b7c972f9b97374f49636214f2b81846c302a019f60d7d16110"
+    "settings": "b6e8dcec0a0645535ad7fd0d8a8efa597d13054c4f4f6a8b792373466fb3e33f"
   },
   "tdeck_320x240_fs1_light": {
     "app_appearance": "b32c2339964aafd6c23dd3ce444aa54b9c6bb2facfda5798bcbdb415928cdd92",
@@ -94,6 +94,6 @@
     "editor_scene": "cd9bde9c331404150a627ff4e30b3d96d01dc9ab3de3ce8624799359c46fecf9",
     "launcher": "13ad77e5fa910149dcc0e5ece844d708e12f8ba3b467bc081a05c08d8fedba97",
     "picker": "eea9c0347493695fa51981e0ad7ca5330d37ae531f0a0c3347ca7243837b6a7c",
-    "settings": "ddf83640e02829c5cb77285e8d44a01e50ccd3fdd48a6be7bca9246edf8e8d5a"
+    "settings": "ec32d2a9d457c2b31eb313f65f456036f6ea36b4b3d02bcae1b4599d83e45944"
   }
 }

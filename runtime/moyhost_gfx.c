@@ -95,28 +95,19 @@ void hg_blit_batch(uint16_t *dst, size_t dcap, int dw, int dh,
     }
 }
 
-/* `dh` IS DELIBERATELY NOT TESTED, and that is a fix, not an oversight. This
- * file used to refuse `dh <= 0` on line/circ/circb/tri/sspr/tline; the board
- * never did -- modmoy_gfx.c marks the argument `(void)dh` and takes its row
- * count from the buffer capacity, which is the only number that can be trusted
- * anyway. So a zero-height canvas drew NOTHING here and fourteen pixels on
- * glass, and no test could see it because the goldens only ever replay a real
- * canvas. Found while extracting the compositor, 2026-08-15, and pinned by the
- * `dh = 0` ops in tests/test_gfx_binding.py's clamp script. The host moved to
- * the board's behaviour rather than the reverse: the board is what ships, and
- * changing it for an unreachable case would be risk with no return. */
-#define HG_SOLID_PROLOGUE()                                                   \
-    moy_canvas c;                                                             \
-    if (dw <= 0) return;                                                      \
-    mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);                                \
-    mg_canvas_solid(&c, dst, dw, dcap, (uint16_t)col, cam_x, cam_y,           \
-                    cx0, cy0, cx1, cy1)
+/* The pre-kernel guards are moy_gfx_kernels.h's (mg_solid_prologue / mg_map_ok
+ * / mg_is_moy_sheet), so this surface and the board's run ONE set -- including
+ * the `dh` decision recorded there, which they once disagreed about. `dh` stays
+ * in the signatures because gfx_binding.py marshals it. */
 
 void hg_line(uint16_t *dst, size_t dcap, int dw, int dh,
              int x0, int y0, int x1, int y1, int col,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    HG_SOLID_PROLOGUE();
+    (void)dh;
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, dcap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
     moy_line(&c, x0, y0, x1, y1, 0);
 }
 
@@ -124,7 +115,11 @@ void hg_circ(uint16_t *dst, size_t dcap, int dw, int dh,
              int ccx, int ccy, int r, int col,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    HG_SOLID_PROLOGUE();
+    (void)dh;
+    if (r < 0) return;
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, dcap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
     moy_circ(&c, ccx, ccy, r, 0);
 }
 
@@ -132,7 +127,11 @@ void hg_circb(uint16_t *dst, size_t dcap, int dw, int dh,
               int ccx, int ccy, int r, int col,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    HG_SOLID_PROLOGUE();
+    (void)dh;
+    if (r < 0) return;
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, dcap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
     moy_circb(&c, ccx, ccy, r, 0);
 }
 
@@ -140,7 +139,10 @@ void hg_tri(uint16_t *dst, size_t dcap, int dw, int dh,
             int x1, int y1, int x2, int y2, int x3, int y3, int col,
             int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    HG_SOLID_PROLOGUE();
+    (void)dh;
+    moy_canvas c;
+    if (!mg_solid_prologue(&c, dst, dw, dcap, col, cam_x, cam_y,
+                           &cx0, &cy0, &cx1, &cy1)) return;
     moy_tri(&c, x1, y1, x2, y2, x3, y3, 0);
 }
 
@@ -151,7 +153,8 @@ void hg_sspr(uint16_t *dst, size_t dcap, int dw, int dh,
              const uint16_t *lut, const uint8_t *palt, int ck, int flip,
              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    if (dw <= 0) return;                    /* `dh` unused -- see the note above */
+    (void)dh;
+    if (dw <= 0 || sw <= 0 || srch <= 0 || ddw <= 0 || ddh <= 0) return;
     if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
     mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     moy_canvas c;
@@ -168,10 +171,9 @@ void hg_tline(uint16_t *dst, size_t dcap, int dw, int dh,
               const uint16_t *lut, const uint8_t *palt, int ck,
               int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
 {
-    if (dw <= 0 || mw <= 0 || mh <= 0) return;   /* `dh` unused, as above */
-    if ((size_t)(mw * mh) > cells_len) return;
+    (void)dh;
+    if (dw <= 0 || !mg_map_ok(mw, mh, cells_len)) return;
     if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
-    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return;
     mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     moy_canvas c;
     moy_sheet sheet_o;
@@ -192,10 +194,8 @@ void hg_blit_map(uint16_t *dst, size_t dcap, int dw, int dsx, int dsy,
                  const uint16_t *lut, const uint8_t *palt,
                  int ck, int scale, int cx0, int cy0, int cx1, int cy1)
 {
-    if (dw <= 0 || mw <= 0 || mh <= 0 || rw <= 0 || rh <= 0) return;
-    if ((size_t)(mw * mh) > cells_len) return;
+    if (dw <= 0 || rw <= 0 || rh <= 0 || !mg_map_ok(mw, mh, cells_len)) return;
     if (!mg_is_moy_sheet(sheetw, sheeth, sheet_len)) return;
-    if (mw > MOY_MAP_MAX || mh > MOY_MAP_MAX) return;
     mg_clip(dw, dcap, &cx0, &cy0, &cx1, &cy1);
     moy_canvas c;
     moy_sheet sh;

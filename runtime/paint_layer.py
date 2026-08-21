@@ -48,7 +48,7 @@ try:
     import ui as _ui              # frozen on device
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
-from editors import PaintEditor, KeyEdge
+from editors import PaintEditor, KeyEdge, _pe_line
 
 # The shared pre-literate glyph vocabulary (#89-#93 icon pass): the tool row draws a
 # 12x12 chrome glyph per button instead of a one-char label. Imported for the
@@ -252,32 +252,6 @@ class PaintLayout:
             + _tool_row(self.pg_x0, row2_y, cw2, toolh, len(_TOOL_ROW2)))
 
 
-def _line_cells(x0, y0, x1, y1):
-    """Integer cells on the line from (x0, y0) to (x1, y1), inclusive (Bresenham).
-    Drag-to-draw fills these so a fast pointer move paints a continuous stroke
-    instead of dotting only the frames it was sampled on (#30). Integer-only so it
-    runs the same under CPython (host) and MicroPython (device)."""
-    cells = []
-    dx = x1 - x0 if x1 >= x0 else x0 - x1
-    dy = y1 - y0 if y1 >= y0 else y0 - y1
-    sx = 1 if x0 < x1 else -1
-    sy = 1 if y0 < y1 else -1
-    err = dx - dy
-    x, y = x0, y0
-    while True:
-        cells.append((x, y))
-        if x == x1 and y == y1:
-            break
-        e2 = err + err
-        if e2 > -dy:
-            err -= dy
-            x += sx
-        if e2 < dx:
-            err += dx
-            y += sy
-    return cells
-
-
 class PaintLayer:
     """The paint editor content Layer (SYSTEM domain, responsive #39 step 3): a
     full-screen panel on the reflowed system canvas (the frozen-cart backdrop is
@@ -438,7 +412,7 @@ class PaintLayer:
             pe.begin_stroke()              # snapshot before the first pixel (#90)
             pe.paint(cell[0], cell[1])
         else:
-            for cx, cy in _line_cells(last[0], last[1], cell[0], cell[1]):
+            for cx, cy in _pe_line(last[0], last[1], cell[0], cell[1]):
                 pe.paint(cx, cy)
         self._paint_drag = cell
         return True

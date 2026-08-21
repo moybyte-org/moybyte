@@ -615,6 +615,10 @@ class _Rec:
         self._raises = frame_raises
         rec = self
 
+        class Comp:
+            def sync(self):
+                pass
+
         class Pump:
             def begin(self):
                 rec.calls.append("begin")
@@ -628,6 +632,8 @@ class _Rec:
                 return 0
 
         class WS:
+            comp = Comp()
+
             @property
             def _frames_drawn(self):
                 return rec.frames_drawn
@@ -758,6 +764,33 @@ def test_frameloop_backlight_gate_fires_once_after_the_first_drawn_frame():
     assert lit == [True] and lp.drew is True
     lp.step()
     assert lit == [True], "the gate is a one-shot boot hand-over"
+
+
+def test_frameloop_backlight_gate_fences_before_it_lights():
+    """#45, the same fence `DeviceBoot.note`'s gate takes. On the two banded
+    boards flush() returns with most of the frame still on the wire, so a light
+    without a drain shows power-on GRAM noise. This gate is the one that runs
+    when the splash never lit the panel."""
+    order = []
+    r = _Rec(frames_drawn_after=0)
+    r.ws.comp.sync = lambda: order.append("sync")
+    lp = r.loop(set_backlight=lambda on: order.append("light"), lit=False)
+    lp.step()
+    assert order == [], "nothing composed yet -- no fence, no light"
+    r._after = 1
+    lp.step()
+    assert order == ["sync", "light"]
+    lp.step()
+    assert order == ["sync", "light"], "one-shot: no fence on later frames"
+
+
+def test_frameloop_gate_survives_a_backend_with_no_sync():
+    lit = []
+    r = _Rec(frames_drawn_after=1)
+    del type(r.ws).comp          # a compositor-less ws (the web tier's shape)
+    lp = r.loop(set_backlight=lit.append, lit=False)
+    lp.step()
+    assert lit == [True]
 
 
 def test_frameloop_gate_respects_a_deliberate_blank():

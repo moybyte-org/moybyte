@@ -362,6 +362,11 @@ class _RawFiles:
     def history(self, kind, name):
         return self.__ws.carts_store.load_history(kind, name, self.__ws.carts_root)
 
+    def history_ops(self, kind, name):
+        store = self.__ws.carts_store
+        return store.ops_since_keyframe(
+            store.load_history(kind, name, self.__ws.carts_root))
+
     def history_commit(self, kind, name, ops, keyframe=None):
         return self.__ws.carts_store.history_commit(
             kind, name, ops, keyframe=keyframe, root=self.__ws.carts_root)
@@ -423,7 +428,14 @@ class Files(_StoreRole):
     # -- the #111 op-history sidecars ---------------------------------------
 
     def history(self, kind, name):
+        """The raw sidecar records. To SEED an undo stack use `history_ops` --
+        the records before the last keyframe are superseded by it."""
         return self._read(self.raw.history, kind, name)
+
+    def history_ops(self, kind, name):
+        """The ops after the sidecar's last keyframe -- an op_history.History
+        seed. The ONE reader of that window (moy_carts.ops_since_keyframe)."""
+        return self._read(self.raw.history_ops, kind, name)
 
     def history_commit(self, kind, name, ops, keyframe=None):
         # `keyframe` rides as a positional through `_write` (the raw verb takes

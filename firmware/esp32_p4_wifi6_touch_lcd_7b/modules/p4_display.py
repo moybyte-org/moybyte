@@ -23,6 +23,11 @@ on the root) carries the horizon. Degrades to the 2-buffer then
 single-buffer paths on older moy_dsi builds.
 """
 
+try:
+    from ticks import _ticks_us, _ticks_diff
+except ImportError:  # pragma: no cover - host package lane
+    from runtime.ticks import _ticks_us, _ticks_diff
+
 BACKLIGHT_GPIO = 32     # active-LOW (board fact, hardware-confirmed)
 
 _bl_pin = None
@@ -86,6 +91,13 @@ class P4Compositor:
         # after a newer one), but its buffer stays unpaintable until a fence.
         self._pend3 = []
         self._busy3 = []
+        # The overlap's meters -- see overlap_stats() for what each one says.
+        self._deferred = 0
+        self._obsolete = 0
+        self._fences = 0
+        self._fence_us = 0
+        self._game_n = 0
+        self._game_us = 0
         # Deferred drag stamp (#58 stamp-defer): the WM registers the dragged
         # window's content stamp here (P4SystemCanvas.blit_strip_async) instead
         # of drawing it mid-stack; flush() kicks it on the PPA as the frame's
@@ -107,6 +119,7 @@ class P4Compositor:
         return self._gfx
 
     def flush(self):
+        game_pending = self._composite_pending
         stamp_kicked = False
         if self._stamp_pending is not None:
             # Kick the registered drag stamp NOW -- every layer (incl. cursor)
@@ -139,16 +152,22 @@ class P4Compositor:
             # never waits on the fence. Deferred frames queue; present_pending
             # shows them when their DMA lands.
             if self._composite_pending:
-                self._pend3.append((self._back,
-                                    "stamp" if stamp_kicked else "game"))
+                # A frame carrying BOTH is a "game": the stamp kick sets the
+                # same flag, and the weaker done()-gated fence would let the
+                # cart's next _draw overwrite the composite's source canvas.
+                self._pend3.append(
+                    (self._back,
+                     "stamp" if stamp_kicked and not game_pending else "game"))
                 self._busy3.append(self._back)
                 self._composite_pending = False
+                self._deferred += 1
             else:
                 if self._pend3:
                     # This full opaque frame REPLACES the queued deferred
                     # ones: drop their shows (an older frame must never flash
                     # after a newer). Their DMA may still fly -- _busy3 keeps
                     # the reuse fence armed.
+                    self._obsolete += len(self._pend3)
                     self._pend3 = []
                 self._dsi.show(self._back)   # msync + zero-copy switch
             self._back = (self._back + 1) % n
@@ -157,7 +176,10 @@ class P4Compositor:
             # op): one blocking fence before handing the buffer out. Rare --
             # a present runs every loop.
             if self._back in self._busy3:
+                t0 = _ticks_us()
                 self._drain_pending()
+                self._fences += 1
+                self._fence_us += _ticks_diff(_ticks_us(), t0)
             return
         if self._composite_pending:
             # A quiet game frame kicked the composite async: hold the show for the
@@ -166,9 +188,19 @@ class P4Compositor:
             # draws it -- blit_game was this frame's last framebuffer op).
             self._pending = self._back
             self._composite_pending = False
+            self._deferred += 1
             return
         self._dsi.show(self._back)       # msync + zero-copy scan-out switch
         self._back ^= 1                  # next frame draws the other buffer
+
+    def _queued_game(self):
+        """Whether ANY queued show reads the game canvas -- not just the head:
+        a "stamp" head sits in front of a "game" whenever a slow DMA held a
+        present back for a loop."""
+        for _fb, kind in self._pend3:
+            if kind == "game":
+                return True
+        return False
 
     def _drain_pending(self):
         """Fence every in-flight PPA op, then show the queued frames in order
@@ -181,11 +213,11 @@ class P4Compositor:
 
     def present_pending(self):
         """Show a deferred (async-composited) frame. n >= 3: non-blocking for a
-        "stamp" pending (its source is frozen; if the DMA is still flying the
-        show just waits for the next loop -- painting continues into a third
-        buffer meanwhile), blocking for a "game" pending (the cart's next _draw
-        overwrites the composite's SOURCE canvas, so the fence must land before
-        the tick -- the double game canvas will retire this). n == 2: wait for
+        "stamp"-only queue (the source is frozen; if the DMA is still flying
+        the show just waits for the next loop -- painting continues into a
+        third buffer meanwhile), blocking once any queued show is a "game" (the
+        cart's next _draw overwrites the composite's SOURCE canvas, so the
+        fence must land before the tick). n == 2: wait for
         the PPA DMA, then switch scan-out and free the other buffer -- called
         by the desktop loop AFTER the input poll, so the poll overlapped the
         DMA. No-op when nothing was deferred."""
@@ -193,8 +225,11 @@ class P4Compositor:
             if not self._pend3:
                 return
             import moy_ppa
-            if self._pend3[0][1] == "game":
+            if self._queued_game():
+                t0 = _ticks_us()
                 self._drain_pending()
+                self._game_n += 1
+                self._game_us += _ticks_diff(_ticks_us(), t0)
                 return
             done = getattr(moy_ppa, "done", None)
             if done is None or done():
@@ -203,13 +238,54 @@ class P4Compositor:
         if self._pending is None:
             return
         import moy_ppa
+        t0 = _ticks_us()
         moy_ppa.sync()                   # fence the async composite
+        self._game_n += 1
+        self._game_us += _ticks_diff(_ticks_us(), t0)
         self._dsi.show(self._pending)
         self._back ^= 1                  # the other buffer is now free to draw
         self._pending = None
 
     def sync(self):
-        pass                             # no in-flight DMA to drain
+        """Leave NO DMA in flight and no deferred show unpresented.
+
+        The panel SCANS, so there is no transfer to drain -- but a deferred
+        composite or drag stamp leaves a PPA op flying and its frame queued.
+
+        Both arms are needed: `_busy3` non-empty with `_pend3` empty is the
+        obsolete-drop state, and the 2-buffer lane tracks its pending in
+        `_pending`, which a `_busy3`-only fence would miss.
+        """
+        if self._busy3:
+            self._drain_pending()
+        elif self._pending is not None:
+            self.present_pending()
+
+    def overlap_stats(self):
+        """The async-overlap meters, cumulative since boot:
+
+            (deferred, obsolete, fences, fence_us, game_n, game_us, timeouts)
+
+        deferred  composites kicked async whose scan-out switch was held one
+                  loop -- the denominator for the rest.
+        obsolete  queued shows a full opaque paint replaced: composited, unseen.
+        fences    blocking reuse fences in flush(), and fence_us their cost.
+                  One per deferred frame means the third framebuffer buys
+                  nothing.
+        game_n    the blocking "game" fence in present_pending(), and game_us
+                  its cost. It runs inside FrameLoop's UNTIMED present() hook,
+                  so this is the only place it is visible.
+        timeouts  moy_ppa fences that gave up. Must stay 0, and a fence cannot
+                  RAISE (it runs where a throw would take the desktop down), so
+                  this is the only sign of a wedge.
+        """
+        try:
+            import moy_ppa
+            timeouts = moy_ppa.stats()[2]
+        except Exception:  # noqa: BLE001 -- no PPA (or an older build)
+            timeouts = 0
+        return (self._deferred, self._obsolete, self._fences, self._fence_us,
+                self._game_n, self._game_us, timeouts)
 
     def underruns(self):
         try:

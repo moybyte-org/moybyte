@@ -70,6 +70,21 @@ WEB_SEND_TIMEOUT = 2.0
 # instant nothing is pending, so this only caps a flood.
 POLL_MAX = 4
 
+# Listen backlog. NOT 1: every response here is one-shot close (no keep-alive),
+# so a browser loading the console opens 4-6 connections at once, and lwIP's
+# tcp_listen_input SILENTLY DROPS a SYN past the backlog -- the extras wait out
+# a client SYN-retransmit (~1s each) rather than failing, which is why this
+# reads as a slow page and never as an error.
+#
+# Measured on a T-Deck, 6 simultaneous SYNs x 3 trials: at 4, exactly 2 of 6
+# connects took ~1.25s and the rest ~30ms -- the split lands on the backlog
+# depth. At 6 none did, and the wall time halved.
+#
+# 6 is the CEILING, not a preference: it is IDF's LWIP_TCP_ACCEPTMBOX_SIZE
+# default (no board overrides it), and past a full accept mbox lwIP aborts the
+# new pcb with an RST -- turning a slow page into a refused one.
+LISTEN_BACKLOG = 6
+
 # Max bytes a WS conn's read buffer may grow to before giving up (a peer that
 # dribbles header bytes without ever completing a frame). Dropping is safe.
 WS_MAX_BUFFER = 16384
@@ -418,7 +433,7 @@ class WebServer:
             except Exception:  # noqa: BLE001 -- not all ports expose SO_REUSEADDR
                 pass
             s.bind(("0.0.0.0", self.port))
-            s.listen(1)
+            s.listen(LISTEN_BACKLOG)
             s.setblocking(False)
             self.sock = s
             return True

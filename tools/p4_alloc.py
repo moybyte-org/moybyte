@@ -393,7 +393,6 @@ DRILL_SETTINGS = [
     "ws.wm._content_for('settings')::_settings_visible::set.visible",
     "ws.wm._content_for('settings')::_scroll_region::set.scroll",
     "ws.bar_layer::_draw_status_strip::bar.status",
-    "ws.bar_layer::_draw_dock::bar.dock",
     "ws.sys_canvas::print::cv.print",
     "ws.sys_canvas::rect::cv.rect",
 ]

@@ -688,7 +688,8 @@ def run_desktop(fps_cap=60):
     # first issuing `diag 0` -- which tools/p4_perf.py already did, its
     # docstring already claiming "DIAG IS OFF BY DEFAULT".
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
+    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0,
+           "ov": comp.overlap_stats()}
 
     def _poll_inputs(now):
         """This board's input sources: the BLE keyboard's async notifications
@@ -746,8 +747,18 @@ def run_desktop(fps_cap=60):
                 # where a slow desktop repaint goes; empty when the last frame
                 # wasn't the home screen.
                 _home = getattr(ws, "_pf_home", None)
+                # The overlap meters as DELTAS over this sample
+                # (comp.overlap_stats is cumulative): ppa= is deferred /
+                # obsolete / reuse-fences / game-fences / PPA timeouts, that
+                # last one must stay 0. gfence_ms otherwise hides -- the game
+                # fence runs inside FrameLoop's UNTIMED present() hook, so it
+                # lands in busy= and in no phase meter.
+                _ov = comp.overlap_stats()
+                _ovd = [a - b for a, b in zip(_ov, _pf["ov"])]
+                _pf["ov"] = _ov
                 print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d cart=%s%s"
+                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d "
+                      "ppa=%d/%d/%d/%d/%d fence_ms=%.1f gfence_ms=%.1f cart=%s%s"
                       % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
                          _pf["busy"] // (_pf["n"] or 1),
                          getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
@@ -756,6 +767,8 @@ def run_desktop(fps_cap=60):
                          getattr(ws, "_pf_wm_restore", 0),  # drag backdrop restore ms
                          getattr(ws, "_pf_wm_windows", 0),  # window-stack pass ms
                          getattr(ws, "_pf_wm_stamp", 0),    # window content stamp ms
+                         _ovd[0], _ovd[1], _ovd[2], _ovd[4], _ovd[6],
+                         _ovd[3] / 1000.0, _ovd[5] / 1000.0,
                          (getattr(ws, "cart", None) or {}).get("title", "-"),
                          (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
             except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop

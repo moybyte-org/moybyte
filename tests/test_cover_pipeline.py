@@ -328,3 +328,50 @@ def test_cover_blob_read_budget(tmp_path):
     assert reads <= len(mine), (
         "read %d blobs for %d carts across three layouts -- the runs cache is not "
         "holding" % (reads, len(mine)))
+
+
+def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
+    """A cover blob is a STORE read, so it goes through `ws._with_sd`.
+
+    On the T-Deck the gate drains the panel and brackets the session because
+    the card shares the panel's SPI host, and an sdspi transaction overlapping
+    band queueing from the core-0 feeder is the documented Cache/MMU panic.
+    This read is the one most likely to hit that: `_cover_runs_load` is reached
+    from the launcher's DRAW and from `_cover_prefetch_tick`, i.e. on frames
+    where the previous flush is still in flight.
+    """
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=2)
+    ws = host_app.build_workstation(root)
+
+    depth = [0]
+    reads = []
+
+    def gate(fn):
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    class _Spy:
+        """The real store, watching only load_image's gate depth."""
+
+        def __init__(self, store):
+            self._store = store
+
+        def __getattr__(self, name):
+            return getattr(self._store, name)
+
+        def load_image(self, *a, **kw):
+            reads.append(depth[0])
+            return self._store.load_image(*a, **kw)
+
+    ws._with_sd = gate
+    ws.carts_store = _Spy(ws.carts_store)
+    for c in [c for c in ws._all_carts
+              if c.get("path") in [x["path"] for x in carts]]:
+        _land_cover(ws, c, 40, 30)
+
+    assert reads, "no cover blob was read -- retarget this test"
+    assert 0 not in reads, "a cover blob was read outside the storage gate"

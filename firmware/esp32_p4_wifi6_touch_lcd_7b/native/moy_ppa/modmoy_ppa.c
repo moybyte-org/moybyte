@@ -20,6 +20,7 @@
 #include "driver/ppa.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 // The ONE nearest-neighbour expand kernel (blit_crisp below). Staged sibling:
 // build.sh places the shared moy_gfx at ../.staged/moy_gfx, and this module's
@@ -37,10 +38,45 @@ static ppa_client_handle_t s_fill = NULL;
 static volatile uint32_t s_submitted = 0;
 static volatile uint32_t s_done = 0;
 
+static volatile uint32_t s_timeouts = 0;
+
+// A real op is microseconds; this is a bug fence, not a knob.
+#define PPA_FENCE_TIMEOUT_US 500000
+
 static bool ppa_trans_done_cb(ppa_client_handle_t client,
                               ppa_event_data_t *edata, void *user_data) {
     s_done++;
     return false;   // no higher-priority task to wake
+}
+
+// In-flight transactions. SIGNED difference on purpose: a completion landing
+// after a fence gave up pushes s_done PAST s_submitted, and an unsigned compare
+// would then read as billions in flight and wedge every later fence for good.
+static inline uint32_t ppa_inflight(void) {
+    int32_t d = (int32_t)(s_submitted - s_done);
+    return d > 0 ? (uint32_t)d : 0;
+}
+
+// Wait until at most `keep` transactions remain. False = it gave up.
+//
+// Every fence in this module goes through here, because a completion that never
+// fires would otherwise spin forever INSIDE the frame loop. Giving up cannot
+// raise -- a fence runs where a throw would take the desktop down -- so
+// s_timeouts is the only place such a failure is ever visible.
+static bool ppa_wait(uint32_t keep) {
+    int64_t deadline = esp_timer_get_time() + PPA_FENCE_TIMEOUT_US;
+    while (ppa_inflight() > keep) {
+        if (esp_timer_get_time() > deadline) {
+            s_timeouts++;
+            // Counters bankrupt, rather than leave a phantom in flight that
+            // every LATER fence waits out too. Safe only because a failed
+            // fence's caller always bails instead of reusing the buffer it
+            // waited on -- a new caller that reuses it breaks this.
+            s_done = s_submitted;
+            return false;
+        }
+    }
+    return true;
 }
 
 // init() -> True once the SRM client is registered (idempotent). False on
@@ -183,19 +219,28 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
 // non-blocking composite). The PPA DMA runs on its own; this is a short busy-wait
 // only reached when the caller deliberately overlaps then fences.
 static mp_obj_t moy_ppa_sync(void) {
-    while (s_done != s_submitted) {
-        // volatile reload each iteration; the done ISR advances s_done
-    }
+    ppa_wait(0);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_sync_obj, moy_ppa_sync);
+
+// stats() -> (submitted, done, timeouts). timeouts must stay 0.
+static mp_obj_t moy_ppa_stats(void) {
+    mp_obj_t t[3] = {
+        mp_obj_new_int_from_uint(s_submitted),
+        mp_obj_new_int_from_uint(s_done),
+        mp_obj_new_int_from_uint(s_timeouts),
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_stats_obj, moy_ppa_stats);
 
 // done() -> bool: True when every submitted transaction has completed -- the
 // NON-BLOCKING probe of sync()'s fence (the triple-framebuffer present checks
 // this per loop and shows the pending frame only once its DMA landed, instead
 // of spinning; a caller that must wait still uses sync()).
 static mp_obj_t moy_ppa_done(void) {
-    return mp_obj_new_bool(s_done == s_submitted);
+    return mp_obj_new_bool(ppa_inflight() == 0);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_ppa_done_obj, moy_ppa_done);
 
@@ -249,7 +294,7 @@ static bool s_band_failed = false;
 
 static void crisp_free_bands(void) {
     // An in-flight ship still READS a band: fence everything first.
-    while (s_done != s_submitted) { }
+    ppa_wait(0);
     for (int i = 0; i < 2; i++) {
         if (s_band[i] != NULL) {
             heap_caps_free(s_band[i]);
@@ -324,8 +369,11 @@ static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
         int bh = out_h - y < band_rows ? out_h - y : band_rows;
         uint16_t *band = s_band[nb & 1];
         // Reuse fence: this band buffer may still feed the ship submitted two
-        // bands ago -- wait until at most ONE transaction is in flight.
-        while ((uint32_t)(s_submitted - s_done) > 1) { }
+        // bands ago -- wait until at most ONE transaction is in flight. Giving
+        // up must NOT overwrite a band still being read, so bail to the CPU.
+        if (!ppa_wait(1)) {
+            return mp_const_false;
+        }
         mg_blit565_scale(band, CRISP_BAND_BYTES / 2, out_w, bh, 0, 0,
                          (const uint16_t *)src.buf + (size_t)(y / scale) * (size_t)sw,
                          (size_t)(bh / scale) * (size_t)sw,
@@ -371,12 +419,12 @@ static mp_obj_t moy_ppa_blit_crisp(size_t n_args, const mp_obj_t *args) {
         s_submitted++;
         if (ppa_do_scale_rotate_mirror(s_srm, &op) != ESP_OK) {
             s_submitted--;
-            while (s_done != s_submitted) { }   // fence what already flew
+            ppa_wait(0);                        // fence what already flew
             return mp_const_false;              // caller repaints via the CPU
         }
     }
-    if (!defer) {
-        while (s_done != s_submitted) { }
+    if (!defer && !ppa_wait(0)) {
+        return mp_const_false;                  // incomplete -> CPU repaint
     }
     return mp_const_true;
 }
@@ -466,6 +514,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_done), MP_ROM_PTR(&moy_ppa_done_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_ppa_stats_obj) },
 };
 static MP_DEFINE_CONST_DICT(moy_ppa_module_globals, moy_ppa_module_globals_table);
 

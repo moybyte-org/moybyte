@@ -153,10 +153,29 @@ def run_desktop(fps_cap=60):
 
     sram_census("rd-entry")
     boot.note("loading cartridges")
+
+    def _sd_session(fn):
+        """Every SD session on this board: drained first, and the panel
+        SERIALIZED for the session's whole span (comp.sd_bracket -> moy_lcd's
+        sd_guard). The bracket exists because the seed/scan below PAINTS a
+        progress frame per cart INSIDE the session, and since the core-0
+        feeder (2026-08-21) an unbracketed paint queues panel bands from core
+        0 while the VM sits inside an sdspi transaction on the same SPI host
+        -- measured as a Cache/MMU panic at "loading cartridges 1/35"."""
+        comp.sync()
+        _b = getattr(comp, "sd_bracket", None)
+        if _b is not None:
+            _b(True)
+        try:
+            return moybyte_sd.with_sd_live(fn)
+        finally:
+            if _b is not None:
+                _b(False)
+
     # SD shares the panel's SPI host, so the mount must bracket the whole
     # seed+scan; `with_sd_live` attaches once and keeps the card resident.
     carts, carts_root = boot.load_carts(moy_carts, CARTS,
-                                        session=moybyte_sd.with_sd_live,
+                                        session=_sd_session,
                                         media="SD")
     sram_census("carts")
     boot.note("building the desktop")
@@ -195,15 +214,13 @@ def run_desktop(fps_cap=60):
         Costs nothing when quiet: SD sessions happen on commits, not per frame.
         """
         if not SD_TRACE:
-            comp.sync()
-            return moybyte_sd.with_sd_live(fn)
+            return _sd_session(fn)
         print("SD > sync")
         _t = _ticks_ms()
-        comp.sync()
         print("SD > op (sync %dms)" % _ticks_diff(_ticks_ms(), _t))
         _t = _ticks_ms()
         try:
-            return moybyte_sd.with_sd_live(fn)
+            return _sd_session(fn)
         finally:
             print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
             _sd_traced[0] = True
@@ -225,6 +242,30 @@ def run_desktop(fps_cap=60):
                           make_audio=make_audio,
                           lua_runtime=lua_runtime, before_slim=_before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+
+    # BLE HID keyboard (#26): a SECOND, optional input source on this board.
+    # On the P4 and the Guition a paired BLE keyboard is the only keyboard and
+    # becomes ws.keyboard outright; here the physical C3 keyboard keeps that
+    # slot and the BLE driver hangs off ws.ble_keyboard. Both write into the
+    # SAME InputState above, so nothing in the shared console needs to know
+    # which one a keypress came from -- and Settings finds it because
+    # settings_layer._bt_service() checks ws.ble_keyboard before ws.keyboard.
+    #
+    # auto_start=False deliberately: scanning is what makes BLE expensive, and
+    # a board whose keyboard already works should not pay for a radio nobody
+    # asked for. Settings starts it when the kid opens the panel.
+    #
+    # The bond store is on the INTERNAL VFS, not beside the carts the way the
+    # touch-only boards do it: this board's carts live on SD, whose writes have
+    # to go through the with_sd_live gate, and a pairing that fails because a
+    # card is missing would be a bad first experience for a feature whose whole
+    # point is "my keyboard works now".
+    try:
+        from ble_keyboard import BleHidKeyboard
+        ws.ble_keyboard = BleHidKeyboard(inp, store_path="/ble_keyboard.json",
+                                         auto_start=False)
+    except Exception as exc:  # noqa: BLE001 -- a build without the module, or no radio
+        print("Moybyte: BLE keyboard unavailable:", exc)
     if getattr(ws, "updater", None) is not None:
         try:
             ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
@@ -319,14 +360,19 @@ def run_desktop(fps_cap=60):
     # steady per-frame cost that never crosses HITCH_MS is invisible without it.
     _acc = [0] * 12
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
+    _ble = getattr(ws, "ble_keyboard", None)   # optional second keyboard (#26)
     boot.start_frames(ws)
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
-        fallback), the keyboard, the trackball (caret in the code editor,
-        cursor everywhere else), the GT911. Returns (click, active) for the
-        shared loop; the dev channel and idle blank run THERE, in the one
-        order that lets the waking touch be swallowed."""
+        fallback), the keyboard, the BLE keyboard, the trackball (caret in the
+        code editor, cursor everywhere else), the GT911. Returns (click,
+        active) for the shared loop; the dev channel and idle blank run THERE,
+        in the one order that lets the waking touch be swallowed.
+
+        The two keyboards each write their OWN InputSource and inp.begin_frame()
+        merges them, so the order they poll in carries no authority -- which is
+        the whole point of the multi-source model (device/moybyte/input.py)."""
         nonlocal poller
         # If the poller thread ever dies, detach and fall back to synchronous
         # polling -- input never goes dark.
@@ -342,6 +388,19 @@ def run_desktop(fps_cap=60):
                 keyboard.poll()
         except Exception:  # noqa: BLE001
             pass
+        # The BLE keyboard is this board's SECOND input source (#26). Its
+        # reports arrive on a radio IRQ; poll() is what turns them into held
+        # buttons + a key, and it also advances scan/reconnect and flushes a
+        # new bond outside the IRQ -- exactly the P4/Guition arrangement, where
+        # it IS the only keyboard. It was never called here, so even before the
+        # multi-source merge the driver could not have worked on this board:
+        # the physical keyboard's poll asserted full authority over the shared
+        # InputState, and nothing was writing the other half anyway.
+        if _ble is not None:
+            try:
+                _ble.poll()
+            except Exception as exc:  # noqa: BLE001 -- BLE must fail keyboard-only
+                print("Moybyte BLE keyboard poll failed:", exc)
         _t["kbd"] = _ticks_diff(_ticks_ms(), now)
         _t0 = _ticks_ms()
         inp.begin_frame()
@@ -382,14 +441,14 @@ def run_desktop(fps_cap=60):
 
         # THE IDLE-BAND DRAIN (#40/#66). The overlapped flush RETURNS with bands
         # still queued, and `console.frame()`'s redraw gate returns BEFORE
-        # comp.flush() on a frame that changes nothing -- so a UI that goes quiet
-        # right after a paint leaves the last frame partly on the glass, with the
-        # 2ms pump timer as the only thing that finishes it. That is a real
-        # dependency on a feeder whose constructor is allowed to fail (see
-        # tdeck_panel): if the timer never started, the bottom of the screen
-        # would sit stale until the next repaint. So when THIS frame did not
-        # draw, drain. It fires once per idle stretch (the drain zeroes the band
-        # state) and is a no-op the rest of the time.
+        # comp.flush() on a frame that changes nothing. Under the 2ms pump
+        # timer this drain was LOAD-BEARING (the timer's constructor was
+        # allowed to fail, and without it the bottom of the screen sat stale
+        # until the next repaint); since moy_lcd's core-0 feeder (2026-08-21)
+        # the flush always completes without VM-side help, so this is now a
+        # cheap fence -- one volatile read once the feeder is idle -- kept so
+        # an idle console still GUARANTEES nothing is in flight before
+        # whatever comes next (SD, sleep, serial py snippets).
         if not loop.drew:
             try:
                 comp.sync()

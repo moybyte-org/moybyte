@@ -20,6 +20,7 @@ rather than being skipped where it matters.
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -258,11 +259,14 @@ def test_stage_native_produces_the_declared_tree(tmp_path, board):
 
 
 def test_the_p4_denies_exactly_its_missing_hardware():
-    """The two P4 denials are the hand-cp list build.sh used to encode
-    silently: no SD in play, ES8311 audio still open (#82). The T-Deck denies
+    """The P4's denials are the hand-cp list build.sh used to encode silently:
+    no SD in play, ES8311 audio still open (#82), and no banded flush at all --
+    its MIPI-DSI panel scans a PSRAM framebuffer continuously, so moy_flush's
+    feeder + bounce slots would be dead code and dead SRAM. The T-Deck denies
     nothing. If this changes, it should be because a board's hardware story
     changed -- update board.toml first, this pin second."""
-    assert sorted(board_config.native_denials(P4)) == ["moy_audio", "moy_sd"]
+    assert sorted(board_config.native_denials(P4)) == [
+        "moy_audio", "moy_flush", "moy_sd"]
     assert board_config.native_denials(TDECK) == {}
     # The Guition's two denials are bring-up staging decisions (SD is stage 4,
     # audio stage 5 -- docs/board_ports_2026-08.md); each names its stage in
@@ -366,3 +370,118 @@ def test_push_cart_holds_no_per_board_branch():
     for marker in ('== "p4"', "== 'p4'", '== "tdeck"', "== 'tdeck'",
                    '== "guition"', "== 'guition'"):
         assert marker not in src, "push_cart.py branches on the board: %s" % marker
+
+
+def test_the_on_glass_suites_read_the_declaration_instead_of_retyping_it():
+    """The last hand-written copies of these facts (#206). Both suites drive a
+    real board, so they are hardware-gated and CI never runs them -- which is
+    exactly why what is typed inside them rots unseen. Each hand-wrote
+    `dtr=True, rts=True` under a comment restating the measurement its
+    board.toml already carries, and neither read `attach_only` at all: the fact
+    that stops a reset stranding the handle was data with no consumer."""
+    for suite, name in (("test_tdeck_on_glass.py", "lilygo_t_deck_plus_mainline"),
+                        ("test_guition_on_glass.py", "guition_jc3248w535")):
+        src = (ROOT / "tests" / suite).read_text()
+        assert 'board_dir=ROOT / "firmware" / "%s"' % name in src, (
+            "%s no longer points P4Board at %s/board.toml" % (suite, name))
+        for typed in ("dtr=", "rts=", "chunk="):
+            assert typed not in src, (
+                "%s retypes a [serial] fact (%s) the board file states" % (
+                    suite, typed))
+
+
+def test_attach_only_is_a_fact_with_teeth():
+    """Declaring it is not enough -- it has to REFUSE. `P4Board.reset()` pulses
+    RTS, which on a SoC-USB board re-enumerates the device under the open handle
+    and every read returns nothing forever, reading exactly like a dead board."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    from p4_autotest import declared_serial
+    for name in ("tdeck", "guition-s3"):
+        assert declared_serial(_DEVICE_BOARDS[name])["attach_only"] is True
+    assert declared_serial(P4)["attach_only"] is False
+    src = (ROOT / "tools" / "p4_autotest.py").read_text()
+    body = src.split("def reset(", 1)[1].split("\n    def ", 1)[0]
+    assert "if self.attach_only:" in body and "raise" in body, (
+        "P4Board.reset() no longer refuses a board that declares attach_only")
+
+
+# -- the sdkconfig fragment, read as data --------------------------------------
+#
+# `boards/<BOARD>/sdkconfig.board` is the store of a board's decided IDF
+# settings and STAYS the store (docs/board_ports_2026-08.md declines moving it
+# into TOML); build.sh's stale-sdkconfig guard DERIVES its option list from it.
+# These checks pin that derivation, not the facts -- a hand-typed subset is how
+# a setting comes to silently no-op on a warm build dir.
+
+
+@pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
+def test_build_sh_carries_no_hand_written_sdkconfig_list(board):
+    """The both-halves check, same shape as the native/staging ones: the script
+    must reach the shared guard, and must not name CONFIG_ options beside it."""
+    sh = (_DEVICE_BOARDS[board] / "build.sh").read_text(encoding="utf-8")
+    assert "moybyte_sdkconfig_guard" in sh, (
+        "%s/build.sh no longer applies its sdkconfig fragment via the "
+        "shared guard" % board)
+    assert "moybyte_partition_and_sdkconfig_guard" not in sh
+    stale = [ln.strip() for ln in sh.splitlines() if "'CONFIG_" in ln]
+    assert not stale, (
+        "%s/build.sh spells out sdkconfig options again -- they belong in "
+        "boards/*/sdkconfig.board, which the guard reads: %s" % (board, stale))
+
+
+@pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
+def test_the_guard_checks_what_the_fragment_decided(board):
+    """Every positive assignment in the fragment reaches the guard's list, and
+    the required list is exactly the non-disabling half."""
+    d = _DEVICE_BOARDS[board]
+    settings = board_config.sdkconfig_settings(d)
+    required = board_config.sdkconfig_required(d)
+    assert settings, "%s: no settings parsed out of sdkconfig.board" % board
+    assert ([s.assignment for s in required]
+            == [s.assignment for s in settings if not s.disables])
+    assert all(s.assignment.startswith(s.option + "=") for s in required)
+    # A generated sdkconfig never carries a bare `CONFIG_X=` line, so a
+    # disable in the required list would demand a line no build can have.
+    assert not any(a.endswith("=") for a in (s.assignment for s in required))
+
+
+@pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
+def test_every_decided_setting_carries_its_prose(board):
+    """The `why` beside a value is what the build prints when ESP-IDF refuses
+    the setting, so a value with no prose is a value nobody can review. Same
+    contract as a board.toml denial with no reason."""
+    for s in board_config.sdkconfig_settings(_DEVICE_BOARDS[board]):
+        assert s.why.strip(), (
+            "%s sets %s at sdkconfig.board:%d with no comment block above it"
+            % (board, s.option, s.line))
+
+
+def test_last_assignment_wins():
+    """Both S3 fragments set FLASHFREQ_80M=y as the board fact up top and turn
+    it off again in the 120MHz MSPI block. A guard reading the FIRST would
+    demand a line the build must not have, and would delete the generated
+    sdkconfig on every single build."""
+    for name in ("tdeck", "guition-s3"):
+        settings = {s.option: s for s in
+                    board_config.sdkconfig_settings(_DEVICE_BOARDS[name])}
+        assert settings["CONFIG_ESPTOOLPY_FLASHFREQ_80M"].disables, name
+        assert settings["CONFIG_ESPTOOLPY_FLASHFREQ_120M"].value == "y", name
+        assert "CONFIG_ESPTOOLPY_FLASHFREQ_80M=y" not in [
+            s.assignment for s in board_config.sdkconfig_required(
+                _DEVICE_BOARDS[name])], name
+
+
+@pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
+def test_the_partition_table_is_named_once(board):
+    """The CSV filename lives in the one setting that has to state it, and the
+    build reads it back out (the guard exports BOARD_PARTITION_CSV)."""
+    d = _DEVICE_BOARDS[board]
+    csv = board_config.sdkconfig_get(d, "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME")
+    assert (board_config.sdkconfig_path(d).parent / csv).exists(), (
+        "%s names a partition table that is not beside its board def: %s"
+        % (board, csv))
+    sh = (d / "build.sh").read_text(encoding="utf-8")
+    assert csv not in sh, (
+        "%s/build.sh restates the partition table filename %r, which "
+        "sdkconfig.board already has to name" % (board, csv))
+    assert "${BOARD_PARTITION_CSV}" in sh

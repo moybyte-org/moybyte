@@ -1,5 +1,5 @@
 """Tests for the Picotron/TIC-80-style desktop shell (#28): a wallpaper backdrop,
-a cart icon grid, a top status strip, a bottom dock, and a Settings app with
+a cart icon grid, a top status strip, and a Settings app with
 FUNCTIONAL, persisted wallpaper switching.
 
 All driven through the SAME shared console the device runs (runtime.host_app +
@@ -79,7 +79,7 @@ def test_desktop_home_renders(tmp_path):
 
 def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
     """With a wallpaper cart selected the backdrop animates; the home frame is not a
-    single flat color (it has the wallpaper, the icon tiles, and the dock)."""
+    single flat color (it has the wallpaper, the icon tiles, and the strip)."""
     ws = _ws(tmp_path)
     assert ws.wallpaper_id is not None
     from runtime import host_app
@@ -147,7 +147,7 @@ def test_settings_screen_opens_and_renders(tmp_path):
 
 
 def test_status_strip_menu_opens_settings_from_home(tmp_path):
-    """The launcher has no bottom dock (#46) and no gear (#52 -- Settings moved into the
+    """The launcher has no gear (#52 -- Settings moved into the
     ≡ system menu, OS-style). Tapping ≡ opens the menu; SETTINGS (#105: now the second
     selectable row, after the launcher-only SEARCH row) opens Settings."""
     from runtime import host_app
@@ -235,19 +235,59 @@ def test_settings_mock_rows_do_not_touch_carts(tmp_path):
     assert ws.system.get("name") in ws.settings_layer._MOCK_NAMES
 
 
-# -- dock keeps the management + open flows working ------------------------
+# -- the pre-2026-07 bottom dock is gone -----------------------------------
 
-def test_dock_home_returns_from_settings(tmp_path):
+def test_the_pre_2026_07_bottom_dock_is_gone(tmp_path):
+    """The six-slot HOME/CODE/DRAW/MAP/RUN/SET bottom dock was DELETED on
+    2026-08-21. It was the pre-2026-07 tool-switcher shell's navigation, and its
+    slots still routed into that shell's entry points (ws._open_menu /
+    ws._open_paint); the 2026-07 shell navigates by the zoned bar, the Make tile
+    and the context-X. The launcher had dropped it in #46, the windowed WM
+    suppressed it, so `settings_layer` was its last caller -- which is why it was
+    still visible on the fullscreen tiers (T-Deck/Guition) and nowhere else.
+
+    This is an ABSENCE ratchet (same shape as tests/test_streaming_sunset.py): the
+    names must not come back, on the surface OR in the geometry."""
+    from runtime import bar_layer, chrome
     from runtime import console as C
-    from runtime import host_app
+
+    for name in ("_DOCK_SLOTS", "_DOCK_GLYPH", "_DOCK_LABEL"):
+        assert not hasattr(bar_layer, name), name
+        assert not hasattr(C, name), name          # nor the console re-export
+    for name in ("_DOCK_Y", "_DOCK_H", "_DOCK_W", "_DOCK_GAP", "_DOCK_X0"):
+        assert not hasattr(chrome, name), name
+        assert not hasattr(C, name), name
+    for name in ("_draw_dock", "_dock_slot_at", "_activate_dock",
+                 "_dock_slot_rect"):
+        assert not hasattr(bar_layer.BarLayer, name), name
+    assert not hasattr(chrome.Layout, "dock_slot_rect")
+
     ws = _ws(tmp_path)
-    drv = host_app.ConsoleDriver(ws)
-    ws.open_settings()
-    k = C._DOCK_SLOTS.index("home")
-    x, y, w, h = ws.bar_layer._dock_slot_rect(k)
-    drv.click(x + w // 2, y + h // 2)
-    drv.frame(1 / 30)
-    assert ws.screen == "launcher"
+    lay = ws.layout
+    for name in ("dock_y", "dock_h", "dock_w", "dock_gap", "dock_x0",
+                 "status_gh"):
+        assert not hasattr(lay, name), name
+    # ...and the module's own text no longer routes a reader to it.
+    src = (ROOT / "runtime" / "settings_layer.py").read_text()
+    assert "_draw_dock" not in src and "_activate_dock" not in src
+
+
+def test_settings_panel_keeps_the_freed_dock_band_as_its_bottom_inset(tmp_path):
+    """The DELIBERATE half of the dock's removal: on the responsive tiers the
+    Settings panel does NOT grow into the band the dock vacated -- it is an inset
+    dialog over the wallpaper, and that 24*fs band now reads as its bottom inset
+    against the 20*fs one at the top. So the only pixels the removal moved are the
+    dock's own. (The launcher grid, which DID reclaim its share, is pinned by
+    test_launcher_grid_runs_to_the_canvas_floor below.)"""
+    from runtime import host_app
+    for size, fs in (((480, 320), 1), ((800, 480), 3)):
+        ws = host_app.build_workstation(str(tmp_path / ("c%dx%d" % size)),
+                                        sys_size=size, font_scale=fs)
+        lay = ws.layout
+        assert not lay._base
+        px, py, pw, ph = lay.settings_panel
+        assert py == lay.status_h + 2 * fs                 # top inset, unchanged
+        assert py + ph == lay.h - 24 * fs                  # the KEPT dock band
 
 
 def test_launcher_home_no_longer_manages_carts(tmp_path):
@@ -372,7 +412,7 @@ def test_perf_breakdown_splits_draw_into_phases(tmp_path):
     assert abs((upd + cart + audio + chrome) - ws._draw_ms) <= 2.0
 
 
-# -- #46: no bottom dock on the launcher; it returns inside a cart ----------
+# -- #46: the launcher draws no bottom dock (and since 2026-08-21 none exists) --
 
 def _spy_draw(ws):
     """Record which chrome layers a frame draws, by wrapping the draw methods.
@@ -381,13 +421,8 @@ def _spy_draw(ws):
     The unified top bar (Stage 1) is now ONE drawer -- _draw_status_strip(where) --
     on both screens, so "strip" counts the launcher/Settings bar (where home/settings)
     and "incart" counts the running-cart bar (where == "desktop")."""
-    seen = {"dock": 0, "incart": 0, "strip": 0}
-    odock = ws.bar_layer._draw_dock
+    seen = {"incart": 0, "strip": 0}
     ostrip = ws.bar_layer._draw_status_strip
-
-    def dock(where):
-        seen["dock"] += 1
-        return odock(where)
 
     def strip(where):
         if where == "desktop":
@@ -396,22 +431,22 @@ def _spy_draw(ws):
             seen["strip"] += 1
         return ostrip(where)
 
-    ws.bar_layer._draw_dock = dock
     ws.bar_layer._draw_status_strip = strip
     return seen
 
 
-def test_launcher_does_not_draw_the_bottom_dock(tmp_path):
-    """The home/launcher screen no longer draws the in-cart bottom dock (#46): it was
-    a dead row there. The status strip is still drawn (clock/pips/management/gear)."""
+def test_launcher_draws_the_strip_and_no_in_cart_bar(tmp_path):
+    """The home/launcher screen draws the status strip (clock/pips/management/gear)
+    and no in-cart tool bar. (It stopped drawing the 6-slot bottom dock in #46; the
+    dock itself was deleted 2026-08-21 -- see
+    test_the_pre_2026_07_bottom_dock_is_gone.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
     seen = _spy_draw(ws)
     assert ws.screen == "launcher"
     drv.frame(1 / 30)
-    assert seen["dock"] == 0          # the 6-slot dock is NOT drawn on the launcher
-    assert seen["incart"] == 0        # nor the in-cart tool buttons (no cart open)
+    assert seen["incart"] == 0        # no in-cart tool buttons (no cart open)
     assert seen["strip"] >= 1         # the status strip IS drawn (still present)
 
 
@@ -419,8 +454,7 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     """Stage 5 retired the #71 pause frame: while a cart PLAYS the game owns the full
     canvas with NO chrome at all -- the in-cart tool bar (EDIT/PAINT/MAP/HOME) appears
     ONLY on a CRASH, so the fix-it tools stay reachable. (Exit while playing a game is the
-    hold-BACKSPACE gesture, not a bar tap.) The launcher's removal of the dead dock does
-    not touch this in-cart chrome."""
+    hold-BACKSPACE gesture, not a bar tap.)"""
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
@@ -434,8 +468,6 @@ def test_in_cart_bar_shows_only_on_crash_never_while_playing(tmp_path):
     ws._dirty = True
     drv.frame(1 / 30)
     assert seen["incart"] >= 1        # crashed: the in-cart tool buttons ARE drawn
-    # The 6-slot bottom dock belongs to home/settings, not a running cart.
-    assert seen["dock"] == 0
 
 
 def test_single_backspace_tap_reaches_the_cart_never_exits(tmp_path):
@@ -749,18 +781,22 @@ def test_settings_opened_during_play_preserves_the_run_caller(tmp_path):
     assert ws.screen == "menu"
 
 
-def test_launcher_grid_band_reclaims_the_freed_dock_space(tmp_path):
-    """With the dock gone the launcher cart grid extends below the old dock line: on a
+def test_launcher_grid_runs_to_the_canvas_floor(tmp_path):
+    """The launcher cart grid extends below the line the old bottom dock sat on: on a
     larger canvas the responsive grid uses the reclaimed band (more rows than it would
-    fit if it still stopped at the dock)."""
+    fit if it still stopped at the dock). The dock's height is spelled out here
+    because the constant is gone (deleted 2026-08-21) -- the point of the test is
+    that the launcher kept the band, so the old line has to stay nameable."""
     from runtime import host_app
+    _OLD_DOCK_H = 22          # the retired dock's height at font scale 1
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
     lay = ws.layout
-    # grid_bottom is the canvas floor (no dock), strictly below the old dock line.
-    assert lay.grid_bottom > lay.dock_y
+    old_dock_y = lay.h - _OLD_DOCK_H * lay.fs
+    # grid_bottom is the canvas floor, strictly below the old dock line.
+    assert lay.grid_bottom > old_dock_y
     # The reclaimed band fits at least one more row than the dock-bounded band would.
     band_now = lay.grid_bottom - lay.icon_y0
-    band_old = lay.dock_y - lay.icon_y0
+    band_old = old_dock_y - lay.icon_y0
     rows_now = (band_now + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     rows_old = (band_old + lay.icon_gap_y) // (lay.icon_h + lay.icon_gap_y)
     assert rows_now >= rows_old
@@ -1086,3 +1122,85 @@ def test_cart_bound_keys_do_not_dirty_the_shell(tmp_path):
     ws.input._pressed = {"right"}
     ws.handle_input()
     assert ws._dirty, "launcher nav key must repaint"
+
+
+def test_a_cart_run_and_exit_touches_the_store_only_inside_the_sd_gate(tmp_path):
+    """Nothing the shell does while opening, running and quitting a cart may
+    reach the store except through `ws._with_sd`.
+
+    On the T-Deck the gate drains the panel and brackets the session because
+    that board's SD card shares the panel's SPI host: an sdspi transaction
+    overlapping band queueing from the core-0 feeder is the documented
+    Cache/MMU panic, and the frame tail's fence is conditional (`if not
+    loop.drew`), so a frame that painted leaves a flush in flight. Swept rather
+    than spot-checked because a per-call-site test cannot find the next
+    ungated read.
+    """
+    import builtins
+    import os
+    import traceback
+
+    from runtime import host_app, moy_carts
+
+    carts_dir = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    ws.carts_root = carts_dir
+    ws.carts_store = moy_carts
+    ws.can_manage = True
+
+    depth = [0]
+    escapes = []
+
+    def gate(fn):
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    ws._with_sd = gate
+
+    def note(kind, path):
+        p = str(path)
+        if p.startswith(carts_dir) and depth[0] == 0:
+            frames = [ln for ln in traceback.format_stack(limit=8)[:-1]
+                      if "/runtime/" in ln or "/device/" in ln]
+            escapes.append("%s %s <- %s" % (
+                kind, p[len(carts_dir):],
+                frames[-3].strip() if len(frames) >= 3 else "?"))
+
+    real = {"open": builtins.open, "stat": os.stat, "listdir": os.listdir,
+            "remove": os.remove, "rename": os.rename, "mkdir": os.mkdir}
+    builtins.open = lambda p, *a, **k: (note("open", p),
+                                        real["open"](p, *a, **k))[1]
+    os.stat = lambda p, *a, **k: (note("stat", p), real["stat"](p, *a, **k))[1]
+    os.listdir = lambda p=".", *a, **k: (note("listdir", p),
+                                         real["listdir"](p, *a, **k))[1]
+    os.remove = lambda p, *a, **k: (note("remove", p),
+                                    real["remove"](p, *a, **k))[1]
+    os.rename = lambda a, b, *r, **k: (note("rename", a),
+                                       real["rename"](a, b, *r, **k))[1]
+    os.mkdir = lambda p, *a, **k: (note("mkdir", p),
+                                   real["mkdir"](p, *a, **k))[1]
+    try:
+        _open_game(ws)
+        for _ in range(3):
+            drv.frame(1 / 30)
+        ws._exit_to_caller()                      # the hold-BACKSPACE exit
+        for _ in range(8):
+            drv.frame(1 / 30)                     # ...and the repaint burst
+    finally:
+        builtins.open = real["open"]
+        os.stat = real["stat"]
+        os.listdir = real["listdir"]
+        os.remove = real["remove"]
+        os.rename = real["rename"]
+        os.mkdir = real["mkdir"]
+
+    assert not escapes, "the store was touched outside ws._with_sd:\n  " + \
+        "\n  ".join(sorted(set(escapes)))
+    # ...and the gate is never taken re-entrantly, because moy_lcd's sd_guard
+    # is a BOOL: an inner session's exit would clear the bracket while the
+    # outer one is still on the bus.
+    assert depth[0] == 0

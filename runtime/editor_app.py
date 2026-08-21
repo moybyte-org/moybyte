@@ -410,8 +410,7 @@ class EditorApp:
     def _draw_history_icon(self, cv, glyph, x, y, ic, enabled):
         """Draw the UNDO/REDO bar icon (#88), dimmed when the journal has nothing to
         walk. `enabled` reads the themeable 16x16 IconSheet sprite like any other bar
-        icon; disabled falls back to the plain _glyph bitmap tinted dim (the SAME
-        disabled affordance the bottom dock uses, bar_layer._draw_dock) -- there's no
+        icon; disabled falls back to the plain _glyph bitmap tinted dim -- there's no
         separate 'dimmed' sprite variant, so the fallback vocabulary carries the
         color instead."""
         ws = self.ws

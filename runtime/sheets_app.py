@@ -59,7 +59,6 @@ except ImportError:  # pragma: no cover - direct host import
 DEFAULT_COLS = 8
 DEFAULT_ROWS = 20
 CELL_MAX = 48            # chars of raw formula/text per cell
-MAX_NAME = 24            # rename entry cap
 _ERRORS = (ERR, LOOP)
 
 
@@ -80,24 +79,6 @@ class _SheetCellCodec(OpCodec):
 
     def snapshot(self, doc):
         return doc.to_dict()
-
-
-def _ops_since_keyframe(recs):
-    """Flatten every op-segment recorded AFTER the last keyframe in `recs` (a
-    moy_carts.load_history() list) into one ordered list of ops -- the same
-    "keyframe + trailing segments" window moy_carts.prune_history keeps on
-    disk. The doc these ops apply to is loaded from the sheet's OWN
-    files/tables/<name>.moysheet file (the source of truth), not replayed from
-    here -- this only rebuilds History's in-RAM undo STACK on a reopen."""
-    last_kf = -1
-    for i, rec in enumerate(recs):
-        if rec.get("t") == "kf":
-            last_kf = i
-    ops = []
-    for rec in recs[last_kf + 1:]:
-        if rec.get("t") == "seg":
-            ops.extend(rec.get("ops") or [])
-    return ops
 
 
 def _fmt(v, width):
@@ -187,7 +168,6 @@ class SheetsAppLayer(ListShellApp):
 
     id = "sheets"
     domain = "system"
-    RENAME_MAX = MAX_NAME
     # The shipped identity (ListShellApp.is_app gates on these).
     APP_TITLE = "Sheets"
     APP_PERM = "sheets"
@@ -354,10 +334,10 @@ class SheetsAppLayer(ListShellApp):
         file, same as everywhere else in moy_carts."""
         hist = History(sheet, _SheetCellCodec())
         if self._store_ready():
-            # a bad/missing sidecar just starts empty (err -> recs None)
-            recs, _err = self._store.history("tables", name)
-            if recs:
-                hist.seed(_ops_since_keyframe(recs))
+            # a bad/missing sidecar just starts empty (err -> ops None)
+            ops, _err = self._store.history_ops("tables", name)
+            if ops:
+                hist.seed(ops)
         return hist
 
     def _open_file(self, name):
@@ -416,7 +396,7 @@ class SheetsAppLayer(ListShellApp):
     def _begin_rename(self):
         if self.sheet_name is None:
             return
-        self.rename_text = self.sheet_name[:MAX_NAME]
+        self.rename_text = self.sheet_name[:self.RENAME_MAX]
         self._ekey_prev = 0
         self.mode = "rename"
         self.status = "TYPE A NAME"

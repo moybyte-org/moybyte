@@ -56,26 +56,13 @@ moybyte_setup_idf esp32s3 \
 # 2) The patch ladder -- THIS BOARD'S half of the build. All marker-guarded,
 #    because both .build trees persist across builds.
 # ---------------------------------------------------------------------------
-MPCONFIGPORT_H="${MPY_DIR}/ports/esp32/mpconfigport.h"
 MACHINE_I2C_C="${MPY_DIR}/ports/esp32/machine_i2c.c"
 
 # 2a) moy_lcd needs esp_lcd in the main component's REQUIRES.
 moybyte_idf_component esp_lcd
 
-# 2b) REPR_C unboxed floats (#66).
-#     Kid float-physics carts otherwise allocate a 16B heap box per float RESULT
-#     (~73KB/frame measured in sakura), and the heap-wrap gc collect that follows
-#     is a 130-175ms visible hitch. A guarded sed rather than a context diff,
-#     which survives the line moving between MicroPython releases.
-if ! grep -q "MICROPY_OBJ_REPR_C" "${MPCONFIGPORT_H}"; then
-  sed -i 's|^#define MICROPY_OBJ_REPR  *(MICROPY_OBJ_REPR_A)|#define MICROPY_OBJ_REPR                    (MICROPY_OBJ_REPR_C) /* Moybyte #66: unboxed 30-bit floats */|' \
-    "${MPCONFIGPORT_H}"
-  grep -q "MICROPY_OBJ_REPR_C" "${MPCONFIGPORT_H}" || {
-    echo "!! REPR_C patch did not apply -- mpconfigport.h's MICROPY_OBJ_REPR line changed shape" >&2
-    exit 1
-  }
-  echo "== patched mpconfigport.h: MICROPY_OBJ_REPR_C (#66)"
-fi
+# 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured.
+moybyte_patch_repr_c
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).
 #     This is what makes the input POLLER THREAD work: a T-Deck keyboard C3
@@ -135,25 +122,9 @@ fi
 # 2e) Un-static esp_native_code_free_all (#66) -- shared with the P4.
 moybyte_patch_native_code_free
 
-# 2f) PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by
-#     this board's 120MHz octal MSPI setting, not optional alongside it: IDF
-#     only starts the retune for verified flash vendor IDs (0xC8/0x20) and
-#     otherwise returns ESP_ERR_NOT_SUPPORTED from a SECONDARY
-#     ESP_SYSTEM_INIT_FN -- which aborts the boot. The board then flashes
-#     cleanly, says NOTHING on serial and never reaches the console, which
-#     reads exactly like a PSRAM timing failure and is not one (measured here
-#     2026-08-16). The patch relaxes the vendor gate to warn-and-run and turns
-#     the task's other brick path -- an abort() when the scanned points share no
-#     temperature range -- into "stop adjusting", degrading to the un-mitigated
-#     build rather than a dead one.
-#
-#     If you ever set MOYBYTE_EXTMEM_SPEED=stock (80/80) in sdkconfig.board,
-#     this patch is inert, not wrong: nothing calls the retune at 80MHz.
-MSPI_TUNING_C="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
-if [ -f "${MSPI_TUNING_C}" ] && ! grep -q "Moybyte #169" "${MSPI_TUNING_C}"; then
-  echo "== applying PSRAM temperature-retune vendor-gate patch (#169)"
-  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_psram_temp_retune_any_vendor.patch"
-fi
+# 2f) PSRAM temperature retune (#169) -- REQUIRED by this board's 120MHz octal
+#     MSPI setting in sdkconfig.board, not optional alongside it.
+moybyte_patch_psram_retune
 
 # ---------------------------------------------------------------------------
 # 3) Stage: the shared native modules (board.toml [native.shared] -- the
@@ -181,16 +152,8 @@ moybyte_ota_identity tdeck "${REPO_ROOT}/device/moy_ota.py"
 # 4) Frozen manifest + partition table + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"
-moybyte_partition_and_sdkconfig_guard \
-  "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
-  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig" \
-  'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"' \
-  'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y' \
-  'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y' \
-  'CONFIG_SPIRAM_MODE_OCT=y' \
-  'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
+moybyte_sdkconfig_guard "${BOARD_DIR}" \
+  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 
 # ---------------------------------------------------------------------------
 # 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
@@ -198,5 +161,5 @@ moybyte_partition_and_sdkconfig_guard \
 #    image cable-flashes at 0x0 (the S3's bootloader offset; the P4's is
 #    0x2000).
 # ---------------------------------------------------------------------------
-moybyte_build_and_collect "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
+moybyte_build_and_collect "${BOARD_PARTITION_CSV}" \
   moybyte_tdeck "full image, cable flash at 0x0"

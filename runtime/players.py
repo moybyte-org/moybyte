@@ -76,24 +76,49 @@ class PlayerRouter:
     # -- the cart-facing reads (bound into make_api's btn/btnp/players) ------
     def held(self, name, player=0):
         if not player:
-            return self._local.held(name)
+            # Slot 0 is the local console. With every source unassigned (the
+            # universal case) that IS the union, byte-for-byte as before; once
+            # a source carries a player of its own, slot 0 stops including it.
+            return self._local.held(name, 0) if self._local_multi() \
+                else self._local.held(name)
         s = self._slots.get(player)
-        return s.held(name) if s is not None else False
+        if s is not None:
+            return s.held(name)
+        return self._local.held(name, player) if self._local_multi() else False
 
     def pressed(self, name, player=0):
         if not player:
-            return self._local.pressed(name)
+            return self._local.pressed(name, 0) if self._local_multi() \
+                else self._local.pressed(name)
         s = self._slots.get(player)
-        return s.pressed(name) if s is not None else False
+        if s is not None:
+            return s.pressed(name)
+        return self._local.pressed(name, player) if self._local_multi() else False
+
+    def _local_multi(self):
+        """True once the local InputState has SOURCES assigned to more than one
+        player -- a BLE keyboard given `src.player = 1` IS player 2, with no
+        transport and no _Slot. False on a pre-source InputState (or a test
+        stub), which is the old always-empty behaviour verbatim."""
+        return getattr(self._local, "_multi", False)
 
     def count(self):
-        """The number of connected players -- always the local one, plus any
-        connected extra slots. A cart offers a 2P mode when this is >= 2."""
-        n = 1
-        for s in self._slots.values():
+        """The number of connected players: the DISTINCT slots anything is
+        assigned to -- the local console's input sources (#26: every producer
+        owns a source and carries a player) plus any extra slot a transport
+        registered. A cart offers a 2P mode when this is >= 2."""
+        ids = None
+        srcp = getattr(self._local, "source_players", None)
+        if srcp is not None:
+            ids = set(srcp())
+        if not self._slots:
+            return len(ids) if ids else 1
+        if ids is None:
+            ids = set((0,))
+        for i, s in self._slots.items():
             if s.connected:
-                n += 1
-        return n
+                ids.add(i)
+        return len(ids) or 1
 
     # -- the transport-facing registration (a backend owns these) -----------
     def add_player(self, index):

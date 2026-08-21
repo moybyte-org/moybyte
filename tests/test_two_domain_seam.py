@@ -1,7 +1,7 @@
 """Tests for the two-domain rendering seam (#39, step 1): a fixed 320x240 GAME
 canvas (carts + the cart API, UNCHANGED) composited as a centered, integer-scaled
 viewport into a responsive SYSTEM canvas (the desktop/launcher/settings + status
-strip + dock), with a settings-resizable system font (petme128 x1/x2/x3, persisted
+strip), with a settings-resizable system font (petme128 x1/x2/x3, persisted
 in system.json).
 
 Driven through the SAME shared console the device runs (runtime.host_app +
@@ -107,18 +107,21 @@ def test_desktop_reflows_on_a_larger_canvas(tmp_path):
     buf = drv.rgb888()
     assert len(buf) == 640 * 480 * 3
     # rgb888() is 3 bytes per pixel, so count COLOURS and not bytes here too.
-    assert probe.distinct_pixels_in(buf, 3) > 4    # wallpaper + grid + dock drew
+    assert probe.distinct_pixels_in(buf, 3) > 4    # wallpaper + grid + strip drew
 
 
-def test_dock_and_strip_scale_with_the_canvas(tmp_path):
-    """The bottom dock anchors to the canvas bottom and spans its width; the status
-    strip stays at the top. (Layout fields drive both.)"""
+def test_strip_and_settings_panel_scale_with_the_canvas(tmp_path):
+    """The status strip stays at the top and the Settings panel fills the band down
+    to its bottom inset. (Layout fields drive both. This used to also assert the
+    bottom dock's slot geometry; the dock was deleted 2026-08-21 -- see
+    bar_layer.py -- and the panel KEPT the band it occupied as its bottom inset.)"""
     ws = _ws(tmp_path, sys_size=(640, 480))
     lay = ws.layout
-    assert lay.dock_y == 480 - lay.dock_h          # bottom-anchored
-    last = ws.bar_layer._dock_slot_rect(len(__import__("runtime.console", fromlist=["_DOCK_SLOTS"])._DOCK_SLOTS) - 1)
-    assert last[0] + last[2] <= 640                # the last slot fits the width
     assert lay.status_h >= 14                       # strip at least the baseline height
+    px, py, pw, ph = lay.settings_panel
+    assert py >= lay.status_h                       # below the strip
+    assert py + ph < 480                            # a bottom inset remains
+    assert px + pw <= 640
 
 
 def test_running_cart_is_a_centered_integer_viewport(tmp_path):

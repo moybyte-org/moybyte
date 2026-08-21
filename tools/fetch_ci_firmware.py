@@ -24,9 +24,10 @@ Two sources, in order:
 
 Either way the output is the same tree, which site/build.py reads:
 
-    dist/ci-firmware/
-      tdeck/moybyte-current-full-dio-0x0.bin
+    dist/ci-firmware/<variant>/
+      tdeck/moybyte_tdeck.bin
       tdeck/source.json                        <- run id/url, commit, date
+      tdeck/manifest.json                      <- the OTA manifest (its version)
       p4/moybyte_p4.bin
       p4/source.json
 
@@ -121,19 +122,25 @@ def board_dir(out_dir, board):
     return dest
 
 
-def fetch_release(slug, board, assets, out_dir):
-    """Take one board's image out of the rolling release. -> source or None.
+def fetch_release(slug, board, assets, out_dir, tag=None):
+    """Take one board's image out of a release. -> source or None.
 
     Release assets are flat, so they are named `<board>-<image>` and
     `<board>-source.json` (tools/publish_firmware_release.py); this puts the
     per-board layout back.
+
+    `tag` is which release to read. It defaults to the rolling stable one, but
+    the site offers a CHANNEL choice now, so the same code pulls `firmware-beta`
+    -- and a version tag (`v0.10`), whose assets are the archive that makes a
+    deliberate rollback possible at all.
     """
+    tag = tag or RELEASE_TAG
     prefix = board + "-"
     mine = [a for a in assets if a.startswith(prefix) and a.endswith(".bin")]
     if not mine:
         return None
     dest = board_dir(out_dir, board)
-    gh("release", "download", RELEASE_TAG, "-R", slug, "-p", prefix + "*",
+    gh("release", "download", tag, "-R", slug, "-p", prefix + "*",
        "-D", dest)
     source = {}
     for name in sorted(os.listdir(dest)):
@@ -146,9 +153,21 @@ def fetch_release(slug, board, assets, out_dir):
                 source = json.load(open(os.path.join(dest, plain), encoding="utf-8"))
             except ValueError:
                 source = {}
+    # The OTA manifest too, as `manifest.json`. It is the only place the build's
+    # human VERSION is written ("0.10", "beta 2026-08-20 10:25"), and the site's
+    # build picker names its options with it -- a channel without a version is
+    # the one thing a person choosing between builds actually wants to know. It
+    # is not prefixed `<board>-`, which is why the pattern above misses it, and
+    # a release without one (the artifacts path) is not an error.
+    if gh("release", "download", tag, "-R", slug,
+          "-p", "latest-%s.json" % board, "-D", dest, check=False) is not None:
+        landed = os.path.join(dest, "latest-%s.json" % board)
+        if os.path.exists(landed):
+            os.rename(landed, os.path.join(dest, "manifest.json"))
+
     files = sorted(n for n in os.listdir(dest) if n.endswith(".bin"))
     print("%-6s release %s (%s, %s) -> %s" %
-          (board, RELEASE_TAG, (source.get("commit") or "?")[:8],
+          (board, tag, (source.get("commit") or "?")[:8],
            (source.get("built") or "")[:10], ", ".join(files)))
     return source or {"board": board}
 
@@ -194,6 +213,10 @@ def main():
     ap.add_argument("--repo", help="owner/name (default: this checkout's)")
     ap.add_argument("--branch", default="master",
                     help="only builds of this branch (default: master)")
+    ap.add_argument("--release", default=RELEASE_TAG, metavar="TAG",
+                    help="which release to read (default: %s). `firmware-beta` "
+                         "is the dev channel; a version tag (v0.10) is the "
+                         "archive a rollback comes from." % RELEASE_TAG)
     ap.add_argument("--source", choices=("auto", "release", "artifacts"),
                     default="auto",
                     help="where to read images from (default: the release, "
@@ -208,12 +231,12 @@ def main():
         slug = args.repo or repo_slug()
         assets = []
         if args.source in ("auto", "release"):
-            got = gh_json("release", "view", RELEASE_TAG, "-R", slug,
+            got = gh_json("release", "view", args.release, "-R", slug,
                           "--json", "assets", check=False)
             assets = [a["name"] for a in (got or {}).get("assets") or []]
             if not assets:
                 print("no `%s` release assets%s" %
-                      (RELEASE_TAG,
+                      (args.release,
                        " -- falling back to run artifacts" if args.source == "auto"
                        else ""))
         runs = []
@@ -228,7 +251,7 @@ def main():
         try:
             source = None
             if assets:
-                source = fetch_release(slug, board, assets, out)
+                source = fetch_release(slug, board, assets, out, args.release)
             # Per board, not per run: a board published only as an artifact so
             # far still gets one while the other comes off the release.
             if source is None and runs:

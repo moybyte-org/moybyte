@@ -36,7 +36,7 @@ sys.modules.setdefault("block_editor_ui", _block_editor_ui)
 sys.modules.setdefault("map_editor_ui", _map_editor_ui)
 sys.modules.setdefault("music_editor_ui", _music_editor_ui)
 # layers.py is the Layer protocol + the self-contained surface adapters; bar_layer.py
-# is the top-bar/dock surface + the single source of the bar/dock geometry constants
+# is the top-bar surface + the single source of the bar geometry constants
 # (extracted from console.py). console.py does `from layers import ...` / `from
 # bar_layer import ...` (its frozen device names). Both are dependency-free leaves, so
 # they only need the same bare-name alias.

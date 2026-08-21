@@ -4,8 +4,9 @@ primitive. Always a SYSTEM group (Settings/About/Reboot); a CART group (Restart/
 is prepended only when a cart is open.
 
 Driven through the SAME shared console the device runs (runtime.host_app +
-ConsoleDriver: mouse == touch, arrows == trackball, Enter == run / A, Esc == stop),
-so these assert host==device behavior. The Popup primitive is also unit-tested directly.
+ConsoleDriver: mouse == touch, arrows == trackball, Enter == run / A),
+so these assert host==device behavior. ESC is the exception: it arrives as the
+`stop` BUTTON, which only the DEVICE tier's BUTTONS has. The Popup primitive is also unit-tested directly.
 """
 
 from pathlib import Path
@@ -15,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import canvas_probe as probe  # noqa: E402  (pixel-width-agnostic "it drew" probes)
 
 
+from device.moybyte.input import InputState as DeviceInputState  # noqa: E402
 from ws_helpers import build_ws as _ws
 
 
@@ -200,12 +202,19 @@ def test_menu_omits_cart_group_when_no_cart(tmp_path):
 # -- dismissal ---------------------------------------------------------------
 
 def test_esc_dismisses(tmp_path):
+    """ESC arrives as `stop`, a name only the DEVICE tier's BUTTONS carries
+    (the host's ends at `home`, and the sim routes ESC through
+    ConsoleDriver.escape instead), so the shared handler is driven with the
+    InputState it meets on glass."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
     ws.toggle_sysmenu()
     drv.frame(1 / 30)
     assert ws.sysmenu.open
-    _key(drv, "stop")                          # ESC -> "stop"
+    i = DeviceInputState()
+    i.source("kbd").set_button("stop", True)
+    i.begin_frame()
+    ws._sysmenu_layer.handle_input(i)
     assert not ws.sysmenu.open
 
 

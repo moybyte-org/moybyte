@@ -1,62 +1,37 @@
 """T-Deck panel glue for the mainline build: the compositor over moy_lcd.
 
-This is the twin of the P4's `p4_display.P4Compositor`, and it satisfies the
-SAME small interface the shared console reaches a backend through -- the one
-`DeviceCanvas.__init__` and `moy_runtime.run_desktop` actually call:
+The MECHANISM is `banded_panel.BandedCompositor` in the shared `device/` tree
+since 2026-08-21 (#206 item 1) -- the backend contract, the kick/drain overlap,
+the core-0 feeder, the ping-pong and the meters all live there, in one body
+this board and the Guition both run. Read that module's docstring first; what
+is left here is what is this BOARD's.
 
-    size()          -> (w, h)
-    framebuffer()   -> the buffer to draw into THIS frame
-    back_buffer()   -> alias of framebuffer(), named for the ping-pong call site
-    gfx()           -> the native moy_gfx kernel, or None
-    flush()         -> present what was drawn
-    sync()          -> guarantee no panel DMA is in flight
+THE ARITHMETIC ON THIS GLASS. 320x240x2 = 153,600 B is ~17 ms on this bus, and
+  paid synchronously it caps the loop near 58 fps before anything is drawn --
+  measured as flush=16.8..20.2 against the deleted fork build's 2.1 on the same
+  panel, and worth ~2x across the cart roster. The overlap is what removes it.
 
-Nothing new is invented here (docs/backend_contract_v1.md L8: strategy stays the
-backend's, and a new backend implements the contract rather than a new
-mechanism). What differs from `moy_compositor.Compositor` in the fork build is
-ONLY where the band machinery lives: there, a Python object drives
-`lcd_bus.tx_color` band by band and owns the bounce buffers, the completion
-counter and the pacing stats; here all of that is `moy_lcd` -- one C module that
-also owns the SPI host, so a band never crosses the Python boundary.
+  Band geometry is 32 rows and the bounce pair 40,960 B of internal SRAM. It
+  was 48 rows, pinned by the retired 2 ms pump timer -- a band had to outlast
+  the timer's period or the SPI starved between fires -- and under that timer
+  32-row bands measured 53.9 -> 51.8 fps on Brick Siege, a real 4% loss.
 
-THE FLUSH OVERLAPS THE NEXT FRAME'S RENDER (#66/#43).
-  320x240x2 = 153,600 B is ~17 ms on this bus, and paid synchronously it caps
-  the loop near 58 fps before anything is drawn -- measured as flush=16.8..20.2
-  against the fork build's 2.1 on the same glass, and worth ~2x across the cart
-  roster. So `flush()` is the fork's three-step sequence:
-
-      1. drain the PREVIOUS frame's bands (mostly already done -- the render
-         that just ran is what hid them),
-      2. swap the ping-pong so the buffer just drawn becomes the FRONT,
-      3. kick it: queue the first two bands (~6 ms of transfer buffered) and
-         RETURN, so the CPU renders the next frame while the panel reads.
-
-  `flush()` therefore costs the drain RESIDUE plus the kick, not the transfer.
-  The residue is what the console's `flush=` reports, and it is the number that
-  should fall.
-
-WHO FEEDS THE REST. Two feeders, both needed, both proven on the fork:
-  * a PUMP_TIMER_MS machine.Timer -- esp32 timers schedule through mp_sched, so
-    the callback lands between bytecodes. That is the only feeder during a
-    cart's long Python `_update`, which has no other hook point.
-  * `pump_if_pending`, poked by DeviceCanvas after each big native draw op (and,
-    on a gated canvas, by moy_gfx's own draw context every GATE_PUMP_EVERY ops).
-    The soft timer CANNOT fire while the interpreter sits inside one 15 ms C
-    fill, which measured as PUMP idle=2-6 ms of starved SPI on the fork.
-
-  Both are pure optimisations of WHEN the bands are fed. If the timer never
-  starts and every poke is missed, `drain()` feeds them all itself and the flush
-  is simply serialised again -- the pre-overlap cost, never a glitch. The front
-  buffer is immutable while it ships (that is what the ping-pong is for), so the
-  bands are tear-free by construction.
+  THE FEEDER REVERSED THAT VERDICT, and the ordering is the whole point: with
+  the flush on its core-0 task there is no timer to outrun, and the same 48->32
+  shrink measured 58.0 -> 58.6 fps for +16.1 KB of internal SRAM (both
+  2026-08-21, d9aa73e). A band-size number measured against the timer says
+  nothing about this build.
 
 WHAT IS NOT PORTED, deliberately: the #190 flush-bounce scale fold, which
   SYNTHESISES each band for a small-canvas game instead of copying the root
-  framebuffer. It needs moy_gfx kernels writing into the bounce slots, i.e. the
-  slots exposed back to Python, and it is a separate lever with its own A/B.
-  `fold_supported` is absent, so `DeviceCanvas.blit_game` takes its ordinary
-  root composite path and the PUMP line prints fold=0. Nothing degrades.
+  framebuffer -- the Guition subclass's lever. It needs moy_gfx kernels writing
+  into the bounce slots, i.e. the slots exposed back to Python, and it is a
+  separate lever with its own A/B. `fold_supported` is absent here, so
+  `DeviceCanvas.blit_game` takes its ordinary root composite path and the PUMP
+  line prints fold=0. Nothing degrades.
 """
+
+from banded_panel import BandedCompositor
 
 WIDTH = 320
 HEIGHT = 240
@@ -117,156 +92,50 @@ ASYNC_FLUSH = True
 # be attributed to the flush or to the copy by flipping one at a time.
 LAYER_COPY_ASYNC = True
 
-# Soft-timer pump period. 2 ms is the fork's shipped value, arrived at on
-# hardware: a band is ~3 ms of transfer, so a 2 ms feeder stays ahead of the two
-# buffered slots. Timer 3 of the S3's four (2 groups x 2); nothing else in this
-# image takes one. 0 disables the timer and leaves the draw-verb poke + drain.
-PUMP_TIMER_MS = 2
-PUMP_TIMER_ID = 3
 
-
-class TDeckCompositor:
+class TDeckCompositor(BandedCompositor):
     """RGB565 framebuffer(s) in PSRAM, pushed to the ST7789 by moy_lcd."""
 
     def __init__(self, nfbs=2, async_flush=None):
+        # The import is HERE, not in the shared base, so this board's dependency
+        # on this C module stays visible -- to a reader and to
+        # tests/test_staging_closure.py, which derives what a build freezes from
+        # the import graph.
         import moy_lcd
 
-        self._lcd = moy_lcd
-        # Dark until the first composed frame (#45): a freshly-powered ST7789's
-        # GRAM is noise, and moy_lcd.init leaves the backlight off for exactly
-        # this reason. run_desktop lights it after the first flush.
-        moy_lcd.init(nfbs=nfbs)
-        self._w = moy_lcd.WIDTH
-        self._h = moy_lcd.HEIGHT
-        # Cache the memoryviews ONCE. back_buffer() is called every frame and on
-        # every layer bind; re-creating a memoryview per call would allocate on
-        # the hot path for no reason.
-        self._fbs = [moy_lcd.fb(i) for i in range(moy_lcd.nfbs())]
-        self._back = 0
-        try:
-            import moy_gfx
-            self._gfx = moy_gfx
-        except ImportError:
-            self._gfx = None
-
-        # The overlap needs BOTH a moy_lcd that can split the flush and two
-        # distinct buffers to ping-pong between: with one framebuffer the DMA
-        # would read exactly what the next frame draws into.
         if async_flush is None:
             async_flush = ASYNC_FLUSH
-        self._async = bool(async_flush) and len(self._fbs) > 1 \
-            and hasattr(moy_lcd, "kick")
-        # `bounce_flush` is what device_diag._diag_pump gates the PUMP line on.
-        self.bounce_flush = self._async
-        self._pump_timer = None
-        if self._async:
-            # The C function itself, not a bound method: DeviceCanvas stores this
-            # and calls it after every big native op, and moy_gfx's draw context
-            # mp_call_function_0's it from inside C. One call, no Python frame.
-            self.pump_if_pending = moy_lcd.pump
-            if PUMP_TIMER_MS:
-                try:
-                    from machine import Timer
-                    self._pump_timer = Timer(PUMP_TIMER_ID)
-                    # The callback is handed the timer object; moy_lcd.pump takes
-                    # 0 or 1 args precisely so it can be wired here directly.
-                    self._pump_timer.init(period=PUMP_TIMER_MS,
-                                          mode=Timer.PERIODIC,
-                                          callback=moy_lcd.pump)
-                except Exception as exc:  # noqa: BLE001
-                    # Not fatal, and worth saying out loud: the flush still works,
-                    # it just loses the feeder that covers a cart's Python logic.
-                    print("Moybyte panel: pump timer unavailable "
-                          "(draw-poke + drain only):", exc)
-                    self._pump_timer = None
-
-    # -- the contract --------------------------------------------------------
-
-    def size(self):
-        return (self._w, self._h)
-
-    def framebuffer(self):
-        return self._fbs[self._back]
-
-    def back_buffer(self):
-        return self._fbs[self._back]
-
-    def gfx(self):
-        return self._gfx
-
-    def has_gfx(self):
-        return self._gfx is not None
-
-    def flush(self):
-        lcd = self._lcd
-        if not self._async:
-            lcd.show(self._back)
-            self._swap()
-            return
-        # 1. Finish the previous frame. Most of it already happened behind the
-        #    render that just ran, so this is the residue -- and it is what the
-        #    console times as `flush=`.
-        lcd.drain()
-        # 2. The buffer just drawn becomes the FRONT; drawing moves to the other,
-        #    which the drain above just made safe to overwrite.
-        front = self._back
-        self._swap()
-        # 3. Queue the first bands and return.
-        lcd.kick(front)
-
-    def _swap(self):
-        # Ping-pong so the next frame is drawn into a buffer the panel is not
-        # reading. This is what DeviceCanvas.sync_back re-points at, and what
-        # DeviceCanvas.RETAINED_FRAMES = 2 is calibrated against.
-        n = len(self._fbs)
-        if n > 1:
-            self._back = (self._back + 1) % n
-
-    def sync(self):
-        """Leave NO panel transfer on the shared SPI bus.
-
-        Load-bearing, not hygiene: the SD card shares this host, and an SD op
-        overlapping an in-flight panel DMA is the documented way to hang this
-        board. `run_desktop._with_sd_synced` calls this before every session.
-        Also the fence anything that reaches around the console must take.
-        """
-        self._lcd.drain()
-
-    # -- diagnostics (#66 lever 4) -------------------------------------------
-
-    @property
-    def pump_last_us(self):
-        """CPU us spent feeding bands during the last shipped frame (HITCH's
-        `pump=`). A property because device_diag reads it as an attribute."""
-        return self._lcd.pump_stats()[0] if self._async else 0
-
-    def bounce_stats(self):
-        """(pump_us, idle_us, idle_n, feed_us, bands) -- the PUMP diag line.
-
-        idle_us is the one to read: it is time the SPI sat starved because a band
-        was fed only after the previous one had already finished. ~0 means the
-        feeders are keeping up and the remaining flush cost is real transfer
-        time; a big number means the pump period or the slot count is the wall.
-        """
-        if not self._async:
-            return (0, 0, 0, -1, 0)
-        st = self._lcd.pump_stats()
-        return (st[0], st[1], st[2], st[3], st[4])
+        BandedCompositor.__init__(self, moy_lcd, nfbs, async_flush)
 
     # -- board bits ----------------------------------------------------------
 
-    def set_backlight(self, on=True):
-        self._lcd.backlight(on)
+    def sd_bracket(self, on):
+        """Bracket an SD session: while on, every flush waits its frame out.
 
-    def stats(self):
-        """(flushes, last_flush_us) -- the WALL span of the last frame's
-        transfer, kick to fully out. It does not shrink when the overlap lands;
-        what shrinks is the share of it the CPU waits for (bounce_stats, and the
-        console's own `flush=`)."""
-        return self._lcd.stats()
+        The core-0 feeder made "no panel flush may overlap an SD session" a
+        rule the VM-side sync() alone can no longer keep -- a paint DURING a
+        session (boot's per-cart progress, a commit's toast) hands bands to
+        core 0 while the VM sits inside an sdspi transaction on the same SPI
+        host, which was measured 2026-08-21 as a Cache/MMU panic within
+        seconds of cart loading. moy_lcd.sd_guard serializes exactly those
+        frames (they still ship through the feeder; the kick just waits).
+        `run_desktop`'s session wrappers call this around every session.
+
+        This is the T-Deck's alone: the Guition's panel bus carries nothing
+        else, so its compositor has no bracket and needs none.
+        """
+        g = getattr(self._lcd, "sd_guard", None)
+        if g is not None:
+            g(bool(on))
 
 
 def set_backlight(on=True):
-    """Module-level backlight, for code that has no compositor in hand."""
+    """Module-level backlight, for code that has no compositor in hand.
+
+    Stays per-board rather than moving to the shared base: its whole reason to
+    exist is having no instance to route through, so the native module has to
+    be named somewhere, and naming it in a plain `import` is what keeps this
+    board's C dependency greppable.
+    """
     import moy_lcd
     moy_lcd.backlight(on)
