@@ -17,8 +17,7 @@ CONFIG_LCD_DSI_ISR_IRAM_SAFE=y
 # window drags -5ms/frame, Lua table bench -13%. Costs exactly 128KB of
 # internal heap. 512KB does NOT boot: the carve starves MicroPython's
 # internal/DMA pool reservation (main_task error 0x101 abort loop), so 256KB
-# is the max viable on this port. NB build.sh's stale-sdkconfig guard greps
-# for this line -- keep them in sync.
+# is the max viable on this port.
 CONFIG_CACHE_L2_CACHE_256KB=y
 
 # The board has 32MB flash (the generic P4 board assumes 16MB).

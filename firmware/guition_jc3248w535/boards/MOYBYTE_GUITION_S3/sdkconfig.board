@@ -21,8 +21,9 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-s3.csv"
 
-# Rollback (#53): restated here because build.sh's stale-sdkconfig guard greps
-# the GENERATED config for it.
+# Rollback (#53): restated here because this file is what the build's sdkconfig
+# guard derives its required list from, so an option written down here is the
+# one the build is made to carry.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Cache geometry: the T-Deck's #63 A/B verdict (32KB icache / 64KB dcache)
@@ -104,6 +105,11 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # would likely be the biggest single win, but MicroPython's modbluetooth
 # compiles its gatts_* half unconditionally, so that is a build risk to test
 # separately rather than fold into a measurement.
+#
+# ADV_REPORT_FLOW_CTRL_NUM is 50 because IDF ranges it 50..1000 (default 100):
+# an out-of-range value is REFUSED SILENTLY and the build keeps the default, so
+# the saving this line claims simply would not happen. 50 is the floor allowed,
+# ~1.75KB back at 35 B per unprocessed report.
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=2
 CONFIG_BT_NIMBLE_MAX_CCCDS=4
@@ -113,7 +119,7 @@ CONFIG_BT_NIMBLE_HCI_EVT_LO_BUF_COUNT=4
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
 CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
-CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50
 
 # --- TCP throughput: Espressif's "Iperf rank" set, which is ATOMIC ---------
 # Measured on the T-Deck (same SoC) 2026-08-20, pinned to one AP: 400 -> 2121

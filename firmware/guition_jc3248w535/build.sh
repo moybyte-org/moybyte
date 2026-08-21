@@ -97,24 +97,13 @@ moybyte_ota_identity guition_s3 "${REPO_ROOT}/device/moy_ota.py"
 # 4) Frozen manifest + partition table + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"
-moybyte_partition_and_sdkconfig_guard \
-  "${BOARD_DIR}/partitions-moybyte-guition-s3.csv" \
-  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig" \
-  'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-guition-s3.csv"' \
-  'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y' \
-  'CONFIG_ESP_WIFI_RX_BA_WIN=32' \
-  'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y' \
-  'CONFIG_SPIRAM_MODE_OCT=y' \
-  'CONFIG_SPIRAM_SPEED_120M=y' \
-  'CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y' \
-  'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
+moybyte_sdkconfig_guard "${BOARD_DIR}" \
+  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 
 # ---------------------------------------------------------------------------
 # 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
 #    #168 size guard). The merged image cable-flashes at 0x0 (S3 bootloader
 #    offset).
 # ---------------------------------------------------------------------------
-moybyte_build_and_collect "${BOARD_DIR}/partitions-moybyte-guition-s3.csv" \
+moybyte_build_and_collect "${BOARD_PARTITION_CSV}" \
   moybyte_guition_s3 "full image, cable flash at 0x0"

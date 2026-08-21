@@ -181,17 +181,8 @@ moybyte_ota_identity tdeck "${REPO_ROOT}/device/moy_ota.py"
 # 4) Frozen manifest + partition table + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"
-moybyte_partition_and_sdkconfig_guard \
-  "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
-  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig" \
-  'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"' \
-  'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y' \
-  'CONFIG_ESP_WIFI_RX_BA_WIN=32' \
-  'CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_64KB=y' \
-  'CONFIG_ESP32S3_DATA_CACHE_LINE_32B=y' \
-  'CONFIG_SPIRAM_MODE_OCT=y' \
-  'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
+moybyte_sdkconfig_guard "${BOARD_DIR}" \
+  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 
 # ---------------------------------------------------------------------------
 # 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
@@ -199,5 +190,5 @@ moybyte_partition_and_sdkconfig_guard \
 #    image cable-flashes at 0x0 (the S3's bootloader offset; the P4's is
 #    0x2000).
 # ---------------------------------------------------------------------------
-moybyte_build_and_collect "${BOARD_DIR}/partitions-moybyte-tdeck.csv" \
+moybyte_build_and_collect "${BOARD_PARTITION_CSV}" \
   moybyte_tdeck "full image, cable flash at 0x0"

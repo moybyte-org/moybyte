@@ -116,19 +116,12 @@ moybyte_ota_identity p4 "${REPO_ROOT}/device/moy_ota.py"
 #    frozen console) + the stale-sdkconfig guard.
 # ---------------------------------------------------------------------------
 moybyte_frozen_manifest "${MANIFEST}"
-moybyte_partition_and_sdkconfig_guard \
-  "${BOARD_DIR}/partitions-moybyte-p4.csv" \
-  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig" \
-  'CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-p4.csv"' \
-  'CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64' \
-  'CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288' \
-  'CONFIG_CACHE_L2_CACHE_256KB=y' \
-  'CONFIG_LCD_DSI_ISR_IRAM_SAFE=y' \
-  'CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y'
+moybyte_sdkconfig_guard "${BOARD_DIR}" \
+  "${MPY_DIR}/ports/esp32/build-${BOARD}/sdkconfig"
 
 # ---------------------------------------------------------------------------
 # 5) Build + collect (shared lib: mpy-cross, the port, the two images and the
 #    #168 size guard -- moybyte_app_size_guard runs in there).
 # ---------------------------------------------------------------------------
-moybyte_build_and_collect "${BOARD_DIR}/partitions-moybyte-p4.csv" \
+moybyte_build_and_collect "${BOARD_PARTITION_CSV}" \
   moybyte_p4 "flash at offset 0x2000"

@@ -27,9 +27,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-tdeck.csv"
 # Rollback (#53): an app that never calls
 # esp32.Partition.mark_app_valid_cancel_rollback() is reverted by the
 # bootloader on the next boot, so a bad OTA self-heals. sdkconfig.base already
-# sets this upstream; restated here because build.sh's stale-sdkconfig guard
-# greps the GENERATED config for it -- an existing build dir silently keeps
-# whatever it was first configured with.
+# sets this upstream; restated here because this file is what the build's
+# sdkconfig guard derives its required list from -- an existing build dir
+# silently keeps whatever it was first configured with.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Cache geometry (#63, A/B'd on this board): the stock build runs the S3's
@@ -182,19 +182,20 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 # It is the one buffer here that must be DMA-capable internal SRAM, the same
 # pool a running cart needs ~31KB of, so it is the knob to watch.
 # TRY_ALLOCATE_WIFI_LWIP is load-bearing: it moves the lwIP buffers into PSRAM,
-# which is why the whole set costs no internal SRAM at all (49,304B free while
-# serving vs stock's 46,424; 18,112B with a cart running vs stock's ~17,600).
+# which is why the whole set costs no internal SRAM at all (A/B'd on this board:
+# the tuned build has MORE internal SRAM free, both while serving and with a
+# cart running, than the stock one).
 #
-# THIS BOARD ONLY, and the Guition is the proof. Flashed with this same set
-# (2026-08-20) its WiFi would not initialise at all -- scan() returned nothing
-# three times and connect() raised OSError: Wifi Internal State Error --
-# because its main internal region had 268 BYTES free against this board's
-# 49,432. Its moy_axs panel pays the same ~61KB bounce cost on a bigger panel,
-# so it had nothing to give. It stays stock until it has headroom; do not copy
-# this block there without measuring idf_heap_info FIRST. The P4 is unaffected
-# by construction -- its WiFi is ESP-Hosted on a C6 over SDIO, so ESP_WIFI_* on
-# the host configures a driver that is not there, and its lwIP window is
-# already 65534.
+# THE GUITION NEEDED THE BLE BLOCK BELOW FIRST, and that ordering is the
+# lesson: flashed with this set alone its WiFi would not initialise at all
+# (scan() empty, connect() raising OSError: Wifi Internal State Error) because
+# it activates BLE at boot and its moy_axs panel pays the same ~61KB bounce
+# cost on a bigger panel, leaving its main internal region with a few hundred
+# bytes. Right-sizing BLE is what bought that board the headroom. A FOURTH
+# board inherits neither block -- measure idf_heap_info first. The P4 is
+# unaffected by construction: its WiFi is ESP-Hosted on a C6 over SDIO, so
+# ESP_WIFI_* on the host configures a driver that is not there, and its lwIP
+# window is already 65534.
 #
 # NOT enabled, deliberately: ESP_WIFI_IRAM_OPT / RX_IRAM_OPT / EXTRA_IRAM_OPT,
 # which Espressif's iperf profile also sets. On the S3 IRAM aliases DRAM, so
@@ -211,23 +212,35 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 
 # --- BLE right-sized for ONE keyboard --------------------------------------
-# This board does not activate BLE today (its keyboard is the on-board C3 over
-# I2C, and ble_keyboard.py is not staged here), so the stack sits linked but
-# idle. That is exactly why this is worth setting NOW rather than when someone
-# first pairs a keyboard: measured 2026-08-21 on this board, calling
-# bluetooth.BLE().active(True) with WiFi up takes the main internal region from
-# 49,432 bytes free to 756. A cart needs ~31KB, so cart + BLE + WiFi would fail
-# outright -- the capability is currently safe only because nobody uses it.
+# `ble_keyboard.py` is staged here and run_desktop constructs
+# `ws.ble_keyboard` as an optional SECOND keyboard beside the C3 matrix, started
+# from the Settings Bluetooth picker. It is not active at boot, so the cost
+# below is paid the moment someone opens that picker and not before.
+#
+# BLE is by far the most expensive thing on this board's internal SRAM --
+# measured over the dev channel, activating it costs ~51.7KB total / ~21.8KB
+# out of the main region, more than running a cart does, while WiFi costs
+# ~144 B because TRY_ALLOCATE_WIFI_LWIP puts its buffers in PSRAM. The squeeze
+# is BLE, not "BLE + WiFi"; that is the number to attack if you go hunting.
+# Right-sized as below, cart + WiFi + BLE all up coexist -- with roughly 18KB
+# of main-region headroom left, which is enough and not much: a feature wanting
+# another 20KB in that state does not have it.
 #
 # The stack ships at MicroPython's generic defaults: four simultaneous
 # connections, six radio activities, 24x255B of ACL buffers. A console that
-# talks to one HID keyboard needs none of that. Same block as the Guition's,
+# talks to one HID keyboard needs none of that, and the right-sizing is what
+# makes that last configuration a working one. Same block as the Guition's,
 # where it took an ACTIVE, SCANNING stack from 98,700 bytes down to ~50,400 and
 # was the difference between "WiFi cannot initialise" and a working web host.
 #
 # Roles are deliberately NOT trimmed: dropping PERIPHERAL/BROADCASTER is likely
 # the biggest remaining win, but MicroPython's modbluetooth compiles its gatts_*
 # half unconditionally, so that is a build risk to test on its own.
+#
+# ADV_REPORT_FLOW_CTRL_NUM is 50 because IDF ranges it 50..1000 (default 100):
+# an out-of-range value is REFUSED SILENTLY and the build keeps the default, so
+# the saving this line claims simply would not happen. 50 is the floor allowed,
+# ~1.75KB back at 35 B per unprocessed report.
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=2
 CONFIG_BT_NIMBLE_MAX_CCCDS=4
@@ -237,4 +250,4 @@ CONFIG_BT_NIMBLE_HCI_EVT_LO_BUF_COUNT=4
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=8
 CONFIG_BT_NIMBLE_MSYS1_BLOCK_COUNT=8
 CONFIG_BT_CTRL_BLE_MAX_ACT=3
-CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20
+CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=50

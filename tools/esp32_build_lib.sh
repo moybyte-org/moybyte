@@ -6,8 +6,9 @@
 # exactly as twins do (the OTA stamp read FIRMWARE_VERSION from two different
 # paths; the web blob was generated into the shared tree on one board and into
 # the staged copy on the other). What stays in each build.sh is the genuinely
-# per-board half: the patch ladder, the sdkconfig option list, and the prose
-# that explains the board.
+# per-board half: the patch ladder and the prose that explains the board. The
+# sdkconfig options are not a list here either -- moybyte_sdkconfig_guard reads
+# the board's own sdkconfig.board.
 #
 # Callers set (before sourcing or before the call that needs them):
 #   REPO_ROOT SCRIPT_DIR BUILD_DIR MPY_DIR MPY_TAG DIST_DIR MODULES_DIR
@@ -183,25 +184,99 @@ EOF
   echo "# frozen-source fingerprint: $(find "${MODULES_DIR}" -type f -name '*.py' -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1)" >> "${manifest}"
 }
 
-# Stage the board's partition CSV ($1, a path) into ports/esp32 (where
-# CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves), then force sdkconfig
-# regeneration when the GENERATED config ($2) exists but lacks any of the
-# required options ($3...). IDF only (re)generates a build's sdkconfig from
-# the defaults when the file is ABSENT -- editing sdkconfig.board does NOT
-# propagate into an existing build dir, which is how a build once silently
-# kept the small caches.
-moybyte_partition_and_sdkconfig_guard() {
-  local csv="$1" gen="$2"; shift 2
-  cp "${csv}" "${MPY_DIR}/ports/esp32/$(basename "${csv}")"
+# Apply the board's sdkconfig fragment: stage the partition table it names,
+# and make sure the settings it decided are the settings this build carries.
+# $1 is the board def dir (boards/<BOARD>), $2 the GENERATED sdkconfig.
+# Reads BUILD_PYTHON REPO_ROOT MPY_DIR MPY_TAG; exports BOARD_PARTITION_CSV.
+#
+# `boards/<BOARD>/sdkconfig.board` is the ONE store of a board's decided IDF
+# settings, prose included; nothing here restates it -- both the required
+# option list and the partition-table filename are read out of it.
+#
+# Two different questions, answered separately because their right answers
+# differ:
+#
+#   1. "Was this build tree configured from the current inputs?" -- a STAMP
+#      over the fragment, mpconfigboard.cmake and MPY_TAG. IDF only generates a
+#      build's sdkconfig when the file is ABSENT, so on a mismatch drop the
+#      generated one. A stamp and not a grep list: it also catches a setting
+#      REMOVED from the fragment, a change to which upstream fragments the
+#      board pulls in, and a MicroPython tag bump underneath both.
+#
+#   2. "Did IDF honour what the fragment asked for?" -- a grep of the generated
+#      config, meaningful ONLY once the stamp matches. A setting still missing
+#      then is INERT because Kconfig refused it (e.g. an out-of-range value:
+#      CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM is `range 50 1000`, so a 20
+#      silently stays 100). Deleting the sdkconfig would not fix that, it would
+#      just rebuild the world forever, so this reports instead.
+moybyte_sdkconfig_guard() {
+  local board_dir="$1" gen="$2"
+  local fragment="${board_dir}/sdkconfig.board"
+  local cmake="${board_dir}/mpconfigboard.cmake"
+  local bc="${REPO_ROOT}/tools/board_config.py"
+  local f
+  for f in "${fragment}" "${cmake}"; do
+    [ -f "${f}" ] || { echo "!! missing ${f}" >&2; exit 1; }
+  done
+
+  # The partition table, named ONCE -- by the setting that has to name it.
+  local csv_name
+  csv_name="$("${BUILD_PYTHON}" "${bc}" sdkconfig-get "${board_dir}" \
+              CONFIG_PARTITION_TABLE_CUSTOM_FILENAME)"
+  BOARD_PARTITION_CSV="${board_dir}/${csv_name}"
+  [ -f "${BOARD_PARTITION_CSV}" ] || {
+    echo "!! sdkconfig.board names ${csv_name}, which is not in ${board_dir}" >&2
+    exit 1; }
+  # CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to ports/esp32.
+  cp "${BOARD_PARTITION_CSV}" "${MPY_DIR}/ports/esp32/${csv_name}"
+
+  local build_dir stamp want
+  build_dir="$(dirname "${gen}")"
+  stamp="${build_dir}/.moybyte-sdkconfig-stamp"
+  want="$( { cat "${fragment}" "${cmake}"; echo "MPY_TAG=${MPY_TAG}"; } \
+           | md5sum | cut -d' ' -f1)"
+
   if [ -f "${gen}" ]; then
-    local opt
-    for opt in "$@"; do
-      if ! grep -qF "${opt}" "${gen}"; then
-        echo "== sdkconfig lacks ${opt} -- forcing regeneration"
-        rm -f "${gen}"
-        break
-      fi
-    done
+    if [ ! -f "${stamp}" ] || [ "$(cat "${stamp}")" != "${want}" ]; then
+      echo "== sdkconfig inputs changed since this build tree was configured -- regenerating"
+      rm -f "${gen}"
+    else
+      moybyte_sdkconfig_report_inert "${board_dir}" "${gen}"
+    fi
+  fi
+  mkdir -p "${build_dir}"
+  printf '%s\n' "${want}" > "${stamp}"
+}
+
+# Report every decided setting the generated sdkconfig does not carry, with the
+# fragment's prose for it. Only ever called when the stamp says this tree WAS
+# configured from this fragment, so a miss is Kconfig's refusal, not staleness.
+# WARNS locally and FAILS under CI / MOYBYTE_REQUIRE_SDKCONFIG=1.
+moybyte_sdkconfig_report_inert() {
+  local board_dir="$1" gen="$2"
+  local bc="${REPO_ROOT}/tools/board_config.py"
+  local want opt inert=0
+  while IFS= read -r want; do
+    [ -n "${want}" ] || continue
+    grep -qxF "${want}" "${gen}" && continue
+    opt="${want%%=*}"
+    inert=1
+    echo "" >&2
+    echo "!! sdkconfig: $(basename "${board_dir}") asks for ${want}, and the build does not have it" >&2
+    echo "!!   generated: $(grep -E "^(${opt}=|# ${opt} is not set)" "${gen}" \
+                            || echo "(no such option -- renamed, or its dependency is off)")" >&2
+    "${BUILD_PYTHON}" "${bc}" sdkconfig-why "${board_dir}" "${opt}" 2>/dev/null \
+      | sed 's/^/!!   /' >&2 || true
+  done < <("${BUILD_PYTHON}" "${bc}" sdkconfig-required "${board_dir}")
+  if [ "${inert}" = "1" ]; then
+    echo "" >&2
+    echo "!! Kconfig refused the setting(s) above (a range, a missing dependency," >&2
+    echo "!! or a renamed option). Fix the value in sdkconfig.board or delete the" >&2
+    echo "!! line -- a setting that does nothing is worse than no setting, because" >&2
+    echo "!! the comment beside it says the board is tuned when it is not." >&2
+    if [ -n "${CI:-}" ] || [ "${MOYBYTE_REQUIRE_SDKCONFIG:-0}" = "1" ]; then
+      exit 1
+    fi
   fi
 }
 

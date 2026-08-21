@@ -11,6 +11,9 @@ import sys
 import types
 from pathlib import Path
 
+
+from tools import board_config
+
 ROOT = Path(__file__).resolve().parents[1]
 # The driver is SHARED since 2026-08-19 (device/ble_keyboard.py -- promoted
 # from the P4's tree when the Guition S3 became its second consumer); the
@@ -438,8 +441,14 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert "MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1" in board_cmake
     assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in board_sdkconfig
     assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in board_sdkconfig
-    assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in build_script
-    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in build_script
+    # build.sh names no CONFIG_ option: its guard derives them from the
+    # fragment, so what is pinned here is the derivation reaching these two.
+    required = [s.assignment for s in
+                board_config.sdkconfig_required(
+                    ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b")]
+    assert "CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=64" in required
+    assert "CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288" in required
+    assert "moybyte_sdkconfig_guard" in build_script
     assert "moy_ble_hid/micropython.cmake" in native_cmake
     assert "moy_ble_hid_queue_on_notify" in native_queue
     assert "moy_ble_hid_queue_on_notify" in bt_patch

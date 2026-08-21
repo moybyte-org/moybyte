@@ -237,9 +237,24 @@ follows the CI matrix row.
 * **A driver registry / ABI / swappable UI backends** — PURR's own F14 is the
   bill (17 backend-macro call sites, icons silently gone on three apps).
   #161's verdict stands: take the board file, leave the ABI.
-* **Full sdkconfig codegen** — the option lists are data fed to the shared
-  guard; `sdkconfig.board` stays the store, with the learned prose beside each
-  value, exactly as the PURR board-file lesson wants.
+* **Full sdkconfig codegen** — `sdkconfig.board` stays the store, with the
+  learned prose beside each value, exactly as the PURR board-file lesson
+  wants. The decline STANDS and was re-affirmed 2026-08-21 rather than
+  re-litigated: generating the fragment from `board.toml` would move 13KB of
+  measured prose into TOML strings and put a generated file in the build's
+  input path, for no fact that is not already in one place.
+  What the entry always said should be data — "the option lists are data fed
+  to the shared guard" — was NOT true in practice: each `build.sh` handed
+  `moybyte_partition_and_sdkconfig_guard` a hand-typed SUBSET of its own
+  fragment, and an option missing from that subset silently no-ops on a warm
+  build dir (IDF only generates a build's sdkconfig when the file is absent).
+  `082fb9e` exercised it live. So the guard now DERIVES its list from the
+  fragment (`board_config.py sdkconfig-required`), stamps the fragment +
+  `mpconfigboard.cmake` + `MPY_TAG` to decide staleness exactly, reads the
+  partition-table filename out of `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME`
+  instead of taking it as a second argument, and reports any decided setting
+  Kconfig REFUSED. One store, no copies, nothing to assert in a test — which
+  is why this is a build mechanism and not a ratchet suite.
 * **A board scaffold generator** — before three ports have walked the
   checklist, a generator is a guess about what varies.
 * Everything here assumes ESP-IDF. `esp32_build_lib.sh` is IDF-specific by
