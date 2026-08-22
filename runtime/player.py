@@ -1108,7 +1108,12 @@ class Player:
                         stalled = not np.advance(
                             _netplay_mask(ws.input, _NET_BUTTONS))
                     else:
-                        stalled = True      # between ticks: draw, do not simulate
+                        # Between ticks: do not simulate, but KEEP SENDING. The
+                        # frame loop is faster than the lockstep clock, so these
+                        # frames are free redundancy against a radio whose ack
+                        # lies -- and they serve a stalled peer sooner.
+                        stalled = True
+                        np.resend()
                 # MICROSECONDS, not ms (2026-08-14). These three brackets and the
                 # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
                 # is what is left after subtracting them from the frame -- so on a

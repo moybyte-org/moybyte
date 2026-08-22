@@ -225,6 +225,44 @@ Two consoles, each opening Brick Siege with nothing else typed:
   **40 fps (Guition) and 55 fps (T-Deck)** — one shared game clock, two
   independent frame rates, which is the whole design in one measurement.
 
+## Input latency: where it comes from, and what does not fix it
+
+The felt lag is the lockstep buffer, not the radio. The radio is already at its
+ceiling (`RATE_54M`, power save off), and it is not the constraint anyway — the
+round-trip floor did not move between 1 Mbps and 54 Mbps.
+
+| source | cost |
+|---|---|
+| 2 frames of input delay at 30 Hz | 66 ms |
+| tick quantisation | up to 33 ms |
+| the radio, one way | ~2.5 ms |
+
+**Halving the buffer was measured and is a bad trade** (2026-08-22, both boards,
+30 s each): `DELAY = 2` stalls **3.0%** of ticks; `DELAY = 1` stalls **14%** and
+advances the game ~8% slower in real time. The limit is not packet loss — it is
+PHASE. At `DELAY = 1` the two consoles must stay within one tick of each other,
+and they pace on independent clocks, so ordinary ±1 tick drift becomes a stall.
+Only a bigger buffer absorbs that, which is what `DELAY = 2` is.
+
+Two things that DID help, both shipped:
+
+- **Send on every frame, not every tick.** The loop runs faster than the
+  lockstep clock, so the spare frames are free redundancy against a radio whose
+  ack lies — and each copy carries whatever frame the peer last said it needed,
+  so a stalled peer is served sooner. Stalls at `DELAY = 2`: 4.3% → **3.0%**.
+- **Draw at the lockstep rate.** A linked game's world only changes on the
+  shared 30 Hz tick, so drawing it at the panel's rate repainted an identical
+  frame one to two times in three. Locking it hands that time back: **58 fps
+  solo → 30 fps linked**, and a more regular loop is itself what makes a tick
+  less likely to be late.
+
+Note this is a genuine RATE LOCK, unlike **frameskip** (#77), which is a phase
+toggle — it renders every second *loop* frame, so it yields half of whatever the
+loop is doing (~20 fps on the Guition's 40, ~27 on the T-Deck's 55), not the
+30 Hz its own comment claimed from when the loop ran at 60. The two do not
+stack: a linked game bypasses the frameskip gate, because frameskip's premise is
+logic at the full loop rate and here logic *is* 30 Hz.
+
 ## Open, and deliberately not built
 
 - **Beaming a cart** to a friend's console (#7's original milestone). The

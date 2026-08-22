@@ -79,7 +79,11 @@ class SettingsLayer:
         ("icons", "EDIT ICONS", "action"),
         # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
         # loop rate but render every SECOND frame -- halves the whole render-side
-        # cost (per-draw-call dispatch, the measured tax) for 30Hz motion. Default
+        # cost (per-draw-call dispatch, the measured tax). It is a PHASE TOGGLE,
+        # so what it gives you is half of whatever the loop is doing, NOT a 30Hz
+        # lock: this comment used to say "for 30Hz motion", which was true when
+        # the loop ran at 60 and is not now (measured 2026-08-22: ~40fps on the
+        # Guition, ~55 on the T-Deck, so frameskip means ~20 and ~27). Default
         # OFF -- the on-glass feel pass kept it opt-in (2026-07-10, both boards).
         # Reads ws.frameskip (the "diag" kind's generic getattr ON/OFF rendering).
         ("frameskip", "FRAMESKIP", "diag"),

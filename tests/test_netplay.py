@@ -478,3 +478,37 @@ def test_two_matches_with_the_same_seed_replay_identically():
                 out.append(random.random())
         return out
     assert run() == run()
+
+
+def test_pending_does_not_consume_the_schedule():
+    """Two callers ask the same question for different jobs -- the console for
+    'does this frame render', the Player for 'do I simulate' -- and only one of
+    them may advance the clock."""
+    wire = _Wire()
+    a, _b = _match(wire)
+    s = a[0]
+    t = 5_000
+    assert s.pending(t) is True
+    assert s.pending(t) is True, "asking twice must not move the schedule"
+    assert s.due(t) is True
+    assert s.pending(t) is False, "...and now the tick has been taken"
+
+
+def test_a_resend_puts_the_same_frame_back_on_the_air():
+    wire = _Wire()
+    a, b = _match(wire)
+    _step(a, b, wire, frames=4)
+    s = a[0]
+    before = s.packets_out
+    wire.queues[1] = []
+    s.resend()
+    assert s.packets_out == before + 1
+    p = wire.queues[1][-1]
+    assert (p[3] | (p[4] << 8)) == s._last_sent, "the newest input, again"
+
+
+def test_a_resend_before_any_tick_is_harmless():
+    wire = _Wire()
+    a, _b = _match(wire)
+    a[0].resend()
+    assert a[0].packets_out == 0

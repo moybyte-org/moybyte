@@ -5243,7 +5243,28 @@ class Workstation:
         # consumes dirty state (a pending repaint in a background window survives to
         # the next rendered frame). Games only: tools/apps are event-driven (the
         # redraw gate already keeps them ~free) and their cursor must stay 60.
-        if (self.frameskip and self.wm.top_is_player()
+        # LOCKSTEP (#65): a linked game's world only changes on the shared 30Hz
+        # tick, so drawing it at the panel's rate (40-55fps on the two S3
+        # boards) repaints an identical frame one to two times in three. Holding
+        # the last frame instead hands that time back to the loop -- and the
+        # loop's regularity is what decides whether the input buffer can be cut,
+        # because a slow frame is what makes a tick late. The Player still runs:
+        # it re-sends the input packet on these frames.
+        _np = self.netplay
+        _linked = (_np is not None and self.wm.top_is_player()
+                   and self.cart_error is None)
+        if _linked and not _np.pending(_ticks_ms()):
+            self.player.tick(dt, render=False)
+            return
+        # ...and a linked game does NOT also take the frameskip gate. Frameskip
+        # is a phase toggle -- it renders every second LOOP frame, so it is half
+        # of whatever the loop is doing (~20fps on the Guition's 40, ~27 on the
+        # T-Deck's 55), not the 30Hz its own comment claims from back when the
+        # loop ran at 60. Stacking it under lockstep would halve a rate that is
+        # already the shared tick, for a saving that no longer exists: the whole
+        # premise of frameskip is logic at the full loop rate, and here logic IS
+        # 30Hz.
+        if (not _linked and self.frameskip and self.wm.top_is_player()
                 and self.cart_error is None
                 and self.cart is not None and self.cart.get("type") == "game"):
             # phase True = render, False = logic-only; the setter resets it False,

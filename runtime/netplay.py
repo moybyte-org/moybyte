@@ -172,6 +172,7 @@ class LockstepSession:
         self.packets_out = 0
         self.last_peer_frame = -1
         self.peer_need = -1        # the frame the PEER says it is waiting for
+        self._last_sent = None     # newest frame we have put on the air
         self.dead = False          # the gap grew past healing; stop pretending
         self._stall_mark = 0
         self._mine = InputTape()
@@ -190,6 +191,15 @@ class LockstepSession:
         random.seed(self.seed)
 
     # -- the per-frame contract ---------------------------------------------
+
+    def pending(self, now_ms):
+        """Is a tick due? PURE -- no schedule side effect, unlike due().
+
+        Two callers need the same answer for different jobs and must not both
+        consume the schedule: the console asks whether this frame renders, and
+        the Player asks whether to simulate."""
+        nx = self._next_ms
+        return nx is None or (now_ms - nx) >= 0
 
     def due(self, now_ms):
         """Is the next fixed tick due yet?
@@ -281,6 +291,19 @@ class LockstepSession:
 
     # -- wire ----------------------------------------------------------------
 
+    def resend(self):
+        """Re-send the newest input packet, between ticks.
+
+        The console's frame loop runs faster than the lockstep clock (40-55fps
+        against 30Hz on the two S3 boards), so there are spare frames in which
+        this costs nothing but eleven bytes of air -- and every one of them is
+        another chance for a packet the radio quietly dropped to arrive. The ack
+        lies, so more copies is the only honest answer to loss; it also serves a
+        STALLED peer sooner, because each copy carries whatever frame the peer
+        last said it was waiting for."""
+        if self._last_sent is not None:
+            self._emit(self._last_sent)
+
     def _emit(self, newest):
         """One input packet: the newest frames, plus whatever the peer still needs.
 
@@ -298,6 +321,7 @@ class LockstepSession:
         and a stalled console gets served the frame it is stuck on instead of
         four frames it already has.
         """
+        self._last_sent = newest
         lo = newest - (self.redundancy - 1)
         need = self.peer_need
         if 0 <= need < lo:
