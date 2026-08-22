@@ -1193,3 +1193,23 @@ def test_music_editor_structural_ops_keep_row_secs_aligned():
     assert len(b.music) == n + 1
     assert b.music[-1].row_secs == t.row_secs
     assert b.music[-1].row_secs is not t.row_secs
+
+
+def test_the_master_level_survives_a_cart_start(tmp_path):
+    """`vol 0` at the launcher used to print "no audio backend" and change
+    nothing, because the backend is rebuilt per run -- so a mute looked like it
+    worked right up until the next game started playing at full volume. On a
+    board with a speaker that is not a cosmetic gap (measured on a T-Deck,
+    2026-08-22)."""
+    from runtime import host_app
+    from ws_helpers import open_cart
+
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    ws.system["volume"] = 0
+    open_cart(ws, "Brick Siege")
+    assert ws.audio is not None
+    assert ws.audio.engine.master == 0, "the stored level must reach the new backend"
+
+    ws.system["volume"] = 5
+    open_cart(ws, "Harpoon Pop")
+    assert ws.audio.engine.master == 5

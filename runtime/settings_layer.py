@@ -139,6 +139,7 @@ class SettingsLayer:
         self._rows_onl = False
         self._rows_web = False
         self._rows_crisp = False
+        self._rows_split = False
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -706,9 +707,11 @@ class SettingsLayer:
         onl = ws._online_update_available()
         web = getattr(ws, "webhost", None) is not None
         crisp = getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
+        split = ws.second_keyboard() is not None
         if (self._rows_cache is not None and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
-                and web == self._rows_web and crisp == self._rows_crisp):
+                and web == self._rows_web and crisp == self._rows_crisp
+                and split == self._rows_split):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -725,6 +728,17 @@ class SettingsLayer:
             i = rows.index(("frameskip", "FRAMESKIP", "diag")) + 1
             rows = rows[:i] + (("crisp_pixels", "CRISP PIXELS", "diag"),) \
                 + rows[i:]
+        if split:
+            # 2 PLAYERS (#65 Phase 1): hand a PAIRED BLUETOOTH KEYBOARD to player
+            # two, so two kids play one console on two real keyboards with no
+            # radio between consoles. Capability-gated to a board that has a
+            # SECOND keyboard (the T-Deck, whose BLE one sits alongside its
+            # physical C3), which is why it is not in the frozen row list --
+            # on the touch-only boards the Bluetooth keyboard is the only one
+            # there is. Default OFF: somebody playing alone with a Bluetooth
+            # keyboard wants to be player one, not player two.
+            i = rows.index(("frameskip", "FRAMESKIP", "diag"))
+            rows = rows[:i] + (("two_player", "2 PLAYERS", "diag"),) + rows[i:]
         if web:
             # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
             # board, so a browser on the same network opens YOUR carts. Its own
@@ -742,6 +756,7 @@ class SettingsLayer:
         self._rows_onl = onl
         self._rows_web = web
         self._rows_crisp = crisp
+        self._rows_split = split
         self._rows_cache = rows
         return rows
 
@@ -770,6 +785,8 @@ class SettingsLayer:
             ws.set_frameskip(not ws.frameskip)
         elif key == "crisp_pixels":
             ws.set_crisp_pixels(not ws.crisp_pixels)
+        elif key == "two_player":
+            ws.set_two_player(not ws.two_player)
         elif key == "show_fps":
             ws.set_show_fps(not ws.show_fps)
         else:

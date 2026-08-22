@@ -37,10 +37,12 @@
 --   * Python's int() truncates toward zero: use trunc() below, NOT math.floor --
 --     a tank stepping off the left edge has a negative x, where they differ
 --   * Lua tables are 1-BASED, so every struct field shifts up by one:
---       player/enemy  p[1..6] = x, y, dir, alive, cooldown, lives (enemy: think)
---       bullet        b[1..4] = x, y, dir, owner
+--       tank          p[1..7] = x, y, dir, alive, cooldown, lives, index
+--       enemy         e[1..6] = x, y, dir, alive, cooldown, think
+--       bullet        b[1..5] = x, y, dir, owner, who
 --       boom         bm[1..4] = x, y, life, big
---     and every direction lookup is DV[dir + 1] / P_TANK[dir + 1] / E_TANK[dir + 1].
+--     and every direction lookup is DV[dir + 1] / E_TANK[dir + 1] /
+--     TANK_SET[index + 1][dir + 1].
 --   * In Lua 0 is TRUTHY, so every Python `if <number>:` became an explicit compare:
 --     `auto ~= 0` (the autoplay flag), `ddx ~= 0 or ddy ~= 0` (was `if ddx or ddy`),
 --     and `bm[4] ~= 0` (the explosion's big flag, stored 1/0 like the Python cart).
@@ -51,10 +53,15 @@
 --     Python cart took this shape. It always cost the same: a contiguous run of
 --     1x1 spr()s leaves as ONE native blit_batch through the auto-batch gate.
 --
--- MULTIPLAYER HOOK (#7, NOT wired): player state lives in the `players` list, which
--- holds ONE player (P1) today. The update/draw/fire/collision code already loops over
--- it, so a 2nd co-op tank is "append another _make_player + read a 2nd pad". Sprite
--- tile 15 is a blue P2 tank, ready for that day. Networking (#7) is out of scope.
+-- TWO PLAYERS (#65). The hook this cart was built with is WIRED now: when players()
+-- reports 2, a blue second tank joins on the same field and both kids defend the one
+-- eagle together. Where the second player comes from is not this cart's business --
+-- the T-Deck's own keyboard split in two (Settings -> 2 PLAYERS), or another console
+-- over the radio (#7). It reads btn(name, i) either way, which is the whole point of
+-- the unified API: nothing below knows or cares which.
+--
+-- Co-op, not versus: your bullets never hit your friend, you each have your own
+-- lives, and the round ends when BOTH of you are out (or the base falls).
 
 TS = 16              -- world tile size: each map cell is an 8x8 sheet tile at scale 2
 MW = 15              -- tilemap width in cells  (matches map.moymap)
@@ -69,8 +76,10 @@ EXP_S = 12
 EXP_B = 13
 
 -- player/enemy tank sprite tile per facing direction (0=up 1=down 2=left 3=right)
-P_TANK = {0, 1, 2, 3}        -- player (green)   -- indexed P_TANK[dir + 1]
+P_TANK = {0, 1, 2, 3}        -- player 1 (green)   -- indexed P_TANK[dir + 1]
+P2_TANK = {15, 16, 17, 18}   -- player 2 (blue) -- the same tank, recolored
 E_TANK = {4, 5, 6, 7}        -- enemy (grey/orange)
+TANK_SET = {P_TANK, P2_TANK} -- indexed TANK_SET[index + 1][dir + 1]
 
 TANK = 14            -- tank collision box (px) -- a touch under TS so it slips through 1-tile gaps
 HALF = TANK // 2
@@ -88,9 +97,9 @@ BASE_CX = 7
 BASE_CY = 14
 
 -- -- state ------------------------------------------------------------------
-players = {}         -- {x, y, dir, alive, cooldown, lives}  (multiplayer hook: list)
+tanks = {}           -- {x, y, dir, alive, cooldown, lives, index} -- one per player
 enemies = {}         -- {x, y, dir, alive, cooldown, think}  think = retarget timer
-bullets = {}         -- {x, y, dir, owner}  owner: 0=player, 1=enemy
+bullets = {}         -- {x, y, dir, owner, who}  owner 0=player 1=enemy; who=which player
 booms = {}           -- {x, y, life, big}   explosion particles
 spawn_q = 0          -- enemies still waiting to enter the wave
 spawn_t = 0.0        -- countdown to the next enemy spawn
@@ -151,15 +160,25 @@ end
 
 -- -- spawning ---------------------------------------------------------------
 
-function _make_player(cx)
-    -- one player tank, facing up, at cell column cx on the bottom row band.
-    return { cx * TS + (TS - TANK) // 2, (MH - 1) * TS + (TS - TANK) // 2,
-             0, true, 0.0, LIVES }
+function _make_player(i)
+    -- one player tank, facing up, on the bottom row band at its own column.
+    -- The trailing index is who it belongs to: it picks the sprite set, the
+    -- respawn column, and WHICH PAD drives it (btn(name, i)).
+    return { _spawn_col(i) * TS + (TS - TANK) // 2,
+             (MH - 1) * TS + (TS - TANK) // 2,
+             0, true, 0.0, LIVES, i }
+end
+
+
+function _spawn_col(i)
+    -- P1 three cells left of the eagle, P2 three cells right of it -- so two
+    -- kids do not start on top of each other and each has a side to defend.
+    return BASE_CX + (i == 0 and -3 or 3)
 end
 
 
 function _respawn_player(p)
-    p[1] = BASE_CX * TS + (TS - TANK) // 2 - 3 * TS
+    p[1] = _spawn_col(p[7]) * TS + (TS - TANK) // 2
     p[2] = (MH - 1) * TS + (TS - TANK) // 2
     p[3] = 0
     p[4] = true
@@ -203,7 +222,18 @@ function _init()
     -- rebuild the brick/steel field from the cart's tilemap source (map.moymap),
     -- so a finished round starts fresh even though we mset() bricks to empty.
     _reset_field()
-    players = { _make_player(BASE_CX - 3) }    -- P1 -- multiplayer: append P2 here
+    -- ONE tank per connected player. players() is 1 on a console nobody has
+    -- joined, so this is the single-player game verbatim; it becomes co-op the
+    -- moment a second controller exists, with no mode to pick and no menu.
+    local n = players()
+    if n > 2 then
+        n = 2                                  -- this field seats two
+    end
+    local roster = {}
+    for i = 0, n - 1 do
+        roster[#roster + 1] = _make_player(i)
+    end
+    tanks = roster
     enemies = {}
     bullets = {}
     booms = {}
@@ -254,14 +284,17 @@ end
 
 -- -- firing & collisions ----------------------------------------------------
 
-function _fire(tank, owner)
+function _fire(tank, owner, who)
+    who = who or 0                 -- Python's `who=0` default (0 is truthy here)
     if tank[5] > 0.0 then
         return false
     end
-    -- one bullet at a time per owner side (player) -- count this owner's live shots.
+    -- One bullet on screen at a time -- PER PLAYER, not per side. Sharing one
+    -- between two kids would make each of them feel like the controller was
+    -- broken, since the other one's shot silently eats their trigger.
     if owner == 0 then
         for i = 1, #bullets do
-            if bullets[i][4] == 0 then
+            if bullets[i][4] == 0 and bullets[i][5] == who then
                 return false
             end
         end
@@ -271,7 +304,7 @@ function _fire(tank, owner)
     -- muzzle at the tank's leading edge, centered on the barrel
     local cx = tank[1] + HALF + dv[1] * HALF
     local cy = tank[2] + HALF + dv[2] * HALF
-    bullets[#bullets + 1] = { cx - 2, cy - 2, d, owner }
+    bullets[#bullets + 1] = { cx - 2, cy - 2, d, owner, who }
     tank[5] = COOLDOWN
     sfx(1)
     return true
@@ -288,7 +321,7 @@ end
 
 function _hit_tank(bx, by, owner)
     -- a bullet at (bx,by) -- does it hit a tank on the OTHER side? returns true if so.
-    -- player bullets (owner 0) hit enemies; enemy bullets hit players.
+    -- player bullets (owner 0) hit enemies; enemy bullets hit tanks.
     if owner == 0 then
         for i = 1, #enemies do
             local e = enemies[i]
@@ -302,8 +335,8 @@ function _hit_tank(bx, by, owner)
             end
         end
     else
-        for i = 1, #players do
-            local p = players[i]
+        for i = 1, #tanks do
+            local p = tanks[i]
             if p[4] and p[1] - 2 <= bx and bx <= p[1] + TANK
                      and p[2] - 2 <= by and by <= p[2] + TANK then
                 _kill_player(p)
@@ -509,9 +542,9 @@ function _update(dt)
 
     local auto = cfg("autoplay", 0)
 
-    -- players (the loop is the multiplayer hook -- add P2 to `players` and it just works)
-    for i = 1, #players do
-        local p = players[i]
+    -- the player tanks -- ONE loop, one kid or two
+    for ti = 1, #tanks do
+        local p = tanks[ti]
         if not p[4] then
             goto continue
         end
@@ -521,41 +554,43 @@ function _update(dt)
         local ddx = 0
         local ddy = 0
         local fire = false
-        -- P1 reads the one hardware pad. (P2 would read a 2nd pad here.)
-        if p == players[1] then
-            local left = btn("left")
-            local right = btn("right")
-            local up = btn("up")
-            local down = btn("down")
-            local any_in = left or right or up or down or btnp("a")
-            if auto ~= 0 and not any_in then       -- 0 is TRUTHY in Lua: compare it
-                ddx, ddy, fire = _ai_player(p, dt)
-            else
-                if left then
-                    ddx = -1
-                elseif right then
-                    ddx = 1
-                elseif up then
-                    ddy = -1
-                elseif down then
-                    ddy = 1
-                end
-                fire = btnp("a")
+        -- EACH tank reads ITS OWN pad. `i` is the player index the struct
+        -- carries, so this one loop drives one kid or two and the cart never
+        -- learns whether the second pad is half a keyboard or another console.
+        -- (the table walk above counts with `ti`: `i` is Python's pad index.)
+        local i = p[7]
+        local left = btn("left", i)
+        local right = btn("right", i)
+        local up = btn("up", i)
+        local down = btn("down", i)
+        local any_in = left or right or up or down or btnp("a", i)
+        if auto ~= 0 and not any_in then       -- 0 is TRUTHY in Lua: compare it
+            ddx, ddy, fire = _ai_player(p, dt)
+        else
+            if left then
+                ddx = -1
+            elseif right then
+                ddx = 1
+            elseif up then
+                ddy = -1
+            elseif down then
+                ddy = 1
             end
+            fire = btnp("a", i)
         end
         if ddx ~= 0 or ddy ~= 0 then
             _move_tank(p, ddx, ddy, PSPEED, dt)
         end
         if fire then
-            _fire(p, 0)
+            _fire(p, 0, i)
         end
         ::continue::
     end
 
-    -- all players dead but lives remain -> respawn the dead ones; none left -> over
+    -- all player tanks dead but lives remain -> respawn them; none left -> over
     local living = 0
-    for i = 1, #players do
-        local p = players[i]
+    for i = 1, #tanks do
+        local p = tanks[i]
         if p[4] then
             living = living + 1
         elseif p[6] > 0 then
@@ -674,7 +709,7 @@ function _draw()
     -- 8x8 tiles at scale 2 -> 16px world blocks. Destroyed bricks are empty cells.
     map(0, 0, MW, MH, sx, sy, 0, 2)
 
-    -- Every moving sprite (eagle + enemies + players + bullets + explosions) is one
+    -- Every moving sprite (eagle + enemies + tanks + bullets + explosions) is one
     -- spr() at colorkey 0, scale 2, in the Python cart's exact order. The contiguous
     -- run leaves as ONE native blit_batch: both languages feed the same int16 quad
     -- array through the auto-batch gate (#67 Phase 1 / #63).
@@ -689,11 +724,11 @@ function _draw()
             spr(E_TANK[e[3] + 1], trunc(e[1]) + sx, trunc(e[2]) + sy, 0, 2)
         end
     end
-    -- players
-    for i = 1, #players do
-        local p = players[i]
+    -- tanks -- P1 green, P2 blue, same tank art recolored
+    for i = 1, #tanks do
+        local p = tanks[i]
         if p[4] then
-            spr(P_TANK[p[3] + 1], trunc(p[1]) + sx, trunc(p[2]) + sy, 0, 2)
+            spr(TANK_SET[p[7] + 1][p[3] + 1], trunc(p[1]) + sx, trunc(p[2]) + sy, 0, 2)
         end
     end
     -- bullets
@@ -718,19 +753,21 @@ function _draw()
     print("LEFT", hx, 64, 6)
     print(tostring(spawn_q + _alive_enemies()), hx, 74, 7)
     print("LIVES", hx, 92, 6)
-    local p0 = nil
-    if #players > 0 then
-        p0 = players[1]
-    end
-    local lv = 0
-    if p0 ~= nil then
-        lv = p0[6]
-    end
-    -- draw a little tank icon per life
-    local i = 0
-    while i < lv and i < 5 do
-        spr(P_TANK[1], hx + i % 2 * 18, 104 + (i // 2) * 14, 0, 1)
-        i = i + 1
+    -- One row of tank icons per player, in that player's colour -- so with two
+    -- kids on one screen each can find their own lives at a glance.
+    local row = 104
+    for ti = 1, #tanks do
+        local p = tanks[ti]
+        local lv = p[6]
+        local i = 0
+        while i < lv and i < 4 do
+            spr(TANK_SET[p[7] + 1][1], hx + i * 10, row, 0, 1)
+            i = i + 1
+        end
+        if not p[4] then
+            print("X", hx + 42, row, 8)        -- 8 = red
+        end
+        row = row + 12
     end
     -- base status pip
     print("BASE", hx, 150, 6)

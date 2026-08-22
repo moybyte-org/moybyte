@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Brick Siege Lua",
   "type": "game",
   "runtime": "lua",
@@ -11,7 +11,8 @@
   "permissions": [
     "graphics",
     "input",
-    "audio"
+    "audio",
+    "multiplayer"
   ],
   "input": [
     "buttons"

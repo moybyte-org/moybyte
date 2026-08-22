@@ -99,6 +99,9 @@ class MoycoreRun:
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
+        self._I_BTN_P1 = _moycore.SNAP_BTN_P1
+        self._I_BTNP_P1 = _moycore.SNAP_BTNP_P1
+        self._I_PLAYERS = _moycore.SNAP_PLAYERS
         self._I_TIME = _moycore.SNAP_TIME_MS
         self._I_TX = _moycore.SNAP_TOUCH_X
         self._I_TY = _moycore.SNAP_TOUCH_Y
@@ -174,7 +177,7 @@ class MoycoreRun:
             finally:
                 raise RuntimeError(err)
 
-        self.snap[_moycore.SNAP_PLAYERS] = 1
+        self.snap[_moycore.SNAP_PLAYERS] = 1   # refreshed every frame by _refresh
         self._view = None
         self._sync_view()          # a view declared in _init must land now
         # init already ran inside run_begin (libmoy's moy_lua_init), so the
@@ -230,6 +233,21 @@ class MoycoreRun:
             held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
+        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
+        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
+        # could not have a second player at all -- the Python twin of the same
+        # cart fielded two tanks and the Lua one fielded one. The count is read
+        # through the router because a transport slot (a radio peer) lives
+        # there, not on the InputState; the fast path costs one dict test.
+        n = 1
+        pr = getattr(inp, "players", None)
+        if pr is not None:
+            n = pr.count()
+            if n > 1:
+                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
+                s[self._I_BTN_P1] = h1
+                s[self._I_BTNP_P1] = p1
+        s[self._I_PLAYERS] = n
         if _ticks_ms is not None:
             try:
                 s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)

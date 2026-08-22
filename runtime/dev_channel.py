@@ -143,6 +143,15 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
     try:
+        # The #7 radio. A board with no link reports None -- never a zeroed
+        # tuple, because a board that HAS one and is simply not paired must be
+        # distinguishable from a board that can never pair. (The scale-fold
+        # meter printed a frozen 0 for a month for exactly the other reason.)
+        _lk = getattr(ws, "link", None)
+        st["link"] = list(_lk.status()) if _lk is not None else None
+    except Exception as exc:  # noqa: BLE001
+        st["link_err"] = str(exc)
+    try:
         # The banded flush's meters, for the boards that have one (absent on the
         # P4, whose DSI panel scans and does not push). `pump` is the whole
         # moy_flush tuple:
@@ -235,6 +244,9 @@ class DevChannel:
                       now, `power on` wakes now. The board keeps RENDERING while
                       dark, so an unattended bench run still produces frames.
       web [start]     serve the wasm console from this board (ws.webhost)
+      link [on|off|cart <title>]   the #7 ESP-NOW radio: peers, pairing and
+                      the live lockstep match, as JSON. `on`/`off` arm it by
+                      hand (the Player only arms it for a multiplayer cart)
       py <code>       eval/exec one line against the LIVE console
       quit            leave the desktop for the REPL
 
@@ -401,6 +413,24 @@ class DevChannel:
             print("REMOTE quit -> REPL")
             self.quit = True
             return
+        if cmd == "link":
+            # `link` alone reports; `link on|off` arms the radio by hand, which
+            # is what a two-board bench needs -- the Player only arms it for a
+            # cart that declares the multiplayer permission.
+            lk = getattr(ws, "link", None)
+            if lk is None:
+                print("REMOTE link: no radio on this board")
+                return
+            action = parts[1] if len(parts) > 1 else ""
+            if action == "on":
+                lk.start()
+            elif action == "off":
+                lk.stop()
+            elif action == "cart" and len(parts) > 2:
+                lk.announce(" ".join(parts[2:]), 1)
+            import json
+            print("LINK %s" % json.dumps(lk.stats()))
+            return
         if cmd == "state":
             import json
             print("STATE %s" % json.dumps(_remote_state(ws)))
@@ -487,14 +517,21 @@ class DevChannel:
             return
         if cmd == "vol":
             lvl = int(parts[1]) if len(parts) == 2 else 0
-            # ws.audio exists only while a cart holds the backend -- at the
-            # launcher it is None, which is not an error worth a traceback.
+            # PERSIST first, apply second. ws.audio exists only while a cart
+            # holds the backend, so at the launcher this used to print "no
+            # audio backend" and change nothing -- which reads as a mute that
+            # worked right up until the next game started playing at full
+            # volume. Storing it means the level is waiting for the backend
+            # that has not been built yet (project._build_audio applies it).
+            ws.system["volume"] = lvl
+            try:
+                ws._persist_system()
+            except Exception as exc:  # noqa: BLE001
+                print("REMOTE vol: not persisted:", exc)
             au = getattr(ws, "audio", None)
-            if au is None:
-                print("REMOTE vol: no audio backend (no cart running)")
-                return
-            au.volume(lvl)
-            print("REMOTE vol %d" % lvl)
+            if au is not None:
+                au.volume(lvl)
+            print("REMOTE vol %d%s" % (lvl, "" if au is not None else " (stored)"))
             return
         if cmd == "power":
             # Act on the IdleBlank DIRECTLY rather than parking a request for the

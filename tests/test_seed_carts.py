@@ -403,8 +403,9 @@ def test_harpoon_pop_harpoon_pops_and_splits(tmp_path):
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 2]]     # one size-2 bubble, centred
-    ns["px"] = 160.0 - ns["PW"] / 2                      # player directly under it
-    ns["harpoon"] = None
+    hu = ns["hunters"][0]
+    hu[ns["H_X"]] = 160.0 - ns["PW"] / 2                 # player directly under it
+    hu[ns["H_ROPE"]] = None
     ns["score"] = 0
     ws.input.set_held("a", True)                         # fire
     ws.input.begin_frame()
@@ -427,8 +428,9 @@ def test_harpoon_pop_smallest_bubble_pops_outright(tmp_path):
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # a size-0 bubble
-    ns["px"] = 160.0 - ns["PW"] / 2
-    ns["harpoon"] = None
+    hu = ns["hunters"][0]
+    hu[ns["H_X"]] = 160.0 - ns["PW"] / 2
+    hu[ns["H_ROPE"]] = None
     for _ in range(4):                                   # fire and let it rise
         ws.input.set_held("a", True)
         ws.input.begin_frame()
@@ -450,14 +452,16 @@ def test_harpoon_pop_contact_costs_a_life(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
-    ns["lives"] = 3
-    ns["invuln"] = 0.0
-    ns["dead_t"] = 0.0
+    hu = ns["hunters"][0]
+    hu[ns["H_LIVES"]] = 3
+    hu[ns["H_INV"]] = 0.0
+    hu[ns["H_DEAD"]] = 0.0
     ns["over"] = 0.0
-    ns["bubbles"][:] = [[ns["px"] + ns["PW"] / 2, ns["PLAYER_TOP"] + 2, 0.0, 10.0, 1]]
+    ns["bubbles"][:] = [[hu[ns["H_X"]] + ns["PW"] / 2, ns["PLAYER_TOP"] + 2,
+                         0.0, 10.0, 1]]
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    assert ns["lives"] == 2, "touching a bubble must cost a life"
+    assert hu[ns["H_LIVES"]] == 2, "touching a bubble must cost a life"
 
 
 def test_harpoon_pop_high_score_persists(tmp_path):
@@ -529,10 +533,12 @@ def test_harpoon_pop_is_deterministic_from_a_seed(tmp_path):
             tuple(round(v, 9) if isinstance(v, float) else v for v in b)
             for b in ns["bubbles"]
         )
-        return (
-            round(ns["px"], 9), ns["score"], ns["level"], ns["lives"],
-            round(ns["invuln"], 9), bubbles,
+        hunters = tuple(
+            (round(hu[ns["H_X"]], 9), hu[ns["H_LIVES"]],
+             round(hu[ns["H_INV"]], 9), round(hu[ns["H_DEAD"]], 9))
+            for hu in ns["hunters"]
         )
+        return (hunters, ns["score"], ns["level"], bubbles)
 
     a = _play("a")
     b = _play("b")

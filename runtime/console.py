@@ -917,6 +917,15 @@ class Workstation:
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
         # ONLY when its manifest permissions include "multiplayer" (see player.start).
         self.net = None
+        # #65 Phase 2: the live two-console LOCKSTEP session (netplay.LockstepSession),
+        # set by a transport once two consoles have agreed on a cart and a seed, and
+        # torn down with the run. None = solo, and every cart behaves as it always has.
+        self.netplay = None
+        # The RADIO that forms those sessions (device/moy_espnow.EspNowLink), injected
+        # by run_desktop on the boards that have one. None on the host, the P4 and the
+        # browser -- and absence is the whole interface: nothing here probes for a
+        # radio, it is simply never armed.
+        self.link = None
         self.carts_store = None     # injected: cart store module (moy_carts API)
         # #67 dual-runtime seam: factory(ns, src) -> a running Lua cart handle
         # (.init/.update/.draw callables + .close()). build_workstation injects
@@ -1273,6 +1282,8 @@ class Workstation:
         # 30Hz motion. Settings -> FRAMESKIP toggles + persists it; default OFF
         # until the on-glass feel verdict. _fs_phase is the alternation bit.
         self.frameskip = False
+        # LOCAL 2P (#65 Phase 1): one keyboard split into two controllers.
+        self.two_player = False
         self._fs_phase = False
         # CRISP PIXELS: nearest-neighbour game composite on canvases whose
         # hardware scaler is fixed bilinear (the P4's PPA -- the only such
@@ -1645,6 +1656,8 @@ class Workstation:
         self.set_show_fps(self.system.get("show_fps", True), persist=False)
         # #77: apply the persisted frameskip gate (default OFF).
         self.set_frameskip(self.system.get("frameskip", False), persist=False)
+        # #65 Phase 1: re-apply the persisted local 2P split (default OFF).
+        self.set_two_player(self.system.get("two_player", False), persist=False)
         # Apply the persisted crisp-composite gate (default OFF = smooth).
         self.set_crisp_pixels(self.system.get("crisp_pixels", False),
                               persist=False)
@@ -1945,6 +1958,50 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["frameskip"] = self.frameskip
+            self._persist_system()
+
+    def second_keyboard(self):
+        """The keyboard that can become player two, or None.
+
+        A board qualifies only when it has a SECOND keyboard: the T-Deck's
+        paired Bluetooth one, alongside the physical C3 keyboard it already
+        has. On the touch-only boards a BLE keyboard IS `ws.keyboard` -- the
+        only one there is -- so handing it to player two would leave player one
+        with nothing to press."""
+        ble = getattr(self, "ble_keyboard", None)
+        if ble is None or ble is self.keyboard:
+            return None
+        return ble if getattr(ble, "set_player", None) is not None else None
+
+    def set_two_player(self, on, persist=True):
+        """Flip LOCAL 2P (Settings -> 2 PLAYERS) and persist it.
+
+        Two kids, two real keyboards, one screen, and no radio between consoles.
+        The whole mechanism is that the second keyboard's input SOURCE carries a
+        player: a source with a player IS a player (#26), so `players()` reports
+        2 and every cart that offers a 2P mode finds it -- no transport, no
+        session, no netcode.
+
+        A board with no second keyboard reports OFF whatever it is told. Saying
+        otherwise would be the frozen-meter bug in another costume: the console
+        would claim two players while nothing on it could produce the second
+        one's buttons. (The keyboard slot stays honest at the other end too --
+        an UNCONNECTED Bluetooth keyboard does not hold the slot, or the cart
+        would field a character nobody could move.)"""
+        on = bool(on)
+        kb = self.second_keyboard()
+        if kb is None:
+            on = False
+        else:
+            try:
+                kb.set_player(1 if on else 0)
+            except Exception as exc:  # noqa: BLE001 -- a keyboard hiccup is not a crash
+                print("Moybyte 2 players failed:", exc)
+                on = False
+        self.two_player = on
+        self._dirty = True
+        if persist:
+            self.system["two_player"] = self.two_player
             self._persist_system()
 
     def set_crisp_pixels(self, on, persist=True):

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 4,
+  "version": 5,
   "title": "Harpoon Pop",
   "type": "game",
   "runtime": "python",
@@ -10,7 +10,8 @@
   "canvas": "320x240",
   "permissions": [
     "graphics",
-    "input"
+    "input",
+    "multiplayer"
   ],
   "safe_to_share": true,
   "config": {

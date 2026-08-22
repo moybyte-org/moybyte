@@ -472,6 +472,31 @@ There is **one** multiplayer API and the way the extra players arrive (a second 
 gamepad, a phone over the web view, another Moybyte over the radio) is just a backend —
 your cart never knows the difference.
 
+**Two ways to get a second player today**, and your cart is written the same for both:
+
+- **One console, two kids.** Pair a Bluetooth keyboard to a console that already
+  has its own (a T-Deck), then Settings → **2 PLAYERS**: the built-in keyboard is
+  player one and the Bluetooth one is player two, on one screen. Nothing else
+  changes — `players()` just becomes `2`.
+- **Two consoles, one game.** Both kids open the *same* game with the
+  `"multiplayer"` permission, and the consoles find each other over the radio and
+  play together, each on their own screen. There is nothing to set up: being in
+  the same room is the whole handshake. The game restarts when your friend joins,
+  because both consoles have to start from the same first frame.
+
+> **Writing a game that works two-console:** always read `btn(name, 0)` and
+> `btn(name, 1)` with an explicit player number, never bare `btn(name)`, for
+> anything that moves the game. Bare `btn(name)` means "whoever is holding *this*
+> console", which is a different answer on each screen. Keep it for things where
+> that is what you want, like "press anything to restart".
+>
+> Two linked consoles run the *same game twice*, one on each screen, and they stay
+> in step by trading only which buttons are held. That works as long as both sides
+> compute the same thing from the same buttons: use `rnd()` for randomness (the
+> console seeds it identically on both), and never make the game depend on the
+> clock. `Brick Siege` and `Harpoon Pop` are both written this way if you want to
+> read one.
+
 **Shared screen (many controllers).** Read each player with the `player` argument.
 Player 0 is always this console:
 

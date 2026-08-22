@@ -161,6 +161,22 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+
+    # THE RADIO LINK (#7/#65 Phase 2): the console's one ESP-NOW owner. Built
+    # here, INERT until a cart with the "multiplayer" permission runs -- the
+    # radio is only started by ws.link_arm(), because pm=PM_NONE costs battery
+    # and a console sitting on its shelf has nobody to talk to. Two kids each
+    # open the same game and the consoles find each other; there is no pairing
+    # screen and no code to type, because being in the same room IS the
+    # agreement (the doctrine the OTA design already set for the SD card).
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="guition_s3",
+                            name=ws.system.get("name", "guition_s3"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte Guition link unavailable:", exc)
+        ws.link = None
     # OTA (#53), the P4 arrangement: no SD, image stages on the internal VFS,
     # with_sd is a plain call-through.
     try:
@@ -276,6 +292,15 @@ def run_desktop(fps_cap=60):
             except Exception:  # noqa: BLE001 -- an idle tidy-up must never throw
                 pass
         poll_webhost(ws)
+
+        # The radio, once per frame. At 30Hz an input frame carries ~2 messages
+        # and the ring holds hundreds, so a per-frame slice is comfortable --
+        # and draining on the frame loop is what keeps ESP-NOW off a thread
+        # fighting the panel flush for the VM core. No-op while the link is
+        # inert, which is every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
 
     def _account(now, elapsed, sleep_ms):
         _pf["n"] += 1

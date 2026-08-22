@@ -243,6 +243,21 @@ def run_desktop(fps_cap=60):
                           lua_runtime=lua_runtime, before_slim=_before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
 
+    # THE RADIO LINK (#7/#65 Phase 2): the console's one ESP-NOW owner. Built
+    # here, INERT until a cart with the "multiplayer" permission runs -- the
+    # radio is only started by ws.link_arm(), because pm=PM_NONE costs battery
+    # and a console sitting on its shelf has nobody to talk to. Two kids each
+    # open the same game and the consoles find each other; there is no pairing
+    # screen and no code to type, because being in the same room IS the
+    # agreement (the doctrine the OTA design already set for the SD card).
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="tdeck", name=ws.system.get("name", "tdeck"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte T-Deck link unavailable:", exc)
+        ws.link = None
+
     # BLE HID keyboard (#26): a SECOND, optional input source on this board.
     # On the P4 and the Guition a paired BLE keyboard is the only keyboard and
     # becomes ws.keyboard outright; here the physical C3 keyboard keeps that
@@ -517,6 +532,15 @@ def run_desktop(fps_cap=60):
         # so `web=` in LOOP/HITCH answers "is the transfer what stalled this
         # frame".
         _t["web"] = poll_webhost(ws)
+
+        # The radio, once per frame. At 30Hz an input frame carries ~2 messages
+        # and the ring holds hundreds, so a per-frame slice is comfortable --
+        # and draining on the frame loop is what keeps ESP-NOW off a thread
+        # fighting the panel flush for the VM core. No-op while the link is
+        # inert, which is every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
 
     def _account(now, elapsed, sleep_ms):
         if diag is not None and elapsed >= HITCH_MS:

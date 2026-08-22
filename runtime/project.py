@@ -194,6 +194,17 @@ class Project:
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
         engine = AudioEngine(bank)
+        # The console's MASTER LEVEL has to be re-applied here. The backend is
+        # rebuilt per run, so a level set anywhere else -- the dev channel, a
+        # future Settings VOLUME row that is not a mock -- lasted exactly until
+        # the next cart start and then came back at full volume. That is not a
+        # cosmetic gap on a board with a speaker: `vol 0` at the launcher looked
+        # like it worked and the next game was loud (measured on a T-Deck,
+        # 2026-08-22).
+        try:
+            engine.set_volume(int(ws.system.get("volume", engine.master)))
+        except Exception:  # noqa: BLE001 -- a bad stored level must not block a run
+            pass
         if ws.make_audio is not None:
             ws.audio = ws.make_audio(engine)
         else:

@@ -561,6 +561,65 @@ of the cut parts again. What shipped, in ten commits on dev:
   plus the two that cascade) **reproduce on the pre-refactor build** -- an
   intermittent chunked-`pyexec` upload, not a regression.
 
+### Two consoles, one game: ESP-NOW multiplayer SHIPPED (2026-08-22, #65/#7)
+
+**`docs/espnow_multiplayer_2026-08.md` is the authority** -- the measurements,
+the protocol, the four bugs the desk found that every host test passed, and the
+on-glass verification. Read it before touching any of this. What belongs here is
+only what a coder must not undo:
+
+- **`runtime/netplay.py`** is the deterministic core and an import-free leaf like
+  `players.py` (the button order arrives as a constructor argument, so `cart_api`
+  stays its one author). **`device/moy_espnow.py`** owns ESP-NOW's single global
+  recv slot for the whole firmware and dispatches by frame type; anything else
+  that ever wants the radio registers there rather than opening its own.
+- **The payload is INPUTS, never state**, and that is a measurement rather than a
+  taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
+  frame desyncs the two sims for good, and silently. Do not "improve" either one.
+- **The tuning recipe is ORDER-SENSITIVE and the ack LIES.** `rxbuf` before
+  `active(True)`, the rate after. Both facts cost a session to learn; the module
+  header carries each one beside the number that taught it.
+- **The handshake is BROADCAST, addressed in the payload.** Unicast here needs a
+  peer registration that an `active()` cycle wipes and the first beacon races,
+  which cost a night to find. Do not tidy it back.
+- **Every input packet carries the frame its sender is WAITING FOR.** A fixed
+  redundancy window deadlocks two stalled consoles permanently.
+- **Nothing waits forever.** An unanswered invite and a match that falls too far
+  behind both give up and re-run the cart solo; a frozen screen with no
+  explanation is the one outcome designed out.
+- **A restart must not stop the radio** (`Player.release_world` stops the link
+  only when `ws.netplay` is None) -- a forming match re-runs the cart, and the
+  dying run used to kill the session that caused the restart.
+- **Board scope is a hardware fact**: the S3 pair, nothing else. The P4 has the
+  module compiled away and its WiFi behind the C6; a browser has no radio.
+- **LOCAL 2P is the same cart API with no radio at all** (#65 Phase 1): Settings
+  -> **2 PLAYERS** gives a paired Bluetooth keyboard the second player slot, so
+  two kids share one screen using two real keyboards. Capability-gated on
+  `ws.second_keyboard()`, which is non-None only where a board ALREADY has a
+  keyboard of its own (the T-Deck); elsewhere the Bluetooth one is `ws.keyboard`
+  and reassigning it would strand player one. The mechanism is entirely #26's: a
+  source carries a player, two disagreeing IS multiplayer. Two honesty rules fell
+  out and both are pinned -- the setting REFUSES where it cannot work, and a
+  DISCONNECTED keyboard releases its slot rather than leaving a cart with a
+  character nobody drives. **Dividing the T-Deck's built-in keyboard between two
+  kids was built and REVERTED the same day (owner call, 2026-08-22): that thumb
+  keyboard is far too small for two people, and the second keyboard is the
+  answer.**
+- **`system_carts/brick_siege.moy` and `harpoon_pop.moy` are two-player**, and
+  read `btn(name, i)` without learning where the second pad came from -- the
+  point of one API. The Lua twin is ported in step (its parity test compares
+  every draw call for 3000 frames). Brick Siege's roster global had to be renamed
+  `players` -> `tanks`: `players` is the API verb's name, and a list shadowing it
+  made the cart call a list the moment it asked how many players there were.
+- **A Lua cart could never see a second player** until 2026-08-22: the moycore
+  snapshot has slots for player two and nothing filled them, so libmoy's
+  `players()` answered 1 forever and the line-faithful Lua twin of a 2P cart
+  fielded one tank where the Python original fielded two. Both tiers feed it now.
+- **The master audio level persists across a cart start** (`ws.system["volume"]`,
+  applied in `project._build_audio`). The backend is rebuilt per run, so `vol 0`
+  at the launcher used to print "no audio backend" and change nothing -- a mute
+  that looked like it worked until the next game played at full volume.
+
 ### The 2026-08-22 hardening pass — every lever gets a meter, every derived value ONE author
 
 A sweep over the six commits that ended the board-port run. The recurring

@@ -100,6 +100,7 @@ SERVICES = {
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
+    "link": "the #7 ESP-NOW radio: discovery, pairing and the two-console lockstep link",
     "wm": "the presentation tier: windowed desktop vs the fullscreen stack",
     "perf_capture": "per-frame timing measured without drawing the HUD",
 }
@@ -129,9 +130,8 @@ WIRING = {
         "updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "no #65 transport on this board yet -- the host injects a "
-               "loopback fake for the sim; a real one needs a radio pairing "
-               "story, not a wiring line",
+        "net": INJECTED,
+        "link": INJECTED,
         "wm": "the fullscreen tier (#73). Workstation.__init__ already installs "
               "FullscreenStackWM, and wm_windowed.py is deliberately NOT staged "
               "into this build -- a 320x240 panel has no desktop to window",
@@ -161,7 +161,12 @@ WIRING = {
         "updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "same as the T-Deck: no #65 transport on a board yet",
+        "net": "the radio this would ride is compiled out here -- see the link row",
+        "link": "ESP-NOW is compiled OUT of this board (MICROPY_PY_ESPNOW 0 in\n"
+                "boards/MOYBYTE_P4/mpconfigboard.h), and its WiFi rides the C6 over\n"
+                "SDIO, so whether ESP-NOW works through a co-processor at all is an\n"
+                "open question rather than a flag flip. The handheld tier is where\n"
+                "couch co-op belongs; flip this with a measured link, not a config",
         "wm": INJECTED,
         "perf_capture": INJECTED,
     },
@@ -190,7 +195,8 @@ WIRING = {
         "updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "same as the other boards: no #65 transport on a board yet",
+        "net": INJECTED,
+        "link": INJECTED,
         "wm": "the fullscreen tier, same as the T-Deck: Workstation.__init__ "
               "already installs FullscreenStackWM, and wm_windowed.py is "
               "deliberately not staged into this build",
@@ -222,6 +228,10 @@ WIRING = {
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
+        "link": "no radio on a laptop. The sim gets its second player from a router\n"
+                "slot instead (players.PlayerRouter.add_player), which is the same\n"
+                "seam a radio fills -- so a two-player cart is testable here with\n"
+                "no hardware at all",
         "wm": INJECTED,
         "perf_capture": "no serial PERF sampler here. On the host the timing "
                         "meters are driven by the perf HUD and the Settings "
@@ -248,6 +258,9 @@ WIRING = {
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
+        "link": "a wasm sandbox has no radio, and never will. The browser's "
+                "route to a second player is a controller over the page, not "
+                "ESP-NOW",
         "wm": INJECTED,
         "perf_capture": "no serial sampler; the page's own harness times whole "
                         "frames from outside (pageshot/browsershot)",
@@ -526,6 +539,11 @@ DRIVEN = {
     # the row appear, and the row is what brings the radio up. The poll is
     # wiring: a bound socket nobody accepts on is a network fault.
     "webhost": ("poll",),
+    # The radio is armed by the RUN of a multiplayer cart, not by the boot: a
+    # link nobody polls hears no beacons and pairs with nobody, and a link
+    # nobody starts is exactly the "present and inert" shape this table exists
+    # to catch. The poll is wiring; the start is the Player's, per cart.
+    "link": ("start", "poll"),
 }
 
 _VERBS = {v for verbs in DRIVEN.values() for v in verbs}
@@ -557,6 +575,8 @@ LIFECYCLE = {
             "a cart"),
         ("ble_keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
     "p4": {
         ("keyboard", "start"): HERE,
@@ -567,6 +587,8 @@ LIFECYCLE = {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
 }
 

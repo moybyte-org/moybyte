@@ -49,6 +49,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import _CODE_LH
 
+# #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
+# from cart_api (its one author) and is handed to the session, so netplay.py can
+# stay the import-free leaf players.py is.
+try:
+    from netplay import mask_of as _netplay_mask
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.netplay import mask_of as _netplay_mask
+try:
+    from cart_api import CART_BUTTONS as _NET_BUTTONS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
+
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
 # (MicroPython on device / unix; never host CPython), every top-level def in a
@@ -335,6 +347,10 @@ class Player:
         self._net = None              # #65: the running cart's net.* service, when it
                                       # has the "multiplayer" permission (else None); tick()
                                       # pumps inbound messages to its on_net handler
+        self._netplay = None          # #65 Phase 2: the live two-console lockstep session
+                                      # (ws.netplay), when this run is a linked match. It
+                                      # OWNS the tick: fixed dt, and a frame the peer's
+                                      # input has not reached does not simulate at all
         self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
@@ -478,6 +494,32 @@ class Player:
             except Exception:  # noqa: BLE001 -- reset must never block an exit
                 pass
         self._net = None
+        # The match dies with the run: drop the session's player slots so the
+        # console is back to one local player the moment the cart is gone.
+        if self._netplay is not None:
+            try:
+                self._netplay.close()
+            except Exception:  # noqa: BLE001 -- teardown must never block an exit
+                pass
+            self._netplay = None
+            self.ws.netplay = None
+        # ...and the radio goes down with it: nobody to talk to, and power save
+        # back on. UNLESS a session is already arranged for the run about to
+        # start -- which is not a hypothetical: the way a match forms is that the
+        # peer's invite arrives while this console is already playing, sets
+        # ws.netplay, and re-runs the cart from frame zero. The dying run tears
+        # down here on the way through, and stopping the radio then killed the
+        # very session that triggered the restart. On glass that read as the host
+        # stalling at frame 0 forever while the guest played on alone, with
+        # nothing logged anywhere (#65, 2026-08-22). The clause above has already
+        # cleared ws.netplay if the session belonged to THIS run, so what
+        # survives here belongs to the next one.
+        _link = getattr(self.ws, "link", None)
+        if _link is not None and self.ws.netplay is None:
+            try:
+                _link.stop()
+            except Exception:  # noqa: BLE001 -- teardown must never block an exit
+                pass
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
@@ -735,6 +777,36 @@ class Player:
         if net is not None:
             net.reset()
         self._net = net
+        # #65 Phase 2: a linked two-console match. THIS is the moment a solo run
+        # becomes one -- before the seed is drawn and before _init runs, so both
+        # consoles' rnd() start from the same place. The guest side has already
+        # been handed a session by its radio (link._on_start), so it just finds
+        # ws.netplay set; the host side offers here and becomes player 0.
+        link = getattr(ws, "link", None)
+        if net is not None and link is not None:
+            # ARM the radio here and nowhere earlier. It is only up while a game
+            # that could use it is running, because disabling power save (which
+            # is what buys the latency tail) costs battery on a handheld, and a
+            # console on a shelf has nobody to talk to. Announcing the cart is
+            # what lets a peer recognise "we are both in the same game".
+            try:
+                link.start()
+                link.announce(cart.get("title") or "", 1)
+                if ws.netplay is None:
+                    link.offer(ws, cart.get("title") or "")
+            except Exception as exc:  # noqa: BLE001 -- a radio must never block a cart
+                print("Moybyte link failed:", exc)
+        # Gated on the same permission: an unlinked console leaves this None and
+        # the cart runs exactly as a single-player cart does.
+        self._netplay = ws.netplay if net is not None else None
+        if self._netplay is not None and self._netplay.config:
+            # The host's tuning wins for the duration of the match. Applied to
+            # the LIVE dict rather than written to the card: it is a property of
+            # this match, not a change to the kid's own copy of the cart.
+            try:
+                project.config.update(self._netplay.config)
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte link config failed:", exc)
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images,
@@ -1007,6 +1079,24 @@ class Player:
                 # frameskip logic-only frame. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
+                # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
+                # the fixed tick -- a variable dt diverges the two sims on frame
+                # one -- and a frame whose peer input has not arrived does NOT
+                # simulate. It still DRAWS: the screen holds the last agreed
+                # frame instead of freezing, which is what "waiting for player"
+                # looks like on hardware that cannot extrapolate safely.
+                stalled = False
+                np = self._netplay
+                if np is not None:
+                    dt = np.dt
+                    # The session owns the CLOCK as well as the order: it ticks
+                    # at its fixed rate, not at whatever the board's frame loop
+                    # manages, or a fixed dt would silently run the game fast.
+                    if np.due(_ticks_ms()):
+                        stalled = not np.advance(
+                            _netplay_mask(ws.input, _NET_BUTTONS))
+                    else:
+                        stalled = True      # between ticks: draw, do not simulate
                 # MICROSECONDS, not ms (2026-08-14). These three brackets and the
                 # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
                 # is what is left after subtracting them from the frame -- so on a
@@ -1017,7 +1107,7 @@ class Player:
                 # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
                 # at the EMA, so every public number stays in ms.
                 _ts = _ticks_us() if _perf else 0
-                if self._update:
+                if self._update and not stalled:
                     self._update(dt)
                 _tm = _ticks_us() if _perf else 0
                 if render and self._draw:

@@ -254,6 +254,10 @@ class BleHidKeyboard:
         # a host test fake may still be the flat pre-source shape.)
         _src = getattr(input_state, "source", None)
         self.src = _src("ble") if _src is not None else input_state
+        # #65: the player slot this keyboard is MEANT to drive. None = nobody
+        # has asked, so the source is left entirely alone; a number is honoured
+        # only while connected.
+        self._want_player = None
         self.store_path = store_path
         self.ble = ble
         self.available = False
@@ -529,8 +533,46 @@ class BleHidKeyboard:
 
     # -- per-frame bridge -------------------------------------------------
 
+    def set_player(self, slot):
+        """Which PLAYER this keyboard drives (#65 Phase 1).
+
+        On a board that already HAS a keyboard, a paired Bluetooth one is the
+        natural second controller -- two kids, two real keyboards, one screen,
+        and no radio between consoles. Assigning it a player is the entire
+        mechanism: a source carries a player (#26), and two sources disagreeing
+        IS multiplayer, so players() reports 2 with nothing else wired.
+
+        Stored as an INTENT rather than applied straight through, because a
+        keyboard that is not connected must not hold a player slot: the cart
+        would field a second character nobody could move. _sync_player resolves
+        the intent against the live connection every frame.
+        """
+        self._want_player = int(slot)
+        self._sync_player()
+
+    def _sync_player(self):
+        """Own the player slot only while actually connected. One int compare
+        per frame, on a path that already runs per frame.
+
+        A no-op until somebody ASKS for a slot: managing it unconditionally
+        would stomp a direct `src.player = n` every poll, and that assignment is
+        the documented one-attribute way to make this keyboard a player."""
+        want = self._want_player
+        if want is None:
+            return
+        if self.state != "ready":
+            want = 0
+        src = self.src
+        if getattr(src, "_player", None) == want:
+            return
+        try:
+            src.player = want
+        except AttributeError:      # a pre-source fake: no players for it
+            pass
+
     def poll(self):
         """Apply latest report level-state before InputState.begin_frame()."""
+        self._sync_player()
         logs = self._log_queue
         self._log_queue = []
         for parts in logs:

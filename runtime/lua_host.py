@@ -133,7 +133,9 @@ class MoycoreHostRun:
     def _update(self, dt):
         s = self._run.snap
         inp = self._ws.input
-        from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, AQ_SFX, AQ_MUSIC,
+        from runtime.lua_binding import (SNAP_BTN, SNAP_BTNP, SNAP_BTN_P1,
+                                         SNAP_BTNP_P1, SNAP_PLAYERS,
+                                         AQ_SFX, AQ_MUSIC,
                                          AQ_BEEP, AQ_MUSIC_STOP,
                                          AQ_SOUND_STOP, AQ_VOLUME)
         # MOY_BUTTONS, not a fourth hand-written copy of the order. This loop
@@ -154,6 +156,21 @@ class MoycoreHostRun:
                 except Exception:  # noqa: BLE001
                     pass
         s[SNAP_BTN], s[SNAP_BTNP] = held, pressed
+        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
+        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
+        # could not have a second player at all -- the Python twin of the same
+        # cart fielded two tanks and the Lua one fielded one. The count is read
+        # through the router because a transport slot (a radio peer) lives
+        # there, not on the InputState; the fast path costs one dict test.
+        n = 1
+        pr = getattr(inp, "players", None)
+        if pr is not None:
+            n = pr.count()
+            if n > 1:
+                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
+                s[SNAP_BTN_P1] = h1
+                s[SNAP_BTNP_P1] = p1
+        s[SNAP_PLAYERS] = n
         err = self._run.tick(dt)
         self._sync_view()
         # Audio drains through the SAME api closures a Python cart uses, so the
