@@ -538,8 +538,16 @@ def _draw():
     sx = 0
     sy = 0
     if shake > 0.0:
-        sx = int(rnd(shake * 2) - shake)
-        sy = int(rnd(shake * 2) - shake)
+        # The shake is a function of the CLOCK, not of rnd(). Drawing must never
+        # draw from the random stream: the console reseeds that stream once per
+        # logic tick, but _draw runs at the screen's rate, so two linked
+        # consoles rendering at different speeds would consume different amounts
+        # of it -- which is a desync you cannot see until the two games have
+        # quietly become different games (#65, measured 2026-08-22). It also
+        # means both screens now shake the SAME way, which is what you want.
+        k = int(t * 371.0)
+        sx = int(shake * (1 - 2 * (k % 3 & 1)))
+        sy = int(shake * (1 - 2 * (k // 3 % 3 & 1)))
     # PERF HABIT (#63/#66): the backdrop is DECLARED (background() in _init), so
     # the engine repaints it before every frame -- no cls here at all. (The HUD
     # strip below repaints its own black over it.)

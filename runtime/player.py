@@ -503,6 +503,10 @@ class Player:
                 pass
             self._netplay = None
             self.ws.netplay = None
+        try:
+            self.ws.input.netplay_live = False
+        except Exception:  # noqa: BLE001
+            pass
         # ...and the radio goes down with it: nobody to talk to, and power save
         # back on. UNLESS a session is already arranged for the run about to
         # start -- which is not a hypothetical: the way a match forms is that the
@@ -799,6 +803,14 @@ class Player:
         # Gated on the same permission: an unlinked console leaves this None and
         # the cart runs exactly as a single-player cart does.
         self._netplay = ws.netplay if net is not None else None
+        # The cart api reads this to refuse touch()/mouse() for the duration:
+        # only buttons cross the radio, so a pointer would move one screen's
+        # player and not the other's. Set on the InputState because that is what
+        # make_api is handed.
+        try:
+            ws.input.netplay_live = self._netplay is not None
+        except Exception:  # noqa: BLE001 -- a bare test stub need not carry it
+            pass
         if self._netplay is not None and self._netplay.config:
             # The host's tuning wins for the duration of the match. Applied to
             # the LIVE dict rather than written to the card: it is a property of

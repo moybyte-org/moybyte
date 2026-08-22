@@ -414,3 +414,67 @@ def test_a_long_stall_does_not_come_back_as_a_burst_of_catch_up_frames():
     late = 5_000                       # five seconds of nothing
     assert s.due(late) is True
     assert s.due(late + 1) is False, "the schedule re-based rather than owing 150 ticks"
+
+
+# -- the shared random stream ------------------------------------------------
+
+def test_drawing_cannot_move_the_logic_random_stream():
+    """THE DESYNC (2026-08-22). Seeding once at match start is correct only
+    while both consoles then draw from the stream the same number of times --
+    and they do not. Brick Siege shakes the screen with rnd() in _draw, the two
+    boards render at different rates (6372 frames against 9335 over one measured
+    window), and from the first explosion the two sims drew different numbers
+    and played different games. Both screens looked fine the whole time."""
+    import random
+    wire = _Wire()
+    a, b = _match(wire, seed=4242)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+
+    seen_a, seen_b = [], []
+    for i in range(24):
+        wire.deliver(0, sa)
+        wire.deliver(1, sb)
+        # Console A renders twice as often as console B, and its draw code asks
+        # for randomness -- exactly what the real pair does.
+        if sa.advance(0):
+            seen_a.append(random.random())
+            for _ in range(3):
+                random.random()          # A's _draw
+        if sb.advance(0):
+            seen_b.append(random.random())
+            if i % 2:
+                random.random()          # B's _draw, at its own rate
+    n = min(len(seen_a), len(seen_b))
+    assert n > 8
+    assert seen_a[:n] == seen_b[:n], (
+        "the logic stream must be identical however much either side draws")
+
+
+def test_the_per_frame_seed_is_mixed_not_a_counter():
+    """A cart that asks for one number a frame (`rnd(1.0) < 0.012` -- the enemy
+    fire roll) would otherwise be reading the low bits of a frame counter."""
+    import random
+    wire = _Wire()
+    a, _b = _match(wire, seed=99)
+    s = a[0]
+    firsts = []
+    for f in range(200):
+        random.seed(s._frame_seed(f))
+        firsts.append(random.random())
+    assert len(set(firsts)) == len(firsts), "no repeats across 200 frames"
+    lo = sum(1 for v in firsts if v < 0.5)
+    assert 70 < lo < 130, "and roughly even, not a ramp: %d/200 below half" % lo
+
+
+def test_two_matches_with_the_same_seed_replay_identically():
+    import random
+    def run():
+        wire = _Wire()
+        a, b = _match(wire, seed=7)
+        out = []
+        for _ in range(30):
+            wire.deliver(0, a[0]); wire.deliver(1, b[0])
+            if a[0].advance(0):
+                out.append(random.random())
+        return out
+    assert run() == run()

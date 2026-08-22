@@ -237,3 +237,24 @@ def test_both_carts_declare_the_multiplayer_permission(tmp_path):
             (ROOT / "system_carts" / (folder + ".moy") / "manifest.json")
             .read_text(encoding="utf-8"))
         assert "multiplayer" in man["permissions"], folder
+
+
+def test_a_linked_match_reports_no_pointer(tmp_path):
+    """Only BUTTONS cross the radio, so a touch read during a match would move
+    this screen's player and not the other's -- a divergence the lockstep
+    exchange can neither see nor heal. touch() answers None for the duration,
+    and a touch-driven cart falls back to its button path."""
+    ws = _ws(tmp_path)
+    _open_cart(ws, "Harpoon Pop")
+    _run(ws, 2)
+
+    class _P:
+        x, y, click, down = 100, 50, True, True
+    ws.input.pointer = _P()
+    _run(ws, 1)
+    assert ws.ns["touch"]() is not None, "solo, the pointer is a pointer"
+
+    ws.input.netplay_live = True
+    assert ws.ns["touch"]() is None, "linked, there is no pointer"
+    ws.input.netplay_live = False
+    assert ws.ns["touch"]() is not None

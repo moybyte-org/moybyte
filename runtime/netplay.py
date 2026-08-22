@@ -41,11 +41,14 @@ enforced here rather than left to carts:
   * FIXED TIMESTEP. `dt` is 1/TICK_HZ on both consoles, always. The Player feeds
     the cart this dt instead of the real frame delta while a session is live; a
     variable dt is a divergence on frame one.
-  * SHARED SEED. `random.seed(seed)` runs on both consoles at match start from
-    the seed the host picked, so `rnd()` agrees. Note the tier limit: CPython and
-    MicroPython ship DIFFERENT PRNGs, so host<->device lockstep would diverge on
-    the first `rnd()`. Device<->device (the actual use case, and both S3 boards
-    run the same MicroPython) agrees.
+  * SHARED SEED, RE-APPLIED EVERY TICK. Seeding once at match start is only
+    correct while both consoles then draw from the stream the same number of
+    times -- and they do not, because DRAWING consumes it too and the two boards
+    render at different rates. So each logic frame re-seeds from (seed, frame),
+    which no amount of drawing can move, and a cart may call `rnd()` wherever it
+    likes. Note the tier limit: CPython and MicroPython ship DIFFERENT PRNGs, so
+    host<->device lockstep would diverge on the first `rnd()`. Device<->device
+    (the actual use case, and both S3 boards run the same MicroPython) agrees.
 
 WHAT IS DELIBERATELY NOT HERE. Rollback/GGPO: it needs the cart's whole world
 snapshotted and re-simulated several times a frame, which a kid-authored `.moy`
@@ -243,7 +246,32 @@ class LockstepSession:
         self._apply(self.remote, theirs)
         self.waiting = False
         self.frame += 1
+        # RE-SEED EVERY TICK, and this is not belt-and-braces -- it is the only
+        # thing that makes a shared random stream survive contact with a real
+        # cart. Seeding once at match start is correct exactly as long as both
+        # consoles then draw from the stream the SAME number of times, and they
+        # do not: anything outside the logic tick consumes it too. Brick Siege
+        # shakes the screen with rnd() in _draw, the two boards render at
+        # different rates (6372 frames against 9335 over one measured window),
+        # and from the first explosion onward the two sims were drawing
+        # different numbers and playing different games. Nothing showed it:
+        # both screens looked fine (2026-08-22).
+        #
+        # So every logic frame starts from a state derived from (seed, frame),
+        # which no amount of drawing can move. It costs one seed() at 30Hz, and
+        # it means a kid may call rnd() wherever they like.
+        random.seed(self._frame_seed(self.frame))
         return True
+
+    def _frame_seed(self, f):
+        """A deterministic per-frame seed. Mixed rather than `seed ^ frame` so
+        consecutive frames do not start from neighbouring states -- a cart that
+        asks for one number a frame (`rnd(1.0) < 0.012`, the enemy fire roll
+        here) would otherwise see the low bits of a counter."""
+        x = (self.seed ^ (f * 0x9E3779B1)) & 0x7FFFFFFF
+        x ^= (x >> 15)
+        x = (x * 0x2545F491) & 0x7FFFFFFF
+        return x or 1
 
     def _apply(self, slot, mask):
         buttons = self._buttons

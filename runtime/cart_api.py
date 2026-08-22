@@ -281,6 +281,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # cart can track a DRAG (drawing, sliders). Two-domain seam (#39): prefer
         # the game-space pointer publication when the console provides one (a
         # distinct big system canvas), so a cart reads 320x240 viewport coords.
+        # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a
+        # touch read here would move this screen's player and not the other
+        # one's -- a divergence the lockstep exchange cannot see and cannot
+        # heal, which is the same class of bug as drawing from the shared random
+        # stream. Reporting "no pointer" makes a touch-driven cart fall back to
+        # its button path, which is the honest answer while two consoles share
+        # one game.
+        if getattr(input, "netplay_live", False):
+            return None
         gp = getattr(input, "game_pointer", None)
         if gp is not None:
             held = bool(gp[3]) if len(gp) > 3 else False

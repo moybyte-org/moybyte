@@ -695,8 +695,15 @@ function _draw()
     local sx = 0
     local sy = 0
     if shake > 0.0 then
-        sx = trunc(rnd(shake * 2) - shake)
-        sy = trunc(rnd(shake * 2) - shake)
+        -- The shake is a function of the CLOCK, not of rnd(). Drawing must never
+        -- draw from the random stream: the console reseeds that stream once per
+        -- logic tick, but _draw runs at the screen's rate, so two linked
+        -- consoles rendering at different speeds would consume different amounts
+        -- of it -- a desync you cannot see until the two games have quietly
+        -- become different games (#65, measured 2026-08-22).
+        local k = trunc(t * 371.0)
+        sx = trunc(shake * (1 - 2 * (k % 3 & 1)))
+        sy = trunc(shake * (1 - 2 * (k // 3 % 3 & 1)))
     end
     -- The battlefield backdrop. The Python twin DECLARES it once via background()
     -- and lets the engine repaint it each frame, but that verb is the `layers`
