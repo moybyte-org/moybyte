@@ -88,8 +88,10 @@ NATIVE = {
                        "moycore", "moy_web", "moy_flush", "moy_lcd"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush along with moy_sd and moy_audio.
+    # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
+    # track -- docs/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_ble_hid"},
+           "moy_ppa", "moy_ble_hid", "moy_c6"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
     # see its board.toml); moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
