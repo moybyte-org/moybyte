@@ -416,16 +416,23 @@ esp_err_t esp_wifi_config_espnow_rate(wifi_interface_t ifx, wifi_phy_rate_t rate
 // push/serial machinery and is sha-checked in Python before activate.
 
 static mp_obj_t moy_c6_bt_up(void) {
-    // esp-hosted-mcu#212: since ~2.8 the slave's BT controller is NOT
-    // initialised or enabled by default -- the host does both, BEFORE the
-    // NimBLE host stack sends its first HCI command. Without this,
-    // bluetooth.BLE().active(True) against a current slave spins the VHCI
-    // send path into an interrupt-WDT PANIC (observed on this glass,
-    // 2026-08-24). ble_keyboard.py calls this guardedly before activating.
+    // The hosted >= ~2.8 BT contract (esp-hosted-mcu#212): the slave's BT
+    // controller is NOT initialised or enabled by default -- the host does
+    // both, BEFORE NimBLE's first HCI command. And the transport must be UP
+    // first: at boot the keyboard driver runs before any network use, so the
+    // controller RPCs here would fail against a transport nobody has brought
+    // up yet -- which is exactly how the 2026-08-24 hunt produced "first
+    // activation times out cleanly, every retry panics" (the failed attempt's
+    // deinit corrupts NimBLE's npl pool while hosted keeps delivering).
+    // connect_to_slave() is hosted's own idempotent bring-up -- the working
+    // bleprph example leads with the same call. All three results returned,
+    // never raised: a console with no BT must stay a console.
+    esp_err_t e0 = esp_hosted_connect_to_slave();
     esp_err_t e1 = esp_hosted_bt_controller_init();
     esp_err_t e2 = esp_hosted_bt_controller_enable();
-    mp_obj_t items[2] = { mp_obj_new_int(e1), mp_obj_new_int(e2) };
-    return mp_obj_new_tuple(2, items);
+    mp_obj_t items[3] = { mp_obj_new_int(e0), mp_obj_new_int(e1),
+                          mp_obj_new_int(e2) };
+    return mp_obj_new_tuple(3, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_bt_up_obj, moy_c6_bt_up);
 

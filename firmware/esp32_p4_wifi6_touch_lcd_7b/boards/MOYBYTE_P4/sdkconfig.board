@@ -133,3 +133,10 @@ CONFIG_WIFI_RMT_TX_BA_WIN=32
 # above is IDF's default here), so the trigger is absent -- re-check that
 # issue before ever moving the line size.
 CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
+
+# HCI debug logging OFF (upstream's sdkconfig.p4_wifi_common ships it ON).
+# Ruled out as the BT-on-2.12-slave breaker during the 2026-08-24 bisect, and
+# kept off anyway: it is a debug ring buffer in the HCI hot path of a kid's
+# console, and the working reference (hosted's bleprph example) runs without
+# it -- one less delta from the proven arrangement.
+CONFIG_BT_HCI_LOG_DEBUG_EN=n
