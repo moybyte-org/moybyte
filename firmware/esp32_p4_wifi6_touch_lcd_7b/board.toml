@@ -205,6 +205,15 @@ otadata_size   = "0x2000"
 dtr         = false
 rts         = false
 attach_only = false
+# The USB device identity, for resolving WHICH /dev/tty* is this board without
+# trusting a remembered port number -- ttyACM numbering shuffles whenever a
+# board resets or replugs, and on 2026-08-24 a whole measurement session ran
+# against the T-Deck believing it was this board (caught only by the boot log
+# growing an SD card and a trackball). The CH343 is the only external USB-UART
+# on this desk, so the id alone resolves it; the definitive check is still the
+# board's own `_ota_build.BOARD` answer, which the harness verifies after
+# attach/reset.
+usb         = "1a86:55d3"
 # 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
 # harness default failed five times with a DIFFERENT bad hash each attempt and
 # succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow

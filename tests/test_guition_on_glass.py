@@ -44,6 +44,9 @@ def board():
         raise RuntimeError(
             "the Guition did not answer `state` on %s -- is the desktop "
             "running? (this suite attaches, it does not reset)" % PORT)
+    # Identity, not just liveness: the other S3 shares this usb id and answers
+    # `state` just as happily (MOYBYTE_GUITION_PORT=auto resolves the port).
+    b.verify_board()
     yield b
     b.close()
 

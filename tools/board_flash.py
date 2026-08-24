@@ -48,7 +48,44 @@ def _esptool(chip, port, baud, *args):
     return subprocess.call(cmd)
 
 
-def flash(board_dir, port):
+def _verify_identity(board_dir, port):
+    """Best-effort identity check before writing flash. esptool's own chip
+    probe already refuses a P4 image on an S3 -- but the two S3 boards are the
+    SAME chip behind the SAME usb id (303a:1001), and a T-Deck image booted on
+    the Guition is a valid flash of the wrong firmware. Both are attach_only
+    (an open never resets them), so asking costs nothing when the console is
+    up. A board that does not answer only WARNS: a wedged board is this tool's
+    ordinary customer. A POSITIVE mismatch refuses (--no-verify overrides)."""
+    ser = board_config.load(board_dir).get("serial", {})
+    want = board_config.load(board_dir).get("board", {}).get("ota")
+    if not want or not ser.get("attach_only"):
+        return  # non-attach boards are chip-guarded by esptool; nothing to ask
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        from p4_autotest import P4Board
+        b = P4Board(port, board_dir=board_dir)
+    except Exception as exc:  # noqa: BLE001 -- no pyserial / busy port
+        print("!! identity unverified (%s) -- proceeding" % exc)
+        return
+    try:
+        b.drain(0.6)
+        got = b.identify(timeout=4.0)
+    finally:
+        b.close()
+    if got is None:
+        print("!! %s did not answer an identity check (wedged or mid-boot) -- "
+              "proceeding as %r" % (port, want))
+    elif got != want:
+        sys.exit("wrong board on %s: it answers as %r, this image is for %r "
+                 "-- the ttyACM numbering has probably shuffled (--no-verify "
+                 "to override)" % (port, got, want))
+    else:
+        print("board on %s confirmed: %s" % (port, got))
+
+
+def flash(board_dir, port, verify=True):
+    if verify:
+        _verify_identity(board_dir, port)
     cfg = board_config.load(board_dir)
     chip = cfg["board"]["chip"]
     fl = cfg.get("flash")
@@ -88,9 +125,11 @@ def main(argv):
     ap.add_argument("verb", choices=("flash", "monitor"))
     ap.add_argument("board_dir")
     ap.add_argument("--port", required=True)
+    ap.add_argument("--no-verify", action="store_true",
+                    help="skip the pre-flash identity check")
     a = ap.parse_args(argv[1:])
     if a.verb == "flash":
-        return flash(a.board_dir, a.port)
+        return flash(a.board_dir, a.port, verify=not a.no_verify)
     return monitor(a.board_dir, a.port)
 
 

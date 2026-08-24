@@ -257,6 +257,13 @@ rts         = true
 # CH343-specific; on this board it strands the handle, which is why the on-glass
 # suite attaches and leaves the console where it found it.
 attach_only = true
+# The USB device identity (see the P4's [serial] for the full why: ttyACM
+# numbers shuffle, and trusting a remembered one drove the wrong board on
+# 2026-08-24). 303a:1001 is the SoC's own USB-Serial/JTAG, so this id is
+# SHARED with the Guition -- it narrows the candidates and cannot finish the
+# job; the harness settles ambiguity by asking each candidate for its
+# `_ota_build.BOARD` (safe here: attach_only boards open without resetting).
+usb         = "303a:1001"
 # USB backpressures, so the default chunk is safe here -- measured 2026-08-19, a
 # 44KB cart pushed clean at 768 in 45s, twice as fast as the P4 needs at 256.
 chunk       = 768

@@ -178,7 +178,10 @@ def main(argv=None):
     ap.add_argument("--board", required=True, choices=sorted(BOARDS),
                     help="which board's [serial] declaration to use (required: "
                          "a default here is a silent wrong transport)")
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve it from "
+                         "the board's [serial] usb id + its own identity "
+                         "answer -- ttyACM numbers shuffle across replugs")
     ap.add_argument("--dest",
                     help="target path (default <ws.carts_root>/<foldername>)")
     ap.add_argument("--only", action="append",
@@ -200,8 +203,9 @@ def main(argv=None):
             sys.exit("not in the cart: " + ", ".join(missing))
         names = [f for f in names if f in a.only]
     ser = serial_cfg(a.board)
+    board_dir = os.path.join(ROOT, BOARDS[a.board])
     b = P4Board(a.port, log=(print if a.verbose else (lambda s: None)),
-                dtr=bool(ser.get("dtr")), rts=bool(ser.get("rts")))
+                board_dir=board_dir)
     # The chunk a `py` line may carry. The P4's UART drops an over-long line as
     # noise with no error (see its board.toml); USB boards backpressure.
     chunk = int(ser.get("chunk") or P4Board.CHUNK)
@@ -214,8 +218,15 @@ def main(argv=None):
             if b.pyval("1+1", timeout=20) != 2:
                 sys.exit("%s is not responding -- this board is attached to, not "
                          "reset, so its console must already be running" % a.port)
+            # Liveness is not identity: the two S3s share a usb id and both
+            # answer. A cart pushed to the wrong board's store is a silent
+            # wrong outcome, so a POSITIVE mismatch refuses here.
+            try:
+                b.verify_board()
+            except RuntimeError as exc:
+                sys.exit(str(exc))
         else:
-            b.reset()
+            b.reset()          # verifies identity once the desk is up
         # The store the CONSOLE says it uses -- the Guition's is conditional on a
         # TF card being present, so asking beats declaring.
         dest = a.dest or (str(b.pyval("str(ws.carts_root)", timeout=20)).rstrip("/")

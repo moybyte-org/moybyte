@@ -50,7 +50,8 @@ def declared_serial(board_dir=P4_BOARD_DIR):
 
     Missing keys fall back to the P4's, because a driver that refuses to start
     is worse than one on a default."""
-    out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None}
+    out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None,
+           "usb": None}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import board_config
@@ -66,6 +67,141 @@ def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
     return int(declared_serial(board_dir)["chunk"] or default)
 
 
+def declared_board_id(board_dir=P4_BOARD_DIR):
+    """The board's `[board] ota` id ("p4"/"tdeck"/"guition_s3") -- the name the
+    board itself answers with (`_ota_build.BOARD`), so it is what identity
+    verification compares against. None if the file declares none."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import board_config
+        return board_config.load(board_dir).get("board", {}).get("ota")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Which /dev/tty* IS this board? ttyACM numbering shuffles whenever a board
+# resets or replugs, and on 2026-08-24 a whole measurement session drove the
+# T-Deck believing it was the P4 -- the port number was remembered from two
+# days earlier. Resolution is two layers, both data:
+#   1. the [serial] usb id (vid:pid) narrows the candidates -- it fully
+#      resolves the P4 (the only CH343), and CANNOT split the two S3s (both
+#      are the SoC's own 303a:1001);
+#   2. the board's own `_ota_build.BOARD` answer settles it -- asked over the
+#      dev channel, which is also what P4Board.verify_board() re-checks after
+#      every attach/reset, so even an explicit --port is caught when it points
+#      at the wrong board.
+# ---------------------------------------------------------------------------
+
+
+def usb_id_of(port, sys_tty="/sys/class/tty"):
+    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
+    Linux). Walks up from the tty's sysfs node to the first ancestor carrying
+    idVendor/idProduct -- the interface sits one or two levels below them."""
+    node = os.path.realpath(
+        os.path.join(sys_tty, os.path.basename(str(port)), "device"))
+    for _ in range(6):
+        vid = os.path.join(node, "idVendor")
+        pid = os.path.join(node, "idProduct")
+        try:
+            if os.path.exists(vid) and os.path.exists(pid):
+                return "%s:%s" % (open(vid).read().strip().lower(),
+                                  open(pid).read().strip().lower())
+        except OSError:
+            return None
+        nxt = os.path.dirname(node)
+        if nxt == node:
+            break
+        node = nxt
+    return None
+
+
+def serial_ports():
+    """The serial device nodes worth considering, sorted."""
+    import glob
+    return sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
+
+
+def _probe_identity(port, board_dir, log):
+    """Attach to `port` with `board_dir`'s line discipline and ask who it is.
+    Only ever called for attach_only declarations, where an open is side-effect
+    free; opening a CH343 reboots its board, which a resolver must not do to a
+    bystander."""
+    try:
+        b = P4Board(port, board_dir=board_dir)
+    except Exception as exc:  # noqa: BLE001 -- busy/permission -> not this one
+        log("  %s: cannot open (%s)" % (port, exc))
+        return None
+    try:
+        b.drain(0.6)
+        return b.identify(timeout=4.0)
+    finally:
+        b.close()
+
+
+def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
+              prober=None):
+    """Resolve a board directory to the serial port it is plugged into.
+
+    Raises RuntimeError with the full candidate picture on anything short of
+    one confident answer -- a guessed port is exactly the bug this exists to
+    remove. `ports`/`usb_of`/`prober` are injectable for the host tests."""
+    log = log or (lambda s: None)
+    ser = declared_serial(board_dir)
+    want_usb = ser.get("usb")
+    if not want_usb:
+        raise RuntimeError(
+            "%s declares no [serial] usb id -- cannot resolve a port for it"
+            % board_dir)
+    usb_of = usb_of or usb_id_of
+    allp = list(ports) if ports is not None else serial_ports()
+    cands = [p for p in allp if usb_of(p) == want_usb]
+    if not cands:
+        raise RuntimeError(
+            "no serial port matches %s's usb id %s (saw: %s)"
+            % (board_dir, want_usb,
+               ", ".join("%s=%s" % (p, usb_of(p)) for p in allp) or "none"))
+    want_id = declared_board_id(board_dir)
+    if len(cands) == 1:
+        # Unique on the bus -- but NOT necessarily unique by design: both S3s
+        # declare 303a:1001, so with one of them unplugged the survivor
+        # "uniquely" matches the OTHER board's name too. Where asking is free
+        # (attach_only), ask; a mismatch is an answer, and a silent board is
+        # accepted here because verify_board() re-checks downstream.
+        if ser.get("attach_only") and want_id:
+            prober = prober or (lambda q: _probe_identity(q, board_dir, log))
+            got = prober(cands[0])
+            if got is not None and got != want_id:
+                raise RuntimeError(
+                    "the only %s port (%s) answers as %r, not %r -- is that "
+                    "board plugged in?" % (want_usb, cands[0], got, want_id))
+            log("resolved %s -> %s (usb %s, identity %s)"
+                % (board_dir, cands[0], want_usb, got or "unconfirmed"))
+        else:
+            log("resolved %s -> %s (usb %s)" % (board_dir, cands[0], want_usb))
+        return cands[0]
+    # Twins on the bus. Ask each -- but only where an open is side-effect free.
+    if not ser.get("attach_only"):
+        raise RuntimeError(
+            "%d ports share usb id %s (%s) and this board's open is not "
+            "side-effect free, so probing would reboot bystanders -- pass "
+            "--port explicitly" % (len(cands), want_usb, ", ".join(cands)))
+    if not want_id:
+        raise RuntimeError(
+            "%d ports share usb id %s and %s declares no [board] ota id to "
+            "tell them apart" % (len(cands), want_usb, board_dir))
+    prober = prober or (lambda p: _probe_identity(p, board_dir, log))
+    seen = {}
+    for p in cands:
+        seen[p] = prober(p)
+        log("  probed %s -> %s" % (p, seen[p]))
+        if seen[p] == want_id:
+            return p
+    raise RuntimeError(
+        "no candidate answered as %r: %s -- is that board's desktop running?"
+        % (want_id, ", ".join("%s=%s" % kv for kv in seen.items())))
+
+
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
@@ -77,6 +213,9 @@ class P4Board:
         ser = declared_serial(board_dir or P4_BOARD_DIR)
         self.log = log if log is not None else (lambda s: None)
         self.attach_only = bool(ser["attach_only"])
+        self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)
+        if port in (None, "auto"):
+            port = find_port(board_dir or P4_BOARD_DIR, log=self.log)
         if serial is None:
             raise RuntimeError(
                 "driving a board needs pyserial: pip install -e '.[device]'")
@@ -214,7 +353,39 @@ class P4Board:
         if line is None:
             raise RuntimeError("P4 did not reach the desktop after reset")
         self.drain(settle)        # splash + first frames
+        self.verify_board()
         return line
+
+    def identify(self, timeout=6.0):
+        """What the board says it IS: its `_ota_build.BOARD` ("p4"/"tdeck"/
+        "guition_s3" -- the same id a signed OTA manifest names). One short
+        line, so it is chunk-safe on every board. None if it does not answer
+        (channel not armed, or a pre-#53-stamp image)."""
+        got = self.pyval('__import__("_ota_build").BOARD', timeout=timeout)
+        return got if isinstance(got, str) else None
+
+    def verify_board(self, strict=True):
+        """Compare the board's own identity against the board_dir this driver
+        was configured for. A POSITIVE mismatch raises -- driving board A with
+        board B's line discipline, chunk size and expectations is precisely the
+        2026-08-24 bug (a session measured the T-Deck as "the P4" after the
+        ttyACM numbers shuffled). A board that does not ANSWER only warns:
+        identity needs a running desk, and half this driver's callers attach to
+        boards in unknown states."""
+        want = self.expect_board
+        if not want:
+            return None
+        got = self.identify()
+        if got is None:
+            self.log("identity unverified: %s did not answer (expected %r)"
+                     % (self.ser.port, want))
+            return None
+        if got != want and strict:
+            raise RuntimeError(
+                "wrong board on %s: it answers as %r, this driver is set up "
+                "for %r -- the ttyACM numbering has probably shuffled "
+                "(port=auto resolves it)" % (self.ser.port, got, want))
+        return got
 
     # -- verbs ------------------------------------------------------------
 
@@ -419,7 +590,9 @@ def _tour(board):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve from the "
+                         "board's [serial] usb id -- ttyACM numbers shuffle")
     ap.add_argument("--verbose", action="store_true",
                     help="echo every serial line")
     args = ap.parse_args()

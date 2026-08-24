@@ -52,6 +52,11 @@ def board():
         raise RuntimeError(
             "the T-Deck did not answer `state` on %s -- is the desktop "
             "running? (this suite attaches, it does not reset)" % PORT)
+    # The board must BE the T-Deck: both S3s share usb id 303a:1001 and the
+    # ttyACM numbering shuffles across replugs, so an answer alone proves only
+    # that SOME console is listening. MOYBYTE_TDECK_PORT=auto resolves the
+    # port; an explicit port that points at the wrong board raises here.
+    b.verify_board()
     yield b
     b.close()
 
