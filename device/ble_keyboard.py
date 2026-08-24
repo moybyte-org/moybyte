@@ -362,6 +362,16 @@ class BleHidKeyboard:
                 self.ble.config(rxbuf=512)
             except Exception:
                 pass
+            try:
+                # ESP-Hosted boards only (the P4): since hosted ~2.8 the
+                # co-processor's BT controller is not initialised or enabled
+                # by default -- the HOST does both before NimBLE's first HCI
+                # command (esp-hosted-mcu#212; without it active(True) panics
+                # the interrupt watchdog). Absent module = radio-on-SoC board.
+                import moy_c6
+                moy_c6.bt_up()
+            except ImportError:
+                pass
             self.ble.active(True)
             self.available = True
             if self._enabled:

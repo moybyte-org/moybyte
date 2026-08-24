@@ -87,7 +87,27 @@ static esp_err_t moyc6_rpc(const void *msg, size_t msg_len,
     return esp_hosted_send_custom_data(MOYC6_H2S, buf, msg_len + payload_len);
 }
 
+static bool s_s2h_registered;
+static void moyc6_on_s2h(uint32_t id, const uint8_t *data, size_t len, void *ctx);
+
+static esp_err_t moyc6_ensure_s2h(void) {
+    // Idempotent: every entry point that expects an answer registers first.
+    // Found on glass 2026-08-24: ping() before any espnow init timed out
+    // forever, because registration lived only in esp_now_init() and the
+    // slave's ACK arrived with nobody listening.
+    if (s_s2h_registered) {
+        return ESP_OK;
+    }
+    esp_err_t err = esp_hosted_register_custom_callback(MOYC6_S2H, moyc6_on_s2h, NULL);
+    s_s2h_registered = err == ESP_OK;
+    return err;
+}
+
 static esp_err_t moyc6_handshake(uint8_t verb) {
+    esp_err_t reg = moyc6_ensure_s2h();
+    if (reg != ESP_OK) {
+        return reg;
+    }
     if (s_ack_sem == NULL) {
         s_ack_sem = xSemaphoreCreateBinary();
         if (s_ack_sem == NULL) {
@@ -197,11 +217,7 @@ esp_err_t esp_now_init(void) {
     if (s_inited) {
         return ESP_OK;
     }
-    esp_err_t err = esp_hosted_register_custom_callback(MOYC6_S2H, moyc6_on_s2h, NULL);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = moyc6_handshake(MOYC6_V_INIT);
+    esp_err_t err = moyc6_handshake(MOYC6_V_INIT);
     if (err != ESP_OK) {
         return err;
     }
@@ -220,6 +236,7 @@ esp_err_t esp_now_deinit(void) {
     // this host is done listening.
     moyc6_handshake(MOYC6_V_DEINIT);
     esp_hosted_register_custom_callback(MOYC6_S2H, NULL, NULL);
+    s_s2h_registered = false;
     return ESP_OK;
 }
 
@@ -398,6 +415,20 @@ esp_err_t esp_wifi_config_espnow_rate(wifi_interface_t ifx, wifi_phy_rate_t rate
 // moy_ota shape, fed from MicroPython so the image rides the ordinary
 // push/serial machinery and is sha-checked in Python before activate.
 
+static mp_obj_t moy_c6_bt_up(void) {
+    // esp-hosted-mcu#212: since ~2.8 the slave's BT controller is NOT
+    // initialised or enabled by default -- the host does both, BEFORE the
+    // NimBLE host stack sends its first HCI command. Without this,
+    // bluetooth.BLE().active(True) against a current slave spins the VHCI
+    // send path into an interrupt-WDT PANIC (observed on this glass,
+    // 2026-08-24). ble_keyboard.py calls this guardedly before activating.
+    esp_err_t e1 = esp_hosted_bt_controller_init();
+    esp_err_t e2 = esp_hosted_bt_controller_enable();
+    mp_obj_t items[2] = { mp_obj_new_int(e1), mp_obj_new_int(e2) };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_bt_up_obj, moy_c6_bt_up);
+
 static mp_obj_t moy_c6_fwversion(void) {
     esp_hosted_coprocessor_fwver_t ver = { 0 };
     if (esp_hosted_get_coprocessor_fwversion(&ver) != 0) {
@@ -473,6 +504,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ota_activate_obj, moy_c6_ota_activate);
 
 static const mp_rom_map_elem_t moy_c6_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_moy_c6) },
+    { MP_ROM_QSTR(MP_QSTR_bt_up), MP_ROM_PTR(&moy_c6_bt_up_obj) },
     { MP_ROM_QSTR(MP_QSTR_fwversion), MP_ROM_PTR(&moy_c6_fwversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_ping), MP_ROM_PTR(&moy_c6_ping_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_c6_stats_obj) },
