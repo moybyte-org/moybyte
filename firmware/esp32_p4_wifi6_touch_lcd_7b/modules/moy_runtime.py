@@ -544,6 +544,21 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+    # THE RADIO LINK (#7/#65 Phase 2 -- Phase E of docs/espnow_p4_2026-08.md):
+    # the console's one ESP-NOW owner, the same module and the same wiring as
+    # the S3 boards. Built here, INERT until a cart with the "multiplayer"
+    # permission runs (ws.link_arm() starts the radio; pm=PM_NONE costs power
+    # and a console on its shelf has nobody to talk to). On this board the
+    # espnow module underneath is the moy_c6 shim to the C6 -- a stock C6
+    # (no shim slave) makes start() fail into an inactive link, never a crash.
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="p4", name=ws.system.get("name", "p4"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte P4 link unavailable:", exc)
+        ws.link = None
+
     # OTA firmware update (#53 on this board). The partition table has been
     # OTA-shaped since bring-up (ota_0/ota_1, 4MB each) and update_ui has been
     # frozen in all along; this is the piece that was missing.
@@ -722,6 +737,12 @@ def run_desktop(fps_cap=60):
 
     def _tail(now):
         poll_webhost(ws)               # see the helper for why the frame TAIL
+        # The radio, once per frame -- same slice as the S3 boards (the module
+        # header carries the numbers). No-op while the link is inert, which is
+        # every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
 
     def _account(now, elapsed, sleep_ms):
         _pf["n"] += 1

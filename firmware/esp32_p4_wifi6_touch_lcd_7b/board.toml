@@ -337,6 +337,20 @@ files = ["device_wifi.py"]
 why = "The WLAN service the console's Settings WIFI panel and the OTA check ride."
 
 [[modules.device.group]]
+files = ["moy_espnow.py"]
+why = """
+The console's ONE ESP-NOW owner (#7/#65) -- the same file the two S3 boards
+stage, UNCHANGED, which is the whole point of the moy_c6 shim underneath it:
+this board's `espnow` module is MicroPython's stock modespnow.c linked against
+seventeen esp_now_* wrappers that ride ESP-Hosted's custom RPC to the C6,
+where the real radio is (native/moy_c6 + c6_slave/, the plan and every
+on-glass verdict in docs/espnow_p4_2026-08.md). Proven on the air 2026-08-24
+before this staging: the P4 receives the T-Deck's live discovery beacons and
+the T-Deck counts the P4's broadcasts. One board-specific fact, already the
+module's own rule: the C6's radio starts with the host's WLAN, so
+link.start()'s wlan.active(True) is load-bearing here, not ceremony."""
+
+[[modules.device.group]]
 files = ["moy_ota.py"]
 why = """
 The OTA updater (#53). Board-agnostic: its staging directory is a constructor

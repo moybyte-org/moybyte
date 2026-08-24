@@ -99,14 +99,23 @@ fi
 #     just later (bigger internal pool).
 moybyte_patch_native_code_free
 
-# DECLINED moybyte_patch_repr_c -- an OPEN QUESTION rather than a verdict
-# (recorded 2026-08-17 so nobody mistakes the absence for one): the unboxed-
-# floats sed (#66) has never been tried or measured on this board. The S3's case
-# was a measured 130-175ms gc hitch from float boxing; whether the P4's bigger
-# pools and different GC cadence (#67 recorded 19-24ms GC spikes under Python
-# carts) make it worth the same object-layout change is an on-glass A/B someone
-# has to run -- per-board verdicts don't transfer in either direction. Tracked
-# in #58's port list.
+# 2e) REPR_C -- applied 2026-08-24, and NOT for the S3's reason. This stood as
+#     "DECLINED, an open question" for a week because the only argument was
+#     perf (the S3's measured float-boxing gc hitch) and per-board perf
+#     verdicts don't transfer. The espnow lockstep match (#7 Phase E) turned
+#     it into a CORRECTNESS requirement: both consoles in a match run the same
+#     sim from the same inputs, and a 30-bit REPR_C float (the S3s) against a
+#     boxed 32-bit single (this board, until now) diverges the two worlds by
+#     construction -- measured on glass, P4<->T-Deck Brick Siege: tanks
+#     identical, 0/1105 world checksums agreeing, and the same accumulator
+#     printing 0.21666668 on one board and 0.216666668 on the other. FLOAT
+#     WIDTH IS PART OF THE LOCKSTEP CONTRACT: every board that can hold a
+#     link runs REPR_C, and a future board that cannot take REPR_C is a
+#     board that cannot join a match until something re-solves this. The
+#     perf A/B ran the same day, paired on the same tree and flash cycle:
+#     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
+#     noise on the other. It would not have gotten a vote anyway.
+moybyte_patch_repr_c
 
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and

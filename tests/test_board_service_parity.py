@@ -161,12 +161,8 @@ WIRING = {
         "updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "the radio this would ride is compiled out here -- see the link row",
-        "link": "ESP-NOW is compiled OUT of this board (MICROPY_PY_ESPNOW 0 in\n"
-                "boards/MOYBYTE_P4/mpconfigboard.h), and its WiFi rides the C6 over\n"
-                "SDIO, so whether ESP-NOW works through a co-processor at all is an\n"
-                "open question rather than a flag flip. The handheld tier is where\n"
-                "couch co-op belongs; flip this with a measured link, not a config",
+        "net": INJECTED,
+        "link": INJECTED,
         "wm": INJECTED,
         "perf_capture": INJECTED,
     },
@@ -582,6 +578,8 @@ LIFECYCLE = {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
     "guition": {
         ("keyboard", "start"): HERE,

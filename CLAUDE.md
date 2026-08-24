@@ -590,16 +590,21 @@ only what a coder must not undo:
 - **A restart must not stop the radio** (`Player.release_world` stops the link
   only when `ws.netplay` is None) -- a forming match re-runs the cart, and the
   dying run used to kill the session that caused the restart.
-- **Board scope is a hardware fact**: the S3 pair, nothing else. The P4 has the
-  module compiled away and its WiFi behind the C6; a browser has no radio.
-  **The P4 question is SETTLED 2026-08-24** -- flipping `MICROPY_PY_ESPNOW` on
-  fails at link (ESP-Hosted's RPC carries no ESP-NOW; upstream esp-hosted-mcu
-  #19 is the open request, "on our roadmap" and unshipped). The evidence, the
-  refuted community workaround and the one viable future path (hosted >= 2.8.1
-  custom RPC + a C6-side shim, deferred because it reflashes the radio that
-  carries that board's only game-exit keyboard) are in
-  docs/espnow_multiplayer_2026-08.md, "The P4 cannot join" -- read that before
-  re-investigating. Found the same day, unrelated to the radio: the P4's WiFi
+- **Board scope: ALL THREE console boards since 2026-08-24** (a browser still
+  has no radio). The morning of that day settled "the P4 cannot join" (the
+  flag flip failed at link; ESP-Hosted's RPC carries no ESP-NOW; upstream
+  esp-hosted-mcu #19 open and unshipped) -- and the rest of it un-settled the
+  verdict by BUILDING the path the verdict named: hosted 2.12.12 + the moy_c6
+  shim (seventeen esp_now_* wrappers over custom RPC) + a shimmed C6 slave
+  flashed over its own SDIO link. **`docs/espnow_p4_2026-08.md` is that whole
+  campaign** -- the phases, every on-glass verdict, the BLE regression and its
+  fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s.
+  **FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT** (found by the owner's
+  hands, first cross-arch match): two consoles in a match run the same sim,
+  and REPR_C's 30-bit floats against boxed 32-bit singles diverge the worlds
+  by construction -- 0/1105 world checksums agreeing before the P4 took
+  `moybyte_patch_repr_c`, 1106/1106 after. Every board that can hold a link
+  runs REPR_C; a board that cannot take it cannot join a match. Found the same day, unrelated to the radio: the P4's WiFi
   buffer set had silently never applied -- `esp_wifi_remote` renames every
   `CONFIG_ESP_WIFI_*` to `CONFIG_WIFI_RMT_*`, so upstream's own fragment asked
   with a dead name and the build carried 10/32/32/6/6 against a 65534 TCP

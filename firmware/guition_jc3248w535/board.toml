@@ -343,12 +343,11 @@ than a feature because `esp_now_register_recv_cb()` has exactly one callback
 slot for the whole firmware -- the second subscriber simply does not get one --
 so netplay's lockstep session and a cart's net.* inbox both read through here.
 
-Staged on the two S3 boards and NOWHERE else, which is a hardware fact rather
-than a staging preference: the P4 compiles ESP-NOW out (`MICROPY_PY_ESPNOW (0)`
-in its mpconfigboard.h) and its WiFi rides the C6 over SDIO -- settled
-2026-08-24: the flag flip fails at link, because ESP-Hosted's RPC carries no
-ESP-NOW (docs/espnow_multiplayer_2026-08.md, "The P4 cannot join"); the browser
-has no radio at all.
+Staged on all three console boards since 2026-08-24 -- and the same day this
+prose said "the two S3 boards and NOWHERE else, a hardware fact": the P4
+joined through the moy_c6 shim (stock modespnow.c over ESP-Hosted custom RPC
+to its C6; docs/espnow_p4_2026-08.md is that whole story, including the
+morning the flag flip failed at link). The browser still has no radio at all.
 
 Measured on this pair of boards, 2026-08-20, and the numbers are why the module
 looks the way it does: 48 KB delivered in 65ms at RATE_54M with rxbuf 32768 and
