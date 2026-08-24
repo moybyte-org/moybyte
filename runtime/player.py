@@ -348,6 +348,7 @@ class Player:
                                       # has the "multiplayer" permission (else None); tick()
                                       # pumps inbound messages to its on_net handler
         self._netplay = None          # #65 Phase 2: the live two-console lockstep session
+        self._drain_input = None      # pre-tick radio drain, bound by start()
                                       # (ws.netplay), when this run is a linked match. It
                                       # OWNS the tick: fixed dt, and a frame the peer's
                                       # input has not reached does not simulate at all
@@ -803,6 +804,12 @@ class Player:
         # Gated on the same permission: an unlinked console leaves this None and
         # the cart runs exactly as a single-player cart does.
         self._netplay = ws.netplay if net is not None else None
+        # The pre-tick radio drain (see the frame loop below). Bound once: a
+        # linked run drains the link it started with, the way it keeps the
+        # session it started with.
+        self._drain_input = None
+        if self._netplay is not None and link is not None:
+            self._drain_input = getattr(link, "drain_input", None)
         # The cart api reads this to refuse touch()/mouse() for the duration:
         # only buttons cross the radio, so a pointer would move one screen's
         # player and not the other's. Set on the InputState because that is what
@@ -1100,13 +1107,33 @@ class Player:
                 stalled = False
                 np = self._netplay
                 if np is not None:
+                    # Drain the radio BEFORE deciding whether this tick can
+                    # advance: the boards drain in the frame TAIL, so without
+                    # this the peer's input is up to a whole loop frame stale
+                    # by the time advance() looks for it. Measured on glass
+                    # (P4<->T-Deck, 2026-08-24): 8.0% -> 6.4% stalled ticks at
+                    # DELAY=2 from this call alone. Input-priority and
+                    # mid-frame-safe by contract -- see EspNowLink.drain_input.
+                    _di = self._drain_input
+                    if _di is not None:
+                        try:
+                            _di()
+                        except Exception:  # noqa: BLE001 -- radio must not kill a frame
+                            pass
                     dt = np.dt
                     # The session owns the CLOCK as well as the order: it ticks
                     # at its fixed rate, not at whatever the board's frame loop
                     # manages, or a fixed dt would silently run the game fast.
-                    if np.due(_ticks_ms()):
+                    _nowp = _ticks_ms()
+                    if np.due(_nowp) or np.waiting:
+                        # A STALLED tick retries every loop frame instead of
+                        # waiting out a whole tick: the missing input usually
+                        # lands a few ms after it was first needed, and the
+                        # wait-for-the-next-due schedule made a 5ms miss cost
+                        # 34ms (wait_med, on glass 2026-08-24). due() still
+                        # owns the cadence of healthy ticks.
                         stalled = not np.advance(
-                            _netplay_mask(ws.input, _NET_BUTTONS))
+                            _netplay_mask(ws.input, _NET_BUTTONS), _nowp)
                     else:
                         # Between ticks: do not simulate, but KEEP SENDING. The
                         # frame loop is faster than the lockstep clock, so these

@@ -108,6 +108,23 @@ moybyte_patch_native_code_free() {
   fi
 }
 
+# ESP-NOW ring torn-read race (#7, measured 2026-08-24). modespnow's recv_cb
+# (WiFi task) writes header/peer/msg as three separate ringbuf puts while
+# recvinto waits only for the HEADER -- a reader that catches a record
+# mid-write raises "ESPNow.recv(): buffer error" on a healthy ring and leaves
+# it genuinely desynced (header consumed, body not). A busy irecv(0) drain
+# hits the window about once a second on glass; every hit forces the link's
+# _recover() active-cycle, which costs a packet burst mid-match. The patch
+# waits (bounded, 10ms) for the body the writer commits microseconds later.
+# All three radio boards call this; the wasm build compiles no modespnow.
+# Reads MPY_DIR, REPO_ROOT.
+moybyte_patch_espnow_ring_race() {
+  if ! grep -q "Moybyte espnow_ring_race" "${MPY_DIR}/ports/esp32/modespnow.c"; then
+    echo "== applying espnow ring torn-read patch (#7)"
+    patch -d "${MPY_DIR}" -p1 < "${REPO_ROOT}/patches/esp32_espnow_ring_race.patch"
+  fi
+}
+
 # REPR_C unboxed floats (#66). REPR_A boxes every float RESULT in 16 bytes of
 # heap (~73KB/frame measured in sakura), and the heap-wrap gc collect that
 # follows is a 130-175ms visible hitch. A GUARDED SED rather than a context

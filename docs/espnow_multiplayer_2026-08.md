@@ -91,9 +91,12 @@ ESP-NOW's tail and does nothing for a download.
 
 **Lockstep at a fixed 30Hz** (`runtime/netplay.py`), with three rules:
 
-1. **Input delay of 2 frames.** Frame N's input is sent during N−2 and played on
-   N; your own input is delayed identically so both consoles stay symmetric. 66 ms
-   of buffer against a 14 ms p99.
+1. **Input delay.** Frame N's input is sent during N−DELAY and played on N;
+   your own input is delayed identically so both consoles play the same tape.
+   Shipped at a fixed 2 frames (66 ms) on 2026-08-22; **adaptive since
+   2026-08-25** — starts at 1 frame (33 ms) and raises itself under stall
+   pressure (see "Input latency" below for the measurements and the raise-only
+   rule).
 2. **Redundancy, not retransmit.** Every packet carries the last 4 frames of
    input. A mask is ONE BYTE, so redundancy is free and a lost packet is healed by
    the *next* one — no round trip, which matters because the ack lies.
@@ -130,6 +133,10 @@ input frame carries ~2 messages and a 32 KB ring holds hundreds, so a per-frame
 slice is comfortable — and it keeps the radio off the core the panel flush needs.
 
 ## Board scope, and why the P4 is out
+
+*(2026-08-20 record. Superseded 2026-08-24: the P4 joined through the moy_c6
+C6-shim — docs/espnow_p4_2026-08.md is that campaign. The section stands as
+the reasoning of its day.)*
 
 The two S3 boards only. The P4 compiles ESP-NOW **out**
 (`MICROPY_PY_ESPNOW (0)` in `boards/MOYBYTE_P4/mpconfigboard.h`) and its WiFi
@@ -237,14 +244,85 @@ round-trip floor did not move between 1 Mbps and 54 Mbps.
 | tick quantisation | up to 33 ms |
 | the radio, one way | ~2.5 ms |
 
-**Halving the buffer was measured and is a bad trade** (2026-08-22, both boards,
-30 s each): `DELAY = 2` stalls **3.0%** of ticks; `DELAY = 1` stalls **14%** and
-advances the game ~8% slower in real time. The limit is not packet loss — it is
-PHASE. At `DELAY = 1` the two consoles must stay within one tick of each other,
-and they pace on independent clocks, so ordinary ±1 tick drift becomes a stall.
-Only a bigger buffer absorbs that, which is what `DELAY = 2` is.
+**Halving the buffer was measured and rejected on 2026-08-22 — and then
+re-measured and SHIPPED on 2026-08-25, because the thing that made it bad was
+the pacing, not the radio.** The 2026-08-22 numbers (both S3 boards, 30 s
+each): `DELAY = 2` stalls 3.0% of ticks; `DELAY = 1` stalls 14% and advances
+the game ~8% slower. The diagnosis "the limit is PHASE" was right, but the
+phase was not free-running clock drift — it was `due()`'s own catch-up: any
+tick debt was repaid as a BURST at the loop rate, which outruns the peer's
+30 Hz emission, so both consoles self-hastened to the exact edge of input
+availability (measured arrival-margin p5 ≈ 0 ms even at `DELAY = 2`) and one
+stall became a coupled oscillation. Three pacing changes fixed it, all in
+`runtime/netplay.py`/`player.py` and all on-glass measured (2026-08-25):
 
-Two things that DID help, both shipped:
+- **debt is dropped, never burst-repaid** (a tick or more behind re-bases the
+  schedule; game time falls behind wall time by the stall, on both consoles at
+  once, which is what lockstep guarantees anyway);
+- **a stalled tick retries every LOOP frame** instead of waiting out a full
+  tick (the missing input usually lands a few ms late; the old schedule made a
+  5 ms miss cost 34 ms — `wait_med` fell to ~17 ms);
+- **the GUEST slews its tick phase** 1 ms at a time toward 12 ms of measured
+  arrival margin at `DELAY = 1` (the host's clock is the anchor; `advance()`
+  and `on_packet()` take an optional `now_ms` for this — timing-side state
+  only, nothing the sim reads).
+
+Re-measured with those in (60 s windows, distinct-stalled-ticks metric):
+T-Deck ↔ Guition at `DELAY = 1` stalls **1.8% / 2.3%** at **29.5 ticks/s** —
+better than 2026-08-22's `DELAY = 2`. The P4 ↔ T-Deck pair at `DELAY = 1`
+stays 25–30%: its two-tick budget is genuinely consumed by the C6-shim
+transport (docs/espnow_p4_2026-08.md Phase F), and no pacing can fund a buffer
+the transport eats. Hence:
+
+**Input delay is ADAPTIVE, starting at 1 (33 ms) and raise-only.** Delay is
+each console's private sampling lead — the tape only ever holds what was
+sampled, so a RAISE never rewrites an input the peer may have played, needs no
+wire agreement, and may legitimately differ between the two sides. (A LOWER
+mid-match could overwrite an already-emitted frame, which is why escalation
+only goes up.) A session that sees ≥12 distinct stalled ticks (~13%) inside a
+3 s window — the first window is match-formation grace — raises its delay to
+2 and says so on serial. On glass (a desk that measured 2–6% bursty ambient
+loss all day): the P4 pair's P4 side escalates within a couple of windows and
+the match then plays 1.3–2.4% at 29.6 ticks/s; the S3 sides hold `delay=1`
+until a real burst lands (a ~400 ms outage is ~12 distinct stall events, which
+is exactly the bar) and escalate independently when one does. **Mixed-delay
+matches are legal and measured**: a final verification run held the T-Deck at
+`delay=1` against the P4 at `delay=2` for a whole match at 29.5 ticks/s and
+2.0% stalls — the raise-only safety argument, demonstrated rather than
+asserted. An earlier bar (5 stalls, no grace) escalated everything always —
+ambient-RF stalls arrive in bursts, and a permanent raise needs a high bar. A
+quieter room holds 33 ms longer; that is the design, not a defect.
+
+Radio-side facts from the 2026-08-25 stall hunt, each shipped where it bites:
+
+- **MicroPython's espnow ring has a torn-read race** (`modespnow.c`: recv_cb
+  writes header/peer/msg as three ring puts; `recvinto` waits only for the
+  header), so a busy `irecv(0)` drain that catches a record mid-write raises
+  `buffer error` on a healthy ring — and the ring is then genuinely desynced.
+  On glass it fired about once a second under a busy drain. Patched in every
+  board build (`patches/esp32_espnow_ring_race.patch`): the peer/msg reads
+  wait, bounded, for the body the writer commits microseconds later. A 60 s
+  busy-drain soak after the patch: zero.
+- **`_recover()` used to lose the PHY rate**: the active() cycle resets the
+  radio to the 1 Mbps default and nothing re-applied `RATE_54M`, so one ring
+  error mid-match silently put the rest of the session at 1 Mbps. It re-applies
+  now, and `recovers` rides `stats()` so a session that churned says so.
+- **The BLE keyboard's background scan was 100% radio duty** —
+  `gap_scan(5000, 30000, 30000)` is interval == window, continuous, 5 s on /
+  5 s off forever while no keyboard is connected. Measured on the P4 at an
+  idle desk: 19.2/s received of 32.5 offered with the scan on, 29.5/s the
+  moment it stopped — most of the P4 pair's original 5.7–6.9% stall rate.
+  Background rescans are now 30 ms in every 300 ms, passive (reconnect matches
+  the bonded address from the ADV itself); the user-facing picker keeps the
+  continuous active scan. `device/ble_keyboard.py` carries the numbers.
+- **The Player drains the radio BEFORE deciding a tick** (input-priority
+  `EspNowLink.drain_input`, called from the lockstep branch): the boards drain
+  in the frame tail, so the peer's input was up to a whole loop frame stale by
+  the time `advance()` looked. Measured alone: 8.0% → 6.4% stalled ticks at
+  `DELAY = 2` on the P4 pair. Non-input frames are parked for the tail poll,
+  because a T_START can relaunch the cart from inside the Player's own frame.
+
+Two things that DID help, both shipped (2026-08-22):
 
 - **Send on every frame, not every tick.** The loop runs faster than the
   lockstep clock, so the spare frames are free redundancy against a radio whose
@@ -264,6 +342,14 @@ stack: a linked game bypasses the frameskip gate, because frameskip's premise is
 logic at the full loop rate and here logic *is* 30 Hz.
 
 ## Open, and deliberately not built
+
+- **`DELAY = 1` on the P4 pair.** Its budget is the C6 shim's per-packet cost
+  (Phase F of docs/espnow_p4_2026-08.md): even with the send RPC off the VM
+  core, emit-to-air and event-to-drain each cost several ms plus a loop
+  frame of tick quantisation, and the two margins at 33 ms sum to nearly
+  nothing. The levers left are transport-level (a data-path ride instead of
+  the RPC seam, resend gating so a tick's emit never queues behind a resend)
+  — measure there before touching netplay again.
 
 - **Beaming a cart** to a friend's console (#7's original milestone). The
   transport is proven — a typical 40 KB cart is ~55 ms at `RATE_54M`, which is

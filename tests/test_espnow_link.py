@@ -394,6 +394,61 @@ def test_a_desynced_ring_is_recovered_by_an_active_cycle_not_a_retry():
     assert a.radio.cfg["rxbuf"] == moy_espnow.RXBUF
 
 
+def test_recover_reapplies_the_phy_rate_and_is_counted():
+    """An active() cycle silently resets the PHY to MicroPython's 1M default,
+    so _recover must re-apply the rate it started with -- until 2026-08-24 it
+    did not, and one mid-match ring error put the rest of the session at 1Mbps
+    with no meter naming it. The recover count rides stats() so a session that
+    churned says so."""
+    air, clock, a, _b = _pair()
+    a._rate = 0x0B                     # what start() records when it builds the radio
+
+    def boom(timeout=0):
+        raise ValueError("ESPNow.recv(): buffer error")
+
+    a.radio.irecv = boom
+    a.poll(None)
+    assert a.recovers == 1
+    assert a.stats()["recovers"] == 1
+    down = a.radio.log.index(("active", False))
+    up = a.radio.log.index(("active", True), down)
+    assert ("config", ("rate",)) in a.radio.log[up:], \
+        "the rate must be re-applied AFTER the ring comes back up"
+
+
+def test_drain_input_dispatches_inputs_and_parks_everything_else():
+    """The Player's pre-tick drain must be mid-frame safe: T_INPUT goes to the
+    session immediately (that is the point -- fresher input for this tick), and
+    ANY other frame is parked for the tail poll, because a T_START can relaunch
+    the cart and a T_BYE can tear down the match from inside the Player's own
+    frame."""
+    air, clock, a, _b = _pair()
+
+    got = []
+
+    class _S:
+        session = 0
+
+        def on_packet(self, m, now_ms=None):
+            got.append(bytes(m))
+            return True
+
+    a.session = _S()
+    peer_mac = b"\xaa" * 6
+    inp = bytes([moy_espnow.PROTO, netplay.T_INPUT, 0, 1, 0, 1, 0, 5])
+    beacon = bytes([moy_espnow.PROTO, netplay.T_BEACON, 0]) + b"kid|tdeck|"
+    a.radio.inbox.append((peer_mac, inp))
+    a.radio.inbox.append((peer_mac, beacon))
+    n = a.drain_input()
+    assert n == 2
+    assert got == [inp], "only the input frame reaches the session mid-frame"
+    assert a._deferred == [(peer_mac, beacon)]
+    a.session = None
+    a.poll(None)
+    assert a._deferred == []
+    assert peer_mac in a.peers, "the parked beacon was dispatched by the tail poll"
+
+
 def test_a_stale_input_frame_from_a_previous_match_cannot_reach_a_new_one():
     air, clock, a, b = _pair(lambda ws, title: True)
     _see_each_other(a, b, clock)

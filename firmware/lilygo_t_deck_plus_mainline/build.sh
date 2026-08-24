@@ -121,6 +121,7 @@ fi
 
 # 2e) Un-static esp_native_code_free_all (#66) -- shared with the P4.
 moybyte_patch_native_code_free
+moybyte_patch_espnow_ring_race
 
 # 2f) PSRAM temperature retune (#169) -- REQUIRED by this board's 120MHz octal
 #     MSPI setting in sdkconfig.board, not optional alongside it.

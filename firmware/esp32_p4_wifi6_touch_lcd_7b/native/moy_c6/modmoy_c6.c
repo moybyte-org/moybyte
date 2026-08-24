@@ -35,6 +35,8 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 
 #include "py/obj.h"
 #include "py/runtime.h"
@@ -68,7 +70,31 @@ static volatile int32_t s_ack_err;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_rx_packets, s_rx_dropped, s_tx_packets;
 static uint32_t s_acks, s_ack_errors;
+static uint32_t s_tx_qfull, s_tx_rpc_err;
 static int32_t s_last_err;
+
+// -- the TX queue ------------------------------------------------------------
+//
+// The hosted custom-RPC seam is a BLOCKING request/response: rpc_slaveif waits
+// for the slave's reply, measured at ~10ms median per call on this desk
+// (200-send bench, 2026-08-24). Calling it inline from esp_now_send() put that
+// wait ON THE VM CORE once per packet -- a linked match sends every frame
+// (~45/s), so the frame loop lost ~10ms per frame to the radio and every
+// lockstep tick jittered by the same. This queue + task move the wait off the
+// VM: esp_now_send() is a memcpy + xQueueSend and returns in microseconds.
+// One queue, one consumer, so espnow's send ORDER is preserved; a full queue
+// answers ESP_ERR_ESPNOW_NO_MEM, which is espnow's own backpressure word for
+// "TX buffers exhausted" (modespnow raises OSError; moy_espnow counts a drop).
+
+#define MOYC6_TX_QUEUE_LEN  (12)
+
+typedef struct {
+    moyc6_send_t msg;
+    uint16_t payload_len;
+    uint8_t payload[ESP_NOW_MAX_DATA_LEN];
+} moyc6_tx_item_t;
+
+static QueueHandle_t s_tx_queue;
 
 // -- hosted plumbing ---------------------------------------------------------
 
@@ -85,6 +111,34 @@ static esp_err_t moyc6_rpc(const void *msg, size_t msg_len,
     memcpy(buf, msg, msg_len);
     memcpy(buf + msg_len, payload, payload_len);
     return esp_hosted_send_custom_data(MOYC6_H2S, buf, msg_len + payload_len);
+}
+
+static void moyc6_tx_task(void *arg) {
+    (void)arg;
+    static moyc6_tx_item_t item;     // one consumer; off the task stack
+    for (;;) {
+        if (xQueueReceive(s_tx_queue, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        esp_err_t err = moyc6_rpc(&item.msg, sizeof(item.msg),
+            item.payload, item.payload_len);
+        if (err == ESP_OK) {
+            portENTER_CRITICAL(&s_lock);
+            s_tx_packets++;
+            portEXIT_CRITICAL(&s_lock);
+        } else {
+            portENTER_CRITICAL(&s_lock);
+            s_tx_rpc_err++;
+            s_last_err = err;
+            portEXIT_CRITICAL(&s_lock);
+            if (s_send_cb != NULL) {
+                // Balance modespnow's tx accounting, exactly as the
+                // error-ACK path does: the radio never took this one.
+                esp_now_send_info_t info = { 0 };
+                s_send_cb(&info, ESP_NOW_SEND_FAIL);
+            }
+        }
+    }
 }
 
 static bool s_s2h_registered;
@@ -221,6 +275,17 @@ esp_err_t esp_now_init(void) {
     if (err != ESP_OK) {
         return err;
     }
+    if (s_tx_queue == NULL) {
+        s_tx_queue = xQueueCreate(MOYC6_TX_QUEUE_LEN, sizeof(moyc6_tx_item_t));
+        if (s_tx_queue == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+        if (xTaskCreate(moyc6_tx_task, "moyc6_tx", 3072, NULL, 5, NULL) != pdPASS) {
+            vQueueDelete(s_tx_queue);
+            s_tx_queue = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
     memset(s_peer_used, 0, sizeof(s_peer_used));
     s_fetch_at = 0;
     s_inited = true;
@@ -232,6 +297,9 @@ esp_err_t esp_now_deinit(void) {
         return ESP_OK;
     }
     s_inited = false;
+    if (s_tx_queue != NULL) {
+        xQueueReset(s_tx_queue);    // queued sends die with the session
+    }
     // Best-effort: the slave tears its side down or times out; either way
     // this host is done listening.
     moyc6_handshake(MOYC6_V_DEINIT);
@@ -267,19 +335,26 @@ esp_err_t esp_now_send(const uint8_t *peer_addr, const uint8_t *data, size_t len
     if (len > ESP_NOW_MAX_DATA_LEN) {
         return ESP_ERR_ESPNOW_ARG;
     }
-    moyc6_send_t msg = { .hdr = { MOYC6_PROTO_VERSION, MOYC6_V_SEND } };
-    msg.dst_valid = peer_addr != NULL;
+    static moyc6_tx_item_t item;    // modespnow is the sole caller (MP task)
+    memset(&item.msg, 0, sizeof(item.msg));
+    item.msg.hdr.proto = MOYC6_PROTO_VERSION;
+    item.msg.hdr.verb = MOYC6_V_SEND;
+    item.msg.dst_valid = peer_addr != NULL;
     if (peer_addr != NULL) {
-        memcpy(msg.dst, peer_addr, 6);
+        memcpy(item.msg.dst, peer_addr, 6);
     }
-    msg.len = (uint16_t)len;
-    esp_err_t err = moyc6_rpc(&msg, sizeof(msg), data, len);
-    if (err == ESP_OK) {
+    item.msg.len = (uint16_t)len;
+    item.payload_len = (uint16_t)len;
+    if (len > 0) {
+        memcpy(item.payload, data, len);
+    }
+    if (xQueueSend(s_tx_queue, &item, 0) != pdTRUE) {
         portENTER_CRITICAL(&s_lock);
-        s_tx_packets++;
+        s_tx_qfull++;
         portEXIT_CRITICAL(&s_lock);
+        return ESP_ERR_ESPNOW_NO_MEM;
     }
-    return err;
+    return ESP_OK;
 }
 
 static int moyc6_peer_find(const uint8_t *mac) {
@@ -455,7 +530,7 @@ static mp_obj_t moy_c6_ping(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ping_obj, moy_c6_ping);
 
 static mp_obj_t moy_c6_stats(void) {
-    mp_obj_t items[6];
+    mp_obj_t items[8];
     portENTER_CRITICAL(&s_lock);
     items[0] = mp_obj_new_int(s_rx_packets);
     items[1] = mp_obj_new_int(s_rx_dropped);
@@ -463,8 +538,10 @@ static mp_obj_t moy_c6_stats(void) {
     items[3] = mp_obj_new_int(s_acks);
     items[4] = mp_obj_new_int(s_ack_errors);
     items[5] = mp_obj_new_int(s_last_err);
+    items[6] = mp_obj_new_int(s_tx_qfull);
+    items[7] = mp_obj_new_int(s_tx_rpc_err);
     portEXIT_CRITICAL(&s_lock);
-    return mp_obj_new_tuple(6, items);
+    return mp_obj_new_tuple(8, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_stats_obj, moy_c6_stats);
 

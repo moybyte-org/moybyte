@@ -1,0 +1,26 @@
+--- a/ports/esp32/modespnow.c	2026-08-24 23:30:46.064673734 +0200
++++ b/ports/esp32/modespnow.c	2026-08-24 23:30:46.077674209 +0200
+@@ -443,11 +443,20 @@
+     }
+     int msg_len = hdr.msg_len;
+ 
+-    // Check the message packet header format and read the message data
++    // Check the message packet header format and read the message data.
++    // Moybyte espnow_ring_race patch: recv_cb (on the WiFi task) writes the
++    // header, peer and message as THREE ringbuf_put_bytes calls, each visible
++    // to this reader the moment it lands -- so a reader that catches the
++    // header mid-record used to fail the non-waiting peer/msg reads below,
++    // raise "buffer error", and leave the ring desynced for good (the header
++    // was consumed, the body was not). A busy irecv(0) drain hits that window
++    // roughly once a second on glass (measured 2026-08-24). The body follows
++    // the header within microseconds, so WAIT for it, bounded; a genuine
++    // corruption still times out and raises.
+     if (hdr.magic != ESPNOW_MAGIC
+         || msg_len > ESP_NOW_MAX_DATA_LEN
+-        || ringbuf_get_bytes(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) < 0
+-        || ringbuf_get_bytes(self->recv_buffer, msg_buf, msg_len) < 0) {
++        || ringbuf_get_bytes_wait(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN, 10) < 0
++        || ringbuf_get_bytes_wait(self->recv_buffer, msg_buf, msg_len, 10) < 0) {
+         mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
+     }
+     if (mp_obj_is_type(msg, &mp_type_bytearray)) {

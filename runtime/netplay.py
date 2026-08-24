@@ -17,9 +17,11 @@ THE THREE RULES, and what each one costs:
 
   1. INPUT DELAY. Frame N's input is sent during frame N-DELAY and played on
      frame N. Your OWN input is delayed identically, so the two consoles stay
-     symmetric -- an asymmetric delay is just a desync with extra steps. The cost
-     is a constant DELAY/TICK_HZ of input lag (2 frames at 30Hz = 66ms), which is
-     the buffer a 14ms p99 has to overrun before anybody stalls.
+     symmetric in WHAT they play -- delay itself is each console's private
+     sampling lead, so the two sides may legitimately run different values (an
+     input for frame N is whatever its sampler assigned to N, wherever it was
+     sampled). The cost is DELAY/TICK_HZ of input lag; it starts at ONE frame
+     (33ms) and raises itself to two under stall pressure (see DELAY above).
 
   2. REDUNDANCY, NOT RETRANSMIT. Every packet carries the last REDUNDANCY frames
      of input, not just the newest. An input mask is ONE BYTE, so the redundancy
@@ -82,7 +84,32 @@ T_BYE = 6        # leaving
 # frame. It also lands on the frameskip model the console already ships (#77:
 # logic at the full rate, motion at 30Hz).
 TICK_HZ = 30
-DELAY = 2          # frames of input delay -- 66ms of buffer at 30Hz
+# Input delay STARTS at one frame (33ms) and RAISES ITSELF to two under stall
+# pressure -- see LockstepSession.advance. DELAY=1 was measured and rejected in
+# 2026-08-22's session (14% stalls); the 2026-08-25 pacing rework (no burst
+# catch-up, loop-rate stall retries, the guest phase controller) re-measured it
+# at 1.8-2.3% on the S3 pair, BETTER than that session's DELAY=2 -- while the
+# P4 pair's two-tick budget is genuinely consumed by its C6-shim transport, so
+# it escalates to 2 within a window or two and plays today's clean 66ms match.
+# The raise is one-sided and wire-silent: delay is each console's own sampling
+# LEAD, the tape only ever holds what was sampled, so a raise never rewrites an
+# input the peer may have played. A LOWER delay mid-match could (the newer
+# sample overwrites a frame already emitted), which is why escalation only
+# ever goes up.
+DELAY = 1          # starting input delay -- 33ms at 30Hz; adaptive, raise-only
+DELAY_MAX = 2      # where stall pressure escalates to (66ms)
+ESCALATE_TICKS = 90    # the escalation window: 3s at 30Hz
+ESCALATE_AT = 12       # distinct stalled ticks (~13%) in one window buy the raise.
+                       # The bar is HIGH and the first window is a throwaway,
+                       # because the raise is permanent: on glass 2026-08-25 a
+                       # bar of 5 escalated the CLEAN S3 pair too -- its ~2%
+                       # stalls arrive in bursts, and match formation (the
+                       # guest's restart, first cover loads) stalls freely. A
+                       # transport that cannot fund 33ms (the P4 pair measured
+                       # 25-30% at DELAY=1) blows through 12 in its second
+                       # window and settles by ~6s; an ambient-RF burst that
+                       # big on a good pair is rare, and 66ms is a defensible
+                       # answer to it when it does happen.
 REDUNDANCY = 4     # frames of input per packet; one byte each, so ~free
 MAX_SPAN = 24      # the widest history one packet may carry (see _emit)
 GIVE_UP = 300      # consecutive stalled frames before a match is declared dead
@@ -166,7 +193,8 @@ class LockstepSession:
         self._send = send
         self._buttons = buttons
         self.frame = 0                       # the next frame to simulate
-        self.stalls = 0                      # frames spent waiting on the peer
+        self.stalls = 0                      # stalled advance() calls (retries included)
+        self.stall_ticks = 0                 # distinct ticks that stalled at least once
         self.waiting = False                 # stalled RIGHT NOW (the cart/HUD reads it)
         self.packets_in = 0
         self.packets_out = 0
@@ -177,6 +205,14 @@ class LockstepSession:
         self._stall_mark = 0
         self._mine = InputTape()
         self._theirs = InputTape()
+        # The DELAY=1 phase controller (guest only; see advance). Arrival
+        # stamps ride a small ring keyed by frame; the EMA is timing-side
+        # state, never simulation state, so a float here cannot desync.
+        self._arr_f = [-1] * 64
+        self._arr_t = [0] * 64
+        self._m_ema = None
+        self._win_mark = 0           # frame at the escalation window's start
+        self._win_stalls = 0         # distinct stalled ticks inside the window
         # Both slots are transport-driven and NOT auto-advanced: this session
         # advances their press edges itself, inside advance(), so held and
         # pressed are always the same frame's truth. The router's own
@@ -212,9 +248,15 @@ class LockstepSession:
         boards did on the desk: a flawless match of Brick Siege in fast-forward.)
 
         So the session paces itself. A tick that arrives late does not try to
-        make up the debt frame by frame -- past a quarter second behind the
-        schedule is re-based, because after a long stall the alternative is a
-        burst of catch-up frames nobody asked for.
+        make up the debt frame by frame: ANY debt of a full tick or more is
+        dropped by re-basing the schedule. Catch-up bursts fire ticks at the
+        loop rate, which outruns the peer's 30Hz input emission and turns one
+        stall into a coupled oscillation -- measured on glass 2026-08-25: the
+        old quarter-second threshold let up to seven burst ticks through, the
+        two consoles' margins self-hastened to the edge of input availability
+        (p5 margin ~0ms at DELAY=2), and at DELAY=1 they stalled each other to
+        ~30%. Game time simply falls behind wall time by the stall, on BOTH
+        consoles at once, which is what lockstep guarantees anyway.
         """
         nx = self._next_ms
         if nx is None:
@@ -223,23 +265,42 @@ class LockstepSession:
         if now_ms - nx < 0:
             return False
         nx += self.tick_ms
-        if now_ms - nx > 250:
+        if now_ms - nx >= 0:
             nx = now_ms + self.tick_ms
         self._next_ms = nx
         return True
 
-    def advance(self, held_mask):
+    SLEW_TARGET_MS = 12     # the guest holds this much arrival margin at DELAY=1
+    SLEW_BAND_MS = 4        # deadband around it; outside, phase moves 1ms/tick
+
+    def advance(self, held_mask, now_ms=None):
         """One lockstep frame. True = simulate, False = STALL (do not simulate).
 
-        Called once per cart tick with the local console's held-button mask.
+        Called once per cart tick with the local console's held-button mask --
+        and again every LOOP frame while a tick is stalled (the Player retries
+        on `waiting`), because the missing input usually lands a few
+        milliseconds after it was first needed and the old wait-out-a-full-tick
+        schedule made a 5ms miss cost 34ms (wait_med, on glass 2026-08-24).
         Broadcasts our input for frame+delay, then decides whether the peer's
         input for THIS frame has arrived. Never blocks, never guesses.
+
+        `now_ms` feeds the DELAY=1 phase controller and may be omitted (tests,
+        older callers): at DELAY=1 the two consoles' margins sum to two ticks
+        minus the transport, so free-running clocks sit wherever drift and
+        stall dynamics push them -- measured on glass, both consoles
+        self-hastened to the cliff edge. The GUEST (index != 0) slews its tick
+        phase 1ms at a time toward SLEW_TARGET_MS of measured arrival margin;
+        the host's clock stays the anchor. Timing-side only: no simulation
+        state touches it.
         """
         due = self.frame + self.delay
         self._mine.put(due, held_mask)
         self._emit(due)
         theirs = self._theirs.get(self.frame)
         if theirs is None:
+            if not self.waiting:
+                self.stall_ticks += 1
+                self._win_stalls += 1
             self.waiting = True
             self.stalls += 1
             # A match that cannot move is over. Saying so lets the console put
@@ -249,6 +310,38 @@ class LockstepSession:
                 self.dead = True
             return False
         self._stall_mark = self.stalls
+        if self.frame - self._win_mark >= ESCALATE_TICKS:
+            # ADAPTIVE DELAY, raise-only (see the constants above): a window
+            # with real stall pressure means this pair's transport cannot fund
+            # a one-tick buffer -- buy the second tick and play smoothly for
+            # the rest of the match rather than hitching every few frames.
+            # The first window (frames 0..90) never escalates: it is match
+            # formation, not the transport.
+            if self._win_mark >= ESCALATE_TICKS \
+                    and self._win_stalls >= ESCALATE_AT and self.delay < DELAY_MAX:
+                self.delay += 1
+                print("Moybyte link: input delay -> %d (stall pressure)"
+                      % self.delay)
+            self._win_mark = self.frame
+            self._win_stalls = 0
+        if now_ms is not None and self.delay == 1 and self.index != 0 \
+                and self._next_ms is not None:
+            i = self.frame & 63
+            if self._arr_f[i] == self.frame:
+                m = now_ms - self._arr_t[i]
+                e = self._m_ema
+                self._m_ema = e = m if e is None else e * 0.9 + m * 0.1
+                # ONE-SIDED on purpose: thin margin pushes the phase later
+                # (1ms/tick) until arrivals comfortably precede needs; FAT
+                # margin is left alone. The symmetric version pulled the phase
+                # earlier whenever margin was plentiful -- which shaves margin
+                # for zero latency benefit (felt lag is the DELAY frames, not
+                # the phase) and, against a peer running a higher delay, chased
+                # the banked-input margin all the way to the stall cliff
+                # (measured 2026-08-25: the T-Deck guest ran ~3% fast and paid
+                # for it in stalls).
+                if e < self.SLEW_TARGET_MS - self.SLEW_BAND_MS:
+                    self._next_ms += 1
         mine = self._mine.get(self.frame)
         if mine is None:
             mine = 0          # frames 0..delay-1 predate any input: nobody moved
@@ -345,10 +438,11 @@ class LockstepSession:
         self.packets_out += 1
         self._send(bytes(p))
 
-    def on_packet(self, data):
+    def on_packet(self, data, now_ms=None):
         """Feed one inbound frame. Ignores anything that is not this session's
         input -- the radio owner dispatches by type, but a stale packet from the
-        PREVIOUS match carries the previous session id and must not land here."""
+        PREVIOUS match carries the previous session id and must not land here.
+        `now_ms` (optional) stamps first arrivals for the phase controller."""
         if len(data) < 7 or data[0] != PROTO or data[1] != T_INPUT:
             return False
         if data[2] != self.session:
@@ -362,6 +456,10 @@ class LockstepSession:
             f = newest - i
             if f >= 0 and self._theirs.get(f) is None:
                 self._theirs.put(f, data[7 + i])
+                if now_ms is not None:
+                    j = f & 63
+                    self._arr_f[j] = f
+                    self._arr_t[j] = now_ms
         if newest > self.last_peer_frame:
             self.last_peer_frame = newest
         self.packets_in += 1

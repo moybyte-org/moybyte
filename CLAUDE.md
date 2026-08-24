@@ -576,6 +576,28 @@ only what a coder must not undo:
 - **The payload is INPUTS, never state**, and that is a measurement rather than a
   taste. **A missing input STALLS the sim; it never extrapolates** -- a guessed
   frame desyncs the two sims for good, and silently. Do not "improve" either one.
+- **Input delay is ADAPTIVE and raise-only since 2026-08-25**: matches start at
+  DELAY=1 (33ms) and a session under real stall pressure raises itself to 2 --
+  never down, because a lower delay mid-match can overwrite an input frame the
+  peer already played. The 2026-08-22 "DELAY=1 measured and REJECTED (14%)"
+  verdict was the PACING's fault, not the radio's -- burst catch-up
+  self-hastened both consoles to the margin cliff; with debt-dropping,
+  loop-rate stall retries and the guest phase slew, the S3 pair measures
+  1.8-2.3% at DELAY=1 while the P4 pair (whose C6-shim transport genuinely
+  consumes the one-tick budget) escalates to 2 by ~6s and plays clean. The
+  multiplayer doc's "Input latency" section carries the whole measurement.
+- **The BLE keyboard's background scan owned most of a radio board's packet
+  loss** -- interval==window was 100% radio duty, 5s on/5s off, costing the P4
+  ~40% of inbound espnow at an idle desk while hiding from every blocking
+  bench (a stalled frame loop stops re-arming the scan). Background rescans
+  are 10% duty + passive now; only the user-facing picker scans continuously.
+  If a radio symptom appears only while the loop RUNS, suspect the scan first
+  (`device/ble_keyboard.py` has the numbers).
+- **modespnow's ring race is patched in every board build**
+  (`patches/esp32_espnow_ring_race.patch`): the upstream reader raises
+  `buffer error` on a healthy ring when it catches a record mid-write, and
+  the ring then really is desynced. `_recover()` re-applies the PHY rate (an
+  active() cycle silently resets it to 1M) and counts itself in stats().
 - **The tuning recipe is ORDER-SENSITIVE and the ack LIES.** `rxbuf` before
   `active(True)`, the rate after. Both facts cost a session to learn; the module
   header carries each one beside the number that taught it.
@@ -598,7 +620,10 @@ only what a coder must not undo:
   shim (seventeen esp_now_* wrappers over custom RPC) + a shimmed C6 slave
   flashed over its own SDIO link. **`docs/espnow_p4_2026-08.md` is that whole
   campaign** -- the phases, every on-glass verdict, the BLE regression and its
-  fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s.
+  fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
+  (2026-08-25) is the stall-rate hunt: the shim's blocking send RPC moved off
+  the VM core onto a TX queue (10.2ms -> 20us per send), and the pair now
+  plays 0.7-2.8% stalled ticks at 29.6 ticks/s.
   **FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT** (found by the owner's
   hands, first cross-arch match): two consoles in a match run the same sim,
   and REPR_C's 30-bit floats against boxed 32-bit singles diverge the worlds

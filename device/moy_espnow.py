@@ -147,6 +147,8 @@ class EspNowLink:
         self.rx = 0
         self.tx = 0
         self.drops = 0
+        self.recovers = 0           # ring-recover cycles (see _recover)
+        self._deferred = []         # non-input frames a mid-frame drain parked
         self.state = 0              # 0 idle, 1 in a cart, 2 matched
         self.cart = ""              # the cart title we are sitting on
         self._session_id = 0
@@ -258,12 +260,50 @@ class EspNowLink:
 
     # -- the per-frame drain -------------------------------------------------
 
+    def drain_input(self, budget=DRAIN_MAX):
+        """Input-priority drain, safe MID-FRAME.
+
+        The Player calls this right before a lockstep tick: the boards drain
+        the radio in the frame TAIL, so without it the peer's input is up to a
+        whole loop frame stale by the time advance() looks for it (measured on
+        glass 2026-08-24: 8.0% -> 6.4% stalled ticks at DELAY=2). Only T_INPUT
+        dispatches here; anything else is PARKED for the tail poll, because a
+        non-input frame can relaunch the cart (T_START) or tear down the match
+        (T_BYE), and this runs inside the Player's own frame."""
+        if not self.active:
+            return 0
+        n = 0
+        try:
+            for _ in range(budget):
+                mac, msg = self.radio.irecv(0)
+                if msg is None:
+                    break
+                n += 1
+                self.rx += 1
+                m = bytes(msg)
+                if len(m) >= 2 and m[0] == PROTO and m[1] == T_INPUT:
+                    s = self.session
+                    if s is not None:
+                        s.on_packet(m, self._ticks_ms())
+                else:
+                    self._deferred.append((bytes(mac), m))
+        except Exception as exc:  # noqa: BLE001 -- same contract as poll()
+            self.error = str(exc)
+            print("Moybyte espnow recv:", exc)
+            self._recover()
+        return n
+
     def poll(self, ws=None):
         """Drain the ring and beacon. Called once per frame from the board's
         frame tail. Never raises; a radio error disarms the link instead."""
         if not self.active:
             return 0
         n = 0
+        if self._deferred:
+            pend = self._deferred
+            self._deferred = []
+            for mac, m in pend:
+                self._dispatch(ws, mac, m)
         try:
             for _ in range(DRAIN_MAX):
                 mac, msg = self.radio.irecv(0)
@@ -325,11 +365,20 @@ class EspNowLink:
             self._host(ws, p, None, None, self.cart, relaunch=True)
 
     def _recover(self):
+        self.recovers += 1
         try:
             self.radio.active(False)
             self.radio.config(rxbuf=RXBUF)
             self.radio.active(True)
             self.radio.add_peer(BROADCAST)
+            # The active() cycle resets the PHY rate to MicroPython's 1M
+            # default, and until 2026-08-24 nothing re-applied it -- so one
+            # ring error mid-match silently put the rest of the session at
+            # 1 Mbps with no meter naming it. Same recipe as start(): the
+            # rate only once the radio is up.
+            rate = getattr(self, "_rate", None)
+            if rate is not None:
+                self.radio.config(rate=rate)
         except Exception as exc:  # noqa: BLE001
             print("Moybyte espnow recover failed:", exc)
             self.active = False
@@ -353,7 +402,7 @@ class EspNowLink:
         if kind == T_INPUT:
             s = self.session
             if s is not None:
-                s.on_packet(msg)
+                s.on_packet(msg, self._ticks_ms())
             return
         if kind == T_BEACON:
             self._on_beacon(mac, msg)
@@ -657,9 +706,12 @@ class EspNowLink:
             "mac": self.mac.hex() if self.mac else None,
             "peers": [(p.name, p.board, p.cart, p.state) for p in self.peers.values()],
             "rx": self.rx, "tx": self.tx, "drops": self.drops,
+            "recovers": self.recovers,
             "error": self.error,
             "match": None if s is None else {
                 "index": s.index, "frame": s.frame, "stalls": s.stalls,
+                "stall_ticks": s.stall_ticks, "delay": s.delay,
+                "m_ema": s._m_ema,
                 "waiting": s.waiting, "in": s.packets_in, "out": s.packets_out,
                 "peer_frame": s.last_peer_frame,
             },

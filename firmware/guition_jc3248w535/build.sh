@@ -55,6 +55,7 @@ moybyte_patch_repr_c
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
+moybyte_patch_espnow_ring_race
 
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).

@@ -240,6 +240,21 @@ class BleHidKeyboard:
 
     SCAN_MS = 5000
     RETRY_MS = 5000       # don't keep the shared C6 radio in near-continuous scan
+    # The scan's RADIO DUTY, not its cadence, was the espnow link's biggest
+    # enemy (measured 2026-08-24, #7): interval == window == 30ms is a
+    # CONTINUOUS scan, and with no keyboard connected the 5s-scan/5s-idle
+    # retry loop kept the shared radio deaf HALF the time -- the P4's C6
+    # dropped ~40% of inbound espnow packets at an idle desk (19.2/s received
+    # of 32.5 offered; 29.5/s the moment the scan stopped), which was most of
+    # the P4<->T-Deck lockstep stall rate. Background rescans now scan 30ms in
+    # every 300ms (10% duty, PASSIVE -- reconnect matches the bonded address
+    # from the ADV itself, so scan responses are not needed); an advertising
+    # keyboard is still found in about a second. The PICKER keeps the
+    # continuous ACTIVE scan: user-facing, brief, and it wants names.
+    BG_INTERVAL_US = 300000
+    BG_WINDOW_US = 30000
+    PICKER_INTERVAL_US = 30000
+    PICKER_WINDOW_US = 30000
     CONNECT_TIMEOUT_MS = 12000
     DISCOVERY_TIMEOUT_MS = 15000
 
@@ -740,11 +755,15 @@ class BleHidKeyboard:
                                       self.name, -127)
         self.error = None
         self._set_state("scanning")
+        if picker:
+            iv, win, act = self.PICKER_INTERVAL_US, self.PICKER_WINDOW_US, True
+        else:
+            iv, win, act = self.BG_INTERVAL_US, self.BG_WINDOW_US, False
         try:
             try:
-                self.ble.gap_scan(self.SCAN_MS, 30000, 30000, True)
+                self.ble.gap_scan(self.SCAN_MS, iv, win, act)
             except TypeError:
-                self.ble.gap_scan(self.SCAN_MS, 30000, 30000)
+                self.ble.gap_scan(self.SCAN_MS, iv, win)
             self._log("Moybyte BLE keyboard: scanning%s"
                       % (" for devices" if picker else ""))
             return True

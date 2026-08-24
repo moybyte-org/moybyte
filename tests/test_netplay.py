@@ -261,7 +261,8 @@ def test_the_tick_is_fixed_and_thirty_hertz():
     a, _b = _match(wire)
     assert abs(a[0].dt - 1.0 / 30.0) < 1e-9
     assert netplay.TICK_HZ == 30
-    assert netplay.DELAY == 2
+    assert netplay.DELAY == 1, "matches START at one frame of delay (33ms)"
+    assert netplay.DELAY_MAX == 2, "...and stall pressure can only raise it to two"
     assert netplay.REDUNDANCY == 4
 
 
@@ -414,6 +415,112 @@ def test_a_long_stall_does_not_come_back_as_a_burst_of_catch_up_frames():
     late = 5_000                       # five seconds of nothing
     assert s.due(late) is True
     assert s.due(late + 1) is False, "the schedule re-based rather than owing 150 ticks"
+
+
+def test_even_one_tick_of_debt_is_dropped_not_burst_repaid():
+    """The old threshold re-based only past 250ms, so a 100ms hitch owed three
+    catch-up ticks that then fired at the LOOP rate -- outrunning the peer's
+    30Hz emission, which is how one stall became a coupled oscillation
+    (measured on glass 2026-08-25: p5 arrival margin ~0ms at DELAY=2 and ~30%
+    stalls at DELAY=1, both of which relaxed when the debt was dropped)."""
+    wire = _Wire()
+    a, _b = _match(wire)
+    s = a[0]
+    s.due(0)
+    assert s.due(100) is True, "the late tick itself still fires"
+    assert s.due(101) is False, "...but the debt is gone, not owed as a burst"
+    assert s.due(100 + s.tick_ms) is True, "the next tick is a full period out"
+
+
+def test_stall_ticks_counts_ticks_not_retries():
+    """The Player retries a stalled tick every loop frame now, so `stalls`
+    (every stalled advance) inflates with the loop rate; `stall_ticks` is the
+    honest per-tick meter the benches read."""
+    wire = _Wire()
+    a, _b = _match(wire)
+    s = a[0]
+    for _ in range(5):                 # five loop-frame retries of ONE tick
+        assert s.advance(0) is False
+    assert s.stall_ticks == 1
+    assert s.stalls == 5
+
+
+def test_stall_pressure_raises_the_delay_once_and_never_lowers_it():
+    """The adaptive delay: matches start at DELAY=1 (33ms); a window with
+    ESCALATE_AT distinct stalled ticks buys the second tick. Raise-only,
+    because a LOWER delay mid-match can overwrite an input frame the peer has
+    already played (the newer sample lands on an already-emitted frame)."""
+    wire = _Wire()
+    a, b = _match(wire)
+    (sa, _ra, _ia), (sb, _rb, _ib) = a, b
+    assert sa.delay == 1 and sb.delay == 1, "matches start at one frame"
+    # distinct one-tick stalls: every other iteration sa's inbox is withheld
+    # until its advance has already failed once, so each is a stalled TICK
+    # healed by a loop-frame retry -- the P4-pair pattern, not one long outage
+    for k in range(3 * netplay.ESCALATE_TICKS):
+        if sa.advance(0) is False:
+            wire.deliver(0, sa)          # the input lands; the retry heals it
+            sa.advance(0)
+        sb.advance(0)
+        wire.deliver(1, sb)
+        if k % 2 == 0:
+            wire.deliver(0, sa)
+        if k == netplay.ESCALATE_TICKS - 10:
+            assert sa.delay == 1, "the FIRST window is formation grace, never a raise"
+    assert sa.delay == 2, "sustained stall pressure bought the second tick"
+    for _ in range(netplay.ESCALATE_TICKS + 10):
+        sa.advance(0)
+        sb.advance(0)
+        wire.deliver(0, sa)
+        wire.deliver(1, sb)
+    assert sa.delay == 2, "clean windows never lower it back"
+
+
+def test_the_delay_one_phase_controller_is_guest_only_and_gated():
+    """At DELAY=1 the GUEST slews its tick phase toward SLEW_TARGET_MS of
+    measured arrival margin; the host's clock is the anchor, and DELAY=2
+    needs no controller at all (its margin floor is a whole extra tick)."""
+    wire = _Wire()
+    a, b = _match(wire, delay=1)
+    (host, _rh, _ih), (guest, _rg, _ig) = a, b
+    t = 1000
+    host.due(t)
+    guest.due(t)
+    nx0 = guest._next_ms
+    for _ in range(12):
+        host.advance(0, t)
+        guest.advance(0, t)
+        for p in wire.queues[0]:
+            host.on_packet(p, t)
+        wire.queues[0] = []
+        for p in wire.queues[1]:
+            guest.on_packet(p, t)
+        wire.queues[1] = []
+        t += 33
+    assert guest._m_ema is not None, "the guest measured arrival margin"
+    assert host._m_ema is None, "the host never runs the controller"
+    # inputs were banked a full tick before each need, so the margin is FAT --
+    # and a fat margin moves NOTHING (the slew is one-sided: only a thin
+    # margin pushes the phase later; pulling earlier shaves margin for zero
+    # latency benefit and was measured chasing the stall cliff):
+    assert guest._next_ms == nx0, "a fat margin leaves the phase alone"
+    # Starve the margin directly: seed a thin EMA and stamp the next frame's
+    # input as having landed 2ms before the need (the wire above cannot thin
+    # the margin -- the host emits a frame ahead, so real deliveries are
+    # always pre-banked; on glass the thinning comes from loss + jitter).
+    guest._m_ema = 5.0
+    f = guest.frame
+    guest._arr_f[f & 63] = f
+    guest._arr_t[f & 63] = t - 2
+    nx1 = guest._next_ms
+    assert guest.advance(0, t) is True
+    assert guest._next_ms == nx1 + 1, "a thin margin pushes the guest's phase later"
+    g_nx = guest._next_ms
+    host.delay = 2
+    guest.delay = 2
+    host.advance(0, t)
+    guest.advance(0, t)
+    assert guest._next_ms == g_nx, "at DELAY=2 the controller is off"
 
 
 # -- the shared random stream ------------------------------------------------
