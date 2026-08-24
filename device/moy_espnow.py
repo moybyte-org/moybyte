@@ -44,7 +44,10 @@ Board-agnostic by construction: every hardware handle is created inside a guarde
 method, so this module imports on CPython and its protocol half is exercised by
 tests/test_espnow_link.py against a fake radio. Staged on the two S3 boards only --
 the P4 compiles ESP-NOW out (`MICROPY_PY_ESPNOW (0)`) and its WiFi rides the C6
-over SDIO, which is a real question rather than a flag flip.
+over SDIO -- SETTLED 2026-08-24: flipping the flag fails at link (17 undefined
+esp_now_* symbols; ESP-Hosted's RPC has no ESP-NOW, upstream esp-hosted-mcu #19
+is the open request). docs/espnow_multiplayer_2026-08.md carries the evidence
+and the one viable future path.
 """
 
 try:

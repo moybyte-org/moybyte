@@ -278,3 +278,52 @@ logic at the full loop rate and here logic *is* 30 Hz.
 - **Power.** `pm=PM_NONE` is armed only while a multiplayer cart runs and restored
   on exit, but the idle-draw cost of a linked session on battery is unmeasured —
   a tie-in to #130, which notes the console has no power policy at all.
+
+## The P4 cannot join (settled 2026-08-24, empirically)
+
+The commit that shipped this feature called the P4 "a real question rather than
+a flag flip". The question is now answered, and the answer is NO — not by
+reading, but by making the linker say it. `MICROPY_PY_ESPNOW (1)` on the P4
+board header compiles clean (the headers resolve) and dies at link with 17
+undefined symbols: every `esp_now_*` plus `esp_wifi_config_espnow_rate` — the
+RATE_54M lever itself. `esp_now_init` is not defined in any archive that board
+links; the probe was reverted the same hour.
+
+Why there is nothing to link, each leg verified:
+
+- **ESP-Hosted's RPC has no ESP-NOW.** The vendored 2.7.0 and upstream `main`
+  both: zero hits for `esp_now_init` in the whole repo, and the only `ESPNOW`
+  strings are the `espnow_max_encrypt_num` field inside `wifi_init_config_t`
+  (marshalled to the C6 and ignored — nothing on the host can call the API it
+  sizes). No raw-802.11-tx or promiscuous RPC exists to build one on. The full
+  changelog through 2.12.12 has no ESP-NOW entry.
+- **It is Espressif's own open feature request** — esp-hosted-mcu #19 (open
+  since 2024-11), maintainer 2025-12-31: "definitely on our roadmap", still
+  scoping which APIs to carry over RPC; last community ping 2026-08-14,
+  unanswered. #34 is the same ask from the other direction.
+- **`esp_wifi_remote` injects `esp_now.h` verbatim** (its changelog: "Add
+  esp_now.h to injected headers") — declarations so consumers compile, nothing
+  behind them. That header is byte-identical to IDF's.
+- **IDF's one host-side ESP-NOW path does not fit this board.**
+  `CONFIG_ESP_HOST_WIFI_ENABLED` links `lib/esp32_host/libespnow.a`, but its
+  `ESP_WIFI_CONTROLLER_TARGET` has exactly one value, `"esp32"` — an ESP32
+  companion over its own transport, not the C6 over SDIO, and it is mutually
+  exclusive with the `esp_wifi_remote` stack this board's WiFi rides.
+- **The community "enabler" (tymorton/esp32-p4-c6-espnow-enabler) is not a
+  path**: it force-OTAs a newer hosted slave onto the C6 — it changes nothing
+  on the host, where the undefined symbols are.
+
+The viable FUTURE path, recorded so it is found and not re-derived: ESP-Hosted
+≥ 2.8.1 ships a documented custom-RPC / Peer Data Transfer seam —
+`esp_hosted_send_custom_data(msg_id, data, len)` +
+`esp_hosted_register_custom_callback(...)` on BOTH halves, 8166-byte payloads,
+and `CONFIG_ESP_HOSTED_COPROCESSOR_APP_MAIN=n` so the slave codebase embeds in
+your own C6 app. An ESP-NOW shim on the C6 behind that seam would slot into
+`moy_espnow`'s four-method transport surface (`start`/`stop`/`_send`/the
+`irecv` drain) with the protocol above unchanged. What it costs, and why it is
+deferred rather than done: the vendored hosted component is 2.7.0 (pinned by
+MicroPython v1.28's lockfile), host and slave versions must match, so the C6 —
+which carries ALL of that board's WiFi and BLE, including the keyboard that is
+its only game-exit — gets reflashed. Recovery exists on paper (the `PROG_C6`
+header; IO9-low download mode over C6_U0RXD/TXD, per Waveshare and the hosted
+board doc) and is unverified on our unit. Do not start this casually.

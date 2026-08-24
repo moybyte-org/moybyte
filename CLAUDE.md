@@ -592,6 +592,20 @@ only what a coder must not undo:
   dying run used to kill the session that caused the restart.
 - **Board scope is a hardware fact**: the S3 pair, nothing else. The P4 has the
   module compiled away and its WiFi behind the C6; a browser has no radio.
+  **The P4 question is SETTLED 2026-08-24** -- flipping `MICROPY_PY_ESPNOW` on
+  fails at link (ESP-Hosted's RPC carries no ESP-NOW; upstream esp-hosted-mcu
+  #19 is the open request, "on our roadmap" and unshipped). The evidence, the
+  refuted community workaround and the one viable future path (hosted >= 2.8.1
+  custom RPC + a C6-side shim, deferred because it reflashes the radio that
+  carries that board's only game-exit keyboard) are in
+  docs/espnow_multiplayer_2026-08.md, "The P4 cannot join" -- read that before
+  re-investigating. Found the same day, unrelated to the radio: the P4's WiFi
+  buffer set had silently never applied -- `esp_wifi_remote` renames every
+  `CONFIG_ESP_WIFI_*` to `CONFIG_WIFI_RMT_*`, so upstream's own fragment asked
+  with a dead name and the build carried 10/32/32/6/6 against a 65534 TCP
+  window (the S3 commit's "half the set is worse than none" state, 0890249).
+  The P4's sdkconfig.board now states the set in the RMT namespace, with the
+  prose; numbers in #58.
 - **LOCAL 2P is the same cart API with no radio at all** (#65 Phase 1): Settings
   -> **2 PLAYERS** gives a paired Bluetooth keyboard the second player slot, so
   two kids share one screen using two real keyboards. Capability-gated on
