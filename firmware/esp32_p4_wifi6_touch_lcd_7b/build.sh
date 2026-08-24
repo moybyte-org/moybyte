@@ -71,6 +71,27 @@ fi
 moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
+# 2c') ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
+#      docs/espnow_p4_2026-08.md). MicroPython pins the hosted component at
+#      exactly 2.7.0; 2.12.12 carries the custom-RPC seam
+#      (esp_hosted_send_custom_data / register_custom_callback) the P4's
+#      ESP-NOW shim rides, plus the streamed slave-OTA API that updates the C6
+#      from this board over SDIO. esp_wifi_remote 0.15.2 constrains only
+#      >=0.0.6, so the bump is manifest-legal. PROVEN ON GLASS 2026-08-24
+#      against the FACTORY C6 slave before any shim existed: builds clean,
+#      boots clean (with the MEMPOOL_PREFER_SPIRAM fragment line -- without it
+#      the 2.12 transport mempool fails its internal-SRAM allocation at boot
+#      and the board crash-loops), wifi at RX parity (2.9-3.0 MB/s vs 2.7.0's
+#      3.2), BLE up and scanning. The stale per-target lockfile is dropped so
+#      the component manager re-resolves; it pins the new tree on first build.
+MAIN_MANIFEST="${MPY_DIR}/ports/esp32/main/idf_component.yml"
+if grep -q 'version: "2.7.0"' "${MAIN_MANIFEST}"; then
+  echo "== bumping esp_hosted 2.7.0 -> 2.12.12 (espnow-on-p4 track)"
+  sed -i 's/^    version: "2.7.0"$/    version: "2.12.12"/' "${MAIN_MANIFEST}"
+  rm -f "${MPY_DIR}/ports/esp32/lockfiles/dependencies.lock.esp32p4"
+  rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
+fi
+
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with the T-Deck.
 #     Mainline's ports/esp32/main.c has the identical grow-only
 #     esp_native_code_commit list, and the P4's RV32 native emitter feeds it

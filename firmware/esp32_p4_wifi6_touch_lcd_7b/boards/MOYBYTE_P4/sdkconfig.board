@@ -119,3 +119,17 @@ CONFIG_WIFI_RMT_TX_BA_WIN=32
 #   in ~512KB rather than the Guition's four free bytes. MAX_CONNECTIONS stays
 #   at upstream's 4 on purpose: one BLE keyboard is what is paired today, and a
 #   second one is the only local-2P path this board can have (#65 Phase 1).
+
+# ESP-Hosted's transport mempool goes to PSRAM (espnow-on-p4 track,
+# docs/espnow_p4_2026-08.md; the component bump itself is build.sh step 2c').
+# NOT optional at hosted 2.12: its mempool asks internal SRAM for more than
+# this board has free after the 256KB L2 carve, fails at boot ("E HS_MP:
+# mempool create failed: no mem"), the SDIO driver then reads no registers and
+# the board CRASH-LOOPS on a ~30s period -- observed on glass 2026-08-24. This
+# knob is upstream's own fix and its help text names this target ("preserves
+# scarce internal RAM on targets where GDMA can reach PSRAM through cache
+# (e.g. ESP32-P4)"). Upstream's EHM-250 warns it breaks SDIO TX DMA alignment
+# at a 128B L2 cache line; this board's line is 64B (CACHE_L2_CACHE_LINE_64B
+# above is IDF's default here), so the trigger is absent -- re-check that
+# issue before ever moving the line size.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
