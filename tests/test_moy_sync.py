@@ -40,6 +40,51 @@ def _bump_mtime(path):
 
 
 # ---------------------------------------------------------------------------
+# Store-walk resilience -- a removable card can EIO under a socket-paced pull.
+# ---------------------------------------------------------------------------
+
+
+def test_a_transient_card_read_is_retried_not_dropped(tmp_path):
+    """A removable store (the Guition's TF card) can EIO a read that lands
+    seconds into a socket-paced pull; the walk must RETRY, because an aborted
+    store stream truncates the browser's whole carts.json. A permanent
+    non-OSError (a binary file) is NOT retried -- it is skipped as before."""
+    import builtins
+    import pytest
+
+    calls = [0]
+
+    def flaky():
+        calls[0] += 1
+        if calls[0] < moy_sync._IO_RETRIES:
+            raise OSError(5, "EIO")
+        return "recovered"
+    assert moy_sync._retry_io(flaky, "DEFAULT") == "recovered"
+    assert moy_sync._retry_io(
+        lambda: (_ for _ in ()).throw(OSError(5, "EIO")), "DEFAULT") == "DEFAULT"
+    with pytest.raises(ValueError):          # only I/O is transient
+        moy_sync._retry_io(lambda: (_ for _ in ()).throw(ValueError()), "D")
+
+    # _read_text retries a real flaky open and returns the bytes, not None.
+    p = tmp_path / "hop.moy" / "boom.py"
+    p.parent.mkdir(parents=True)
+    p.write_text("def _draw():\n    cls(3)\n")
+    state = {"n": 0}
+    orig = builtins.open
+
+    def eio_once(path, *a, **k):
+        if str(path).endswith("boom.py") and state["n"] < 1:
+            state["n"] += 1
+            raise OSError(5, "EIO")
+        return orig(path, *a, **k)
+    builtins.open = eio_once
+    try:
+        assert moy_sync._read_text(str(p)).endswith("cls(3)\n")
+    finally:
+        builtins.open = orig
+
+
+# ---------------------------------------------------------------------------
 # safe_segments -- the path trust boundary.
 # ---------------------------------------------------------------------------
 

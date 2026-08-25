@@ -119,6 +119,7 @@ good copy untouched and the retry simply restarts at part 0.
 """
 
 import json
+import time
 
 try:
     import os
@@ -291,13 +292,49 @@ def _entries(path, _listdir=None, _isdir=None):
     """
     ils = getattr(os, "ilistdir", None)
     if ils is not None and _listdir is None:
-        for e in ils(path):
+        # Materialize the whole listing (not lazily) so a transient OSError is
+        # RETRYABLE: a removable card (the Guition's TF store) can EIO a read
+        # that lands seconds into a socket-paced pull, and a bare `for e in
+        # ils(...)` would abort the store stream mid-body -- the browser then
+        # gets a truncated carts.json and a dead boot. EIO on removable media
+        # is the textbook retry case; a re-listing almost always succeeds.
+        for e in _retry_io(lambda: list(ils(path)), ()):
             yield e[0], (e[1] & 0x4000) != 0
         return
     ld = _listdir or os.listdir
     isd = _isdir or _is_dir
     for name in ld(path):
         yield name, isd(path + "/" + name)
+
+
+# How many times a store-walk read is re-tried before it is given up on, and
+# how long between tries. Small on purpose: a healthy card never retries, and a
+# card so flaky it fails three reads in a row is one to replace, not to wait on.
+_IO_RETRIES = 3
+_IO_BACKOFF_MS = 20
+
+
+def _retry_io(fn, default):
+    """Run `fn`, retrying a bounded number of times on OSError (a transient
+    card EIO), then return `default` rather than propagate -- an aborted store
+    walk is strictly worse than an omitted entry, because the abort truncates
+    the whole chunked response. Non-OSError propagates: only I/O is transient."""
+    last = None
+    for i in range(_IO_RETRIES):
+        try:
+            return fn()
+        except OSError as exc:              # noqa: BLE001 -- transient card I/O
+            last = exc
+            _sleep = getattr(time, "sleep_ms", None)
+            if _sleep is not None:
+                _sleep(_IO_BACKOFF_MS)
+            elif i + 1 < _IO_RETRIES:
+                time.sleep(_IO_BACKOFF_MS / 1000.0)
+    try:
+        print("moy_sync: read gave up after %d tries: %s" % (_IO_RETRIES, last))
+    except Exception:                        # noqa: BLE001 -- a log is never fatal
+        pass
+    return default
 
 
 def _is_dir(path):
@@ -308,11 +345,17 @@ def _is_dir(path):
 
 
 def _read_text(path):
-    try:
-        with open(path, "r") as f:
-            return f.read()
-    except (OSError, UnicodeError, ValueError):
-        return None
+    # Retried on OSError for the same reason _entries is: a flaky-card read a
+    # few seconds into a store pull should re-try, not silently drop the file
+    # from the browser's copy. UnicodeError/ValueError are NOT retried -- a
+    # binary file is binary every time -- so they stay None (skip, never crash).
+    def _open():
+        try:
+            with open(path, "r") as f:
+                return f.read()
+        except (UnicodeError, ValueError):
+            return None                      # binary/unreadable: skip, permanent
+    return _retry_io(_open, None)
 
 
 def _stat_file(path):
