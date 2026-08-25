@@ -187,9 +187,14 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
     line = board.cmd("web", wait_for="WEB ", timeout=30.0)
     if line is None or "http://" not in line:
         pytest.skip("webhost did not come up (no wifi on this bench): %r" % line)
-    url = "http://" + line.split("http://", 1)[1].split()[0].rstrip("/")
+    # Since #197 the `web` line is the PAIRED url -- the pin rides ?pin= and
+    # every write batch must carry it (a bare batch is the 403 the pin exists
+    # to give). The glass is parked on the connection screen while this runs.
+    paired = "http://" + line.split("http://", 1)[1].split()[0].rstrip("/")
+    pin = paired.split("pin=", 1)[1].split("&")[0] if "pin=" in paired else None
+    url = paired.split("?", 1)[0].rstrip("/")
     try:
-        batch = _json.dumps({"v": 1, "ops": [
+        batch = _json.dumps({"v": 1, "pin": pin, "ops": [
             {"p": "pytest_sync.moy/manifest.json",
              "t": '{"title": "Pytest Sync", "type": "game", "main": "main.py"}'},
             {"p": "pytest_sync.moy/main.py",
@@ -203,6 +208,17 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
         pytest.skip("board url unreachable from this machine: %s" % exc)
     try:
         assert doc == {"ok": 2, "err": []}, doc
+        if pin:
+            # The gate itself, on glass: the same batch without the pin.
+            import urllib.error
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    url + "/sync",
+                    data=_json.dumps({"v": 1, "ops": []}).encode(),
+                    headers={"Content-Type": "application/json"}), timeout=15)
+                assert False, "a pinless batch was accepted"
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 403, exc.code
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"
@@ -210,8 +226,9 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
             wait_for="SYNCED=", timeout=8.0)
         assert line is not None and "SYNCED=True" in line, line
         # ...and the dc op takes it back off the card AND the shelf.
-        batch = _json.dumps({"v": 1, "ops": [{"p": "pytest_sync.moy",
-                                              "dc": 1}]}).encode()
+        batch = _json.dumps({"v": 1, "pin": pin,
+                             "ops": [{"p": "pytest_sync.moy",
+                                      "dc": 1}]}).encode()
         r = urllib.request.urlopen(urllib.request.Request(
             url + "/sync", data=batch,
             headers={"Content-Type": "application/json"}), timeout=15)
@@ -225,6 +242,8 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
             wait_for="GONE=", timeout=8.0)
         assert line is not None and "GONE=True" in line, line
     finally:
-        # Leave the board as found: the webhost row off again.
-        board.cmd("py ws.toggle_webhost(); print('WEBOFF')",
+        # Leave the board as found: unpark the glass and stop the host.
+        # stop_web_console, not toggle -- a toggle would START a host that
+        # died under the parked screen (the reason the verb exists).
+        board.cmd("py ws.stop_web_console(); print('WEBOFF')",
                   wait_for="WEBOFF", timeout=8.0)
