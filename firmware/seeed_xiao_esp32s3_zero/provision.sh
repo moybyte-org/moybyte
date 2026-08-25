@@ -46,10 +46,22 @@ except OSError: pass" >/dev/null
 done
 
 echo "== web bundle (gzipped -- moy_webhost prefers the .gz copies)"
+# The asset SET is moy_webhost.ASSETS's business, not this script's: a file the
+# worker statically imports but nobody pushed is a console that cannot boot
+# (moy_store.mjs joined 2026-08-25 and the hand-list here missed it same-day).
 if [ -d "${DIST}" ]; then
-  run cp "${DIST}/index.html.gz" "${DIST}/worker.js.gz" \
-         "${DIST}/micropython.mjs.gz" "${DIST}/micropython.wasm.gz" \
-         :/moy/web/ >/dev/null
+  ASSET_LIST="$(MOY_REPO="${REPO}" "${REPO}/.venv/bin/python" - <<'PYEOF'
+import os, sys
+repo = os.environ["MOY_REPO"]
+sys.path.insert(0, repo)
+sys.path.insert(0, os.path.join(repo, "device"))
+import moy_webhost
+print("\n".join(moy_webhost.ASSETS))
+PYEOF
+)"
+  for a in ${ASSET_LIST}; do
+    run cp "${DIST}/${a}.gz" :/moy/web/ >/dev/null
+  done
 else
   echo "   (no ${DIST} -- build firmware/web_runner first; skipping)"
 fi

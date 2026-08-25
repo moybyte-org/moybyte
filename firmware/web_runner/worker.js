@@ -24,12 +24,20 @@
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
 //   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
+//   {t:"carts"}          list the cart folders (the export picker)
+//   {t:"export", cart}   zip one cart out of the VFS
+//   {t:"import", name, buf}  unzip a .moy zip into the store
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
 //   {t:"error", s}       fatal: the page shows it and stops
+//   {t:"persist", mode, s}   where carts are being kept, in the page's words
+//   {t:"carts", names}   the shelf's folder names
+//   {t:"exported", name, buf}  a .moy zip, TRANSFERRED
+//   {t:"imported", s, ok}    the result of an import, in the page's words
 import { loadMicroPython } from "./micropython.mjs";
+import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
@@ -47,7 +55,7 @@ let fbAddr = null, fbLen = null;
 // for is inside the body, chosen by web_boot, and the disable-on-404 above is
 // about the ENDPOINT, not about either store. Whether the files half runs at
 // all is settled once at boot by the files.json fetch (see writeFiles).
-let syncPoll = null, syncAck = null, syncOff = null;
+let syncPoll = null, syncAck = null, syncOff = null, rescan = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
 // #9 physical I/O: the same pump shape as the sync push, at a physical-I/O
@@ -60,6 +68,15 @@ const SYNC_MS = 1000;
 let gpioPoll = null, gpioAck = null, gpioOff = null;
 let gpioBusy = false, lastGpioAt = 0;
 const GPIO_MS = 33;
+// MODE 1 (#193): the same batches, applied into OPFS instead of POSTed. `mode`
+// is decided ONCE at boot, before anything is written, because it decides where
+// the VFS is seeded FROM -- a board's carts.json, or the browser's own store.
+//   "board"  a console served this page; it owns the carts, nothing is kept here
+//   "site"   a static host; OPFS is the truth and survives the reload
+//   "none"   site mode with no usable OPFS: in memory, and the page SAYS so
+let mode = null, opfs = null, persistFails = 0, persistSaid = false;
+let persistBatches = 0;
+const PERSIST_GIVE_UP = 3;
 let running = false, ahead = -1, inbox = [];
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -140,6 +157,119 @@ function writeStore(root, files) {
 // files, and skipping it would leave the kid's first drawing unable to travel.
 function writeFiles(files) { writeStore(FILES_ROOT, files); }
 
+// `d` is the DETAIL -- how many files moved and how long it took. It rides the
+// message rather than a console.log because that is the only form a test (or a
+// curious owner) can read back: log lines are trimmed by whatever is capturing
+// them, and this is the evidence that the store is actually being written.
+function persist(m, s, d) {
+    mode = m;
+    self.postMessage({ t: "persist", mode: m, s: s, d: d || "", n: persistBatches });
+    console.log("[moy] persist: " + m + " -- " + s + (d ? " (" + d + ")" : ""));
+}
+
+// Decide the world and seed the VFS from whoever owns the carts. Runs BEFORE
+// the console boots, because web_boot constructs the StoreWatcher over this
+// root and rebases on what it finds: seed first and the baseline is correct
+// with nothing pending, seed after and the whole store ships as "changed".
+async function initStore(carts) {
+    const t0 = performance.now();
+    const m = await store.probeMode((u, o) => fetch(u, o));
+    if (m === "board") {
+        writeStore(CARTS_ROOT, carts);
+        persist("board", "carts are kept on the console");
+        return;
+    }
+    opfs = await store.openStore(navigator);
+    if (!opfs) {
+        // No OPFS: a private window, blocked site data, a file:// origin. The
+        // pre-#193 behaviour, but never silently -- the page says it out loud.
+        writeStore(CARTS_ROOT, carts);
+        persist("none", "this browser has no local storage: carts will NOT survive a reload");
+        return;
+    }
+    try {
+        if (await store.isEmpty(opfs)) {
+            // First visit: the served carts.json is the seed AND the baseline,
+            // so the shelf is never empty and the first sweep has nothing to say.
+            writeStore(CARTS_ROOT, carts);
+            const n = await store.seed(opfs, carts);
+            persist("site", "carts are saved in this browser", "seeded " + n
+                + " files in " + (performance.now() - t0).toFixed(0) + "ms");
+        } else {
+            // The local store WINS over carts.json: it is the kid's work, and
+            // the served bundle is only ever the factory seed.
+            const local = await store.readAll(opfs);
+            writeStore(CARTS_ROOT, local);
+            persist("site", "carts are saved in this browser",
+                    "loaded " + Object.keys(local).length + " files in "
+                    + (performance.now() - t0).toFixed(0) + "ms");
+        }
+    } catch (e) {
+        writeStore(CARTS_ROOT, carts);
+        opfs = null;
+        persist("none", "this browser refused local storage: carts will NOT survive a reload");
+        console.log("[moy] persist: OPFS failed -- " + e);
+    }
+}
+
+function vfsIsDir(p) {
+    const m = mp.FS.stat(p).mode;
+    return typeof mp.FS.isDir === "function" ? mp.FS.isDir(m) : (m & 0o170000) === 0o040000;
+}
+
+function vfsExists(p) {
+    try { mp.FS.stat(p); return true; } catch (e) { return false; }
+}
+
+function cartNames() {
+    const out = [];
+    if (!mp) return out;
+    for (const name of mp.FS.readdir(CARTS_ROOT)) {
+        if (name === "." || name === ".." || store.skipName(name)) continue;
+        try { if (vfsIsDir(CARTS_ROOT + "/" + name)) out.push(name); } catch (e) { }
+    }
+    return out.sort();
+}
+
+// The cart as it sits in the VFS RIGHT NOW -- the live shelf, not the local
+// store, which lags it by up to one sweep. Skip-filtered at every level, so an
+// exported zip carries exactly what a board would have been sent.
+function walkVfs(path, prefix, out, depth) {
+    if (depth > 6) return;
+    for (const name of mp.FS.readdir(path)) {
+        if (name === "." || name === ".." || store.skipName(name)) continue;
+        const full = path + "/" + name;
+        const rel = prefix + "/" + name;
+        if (vfsIsDir(full)) walkVfs(full, rel, out, depth + 1);
+        else out.push({ name: rel, data: mp.FS.readFile(full) });
+    }
+}
+
+// Unzip into the store under a collision-safe name, then re-scan the shelf
+// WITHOUT rebasing the watcher: the imported files must stay pending so the
+// very next sweep writes them to the local store like any other commit.
+async function importZip(name, buf) {
+    const entries = await store.unzip(new Uint8Array(buf));
+    if (!entries.length) throw new Error("no files in that zip");
+    const top = store.zipTopDir(entries);
+    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
+                                    store.cartBase(top || name));
+    let n = 0;
+    for (const e of entries) {
+        const rel = top ? e.name.slice(top.length + 1) : e.name;
+        if (!rel) continue;
+        const parts = store.safeSegments(dir + "/" + rel);
+        if (!parts) continue;                 // traversal, or a skip-listed name
+        const full = CARTS_ROOT + "/" + parts.join("/");
+        mkdirs(full.slice(0, full.lastIndexOf("/")));
+        mp.FS.writeFile(full, e.data);
+        n++;
+    }
+    if (!n) throw new Error("nothing in that zip looked like a cart");
+    if (rescan) rescan();
+    return { dir, n };
+}
+
 async function init(search) {
     say("loading vm...");
     // 16MB: the per-frame GC sweep scales with heap SIZE under this build's
@@ -161,8 +291,8 @@ async function init(search) {
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    writeStore(CARTS_ROOT, carts);
-    if (files) writeFiles(files);
+    await initStore(carts);
+    if (mode === "board" && files) writeFiles(files);
     say("booting console...");
 
     const qs = new URLSearchParams(search || "");
@@ -203,7 +333,7 @@ async function init(search) {
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
-        + "sync_poll_json, sync_ack, sync_off, sync_config, "
+        + "sync_poll_json, sync_ack, sync_off, sync_config, rescan_store, "
         + "gpio_poll_json, gpio_ack_json, gpio_off");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
@@ -215,6 +345,7 @@ async function init(search) {
     syncPoll = mp.globals.get("sync_poll_json");
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
+    rescan = mp.globals.get("rescan_store");
     if (gpioPins) {
         gpioPoll = mp.globals.get("gpio_poll_json");
         gpioAck = mp.globals.get("gpio_ack_json");
@@ -303,15 +434,58 @@ function gpioPump() {
         .finally(() => { gpioBusy = false; });
 }
 
+// MODE 1 delivery: the batch the sweep just built, applied into OPFS.
+// Per-op failures are LOGGED and still ack true, exactly as the board path
+// treats a 200 carrying `err` entries -- a malformed op is poison that would
+// otherwise replay forever. Only a store-level failure requeues.
+async function pumpLocal(body) {
+    const t0 = performance.now();
+    try {
+        const doc = JSON.parse(body);
+        const ops = doc.ops || [];
+        const r = await store.applyOps(opfs, ops);
+        if (r.errors.length)
+            console.log("[moy] persist: " + r.errors.length + " op(s) refused, first "
+                + JSON.stringify(r.errors[0]));
+        persistFails = 0;
+        persistBatches++;
+        try { syncAck(1); } catch (e) { }
+        persist("site", "carts are saved in this browser",
+                ops.length + " ops in " + (performance.now() - t0).toFixed(1) + "ms");
+    } catch (e) {
+        // Quota, or the browser evicted the store under us. Requeue; after a
+        // few consecutive failures stop pretending, once, and tell the page --
+        // #193's requirement is that this is never silent.
+        try { syncAck(0); } catch (e2) { }
+        persistFails++;
+        console.log("[moy] persist: apply failed -- " + e);
+        if (persistFails >= PERSIST_GIVE_UP && !persistSaid) {
+            persistSaid = true;
+            opfs = null;
+            persist("none", "this browser stopped saving (storage full?): export your cart");
+        }
+    } finally {
+        syncBusy = false;
+    }
+}
+
 function syncPump() {
     if (syncBusy || !syncPoll) return;
     const now = performance.now();
     if (now - lastSyncAt < SYNC_MS) return;
     lastSyncAt = now;
+    if (mode === "none") {
+        // Nowhere to deliver: stop the sweep for good rather than take batches
+        // and drop them. One decision, then silence.
+        try { syncOff(); } catch (e) { }
+        syncPoll = null;
+        return;
+    }
     let body = "";
     try { body = syncPoll(); } catch (e) { return; }
     if (!body) return;
     syncBusy = true;
+    if (mode === "site" && opfs) { pumpLocal(body); return; }
     fetch("sync", { method: "POST", body: body,
                     headers: { "Content-Type": "application/json" } })
         .then((r) => {
@@ -464,6 +638,32 @@ self.onmessage = async (ev) => {
             if (files) writeFiles(files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
+        } else if (m.t === "carts") {
+            self.postMessage({ t: "carts", names: cartNames() });
+        } else if (m.t === "export") {
+            // A failed export is a MESSAGE, never the fatal {t:"error"} the
+            // outer catch would send -- the console is fine, the ask was not.
+            try {
+                const files = [];
+                walkVfs(CARTS + "/" + m.cart, m.cart, files, 0);
+                if (!files.length) throw new Error("no such cart");
+                const zip = store.zipStore(files);
+                self.postMessage({ t: "exported", name: m.cart + ".zip",
+                                   buf: zip.buffer }, [zip.buffer]);
+            } catch (e) {
+                self.postMessage({ t: "imported", ok: false,
+                    s: "export failed: " + ((e && e.message) || e) });
+            }
+        } else if (m.t === "import") {
+            try {
+                const r = await importZip(m.name, m.buf);
+                self.postMessage({ t: "imported", ok: true,
+                    s: "imported " + r.dir + " (" + r.n + " files)" });
+                if (assets) self.postMessage({ t: "assets", json: assets() });
+            } catch (e) {
+                self.postMessage({ t: "imported", ok: false,
+                    s: "import failed: " + ((e && e.message) || e) });
+            }
         }
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.stack) || e) });

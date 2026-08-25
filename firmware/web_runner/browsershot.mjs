@@ -53,7 +53,12 @@ const PORT = server.address().port;
 const ORIGIN = BASE || `http://127.0.0.1:${PORT}`;
 
 // -- headless chrome + CDP ---------------------------------------------------
-const profile = join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
+// MOY_PROFILE pins the Chrome profile across invocations. The default name is
+// per-port and therefore per-RUN, which is right for a screenshot but wrong for
+// anything that must survive a reload: the browser-local cart store (#193) lives
+// in the profile, so proving persistence needs two runs to share one.
+const profile = process.env.MOY_PROFILE
+    || join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
 const chrome = spawn(CHROME, [
     "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-gpu",
