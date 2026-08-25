@@ -7,9 +7,10 @@ transport. This ships the CONSOLE: the board hands the browser the wasm head
 once, the page then runs the whole shell locally at full speed, and the only
 thing that crosses the wire afterwards is cart data.
 
-    GET /                -> index.html          (the wasm console)
-    GET /<asset>         -> micropython.wasm, worker.js, ...   [streamed]
-    GET /carts.json      -> THIS BOARD's store, packed live
+    GET  /               -> index.html          (the wasm console)
+    GET  /<asset>        -> micropython.wasm, worker.js, ...   [streamed]
+    GET  /carts.json     -> THIS BOARD's store, packed live
+    POST /sync           -> apply a commit-shaped batch INTO the store
 
 The assets come from the FIRMWARE IMAGE (native/moy_web, gzipped, ~573KB of
 the app slot), and a copy pushed onto the board's storage overrides them. That
@@ -26,17 +27,23 @@ wasm VFS -- a RELATIVE url, so a page served from the board fetches the board's
 carts and the unmodified web build comes up holding your things. The pull half
 of moycore plan 3.4 is that one endpoint.
 
-WHAT THIS SLICE DOES NOT DO: write back. Commits made in the browser live in
-the page's VFS and are lost on reload -- the push half is the next slice, and
-until it lands this is a way to PLAY your console's carts in a browser and to
-read their code, not to author into the board.
+THE PUSH HALF is POST /sync (moy_sync, one body with the browser's watcher and
+the CI convergence harness): the page sweeps its own VFS for changed files and
+ships them back as commit-shaped batches, so an edit made in the browser lands
+in this board's store within about a second of its #111 commit. Per-file
+last-writer-wins; each side keeps its own journal. A batch that touches the
+SHELF (a manifest, a cover sheet, a cart appearing or dying) triggers the
+injected `on_sync` -- the console re-scans, so the kid's launcher shows the
+browser's work without a reboot.
 
-NOT SECURED, deliberately and by owner call: no pairing, no PIN, no token. Any
-device on the same network that can reach the port gets the store. That is a
-decision to revisit before this is ever pointed at a classroom (the OTA
-doctrine -- physical possession is consent -- does not stretch to an open TCP
-port), and the reason it is acceptable now is that the endpoint is read-only
-and the console has to be told to start it.
+SECURITY: the read half stays open by the standing owner call (any device on
+the network that can reach the port gets the store); the WRITE half accepts an
+optional `pin` -- when the host is built with one, a batch not carrying it is
+refused 403. The boards pass none TODAY, which keeps the LAN dev loop and the
+owner's own desk working, but an open port that writes flash is explicitly
+NOT classroom-safe (the 3.4 doctrine: physical possession is consent, an open
+TCP port is not) -- wiring the pin into the Settings row's displayed URL is
+the named follow-up before this feature travels.
 """
 
 try:
@@ -84,27 +91,21 @@ ASSETS = {
     "micropython.wasm": "application/wasm",
 }
 
-# Never shipped inside a cart folder. `journal/` is the durable undo history and
-# the bulk of this endpoint's payload; the browser copy is read-only (any method
-# but GET is a 405) so a shipped log can never be undone back onto the board, and
-# every reader already tolerates its absence -- a seed cart has none until its
-# first commit. `pmem.json` stays: it is the kid's saves.
-SKIP_DIRS = ("thumbs", "__pycache__", "journal")
+# The skip predicate and the walking primitives are moy_sync's now -- ONE body
+# for the pull walkers here, the browser's push sweep, and the receiving
+# apply, so what never crosses the wire cannot diverge by direction. journal/
+# stays home (each side keeps its own undo history -- the 2026-08-22 pull
+# decision and its push mirror), thumbs/ is a regenerable cache, .bak/.tmp are
+# crash-safety artifacts. `pmem.json` crosses: it is the kid's saves.
+try:
+    import moy_sync
+except ImportError:                      # host / CPython: the runtime package
+    from runtime import moy_sync
 
-# Belt to the above's braces, for a flat log beside the cart. `moy_carts._dup_skip`
-# carries the same pair for the same reason.
-SKIP_FILES = ("journal.jsonl",)
-
-# `moy_fs._write_atomic`'s last-known-good rotations (`main.py.bak`,
-# `cursor.json.bak`, ...). Pure duplication on the wire: the live file is
-# already in the bundle, and a crash-recovery copy is a filesystem concern the
-# browser has no use for.
-SKIP_SUFFIX = ".bak"
-
-
-def _skip(name):
-    return (name in SKIP_DIRS or name in SKIP_FILES
-            or name.endswith(SKIP_SUFFIX))
+_skip = moy_sync._skip
+_entries = moy_sync._entries
+_is_dir = moy_sync._is_dir
+_read_text = moy_sync._read_text
 
 
 def pack_store(carts_root, listdir=None, read=None, isdir=None):
@@ -206,51 +207,6 @@ def _jstr(s):
     return _json.dumps(s)
 
 
-def _entries(path, _listdir=None, _isdir=None):
-    """(name, is_dir) for everything in `path`, in ONE directory traversal.
-
-    `os.ilistdir` yields the TYPE alongside the name, which is the whole point:
-    the obvious `listdir` + `stat`-each costs a full path resolution per entry,
-    and on littlefs that is not a small constant.
-
-    MEASURED ON P4 GLASS, 2026-08-14 -- littlefs walks from the root on every
-    path operation, so the cost is linear in how many entries the parent holds:
-
-        stat /moy                          5.3 ms   (depth 1)
-        stat /moy/carts                   28.9 ms   (depth 2, 46 entries)
-        stat /moy/carts/<cart>/main.py    59.4 ms   (depth 4)
-
-    A stat cost MORE than opening and reading an 11KB file (44.0 ms). The store
-    walk was doing 271 of them, ~16s of a 27s pack, to learn something ilistdir
-    hands over for free.
-    """
-    ils = getattr(os, "ilistdir", None)
-    if ils is not None and _listdir is None:
-        for e in ils(path):
-            yield e[0], (e[1] & 0x4000) != 0
-        return
-    # Host/test path: no ilistdir (CPython's os has none), or injected fakes.
-    ld = _listdir or os.listdir
-    isd = _isdir or _is_dir
-    for name in ld(path):
-        yield name, isd(path + "/" + name)
-
-
-def _is_dir(path):
-    try:
-        return (os.stat(path)[0] & 0x4000) != 0
-    except OSError:
-        return False
-
-
-def _read_text(path):
-    try:
-        with open(path, "r") as f:
-            return f.read()
-    except (OSError, UnicodeError, ValueError):
-        return None
-
-
 def _file_size(path):
     try:
         return os.stat(path)[6]
@@ -308,13 +264,19 @@ class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
     def __init__(self, carts_root, web_dir, port=None, with_sd=None,
-                 ensure_online=None):
+                 ensure_online=None, pin=None, on_sync=None):
         if port is None:
             WebServer.__init__(self)
         else:
             WebServer.__init__(self, port=port)
         self.carts_root = carts_root
         self.web_dir = web_dir
+        # The push half's consent gate + the console's shelf-refresh hook (see
+        # the module docstring). pin=None means the write endpoint is as open
+        # as the read one -- the standing owner call for a desk, not a
+        # classroom. on_sync fires only for batches that changed the SHELF.
+        self.pin = pin
+        self.on_sync = on_sync
         # Settings contract (console.Workstation.toggle_webhost): `.serving`,
         # `.start()`, `.stop()`, `.url()`, and `.error` for a failure the row can
         # show. Constructed but NOT started -- __init__ binds no socket, so
@@ -393,10 +355,10 @@ class WebHost(WebServer):
         self.serving = False
 
     def handle_http(self, method, path, body):
+        if method == "POST" and path.split("?", 1)[0] == "/sync":
+            return self._sync(body)
         if method != "GET":
-            # The push half is the next slice; say so rather than 404, because
-            # a page from a NEWER build talking to an older board will try.
-            return http_response(405, '{"error":"read-only build"}')
+            return http_response(405, '{"error":"GET only (writes ride POST /sync)"}')
         path = path.split("?", 1)[0]
         if path == "/" or path == "/index.html":
             return self._asset("index.html")
@@ -455,6 +417,42 @@ class WebHost(WebServer):
             404, "no web bundle in this firmware and none at %s -- build "
                  "firmware/web_runner/dist and reflash, or copy it there"
                  % self.web_dir, "text/plain; charset=utf-8")
+
+    def _sync(self, body):
+        """Apply one push batch into the store (moy_sync.apply_ops -- the same
+        function the CI convergence harness and the dev server run).
+
+        The whole apply runs INSIDE one storage-gate entry: a batch is bounded
+        (the transport refuses requests past 64KB), and on the T-Deck every
+        one of these writes lands on the card that shares the panel's SPI
+        host, at the frame tail where the feeder may still be shipping bands
+        -- the same reason the asset probe takes the gate. Boards without
+        shared storage pass a call-through and pay nothing.
+
+        A bad op SKIPS (reported in `err`), it never aborts the batch: the
+        client clears an answered batch either way, so aborting would just
+        make one poison op eat its innocent neighbours forever.
+        """
+        ops, pin = moy_sync.parse_batch(body)
+        if ops is None:
+            return http_response(400, '{"error":"bad batch"}')
+        if self.pin and pin != self.pin:
+            return http_response(403, '{"error":"pin"}')
+        applied, errors, shelf_dirty = self._with_sd(
+            lambda: moy_sync.apply_ops(self.carts_root, ops))
+        if errors:
+            try:
+                print("SYNC %d applied, %d refused: %s"
+                      % (applied, len(errors), errors[0][1]))
+            except Exception:            # noqa: BLE001 -- a log is never fatal
+                pass
+        if shelf_dirty and self.on_sync is not None:
+            try:
+                self.on_sync()
+            except Exception as exc:     # noqa: BLE001 -- never fail the request
+                print("SYNC rescan failed:", exc)
+        return http_response(200, _json.dumps(
+            {"ok": applied, "err": [list(e) for e in errors[:8]]}))
 
     def _carts_json(self):
         """The store, STREAMED as JSON -- never built.
@@ -520,13 +518,16 @@ def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
 
 
 def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
-                 port=None):
-    """The WebHost both boards inject -- built once, here.
+                 port=None, pin=None):
+    """The WebHost every board injects -- built once, here.
 
     Takes `ws` rather than `ws.wifi` because the wifi service is attached by
     wire_workstation_core, which has not necessarily run when a board builds
     this; the closure reads it at TOGGLE time, which is the only moment it
-    matters.
+    matters. The sync push's shelf refresh is wired HERE for the same reason
+    the wait lives in ensure_online: it is the same line on every board, and
+    a per-board injection is exactly what left the T-Deck without the web
+    console the first time.
 
     Constructed, NOT started: __init__ binds no socket, so injecting this costs
     nothing until a kid turns the row on. The two things that genuinely differ
@@ -535,4 +536,5 @@ def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
     """
     return WebHost(carts_root, web_dir, port=port, with_sd=with_sd,
                    ensure_online=lambda: ensure_online(
-                       getattr(ws, "wifi", None), autoconnect))
+                       getattr(ws, "wifi", None), autoconnect),
+                   pin=pin, on_sync=lambda: ws.rescan_carts())

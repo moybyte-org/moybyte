@@ -1927,6 +1927,23 @@ class Workstation:
             wh.error = "%s" % exc
         self._dirty = True
 
+    def rescan_carts(self):
+        """Re-read the store and rebuild both shelves -- the sync push's board
+        half (moy_webhost wires it as `on_sync`), fired when a browser batch
+        changed what the launcher shows: a manifest, a cover sheet, a cart
+        created or deleted. `_apply_items` does the whole refresh (re-slim,
+        cover caches dropped, generation bumped), the same body every
+        create/dup/delete already runs. Safe between frames: the webhost
+        polls at the frame tail, after present."""
+        if self.carts_store is None or not self.carts_root:
+            return
+        try:
+            self._apply_items(self._with_sd(
+                lambda: self.carts_store.scan(self.carts_root)))
+        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
+            print("Moybyte rescan failed:", exc)
+        self._dirty = True
+
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
         The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,

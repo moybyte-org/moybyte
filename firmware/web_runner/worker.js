@@ -35,6 +35,15 @@ let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
+// The 3.4 sync push: about once a second, ask the console (moy_sync's
+// watcher) for a batch of committed changes and POST it to the RELATIVE
+// /sync -- a page served from a board writes back to that board; one served
+// by a static host gets a 404/405/501 on the first try and push turns off
+// for good. ONE batch in flight at a time, so ops arrive in order and a
+// failed send simply requeues on the Python side (syncAck false).
+let syncPoll = null, syncAck = null, syncOff = null;
+let syncBusy = false, lastSyncAt = 0;
+const SYNC_MS = 1000;
 let running = false, ahead = -1, inbox = [];
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -152,7 +161,8 @@ async function init(search) {
         + (!desktop && names.length === 1 && cart
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
-        + "reload_cart, idle_collect, fb_addr, fb_len");
+        + "reload_cart, idle_collect, fb_addr, fb_len, "
+        + "sync_poll_json, sync_ack, sync_off, sync_config");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -160,6 +170,11 @@ async function init(search) {
     idleCollect = mp.globals.get("idle_collect");
     fbAddr = mp.globals.get("fb_addr");
     fbLen = mp.globals.get("fb_len");
+    syncPoll = mp.globals.get("sync_poll_json");
+    syncAck = mp.globals.get("sync_ack");
+    syncOff = mp.globals.get("sync_off");
+    const pin = qs.get("pin");
+    if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });
     wantAssets = false;      // the boot payload answers any pre-boot request
     say("live");
@@ -188,6 +203,40 @@ function shipFrame(s) {
     }
     if (fb) self.postMessage({ t: "frame", s: s, fb: fb }, [fb]);
     else self.postMessage({ t: "frame", s: s });
+}
+
+function syncPump() {
+    if (syncBusy || !syncPoll) return;
+    const now = performance.now();
+    if (now - lastSyncAt < SYNC_MS) return;
+    lastSyncAt = now;
+    let body = "";
+    try { body = syncPoll(); } catch (e) { return; }
+    if (!body) return;
+    syncBusy = true;
+    fetch("sync", { method: "POST", body: body,
+                    headers: { "Content-Type": "application/json" } })
+        .then((r) => {
+            if (r.status === 404 || r.status === 405 || r.status === 501) {
+                // A host with no push half (moybyte.com, an export, an older
+                // read-only board): one probe, then off for good.
+                try { syncAck(0); syncOff(); } catch (e) { }
+                syncPoll = null;
+                console.log("[moy] sync off: host has no /sync (" + r.status + ")");
+                return;
+            }
+            if (r.status === 403) {
+                // The board wants a pin this page was not opened with
+                // (?pin=...). Retrying the same batch forever is noise.
+                try { syncAck(0); syncOff(); } catch (e) { }
+                syncPoll = null;
+                console.log("[moy] sync off: board refused the pin");
+                return;
+            }
+            try { syncAck(r.ok ? 1 : 0); } catch (e) { }
+        })
+        .catch(() => { try { syncAck(0); } catch (e) { } })
+        .finally(() => { syncBusy = false; });
 }
 
 // Self-driven frame loop. setTimeout (not rAF -- workers have none) against a
@@ -256,6 +305,7 @@ function loop() {
             idleCollected = true;
             framesSinceCollect = 0;
         }
+        syncPump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;

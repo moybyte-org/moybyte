@@ -169,3 +169,62 @@ def test_idle_screen_blank_and_wake(board):
 def test_mem_reports_the_heap(board):
     line = board.cmd("mem", wait_for="REMOTE mem")
     assert line is not None and "live=" in line and "free=" in line, line
+
+
+def test_sync_push_writes_the_store_and_the_shelf_follows(board):
+    """The 3.4 sync RPC against the REAL board: bring the webhost up, POST a
+    batch from this machine over the LAN, and read the result back over
+    serial -- the file on the TF card, the cart on the LIVE launcher (the
+    shelf rescan, with no reboot anywhere), then a dc batch that removes it
+    again. Skips rather than fails when the bench has no shared network:
+    everything up to the HTTP hop is the other tests' job.
+
+    Runs LAST-ish on purpose: it flips WiFi + the webhost on, and puts both
+    back the way it found them."""
+    import json as _json
+    import urllib.request
+
+    line = board.cmd("web", wait_for="WEB ", timeout=30.0)
+    if line is None or "http://" not in line:
+        pytest.skip("webhost did not come up (no wifi on this bench): %r" % line)
+    url = "http://" + line.split("http://", 1)[1].split()[0].rstrip("/")
+    try:
+        batch = _json.dumps({"v": 1, "ops": [
+            {"p": "pytest_sync.moy/manifest.json",
+             "t": '{"title": "Pytest Sync", "type": "game", "main": "main.py"}'},
+            {"p": "pytest_sync.moy/main.py",
+             "t": "def _draw():\n    cls(11)\n"},
+        ]}).encode()
+        r = urllib.request.urlopen(urllib.request.Request(
+            url + "/sync", data=batch,
+            headers={"Content-Type": "application/json"}), timeout=15)
+        doc = _json.loads(r.read())
+    except OSError as exc:
+        pytest.skip("board url unreachable from this machine: %s" % exc)
+    try:
+        assert doc == {"ok": 2, "err": []}, doc
+        board.drain(0.5)
+        line = board.cmd(
+            "py print('SYNCED=' + repr(any((c.get('path') or '')"
+            ".endswith('pytest_sync.moy') for c in ws.launcher.items)))",
+            wait_for="SYNCED=", timeout=8.0)
+        assert line is not None and "SYNCED=True" in line, line
+        # ...and the dc op takes it back off the card AND the shelf.
+        batch = _json.dumps({"v": 1, "ops": [{"p": "pytest_sync.moy",
+                                              "dc": 1}]}).encode()
+        r = urllib.request.urlopen(urllib.request.Request(
+            url + "/sync", data=batch,
+            headers={"Content-Type": "application/json"}), timeout=15)
+        assert _json.loads(r.read())["ok"] == 1
+        board.drain(0.5)
+        line = board.cmd(
+            "py import os; print('GONE=' + repr("
+            "any((c.get('path') or '').endswith('pytest_sync.moy') "
+            "for c in ws.launcher.items) is False "
+            "and 'pytest_sync.moy' not in os.listdir(ws.carts_root)))",
+            wait_for="GONE=", timeout=8.0)
+        assert line is not None and "GONE=True" in line, line
+    finally:
+        # Leave the board as found: the webhost row off again.
+        board.cmd("py ws.toggle_webhost(); print('WEBOFF')",
+                  wait_for="WEBOFF", timeout=8.0)

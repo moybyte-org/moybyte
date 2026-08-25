@@ -183,8 +183,20 @@ for (const step of scenario.steps || []) {
             await sleep(step.settle ?? 300);
         }
         if (step.key != null) {
-            await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: String(step.key), key: String(step.key) });
-            await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: String(step.key) });
+            // CDP takes `text` only for printable chars; a NAMED key (Enter,
+            // ArrowDown, ...) must go as rawKeyDown with its virtual keycode
+            // or the call is refused with "Invalid 'text' parameter".
+            const k = String(step.key);
+            const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9,
+                         ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+            if (k.length === 1) {
+                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k });
+            } else {
+                const vk = VK[k] || 0;
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k, windowsVirtualKeyCode: vk });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
+            }
             await sleep(150);
         }
         if (step.js) console.log("   js ->", JSON.stringify(await evaluate(step.js)));

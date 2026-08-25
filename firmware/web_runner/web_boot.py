@@ -362,6 +362,18 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
+    # The 3.4 sync push (moy_sync): watch this VFS store for committed changes
+    # and hand them to the worker as wire batches; the worker POSTs them to
+    # the relative /sync of whoever served the page. Constructed AFTER the
+    # pull wrote the store, so the baseline is "the board's own state, nothing
+    # pending". A page served by a host with no /sync (moybyte.com, an
+    # export) gets one failed POST and the worker calls sync_off().
+    try:
+        import moy_sync
+        _S["sync"] = moy_sync.StoreWatcher(carts_root)
+    except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
+        print("sync watcher unavailable:", exc)
+        _S["sync"] = None
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -403,6 +415,12 @@ def reload_cart(name=None):
     ws.launcher.items = ws._launcher_items(ws._all_carts)
     ws.slim_carts()
     ws._dirty = True
+    w = _S.get("sync")
+    if w is not None:
+        # The reload just re-pulled the served store over the VFS -- adopt it
+        # as the new baseline (deliberate LWW: replaying local unpushed edits
+        # over a state the human just asked for would undo the reload).
+        w.rebase()
     return open_cart(name) if name else True
 
 
@@ -557,6 +575,42 @@ def _apply(events):
         rest, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
+
+
+def sync_config(pin=None):
+    """The page's ?pin= (if any), forwarded by the worker after init -- it
+    rides inside every batch body, where the board's WebHost checks it."""
+    _S["sync_pin"] = pin or None
+    return ""
+
+
+def sync_poll_json():
+    """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
+    batch is already awaiting its answer). The worker calls this about once a
+    second -- the sweep is a stat walk of an in-memory VFS, so its cost is
+    noise; the READ of changed files happens only when something committed."""
+    w = _S.get("sync")
+    if w is None:
+        return ""
+    w.sweep()
+    return w.take_json(_S.get("sync_pin"))
+
+
+def sync_ack(ok):
+    """Settle the in-flight batch: the worker's POST got an answer (ok=True
+    clears it; anything else requeues every path it carried)."""
+    w = _S.get("sync")
+    if w is not None:
+        w.ack(bool(ok))
+    return ""
+
+
+def sync_off():
+    """The far end has no /sync (a static host, an old read-only board): stop
+    sweeping for good. One failed probe, then silence -- the standalone
+    browser console must not retry-log forever."""
+    _S["sync"] = None
+    return ""
 
 
 def idle_collect():

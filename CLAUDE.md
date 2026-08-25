@@ -398,7 +398,28 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   refuse), and the next growth spurt is a partition-table decision, not a
   surprise. Building the bundle needs emsdk, so a missing one only WARNS locally
   and FAILS under `CI`/`MOYBYTE_REQUIRE_WEB_BUNDLE` — the firmware workflow builds
-  the web runner before each board, so a published image always carries one. **The browser runs moycore too since 2026-08-13** — the
+  the web runner before each board, so a published image always carries one.
+  **The 3.4 sync RPC SHIPPED (2026-08-25): a page served from a board writes
+  BACK.** `runtime/moy_sync.py` is the one body — the browser's `StoreWatcher`
+  (a ~1/s stat-sweep of the wasm VFS; no store hooks, because the store writes
+  through several funnels and watching the filesystem catches every writer by
+  construction), the wire shape (`POST /sync`, commit-shaped batches under the
+  transport's 64KB request cap; big files chunk through a `.tmp` and publish
+  atomically), and `apply_ops`, which the board (`moy_webhost`), the dev twin
+  (`serve.py --carts DIR`) and the CI convergence harness
+  (`tests/test_sync_convergence.py` — the pin the moycore plan §3.4 demands:
+  two real stores, drop-and-reattach, a two-sided collision, both journals
+  still replayable) all share. Per-file last-writer-wins; journals stay home;
+  a batch that changes the SHELF fires `ws.rescan_carts()` so the launcher
+  follows with no reboot (on-glass: `test_guition_on_glass.py`'s sync test).
+  The write endpoint takes an optional `pin` (403 without it; the page passes
+  `?pin=`) but the boards pass NONE today — same standing as the open read
+  half, and the named follow-up before this points at a classroom. The
+  **Zero is re-provisioned as the sync RPC's first host**
+  (`firmware/seeed_xiao_esp32s3_zero/` — stock MicroPython + `provision.sh`
+  pushed files, no build; the browser console served FROM the XIAO's flash
+  round-trips authored carts onto it, verified with real headless Chrome
+  2026-08-25). **The browser runs moycore too since 2026-08-13** — the
   usermod is staged beside `moy_gfx`/`moy_lua`/`moy_audio` and `web_boot` wires
   the boards' chooser verbatim, so a Lua cart's whole frame runs inside libmoy
   on all three tiers rather than two. It needs no wasm variant of the module:
@@ -718,11 +739,15 @@ was promoted into one body and nothing executable guarded it.**
   webhost's asset probe were the only ungated reads in the shell; a sweep across a
   cart open/run/quit is now a test. **A missing asset costs the same directory read
   as a hit**, so serving the baked bundle was never exempt.
-- **The browser gets carts, not their history.** The store stream is GET-only with
-  no write-back, so a shipped undo journal could only ever undo board-era commits
-  on a copy that never returns — 40% of the payload, inert at the destination.
-  `pmem` stays (the kid's saves, 0.3%). Both walkers share one `_skip` predicate so
-  packed and streamed cannot diverge.
+- **The browser gets carts, not their history.** The undo journal never crosses
+  the wire in EITHER direction: a shipped log could only ever undo board-era
+  commits on a copy that never returns (40% of the payload, inert), and — since
+  the push half landed 2026-08-25 — a pushed one could only replay browser-era
+  ops onto a board that keeps its own. `pmem` crosses (the kid's saves, 0.3%).
+  The `_skip` predicate is ONE body in `runtime/moy_sync.py` now, shared by the
+  pull walkers, the push sweep and the receiving apply — the store stream's
+  "GET-only with no write-back" era ended with `POST /sync` (see the sync
+  paragraph in the web-runner section).
 - **`slim_carts` no longer decodes a 32,768-pixel sheet to read one 8×8 icon.**
   That was 137ms of a 278ms browser page load, and the same wiring order runs on
   every tier, so all three boards get it. Per-cart numbers belong in #66.

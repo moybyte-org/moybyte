@@ -491,14 +491,108 @@ def test_the_asset_probe_never_stats_storage_outside_the_gate(tmp_path,
     assert len(entries) == 1, entries
 
 
-def test_a_write_is_refused_in_a_way_a_newer_page_can_read(tmp_path):
-    """The push half is the next slice. A page from a build that HAS it will
-    POST at a board that does not, and 405-with-a-reason is a thing the page
-    can act on where a 404 reads as a wrong url."""
+def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
+    """The write surface is exactly ONE path. Every other method+path pair
+    stays refused with a reason the page can read (405, not a 404 that reads
+    as a wrong url)."""
     h = _host(tmp_path)
     r = h.handle_http("POST", "/carts.json", b"{}")
     assert b"405" in r.split(b"\r\n")[0]
-    assert b"read-only" in r
+    assert b"/sync" in r
+    r = h.handle_http("PUT", "/sync", b"{}")
+    assert b"405" in r.split(b"\r\n")[0]
+
+
+# ---------------------------------------------------------------------------
+# POST /sync -- the push half (moycore plan 3.4; moy_sync carries the batch
+# semantics and its own suites; what belongs HERE is the endpoint's wiring:
+# routing, the pin gate, the SD gate, and the shelf-refresh hook).
+# ---------------------------------------------------------------------------
+
+
+def _batch(*ops, pin=None):
+    doc = {"v": 1, "ops": list(ops)}
+    if pin is not None:
+        doc["pin"] = pin
+    return json.dumps(doc).encode()
+
+
+def test_sync_applies_into_the_store(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync",
+                      _batch({"p": "hop.moy/main.py", "t": "x = 7\n"}))
+    assert b"200" in r.split(b"\r\n")[0]
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body == {"ok": 1, "err": []}
+    assert (root / "hop.moy" / "main.py").read_text() == "x = 7\n"
+
+
+def test_sync_refuses_a_bad_batch_and_a_bad_path(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    assert b"400" in h.handle_http("POST", "/sync", b"junk").split(b"\r\n")[0]
+    r = h.handle_http("POST", "/sync",
+                      _batch({"p": "../../wifi.json", "t": "stolen"}))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and body["err"]
+    assert not (tmp_path / "wifi.json").exists()
+
+
+def test_sync_pin_gate(tmp_path):
+    """pin=None keeps the desk's open dev loop; a host built WITH a pin
+    refuses a batch that does not carry it, before any op is looked at."""
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"), pin="4321")
+    op = {"p": "hop.moy/main.py", "t": "x = 9\n"}
+    r = h.handle_http("POST", "/sync", _batch(op))
+    assert b"403" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text() != "x = 9\n"
+    r = h.handle_http("POST", "/sync", _batch(op, pin="4321"))
+    assert b"200" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text() == "x = 9\n"
+
+
+def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
+    """On the T-Deck every one of these writes lands on the card that shares
+    the panel's SPI host -- the whole apply must sit inside ONE gate entry,
+    same law as the asset probe (see that test above)."""
+    root = _store(tmp_path)
+    depth = [0]
+    entries = []
+
+    def gate(fn):
+        depth[0] += 1
+        entries.append(True)
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    seen = []
+    real = wh.moy_sync.apply_ops
+    wh.moy_sync.apply_ops = lambda *a: (seen.append(depth[0]), real(*a))[1]
+    try:
+        h.handle_http("POST", "/sync",
+                      _batch({"p": "hop.moy/main.py", "t": "x = 1\n"}))
+    finally:
+        wh.moy_sync.apply_ops = real
+    assert seen == [1], "apply ran outside the storage gate"
+    assert len(entries) == 1
+
+
+def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
+    root = _store(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), str(tmp_path / "web"),
+                   on_sync=lambda: hits.append(1))
+    h.handle_http("POST", "/sync",
+                  _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
+    assert not hits, "a code edit repaints nothing on the shelf"
+    h.handle_http("POST", "/sync",
+                  _batch({"p": "hop.moy/manifest.json", "t": '{"title":"H2"}'}))
+    assert hits == [1]
 
 
 def test_the_sd_gate_wraps_the_store_read(tmp_path):
