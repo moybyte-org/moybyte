@@ -440,9 +440,28 @@ def test_the_guard_checks_what_the_fragment_decided(board):
     assert ([s.assignment for s in required]
             == [s.assignment for s in settings if not s.disables])
     assert all(s.assignment.startswith(s.option + "=") for s in required)
-    # A generated sdkconfig never carries a bare `CONFIG_X=` line, so a
-    # disable in the required list would demand a line no build can have.
-    assert not any(a.endswith("=") for a in (s.assignment for s in required))
+    # A generated sdkconfig never carries a bare `CONFIG_X=` line -- and it
+    # renders `=n` as `# CONFIG_X is not set` -- so a disable in the required
+    # list would demand a line no build can have. The `=n` case is not
+    # hypothetical: CONFIG_BT_HCI_LOG_DEBUG_EN=n rode the required list for a
+    # day and failed every CI p4 build while local builds only warned.
+    assert not any(a.endswith("=") or a.endswith("=n")
+                   for a in (s.assignment for s in required))
+
+
+def test_an_equals_n_disable_never_reaches_the_required_list():
+    """The exact 2026-08-25 CI failure, pinned: the P4 fragment spells one
+    disable `CONFIG_BT_HCI_LOG_DEBUG_EN=n` (the idiomatic Kconfig form), the
+    generated config renders it `# ... is not set`, and a guard that greps for
+    the literal `=n` line reports it inert forever."""
+    d = _DEVICE_BOARDS["p4"]
+    settings = {s.option: s for s in board_config.sdkconfig_settings(d)}
+    s = settings.get("CONFIG_BT_HCI_LOG_DEBUG_EN")
+    if s is None:
+        pytest.skip("the P4 fragment no longer carries the option")
+    assert s.disables, "=n is a disable spelling"
+    assert s.assignment not in [
+        q.assignment for q in board_config.sdkconfig_required(d)]
 
 
 @pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))

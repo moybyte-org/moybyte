@@ -416,13 +416,19 @@ class Setting:
 
     @property
     def disables(self):
-        """`CONFIG_X=` -- a bool/choice member turned OFF.
+        """`CONFIG_X=` or `CONFIG_X=n` -- a bool/choice member turned OFF.
 
-        NOT checkable in a generated sdkconfig: an unset bool renders as
-        `# CONFIG_X is not set`, but a choice member whose choice is hidden is
-        omitted ENTIRELY, so a grep for either form false-alarms. Disables ride
-        the fragment stamp instead."""
-        return self.value == ""
+        Both are legitimate fragment spellings (ESP-IDF's own defaults files
+        use `=n`; a bare `n` cannot be anything else, a string value would be
+        quoted). NOT checkable in a generated sdkconfig: an unset bool renders
+        as `# CONFIG_X is not set`, but a choice member whose choice is hidden
+        is omitted ENTIRELY, so a grep for either form false-alarms. Disables
+        ride the fragment stamp instead. The `=n` spelling joined 2026-08-25:
+        the P4's `CONFIG_BT_HCI_LOG_DEBUG_EN=n` (98419ff) was treated as a
+        required literal, which the guard then reported inert on every build
+        -- a warning locally, a red X on CI's cold second pass, and nothing
+        wrong on the board."""
+        return self.value in ("", "n")
 
     def __repr__(self):
         return "Setting(%s=%s @%d)" % (self.option, self.value, self.line)

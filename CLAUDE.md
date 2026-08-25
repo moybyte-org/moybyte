@@ -308,8 +308,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   `CI`/`MOYBYTE_REQUIRE_SDKCONFIG`. It caught a live one immediately —
   `CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20` is below IDF's `range 50 1000`, so both S3
   boards silently kept 100 and the saving that commit describes never happened (now 50). A
-  `CONFIG_X=` disable is fingerprinted but never grepped: a hidden choice member is absent from a
-  generated config entirely, not rendered "is not set". The partition CSV is likewise named once,
+  disable -- `CONFIG_X=` or the idiomatic `CONFIG_X=n` -- is fingerprinted but never grepped: a
+  disabled bool renders "is not set" and a hidden choice member is absent from a generated config
+  entirely, so a grep for either false-alarms (the `=n` spelling joined 2026-08-25 after
+  `CONFIG_BT_HCI_LOG_DEBUG_EN=n` failed every CI p4 build while local builds only warned). The partition CSV is likewise named once,
   in `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME`, and exported as `BOARD_PARTITION_CSV`. Full codegen
   of the fragment stays DECLINED — `docs/board_ports_2026-08.md` carries that entry and the
   reasoning. **The cable-flash facts are board.toml data too** (`[flash]`/
