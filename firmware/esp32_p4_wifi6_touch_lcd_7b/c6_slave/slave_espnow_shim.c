@@ -124,6 +124,13 @@ static void moyc6_on_h2s(uint32_t id, const uint8_t *data, size_t len, void *ctx
             // "Is the shim here?" -- answered by existing, not by radio state.
             moyc6_ack(verb, ESP_OK);
             break;
+        case MOYC6_V_VERSION:
+            // "WHICH shim?" -- the ACK's err field carries the build identity
+            // (positive, so the host's error accounting must except this
+            // verb). A slave that predates the verb ignores it and the host
+            // reads the timeout as "older than everything".
+            moyc6_ack(verb, MOYC6_SHIM_VERSION);
+            break;
         case MOYC6_V_SEND: {
             if (len < sizeof(moyc6_send_t)) {
                 break;

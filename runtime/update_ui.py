@@ -103,6 +103,24 @@ class UpdateUI:
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
 
+    def open_update_c6(self):
+        """Open the C6 radio-upgrade flow (#7/#58): the same screen, pumped a
+        step per frame, backed by ws.c6_updater (P4 only -- the row that opens
+        this is capability-gated on it). check -> confirm -> download -> flash
+        over SDIO -> reboot; the backend module's header carries the design."""
+        self.ws.wm.goto("update")
+        self.ws._dirty = True
+        self.ws.show_achievements = False
+        self.ws._set_text_mode(False)
+        self._upd_bin = None
+        self._upd_msg = ""
+        if getattr(self.ws, "c6_updater", None) is None:
+            self._upd_phase = "error"
+            self._upd_msg = "no c6 updater"
+            return
+        self._check_armed = False              # CHECKING... paints first
+        self._upd_phase = "c6_checking"
+
     def _boot_verdict_phase(self):
         """If the last install left a verdict, show THAT before anything else.
 
@@ -147,6 +165,12 @@ class UpdateUI:
                 u.download_cancel()
             except Exception:
                 pass
+        cu = getattr(self.ws, "c6_updater", None)
+        if cu is not None:
+            try:
+                cu.cancel()
+            except Exception:
+                pass
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws._dirty = True
 
@@ -180,10 +204,17 @@ class UpdateUI:
                 self._start_download()
             elif i.pressed("b"):
                 self._exit_update()
-        elif ph in ("install", "downloading", "checking"):
-            if i.pressed("b"):                 # abort: nothing bootable was committed yet
+        elif ph == "c6_confirm":
+            if i.pressed("a") or i.pressed("run"):
+                self._start_c6_download()
+            elif i.pressed("b"):
                 self._exit_update()
-        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish"):
+        elif ph in ("install", "downloading", "checking",
+                    "c6_checking", "c6_downloading", "c6_flashing"):
+            if i.pressed("b"):                 # abort: nothing was activated yet
+                self._exit_update()
+        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
+                    "c6_uptodate"):
             if i.pressed("b") or i.pressed("a"):
                 self._exit_update()
         # "done": ignore input -- _pump_update reboots into the new image shortly.
@@ -200,14 +231,98 @@ class UpdateUI:
             self._confirm_update()             # tap anywhere (besides X) = install
         elif ph == "confirm_online":
             self._start_download()             # tap anywhere (besides X) = download
-        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish"):
+        elif ph == "c6_confirm":
+            self._start_c6_download()
+        elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
+                    "c6_uptodate"):
             self._exit_update()
+
+    def _start_c6_download(self):
+        cu = getattr(self.ws, "c6_updater", None)
+        if cu is None or not cu.offer:
+            return
+        self.ws._dirty = True
+        try:
+            cu.begin_download()
+            self._upd_phase = "c6_downloading"
+        except Exception as exc:               # noqa: BLE001 -- shown to the kid
+            self._upd_phase = "error"
+            self._upd_msg = self._err_text(exc)[:30]
+
+    def _pump_c6(self):
+        """The C6 flow's per-frame step (called from _pump_update). Same shape
+        as the firmware phases: one blocking check behind its arm gate, then
+        one chunk of download or flash per painted frame."""
+        cu = getattr(self.ws, "c6_updater", None)
+        ph = self._upd_phase
+        if cu is None:
+            self._upd_phase = "error"
+            self._upd_msg = "no c6 updater"
+            return
+        if ph == "c6_checking":
+            if not self._check_armed:
+                self._check_armed = True
+                return
+            verdict = cu.check(self.ws._ota_channel())
+            if verdict == "offer":
+                self._upd_phase = "c6_confirm"
+            elif verdict == "uptodate":
+                self._upd_phase = "c6_uptodate"
+            elif verdict == "nopublish":
+                self._upd_phase = "nopublish"
+            else:
+                self._upd_phase = "error"
+                self._upd_msg = cu.error or "check failed"
+        elif ph == "c6_downloading":
+            more = cu.download_step()
+            if cu.error or self.ws.updater.error:
+                self._upd_phase = "error"
+                self._upd_msg = cu.error or self.ws.updater.error
+                return
+            if not more:
+                path = cu.download_finish()
+                if not path:
+                    self._upd_phase = "error"
+                    self._upd_msg = cu.error or "verify failed"
+                    return
+                try:
+                    cu.begin_flash(path)
+                    self._upd_phase = "c6_flashing"
+                except Exception as exc:       # noqa: BLE001 -- shown to the kid
+                    self._upd_phase = "error"
+                    self._upd_msg = self._err_text(exc)[:30]
+        elif ph == "c6_flashing":
+            more = cu.flash_step()
+            if cu.error:
+                self._upd_phase = "error"
+                self._upd_msg = cu.error
+                return
+            if not more:
+                if cu.finish_flash() and cu.activate():
+                    self._upd_phase = "c6_done"
+                    self._upd_at = _ticks_ms()
+                else:
+                    self._upd_phase = "error"
+                    self._upd_msg = cu.error or "c6 flash failed"
+        elif ph == "c6_done":
+            # The C6 is rebooting under a host whose WiFi/BLE state is stale --
+            # a full console restart re-runs the proven bring-up rather than
+            # re-verifying against the exact npl minefield the D-tail mapped.
+            if _ticks_diff(_ticks_ms(), self._upd_at) >= 1500:
+                try:
+                    self.ws.updater.reset()
+                except Exception:
+                    self._upd_phase = "error"
+                    self._upd_msg = "reset failed"
 
     def _pump_update(self, dt):
         """Advance the install one chunk (called each painted frame on the update
         screen). Drives begin->step*N->finish->reset through the updater backend."""
         u = self.ws.updater
         ph = self._upd_phase
+        if ph and ph.startswith("c6_"):
+            self._pump_c6()
+            return
         if ph == "checking":
             # Run the blocking connect + manifest fetch ONE frame after entry, so the
             # CHECKING... screen paints first (this method runs before _draw each frame).
@@ -432,6 +547,68 @@ class UpdateUI:
             cv.print("UPDATED!", x, y, th["play"], 2)     # scale 2: see _line
             y += 20 * fs
             self._line(x, y, "rebooting...", th["ink"])
+        elif phase == "c6_checking":
+            self._line(x, y, "CHECKING C6 RADIO...", th["accent"])
+            y += 16 * fs
+            cu = getattr(self.ws, "c6_updater", None)
+            iv = cu.installed if cu is not None else None
+            self._line(x, y, "radio: %s" % (
+                ("shim v%d" % iv) if iv else "no espnow shim"), th["ink_dim"])
+        elif phase == "c6_confirm":
+            cu = getattr(self.ws, "c6_updater", None)
+            c6 = (cu.offer or {}) if cu is not None else {}
+            iv = cu.installed if cu is not None else None
+            self._line(x, y, "UPGRADE C6 RADIO", th["ink_dim"])
+            y += 12 * fs
+            self._line(x, y, "%s ->" % (("shim v%d" % iv) if iv else "no espnow"),
+                       th["ink_dim"])
+            y += 11 * fs
+            self._line(x, y, "shim v%d (%s)" % (
+                int(c6.get("version") or 0),
+                str(c6.get("hosted") or "?")[:12]), th["play"])
+            y += 13 * fs
+            kb = int(c6.get("size") or 0) // 1024
+            if kb:
+                self._line(x, y, "%d KB download" % kb, th["ink"])
+                y += 14 * fs
+            self._line(x, y, "A = UPGRADE", th["accent"])
+            y += 12 * fs
+            self._line(x, y, "B = CANCEL", th["ink_dim"])
+        elif phase == "c6_uptodate":
+            cu = getattr(self.ws, "c6_updater", None)
+            iv = cu.installed if cu is not None else None
+            self._line(x, y, "C6 RADIO UP TO DATE", th["play"])
+            y += 14 * fs
+            self._line(x, y, ("shim v%d" % iv) if iv else "?", th["ink"])
+            y += 18 * fs
+            self._line(x, y, "B = BACK", th["accent"])
+        elif phase == "c6_downloading":
+            cu = getattr(self.ws, "c6_updater", None)
+            done = cu.dl_done if cu is not None else 0
+            total = cu.dl_total if (cu is not None and cu.dl_total) else 0
+            self._line(x, y, "DOWNLOADING C6...", th["accent"])
+            y += 16 * fs
+            frac = (done / total) if total else 0.0
+            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, frac)
+            y += 16 * fs
+            self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024), th["ink"])
+            y += 16 * fs
+            self._line(x, y, "B = CANCEL", th["ink_dim"])
+        elif phase == "c6_flashing":
+            cu = getattr(self.ws, "c6_updater", None)
+            done = cu.fl_done if cu is not None else 0
+            total = cu.fl_total if (cu is not None and cu.fl_total) else 1
+            self._line(x, y, "FLASHING C6 RADIO...", th["accent"])
+            y += 16 * fs
+            self._draw_progress_bar(px + 12 * fs, y, pw - 24 * fs, 10 * fs, done / total)
+            y += 16 * fs
+            self._line(x, y, "%d / %d KB" % (done // 1024, total // 1024), th["ink"])
+            y += 16 * fs
+            self._line(x, y, "DO NOT POWER OFF", th["danger"])
+        elif phase == "c6_done":
+            cv.print("C6 UPDATED!", x, y, th["play"], 2)  # scale 2: see _line
+            y += 20 * fs
+            self._line(x, y, "restarting...", th["ink"])
         elif phase == "updated":
             # The verdict from the PREVIOUS boot: the slot we were pointed at is
             # the one now running. This is the only place the machine ever says

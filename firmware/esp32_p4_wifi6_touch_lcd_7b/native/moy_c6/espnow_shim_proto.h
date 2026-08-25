@@ -39,12 +39,27 @@
 #define MOYC6_V_SET_RATE      0x06  // moyc6_rate_t
 #define MOYC6_V_SET_PMK       0x07  // moyc6_pmk_t
 #define MOYC6_V_PING          0x08  // moyc6_hdr_t
+#define MOYC6_V_VERSION       0x09  // moyc6_hdr_t; ACK's err carries MOYC6_SHIM_VERSION
 // slave -> host
 #define MOYC6_V_ACK           0x81  // moyc6_ack_t
 #define MOYC6_V_RECV          0x82  // moyc6_recv_t + payload
 #define MOYC6_V_SEND_STATUS   0x83  // moyc6_send_status_t
 
 #define MOYC6_PROTO_VERSION   1
+
+// The SHIM's build identity, self-reported over MOYC6_V_VERSION so the C6
+// updater (device/moy_c6_update.py) needs no local bookkeeping: the slave IS
+// the record of what it runs. BUMP THIS whenever the slave image changes for
+// any reason -- a shim edit, a hosted component bump, an sdkconfig change --
+// exactly the FIRMWARE_VERSION discipline, because the published manifest's
+// c6.version is read from here and a stale number is an update nobody is
+// offered. 1 is reserved for the first shim, which predates the verb and
+// answers nothing (the updater reads a VERSION timeout as "older than
+// everything").
+// MUST stay below 0x100: the version travels in the ACK's err field, and
+// ESP-IDF's own error space starts at 0x100 (ESP_ERR_TIMEOUT is 0x107) --
+// the host filters on that boundary.
+#define MOYC6_SHIM_VERSION    2
 
 // Every message begins with this envelope; every struct below embeds it.
 typedef struct __attribute__((packed)) {

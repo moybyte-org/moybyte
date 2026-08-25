@@ -49,6 +49,13 @@ import os
 import sys
 
 SCHEME = "moybyte-ota-v2"        # v2 added `board` -- see canonical()
+# The C6 co-processor image rides the SAME manifest as the P4's app image but
+# under its OWN signature: the app `sig` covers only the app fields (and must
+# keep doing so -- widening it would make every deployed verifier refuse the
+# manifest), so without this an attacker who cannot touch the signed app entry
+# could still rewrite the c6 block and hand the radio co-processor their own
+# firmware. Mirrored by device/moy_c6_update._canonical_c6.
+C6_SCHEME = "moybyte-c6-v1"
 EXPONENT = 65537
 KEY_BITS = 2048
 KEY_BYTES = KEY_BITS // 8
@@ -99,6 +106,10 @@ def verify(manifest, signature_hex, n, e=EXPONENT):
     """True when `signature_hex` is a valid signature over `manifest` for the
     public key (n, e). Pure arithmetic -- no crypto library, byte-identical in
     intent to the device's moy_ota._verify_sig."""
+    return _verify_bytes(canonical(manifest), signature_hex, n, e)
+
+
+def _verify_bytes(payload, signature_hex, n, e=EXPONENT):
     try:
         s = int(signature_hex, 16)
     except (TypeError, ValueError):
@@ -111,7 +122,7 @@ def verify(manifest, signature_hex, n, e=EXPONENT):
         got = m.to_bytes(k, "big")
     except OverflowError:
         return False
-    want = pkcs1_v15_block(hashlib.sha256(canonical(manifest)).digest(), k)
+    want = pkcs1_v15_block(hashlib.sha256(payload).digest(), k)
     # Not constant-time, and it does not need to be: this compares a public
     # value against a public value, with no secret to leak through timing.
     return got == want
@@ -148,10 +159,39 @@ def read_key(source=None):
 
 def sign(manifest, key_pem):
     """Sign `manifest` and return the signature as lowercase hex."""
+    return _sign_bytes(canonical(manifest), key_pem)
+
+
+def _sign_bytes(payload, key_pem):
     hashes, serialization, padding, _rsa = _load_backend()
     key = serialization.load_pem_private_key(key_pem, password=None)
-    sig = key.sign(canonical(manifest), padding.PKCS1v15(), hashes.SHA256())
+    sig = key.sign(payload, padding.PKCS1v15(), hashes.SHA256())
     return sig.hex()
+
+
+def canonical_c6(manifest):
+    """The bytes c6_sig covers: the c6 block plus the board (an image for one
+    co-processor must not replay onto another board's manifest). Mirrored by
+    device/moy_c6_update._canonical_c6 -- change one, change both
+    (tests/test_ota_signing.py pins the agreement)."""
+    c6 = manifest.get("c6") or {}
+    return ("%s\n%s\n%d\n%d\n%s" % (
+        C6_SCHEME,
+        manifest.get("board") or "",
+        int(c6.get("version") or 0),
+        int(c6.get("size") or 0),
+        (c6.get("sha256") or "").lower(),
+    )).encode()
+
+
+def sign_c6(manifest, key_pem):
+    """Sign the manifest's c6 block; hex, like sign()."""
+    return _sign_bytes(canonical_c6(manifest), key_pem)
+
+
+def verify_c6(manifest, signature_hex, n, e=EXPONENT):
+    """True when `signature_hex` validly signs the manifest's c6 block."""
+    return _verify_bytes(canonical_c6(manifest), signature_hex, n, e)
 
 
 def public_numbers(key_pem):

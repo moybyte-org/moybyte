@@ -101,6 +101,53 @@ def test_the_device_accepts_what_the_publisher_signs(device):
     assert u.verify_manifest(signed(), TEST_KEYS) is True
 
 
+def _load_c6_update():
+    p = ROOT / "device" / "moy_c6_update.py"
+    spec = importlib.util.spec_from_file_location("moy_c6_update_signing", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+C6_MANIFEST = dict(MANIFEST, c6={
+    "version": 2, "hosted": "2.12.12",
+    "url": "https://example.invalid/c6_network_adapter.bin",
+    "size": 1207264,
+    "sha256": "ab" * 32,
+})
+
+
+def test_the_two_c6_canonical_forms_agree():
+    """Same contract as the manifest's own canonical, for the c6 block: the
+    bytes c6_sig covers are written twice (tools/ota_sign.canonical_c6 and
+    moy_c6_update._canonical_c6) and only this runs them together."""
+    cu = _load_c6_update()
+    for manifest in (C6_MANIFEST,
+                     dict(C6_MANIFEST, board="p4"),
+                     dict(C6_MANIFEST, c6={}),
+                     dict(C6_MANIFEST, c6={"version": None, "size": None})):
+        assert cu.C6Updater._canonical_c6(manifest)             == ota_sign.canonical_c6(manifest)
+
+
+def test_the_c6_signature_round_trips_and_tamper_is_refused():
+    """The c6 block's OWN signature: the app `sig` deliberately covers only
+    the app fields, so without c6_sig a network attacker who cannot touch the
+    signed app entry could still rewrite the c6 block and hand the RADIO
+    co-processor their own firmware."""
+    m = dict(C6_MANIFEST)
+    digest = hashlib.sha256(ota_sign.canonical_c6(m)).digest()
+    block = ota_sign.pkcs1_v15_block(digest, (TEST_N.bit_length() + 7) // 8)
+    sig = "%x" % pow(int.from_bytes(block, "big"), TEST_D, TEST_N)
+    assert ota_sign.verify_c6(m, sig, TEST_N) is True
+    ota_mod = _load_moy_ota()
+    assert ota_mod.verify_sig(
+        _load_c6_update().C6Updater._canonical_c6(m), sig, TEST_KEYS) is True
+    tampered = dict(m, c6=dict(m["c6"], sha256="cd" * 32))
+    assert ota_sign.verify_c6(tampered, sig, TEST_N) is False
+    assert ota_mod.verify_sig(
+        _load_c6_update().C6Updater._canonical_c6(tampered), sig, TEST_KEYS) is False
+
+
 def test_the_two_canonical_forms_agree(device):
     """The signed bytes are written twice -- once in Python, once in MicroPython
     -- and nothing executes them together but this. If they drift, every update

@@ -259,6 +259,16 @@ jobs:
             echo "== warm .build cache: single pass is patched"
           fi
 
+      # The P4's radio is a SECOND processor with its own firmware: the C6
+      # slave (the espnow shim -- docs/espnow_p4_2026-08.md). Built from the
+      # SAME managed-component checkout the P4 image just built against, so
+      # host and slave hosted versions cannot drift; the publisher stages it
+      # into latest-p4.json's `c6` block and the console's Settings UPGRADE
+      # C6 flow streams it over SDIO (device/moy_c6_update.py). P4 job only.
+      - name: Build the C6 co-processor image
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
+        run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh
+
       - name: Collect images
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -282,6 +292,9 @@ jobs:
           cp dist/tdeck_mainline/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
           cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
+          # The C6 slave's identity stamp (P4 job only) -- the publisher reads
+          # c6.version out of it; the .bin itself rode the find above.
+          cp dist/p4/c6_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

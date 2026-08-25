@@ -97,6 +97,9 @@ SERVICES = {
     "ble_keyboard": "an OPTIONAL SECOND keyboard over BLE HID (#26), on a board that already has a physical one",
     "_with_sd": "the storage gate every store op is wrapped in",
     "updater": "the #53 OTA updater behind Settings -> UPDATE FW",
+    "c6_updater": "the C6 radio co-processor's updater behind Settings -> "
+                  "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
+                  "image and streams it over SDIO",
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
@@ -128,6 +131,7 @@ WIRING = {
         "ble_keyboard": INJECTED,
         "_with_sd": INJECTED,
         "updater": INJECTED,
+        "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
@@ -159,6 +163,7 @@ WIRING = {
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
         "updater": INJECTED,
+        "c6_updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
@@ -189,6 +194,8 @@ WIRING = {
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",
         "updater": INJECTED,
+        "c6_updater": "same as the T-Deck: this S3's radio is on-die, there "
+                      "is no co-processor to flash",
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
@@ -218,6 +225,9 @@ WIRING = {
         "updater": "OTA writes an ESP32 app partition (esp32.Partition). There "
                    "is nothing on a host to flash, and Settings hides the row "
                    "when no updater is injected",
+        "c6_updater": "the host has no radio hardware at all; the C6 updater "
+                      "is SDIO plumbing to a co-processor that only the P4 "
+                      "carries, and Settings hides its row the same way",
         "webhost": "the host IS the machine the browser runs on -- serving the "
                    "wasm console to itself has no user. `tools/simulate_desktop"
                    ".py` and firmware/web_runner cover that ground",
@@ -249,6 +259,8 @@ WIRING = {
         "_with_sd": "the VFS is in-memory; nothing to gate",
         "updater": "the page IS the update -- a reload fetches the current "
                    "build, so there is no image to flash",
+        "c6_updater": "no radio, no SDIO, no co-processor -- the same absence "
+                      "as the updater row, one level down",
         "webhost": "this build is what a webhost SERVES. A page hosting itself "
                    "is the same circle the host row describes",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",

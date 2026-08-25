@@ -69,8 +69,11 @@ fi
 # Toolchain: the same IDF checkout every moybyte esp32 build uses.
 # shellcheck disable=SC1091
 source "${REPO_ROOT}/tools/esp32_build_lib.sh"
-moybyte_setup_idf esp32c6 \
-  "${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf"
+# The P4's OWN checkout, not the T-Deck's: this script already refuses to run
+# before `make firmware-build-p4`, which guarantees the P4 tree exists -- and
+# in CI's p4 job it is the ONLY one that does (pointing at the T-Deck's was a
+# desk-topology accident that would have cloned a second ESP-IDF per CI run).
+moybyte_setup_idf esp32c6 "${BOARD_DIR}/.build/esp-idf"
 
 cd "${STAGE}/project"
 SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32c6;${HERE}/sdkconfig.moybyte"
@@ -81,6 +84,14 @@ idf.py -B build build
 mkdir -p "${DIST}"
 cp build/network_adapter.bin "${DIST}/c6_network_adapter.bin"
 cp build/flasher_args.json "${DIST}/c6_flasher_args.json"
+# The image's identity, for the publisher: c6.version in latest-p4.json is
+# READ FROM THE PROTO HEADER (the one body the slave compiled), so the number
+# a device is offered is the number the image answers over MOYC6_V_VERSION.
+SHIM_VER=$(grep -oP '#define MOYC6_SHIM_VERSION\s+\K[0-9]+' \
+  "${BOARD_DIR}/native/moy_c6/espnow_shim_proto.h")
+[ -n "${SHIM_VER}" ] || { echo "!! no MOYC6_SHIM_VERSION in the proto header" >&2; exit 1; }
+printf '{"version": %s, "hosted": "%s"}\n' "${SHIM_VER}" "${HOSTED_VER}" \
+  > "${DIST}/c6_build.json"
 SIZE=$(stat -c%s "${DIST}/c6_network_adapter.bin")
-echo "OK -> ${DIST}/c6_network_adapter.bin (${SIZE} B, hosted ${HOSTED_VER})"
+echo "OK -> ${DIST}/c6_network_adapter.bin (${SIZE} B, hosted ${HOSTED_VER}, shim v${SHIM_VER})"
 echo "     flashing it is Phase D of docs/espnow_p4_2026-08.md -- the C6 gate"
