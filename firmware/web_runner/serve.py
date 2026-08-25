@@ -68,6 +68,12 @@ else:
             self.wfile.write(body)
 
         def do_GET(self):
+            if self.path.split("?", 1)[0] == "/sync":
+                # The MODE MARKER (#193): a host that answers this owns the
+                # carts, so the page keeps nothing locally. Static hosting
+                # 404s here, which is how moybyte.com gets a browser store.
+                self._send(200, b'{"sync":1}')
+                return
             if self.path.split("?", 1)[0] == "/carts.json":
                 # The board's own packer, over a plain directory -- one body,
                 # so this twin cannot drift from what a board serves.

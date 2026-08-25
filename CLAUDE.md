@@ -399,6 +399,40 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   surprise. Building the bundle needs emsdk, so a missing one only WARNS locally
   and FAILS under `CI`/`MOYBYTE_REQUIRE_WEB_BUNDLE` — the firmware workflow builds
   the web runner before each board, so a published image always carries one.
+  **TWO WEB MODES, TOTAL, NO CROSSOVER (2026-08-25, #193/#197).** Where a page is
+  SERVED from decides where its carts live. A board-served page edits the BOARD's
+  store (the pull + `POST /sync` half); a page on a static host — moybyte.com, an
+  export, `file://` — keeps them in the BROWSER. The mode is decided ONCE at boot,
+  BEFORE the VFS is seeded, because it decides what the VFS is seeded FROM
+  (`moy_store.probeMode`): `GET /sync` is the marker a board serves, and a GET miss
+  falls through to an EMPTY-batch POST, because a board running firmware older than
+  that marker still ACCEPTS the batch and reading it as "static host" would quietly
+  strand a kid's edits in a browser. Mode 1 is not a second persistence design — it
+  is a second DELIVERY TARGET for the batch `moy_sync`'s `StoreWatcher` already
+  builds, so writes, deletes and cart-deletes arrive in the one op vocabulary and
+  the two sides cannot disagree about what a batch means. **The substrate is OPFS,
+  not IndexedDB** (the moycore plan §9 open question, closed here): the ops ARE file
+  writes at paths, so OPFS applies them 1:1 and a cart folder stays a cart folder —
+  the shape `moy_carts` already speaks on every tier — where IndexedDB would mean
+  inventing a path keyspace and a blob schema to keep a filesystem inside a
+  database, then keeping that schema honest as the store grows file kinds. Measured
+  in Chrome: a first visit seeds 89 files in **184ms**, a reload reads 92 back in
+  **71ms**, and a commit costs 3 ops in **9.0ms** against a 1/s sweep — nowhere near
+  the budget, which is what makes the file-shaped substrate free to prefer. **The
+  journal does NOT come along**: `_skip` keeps `journal/`, `thumbs/` and `.bak` off
+  the wire in both directions and mode 1 rides that same predicate, so a browser
+  cart survives a reload WITHOUT its #111 commit history — a real gap against
+  #193's "with its undo history", recorded rather than hidden. **No OPFS means the
+  page says so**: a private window, blocked site data or a `file://` origin runs in
+  memory exactly as before, with the row reading "carts will NOT survive a reload";
+  a quota failure mid-apply requeues, and after three gives up ONCE and says that
+  too. `.moy` export/import is the no-account escape hatch (a dependency-free
+  STORED zip out, stored-or-deflated in) and is offered only in mode 1 — on a board
+  the console owns the store. worker.js STATICALLY imports `moy_store.mjs`, so it is
+  in `moy_webhost.ASSETS` too: a board that does not serve it serves a console that
+  cannot boot. Proof is `tests/test_web_persist_e2e.py` (env-gated `MOYBYTE_WEB_E2E`),
+  which needs **two Chrome runs sharing one profile AND one port** — OPFS is scoped
+  to the origin and lives in the profile, hence browsershot's `MOY_PROFILE`.
   **The 3.4 sync RPC SHIPPED (2026-08-25): a page served from a board writes
   BACK.** `runtime/moy_sync.py` is the one body — the browser's `StoreWatcher`
   (a ~1/s stat-sweep of the wasm VFS; no store hooks, because the store writes

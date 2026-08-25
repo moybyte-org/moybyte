@@ -1,0 +1,18 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "export the cart, then feed the very bytes back -- the round trip", "wait": 2500},
+  {"note": "catch the zip instead of downloading it (a headless download proves nothing)"},
+  {"js": "window.__zip=null,pzDownload=function(n,b){window.__zip={n:n,b:b};},'patched'"},
+  {"js": "document.getElementById('pzc').value='new_cart.moy',document.getElementById('pze').click(),'clicked'"},
+  {"wait": 1500},
+  {"js": "window.__zip ? window.__zip.n+' '+window.__zip.b.byteLength : 'NO ZIP'"},
+  {"note": "the zip's own bytes back in: a real unzip, a real collision-safe name"},
+  {"js": "WORKER.postMessage({t:'import',name:'copy.moy.zip',buf:window.__zip.b}),'sent'"},
+  {"wait": 2500},
+  {"js": "window.__moyImported || 'nothing imported'"},
+  {"note": "let the sweep persist the imported cart too"},
+  {"wait": 5000},
+  {"js": "pzAsk(), 'asked'"},
+  {"wait": 600},
+  {"js": "Array.from(document.getElementById('pzc').options).map(o=>o.value).join(',')"},
+  {"shot": "imported"}
+]}

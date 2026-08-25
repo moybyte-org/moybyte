@@ -44,9 +44,52 @@ gotAssets=true;}
 else if(m.t==="frame"){
 if(pendingFB&&WORKER)WORKER.postMessage({t:"fbret",b:pendingFB},[pendingFB]);
 pendingFrame=m.s;pendingFB=m.fb||null;}
+// The worker's own account of where the carts went, kept where a probe (or a
+// devtools console) can read it -- console logs get trimmed by whatever is
+// capturing them, and this is the evidence that the store is being written.
+else if(m.t==="persist"){window.__moyPersist={mode:m.mode,s:m.s,d:m.d||"",n:m.n||0};
+pzMode(m.mode,m.s);}
+else if(m.t==="carts"){pzFill(m.names);}
+else if(m.t==="exported"){pzDownload(m.name,m.buf);}
+else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 else if(m.t==="error"){console.error("[moy]",m.s);
 sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";}}
+// ---- persistence row (#193) -------------------------------------------------
+// The worker decides the MODE (board vs browser-local) and this only reports it.
+// On a board-served page the row never appears: the console owns the carts.
+var pzEl=document.getElementById("pz"),pzS=document.getElementById("pzs"),
+pzC=document.getElementById("pzc"),pzE=document.getElementById("pze"),
+pzI=document.getElementById("pzi"),PZMODE=null;
+function pzSay(s,warn){pzS.textContent=s;pzS.className=warn?"warn":"";}
+function pzMode(mode,s){PZMODE=mode;pzSay(s,mode==="none");
+if(mode!=="board"){pzEl.style.display="flex";pzAsk();}}
+function pzAsk(){if(WORKER)WORKER.postMessage({t:"carts"});}
+function pzFill(names){var keep=pzC.value;pzC.innerHTML="";
+for(var i=0;i<names.length;i++){var o=document.createElement("option");
+o.value=names[i];o.textContent=names[i];pzC.appendChild(o);}
+if(keep&&names.indexOf(keep)>=0)pzC.value=keep;}
+// A .moy zip is bytes the page never inspects -- the worker built it from the
+// live VFS, which is the same folder a board reads.
+function pzDownload(name,buf){var url=URL.createObjectURL(new Blob([buf],{type:"application/zip"}));
+var a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();
+document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(url);},4000);
+pzSay("exported "+name,false);}
+pzE.addEventListener("click",function(){if(!WORKER||!pzC.value)return;
+pzSay("exporting "+pzC.value+"...",false);WORKER.postMessage({t:"export",cart:pzC.value});});
+pzC.addEventListener("mousedown",pzAsk);
+function pzImport(file){if(!WORKER||!file)return;pzSay("importing "+file.name+"...",false);
+file.arrayBuffer().then(function(buf){
+WORKER.postMessage({t:"import",name:file.name,buf:buf},[buf]);})
+.catch(function(e){pzSay("could not read that file",true);console.error(e);});}
+pzI.addEventListener("change",function(){if(pzI.files&&pzI.files[0])pzImport(pzI.files[0]);
+pzI.value="";});
+// Drop a .moy zip anywhere on the page. Only in a mode that has a local store:
+// on a board-served page the drop would write to a store the board owns.
+window.addEventListener("dragover",function(e){if(PZMODE&&PZMODE!=="board")e.preventDefault();});
+window.addEventListener("drop",function(e){if(!PZMODE||PZMODE==="board")return;
+e.preventDefault();var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+if(f)pzImport(f);});
 // The loader module hands the worker over once constructed.
 window.__moyAttach=function(w){WORKER=w;w.onmessage=function(e){onWorker(e.data);};};
 // ?pad=1 forces the touch controls on ANY device (desktop demos, touch laptops).

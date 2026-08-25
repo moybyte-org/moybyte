@@ -1,0 +1,19 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "a STATIC host: no /sync, so the carts must be kept in the browser", "wait": 1500},
+  {"js": "document.getElementById('pzs').textContent"},
+  {"note": "tap the MAKE STUDIO tile (left-most)"},
+  {"click": [63, 120]},
+  {"wait": 1500},
+  {"shot": "picker"},
+  {"note": "tap the +New tile -- a real store mutation through the real UI"},
+  {"click": [63, 120]},
+  {"wait": 2000},
+  {"shot": "after_new"},
+  {"note": "let the commit sweep + the OPFS apply land (1s pump cadence)"},
+  {"wait": 6000},
+  {"js": "pzAsk(), 'asked'"},
+  {"wait": 600},
+  {"js": "Array.from(document.getElementById('pzc').options).map(o=>o.value).join(',')"},
+  {"js": "window.__moyPersist ? window.__moyPersist.n : -1"},
+  {"js": "window.__moyPersist ? window.__moyPersist.d : 'none'"}
+]}

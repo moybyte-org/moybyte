@@ -87,6 +87,11 @@ INTERNAL_WEB_DIR = "/moy/web"
 ASSETS = {
     "index.html": "text/html; charset=utf-8",
     "worker.js": "text/javascript; charset=utf-8",
+    # worker.js IMPORTS this one, so a board that does not serve it serves a
+    # console that cannot boot. It is mode 1's store (#193) and the .moy zip
+    # codec; a board-served page uses only its mode probe, but the import is
+    # static and the module has to be here.
+    "moy_store.mjs": "text/javascript; charset=utf-8",
     "micropython.mjs": "text/javascript; charset=utf-8",
     "micropython.wasm": "application/wasm",
 }
@@ -348,7 +353,7 @@ class WebHost(WebServer):
             return "serving the PUSHED copy at %s, not the image's (%s)" % (
                 self.web_dir, stamp or "none")
         return "MIXED: %d of %d assets pushed to %s, the rest from the " \
-               "image (%s) -- push all four or delete them" % (
+               "image (%s) -- push them all or delete them" % (
                    len(pushed), len(ASSETS), self.web_dir, stamp or "none")
 
     def stop(self):
@@ -374,8 +379,8 @@ class WebHost(WebServer):
         # A PRE-GZIPPED copy wins when it is there. The board does no
         # compressing -- it serves `<name>.gz` verbatim and lets the browser
         # inflate it, so the only cost is picking the file. Worth it because
-        # the wire is the expensive part here: the four assets are 1,155,953 B
-        # raw and 572,747 B gzipped, and on the T-Deck they stream off SD
+        # the wire is the expensive part here: the assets are 1,230,814 B
+        # raw and 609,268 B gzipped, and on the T-Deck they stream off SD
         # inside the DMA gate, so halving the bytes halves the window in which
         # the console is handing its storage to the socket.
         # Raw stays the fallback: `dist/` keeps both, because a plain static
@@ -389,7 +394,7 @@ class WebHost(WebServer):
         # on. The image's job is the GUARANTEE: a board that has never been
         # pushed to still serves a console, and it is the one its firmware was
         # built from. (Which also means a HALF-pushed bundle is a mixed one --
-        # push all four or none; p4_push_web does.)
+        # push them all or none; p4_push_web does.)
         #
         # The PROBE must go through `_with_sd` too, not just the body: on the
         # T-Deck `web_dir` is on the card sharing the panel's SPI host, and this

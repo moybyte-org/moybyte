@@ -76,12 +76,27 @@ background:#7e2553;border:2px solid #c2c3c7;margin-left:min(18px,2vw)}#bb{backgr
 #kbin{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;margin:0;border:0;
 opacity:0;font-size:16px;background:transparent;color:transparent;caret-color:transparent}
 @media (hover:hover) and (pointer:fine){#ctl{display:none}}
+/* Persistence row (#193): where the carts are being kept, plus the .moy escape
+   hatch. Hidden until the worker reports a mode, and hidden for good on a
+   board-served page -- there the console owns the store and a browser-local
+   export/import would only invite the crossover the two modes exist to avoid. */
+#pz{display:none;align-items:center;gap:8px;margin:0 0 6px;max-width:96vw;
+flex-wrap:wrap;justify-content:center;font-size:12px;color:#5f6f9f}
+#pz select,#pz button,#pz .fb{font:12px ui-monospace,Menlo,Consolas,monospace;
+color:#c2c3c7;background:#1d2b53;border:1px solid #29366f;border-radius:4px;padding:3px 7px}
+#pz button,#pz .fb{cursor:pointer}
+#pz .fb:hover,#pz button:hover{border-color:#5f6f9f}
+#pzs.warn{color:#ffa300}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
 <h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a></h1>
+<div id=pz><span id=pzs></span>
+<select id=pzc title="cart to export"></select>
+<button id=pze>export .moy</button>
+<label class=fb>import .moy<input id=pzi type=file accept=".zip,.moy" style="display:none"></label></div>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
 <div id=ctl><div id=joy><div id=th></div></div>

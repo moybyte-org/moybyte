@@ -11,8 +11,8 @@ under the desktop (CLAUDE.md, hard constraints), so its bundle went on by card
 reader or not at all.
 
 So the image carries one. This emits a C translation unit that `.incbin`s the
-PRE-GZIPPED assets (the four in `moy_webhost.ASSETS`, 572,693 B against
-1,155,953 B raw -- raw does not fit the T-Deck's slot at all) and exposes them
+PRE-GZIPPED assets (every one in `moy_webhost.ASSETS` -- 609,268 B against
+1,230,814 B raw; raw does not fit the T-Deck's slot at all) and exposes them
 as a table the `moy_web` native module hands out as memoryviews. Storage still
 WINS at serve time; see `moy_webhost._asset`.
 

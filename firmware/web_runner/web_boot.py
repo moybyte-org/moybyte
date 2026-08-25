@@ -400,6 +400,28 @@ def kiosk(name):
     ws._exit_to_caller = _restart
 
 
+def _rescan():
+    """Re-derive the shelf from the store on disk. Both re-scan paths share it,
+    so the launcher items, the slim covers and the dirty flag cannot drift
+    apart depending on which one ran."""
+    ws = _S["ws"]
+    ws._all_carts = moy_carts.scan(_S["root"])
+    ws.launcher.items = ws._launcher_items(ws._all_carts)
+    ws.slim_carts()
+    ws._dirty = True
+
+
+def rescan_store():
+    """Files landed in the VFS from OUTSIDE the console -- the page's .moy
+    import (#193). Re-scan the shelf, and deliberately do NOT rebase the sync
+    watcher: an import is a CHANGE, so it must stay pending and reach the store
+    (the browser's OPFS in mode 1) on the next sweep like any other commit.
+    reload_cart's rebase is the opposite case -- there the files arrived FROM
+    the far end, and replaying them back at it would undo the reload."""
+    _rescan()
+    return True
+
+
 def reload_cart(name=None):
     """Dev hot-reload (the moy CLI's watch loop): the page rewrote changed cart
     files in the VFS; pop any running cart (flushes pmem via release_world),
@@ -411,10 +433,7 @@ def reload_cart(name=None):
         name = (cart.get("path") or "").rsplit("/", 1)[-1]
     if cart is not None:
         _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
-    ws._all_carts = moy_carts.scan(_S["root"])
-    ws.launcher.items = ws._launcher_items(ws._all_carts)
-    ws.slim_carts()
-    ws._dirty = True
+    _rescan()
     w = _S.get("sync")
     if w is not None:
         # The reload just re-pulled the served store over the VFS -- adopt it

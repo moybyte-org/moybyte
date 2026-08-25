@@ -295,7 +295,11 @@ echo "== generating index.html"
 # measured the slow way, with a board serving a correct console to a browser
 # running the previous worker. Content-addressed so the url changes when, and
 # only when, the worker does.
-MOY_BUILD="$(sha1sum "${SCRIPT_DIR}/worker.js" | cut -c1-12)"
+# Both worker files feed the hash: worker.js IMPORTS moy_store.mjs, so a change
+# confined to the store would otherwise leave the worker url identical and let a
+# browser pair a new worker with a cached store module.
+MOY_BUILD="$(cat "${SCRIPT_DIR}/worker.js" "${SCRIPT_DIR}/moy_store.mjs" \
+  | sha1sum | cut -c1-12)"
 cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" \
   | sed "s/@MOY_BUILD@/${MOY_BUILD}/" > "${STAGE_DIR}/index.html"
 
@@ -326,7 +330,12 @@ mkdir -p "${DIST_DIR}"
 cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
 # worker.js is a SEPARATE file, not inlined: a module Worker needs its own URL.
 # It owns the VM + the frame loop; the page only replays (#176 smoothness).
-cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+# ...and its import of moy_store.mjs (the browser-local store + the .moy zip,
+# #193) carries the same cache buster, because a static import specifier is a
+# url a browser caches as hard as the worker's own.
+sed "s|\"./moy_store.mjs\"|\"./moy_store.mjs?v=${MOY_BUILD}\"|" \
+  "${SCRIPT_DIR}/worker.js" > "${DIST_DIR}/worker.js"
+cp "${SCRIPT_DIR}/moy_store.mjs" "${DIST_DIR}/"
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
@@ -343,7 +352,7 @@ fi
 # that knows to advertise it.
 # -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
 # the push tool's per-file compare stays meaningful.
-for f in index.html worker.js micropython.mjs micropython.wasm; do
+for f in index.html worker.js moy_store.mjs micropython.mjs micropython.wasm; do
   if [ -f "${DIST_DIR}/${f}" ]; then
     gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
   fi
