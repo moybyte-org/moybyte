@@ -233,10 +233,10 @@ def frozen_set(target):
         # died with the inline list.
         mods = {Path(name).stem: path for name, path
                 in board_config.staged_modules(WEB, ROOT).items()}
-        # web_boot/web_canvas are the runner's AUTHORED modules, copied by
-        # name in build.sh; its moy.py and serve.py are HOST dev tools and
-        # never enter the image.
-        for name in ("web_boot", "web_canvas"):
+        # web_boot/web_canvas/gpio_link are the runner's AUTHORED modules,
+        # copied by name in build.sh; its moy.py and serve.py are HOST dev
+        # tools and never enter the image.
+        for name in ("web_boot", "web_canvas", "gpio_link"):
             p = WEB / (name + ".py")
             if p.exists():
                 mods[name] = p

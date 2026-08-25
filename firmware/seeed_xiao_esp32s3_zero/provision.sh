@@ -33,6 +33,8 @@ run cp \
   "${REPO}/runtime/web_view_ws.py" \
   "${REPO}/runtime/ticks.py" \
   "${HERE}/zero_host.py" \
+  "${HERE}/zero_setup.py" \
+  "${HERE}/zero_gpio.py" \
   "${HERE}/main.py" \
   : >/dev/null
 

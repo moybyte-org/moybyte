@@ -536,6 +536,63 @@ Both `net` and `on_net` are **only present** when the manifest grants
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
 > game logic off the wall clock — otherwise the two screens drift apart.
 
+## Pins — wires, lights and buttons (`#9`)
+
+Some consoles have a **spare pin header**: the Moybyte Zero is one, a little
+board with no screen that serves this console to your browser over WiFi. When
+your cart is running on a console like that, it gets two extra verbs and can
+turn things on and off in the real world.
+
+| call | does |
+|---|---|
+| `pin_write(n, v)` | pin `n` goes high (`v` = 1) or low (`v` = 0). `True`/`False` work too |
+| `pin_read(n)` | the last level pin `n` reported — `0`, `1`, or `None` before the first answer |
+
+```python
+LED = 21          # the Zero's own little light
+BUTTON = 2        # a switch wired between pin 2 and ground
+
+def _update(dt):
+    if pin_read(BUTTON) == 0:      # pressed (the switch pulls the pin low)
+        pin_write(LED, 0)          # this LED is ON when the pin is LOW
+    else:
+        pin_write(LED, 1)
+```
+
+**These names are only there when the console has pins.** On moybyte.com, on a
+T-Deck or a P4, or in a browser tab you opened from a file, `pin_write` does
+not exist at all and using it is a `NameError` — the same rule as `wifi` and
+`net`. That is on purpose: a verb that pretends to work while nothing happens
+is the hardest possible bug for a kid to see.
+
+**They are not instant, and you should know how much.** Your cart runs in the
+browser and the pins are on the board across the room, so a `pin_write` does
+not go down a wire — it is **queued**, and the page sends everything that piled
+up about **30 times a second**. So:
+
+* a write lands roughly **one to two frames** after you make it, plus however
+  long your WiFi takes;
+* `pin_read(n)` answers with the **last thing the board said**, which is up to
+  one of those round trips old — the first call, before any answer has come
+  back, returns `None`;
+* writing the same pin twice in one frame is fine — only the **last** value was
+  ever real, and only it is sent.
+
+None of that is enough to notice for a light, a buzzer or a button. It is not
+fast enough to bit-bang a protocol, and it is not meant to be.
+
+**Which pins?** Each board publishes its own list, and a pin that is not on it
+is **refused, never driven** — the board needs some of its pins to stay alive
+(its flash, its USB, its serial console), and a typo must not be able to reach
+them. Ask for a pin outside the list and the console says so once, and nothing
+happens. On the Zero the list is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
+`D0`, `D1`, `D3`, `D4`, `D5`, `D8`, `D9`, `D10`) plus `21`, the board's own
+built-in LED.
+
+> **On or off, and that is all — for now.** There is no `pin_pwm`, no servo and
+> no motor verb yet: driving a motor takes a driver board between the pin and
+> the motor, and that is `#9`'s next step rather than this one.
+
 ## Turning a cart into an APP (`#181`)
 
 A cart whose manifest says `"type": "app"` is a tool rather than a game. The
