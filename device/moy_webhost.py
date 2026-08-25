@@ -111,9 +111,10 @@ _read_text = moy_sync._read_text
 def pack_store(carts_root, listdir=None, read=None, isdir=None):
     """The whole cart store as the page's bundle shape: {"<cart>/<rel>": text}.
 
-    The shape is `worker.js`'s, not a new one -- it is what the dev server
-    (`firmware/web_runner/moy.py`) already emits and what `writeCarts` already
-    consumes, so the page needs no change to read a board instead of a build.
+    The shape is `worker.js`'s, not a new one -- it is what the dev twin
+    (`firmware/web_runner/serve.py --carts`, which calls THIS function) serves
+    and what `writeCarts` already consumes, so the page needs no change to
+    read a board instead of a build.
 
     The three injected callables are for testing on the host, where there is no
     device filesystem; they default to the real ones.

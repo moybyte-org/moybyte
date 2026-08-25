@@ -1213,8 +1213,11 @@ glass and is therefore waiting on the same flash stage 3 is.*
   layers per-frame-HOT — `draw_layer` inside a sprite loop, or many layers
   composited per frame — would move this from one upcall to many, and the
   measurement, not the design, should decide it then.
-- **The screenshot verb** on the sync RPC (§3.2's partial mirror
-  successor): worth its ~page of code, or does the capture job just die?
+- ~~**The screenshot verb** on the sync RPC (§3.2's partial mirror
+  successor): worth its ~page of code, or does the capture job just die?~~
+  **DROPPED (owner, 2026-08-25):** the wasm head covers the show-and-tell
+  jobs — the browser IS the console, so sharing happens there; the capture
+  job dies with the mirror as §3.2 priced in.
 - **Sync mechanics** (§3.4): the browser-local store substrate (OPFS vs
   IndexedDB), pairing-token lifetime vs plain re-pair-by-QR, and how a
   two-sided collision *presents* to a kid — the rule is LWW + journal; the

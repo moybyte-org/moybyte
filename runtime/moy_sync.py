@@ -19,7 +19,7 @@ One body, three consumers, so the two sides cannot disagree about the wire:
     appends, os.rename), and watching the filesystem catches every writer by
     construction where a verb-level wrapper would miss the next one added.
   * `apply_ops` -- the RECEIVING half: the board (moy_webhost POST /sync),
-    the dev server (web_runner/moy.py), and the convergence harness all apply
+    the dev server (web_runner/serve.py --carts), and the convergence harness all apply
     a batch through this one function. MicroPython-safe (os + json only);
     every landed file goes through moy_fs's crash-safe publish.
   * `_skip` -- the ONE predicate for what never crosses the wire, now shared

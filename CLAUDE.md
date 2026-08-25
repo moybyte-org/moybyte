@@ -434,8 +434,14 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   fatal. (2) `HEAPU8` is patched INTO the port's own
   `EXPORTED_RUNTIME_METHODS_EXTRA` list; that variable is set with `+=`, so a
   command-line assignment REPLACES it — which drops `getValue`/`setValue` and the
-  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop: `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
-  `node harness.mjs` drives it headless. **To see what the BROWSER shows, use
+  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop:
+  `serve.py` over `dist/` (`--carts DIR` makes it the board twin: live carts.json
+  + POST /sync against a plain directory); `node harness.mjs` drives it headless.
+  **`moy.py` was DELETED 2026-08-25** (owner call): it was moy-spec's CLI shape
+  left behind — its `run`/`export` served a `runner/` dir this repo never had
+  (worker.js missing from its file list), `new` duplicates the console's own
+  +New, and the real `moy` CLI (new/run/export/port/demo) lives in the spec repo.
+  Hot reload went with it, unmissed. **To see what the BROWSER shows, use
   `node pageshot.mjs <scenario.json> [outdir]`**: it boots the real wasm console
   from `dist/` and decodes the same framebuffer the browser blits, into PNGs.
   (It used to have to slice the page's replayer out of the page source and replay

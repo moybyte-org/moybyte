@@ -52,9 +52,9 @@ else
   echo "   (no ${DIST} -- build firmware/web_runner first; skipping)"
 fi
 
-echo "== seed carts"
-for cart in star_catcher.moy sakura.moy; do
-  run cp -r "${REPO}/system_carts/${cart}" :/moy/carts/ >/dev/null
+echo "== seed carts (the whole roster -- ~1.1MB against a ~6MB flash store)"
+for cart in "${REPO}"/system_carts/*.moy; do
+  run cp -r "${cart}" :/moy/carts/ >/dev/null
 done
 
 if [ -n "${WIFI}" ]; then
