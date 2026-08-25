@@ -56,6 +56,36 @@ def test_the_two_skip_predicates_agree():
     assert arr("SITE_SKIP_FILES") == moy_sync.SITE_SKIP_FILES
 
 
+def test_the_sync_root_registry_agrees_across_languages():
+    """A static host has no server to hand the page the root list, so
+    moy_store.mjs carries a MIRROR of moy_sync.SYNC_ROOTS. The mirror can rot --
+    a root whose dc arity or vfs path drifts would persist a kid's drawing into
+    the wrong place or reject a legal delete -- so pin id, endpoint, vfs and the
+    whole-folder-delete arity against the Python registry, in order."""
+    from runtime import moy_sync
+
+    js = _read("firmware", "web_runner", "moy_store.mjs")
+    block = re.search(r"export const ROOTS = \[(.*?)\];", js, re.S)
+    assert block, "no ROOTS registry in moy_store.mjs"
+    entries = re.findall(r"\{([^}]*)\}", block.group(1))
+    assert len(entries) == len(moy_sync.SYNC_ROOTS), \
+        "the JS registry has %d roots, Python has %d" % (
+            len(entries), len(moy_sync.SYNC_ROOTS))
+
+    def field(entry, name):
+        m = re.search(r'%s:\s*("([^"]*)"|null|\d+)' % name, entry)
+        assert m, "no %s in %r" % (name, entry)
+        v = m.group(1)
+        return None if v == "null" else (m.group(2) if v.startswith('"') else int(v))
+
+    for entry, root in zip(entries, moy_sync.SYNC_ROOTS):
+        assert field(entry, "id") == root.id, entry
+        assert field(entry, "endpoint") == root.endpoint.lstrip("/"), entry
+        assert field(entry, "vfs") == "/moy/" + root.id, entry
+        assert field(entry, "dcMin") == root.dc_min, entry
+        assert field(entry, "dcMax") == root.dc_max, entry
+
+
 def test_the_journal_crosses_only_into_the_local_store():
     """The distinction the whole doctrine rests on, in both languages: a
     journal path is refused by the WIRE predicate and accepted by the LOCAL
@@ -126,11 +156,19 @@ def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
 
     boot = _read("firmware", "web_runner", "web_boot.py")
     assert "def store_mode(" in boot
-    made = boot[boot.index("import moy_sync"):boot.index('_S["canvas"]')]
-    assert "skip_keep_journal" in made and '"site"' in made, made
-    # The DEFAULT is the wire's own predicate: a mode that fails to arrive must
-    # not start shipping journals at a board.
-    assert "else None" in made, made
+    # boot() decides site-ness from the mode and hands it to the watcher build;
+    # the per-root relaxation itself lives on the Root descriptor now.
+    made = boot[boot.index("def boot("):boot.index('_S["canvas"]')]
+    assert '_build_watchers(carts_root' in made and '"site"' in made, made
+    build = boot[boot.index("def _build_watchers("):boot.index("def _watchers(")]
+    assert "root.watch_skip(site)" in build, build
+    # The relaxation is site-AND-that-root-of-record; the DEFAULT is the wire's
+    # own predicate (None), so a mode that fails to arrive never starts shipping
+    # journals at a board.
+    sync = _read("runtime", "moy_sync.py")
+    skip = sync[sync.index("def watch_skip("):sync.index("def watch_skip(") + 400]
+    assert "skip_keep_journal" in skip and "site_keep_journal" in skip, skip
+    assert "else None" in skip, skip
 
 
 def test_the_mode_is_decided_before_anything_is_written():
@@ -140,8 +178,10 @@ def test_the_mode_is_decided_before_anything_is_written():
     worker = _read("firmware", "web_runner", "worker.js")
     init = worker[worker.index("async function initStore("):
                   worker.index("async function init(")]
-    assert init.index("probeMode") < init.index("writeStore")
-    # The console boots AFTER the store is seeded: web_boot rebases the watcher
+    # The mode is decided (probeMode) before the seed loop writes anything --
+    # seedRoot is what does the writeStore, so probeMode must precede its call.
+    assert init.index("probeMode") < init.index("seedRoot(")
+    # The console boots AFTER the store is seeded: web_boot rebases each watcher
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]
-    assert body.index("initStore(carts)") < body.index("mp.runPython")
+    assert body.index("initStore({") < body.index("mp.runPython")

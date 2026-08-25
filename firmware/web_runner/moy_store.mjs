@@ -61,6 +61,25 @@ export function skipLocal(name) {
     return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
 }
 
+// The SYNC ROOT REGISTRY -- the JS MIRROR of runtime/moy_sync.SYNC_ROOTS, so the
+// worker and this store iterate roots instead of naming carts/files. A static
+// host has no server to ask for this, so it is a constant, pinned against the
+// Python registry by tests/test_web_store.py (a drift there fails the build).
+// The only per-root behaviour the browser store needs is the whole-folder
+// delete ARITY: a cart is one segment, a files item is a kind/name or a folder
+// below it. Kinds are not validated here -- these ops are the browser's own
+// sweep of its own store, and `.history`/`trash` persisting to a SITE-mode OPFS
+// is the kid's own undo/recovery surviving the tab, which is correct.
+export const ROOTS = [
+    { id: "carts", vfs: "/moy/carts", endpoint: "carts.json", dcMin: 1, dcMax: 1 },
+    { id: "files", vfs: "/moy/files", endpoint: "files.json", dcMin: 2, dcMax: null },
+];
+
+export function rootById(id) {
+    for (const r of ROOTS) if (r.id === id) return r;
+    return null;
+}
+
 // A path the local store will accept: the JS half of moy_sync.safe_segments.
 // An allowlist of shape, not a blocklist of tricks -- the store is a real
 // filesystem and `..` in a cart name must never resolve. `skip` defaults to the
@@ -122,13 +141,17 @@ const dec = new TextDecoder();
 // null when the browser has no OPFS (or refuses it -- a private window, a
 // file:// origin, site data blocked). The caller must treat null as "run in
 // memory and SAY so", never as an empty store.
-export async function openStore(nav, root = "carts") {
+export async function openStore(nav, rootId = "carts") {
+    const desc = rootById(rootId);
+    if (!desc) return null;
     const st = nav && nav.storage;
     if (!st || typeof st.getDirectory !== "function") return null;
     try {
         const dir = await st.getDirectory();
-        const carts = await dir.getDirectoryHandle(root, { create: true });
-        return { dir, carts, parts: new Map() };
+        // The OPFS directory is named by the root id, so the carts and files
+        // stores are siblings under the origin's OPFS, never one blob.
+        const carts = await dir.getDirectoryHandle(rootId, { create: true });
+        return { dir, carts, parts: new Map(), root: desc };
     } catch (e) {
         return null;
     }
@@ -198,7 +221,10 @@ async function applyOne(store, op) {
     const parts = safeSegments(op.p || "", skipLocal);
     if (!parts) return "bad path";
     if (op.dc) {
-        if (parts.length !== 1) return "dc wants a cart folder";
+        // Whole-folder delete arity from the root descriptor -- a cart is one
+        // segment, a files item a kind/name or a recording folder below it.
+        const n = parts.length, r = store.root;
+        if (n < r.dcMin || (r.dcMax !== null && n > r.dcMax)) return "bad dc target";
         try { await removeAt(store, parts, true); } catch (e) { /* already gone */ }
         return null;
     }

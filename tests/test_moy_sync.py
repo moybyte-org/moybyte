@@ -696,16 +696,18 @@ def _web_boot():
 
 
 def _wired(tmp_path, files=True):
-    """web_boot's `_S` wired the way boot() wires it: a carts watcher always, a
-    files watcher only when the pull left a files root behind."""
+    """web_boot's `_S` wired the way boot() wires it: ONE watcher per registered
+    sync root whose store is present -- carts always, a sibling root (files) only
+    when the pull left its directory behind. Built through the same
+    `_build_watchers` boot() calls, so the test can't drift from the wiring."""
     wb = _web_boot()
     carts = tmp_path / "carts"
     (carts / "hop.moy").mkdir(parents=True)
     (carts / "hop.moy" / "main.py").write_text("x = 1\n")
     if files:
         _files_store(tmp_path)
-    wb._S["sync"] = StoreWatcher(str(carts))
-    wb._S["sync_files"] = wb._files_watcher(moy_sync, str(carts))
+    wb._S["store_mode"] = None
+    wb._S["watchers"] = wb._build_watchers(str(carts), False)
     wb._S.pop("sync_took", None)
     wb._S.pop("sync_pin", None)
     return wb, carts
@@ -716,8 +718,9 @@ def test_no_files_root_means_no_files_watcher(tmp_path):
     push: worker.js creates the files root only when GET /files.json answered,
     so a board that predates files sync leaves nothing here to watch."""
     wb, _carts = _wired(tmp_path, files=False)
-    assert wb._S["sync"] is not None
-    assert wb._S["sync_files"] is None
+    watchers = wb._S["watchers"]
+    assert moy_sync.CARTS_ROOT_ID in watchers
+    assert moy_sync.FILES_ROOT_ID not in watchers
     assert wb.sync_poll_json() == "", "a quiet store says nothing either way"
 
 
@@ -763,7 +766,7 @@ def test_sync_off_stops_both_roots(tmp_path):
     is a different thing from a board that has /sync and no files layer."""
     wb, _carts = _wired(tmp_path)
     wb.sync_off()
-    assert wb._S["sync"] is None and wb._S["sync_files"] is None
+    assert wb._S["watchers"] == {}
     assert wb.sync_poll_json() == ""
 
 

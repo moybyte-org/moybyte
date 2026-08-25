@@ -387,24 +387,15 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # pull wrote the store, so the baseline is "the board's own state, nothing
     # pending". A page served by a host with no /sync (moybyte.com, an
     # export) gets one failed POST and the worker calls sync_off().
-    try:
-        import moy_sync
-        # THE JOURNAL FOLLOWS THE STORE OF RECORD (2026-08-25). In SITE mode
-        # this browser's OPFS is that store, so its watcher sweeps the journal
-        # too and the kid's undo history survives the tab. In BOARD mode the
-        # board is of record and journals the pushes itself, so this watcher
-        # keeps the default predicate and the wire is byte-identical to what it
-        # always was -- the VFS journal here is written, never shipped, and dies
-        # with the session, which is now correct rather than a gap.
-        _S["sync"] = moy_sync.StoreWatcher(
-            carts_root,
-            skip=moy_sync.skip_keep_journal
-            if _S.get("store_mode") == "site" else None)
-        _S["sync_files"] = _files_watcher(moy_sync, carts_root)
-    except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
-        print("sync watcher unavailable:", exc)
-        _S["sync"] = None
-        _S["sync_files"] = None
+    # ONE watcher per registered sync root (moy_sync.SYNC_ROOTS) -- built by
+    # ITERATING the registry, so a new store is watched the day it is registered
+    # with no new line here. THE JOURNAL FOLLOWS THE STORE OF RECORD (2026-08-25):
+    # `root.watch_skip(site)` sweeps journal/ into the browser's own OPFS in SITE
+    # mode for the root that is of record there (carts), and keeps the wire's own
+    # rule everywhere else -- so a board-mode sweep is byte-identical to what it
+    # always was. A root whose store is not present in the VFS (a sibling root
+    # the served host has no layer for) simply gets no watcher.
+    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site")
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -418,26 +409,42 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     return True
 
 
-def _files_watcher(moy_sync, carts_root):
-    """The #108 files watcher, or None when this page's server has no files half.
-
-    CAPABILITY, not configuration, and the mechanism is deliberately the pull's
-    own result: worker.js creates the files root in the VFS only when its
-    GET /files.json answered, so an older board -- one that serves carts and
-    /sync but predates this -- leaves no directory here and no files batch is
-    ever aimed at a receiver that would misapply it. (The wire's v2 bump would
-    refuse such a batch anyway; this is what keeps it from being sent, and it
-    is why one 404 cannot disable the CARTS push along with it.)
-    """
+def _build_watchers(carts_root, site):
+    """`{root_id: StoreWatcher}` for every registered sync root whose store is
+    PRESENT in the VFS. A missing store means no watcher -- and that is a
+    CAPABILITY signal, not a bug: worker.js seeds a sibling root's directory only
+    when its source exists (a board-served `files.json`, or the browser's own
+    OPFS in site mode), so a host that has no files layer leaves no directory,
+    gets no files watcher, and never aims a files batch at a receiver that could
+    only refuse it. Never blocks a boot -- any failure leaves an empty dict."""
     import os
-    root = moy_sync.files_root(carts_root)
-    if root is None:
-        return None
+    out = {}
     try:
-        os.stat(root)
-    except OSError:
-        return None
-    return moy_sync.StoreWatcher(root, root_id=moy_sync.FILES_ROOT_ID)
+        import moy_sync
+        for root in moy_sync.SYNC_ROOTS:
+            path = root.path(carts_root)
+            if path is None:
+                continue                 # no such layer on this host at all
+            try:
+                os.stat(path)            # present in the VFS?
+            except OSError:
+                continue                 # not seeded -> not watched
+            out[root.id] = moy_sync.StoreWatcher(
+                path, root_id=root.id, skip=root.watch_skip(site))
+    except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
+        print("sync watcher unavailable:", exc)
+        return {}
+    return out
+
+
+def _watchers():
+    """The live watchers, in REGISTRY (drain) order -- CARTS FIRST, a deliberate
+    priority: a cart edit is what the kid is watching on the glass, and a drawing
+    landing a second later costs nobody anything. Order comes from the registry,
+    never the dict (MicroPython dicts are not insertion-ordered)."""
+    import moy_sync
+    ws = _S.get("watchers") or {}
+    return [ws[r.id] for r in moy_sync.SYNC_ROOTS if r.id in ws]
 
 
 def kiosk(name):
@@ -487,14 +494,11 @@ def reload_cart(name=None):
     if cart is not None:
         _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
     _rescan()
-    for key in _SYNC_ROOTS:
-        w = _S.get(key)
-        if w is not None:
-            # The reload just re-pulled the served store over the VFS -- adopt
-            # it as the new baseline (deliberate LWW: replaying local unpushed
-            # edits over a state the human just asked for would undo the
-            # reload).
-            w.rebase()
+    for w in _watchers():
+        # The reload just re-pulled the served store over the VFS -- adopt it as
+        # the new baseline (deliberate LWW: replaying local unpushed edits over a
+        # state the human just asked for would undo the reload).
+        w.rebase()
     return open_cart(name) if name else True
 
 
@@ -678,13 +682,6 @@ def sync_config(pin=None):
     return ""
 
 
-# The watched roots, drained in this order. CARTS FIRST is a deliberate
-# priority and not an accident of the tuple: a cart edit is what the kid is
-# looking at on the board's glass, and a drawing landing a second later costs
-# nobody anything.
-_SYNC_ROOTS = ("sync", "sync_files")
-
-
 def sync_poll_json():
     """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
     batch is already awaiting its answer). The worker calls this about once a
@@ -697,18 +694,15 @@ def sync_poll_json():
     fell through to the files root while a carts batch was still unanswered
     would hand out a second body on that promise, and `sync_ack` would then
     settle the wrong one."""
-    for key in _SYNC_ROOTS:
-        w = _S.get(key)
-        if w is not None and w.busy():
+    live = _watchers()
+    for w in live:
+        if w.busy():
             return ""
-    for key in _SYNC_ROOTS:
-        w = _S.get(key)
-        if w is None:
-            continue
+    for w in live:
         w.sweep()
         body = w.take_json(_S.get("sync_pin"))
         if body:
-            _S["sync_took"] = key
+            _S["sync_took"] = w.root_id
             return body
     return ""
 
@@ -718,7 +712,9 @@ def sync_ack(ok):
     clears it; anything else requeues every path it carried). Routed to the
     watcher that TOOK it -- acking the wrong root would strand its batch in
     flight forever and requeue nothing."""
-    w = _S.get(_S.get("sync_took") or "sync")
+    import moy_sync
+    watchers = _S.get("watchers") or {}
+    w = watchers.get(_S.get("sync_took") or moy_sync.CARTS_ROOT_ID)
     if w is not None:
         w.ack(bool(ok))
     return ""
@@ -731,10 +727,9 @@ def sync_off():
 
     BOTH roots, because this is the "there is no push half here" answer. A board
     that has /sync but no files layer is a different case entirely, and it is
-    settled at boot: no files.json means no files watcher, so nothing ever
-    probes for a files endpoint that would 404."""
-    _S["sync"] = None
-    _S["sync_files"] = None
+    settled at boot: no files store in the VFS means no files watcher, so
+    nothing ever probes for a files endpoint that would 404."""
+    _S["watchers"] = {}
     return ""
 
 

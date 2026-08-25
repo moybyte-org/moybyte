@@ -151,7 +151,8 @@ PROTOCOL_V = 1
 PROTOCOL_V_ROOTED = 2
 CARTS_ROOT_ID = "carts"
 FILES_ROOT_ID = "files"
-ROOT_IDS = (CARTS_ROOT_ID, FILES_ROOT_ID)
+# ROOT_IDS is derived from the registry (below files_root, which a Root needs to
+# name its path); it stays importable under this name for callers that had it.
 
 # One chunk of a large file per op, and the total text budget of one batch.
 # The transport (`moy_webserver._recv_request`) refuses requests past 64KB as
@@ -267,6 +268,116 @@ def files_root(carts_root):
     None when the store module is missing."""
     mc = _moy_carts()
     return None if mc is None else mc.files_root(carts_root)
+
+
+# ---------------------------------------------------------------------------
+# The SYNC ROOT REGISTRY. A syncable store is DATA here -- not an `if files:`
+# branch scattered through the wire parser, the apply, the webhost endpoints,
+# the browser watchers and the OPFS store. Every per-root behaviour that used to
+# be such a branch is a field on its Root, so ADDING A STORE is one entry and
+# nothing else moves. The two we ship are carts and the #108 user files; a third
+# (a shared-projects store, say) would be a third descriptor and no new plumbing.
+#
+# The JS side mirrors this list (firmware/web_runner/moy_store.mjs ROOTS), pinned
+# by tests/test_web_store.py, because a STATIC host has no server to ask for it --
+# the roots are ours and few, so a mirrored constant is honest where a fetched
+# manifest would only move the coupling.
+# ---------------------------------------------------------------------------
+
+# The files whose write can change what the LAUNCHER shows -- a cover sheet or a
+# manifest (title/order). Only a shelf-bearing root consults this.
+_SHELF_FILES = ("manifest.json", "sheet.json")
+
+
+class Root:
+    """One syncable store, described by data. The fields are exactly the places
+    the two stores used to differ:
+
+      wire     the protocol version a batch for this store carries. Carts is 1
+               (the shape every flashed board already parses); every other root
+               is 2 + an explicit `root`, which is what makes an old board REFUSE
+               it rather than misapply its paths.
+      path     (carts_root) -> where this store lives. Carts IS carts_root; the
+               files root is its sibling.
+      kinds    the first path segment must be a `moy_carts.FILE_KINDS` name --
+               which is also what keeps `.history`/`trash` home, in both
+               directions, with no second skip list.
+      journals a publish here writes #111 history when the receiver is of record
+               (the board journaling a browser's pushes).
+      shelf    a change here can dirty the launcher (a cart born/dying, a
+               manifest/sheet edit). The files root never touches the shelf.
+      ensure   mkdir the root on the first write -- the files root is created
+               lazily, the first thing a peer sends may BE its first drawing.
+      dc_min/  a whole-folder delete names a path this many segments deep. A cart
+      dc_max   is exactly one segment; a files item is a kind/name (2) or a
+               recording folder below it (>=2, so dc_max is None).
+      site_keep_journal
+               in SITE mode (the browser's OPFS is of record) this root's watcher
+               sweeps `journal/` too, so the kid's undo history survives the tab.
+               Only carts relaxes; the files layer's history is `.history/`
+               sidecars, a different mechanism that stays home either way.
+    """
+
+    def __init__(self, id, wire, path, endpoint, kinds=False, journals=False,
+                 shelf=False, ensure=False, dc_min=1, dc_max=1,
+                 site_keep_journal=False):
+        self.id = id
+        self.wire = wire
+        self._path = path
+        self.endpoint = endpoint
+        self.kinds = kinds
+        self.journals = journals
+        self.shelf = shelf
+        self.ensure = ensure
+        self.dc_min = dc_min
+        self.dc_max = dc_max
+        self.site_keep_journal = site_keep_journal
+
+    def path(self, carts_root):
+        return self._path(carts_root)
+
+    def watch_skip(self, site):
+        """What a watcher over this root will NOT sweep -- the wire's `_skip` by
+        default (None lets StoreWatcher supply it), relaxed to keep the journal
+        only for the one root+mode that is of record in the browser."""
+        return skip_keep_journal if (site and self.site_keep_journal) else None
+
+
+CARTS_ROOT = Root(
+    CARTS_ROOT_ID, PROTOCOL_V, lambda carts_root: carts_root, "/carts.json",
+    shelf=True, journals=True, dc_min=1, dc_max=1, site_keep_journal=True)
+
+FILES_ROOT = Root(
+    # A lambda, not the bare `files_root` reference, so the name resolves at CALL
+    # time: a host with no `moy_carts` (the headless XIAO cart store) answers None
+    # here and the endpoint 404s, exactly as it should, per call rather than per
+    # registry construction.
+    FILES_ROOT_ID, PROTOCOL_V_ROOTED, lambda carts_root: files_root(carts_root),
+    "/files.json", kinds=True, ensure=True, dc_min=2, dc_max=None)
+
+SYNC_ROOTS = (CARTS_ROOT, FILES_ROOT)
+ROOT_IDS = tuple(r.id for r in SYNC_ROOTS)
+_ROOT_BY_ID = {r.id: r for r in SYNC_ROOTS}
+
+
+def root_by_id(root_id):
+    """The Root for a wire root id, or None."""
+    return _ROOT_BY_ID.get(root_id)
+
+
+def root_for_wire(v, named):
+    """The Root a batch (version `v`, optional `named` root field) speaks for, or
+    None when the pair is not one this build serves -- which a receiver treats as
+    "refuse", never "guess". A v1 batch is carts BY DEFINITION and one that
+    smuggles a different root is refused rather than read as carts."""
+    if v == PROTOCOL_V:
+        if named is not None and named != CARTS_ROOT_ID:
+            return None
+        return CARTS_ROOT
+    if v == PROTOCOL_V_ROOTED:
+        r = _ROOT_BY_ID.get(named)
+        return r if (r is not None and r.wire == PROTOCOL_V_ROOTED) else None
+    return None
 
 
 def _entries(path, _listdir=None, _isdir=None):
@@ -423,25 +534,13 @@ def parse_batch(body):
         return None, None, None
     if not isinstance(doc, dict):
         return None, None, None
-    v = doc.get("v")
-    if v == PROTOCOL_V:
-        # A v1 batch is carts BY DEFINITION. It carries no root, and one that
-        # smuggles a different one in is refused rather than quietly read as
-        # carts: the version is what a v1 receiver checks, so the two must not
-        # be able to disagree about the same bytes.
-        if doc.get("root", CARTS_ROOT_ID) != CARTS_ROOT_ID:
-            return None, None, None
-        root = CARTS_ROOT_ID
-    elif v == PROTOCOL_V_ROOTED:
-        root = doc.get("root")
-        if root not in ROOT_IDS:
-            return None, None, None
-    else:
+    root = root_for_wire(doc.get("v"), doc.get("root"))
+    if root is None:
         return None, None, None
     ops = doc.get("ops")
     if not isinstance(ops, list):
         return None, None, None
-    return ops, doc.get("pin"), root
+    return ops, doc.get("pin"), root.id
 
 
 def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
@@ -470,12 +569,15 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     behaviour being unconditional: a receiver that is a scratch directory (the
     convergence harness) should not grow a history nobody will ever walk.
     """
+    desc = root_by_id(root_id)
+    if desc is None:                     # parse_batch gates this; belt to braces
+        return 0, [(i, "unknown root") for i in range(len(ops))], False
     applied = 0
     errors = []
     shelf_dirty = False
     for i, op in enumerate(ops):
         try:
-            reason, shelf = _apply_one(root, op, root_id, journal)
+            reason, shelf = _apply_one(root, op, desc, journal)
         except Exception as exc:  # noqa: BLE001 -- one bad op never kills a batch
             reason, shelf = ("%s: %s" % (type(exc).__name__, exc)), False
         if reason is None:
@@ -528,65 +630,72 @@ def _journal_commit(root, parts, text):
         print("SYNC journal failed:", exc)
 
 
-def _apply_one(root, op, root_id, journal=False):
-    """-> (error_reason_or_None, shelf_dirty)."""
+def _shelf_dirty(desc, parts, new_item):
+    """Whether landing `parts` in `desc` should make the launcher re-scan -- a
+    root without a shelf never does; one with a shelf does for a new top-level
+    folder or a change to a shelf-visible file (a cover sheet, a manifest)."""
+    return desc.shelf and (new_item or parts[-1] in _SHELF_FILES)
+
+
+def _apply_one(root, op, desc, journal=False):
+    """Apply one op into `root` (the store path) whose SHAPE is `desc` (a Root).
+    -> (error_reason_or_None, shelf_dirty). Every branch that used to test
+    `root_id == FILES_ROOT_ID` now reads a field off `desc`."""
     if not isinstance(op, dict):
         return "not an op", False
     parts = safe_segments(op.get("p", ""))
     if parts is None:
         return "bad path", False
-    files = (root_id == FILES_ROOT_ID)
-    if files:
+    if desc.kinds:
+        # A kinded root (files) has a fixed vocabulary: the first segment must be
+        # a known kind, which also refuses `.history`/`trash` by construction.
         bad = _files_shape(parts, op)
         if bad:
             return bad, False
     if op.get("dc"):
-        # Whole-folder delete, and the receiver removes everything under it
-        # INCLUDING what never crossed the wire (a cart's journal, its thumbs)
-        # -- a deleted cart's history dies with it, the same as the on-device
-        # picker's delete. In the carts root that folder is a CART, so exactly
-        # one segment; in the files root it is an item, checked above.
-        if not files and len(parts) != 1:
-            return "dc wants a cart folder", False
+        # Whole-folder delete: the receiver removes everything under it INCLUDING
+        # what never crossed the wire (a cart's journal, its thumbs) -- a deleted
+        # cart's history dies with it, the same as the on-device picker. The
+        # folder is a CART (one segment) in the carts root, an ITEM (>=2) in the
+        # files root -- `desc.dc_min/dc_max` say which.
+        n = len(parts)
+        if n < desc.dc_min or (desc.dc_max is not None and n > desc.dc_max):
+            return "bad dc target", False
         _rmtree(_full(root, parts))
-        return None, not files
+        return None, desc.shelf
     if len(parts) < 2:
-        # Never a top-level file: system.json / wifi.json / the shared sheet
-        # are system state beside the carts, not the kid's work.
-        return "not a cart file", False
+        # Never a top-level file: system.json / wifi.json / the shared sheet are
+        # system state beside the store, not the kid's work.
+        return "not a store file", False
     full = _full(root, parts)
-    new_cart = not files and not _exists(root + "/" + parts[0])
+    new_item = desc.shelf and not _exists(root + "/" + parts[0])
     if op.get("d"):
         _remove(full)
-        return None, not files and parts[-1] in ("manifest.json", "sheet.json")
+        return None, desc.shelf and parts[-1] in _SHELF_FILES
     if op.get("pub"):
         _publish(full)
-        if journal and not files:
-            # Read the file BACK rather than re-assembling the chunks: the
-            # parts arrived across several requests and were never all resident
-            # here at once, which is the point of chunking. One bounded read of
-            # a cart file is the cheap half of the snapshot this is about to
-            # write anyway.
+        if journal and desc.journals:
+            # Read the file BACK rather than re-assembling the chunks: they
+            # arrived across several requests and were never all resident here,
+            # which is the point of chunking. One bounded read is the cheap half
+            # of the snapshot this is about to write anyway.
             _journal_commit(root, parts, _read_text(full))
-        shelf = (new_cart or (not files
-                              and parts[-1] in ("manifest.json", "sheet.json")))
-        return None, shelf
+        return None, _shelf_dirty(desc, parts, new_item)
     text = op.get("t")
     if not isinstance(text, str):
         return "no text", False
     if len(text) > PART_MAX * 2:
         return "op too large", False
-    if files:
-        # The carts root always exists; the files root does not until the kid
-        # makes something, and the first thing a peer sends may BE that -- so
-        # create it here, the same on-demand mkdir moy_carts._ensure_kind_dir
-        # does. Its parent is the carts root's parent, which is already there.
+    if desc.ensure:
+        # A lazily-created root (files) may not exist until the first write, and
+        # the first thing a peer sends may BE that. Its parent is the carts
+        # root's parent, which is already there.
         _mkdir(root)
     _mkdirs(root, parts[:-1])
     part = op.get("part")
     if part is None:
         _write_atomic(full, text)
-        if journal and not files:
+        if journal and desc.journals:
             _journal_commit(root, parts, text)
     elif part == 0:
         _write(full + ".tmp", text)
@@ -595,9 +704,7 @@ def _apply_one(root, op, root_id, journal=False):
         with open(full + ".tmp", "a") as f:
             f.write(text)
         return None, False
-    shelf = (new_cart or (not files
-                          and parts[-1] in ("manifest.json", "sheet.json")))
-    return None, shelf
+    return None, _shelf_dirty(desc, parts, new_item)
 
 
 def _publish(path):
@@ -918,10 +1025,11 @@ class StoreWatcher:
         ops = self.take()
         if not ops:
             return ""
-        if self.root_id == CARTS_ROOT_ID:
+        root = root_by_id(self.root_id) or CARTS_ROOT
+        if root.wire == PROTOCOL_V:
             doc = {"v": PROTOCOL_V, "ops": ops}
         else:
-            doc = {"v": PROTOCOL_V_ROOTED, "root": self.root_id, "ops": ops}
+            doc = {"v": root.wire, "root": root.id, "ops": ops}
         if pin:
             doc["pin"] = pin
         return json.dumps(doc)

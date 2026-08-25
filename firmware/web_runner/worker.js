@@ -79,7 +79,12 @@ const GPIO_MS = 33;
 //   "board"  a console served this page; it owns the carts, nothing is kept here
 //   "site"   a static host; OPFS is the truth and survives the reload
 //   "none"   site mode with no usable OPFS: in memory, and the page SAYS so
-let mode = null, opfs = null, persistFails = 0, persistSaid = false;
+// ONE OPFS store per registered root (site mode), keyed by root id -- so the
+// carts store and the #108 files store persist side by side and a new root
+// would be one more entry, not a second variable. null for a root whose OPFS
+// could not be opened (that root then runs in memory; the page says so).
+let mode = null, persistFails = 0, persistSaid = false;
+const opfsStores = {};
 let persistBatches = 0;
 const PERSIST_GIVE_UP = 3;
 let running = false, ahead = -1, inbox = [];
@@ -139,12 +144,18 @@ function mkdirs(p) {
     }
 }
 
-// The two pulled stores. FILES_ROOT is the SIBLING of the carts root, which is
-// moy_carts.files_root's own rule (/moy/carts -> /moy/files); web_boot derives
-// the identical path in Python and watches it there.
-const CARTS_ROOT = "/moy/carts", FILES_ROOT = "/moy/files";
+// The carts VFS root, from the registry (store.ROOTS) so there is one source of
+// the path. Only the carts-specific export/import code below names a root
+// directly; everything else iterates store.ROOTS.
+const CARTS_ROOT = store.rootById("carts").vfs;
 
 function writeStore(root, files) {
+    // mkdirs(root) even for an empty set: a root with no files YET (a board's
+    // files layer with no drawings; a site-mode files store on first visit)
+    // must still create its directory, because web_boot builds a watcher only
+    // for a root whose store is present -- the empty dir IS the capability
+    // signal, and skipping it would leave the kid's first drawing with nothing
+    // watching for it.
     mkdirs(root);
     for (const rel in files) {
         const full = root + "/" + rel;
@@ -152,15 +163,6 @@ function writeStore(root, files) {
         mp.FS.writeFile(full, files[rel]);
     }
 }
-
-// GET /files.json is also the CAPABILITY PROBE for the #108 files push: this
-// creates the files root only when the server answered, and web_boot builds its
-// files watcher only when the directory is there. So a board that serves carts
-// and /sync but predates files sync is never sent a files batch -- which is
-// what keeps its one 404 from disabling the carts push along with it. mkdirs
-// runs even for an empty answer: a board with no drawings YET still speaks
-// files, and skipping it would leave the kid's first drawing unable to travel.
-function writeFiles(files) { writeStore(FILES_ROOT, files); }
 
 // `d` is the DETAIL -- how many files moved and how long it took. It rides the
 // message rather than a console.log because that is the only form a test (or a
@@ -172,48 +174,81 @@ function persist(m, s, d) {
     console.log("[moy] persist: " + m + " -- " + s + (d ? " (" + d + ")" : ""));
 }
 
-// Decide the world and seed the VFS from whoever owns the carts. Runs BEFORE
-// the console boots, because web_boot constructs the StoreWatcher over this
-// root and rebases on what it finds: seed first and the baseline is correct
-// with nothing pending, seed after and the whole store ships as "changed".
-async function initStore(carts) {
-    const t0 = performance.now();
-    const m = await store.probeMode((u, o) => fetch(u, o));
-    if (m === "board") {
-        writeStore(CARTS_ROOT, carts);
-        persist("board", "carts are kept on the console");
-        return;
+// Seed ONE root into the VFS, and in site mode into that root's OWN OPFS store.
+// `data` is the served bundle for this root ({} / null when the host does not
+// serve it). Returns "board" | "site" | "none" for the caller's tally, and sets
+// opfsStores[root.id]. The carts and files roots go through the identical body,
+// which is the whole point of the registry: files persistence is not a second
+// path, it is this path run once more.
+async function seedRoot(root, data, site) {
+    data = data || {};
+    if (!site) {                             // board mode: the console owns it
+        writeStore(root.vfs, data);
+        return "board";
     }
-    opfs = await store.openStore(navigator);
-    if (!opfs) {
-        // No OPFS: a private window, blocked site data, a file:// origin. The
-        // pre-#193 behaviour, but never silently -- the page says it out loud.
-        writeStore(CARTS_ROOT, carts);
-        persist("none", "this browser has no local storage: carts will NOT survive a reload");
-        return;
+    const s = await store.openStore(navigator, root.id);
+    opfsStores[root.id] = s;
+    if (!s) {                                // no OPFS for this root: in memory
+        writeStore(root.vfs, data);
+        return "none";
     }
     try {
-        if (await store.isEmpty(opfs)) {
-            // First visit: the served carts.json is the seed AND the baseline,
-            // so the shelf is never empty and the first sweep has nothing to say.
-            writeStore(CARTS_ROOT, carts);
-            const n = await store.seed(opfs, carts);
-            persist("site", "carts saved here (drawings/docs not yet)", "seeded " + n
-                + " files in " + (performance.now() - t0).toFixed(0) + "ms");
-        } else {
-            // The local store WINS over carts.json: it is the kid's work, and
-            // the served bundle is only ever the factory seed.
-            const local = await store.readAll(opfs);
-            writeStore(CARTS_ROOT, local);
-            persist("site", "carts saved here (drawings/docs not yet)",
-                    "loaded " + Object.keys(local).length + " files in "
-                    + (performance.now() - t0).toFixed(0) + "ms");
+        if (await store.isEmpty(s)) {
+            // First visit: the served bundle is the seed AND the baseline, so
+            // the shelf is never empty and the first sweep has nothing to say.
+            // On a static host the files bundle is empty, which correctly seeds
+            // an empty files store the kid's first drawing then persists into.
+            writeStore(root.vfs, data);
+            await store.seed(s, data);
+            return "seed";
         }
+        // The local store WINS over the served bundle: it is the kid's work, and
+        // the bundle is only ever the factory seed. "load" (vs "seed") is the
+        // evidence that a reload READ FROM local rather than re-seeding fresh.
+        writeStore(root.vfs, await store.readAll(s));
+        return "load";
     } catch (e) {
-        writeStore(CARTS_ROOT, carts);
-        opfs = null;
-        persist("none", "this browser refused local storage: carts will NOT survive a reload");
-        console.log("[moy] persist: OPFS failed -- " + e);
+        writeStore(root.vfs, data);
+        opfsStores[root.id] = null;
+        console.log("[moy] persist: OPFS failed for " + root.id + " -- " + e);
+        return "none";
+    }
+}
+
+// Decide the world and seed EVERY registered root. Runs BEFORE the console
+// boots, because web_boot constructs a StoreWatcher over each root and rebases
+// on what it finds: seed first and the baseline is correct with nothing pending,
+// seed after and the whole store ships as "changed".
+async function initStore(fetched) {
+    const t0 = performance.now();
+    const site = (await store.probeMode((u, o) => fetch(u, o))) !== "board";
+    let anySite = false, anyNone = false, loaded = false;
+    for (const root of store.ROOTS) {
+        const data = fetched[root.id];
+        // A sibling root the host does not serve (files.json 404 -> null): in
+        // BOARD mode skip it (no watcher, no empty dir, exactly today's
+        // capability rule); in SITE mode still give it an empty OPFS store, so a
+        // drawing the kid makes locally has somewhere to persist.
+        if (!site && data == null && root.id !== "carts") continue;
+        const w = await seedRoot(root, data, site);
+        if (w === "seed" || w === "load") anySite = true;
+        if (w === "load") loaded = true;
+        if (w === "none") anyNone = true;
+    }
+    if (!site) {
+        persist("board", "carts are kept on the console");
+    } else if (!anySite) {
+        // No OPFS at all: a private window, blocked site data, file://. The
+        // pre-#193 behaviour, but never silently -- the page says it out loud.
+        persist("none", "this browser has no local storage: work will NOT survive a reload");
+    } else {
+        // "loaded" once any root read the kid's work back from OPFS (a revisit);
+        // "seeded" on a first visit. The word is the persistence evidence the
+        // E2E reads back.
+        persist("site", anyNone ? "carts saved here (some kinds could not)"
+                                : "carts & drawings saved in this browser",
+                (loaded ? "loaded" : "seeded") + " in "
+                + (performance.now() - t0).toFixed(0) + "ms");
     }
 }
 
@@ -320,8 +355,7 @@ async function init(search) {
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    await initStore(carts);
-    if (mode === "board" && files) writeFiles(files);
+    await initStore({ carts: carts, files: files });
     say("booting console...");
 
     let cart = qs.get("cart");
@@ -475,15 +509,25 @@ async function pumpLocal(body) {
     try {
         const doc = JSON.parse(body);
         const ops = doc.ops || [];
-        const r = await store.applyOps(opfs, ops);
+        // The batch names its root (v2 -> doc.root; a v1 batch is carts). Apply
+        // it into THAT root's OPFS store -- so a files batch persists drawings
+        // and a carts batch persists carts, from the one pump.
+        const rootId = (doc.v === 2 && doc.root) ? doc.root : "carts";
+        const s = opfsStores[rootId];
+        if (!s) {                            // no store for this root: nothing to
+            try { syncAck(1); } catch (e) { }  // keep; ack so it does not requeue
+            return;
+        }
+        const r = await store.applyOps(s, ops);
         if (r.errors.length)
             console.log("[moy] persist: " + r.errors.length + " op(s) refused, first "
                 + JSON.stringify(r.errors[0]));
         persistFails = 0;
         persistBatches++;
         try { syncAck(1); } catch (e) { }
-        persist("site", "carts saved here (drawings/docs not yet)",
-                ops.length + " ops in " + (performance.now() - t0).toFixed(1) + "ms");
+        persist("site", "carts & drawings saved in this browser",
+                rootId + " " + ops.length + " ops in "
+                + (performance.now() - t0).toFixed(1) + "ms");
     } catch (e) {
         // Quota, or the browser evicted the store under us. Requeue; after a
         // few consecutive failures stop pretending, once, and tell the page --
@@ -493,7 +537,7 @@ async function pumpLocal(body) {
         console.log("[moy] persist: apply failed -- " + e);
         if (persistFails >= PERSIST_GIVE_UP && !persistSaid) {
             persistSaid = true;
-            opfs = null;
+            for (const id in opfsStores) opfsStores[id] = null;
             persist("none", "this browser stopped saving (storage full?): export your cart");
         }
     } finally {
@@ -517,7 +561,7 @@ function syncPump() {
     try { body = syncPoll(); } catch (e) { return; }
     if (!body) return;
     syncBusy = true;
-    if (mode === "site" && opfs) { pumpLocal(body); return; }
+    if (mode === "site") { pumpLocal(body); return; }
     fetch("sync", { method: "POST", body: body,
                     headers: { "Content-Type": "application/json" } })
         .then((r) => {
@@ -667,7 +711,7 @@ self.onmessage = async (ev) => {
                 fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
                     .catch(() => null)]);
             writeStore(CARTS_ROOT, carts);
-            if (files) writeFiles(files);
+            if (files) writeStore(store.rootById("files").vfs, files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
         } else if (m.t === "carts") {

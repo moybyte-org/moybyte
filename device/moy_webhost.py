@@ -516,10 +516,12 @@ class WebHost(WebServer):
             # same bytes every build of the console ships and say nothing about
             # this board.
             return self._asset(name)
-        if path == "/carts.json":
-            return self.gate(target) or self._carts_json()
-        if path == "/files.json":
-            return self.gate(target) or self._files_json()
+        # The pull endpoints are DATA: one per registered sync root
+        # (moy_sync.SYNC_ROOTS), so a new store serves its own GET with no new
+        # arm here. Each is pin-gated -- it is the kid's work.
+        for root in moy_sync.SYNC_ROOTS:
+            if path == root.endpoint:
+                return self.gate(target) or self._pack(root)
         return None                      # -> 404 from the transport
 
     def _asset(self, name):
@@ -666,8 +668,9 @@ class WebHost(WebServer):
             return http_response(404, '{"error":"no cart"}')
         return http_response(200, _json.dumps({"run": title}))
 
-    def _carts_json(self):
-        """The store, STREAMED as JSON -- never built.
+    def _pack(self, root):
+        """One sync root, STREAMED as JSON -- the pull half for any registered
+        `root` (moy_sync.SYNC_ROOTS), never assembled into a dict.
 
         Measured on P4 glass before this was a generator: 46 carts / 225 files
         packed in 21.8s and `json.dumps`ed in 39.3s into a 982KB string, so the
@@ -675,51 +678,36 @@ class WebHost(WebServer):
         blocked throughout. The dict and the dump are both gone; what is left is
         the unavoidable part, reading the files.
 
+        A KINDED root (files) is walked through its kind allowlist rather than a
+        skip list, so `.history/` (each side's own undo sidecars) and `trash/`
+        (a LOCAL recovery bin -- shipping it hands a peer a deletion it cannot
+        undo) stay home with no second rule to keep in step. Its two "nothing
+        here" cases answer DIFFERENTLY on purpose, because the page reads this as
+        a capability probe: an EMPTY files layer -> `{}` 200 (the board speaks
+        files; a 404 would disable the push half and strand the kid's first
+        drawing), a host with NO files layer at all (the headless XIAO cart
+        store: moy_webhost + moy_sync, no moy_carts) -> 404, the same answer a
+        board flashed before files sync gives, so the page never builds a files
+        watcher against a wall.
+
         The SD gate is entered ONCE, here, and the walk then runs outside it --
-        which is correct only because of what `with_sd_live` is: it mounts the
-        card once and KEEPS IT RESIDENT for the session (moybyte_sd; tearing it
-        down per op is what corrupts the shared bus and hangs the next panel
-        flush). So the gate's job is "make sure the card is up", and a generator
-        that yields for a minute must not hold anything. Wrapping the whole
-        iteration would mean holding the gate across every read, which is the
-        opposite of that module's contract.
+        correct only because of what `with_sd_live` is: it mounts the card once
+        and KEEPS IT RESIDENT for the session (moybyte_sd; tearing it down per op
+        corrupts the shared bus and hangs the next panel flush). So the gate's
+        job is "make sure the card is up", and a generator that yields for a
+        minute must hold nothing.
         """
         self._with_sd(lambda: None)          # ensure the card is mounted
-        return ChunkedResponse(stream_store_json(self.carts_root))
-
-    def _files_json(self):
-        """The #108 user files, streamed in the SAME shape as the carts store.
-
-        Kind-filtered rather than skip-listed: only a directory moy_carts knows
-        as a kind is walked, so `files/.history/` (each side's own undo
-        sidecars) and `files/trash/` (a LOCAL recovery bin -- shipping it would
-        hand a peer a deletion it cannot undo) stay home with no second rule to
-        keep in step.
-
-        The two "nothing here" cases are answered DIFFERENTLY on purpose,
-        because the browser reads this endpoint as a capability probe:
-
-          * a store that has a files layer and no drawings in it yet -> `{}`,
-            200. The board speaks files; a 404 would disable the push half for
-            good and the kid's first drawing would never travel.
-          * a host with no files layer at all (the headless XIAO cart store,
-            which ships moy_webhost + moy_sync and no moy_carts) -> 404, the
-            same answer a board flashed before files sync gives. The page then
-            never builds a files watcher, so nothing retries a batch this host
-            could only refuse.
-        """
-        self._with_sd(lambda: None)          # ensure the card is mounted
-        root = moy_sync.files_root(self.carts_root)
-        if root is None:
-            return None                      # -> 404 from the transport
-        return ChunkedResponse(
-            stream_store_json(root, tops=moy_sync.file_kinds()))
+        path = root.path(self.carts_root)
+        if path is None:
+            return None                      # no such layer -> 404 from transport
+        tops = moy_sync.file_kinds() if root.kinds else None
+        return ChunkedResponse(stream_store_json(path, tops=tops))
 
     def _root_for(self, root_id):
-        """The filesystem root one batch's `root` names, or None (unservable)."""
-        if root_id == moy_sync.FILES_ROOT_ID:
-            return moy_sync.files_root(self.carts_root)
-        return self.carts_root
+        """The filesystem path one batch's `root` names, or None (unservable)."""
+        root = moy_sync.root_by_id(root_id)
+        return None if root is None else root.path(self.carts_root)
 
 
 def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
