@@ -44,6 +44,16 @@ let fbAddr = null, fbLen = null;
 let syncPoll = null, syncAck = null, syncOff = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
+// #9 physical I/O: the same pump shape as the sync push, at a physical-I/O
+// rate. A cart's pin_write QUEUES (gpio_link.py: it must never stall a frame
+// on the wire), so the pace here IS the latency a kid feels between the cart
+// deciding and the LED changing. 33ms is one console frame; below that the
+// round trip is the limit anyway, and above it a blink starts to look laggy.
+// The busy flag is what keeps it honest: one POST in flight, and whatever
+// happened while it was away coalesces into the next batch.
+let gpioPoll = null, gpioAck = null, gpioOff = null;
+let gpioBusy = false, lastGpioAt = 0;
+const GPIO_MS = 33;
 let running = false, ahead = -1, inbox = [];
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -153,7 +163,16 @@ async function init(search) {
     const bootArgs = desktop
         ? ", None, " + dw + ", " + dh + ", True"
         : (cart ? ", cart=" + JSON.stringify(cart) : "");
+    const pin = qs.get("pin");
+    // #9: does whoever served this page have PINS? ONE probe, here, before the
+    // console exists -- so `pin_write`/`pin_read` are decided once and a cart
+    // either has the names or has never heard of them. An empty batch is the
+    // probe (the board answers it with its allowlist), which also means the
+    // probe passes through the PIN gate: a page opened without the board's
+    // ?pin= is refused now rather than on every write it later makes.
+    const gpioPins = await probeGpio(pin);
     mp.runPython(boot + "import web_boot\n"
+        + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
         // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
@@ -162,7 +181,8 @@ async function init(search) {
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
-        + "sync_poll_json, sync_ack, sync_off, sync_config");
+        + "sync_poll_json, sync_ack, sync_off, sync_config, "
+        + "gpio_poll_json, gpio_ack_json, gpio_off");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -173,7 +193,12 @@ async function init(search) {
     syncPoll = mp.globals.get("sync_poll_json");
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
-    const pin = qs.get("pin");
+    if (gpioPins) {
+        gpioPoll = mp.globals.get("gpio_poll_json");
+        gpioAck = mp.globals.get("gpio_ack_json");
+        gpioOff = mp.globals.get("gpio_off");
+        console.log("[moy] gpio: " + gpioPins.length + " pins on the host");
+    }
     if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });
     wantAssets = false;      // the boot payload answers any pre-boot request
@@ -203,6 +228,57 @@ function shipFrame(s) {
     }
     if (fb) self.postMessage({ t: "frame", s: s, fb: fb }, [fb]);
     else self.postMessage({ t: "frame", s: s });
+}
+
+// The #9 probe. Returns the host's pin allowlist, or null for "this page is
+// not served by anything with pins" -- a static host (moybyte.com, an export),
+// a console board that spends its GPIOs on a panel, or a Zero whose pin gate
+// this page cannot pass. All four are the same answer to a cart: no verbs.
+async function probeGpio(pin) {
+    const body = JSON.stringify(pin ? { v: 1, ops: [], pin: pin }
+                                    : { v: 1, ops: [] });
+    try {
+        const r = await fetch("gpio", { method: "POST", body: body,
+            headers: { "Content-Type": "application/json" } });
+        if (!r.ok) return null;
+        const d = await r.json();
+        return (d && d.pins && d.pins.length) ? d.pins : null;
+    } catch (e) {
+        return null;                 // no such host, no such endpoint: fine
+    }
+}
+
+function gpioPump() {
+    if (gpioBusy || !gpioPoll) return;
+    const now = performance.now();
+    if (now - lastGpioAt < GPIO_MS) return;
+    lastGpioAt = now;
+    let body = "";
+    try { body = gpioPoll(); } catch (e) { return; }
+    if (!body) return;               // nothing queued and nothing watched
+    gpioBusy = true;
+    fetch("gpio", { method: "POST", body: body,
+                    headers: { "Content-Type": "application/json" } })
+        .then((r) => {
+            // The probe already cleared 404/405/403, so reaching one HERE means
+            // the host changed under us (rebooted into setup, a pin rotated).
+            // Stop for good rather than retry-logging: the verbs go inert and
+            // say so once, which is the most a running cart can be told.
+            if (r.status === 404 || r.status === 405 || r.status === 501
+                || r.status === 403) {
+                try { gpioAck(0, ""); gpioOff(); } catch (e) { }
+                gpioPoll = null;
+                console.log("[moy] gpio off: host stopped answering ("
+                            + r.status + ")");
+                return null;
+            }
+            const ok = r.ok ? 1 : 0;
+            return r.text().then((t) => {
+                try { gpioAck(ok, t); } catch (e) { }
+            });
+        })
+        .catch(() => { try { gpioAck(0, ""); } catch (e) { } })
+        .finally(() => { gpioBusy = false; });
 }
 
 function syncPump() {
@@ -306,6 +382,7 @@ function loop() {
             framesSinceCollect = 0;
         }
         syncPump();
+        gpioPump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;

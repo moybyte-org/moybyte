@@ -34,6 +34,9 @@ JS contract (see worker.js):
                                      byte length, read by the worker
     apply_events_json(text)       -> feed an {"events":[...]} JSON text batch
     open_cart(name)               -> select+run a cart by folder name or title
+    gpio_enable(pins_json)        -> the host answered POST /gpio: wire the
+                                     pin verbs (absent otherwise -- see #9)
+    gpio_poll_json() / gpio_ack_json(ok, text) / gpio_off()
 """
 
 import json
@@ -215,6 +218,22 @@ class _PointerSink:
             self._d._click = True
 
 
+def _make_api(*a, **kw):
+    """The shared cart API, plus this tier's one extra gate.
+
+    A wrapper and not a `functools.partial` because the gate is decided AFTER
+    boot: the worker probes POST /gpio while the console is already built, and
+    a cart's namespace is assembled when the cart STARTS. Reading `_S` here is
+    what makes the two orders independent -- the page that turns out to be
+    served by a Zero gets the verbs, the one served by a static host never
+    hears the name.
+    """
+    g = _S.get("gpio")
+    if g is not None:
+        kw["gpio"] = g
+    return host_api.make_api(*a, **kw)
+
+
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
          windowed=False, font_scale=0, hud=True):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
@@ -298,7 +317,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # boards + this runner). Runner-only: can_manage=False (no Make tile / no
     # project management); the FakeWifi keeps any wifi UI harmless.
     console.wire_workstation_core(
-        ws, moy_carts, carts_root, host_api.make_api,
+        ws, moy_carts, carts_root, _make_api,
         host_api.make_wifi(moy_carts, carts_root),
         make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
@@ -610,6 +629,59 @@ def sync_off():
     sweeping for good. One failed probe, then silence -- the standalone
     browser console must not retry-log forever."""
     _S["sync"] = None
+    return ""
+
+
+def gpio_enable(pins_json):
+    """The host answered the /gpio probe: wire the pin verbs (#9).
+
+    Called by the worker in the boot script, so this lands BEFORE any cart can
+    start and the availability question is settled exactly once. A host that
+    did not answer never calls it, and `pin_write`/`pin_read` then have no name
+    at all -- the repo's standing rule for a capability that is not there.
+
+    `pins_json` is the allowlist the board sent. Kept rather than assumed,
+    because the refusal has to be able to say WHICH pins this board has, and
+    the browser cannot know that: the answer is a fact about the hardware on
+    the other end of the wire.
+    """
+    try:
+        pins = json.loads(pins_json)
+    except Exception:                # noqa: BLE001 -- a garbled probe answer
+        pins = None
+    if not pins:
+        return ""
+    try:
+        from gpio_link import GpioLink
+        _S["gpio"] = GpioLink(pins)
+    except Exception as exc:         # noqa: BLE001 -- never block a boot
+        print("gpio unavailable:", exc)
+    return ""
+
+
+def gpio_poll_json():
+    """The next batch of queued pin ops, or "" -- the worker POSTs it to the
+    relative /gpio of whoever served the page, exactly like the sync push."""
+    g = _S.get("gpio")
+    return g.take_json(_S.get("sync_pin")) if g is not None else ""
+
+
+def gpio_ack_json(ok, text=""):
+    """Settle the in-flight batch: `text` is the board's answer, whose `reads`
+    are what `pin_read` returns until the next one arrives."""
+    g = _S.get("gpio")
+    if g is not None:
+        g.ack(bool(ok), text or "")
+    return ""
+
+
+def gpio_off():
+    """The far end stopped answering /gpio. The verbs STAY (a running cart is
+    holding them) and go inert -- see GpioLink.stop."""
+    g = _S.get("gpio")
+    if g is not None:
+        g.stop()
+    _S["gpio"] = None
     return ""
 
 

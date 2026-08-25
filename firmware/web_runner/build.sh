@@ -205,6 +205,7 @@ mkdir -p "${STAGE_DIR}/modules"
 # modules/ files, copied by name because the stage dir is rebuilt from scratch.
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
 cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
+cp "${SCRIPT_DIR}/gpio_link.py" "${STAGE_DIR}/modules/gpio_link.py"
 
 
 # palette.py: runtime/palette.py builds its HSV ramp with CPython's colorsys, so

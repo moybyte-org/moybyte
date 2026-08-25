@@ -142,7 +142,7 @@ class _Layer:
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, net=None, owner="cart"):
+             texts=None, net=None, gpio=None, owner="cart"):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -155,7 +155,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     passes it ONLY for a cart whose manifest permissions include "network", and
     the `wifi` name enters the namespace iff it is non-None -- a normal kid
     cart gets no network access at all (the base key-set is identical either
-    way). `net` is the same gate for "multiplayer" (#65). `owner` tags layer
+    way). `net` is the same gate for "multiplayer" (#65). `gpio` is the third
+    such gate (#9): physical pins, which only exist where a host with pins is
+    on the other end of the page -- so far the Zero. `owner` tags layer
     loans for the device's #63 leak-fix reclaim; a gc-heap canvas ignores it.
     """
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -567,6 +569,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return fn
 
         ns["on_net"] = on_net
+    # Capability-gated PHYSICAL I/O (#9): pin_write/pin_read, injected only when
+    # the thing serving this page has pins and answered the probe -- today the
+    # Zero, over POST /gpio. Gated the same way and for the same reason as wifi
+    # and net: a verb that cannot work must not have a NAME. A stubbed
+    # `pin_write` that quietly does nothing is the worst of the three answers a
+    # kid can get, because the cart looks right and the LED never lights, and
+    # there is nothing to search for.
+    #
+    # The queue behind these is gpio_link.GpioLink; a write returns as soon as
+    # it is queued and `pin_read` answers from the last batch, so neither verb
+    # can stall a frame on the network. That latency is documented in
+    # docs/moy_cart_api.md, because it is the one thing about them a cart
+    # author has to hold in their head.
+    if gpio is not None:
+        ns["pin_write"] = gpio.write
+        ns["pin_read"] = gpio.read
     # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
     # placed-actor scenes. Pure DATA (no drawing) -- the logic lives once in the
     # shared widgets.Scenes and make_api just binds its methods. The Player
