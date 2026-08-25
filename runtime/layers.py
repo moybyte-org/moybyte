@@ -159,6 +159,28 @@ class _UpdateLayer(Layer):
         return True
 
 
+class _WebConsoleLayer(Layer):
+    """The WEB CONSOLE connection screen (#197): the glass while wasm mode is on.
+
+    A parked fullscreen surface in the shape of the update screen -- it owns
+    every pixel and claims every event, because while the toggle is on there is
+    nothing else for the glass to be doing. Entry state (the revealed address is
+    cleared) is reset by `Workstation.park_web_console`, NOT by the Layer
+    protocol's `on_enter`: nothing in the router calls that hook today."""
+
+    id = "webconsole"
+    domain = "system"
+
+    def draw(self, dt):
+        self.ws.web_console_ui.draw(dt)
+
+    def handle_input(self, i):
+        return self.ws.web_console_ui.handle_input(i)
+
+    def handle_pointer(self, px, py, click):
+        return self.ws.web_console_ui.handle_pointer(px, py, click)
+
+
 class _MapLayer(Layer):
     """The map/tilemap editor (#32), SYSTEM-domain responsive (#39 step 3): a
     full-screen panel on the reflowed system canvas (the frozen-cart backdrop is

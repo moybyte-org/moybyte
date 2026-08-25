@@ -71,13 +71,51 @@ v:(typeof audioQueuedSecs==="function")?audioQueuedSecs():-1});
 var f=pendingFrame,fb=pendingFB;pendingFrame=null;pendingFB=null;
 if(f){PERF.f++;if(fb)PERF.b+=fb.byteLength;HUD.kb=fb?fb.byteLength/1024:HUD.kb;
 df(JSON.parse(f),fb);
+podTick();
 // Hand the buffer back for reuse once it has been blitted.
 if(fb&&WORKER)WORKER.postMessage({t:"fbret",b:fb},[fb]);}}
+// ---- PLAY ON DEVICE (#197) ---------------------------------------------------
+// A page served BY a board can hand the open cart back to the board's own glass.
+// The whole protocol is a cart NAME: the board looks it up the same way its
+// serial `run` does, plays it, and its own exit returns to the connection screen
+// -- so this page never has to model device state.
+//
+// The link shows only when BOTH are true: the host answered GET /sync (a static
+// host -- moybyte.com, an export, a plain file server -- 404s it, and offering
+// the button there would be a button that always fails), and a cart is actually
+// open here. Probed ONCE at boot: the answer cannot change under a page, and a
+// per-frame probe would be a request per frame at a board that is single-threaded.
+var POD=document.getElementById("pod"),podHost=false,podLast=undefined;
+function podSync(){if(!POD)return;
+POD.style.display=(podHost&&assCart)?"":"none";
+POD.textContent="play on device";}
+function podProbe(){if(!POD)return;
+fetch("sync",{method:"GET"}).then(function(r){podHost=r.ok;podSync();})
+.catch(function(){});}
+// A cart change re-arms the link (and clears any "playing on device: X" the last
+// tap left on it). Checked off the frame loop rather than hooked into df(): the
+// cart title arrives on every frame payload, so a string compare is the whole
+// cost and it needs no second detection of a change page_core already tracks.
+function podTick(){if(podLast!==assCart){podLast=assCart;podSync();}}
+if(POD)POD.addEventListener("click",function(e){e.preventDefault();
+if(!assCart)return;
+var was=POD.textContent;POD.textContent="starting...";
+// The pin rides THIS page's own url, exactly as the sync push's does: a page
+// opened from the board's QR carries it, one opened by hand does not, and the
+// board answers 403 either way rather than trusting the request.
+var pin=new URLSearchParams(location.search).get("pin");
+fetch("run",{method:"POST",headers:{"Content-Type":"application/json"},
+body:JSON.stringify({cart:assCart,pin:pin})})
+.then(function(r){return r.ok?r.json():Promise.reject(r.status);})
+.then(function(j){POD.textContent="playing on device: "+(j.run||assCart);})
+.catch(function(err){POD.textContent=(err===403)?"device refused the pin":was;
+console.log("[moy] play on device failed: "+err);});});
 // The loader module calls this on the play-button gesture (which also unlocks
 // WebAudio), once the worker has booted and shipped its assets.
 window.__moyStart=function(){
 getA().then(function(){sEl.textContent="live";sEl.style.color="#00e436";
 if(WORKER)WORKER.postMessage({t:"run"});
+podProbe();
 requestAnimationFrame(tick);setInterval(plog,PERF_MS);cv.focus();})
 .catch(function(e){console.error(e);sEl.textContent="no assets";sEl.style.color="#ff004d";});};
 window.__moyRefetchAssets=function(){getA().catch(function(){});};

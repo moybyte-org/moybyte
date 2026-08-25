@@ -422,10 +422,28 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   still-undoable delete is how LWW becomes data loss) home in both directions,
   and the browser builds its files watcher only when the pull answered, so an
   older board's 404 cannot disable the carts push with it.
-  The write endpoint takes an optional `pin` (403 without it; the page passes
-  `?pin=`) but the boards pass NONE today — same standing as the open read
-  half, and the named follow-up before this points at a classroom. The
-  **Zero is re-provisioned as the sync RPC's first host**
+  **WASM MODE IS A SWITCH, NOT A SESSION (owner call, #197, 2026-08-25), and
+  the boards carry a PIN now.** No heartbeat, no presence detection, no
+  timeout, no session object: while Settings → WEB CONSOLE is ON the glass
+  PARKS on a connection screen (`runtime/web_console_ui.py`, back-stack kind
+  `webconsole`) and turning it off returns the console — which is how the
+  two-writer collision is designed out rather than detected. The screen is a QR
+  of the paired url plus tap-to-reveal text plus TURN OFF; the encoder is ours
+  (`runtime/moy_qr.py` — byte mode, EC L, versions 1–4, one fixed mask whose
+  format bits say so; there is no library on a board and the pin is not a
+  constant anything could be baked with). The pin is minted ONCE, lazily, into
+  `system.json` (`ws.web_pin()`), and `make_webhost` reads it at **`start()`,
+  never at construction** — boards build the webhost before system.json is
+  loaded, so a pin captured then is one minted against an empty store. **PLAY ON
+  DEVICE** is `POST /run` (`{"cart": …, "pin": …}`, pin-gated like `/sync`,
+  launched inside the storage gate because it runs at the frame tail) over
+  `ws.launch_named`, the ONE lookup the serial `run` also uses — title *and*
+  folder, because on device those differ by construction. Its exit returns to
+  the connection screen, and it does so from `go_home`'s tail rather than at
+  each exit site: "return to the launcher" has many doors and they all funnel
+  there. `GET /sync` → `{"sync":1}` is the capability marker the page probes
+  once at boot (a static host 404s it) before offering the button.
+  The **Zero is re-provisioned as the sync RPC's first host**
   (`firmware/seeed_xiao_esp32s3_zero/` — stock MicroPython + `provision.sh`
   pushed files, no build; the browser console served FROM the XIAO's flash
   round-trips authored carts onto it, verified with real headless Chrome
