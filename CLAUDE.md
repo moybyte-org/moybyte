@@ -398,7 +398,142 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   refuse), and the next growth spurt is a partition-table decision, not a
   surprise. Building the bundle needs emsdk, so a missing one only WARNS locally
   and FAILS under `CI`/`MOYBYTE_REQUIRE_WEB_BUNDLE` — the firmware workflow builds
-  the web runner before each board, so a published image always carries one. **The browser runs moycore too since 2026-08-13** — the
+  the web runner before each board, so a published image always carries one.
+  **TWO WEB MODES, TOTAL, NO CROSSOVER (2026-08-25, #193/#197).** Where a page is
+  SERVED from decides where its carts live. A board-served page edits the BOARD's
+  store (the pull + `POST /sync` half); a page on a static host — moybyte.com, an
+  export, `file://` — keeps them in the BROWSER. The mode is decided ONCE at boot,
+  BEFORE the VFS is seeded, because it decides what the VFS is seeded FROM
+  (`moy_store.probeMode`): `GET /sync` is the marker a board serves, and a GET miss
+  falls through to an EMPTY-batch POST, because a board running firmware older than
+  that marker still ACCEPTS the batch and reading it as "static host" would quietly
+  strand a kid's edits in a browser. Mode 1 is not a second persistence design — it
+  is a second DELIVERY TARGET for the batch `moy_sync`'s `StoreWatcher` already
+  builds, so writes, deletes and cart-deletes arrive in the one op vocabulary and
+  the two sides cannot disagree about what a batch means. **The substrate is OPFS,
+  not IndexedDB** (the moycore plan §9 open question, closed here): the ops ARE file
+  writes at paths, so OPFS applies them 1:1 and a cart folder stays a cart folder —
+  the shape `moy_carts` already speaks on every tier — where IndexedDB would mean
+  inventing a path keyspace and a blob schema to keep a filesystem inside a
+  database, then keeping that schema honest as the store grows file kinds. Measured
+  in Chrome: a first visit seeds 89 files in **184ms**, a reload reads 92 back in
+  **71ms**, and a commit costs 3 ops in **9.0ms** against a 1/s sweep — nowhere near
+  the budget, which is what makes the file-shaped substrate free to prefer. **The
+  journal comes along in mode 1 (2026-08-25)** — see the doctrine below; the
+  mechanism is one argument, `web_boot` handing its site-mode carts watcher
+  `moy_sync.skip_keep_journal` instead of the wire's `_skip`, so the #111 history
+  rides the ordinary sweep into the ordinary store. This line used to record the
+  absence as a gap against #193's "with its undo history"; the gap is closed, and
+  the JS half (`moy_store.skipLocal` vs `skipName`) is pinned against the Python
+  one by `tests/test_web_store.py`. **No OPFS means the
+  page says so**: a private window, blocked site data or a `file://` origin runs in
+  memory exactly as before, with the row reading "carts will NOT survive a reload";
+  a quota failure mid-apply requeues, and after three gives up ONCE and says that
+  too. `.moy` export/import is the no-account escape hatch (a dependency-free
+  STORED zip out, stored-or-deflated in) and is offered only in mode 1 — on a board
+  the console owns the store. worker.js STATICALLY imports `moy_store.mjs`, so it is
+  in `moy_webhost.ASSETS` too: a board that does not serve it serves a console that
+  cannot boot. Proof is `tests/test_web_persist_e2e.py` (env-gated `MOYBYTE_WEB_E2E`),
+  which needs **two Chrome runs sharing one profile AND one port** — OPFS is scoped
+  to the origin and lives in the profile, hence browsershot's `MOY_PROFILE`.
+  **The 3.4 sync RPC SHIPPED (2026-08-25): a page served from a board writes
+  BACK.** `runtime/moy_sync.py` is the one body — the browser's `StoreWatcher`
+  (a ~1/s stat-sweep of the wasm VFS; no store hooks, because the store writes
+  through several funnels and watching the filesystem catches every writer by
+  construction), the wire shape (`POST /sync`, commit-shaped batches under the
+  transport's 64KB request cap; big files chunk through a `.tmp` and publish
+  atomically), and `apply_ops`, which the board (`moy_webhost`), the dev twin
+  (`serve.py --carts DIR`) and the CI convergence harness
+  (`tests/test_sync_convergence.py` — the pin the moycore plan §3.4 demands:
+  two real stores, drop-and-reattach, a two-sided collision, both journals
+  still replayable) all share. Per-file last-writer-wins, and
+  a batch that changes the SHELF fires `ws.rescan_carts()` so the launcher
+  follows with no reboot (on-glass: `test_guition_on_glass.py`'s sync test).
+  **THE JOURNAL LIVES WITH THE STORE OF RECORD (owner call 2026-08-25),** which
+  replaces "both sides keep their own journal" — true, and useless: the
+  browser's VFS is a scratch copy that dies with the tab, so the kid's undo
+  history lived in the one place it could not survive, and a board that took a
+  browser's edits kept no record of them at all. There is ONE durable journal
+  per cart and it sits where the cart durably lives. Board-served page: the
+  RECEIVER journals (`apply_ops(..., journal=True)` appends a #111 commit for
+  every carts-root file a batch publishes, in the shape `Project.commit_*`
+  writes, so on-glass UNDO walks back through work done in a browser; the
+  browser's VFS journal is still written, still never crosses, and is now
+  correctly READ as session-local undo). Static host: the browser's OPFS is of
+  record, so the journal persists there. **The wire predicate itself never
+  moves** — `_skip` refuses journal paths, a board-mode batch is byte-identical
+  to what it always was, and the site relaxation is a watcher argument rather
+  than a change of what the wire means. The cost is stated where it is paid
+  (`journal_append` writes a full snapshot + a log line + an atomic cursor
+  rewrite per file — fine at cart sizes, which is what the console's own
+  commits have always paid), and the #108 files root is deliberately NOT part
+  of it: its undo is `files/.history/` op sidecars, a different mechanism, and
+  a pushed drawing lands as a file and nothing else.
+  **THE PIN GATES EVERYTHING (owner call 2026-08-25),** reversing the standing
+  "the read half stays open". A pinned host serves a stranger exactly the boot
+  assets (`index.html`/`worker.js`/`moy_store.mjs`/`micropython.mjs`/`.wasm` —
+  open BY NECESSITY, because the page is what shows the pin prompt) plus
+  `GET /sync` (the capability marker, which reveals that a board lives here and
+  nothing else, and the page has to make its mode decision before it has a pin
+  to offer). `GET /carts.json`, `GET /files.json`, `POST /sync`, `POST /run`
+  and the Zero's `/gpio` all take the pin. The old split handed any device on
+  the WiFi the whole cart store for the asking, on the reasoning that a read
+  changes nothing — what it reads is a child's work off their console. A GET
+  carries its pin the only place a GET can, so **`moy_webserver.parse_request`
+  stopped stripping query strings** (it was spending the credential before any
+  handler saw it) and hands `handle_http` the request TARGET; handlers route on
+  the bare path and read `query_param(target, "pin")`. A refusal is
+  `403 {"error":"pin"}`, distinguishable from the transport's plain-text 404
+  because the page branches on it: worker.js stops the boot and the page
+  prompts IN-PAGE (never `window.prompt` — a native dialog cannot be styled,
+  screenshotted or driven by the browser harness), remembering the pin in
+  localStorage per ORIGIN so a kid types four digits once per browser and a QR
+  arrival never sees it at all. Dev twins stay pinless and are meant to
+  (`serve.py --pin NNNN` exists only so the gate and the prompt can be driven
+  in real Chrome with no board on the desk — `tests/test_web_sync_e2e.py`).
+  **The #108 user files ride the same protocol as a SECOND root (2026-08-25,
+  owner call "they should get synced")** — `GET /files.json` pulls them and a
+  batch stamped `{"v": 2, "root": "files"}` pushes them back, the bump being
+  what makes a board flashed before this REFUSE the batch instead of writing
+  `drawings/…` into its carts store; a files path must start with a
+  `moy_carts.FILE_KINDS` kind, which is the one rule that keeps `.history/`
+  (each side's own undo) and `trash/` (a local recovery bin — syncing a
+  still-undoable delete is how LWW becomes data loss) home in both directions,
+  and the browser builds its files watcher only when the pull answered, so an
+  older board's 404 cannot disable the carts push with it.
+  **WASM MODE IS A SWITCH, NOT A SESSION (owner call, #197, 2026-08-25), and
+  the boards carry a PIN now.** No heartbeat, no presence detection, no
+  timeout, no session object: while Settings → WEB CONSOLE is ON the glass
+  PARKS on a connection screen (`runtime/web_console_ui.py`, back-stack kind
+  `webconsole`) and turning it off returns the console — which is how the
+  two-writer collision is designed out rather than detected. The screen is a QR
+  of the paired url plus tap-to-reveal text plus TURN OFF; the encoder is ours
+  (`runtime/moy_qr.py` — byte mode, EC L, versions 1–4, one fixed mask whose
+  format bits say so; there is no library on a board and the pin is not a
+  constant anything could be baked with). The pin is minted ONCE, lazily, into
+  `system.json` (`ws.web_pin()`), and `make_webhost` reads it at **`start()`,
+  never at construction** — boards build the webhost before system.json is
+  loaded, so a pin captured then is one minted against an empty store. **PLAY ON
+  DEVICE** is `POST /run` (`{"cart": …, "pin": …}`, pin-gated like `/sync`,
+  launched inside the storage gate because it runs at the frame tail) over
+  `ws.launch_named`, the ONE lookup the serial `run` also uses — title *and*
+  folder, because on device those differ by construction. Its exit returns to
+  the connection screen, and it does so from `go_home`'s tail rather than at
+  each exit site: "return to the launcher" has many doors and they all funnel
+  there. `GET /sync` → `{"sync":1}` is the capability marker the page probes
+  once at boot (a static host 404s it) before offering the button.
+  The **Zero is re-provisioned as the sync RPC's first host**
+  (`firmware/seeed_xiao_esp32s3_zero/` — stock MicroPython + `provision.sh`
+  pushed files, no build; the browser console served FROM the XIAO's flash
+  round-trips authored carts onto it, verified with real headless Chrome
+  2026-08-25). **It carries the whole stack, not the minimum that boots**
+  (owner call, same day): the sync stack's full import closure — `moy_carts` +
+  `moy_image` for the #108 files half, `moy_journal` for the history it now
+  keeps — and `provision.sh` mints a pairing pin for a board that never went
+  through the setup form. That directory's README is the authority on both, and
+  `tests/test_zero_provision.py` ratchets its cp list, which is the whole build
+  system on that board.
+  **The browser runs moycore too since 2026-08-13** — the
   usermod is staged beside `moy_gfx`/`moy_lua`/`moy_audio` and `web_boot` wires
   the boards' chooser verbatim, so a Lua cart's whole frame runs inside libmoy
   on all three tiers rather than two. It needs no wasm variant of the module:
@@ -413,8 +548,14 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   fatal. (2) `HEAPU8` is patched INTO the port's own
   `EXPORTED_RUNTIME_METHODS_EXTRA` list; that variable is set with `+=`, so a
   command-line assignment REPLACES it — which drops `getValue`/`setValue` and the
-  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop: `moy.py run` (sub-second hot reload via `?dev=1` + `/stamp`);
-  `node harness.mjs` drives it headless. **To see what the BROWSER shows, use
+  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop:
+  `serve.py` over `dist/` (`--carts DIR` makes it the board twin: live carts.json
+  + POST /sync against a plain directory); `node harness.mjs` drives it headless.
+  **`moy.py` was DELETED 2026-08-25** (owner call): it was moy-spec's CLI shape
+  left behind — its `run`/`export` served a `runner/` dir this repo never had
+  (worker.js missing from its file list), `new` duplicates the console's own
+  +New, and the real `moy` CLI (new/run/export/port/demo) lives in the spec repo.
+  Hot reload went with it, unmissed. **To see what the BROWSER shows, use
   `node pageshot.mjs <scenario.json> [outdir]`**: it boots the real wasm console
   from `dist/` and decodes the same framebuffer the browser blits, into PNGs.
   (It used to have to slice the page's replayer out of the page source and replay
@@ -723,11 +864,19 @@ was promoted into one body and nothing executable guarded it.**
   webhost's asset probe were the only ungated reads in the shell; a sweep across a
   cart open/run/quit is now a test. **A missing asset costs the same directory read
   as a hit**, so serving the baked bundle was never exempt.
-- **The browser gets carts, not their history.** The store stream is GET-only with
-  no write-back, so a shipped undo journal could only ever undo board-era commits
-  on a copy that never returns — 40% of the payload, inert at the destination.
-  `pmem` stays (the kid's saves, 0.3%). Both walkers share one `_skip` predicate so
-  packed and streamed cannot diverge.
+- **The browser gets carts, not their history.** The undo journal never crosses
+  the wire in EITHER direction: a shipped log could only ever undo board-era
+  commits on a copy that never returns (40% of the payload, inert), and — since
+  the push half landed 2026-08-25 — a pushed one could only replay browser-era
+  ops onto a board that keeps its own. `pmem` crosses (the kid's saves, 0.3%).
+  The `_skip` predicate is ONE body in `runtime/moy_sync.py` now, shared by the
+  pull walkers, the push sweep and the receiving apply — the store stream's
+  "GET-only with no write-back" era ended with `POST /sync` (see the sync
+  paragraph in the web-runner section). **That is still true, and it is not the
+  same claim as "nobody has a history":** since the store-of-record decision
+  (same section, 2026-08-25) the RECEIVING side writes its own journal from the
+  files a batch lands, so the kid gets undo on both ends without a byte of
+  history on the wire.
 - **`slim_carts` no longer decodes a 32,768-pixel sheet to read one 8×8 icon.**
   That was 137ms of a 278ms browser page load, and the same wiring order runs on
   every tier, so all three boards get it. Per-cart numbers belong in #66.

@@ -1,0 +1,42 @@
+#  Moybyte board definition -- Seeed XIAO ESP32-S3 "Zero" (headless)
+#  =================================================================
+#
+#  The re-based Zero (#41, moycore plan 3.2, owner call 2026-08-12): not a
+#  console but the console's pocketable COMPANION. It has no panel, no touch
+#  and no frame loop -- the browser runs the whole console (the wasm head) and
+#  this board is the kid's cart store behind it: `moy_webhost` serving the
+#  bundle + carts.json and applying POST /sync batches onto its own flash.
+#
+#  DELIBERATELY NOT A BUILD TARGET. It runs STOCK MicroPython v1.28
+#  (ESP32_GENERIC_S3-SPIRAM_OCT, flashed once -- README.md) with the shared
+#  modules PUSHED as plain files by provision.sh, which is why this file has
+#  no [modules]/[native] staging sections and no build.sh: the module set is
+#  provision.sh's cp list -- nine shared files since 2026-08-25, when the owner
+#  call "the Zero supports all features" added the #108 files layer and the
+#  store-of-record journal (moy_carts + moy_image + moy_journal), which is a
+#  measurable step toward the fs headroom below. If this board ever earns a
+#  frozen image, it graduates to the ordinary port-kit shape and this file
+#  grows the sections. Until then a board.toml exists so the tools that
+#  ENUMERATE boards (push_cart's glob, the serial-fact readers) see the true
+#  facts. `tests/test_zero_provision.py` is what keeps the cp list honest.
+
+[board]
+name    = "seeed_xiao_esp32s3_zero"
+chip    = "esp32s3"
+ota     = "xiao_zero"       # no OTA channel exists for it yet; the id reserves the name
+tier    = "headless"
+tier_why = """
+No glass at all: the browser is the display, the store is the product. The
+sync RPC's "natural first host" (moycore plan 3.2) -- everything it serves
+and applies is the shared device tier, pushed rather than frozen."""
+
+[serial]
+# Stock MicroPython on the S3's native USB is TinyUSB CDC (303a:4001,
+# "Espressif Device") -- NOT the USB-Serial/JTAG id the console S3 boards
+# show. DTR must be asserted or the REPL is silent (the memory's oldest Zero
+# fact, still true); mpremote handles it. Resets are fine (nothing on this
+# board holds state a reset loses), so no attach_only.
+dtr  = true
+rts  = true
+usb  = "303a:4001"
+chunk = 768

@@ -23,18 +23,70 @@
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
-//   {t:"reload"}         dev hot-reload: re-read carts.json and restart the cart
+//   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
+//   {t:"carts"}          list the cart folders (the export picker)
+//   {t:"export", cart}   zip one cart out of the VFS
+//   {t:"import", name, buf}  unzip a .moy zip into the store
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
 //   {t:"error", s}       fatal: the page shows it and stops
+//   {t:"persist", mode, s}   where carts are being kept, in the page's words
+//   {t:"pin", tried}     this board is PINNED and this page cannot read it, so
+//                        the boot stopped before the VM: the page prompts.
+//                        `tried` = a pin WAS offered and refused (a wrong one),
+//                        which is the difference between "type it" and "that
+//                        one did not work".
+//   {t:"carts", names}   the shelf's folder names
+//   {t:"exported", name, buf}  a .moy zip, TRANSFERRED
+//   {t:"imported", s, ok}    the result of an import, in the page's words
 import { loadMicroPython } from "./micropython.mjs";
+import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
+// The 3.4 sync push: about once a second, ask the console (moy_sync's
+// watchers) for a batch of committed changes and POST it to the RELATIVE
+// /sync -- a page served from a board writes back to that board; one served
+// by a static host gets a 404/405/501 on the first try and push turns off
+// for good. ONE batch in flight at a time, so ops arrive in order and a
+// failed send simply requeues on the Python side (syncAck false).
+//
+// The batch is an OPAQUE string here, which is what lets the carts store and
+// the #108 user files share this pump untouched: which root a batch speaks
+// for is inside the body, chosen by web_boot, and the disable-on-404 above is
+// about the ENDPOINT, not about either store. Whether the files half runs at
+// all is settled once at boot by the files.json fetch (see writeFiles).
+let syncPoll = null, syncAck = null, syncOff = null, rescan = null;
+let syncBusy = false, lastSyncAt = 0;
+const SYNC_MS = 1000;
+// #9 physical I/O: the same pump shape as the sync push, at a physical-I/O
+// rate. A cart's pin_write QUEUES (gpio_link.py: it must never stall a frame
+// on the wire), so the pace here IS the latency a kid feels between the cart
+// deciding and the LED changing. 33ms is one console frame; below that the
+// round trip is the limit anyway, and above it a blink starts to look laggy.
+// The busy flag is what keeps it honest: one POST in flight, and whatever
+// happened while it was away coalesces into the next batch.
+let gpioPoll = null, gpioAck = null, gpioOff = null;
+let gpioBusy = false, lastGpioAt = 0;
+const GPIO_MS = 33;
+// MODE 1 (#193): the same batches, applied into OPFS instead of POSTed. `mode`
+// is decided ONCE at boot, before anything is written, because it decides where
+// the VFS is seeded FROM -- a board's carts.json, or the browser's own store.
+//   "board"  a console served this page; it owns the carts, nothing is kept here
+//   "site"   a static host; OPFS is the truth and survives the reload
+//   "none"   site mode with no usable OPFS: in memory, and the page SAYS so
+// ONE OPFS store per registered root (site mode), keyed by root id -- so the
+// carts store and the #108 files store persist side by side and a new root
+// would be one more entry, not a second variable. null for a root whose OPFS
+// could not be opened (that root then runs in memory; the page says so).
+let mode = null, persistFails = 0, persistSaid = false;
+const opfsStores = {};
+let persistBatches = 0;
+const PERSIST_GIVE_UP = 3;
 let running = false, ahead = -1, inbox = [];
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -92,16 +144,185 @@ function mkdirs(p) {
     }
 }
 
-function writeCarts(carts) {
-    mkdirs("/moy/carts");
-    for (const rel in carts) {
-        const full = "/moy/carts/" + rel;
+// The carts VFS root, from the registry (store.ROOTS) so there is one source of
+// the path. Only the carts-specific export/import code below names a root
+// directly; everything else iterates store.ROOTS.
+const CARTS_ROOT = store.rootById("carts").vfs;
+
+function writeStore(root, files) {
+    // mkdirs(root) even for an empty set: a root with no files YET (a board's
+    // files layer with no drawings; a site-mode files store on first visit)
+    // must still create its directory, because web_boot builds a watcher only
+    // for a root whose store is present -- the empty dir IS the capability
+    // signal, and skipping it would leave the kid's first drawing with nothing
+    // watching for it.
+    mkdirs(root);
+    for (const rel in files) {
+        const full = root + "/" + rel;
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, carts[rel]);
+        mp.FS.writeFile(full, files[rel]);
     }
 }
 
+// `d` is the DETAIL -- how many files moved and how long it took. It rides the
+// message rather than a console.log because that is the only form a test (or a
+// curious owner) can read back: log lines are trimmed by whatever is capturing
+// them, and this is the evidence that the store is actually being written.
+function persist(m, s, d) {
+    mode = m;
+    self.postMessage({ t: "persist", mode: m, s: s, d: d || "", n: persistBatches });
+    console.log("[moy] persist: " + m + " -- " + s + (d ? " (" + d + ")" : ""));
+}
+
+// Seed ONE root into the VFS, and in site mode into that root's OWN OPFS store.
+// `data` is the served bundle for this root ({} / null when the host does not
+// serve it). Returns "board" | "site" | "none" for the caller's tally, and sets
+// opfsStores[root.id]. The carts and files roots go through the identical body,
+// which is the whole point of the registry: files persistence is not a second
+// path, it is this path run once more.
+async function seedRoot(root, data, site) {
+    data = data || {};
+    if (!site) {                             // board mode: the console owns it
+        writeStore(root.vfs, data);
+        return "board";
+    }
+    const s = await store.openStore(navigator, root.id);
+    opfsStores[root.id] = s;
+    if (!s) {                                // no OPFS for this root: in memory
+        writeStore(root.vfs, data);
+        return "none";
+    }
+    try {
+        if (await store.isEmpty(s)) {
+            // First visit: the served bundle is the seed AND the baseline, so
+            // the shelf is never empty and the first sweep has nothing to say.
+            // On a static host the files bundle is empty, which correctly seeds
+            // an empty files store the kid's first drawing then persists into.
+            writeStore(root.vfs, data);
+            await store.seed(s, data);
+            return "seed";
+        }
+        // The local store WINS over the served bundle: it is the kid's work, and
+        // the bundle is only ever the factory seed. "load" (vs "seed") is the
+        // evidence that a reload READ FROM local rather than re-seeding fresh.
+        writeStore(root.vfs, await store.readAll(s));
+        return "load";
+    } catch (e) {
+        writeStore(root.vfs, data);
+        opfsStores[root.id] = null;
+        console.log("[moy] persist: OPFS failed for " + root.id + " -- " + e);
+        return "none";
+    }
+}
+
+// Decide the world and seed EVERY registered root. Runs BEFORE the console
+// boots, because web_boot constructs a StoreWatcher over each root and rebases
+// on what it finds: seed first and the baseline is correct with nothing pending,
+// seed after and the whole store ships as "changed".
+async function initStore(fetched) {
+    const t0 = performance.now();
+    const site = (await store.probeMode((u, o) => fetch(u, o))) !== "board";
+    let anySite = false, anyNone = false, loaded = false;
+    for (const root of store.ROOTS) {
+        const data = fetched[root.id];
+        // A sibling root the host does not serve (files.json 404 -> null): in
+        // BOARD mode skip it (no watcher, no empty dir, exactly today's
+        // capability rule); in SITE mode still give it an empty OPFS store, so a
+        // drawing the kid makes locally has somewhere to persist.
+        if (!site && data == null && root.id !== "carts") continue;
+        const w = await seedRoot(root, data, site);
+        if (w === "seed" || w === "load") anySite = true;
+        if (w === "load") loaded = true;
+        if (w === "none") anyNone = true;
+    }
+    if (!site) {
+        persist("board", "carts are kept on the console");
+    } else if (!anySite) {
+        // No OPFS at all: a private window, blocked site data, file://. The
+        // pre-#193 behaviour, but never silently -- the page says it out loud.
+        persist("none", "this browser has no local storage: work will NOT survive a reload");
+    } else {
+        // "loaded" once any root read the kid's work back from OPFS (a revisit);
+        // "seeded" on a first visit. The word is the persistence evidence the
+        // E2E reads back.
+        persist("site", anyNone ? "carts saved here (some kinds could not)"
+                                : "carts & drawings saved in this browser",
+                (loaded ? "loaded" : "seeded") + " in "
+                + (performance.now() - t0).toFixed(0) + "ms");
+    }
+}
+
+function vfsIsDir(p) {
+    const m = mp.FS.stat(p).mode;
+    return typeof mp.FS.isDir === "function" ? mp.FS.isDir(m) : (m & 0o170000) === 0o040000;
+}
+
+function vfsExists(p) {
+    try { mp.FS.stat(p); return true; } catch (e) { return false; }
+}
+
+function cartNames() {
+    const out = [];
+    if (!mp) return out;
+    for (const name of mp.FS.readdir(CARTS_ROOT)) {
+        if (name === "." || name === ".." || store.skipName(name)) continue;
+        try { if (vfsIsDir(CARTS_ROOT + "/" + name)) out.push(name); } catch (e) { }
+    }
+    return out.sort();
+}
+
+// The cart as it sits in the VFS RIGHT NOW -- the live shelf, not the local
+// store, which lags it by up to one sweep. Skip-filtered at every level, so an
+// exported zip carries exactly what a board would have been sent.
+function walkVfs(path, prefix, out, depth) {
+    if (depth > 6) return;
+    for (const name of mp.FS.readdir(path)) {
+        if (name === "." || name === ".." || store.skipName(name)) continue;
+        const full = path + "/" + name;
+        const rel = prefix + "/" + name;
+        if (vfsIsDir(full)) walkVfs(full, rel, out, depth + 1);
+        else out.push({ name: rel, data: mp.FS.readFile(full) });
+    }
+}
+
+// Unzip into the store under a collision-safe name, then re-scan the shelf
+// WITHOUT rebasing the watcher: the imported files must stay pending so the
+// very next sweep writes them to the local store like any other commit.
+async function importZip(name, buf) {
+    const entries = await store.unzip(new Uint8Array(buf));
+    if (!entries.length) throw new Error("no files in that zip");
+    const top = store.zipTopDir(entries);
+    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
+                                    store.cartBase(top || name));
+    let n = 0;
+    for (const e of entries) {
+        const rel = top ? e.name.slice(top.length + 1) : e.name;
+        if (!rel) continue;
+        const parts = store.safeSegments(dir + "/" + rel);
+        if (!parts) continue;                 // traversal, or a skip-listed name
+        const full = CARTS_ROOT + "/" + parts.join("/");
+        mkdirs(full.slice(0, full.lastIndexOf("/")));
+        mp.FS.writeFile(full, e.data);
+        n++;
+    }
+    if (!n) throw new Error("nothing in that zip looked like a cart");
+    if (rescan) rescan();
+    return { dir, n };
+}
+
+// THE PIN, on every request that needs it. A GET has nowhere else to carry a
+// credential, so it rides the query -- the same `?pin=` the page itself was
+// opened with (a QR scan, or the prompt's remembered value). A page with no pin
+// asks for the bare url and finds out from the answer.
+let pin = null;
+const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
+                              + "pin=" + encodeURIComponent(pin) : url);
+
 async function init(search) {
+    const qs = new URLSearchParams(search || "");
+    // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
+    // half is gated too, so carts.json is the first request that needs it.
+    pin = qs.get("pin") || null;
     say("loading vm...");
     // 16MB: the per-frame GC sweep scales with heap SIZE under this build's
     // GC_SPLIT_HEAP_AUTO (~0.13ms/MB/frame, #176), so a generous heap is a
@@ -112,19 +333,31 @@ async function init(search) {
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
-    const [mods, carts] = await Promise.all([
+    const [mods, cartsRes, files] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch("carts.json").then((r) => r.json())]);
+        fetch(withPin("carts.json")),
+        fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
+            .catch(() => null)]);
+    if (cartsRes.status === 403) {
+        // A PINNED BOARD, and this page cannot read it. Stop the boot here --
+        // there is nothing to boot, and seeding the VFS from an error body
+        // would build a shelf out of the refusal. The page prompts; a submitted
+        // pin comes back as a fresh load with ?pin= on it.
+        say("this console needs a pin");
+        self.postMessage({ t: "pin", tried: !!pin });
+        console.log("[moy] carts.json refused the pin");
+        return;
+    }
+    const carts = await cartsRes.json();
     let boot = "";
     if (mods) {
         mkdirs("/modules");
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    writeCarts(carts);
+    await initStore({ carts: carts, files: files });
     say("booting console...");
 
-    const qs = new URLSearchParams(search || "");
     let cart = qs.get("cart");
     const names = [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))];
     if (!cart && names.length === 1) cart = names[0];
@@ -144,7 +377,20 @@ async function init(search) {
     const bootArgs = desktop
         ? ", None, " + dw + ", " + dh + ", True"
         : (cart ? ", cart=" + JSON.stringify(cart) : "");
+    // #9: does whoever served this page have PINS? ONE probe, here, before the
+    // console exists -- so `pin_write`/`pin_read` are decided once and a cart
+    // either has the names or has never heard of them. An empty batch is the
+    // probe (the board answers it with its allowlist), which also means the
+    // probe passes through the PIN gate: a page opened without the board's
+    // ?pin= is refused now rather than on every write it later makes.
+    const gpioPins = await probeGpio(pin);
     mp.runPython(boot + "import web_boot\n"
+        // BEFORE boot(): the mode is what decides whether the carts watcher
+        // sweeps the journal, and boot() is where that watcher is built.
+        // `mode || ""` and not `mode`: JSON.stringify(null) is the token `null`,
+        // which is a NameError in the Python this string becomes.
+        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ")\n"
+        + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
         // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
@@ -152,7 +398,9 @@ async function init(search) {
         + (!desktop && names.length === 1 && cart
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
-        + "reload_cart, idle_collect, fb_addr, fb_len");
+        + "reload_cart, idle_collect, fb_addr, fb_len, "
+        + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
+        + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -160,6 +408,17 @@ async function init(search) {
     idleCollect = mp.globals.get("idle_collect");
     fbAddr = mp.globals.get("fb_addr");
     fbLen = mp.globals.get("fb_len");
+    syncPoll = mp.globals.get("sync_poll_json");
+    syncAck = mp.globals.get("sync_ack");
+    syncOff = mp.globals.get("sync_off");
+    rescan = mp.globals.get("rescan_store");
+    if (gpioPins) {
+        gpioPoll = mp.globals.get("gpio_poll_json");
+        gpioAck = mp.globals.get("gpio_ack_json");
+        gpioOff = mp.globals.get("gpio_off");
+        console.log("[moy] gpio: " + gpioPins.length + " pins on the host");
+    }
+    if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });
     wantAssets = false;      // the boot payload answers any pre-boot request
     say("live");
@@ -188,6 +447,144 @@ function shipFrame(s) {
     }
     if (fb) self.postMessage({ t: "frame", s: s, fb: fb }, [fb]);
     else self.postMessage({ t: "frame", s: s });
+}
+
+// The #9 probe. Returns the host's pin allowlist, or null for "this page is
+// not served by anything with pins" -- a static host (moybyte.com, an export),
+// a console board that spends its GPIOs on a panel, or a Zero whose pin gate
+// this page cannot pass. All four are the same answer to a cart: no verbs.
+async function probeGpio(pin) {
+    const body = JSON.stringify(pin ? { v: 1, ops: [], pin: pin }
+                                    : { v: 1, ops: [] });
+    try {
+        const r = await fetch("gpio", { method: "POST", body: body,
+            headers: { "Content-Type": "application/json" } });
+        if (!r.ok) return null;
+        const d = await r.json();
+        return (d && d.pins && d.pins.length) ? d.pins : null;
+    } catch (e) {
+        return null;                 // no such host, no such endpoint: fine
+    }
+}
+
+function gpioPump() {
+    if (gpioBusy || !gpioPoll) return;
+    const now = performance.now();
+    if (now - lastGpioAt < GPIO_MS) return;
+    lastGpioAt = now;
+    let body = "";
+    try { body = gpioPoll(); } catch (e) { return; }
+    if (!body) return;               // nothing queued and nothing watched
+    gpioBusy = true;
+    fetch("gpio", { method: "POST", body: body,
+                    headers: { "Content-Type": "application/json" } })
+        .then((r) => {
+            // The probe already cleared 404/405/403, so reaching one HERE means
+            // the host changed under us (rebooted into setup, a pin rotated).
+            // Stop for good rather than retry-logging: the verbs go inert and
+            // say so once, which is the most a running cart can be told.
+            if (r.status === 404 || r.status === 405 || r.status === 501
+                || r.status === 403) {
+                try { gpioAck(0, ""); gpioOff(); } catch (e) { }
+                gpioPoll = null;
+                console.log("[moy] gpio off: host stopped answering ("
+                            + r.status + ")");
+                return null;
+            }
+            const ok = r.ok ? 1 : 0;
+            return r.text().then((t) => {
+                try { gpioAck(ok, t); } catch (e) { }
+            });
+        })
+        .catch(() => { try { gpioAck(0, ""); } catch (e) { } })
+        .finally(() => { gpioBusy = false; });
+}
+
+// MODE 1 delivery: the batch the sweep just built, applied into OPFS.
+// Per-op failures are LOGGED and still ack true, exactly as the board path
+// treats a 200 carrying `err` entries -- a malformed op is poison that would
+// otherwise replay forever. Only a store-level failure requeues.
+async function pumpLocal(body) {
+    const t0 = performance.now();
+    try {
+        const doc = JSON.parse(body);
+        const ops = doc.ops || [];
+        // The batch names its root (v2 -> doc.root; a v1 batch is carts). Apply
+        // it into THAT root's OPFS store -- so a files batch persists drawings
+        // and a carts batch persists carts, from the one pump.
+        const rootId = (doc.v === 2 && doc.root) ? doc.root : "carts";
+        const s = opfsStores[rootId];
+        if (!s) {                            // no store for this root: nothing to
+            try { syncAck(1); } catch (e) { }  // keep; ack so it does not requeue
+            return;
+        }
+        const r = await store.applyOps(s, ops);
+        if (r.errors.length)
+            console.log("[moy] persist: " + r.errors.length + " op(s) refused, first "
+                + JSON.stringify(r.errors[0]));
+        persistFails = 0;
+        persistBatches++;
+        try { syncAck(1); } catch (e) { }
+        persist("site", "carts & drawings saved in this browser",
+                rootId + " " + ops.length + " ops in "
+                + (performance.now() - t0).toFixed(1) + "ms");
+    } catch (e) {
+        // Quota, or the browser evicted the store under us. Requeue; after a
+        // few consecutive failures stop pretending, once, and tell the page --
+        // #193's requirement is that this is never silent.
+        try { syncAck(0); } catch (e2) { }
+        persistFails++;
+        console.log("[moy] persist: apply failed -- " + e);
+        if (persistFails >= PERSIST_GIVE_UP && !persistSaid) {
+            persistSaid = true;
+            for (const id in opfsStores) opfsStores[id] = null;
+            persist("none", "this browser stopped saving (storage full?): export your cart");
+        }
+    } finally {
+        syncBusy = false;
+    }
+}
+
+function syncPump() {
+    if (syncBusy || !syncPoll) return;
+    const now = performance.now();
+    if (now - lastSyncAt < SYNC_MS) return;
+    lastSyncAt = now;
+    if (mode === "none") {
+        // Nowhere to deliver: stop the sweep for good rather than take batches
+        // and drop them. One decision, then silence.
+        try { syncOff(); } catch (e) { }
+        syncPoll = null;
+        return;
+    }
+    let body = "";
+    try { body = syncPoll(); } catch (e) { return; }
+    if (!body) return;
+    syncBusy = true;
+    if (mode === "site") { pumpLocal(body); return; }
+    fetch("sync", { method: "POST", body: body,
+                    headers: { "Content-Type": "application/json" } })
+        .then((r) => {
+            if (r.status === 404 || r.status === 405 || r.status === 501) {
+                // A host with no push half (moybyte.com, an export, an older
+                // read-only board): one probe, then off for good.
+                try { syncAck(0); syncOff(); } catch (e) { }
+                syncPoll = null;
+                console.log("[moy] sync off: host has no /sync (" + r.status + ")");
+                return;
+            }
+            if (r.status === 403) {
+                // The board wants a pin this page was not opened with
+                // (?pin=...). Retrying the same batch forever is noise.
+                try { syncAck(0); syncOff(); } catch (e) { }
+                syncPoll = null;
+                console.log("[moy] sync off: board refused the pin");
+                return;
+            }
+            try { syncAck(r.ok ? 1 : 0); } catch (e) { }
+        })
+        .catch(() => { try { syncAck(0); } catch (e) { } })
+        .finally(() => { syncBusy = false; });
 }
 
 // Self-driven frame loop. setTimeout (not rAF -- workers have none) against a
@@ -256,6 +653,8 @@ function loop() {
             idleCollected = true;
             framesSinceCollect = 0;
         }
+        syncPump();
+        gpioPump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;
@@ -307,10 +706,40 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const carts = await fetch("carts.json").then((r) => r.json());
-            writeCarts(carts);
+            const [carts, files] = await Promise.all([
+                fetch(withPin("carts.json")).then((r) => r.json()),
+                fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
+                    .catch(() => null)]);
+            writeStore(CARTS_ROOT, carts);
+            if (files) writeStore(store.rootById("files").vfs, files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
+        } else if (m.t === "carts") {
+            self.postMessage({ t: "carts", names: cartNames() });
+        } else if (m.t === "export") {
+            // A failed export is a MESSAGE, never the fatal {t:"error"} the
+            // outer catch would send -- the console is fine, the ask was not.
+            try {
+                const files = [];
+                walkVfs(CARTS_ROOT + "/" + m.cart, m.cart, files, 0);
+                if (!files.length) throw new Error("no such cart");
+                const zip = store.zipStore(files);
+                self.postMessage({ t: "exported", name: m.cart + ".zip",
+                                   buf: zip.buffer }, [zip.buffer]);
+            } catch (e) {
+                self.postMessage({ t: "imported", ok: false,
+                    s: "export failed: " + ((e && e.message) || e) });
+            }
+        } else if (m.t === "import") {
+            try {
+                const r = await importZip(m.name, m.buf);
+                self.postMessage({ t: "imported", ok: true,
+                    s: "imported " + r.dir + " (" + r.n + " files)" });
+                if (assets) self.postMessage({ t: "assets", json: assets() });
+            } catch (e) {
+                self.postMessage({ t: "imported", ok: false,
+                    s: "import failed: " + ((e && e.message) || e) });
+            }
         }
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.stack) || e) });

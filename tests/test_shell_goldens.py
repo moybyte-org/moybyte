@@ -49,7 +49,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            fs=2 rung is pinned here rather than in a config of
                            its own), plus the desk and a desk-with-one-window.
 
-That is 5 configurations x 17 surfaces (+2 windowed-only) = 87 goldens in
+That is 5 configurations x 19 surfaces (+2 windowed-only) = 97 goldens in
 about 1 second. The combination NOT covered is light-on-windowed; it is the
 one intersection, not an axis, and adding it would start the product
 explosion this phase was told to avoid.
@@ -164,6 +164,38 @@ GOLDEN_EXCLUDE = {
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
 APPS = ("artwork", "appearance", "writer", "storybook", "sheets", "files", "calc")
+
+# The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
+# service, for two reasons that are both about not moving the other 87 hashes:
+# injecting `ws.webhost` makes the Settings row appear, and parking the glass
+# calls go_home. Every other surface is already captured by then.
+#
+# Both the pin and the address are FIXED here. They are not decoration -- they
+# are the QR's input, and a minted pin would re-encode a different matrix on
+# every run, which is the one way this surface could be non-deterministic.
+GOLDEN_PIN = "4821"
+GOLDEN_URL = "http://192.168.1.151:8080/"
+
+
+class _GoldenWebHost:
+    """The `serving`/`start`/`stop`/`url`/`paired_url` contract the console's
+    webhost verbs use, over a fixed address."""
+
+    serving = False
+    error = None
+
+    def start(self):
+        self.serving = True
+
+    def stop(self):
+        self.serving = False
+
+    def url(self):
+        return GOLDEN_URL
+
+    def paired_url(self):
+        return GOLDEN_URL + "?pin=" + GOLDEN_PIN
+
 
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
@@ -281,6 +313,21 @@ def _surface_plan(ws, cfg):
     for app in APPS:
         plan.append(("app_" + app,
                      lambda app=app: ws.open_app(ws._apps_by_id[app])))
+
+    def park():
+        ws.system["web_pin"] = GOLDEN_PIN
+        if ws.webhost is None:
+            ws.webhost = _GoldenWebHost()
+        if not ws.webhost_serving():
+            ws.toggle_webhost()          # the real funnel: start, then park
+        ws.web_console_ui.show_address = False
+
+    def park_revealed():
+        park()
+        ws.web_console_ui.show_address = True
+
+    plan.append(("web_console", park))
+    plan.append(("web_console_address", park_revealed))
     return plan
 
 
@@ -293,6 +340,7 @@ def surface_names(config_name):
     names += ["launcher", "picker", "settings"]
     names += ["editor_" + t for t in TABS]
     names += ["app_" + a for a in APPS]
+    names += ["web_console", "web_console_address"]
     return names
 
 

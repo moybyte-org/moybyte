@@ -36,9 +36,47 @@ from runtime import web_view_ws as wsp  # noqa: E402  (the shared WS primitives)
 # ---------------------------------------------------------------------------
 
 
-def test_parse_request_get_strips_query():
+def test_parse_request_keeps_the_query_for_the_handler():
+    """The transport hands over the request TARGET, query and all.
+
+    It used to strip at "?" here, and that is where the pin gate died before it
+    was written: a GET carries its credential as `?pin=NNNN` and nowhere else,
+    so discarding it in the parser made gating a read inexpressible. Handlers
+    route on the bare path themselves (moy_webhost always did, defensively)."""
     m, p, clen, end = web.parse_request(b"GET /sync?t=1 HTTP/1.1\r\nHost: x\r\n\r\n")
-    assert m == "GET" and p == "/sync" and clen == 0 and end > 0
+    assert m == "GET" and p == "/sync?t=1" and clen == 0 and end > 0
+    m, p, clen, end = web.parse_request(b"GET /sync HTTP/1.1\r\nHost: x\r\n\r\n")
+    assert p == "/sync", "a target with no query must not grow one"
+
+
+def test_query_param_reads_a_pin_off_a_target():
+    assert web.query_param("/carts.json?pin=1234", "pin") == "1234"
+    assert web.query_param("/carts.json?dev=1&pin=99&x=2", "pin") == "99"
+    # Absent, empty, and no query at all are all "" -- one answer, so a caller
+    # never has to tell three kinds of nothing apart.
+    assert web.query_param("/carts.json?dev=1", "pin") == ""
+    assert web.query_param("/carts.json?pin=", "pin") == ""
+    assert web.query_param("/carts.json", "pin") == ""
+    assert web.query_param("", "pin") == ""
+    # A prefix match is not a match: `?pinned=1` must not read as a pin.
+    assert web.query_param("/carts.json?pinned=1234", "pin") == ""
+
+
+def test_the_handler_seam_receives_the_query():
+    """The parser keeping the query is only half of it -- `_serve_http` has to
+    pass the target through to `handle_http` or the gate never sees it."""
+    seen = []
+
+    class Srv(web.WebServer):
+        def handle_http(self, method, path, body):
+            seen.append(path)
+            return web.http_response(200, "{}")
+
+    srv = Srv.__new__(Srv)
+    srv.requests = 0
+    srv._http_send_close = lambda conn, data: None
+    srv._serve_http(None, "GET", "/carts.json?pin=1234", b"")
+    assert seen == ["/carts.json?pin=1234"]
 
 
 def test_parse_request_post_reads_content_length():

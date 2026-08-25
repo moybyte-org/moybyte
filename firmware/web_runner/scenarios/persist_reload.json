@@ -1,0 +1,7 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "a SECOND load in the same browser: the shelf comes from OPFS", "wait": 2500},
+  {"js": "document.getElementById('pzs').textContent"},
+  {"js": "Array.from(document.getElementById('pzc').options).map(o=>o.value).join(',')"},
+  {"js": "window.__moyPersist ? window.__moyPersist.d : 'none'"},
+  {"shot": "reloaded"}
+]}

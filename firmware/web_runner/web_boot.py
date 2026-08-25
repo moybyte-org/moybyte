@@ -34,6 +34,9 @@ JS contract (see worker.js):
                                      byte length, read by the worker
     apply_events_json(text)       -> feed an {"events":[...]} JSON text batch
     open_cart(name)               -> select+run a cart by folder name or title
+    gpio_enable(pins_json)        -> the host answered POST /gpio: wire the
+                                     pin verbs (absent otherwise -- see #9)
+    gpio_poll_json() / gpio_ack_json(ok, text) / gpio_off()
 """
 
 import json
@@ -215,6 +218,22 @@ class _PointerSink:
             self._d._click = True
 
 
+def _make_api(*a, **kw):
+    """The shared cart API, plus this tier's one extra gate.
+
+    A wrapper and not a `functools.partial` because the gate is decided AFTER
+    boot: the worker probes POST /gpio while the console is already built, and
+    a cart's namespace is assembled when the cart STARTS. Reading `_S` here is
+    what makes the two orders independent -- the page that turns out to be
+    served by a Zero gets the verbs, the one served by a static host never
+    hears the name.
+    """
+    g = _S.get("gpio")
+    if g is not None:
+        kw["gpio"] = g
+    return host_api.make_api(*a, **kw)
+
+
 def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
          windowed=False, font_scale=0, hud=True):
     """Build the shared Workstation over the RGB565 canvas + the VFS store.
@@ -298,7 +317,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # boards + this runner). Runner-only: can_manage=False (no Make tile / no
     # project management); the FakeWifi keeps any wifi UI harmless.
     console.wire_workstation_core(
-        ws, moy_carts, carts_root, host_api.make_api,
+        ws, moy_carts, carts_root, _make_api,
         host_api.make_wifi(moy_carts, carts_root),
         make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
@@ -362,6 +381,21 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
+    # The 3.4 sync push (moy_sync): watch this VFS store for committed changes
+    # and hand them to the worker as wire batches; the worker POSTs them to
+    # the relative /sync of whoever served the page. Constructed AFTER the
+    # pull wrote the store, so the baseline is "the board's own state, nothing
+    # pending". A page served by a host with no /sync (moybyte.com, an
+    # export) gets one failed POST and the worker calls sync_off().
+    # ONE watcher per registered sync root (moy_sync.SYNC_ROOTS) -- built by
+    # ITERATING the registry, so a new store is watched the day it is registered
+    # with no new line here. THE JOURNAL FOLLOWS THE STORE OF RECORD (2026-08-25):
+    # `root.watch_skip(site)` sweeps journal/ into the browser's own OPFS in SITE
+    # mode for the root that is of record there (carts), and keeps the wire's own
+    # rule everywhere else -- so a board-mode sweep is byte-identical to what it
+    # always was. A root whose store is not present in the VFS (a sibling root
+    # the served host has no layer for) simply gets no watcher.
+    _S["watchers"] = _build_watchers(carts_root, _S.get("store_mode") == "site")
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -373,6 +407,44 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     if cart:
         open_cart(cart)
     return True
+
+
+def _build_watchers(carts_root, site):
+    """`{root_id: StoreWatcher}` for every registered sync root whose store is
+    PRESENT in the VFS. A missing store means no watcher -- and that is a
+    CAPABILITY signal, not a bug: worker.js seeds a sibling root's directory only
+    when its source exists (a board-served `files.json`, or the browser's own
+    OPFS in site mode), so a host that has no files layer leaves no directory,
+    gets no files watcher, and never aims a files batch at a receiver that could
+    only refuse it. Never blocks a boot -- any failure leaves an empty dict."""
+    import os
+    out = {}
+    try:
+        import moy_sync
+        for root in moy_sync.SYNC_ROOTS:
+            path = root.path(carts_root)
+            if path is None:
+                continue                 # no such layer on this host at all
+            try:
+                os.stat(path)            # present in the VFS?
+            except OSError:
+                continue                 # not seeded -> not watched
+            out[root.id] = moy_sync.StoreWatcher(
+                path, root_id=root.id, skip=root.watch_skip(site))
+    except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
+        print("sync watcher unavailable:", exc)
+        return {}
+    return out
+
+
+def _watchers():
+    """The live watchers, in REGISTRY (drain) order -- CARTS FIRST, a deliberate
+    priority: a cart edit is what the kid is watching on the glass, and a drawing
+    landing a second later costs nobody anything. Order comes from the registry,
+    never the dict (MicroPython dicts are not insertion-ordered)."""
+    import moy_sync
+    ws = _S.get("watchers") or {}
+    return [ws[r.id] for r in moy_sync.SYNC_ROOTS if r.id in ws]
 
 
 def kiosk(name):
@@ -388,6 +460,28 @@ def kiosk(name):
     ws._exit_to_caller = _restart
 
 
+def _rescan():
+    """Re-derive the shelf from the store on disk. Both re-scan paths share it,
+    so the launcher items, the slim covers and the dirty flag cannot drift
+    apart depending on which one ran."""
+    ws = _S["ws"]
+    ws._all_carts = moy_carts.scan(_S["root"])
+    ws.launcher.items = ws._launcher_items(ws._all_carts)
+    ws.slim_carts()
+    ws._dirty = True
+
+
+def rescan_store():
+    """Files landed in the VFS from OUTSIDE the console -- the page's .moy
+    import (#193). Re-scan the shelf, and deliberately do NOT rebase the sync
+    watcher: an import is a CHANGE, so it must stay pending and reach the store
+    (the browser's OPFS in mode 1) on the next sweep like any other commit.
+    reload_cart's rebase is the opposite case -- there the files arrived FROM
+    the far end, and replaying them back at it would undo the reload."""
+    _rescan()
+    return True
+
+
 def reload_cart(name=None):
     """Dev hot-reload (the moy CLI's watch loop): the page rewrote changed cart
     files in the VFS; pop any running cart (flushes pmem via release_world),
@@ -399,10 +493,12 @@ def reload_cart(name=None):
         name = (cart.get("path") or "").rsplit("/", 1)[-1]
     if cart is not None:
         _S["exit"]()          # the REAL exit (kiosk wraps ws._exit_to_caller)
-    ws._all_carts = moy_carts.scan(_S["root"])
-    ws.launcher.items = ws._launcher_items(ws._all_carts)
-    ws.slim_carts()
-    ws._dirty = True
+    _rescan()
+    for w in _watchers():
+        # The reload just re-pulled the served store over the VFS -- adopt it as
+        # the new baseline (deliberate LWW: replaying local unpushed edits over a
+        # state the human just asked for would undo the reload).
+        w.rebase()
     return open_cart(name) if name else True
 
 
@@ -557,6 +653,137 @@ def _apply(events):
         rest, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
+
+
+def store_mode(mode=None):
+    """Which world this page is in, told to us by the worker BEFORE boot().
+
+    The worker decides it (moy_store.probeMode) before anything is written,
+    because the answer is what the VFS gets seeded FROM. boot() then needs it
+    for one decision only: whether the carts watcher sweeps the journal, which
+    it does exactly when THIS browser is the store of record ("site"). So this
+    must be called before boot() -- after it, the watcher already exists and a
+    late mode would be a setting with no effect, which is the shape of bug this
+    whole file is careful about.
+
+    Anything other than "site" ("board", "none", or never called at all) leaves
+    the wire's own predicate in place. That default matters more than the
+    setting: a mode that fails to arrive must not start shipping journals at a
+    board.
+    """
+    _S["store_mode"] = mode or None
+    return ""
+
+
+def sync_config(pin=None):
+    """The page's ?pin= (if any), forwarded by the worker after init -- it
+    rides inside every batch body, where the board's WebHost checks it."""
+    _S["sync_pin"] = pin or None
+    return ""
+
+
+def sync_poll_json():
+    """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
+    batch is already awaiting its answer). The worker calls this about once a
+    second -- the sweep is a stat walk of an in-memory VFS, so its cost is
+    noise; the READ of changed files happens only when something committed.
+
+    ONE BATCH IN FLIGHT is a rule about the TRANSPORT, so it is enforced here
+    across both roots rather than left to each watcher's own `take`. The worker
+    posts one body at a time and acks before polling again -- but a poll that
+    fell through to the files root while a carts batch was still unanswered
+    would hand out a second body on that promise, and `sync_ack` would then
+    settle the wrong one."""
+    live = _watchers()
+    for w in live:
+        if w.busy():
+            return ""
+    for w in live:
+        w.sweep()
+        body = w.take_json(_S.get("sync_pin"))
+        if body:
+            _S["sync_took"] = w.root_id
+            return body
+    return ""
+
+
+def sync_ack(ok):
+    """Settle the in-flight batch: the worker's POST got an answer (ok=True
+    clears it; anything else requeues every path it carried). Routed to the
+    watcher that TOOK it -- acking the wrong root would strand its batch in
+    flight forever and requeue nothing."""
+    import moy_sync
+    watchers = _S.get("watchers") or {}
+    w = watchers.get(_S.get("sync_took") or moy_sync.CARTS_ROOT_ID)
+    if w is not None:
+        w.ack(bool(ok))
+    return ""
+
+
+def sync_off():
+    """The far end has no /sync at all (a static host, an old read-only board):
+    stop sweeping for good. One failed probe, then silence -- the standalone
+    browser console must not retry-log forever.
+
+    BOTH roots, because this is the "there is no push half here" answer. A board
+    that has /sync but no files layer is a different case entirely, and it is
+    settled at boot: no files store in the VFS means no files watcher, so
+    nothing ever probes for a files endpoint that would 404."""
+    _S["watchers"] = {}
+    return ""
+
+
+def gpio_enable(pins_json):
+    """The host answered the /gpio probe: wire the pin verbs (#9).
+
+    Called by the worker in the boot script, so this lands BEFORE any cart can
+    start and the availability question is settled exactly once. A host that
+    did not answer never calls it, and `pin_write`/`pin_read` then have no name
+    at all -- the repo's standing rule for a capability that is not there.
+
+    `pins_json` is the allowlist the board sent. Kept rather than assumed,
+    because the refusal has to be able to say WHICH pins this board has, and
+    the browser cannot know that: the answer is a fact about the hardware on
+    the other end of the wire.
+    """
+    try:
+        pins = json.loads(pins_json)
+    except Exception:                # noqa: BLE001 -- a garbled probe answer
+        pins = None
+    if not pins:
+        return ""
+    try:
+        from gpio_link import GpioLink
+        _S["gpio"] = GpioLink(pins)
+    except Exception as exc:         # noqa: BLE001 -- never block a boot
+        print("gpio unavailable:", exc)
+    return ""
+
+
+def gpio_poll_json():
+    """The next batch of queued pin ops, or "" -- the worker POSTs it to the
+    relative /gpio of whoever served the page, exactly like the sync push."""
+    g = _S.get("gpio")
+    return g.take_json(_S.get("sync_pin")) if g is not None else ""
+
+
+def gpio_ack_json(ok, text=""):
+    """Settle the in-flight batch: `text` is the board's answer, whose `reads`
+    are what `pin_read` returns until the next one arrives."""
+    g = _S.get("gpio")
+    if g is not None:
+        g.ack(bool(ok), text or "")
+    return ""
+
+
+def gpio_off():
+    """The far end stopped answering /gpio. The verbs STAY (a running cart is
+    holding them) and go inert -- see GpioLink.stop."""
+    g = _S.get("gpio")
+    if g is not None:
+        g.stop()
+    _S["gpio"] = None
+    return ""
 
 
 def idle_collect():

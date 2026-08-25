@@ -96,10 +96,16 @@ WS_MAX_BUFFER = 16384
 
 
 def parse_request(raw):
-    """Parse a raw HTTP request (bytes or str) into (method, path, content_length,
+    """Parse a raw HTTP request (bytes or str) into (method, target, content_length,
     header_end). header_end is the index just past the blank line ending the headers (-1 if
-    the headers aren't complete yet). path has its query string stripped. A malformed request
-    returns (None, None, 0, -1)."""
+    the headers aren't complete yet). A malformed request returns (None, None, 0, -1).
+
+    `target` is the REQUEST TARGET VERBATIM, query string and all. It used to be
+    stripped at "?" here, which was the wrong place to do it (2026-08-25): a GET
+    carries its pin as `?pin=NNNN` -- the only place a GET can carry anything --
+    and the transport was discarding the credential before any handler could see
+    it, so gating a read was not expressible. Handlers split it themselves (they
+    always did, defensively) and reach the query through `query_param`."""
     if isinstance(raw, bytes):
         try:
             text = raw.decode("utf-8")
@@ -122,7 +128,7 @@ def parse_request(raw):
     if len(parts) < 2:
         return (None, None, 0, -1)
     method = parts[0]
-    path = parts[1].split("?", 1)[0]
+    path = parts[1]
     clen = 0
     for ln in lines[1:]:
         c = ln.find(":")
@@ -134,14 +140,40 @@ def parse_request(raw):
     return (method, path, clen, sep + nlen)
 
 
+def query_param(target, name):
+    """The value of `name` in a request target's query string, or "".
+
+    Deliberately small: no percent-decoding and no `+` handling, because the ONE
+    thing that rides a query here is a four-digit pin and a decoder is code that
+    can be wrong about a credential. A parameter whose value would need decoding
+    is one this does not serve.
+    """
+    if not target:
+        return ""
+    q = target.split("?", 1)
+    if len(q) < 2:
+        return ""
+    for pair in q[1].split("&"):
+        kv = pair.split("=", 1)
+        if kv[0] == name:
+            return kv[1] if len(kv) > 1 else ""
+    return ""
+
+
 def http_response(status, body, content_type="application/json"):
     """Build a complete HTTP/1.1 response (bytes). `body` may be str or bytes. The server
     closes the connection after each response (Connection: close), which keeps the
     single-request-per-poll model simple and robust to half-open clients."""
     if isinstance(body, str):
         body = body.encode("utf-8")
-    reason = {200: "OK", 400: "Bad Request", 404: "Not Found",
-              500: "Server Error"}.get(status, "OK")
+    # 403/405/501 joined the table on 2026-08-25: all three were already being
+    # SENT (the pin gate, the write-surface refusal, "no runner") and all three
+    # went out reading `HTTP/1.1 403 OK`, because an unknown status fell through
+    # to "OK". Browsers do not care, but a human reading a capture does, and the
+    # page now branches on exactly these.
+    reason = {200: "OK", 400: "Bad Request", 403: "Forbidden",
+              404: "Not Found", 405: "Method Not Allowed",
+              500: "Server Error", 501: "Not Implemented"}.get(status, "OK")
     head = (
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
@@ -406,7 +438,9 @@ class WebServer:
       * `handle_http(method, path, body)` -- override in a subclass to serve
                                endpoints; return a complete http_response()
                                bytes blob, or None for 404. The base serves 404
-                               for everything.
+                               for everything. `path` is the REQUEST TARGET, so
+                               it may carry a query string: split it for routing
+                               and read it with `query_param`.
       * `send_text(payload)` -- push one WS text frame to the connected client
                                (False when none is connected).
 
@@ -724,7 +758,11 @@ class WebServer:
 
     def handle_http(self, method, path, body):
         """Endpoint seam for the 3.4 sync RPC: return complete http_response()
-        bytes, or None for a 404. The base transport serves nothing."""
+        bytes, or None for a 404. The base transport serves nothing.
+
+        `path` arrives as the request TARGET -- `/carts.json?pin=1234`, not
+        `/carts.json` -- because a GET has nowhere else to carry a credential
+        and the transport must not spend it."""
         return None
 
     def _serve_http(self, conn, method, path, body):

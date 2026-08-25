@@ -7,9 +7,16 @@ transport. This ships the CONSOLE: the board hands the browser the wasm head
 once, the page then runs the whole shell locally at full speed, and the only
 thing that crosses the wire afterwards is cart data.
 
-    GET /                -> index.html          (the wasm console)
-    GET /<asset>         -> micropython.wasm, worker.js, ...   [streamed]
-    GET /carts.json      -> THIS BOARD's store, packed live
+    GET  /               -> index.html          (the wasm console)
+    GET  /<asset>        -> micropython.wasm, worker.js, ...   [streamed]
+    GET  /sync           -> {"sync": 1}: this host HAS the push half
+    GET  /carts.json     -> THIS BOARD's cart store, packed live        [pin]
+    GET  /files.json     -> its #108 user files (drawings/docs/...)     [pin]
+    POST /sync           -> apply a commit-shaped batch INTO either store [pin]
+    POST /run            -> play a cart on the BOARD's own glass (#197)   [pin]
+
+[pin] = refused 403 without the host's pairing pin (SECURITY, below). The two
+lines above it are open on purpose, and each for its own reason.
 
 The assets come from the FIRMWARE IMAGE (native/moy_web, gzipped, ~573KB of
 the app slot), and a copy pushed onto the board's storage overrides them. That
@@ -26,17 +33,65 @@ wasm VFS -- a RELATIVE url, so a page served from the board fetches the board's
 carts and the unmodified web build comes up holding your things. The pull half
 of moycore plan 3.4 is that one endpoint.
 
-WHAT THIS SLICE DOES NOT DO: write back. Commits made in the browser live in
-the page's VFS and are lost on reload -- the push half is the next slice, and
-until it lands this is a way to PLAY your console's carts in a browser and to
-read their code, not to author into the board.
+THE PUSH HALF is POST /sync (moy_sync, one body with the browser's watcher and
+the CI convergence harness): the page sweeps its own VFS for changed files and
+ships them back as commit-shaped batches, so an edit made in the browser lands
+in this board's store within about a second of its #111 commit. Per-file
+last-writer-wins; each side keeps its own journal. A batch that touches the
+SHELF (a manifest, a cover sheet, a cart appearing or dying) triggers the
+injected `on_sync` -- the console re-scans, so the kid's launcher shows the
+browser's work without a reboot.
 
-NOT SECURED, deliberately and by owner call: no pairing, no PIN, no token. Any
-device on the same network that can reach the port gets the store. That is a
-decision to revisit before this is ever pointed at a classroom (the OTA
-doctrine -- physical possession is consent -- does not stretch to an open TCP
-port), and the reason it is acceptable now is that the endpoint is read-only
-and the console has to be told to start it.
+BOTH STORES ride that one endpoint (2026-08-25): the batch names its root, and
+a files batch lands under moy_sync.files_root instead. Nothing about the files
+half touches the shelf -- the launcher renders no drawings, and the Files app
+scans its kinds when it opens -- so `on_sync` stays a carts-only hook. Serving
+GET /files.json is also what a browser reads as "this board speaks files": an
+older board 404s, and the page then never builds its files watcher at all.
+
+PLAY ON DEVICE is POST /run (#197): the browser hands back a cart NAME and the
+board plays it on its own glass. That is the whole protocol -- the page needs to
+know nothing else about device state, because the exit is the console's own
+(a cart run this way returns to the connection screen, not to a shelf the
+browser may be rewriting). The launch itself is `ws.launch_named`, the same body
+the serial dev channel's `run` goes through.
+
+SECURITY: THE PIN GATES EVERYTHING (owner call 2026-08-25, reversing the
+standing "the read half stays open"). A host that has a pin serves exactly one
+thing to a stranger -- the boot assets -- and refuses every request that would
+reveal or change what is on the board:
+
+    OPEN, always      index.html, worker.js, moy_store.mjs, micropython.mjs,
+                      micropython.wasm      the page must LOAD in order to ask
+    OPEN, always      GET /sync             the capability marker: it says "a
+                      board lives here" and nothing else, and the page's mode
+                      decision is made before it has a pin to offer
+    PIN               GET /carts.json, GET /files.json    the kid's work
+    PIN               POST /sync, POST /run              (and /gpio on the Zero)
+
+The old split gave any device on the same WiFi the whole cart store for the
+asking, on the reasoning that reading changes nothing. It reads a child's
+work off their console, which is the part that reasoning left out.
+
+A GET carries its pin the only place a GET can, `?pin=NNNN` -- which is why
+`moy_webserver.parse_request` stopped stripping query strings: it was spending
+the credential before any handler saw it. A gated GET without the right pin is
+403 with `{"error":"pin"}`, deliberately distinguishable from the transport's
+plain-text 404, because the PAGE branches on it: worker.js stops its boot and
+the page prompts for a pin instead of showing a broken console.
+
+The BOARDS PASS ONE SINCE #197: `make_webhost` reads `ws.web_pin()` at START,
+the connection screen shows it as a QR of `http://<ip>:8080/?pin=NNNN`, and the
+page forwards its own `?pin=` into every request. Read that order carefully --
+the pin is resolved in `start()`, not in `__init__`, because a board CONSTRUCTS
+this before system.json is loaded and a pin captured then would be a pin minted
+from an empty store. A host built with `pin=None` (a test, the dev server) is
+open end to end, which is what keeps the LAN dev loop free of a password.
+
+THE JOURNAL: this board is the STORE OF RECORD for a page it serves, so the
+apply path journals (`moy_sync.apply_ops(..., journal=True)`) -- a browser-made
+commit lands in the cart's own `journal/` and the console's UNDO walks back
+through it. moy_sync's docstring carries the doctrine and the cost.
 """
 
 try:
@@ -47,7 +102,7 @@ except ImportError:                      # pragma: no cover
 import json as _json
 
 from moy_webserver import (WebServer, http_response, FileResponse,
-                           ChunkedResponse, BlobResponse)
+                           ChunkedResponse, BlobResponse, query_param)
 
 # The console BAKED INTO THIS IMAGE (native/moy_web + tools/gen_web_blob.py).
 # Optional by construction: a build without it (a host test, an older image, a
@@ -77,53 +132,85 @@ INTERNAL_WEB_DIR = "/moy/web"
 # from serving /moy/carts/../wifi.json -- and the set of files the console needs
 # to hand a browser is FIXED and known at build time, so there is no reason to
 # accept a path from the network at all.
+# The one refusal body every gated endpoint answers with, here rather than
+# spelled five times: the page tests for it, and a page and a board disagreeing
+# about the shape of "you need a pin" is a prompt that never appears.
+PIN_REFUSED = '{"error":"pin"}'
+
+
+def pin_ok(pin, sent):
+    """May a request carrying `sent` proceed against a host holding `pin`?
+    No pin configured = open (a test, the dev server, a pre-#197 board). ONE
+    body, so the device host and the dev twin cannot drift about what the gate
+    means -- serve.py imports it."""
+    return (not pin) or (sent == pin)
+
+
 ASSETS = {
     "index.html": "text/html; charset=utf-8",
     "worker.js": "text/javascript; charset=utf-8",
+    # worker.js IMPORTS this one, so a board that does not serve it serves a
+    # console that cannot boot. It is mode 1's store (#193) and the .moy zip
+    # codec; a board-served page uses only its mode probe, but the import is
+    # static and the module has to be here.
+    "moy_store.mjs": "text/javascript; charset=utf-8",
     "micropython.mjs": "text/javascript; charset=utf-8",
     "micropython.wasm": "application/wasm",
 }
 
-# Never shipped inside a cart folder. `journal/` is the durable undo history and
-# the bulk of this endpoint's payload; the browser copy is read-only (any method
-# but GET is a 405) so a shipped log can never be undone back onto the board, and
-# every reader already tolerates its absence -- a seed cart has none until its
-# first commit. `pmem.json` stays: it is the kid's saves.
-SKIP_DIRS = ("thumbs", "__pycache__", "journal")
+# The skip predicate and the walking primitives are moy_sync's now -- ONE body
+# for the pull walkers here, the browser's push sweep, and the receiving
+# apply, so what never crosses the wire cannot diverge by direction. journal/
+# stays home (each side keeps its own undo history -- the 2026-08-22 pull
+# decision and its push mirror), thumbs/ is a regenerable cache, .bak/.tmp are
+# crash-safety artifacts. `pmem.json` crosses: it is the kid's saves.
+try:
+    import moy_sync
+except ImportError:                      # host / CPython: the runtime package
+    from runtime import moy_sync
 
-# Belt to the above's braces, for a flat log beside the cart. `moy_carts._dup_skip`
-# carries the same pair for the same reason.
-SKIP_FILES = ("journal.jsonl",)
-
-# `moy_fs._write_atomic`'s last-known-good rotations (`main.py.bak`,
-# `cursor.json.bak`, ...). Pure duplication on the wire: the live file is
-# already in the bundle, and a crash-recovery copy is a filesystem concern the
-# browser has no use for.
-SKIP_SUFFIX = ".bak"
-
-
-def _skip(name):
-    return (name in SKIP_DIRS or name in SKIP_FILES
-            or name.endswith(SKIP_SUFFIX))
+_skip = moy_sync._skip
+_entries = moy_sync._entries
+_is_dir = moy_sync._is_dir
+_read_text = moy_sync._read_text
 
 
-def pack_store(carts_root, listdir=None, read=None, isdir=None):
-    """The whole cart store as the page's bundle shape: {"<cart>/<rel>": text}.
+def pack_store(carts_root, listdir=None, read=None, isdir=None, tops=None):
+    """The whole store as the page's bundle shape: {"<top>/<rel>": text}.
 
-    The shape is `worker.js`'s, not a new one -- it is what the dev server
-    (`firmware/web_runner/moy.py`) already emits and what `writeCarts` already
-    consumes, so the page needs no change to read a board instead of a build.
+    The shape is `worker.js`'s, not a new one -- it is what the dev twin
+    (`firmware/web_runner/serve.py --carts`, which calls THIS function) serves
+    and what `writeCarts` already consumes, so the page needs no change to
+    read a board instead of a build.
+
+    `tops` restricts the top-level directories that are walked at all: None
+    (every dir) for the carts root, moy_sync.file_kinds() for the files root,
+    where it is the one rule that keeps `.history` and `trash` home.
 
     The three injected callables are for testing on the host, where there is no
     device filesystem; they default to the real ones.
     """
     _read = read or _read_text
     out = {}
-    for cart, isdir_ in sorted(_entries(carts_root, listdir, isdir)):
-        if not isdir_:
-            continue
-        _pack_dir(out, carts_root + "/" + cart, cart, listdir, isdir, _read)
+    for top in _root_dirs(carts_root, listdir, isdir, tops):
+        _pack_dir(out, carts_root + "/" + top, top, listdir, isdir, _read)
     return out
+
+
+def _root_dirs(root, listdir, isdir, tops):
+    """The top-level directories a store walk descends into.
+
+    ONE body for both walkers: they are independent generators whose output must
+    agree, and the `tops` allowlist is the whole of what makes a files root
+    different from a carts one. Missing root -> nothing: the carts root always
+    exists, the files root is created the first time a kid makes something.
+    """
+    try:
+        entries = sorted(_entries(root, listdir, isdir))
+    except OSError:
+        return []
+    return [n for n, isdir_ in entries
+            if isdir_ and (tops is None or n in tops)]
 
 
 def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
@@ -140,7 +227,8 @@ def _pack_dir(out, path, prefix, _listdir, _isdir, _read):
             out[rel] = text
 
 
-def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
+def stream_store_json(carts_root, listdir=None, read=None, isdir=None,
+                      tops=None):
     """The same bundle as pack_store, yielded as JSON pieces -- never assembled.
 
     A generator and not a dict-then-dumps because on real hardware the dict IS
@@ -154,10 +242,8 @@ def stream_store_json(carts_root, listdir=None, read=None, isdir=None):
     _read = read or _read_text
     yield "{"
     first = [True]
-    for cart, isdir_ in sorted(_entries(carts_root, listdir, isdir)):
-        if not isdir_:
-            continue
-        for piece in _stream_dir(carts_root + "/" + cart, cart,
+    for top in _root_dirs(carts_root, listdir, isdir, tops):
+        for piece in _stream_dir(carts_root + "/" + top, top,
                                  listdir, isdir, _read, first):
             yield piece
     yield "}"
@@ -204,51 +290,6 @@ def _jstr(s):
     dict-of-everything this replaced was not.
     """
     return _json.dumps(s)
-
-
-def _entries(path, _listdir=None, _isdir=None):
-    """(name, is_dir) for everything in `path`, in ONE directory traversal.
-
-    `os.ilistdir` yields the TYPE alongside the name, which is the whole point:
-    the obvious `listdir` + `stat`-each costs a full path resolution per entry,
-    and on littlefs that is not a small constant.
-
-    MEASURED ON P4 GLASS, 2026-08-14 -- littlefs walks from the root on every
-    path operation, so the cost is linear in how many entries the parent holds:
-
-        stat /moy                          5.3 ms   (depth 1)
-        stat /moy/carts                   28.9 ms   (depth 2, 46 entries)
-        stat /moy/carts/<cart>/main.py    59.4 ms   (depth 4)
-
-    A stat cost MORE than opening and reading an 11KB file (44.0 ms). The store
-    walk was doing 271 of them, ~16s of a 27s pack, to learn something ilistdir
-    hands over for free.
-    """
-    ils = getattr(os, "ilistdir", None)
-    if ils is not None and _listdir is None:
-        for e in ils(path):
-            yield e[0], (e[1] & 0x4000) != 0
-        return
-    # Host/test path: no ilistdir (CPython's os has none), or injected fakes.
-    ld = _listdir or os.listdir
-    isd = _isdir or _is_dir
-    for name in ld(path):
-        yield name, isd(path + "/" + name)
-
-
-def _is_dir(path):
-    try:
-        return (os.stat(path)[0] & 0x4000) != 0
-    except OSError:
-        return False
-
-
-def _read_text(path):
-    try:
-        with open(path, "r") as f:
-            return f.read()
-    except (OSError, UnicodeError, ValueError):
-        return None
 
 
 def _file_size(path):
@@ -308,13 +349,27 @@ class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
     def __init__(self, carts_root, web_dir, port=None, with_sd=None,
-                 ensure_online=None):
+                 ensure_online=None, pin=None, on_sync=None, pin_source=None,
+                 on_run=None):
         if port is None:
             WebServer.__init__(self)
         else:
             WebServer.__init__(self, port=port)
         self.carts_root = carts_root
         self.web_dir = web_dir
+        # The push half's consent gate + the console's shelf-refresh hook (see
+        # the module docstring). pin=None means the write endpoint is as open
+        # as the read one -- what a test or the dev server wants, and NOT what
+        # a board passes since #197. on_sync fires only for batches that
+        # changed the SHELF; on_run(name) plays a cart on the board's glass.
+        self.pin = pin
+        # ...and where a LIVE pin comes from. Resolved in start(), never here:
+        # a board builds this before system.json is loaded, so reading the pin
+        # at construction would mint one against an empty store and then serve
+        # a QR nobody's system.json agrees with.
+        self._pin_source = pin_source
+        self.on_sync = on_sync
+        self.on_run = on_run
         # Settings contract (console.Workstation.toggle_webhost): `.serving`,
         # `.start()`, `.stop()`, `.url()`, and `.error` for a failure the row can
         # show. Constructed but NOT started -- __init__ binds no socket, so
@@ -348,6 +403,19 @@ class WebHost(WebServer):
         given, which is 0.0.0.0 by default, and 0.0.0.0 is exactly the one
         address a kid cannot type into a browser.
         """
+        if self._pin_source is not None:
+            # BEFORE the bind: the pin is what the connection screen puts in
+            # its QR, and a socket accepting writes for even one poll without
+            # the gate its own screen advertises is the bug this ordering
+            # exists to make impossible.
+            try:
+                self.pin = self._pin_source() or None
+            except Exception as exc:  # noqa: BLE001
+                # A store that cannot be written (no card, read-only) must not
+                # cost the feature -- but it must not silently serve an OPEN
+                # write endpoint either, so say so and keep whatever pin the
+                # host was built with.
+                print("WEBHOST pin unavailable:", exc)
         if self._ensure_online is not None and ip is None:
             ip = self._ensure_online()
         # The base start() RETURNS False on a bind failure rather than raising
@@ -385,34 +453,83 @@ class WebHost(WebServer):
             return "serving the PUSHED copy at %s, not the image's (%s)" % (
                 self.web_dir, stamp or "none")
         return "MIXED: %d of %d assets pushed to %s, the rest from the " \
-               "image (%s) -- push all four or delete them" % (
+               "image (%s) -- push them all or delete them" % (
                    len(pushed), len(ASSETS), self.web_dir, stamp or "none")
 
     def stop(self):
         WebServer.stop(self)
         self.serving = False
 
+    def paired_url(self):
+        """`url()` with the pin on it -- the ONE string worth handing a human.
+
+        The page forwards its own `?pin=` into every batch it posts, so this is
+        the entire pairing gesture: scan it, or type it, and the browser can
+        write back. Without a pin it is just `url()`, which is what a host built
+        open (a test, the dev server) should show."""
+        base = self.url()
+        if not self.pin:
+            return base
+        return base + "?pin=" + str(self.pin)
+
+    def gate(self, target):
+        """None when a gated request may proceed, else the 403 to answer with.
+
+        `target` is the request target, so the pin comes off `?pin=`. Called
+        before the endpoint does any work at all -- refusing after a store walk
+        would leak its timing and, on the T-Deck, take the SD gate to do it.
+        """
+        if pin_ok(self.pin, query_param(target, "pin")):
+            return None
+        return http_response(403, PIN_REFUSED)
+
     def handle_http(self, method, path, body):
+        # `path` is the request TARGET (query string included, since 2026-08-25
+        # -- see the SECURITY note). Route on the bare path, gate on the target.
+        target = path
+        path = target.split("?", 1)[0]
+        if method == "POST":
+            if path == "/sync":
+                return self._sync(body)
+            if path == "/run":
+                return self._run(body)
         if method != "GET":
-            # The push half is the next slice; say so rather than 404, because
-            # a page from a NEWER build talking to an older board will try.
-            return http_response(405, '{"error":"read-only build"}')
-        path = path.split("?", 1)[0]
+            return http_response(
+                405, '{"error":"GET only (writes ride POST /sync and /run)"}')
+        if path == "/sync":
+            # The CAPABILITY MARKER, and the one GET that stays OPEN on a
+            # pinned board. It reveals that a board lives here and nothing
+            # else -- no cart, no name, no file -- and the page has to make its
+            # mode decision (board store vs browser store) BEFORE it has any
+            # pin to offer. A static host (moybyte.com, an export, `python -m
+            # http.server` over dist/) 404s it, which is exactly how the page
+            # learns not to offer PLAY ON DEVICE and not to build a sync loop
+            # against a wall.
+            return http_response(200, '{"sync":1}')
         if path == "/" or path == "/index.html":
             return self._asset("index.html")
-        if path == "/carts.json":
-            return self._carts_json()
         name = path[1:]
         if name in ASSETS:
+            # The boot assets are open BY NECESSITY: the page is what shows the
+            # pin prompt, so a board that gated its own console behind a pin
+            # would have nothing left to ask the question with. They are the
+            # same bytes every build of the console ships and say nothing about
+            # this board.
             return self._asset(name)
+        # The pull endpoints are DATA: one per registered sync root
+        # (moy_sync.SYNC_ROOTS), so a new store serves its own GET with no new
+        # arm here. Each is pin-gated -- it is the kid's work.
+        for root in moy_sync.SYNC_ROOTS:
+            if path == root.endpoint:
+                return self.gate(target) or self._pack(root)
         return None                      # -> 404 from the transport
 
     def _asset(self, name):
         # A PRE-GZIPPED copy wins when it is there. The board does no
         # compressing -- it serves `<name>.gz` verbatim and lets the browser
         # inflate it, so the only cost is picking the file. Worth it because
-        # the wire is the expensive part here: the four assets are 1,155,953 B
-        # raw and 572,747 B gzipped, and on the T-Deck they stream off SD
+        # the wire is the expensive part here: the assets are 1,230,814 B
+        # raw and 609,268 B gzipped, and on the T-Deck they stream off SD
         # inside the DMA gate, so halving the bytes halves the window in which
         # the console is handing its storage to the socket.
         # Raw stays the fallback: `dist/` keeps both, because a plain static
@@ -426,7 +543,7 @@ class WebHost(WebServer):
         # on. The image's job is the GUARANTEE: a board that has never been
         # pushed to still serves a console, and it is the one its firmware was
         # built from. (Which also means a HALF-pushed bundle is a mixed one --
-        # push all four or none; p4_push_web does.)
+        # push them all or none; p4_push_web does.)
         #
         # The PROBE must go through `_with_sd` too, not just the body: on the
         # T-Deck `web_dir` is on the card sharing the panel's SPI host, and this
@@ -456,8 +573,104 @@ class WebHost(WebServer):
                  "firmware/web_runner/dist and reflash, or copy it there"
                  % self.web_dir, "text/plain; charset=utf-8")
 
-    def _carts_json(self):
-        """The store, STREAMED as JSON -- never built.
+    def _sync(self, body):
+        """Apply one push batch into the store (moy_sync.apply_ops -- the same
+        function the CI convergence harness and the dev server run).
+
+        The whole apply runs INSIDE one storage-gate entry: a batch is bounded
+        (the transport refuses requests past 64KB), and on the T-Deck every
+        one of these writes lands on the card that shares the panel's SPI
+        host, at the frame tail where the feeder may still be shipping bands
+        -- the same reason the asset probe takes the gate. Boards without
+        shared storage pass a call-through and pay nothing.
+
+        A bad op SKIPS (reported in `err`), it never aborts the batch: the
+        client clears an answered batch either way, so aborting would just
+        make one poison op eat its innocent neighbours forever.
+
+        AND IT JOURNALS (2026-08-25). This board is the store of record for the
+        page that sent this, so every carts-root file the batch publishes gets
+        a #111 commit in the shape the console's own commits use -- which is
+        what makes the kid's on-glass UNDO able to walk back through an edit
+        made in a browser. Inside the same gate entry as the writes, because
+        the snapshot lands on the same card. The pin rides the BODY here (a
+        POST has somewhere to put it); the gated GETs read `?pin=`.
+        """
+        ops, pin, root_id = moy_sync.parse_batch(body)
+        if ops is None:
+            return http_response(400, '{"error":"bad batch"}')
+        if not pin_ok(self.pin, pin):
+            return http_response(403, PIN_REFUSED)
+        target = self._root_for(root_id)
+        if target is None:
+            return http_response(400, '{"error":"no such store"}')
+        applied, errors, shelf_dirty = self._with_sd(
+            lambda: moy_sync.apply_ops(target, ops, root_id, journal=True))
+        if errors:
+            try:
+                print("SYNC %d applied, %d refused: %s"
+                      % (applied, len(errors), errors[0][1]))
+            except Exception:            # noqa: BLE001 -- a log is never fatal
+                pass
+        if shelf_dirty and self.on_sync is not None:
+            try:
+                self.on_sync()
+            except Exception as exc:     # noqa: BLE001 -- never fail the request
+                print("SYNC rescan failed:", exc)
+        return http_response(200, _json.dumps(
+            {"ok": applied, "err": [list(e) for e in errors[:8]]}))
+
+    def _run(self, body):
+        """PLAY ON DEVICE (#197): `{"cart": "<title or folder>", "pin": ...}`.
+
+        Pin-gated exactly like /sync -- this starts code on the kid's console,
+        so it is a WRITE by any reading of the word.
+
+        The launch runs INSIDE the storage gate for the same reason the apply
+        does, and it is easy to miss why: `handle_http` is called from poll(),
+        which the boards run at the FRAME TAIL, where a frame that painted has
+        just kicked a flush the feeder may still be shipping. Opening a cart
+        reads its manifest, code, sheet and pmem off the store -- on the T-Deck
+        that is the card sharing the panel's SPI host, and an sdspi transaction
+        there is the documented Cache/MMU panic.
+
+        The answer carries the cart's TITLE, not an ack: the page sent a name it
+        guessed at, and echoing what actually started is how it can say so."""
+        try:
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            doc = _json.loads(body)
+        except Exception:                # noqa: BLE001
+            doc = None
+        if not isinstance(doc, dict):
+            return http_response(400, '{"error":"bad body"}')
+        if not pin_ok(self.pin, doc.get("pin")):
+            return http_response(403, PIN_REFUSED)
+        if self.on_run is None:
+            # A host with no console behind it (the dev server, a test): say so
+            # rather than 404, which the page would read as "no such endpoint"
+            # and stop offering the button over a board that simply has none.
+            return http_response(501, '{"error":"no runner"}')
+        name = doc.get("cart")
+        # A named launch, not a bare one: `launch_named("")` runs the FIRST cart
+        # (the serial `run` with no argument), which is wrong for a PLAY ON DEVICE
+        # whose body arrived without a cart -- it would start a random game and,
+        # for a titleless one, then answer 404. The page always names its cart;
+        # an empty name is a malformed request, refused before anything launches.
+        if not name or not str(name).strip():
+            return http_response(400, '{"error":"no cart named"}')
+        try:
+            title = self._with_sd(lambda: self.on_run(name))
+        except Exception as exc:         # noqa: BLE001 -- never fail the request
+            print("RUN failed:", exc)
+            return http_response(500, '{"error":"run failed"}')
+        if not title:
+            return http_response(404, '{"error":"no cart"}')
+        return http_response(200, _json.dumps({"run": title}))
+
+    def _pack(self, root):
+        """One sync root, STREAMED as JSON -- the pull half for any registered
+        `root` (moy_sync.SYNC_ROOTS), never assembled into a dict.
 
         Measured on P4 glass before this was a generator: 46 carts / 225 files
         packed in 21.8s and `json.dumps`ed in 39.3s into a 982KB string, so the
@@ -465,17 +678,36 @@ class WebHost(WebServer):
         blocked throughout. The dict and the dump are both gone; what is left is
         the unavoidable part, reading the files.
 
+        A KINDED root (files) is walked through its kind allowlist rather than a
+        skip list, so `.history/` (each side's own undo sidecars) and `trash/`
+        (a LOCAL recovery bin -- shipping it hands a peer a deletion it cannot
+        undo) stay home with no second rule to keep in step. Its two "nothing
+        here" cases answer DIFFERENTLY on purpose, because the page reads this as
+        a capability probe: an EMPTY files layer -> `{}` 200 (the board speaks
+        files; a 404 would disable the push half and strand the kid's first
+        drawing), a host with NO files layer at all (the headless XIAO cart
+        store: moy_webhost + moy_sync, no moy_carts) -> 404, the same answer a
+        board flashed before files sync gives, so the page never builds a files
+        watcher against a wall.
+
         The SD gate is entered ONCE, here, and the walk then runs outside it --
-        which is correct only because of what `with_sd_live` is: it mounts the
-        card once and KEEPS IT RESIDENT for the session (moybyte_sd; tearing it
-        down per op is what corrupts the shared bus and hangs the next panel
-        flush). So the gate's job is "make sure the card is up", and a generator
-        that yields for a minute must not hold anything. Wrapping the whole
-        iteration would mean holding the gate across every read, which is the
-        opposite of that module's contract.
+        correct only because of what `with_sd_live` is: it mounts the card once
+        and KEEPS IT RESIDENT for the session (moybyte_sd; tearing it down per op
+        corrupts the shared bus and hangs the next panel flush). So the gate's
+        job is "make sure the card is up", and a generator that yields for a
+        minute must hold nothing.
         """
         self._with_sd(lambda: None)          # ensure the card is mounted
-        return ChunkedResponse(stream_store_json(self.carts_root))
+        path = root.path(self.carts_root)
+        if path is None:
+            return None                      # no such layer -> 404 from transport
+        tops = moy_sync.file_kinds() if root.kinds else None
+        return ChunkedResponse(stream_store_json(path, tops=tops))
+
+    def _root_for(self, root_id):
+        """The filesystem path one batch's `root` names, or None (unservable)."""
+        root = moy_sync.root_by_id(root_id)
+        return None if root is None else root.path(self.carts_root)
 
 
 def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
@@ -520,19 +752,32 @@ def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
 
 
 def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
-                 port=None):
-    """The WebHost both boards inject -- built once, here.
+                 port=None, pin=None):
+    """The WebHost every board injects -- built once, here.
 
     Takes `ws` rather than `ws.wifi` because the wifi service is attached by
     wire_workstation_core, which has not necessarily run when a board builds
     this; the closure reads it at TOGGLE time, which is the only moment it
-    matters.
+    matters. The sync push's shelf refresh is wired HERE for the same reason
+    the wait lives in ensure_online: it is the same line on every board, and
+    a per-board injection is exactly what left the T-Deck without the web
+    console the first time.
 
     Constructed, NOT started: __init__ binds no socket, so injecting this costs
     nothing until a kid turns the row on. The two things that genuinely differ
     per board are the arguments -- the web directory (/sd/web vs /moy/web) and
     the SD gate (the T-Deck's store is on a shared-SPI card; the P4 has none).
+
+    The #197 wiring -- the pairing pin and PLAY ON DEVICE -- is here for that
+    same reason and NOT in three board files. An explicit `pin=` still wins (a
+    test, a host with its own policy); otherwise the pin is read off the live
+    `ws` at START, never now: a board builds this before system.json is loaded,
+    and a pin captured at construction would be minted against an empty store.
     """
     return WebHost(carts_root, web_dir, port=port, with_sd=with_sd,
                    ensure_online=lambda: ensure_online(
-                       getattr(ws, "wifi", None), autoconnect))
+                       getattr(ws, "wifi", None), autoconnect),
+                   pin=pin,
+                   pin_source=None if pin else lambda: ws.web_pin(),
+                   on_sync=lambda: ws.rescan_carts(),
+                   on_run=lambda name: ws.launch_named(name))

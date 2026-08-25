@@ -59,6 +59,8 @@ CART_VERBS = (
     "table", "text",
     # Capability-gated: network (#38), multiplayer (#65)
     "wifi", "net", "on_net",
+    # Capability-gated: physical pins (#9), on a host that has them
+    "pin_write", "pin_read",
     # Capability-gated: scenes + the actor world (#85 / #109)
     "scene", "load_scene", "draw_scene",
     "actors", "touching", "move_actor", "move_actor_to", "remove_actor",

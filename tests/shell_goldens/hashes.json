@@ -16,7 +16,9 @@
     "editor_scene": "ccaf62165434cf8081d92147de5ee32ea6d40814e91482e2cd92e2aecc0ada73",
     "launcher": "e006367ac1476dd74a5c69ddb3172288652910f0226b0ddfec7d52f377107086",
     "picker": "bd1b97b465272f46174e0fc8080a8f9c2a4e78b52c28b0baa65b8ccef1a53dbe",
-    "settings": "1871705d8b41aa4fa719953765c781d26be56b680dd03b55e079d9da93468bc7"
+    "settings": "1871705d8b41aa4fa719953765c781d26be56b680dd03b55e079d9da93468bc7",
+    "web_console": "9fbdc6321590cba2d5b6a434832685d1964cd96629b7fc5818b3a976f1074d02",
+    "web_console_address": "731cc224c7c549d8560d722fb933cad2da221f0e652f9a3380ff8cb5d4a9943f"
   },
   "guition_480x320_fs1_dark": {
     "app_appearance": "e53ec9c6df39221c0a7a6908217a90331ef1097c966248d9d4a9c29384834bb5",
@@ -35,7 +37,9 @@
     "editor_scene": "7e8b396f273ad346fb1dd6b5febfd57832cfd836cbb74a4e3e98a32fa0f68357",
     "launcher": "f62a80a0d8fd89a724247367acd8a150ad208eebb938c01ba3177c5643ff8c98",
     "picker": "1ae1bd7375ec4fbff536d5e2a089b3ca040f80576ab3adaba019521072cce6cb",
-    "settings": "754e65c0b54331a1a0d71541cddecc08b7cb49b326ab769610000b0320f87da2"
+    "settings": "754e65c0b54331a1a0d71541cddecc08b7cb49b326ab769610000b0320f87da2",
+    "web_console": "8351a0584b34f64a957d22b6e30197245534e543b2c498c0558b4834dfcbd96c",
+    "web_console_address": "b72b54c0e542ee318842d4de8f8712c084fd0bf1c4364b49697567ecd354dd26"
   },
   "p4_1024x600_fs2_windowed": {
     "app_appearance": "44294bd9c86e40694b00a768c9d4a176089ad4aac18e9cb11c023178ea00a63c",
@@ -56,7 +60,9 @@
     "editor_scene": "a6466de61618e5ea83e47f4147f142486ad706e9daead1acbca8410a47d4b147",
     "launcher": "91b16bf396ad82ca0d947af0d9cb0f356365e7d7b732c8d667b9347be36e97c4",
     "picker": "2065afe3ac99a6e9e688df7337f2567d8a2d954828f7a56b26197ad15a8ba52e",
-    "settings": "65cfd476eaa0cd2c82d7fd2100874c8c3ad6d83ec9d6d160eda3a790174691bd"
+    "settings": "65cfd476eaa0cd2c82d7fd2100874c8c3ad6d83ec9d6d160eda3a790174691bd",
+    "web_console": "78313911aca135cc9f406899306420387033cee267a79aac3ed5c3e8f6e38dad",
+    "web_console_address": "0e48f7f7c0aab6b1ee75dbd9cb02598e2ec9b79e25e0e2e880e30e11b1639ce5"
   },
   "tdeck_320x240_fs1_dark": {
     "app_appearance": "553a27cd631e86b3e440c48784cb6e57faddd554a38490381738154dc8cec284",
@@ -75,7 +81,9 @@
     "editor_scene": "a18ccf89fa8c475b18996f898df1e2f567db26c5cfef91bcff2d648ae515f329",
     "launcher": "9a9b99030ee229bf4cdf85a8cef3c13c77957458e1f43153800bb9ebb4a721b3",
     "picker": "6dd81d0ddf4a53f9ee7c15300f4e2adc9c46125b1cff223c1a9a7b5389731580",
-    "settings": "b6e8dcec0a0645535ad7fd0d8a8efa597d13054c4f4f6a8b792373466fb3e33f"
+    "settings": "b6e8dcec0a0645535ad7fd0d8a8efa597d13054c4f4f6a8b792373466fb3e33f",
+    "web_console": "631416b31ce1de9d8308ed404c23d4399ae185d401cd691e4ad7a185bb44bfc3",
+    "web_console_address": "6764b4b15ffb053629a9be3e6073ed55d3556b816e13e14e1810a98773dc673d"
   },
   "tdeck_320x240_fs1_light": {
     "app_appearance": "b32c2339964aafd6c23dd3ce444aa54b9c6bb2facfda5798bcbdb415928cdd92",
@@ -94,6 +102,8 @@
     "editor_scene": "cd9bde9c331404150a627ff4e30b3d96d01dc9ab3de3ce8624799359c46fecf9",
     "launcher": "13ad77e5fa910149dcc0e5ece844d708e12f8ba3b467bc081a05c08d8fedba97",
     "picker": "eea9c0347493695fa51981e0ad7ca5330d37ae531f0a0c3347ca7243837b6a7c",
-    "settings": "ec32d2a9d457c2b31eb313f65f456036f6ea36b4b3d02bcae1b4599d83e45944"
+    "settings": "ec32d2a9d457c2b31eb313f65f456036f6ea36b4b3d02bcae1b4599d83e45944",
+    "web_console": "3652a71b740f8989b87d8998c61e50cf7849eb5fefea13ad12e2a7b8f257c52c",
+    "web_console_address": "570a22704a776850c19a0dc080bdcd2e4a321b3095149c3ce350661f838bfd6d"
   }
 }

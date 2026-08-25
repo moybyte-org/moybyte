@@ -171,7 +171,7 @@ the host builds the boards' own vendored Lua 5.4 + libmoy binding on demand
 .venv/bin/python tools/simulate_desktop.py --cart ~/.moybyte/projects/mine.moy
 
 # the whole console in a browser: the wasm build (firmware/web_runner)
-cd firmware/web_runner && python moy.py run
+cd firmware/web_runner && ./build.sh && python serve.py
 
 # headless tour -> animated GIF (this is how the GIFs above are made)
 .venv/bin/python tools/simulate_desktop.py --demo --gif demo.gif

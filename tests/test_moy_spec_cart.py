@@ -237,6 +237,17 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
         def __getattr__(self, name):
             return lambda *a, **k: 0
 
+    class _GpioGate:
+        """The #9 pin backend's shape -- make_api binds these two methods, so
+        unlike `wifi` (a bare object handed straight to the cart) this gate
+        cannot be an `object()`."""
+
+        def write(self, n, v):
+            return False
+
+        def read(self, n):
+            return None
+
     modules_dir = ROOT / "device"
     sys.path.insert(0, str(modules_dir))
     try:
@@ -255,7 +266,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
     # Every gate the Player can open, together -- so a name that only appears
     # under a combination is compared too.
     gates = dict(scenes=widgets.Scenes({}, []), images={}, tables={},
-                 texts={}, wifi=object())
+                 texts={}, wifi=object(), gpio=_GpioGate())
     full_h, full_d = names(host_app, **gates), names(dev, **gates)
     assert full_h == full_d, (
         "host-only: %s / device-only: %s"

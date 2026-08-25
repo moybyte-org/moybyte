@@ -129,6 +129,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.update_ui import UpdateUI
 
+# The WEB CONSOLE connection screen (#197): the surface the glass parks on while
+# wasm mode is on -- the QR of the paired url, the tap-to-reveal address, and
+# TURN OFF. Same shape and the same construction point as UpdateUI.
+try:
+    from web_console_ui import WebConsoleUI
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.web_console_ui import WebConsoleUI
+
 # The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
 # builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device). Same
@@ -155,11 +163,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from layers import (
         _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
+        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
+        _WebConsoleLayer)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.layers import (
         _LegacyLayer, _PlayerLayer, _BlocksLayer, _UpdateLayer, _MapLayer, _MusicLayer,
-        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer)
+        _SceneLayer, _PerfLayer, _AchOverlayLayer, _SysMenuLayer, _AboutLayer,
+        _WebConsoleLayer)
 
 # The unified top bar surface (#46, extracted from this file -- see
 # bar_layer.py). bar_layer.py is the SINGLE SOURCE of the bar geometry constants
@@ -959,6 +969,14 @@ class Workstation:
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
         self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
+        # The WEB CONSOLE connection screen (#197, web_console_ui.py) + the flag
+        # that says the glass is parked on it. `_web_parked` is what makes wasm
+        # mode a MODE and not a screen: every return-to-the-launcher path
+        # (go_home) re-parks while it is set, so a cart launched from the browser
+        # comes back HERE rather than dropping a kid onto a shelf the browser is
+        # concurrently rewriting.
+        self.web_console_ui = WebConsoleUI(self, NAMES, _in)
+        self._web_parked = False
         # The scanned cart list is the single source both grids derive from (#carts):
         # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and the
         # Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every editable cart.
@@ -1419,6 +1437,7 @@ class Workstation:
             "picker": self.editor_picker,
             "settings": self.settings_layer,
             "update": _UpdateLayer(self),
+            "webconsole": _WebConsoleLayer(self),   # #197: the parked wasm mode
             "desktop": _PlayerLayer(self),   # Stage 2: the run loop is ws.player
 
             "code": self.code_layer,
@@ -1875,9 +1894,110 @@ class Workstation:
 
     # -- WEB CONSOLE (moycore plan 3.4 pull half) ----------------------------
     #
-    # Three thin verbs over the injected `webhost`, so settings_layer never
-    # touches a socket and every tier without the service is untouched. The
-    # service contract is `.serving` / `.start()` / `.stop()` / `.url()`.
+    # Thin verbs over the injected `webhost`, so settings_layer never touches a
+    # socket and every tier without the service is untouched. The service
+    # contract is `.serving` / `.start()` / `.stop()` / `.url()`.
+    #
+    # Since #197 the toggle is also a MODE: turning it on parks the glass on the
+    # connection screen (web_console_ui.py) and turning it off returns the
+    # console. See park_web_console below for why that is a switch and not a
+    # session.
+
+    _WEB_PIN_DIGITS = 4
+
+    def web_pin(self):
+        """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
+
+        MINTED ONCE, LAZILY, and then persisted in system.json beside every
+        other Settings choice. Lazily because a board that never serves the web
+        console should never have written a secret to its store; once because a
+        pin that changed per boot would mean re-scanning the QR after every
+        power cycle, and a kid's phone keeping the old url would look like the
+        board had broken.
+
+        Four digits is the strength a kid can read off a panel and a grown-up
+        can type. It is not a password: it stops the OTHER machine on the
+        network from writing to this store by accident, which is the threat an
+        open write endpoint on a classroom LAN actually poses (moy_webhost's
+        SECURITY note). The read half stays open, by the standing owner call."""
+        pin = self.system.get("web_pin")
+        if pin:
+            return str(pin)
+        pin = self._mint_web_pin()
+        self.system["web_pin"] = pin
+        self._persist_system()
+        return pin
+
+    def _mint_web_pin(self):
+        """A fresh 4-digit pin. `os.urandom` where there is one (both boards and
+        the host have it); the clock is the fallback, and is only ever reached
+        on a build with no urandom at all."""
+        n = None
+        try:
+            import os as _os
+            n = int.from_bytes(_os.urandom(3), "big")
+        except Exception:  # noqa: BLE001 -- no urandom: fall through to the clock
+            n = None
+        if n is None:
+            n = _ticks_us()
+        return "%04d" % (n % (10 ** self._WEB_PIN_DIGITS))
+
+    def web_console_url(self):
+        """The PAIRED url -- what the QR encodes and SHOW ADDRESS reveals.
+
+        `http://<ip>:8080/?pin=NNNN`: the page forwards its own `?pin=` into
+        every sync batch, so scanning this is the whole pairing gesture. Empty
+        when nothing is serving -- there is no address to show then, and a
+        placeholder would encode to a QR that sends a phone nowhere."""
+        wh = self.webhost
+        if wh is None or not getattr(wh, "serving", False):
+            return ""
+        try:
+            paired = getattr(wh, "paired_url", None)
+            return (paired() if paired is not None else wh.url()) or ""
+        except Exception:  # noqa: BLE001 -- a url is not worth a crash
+            return ""
+
+    def park_web_console(self):
+        """Take the glass over with the connection screen (#197).
+
+        WASM MODE IS A SWITCH, NOT A SESSION (owner call, 2026-08-25). While the
+        toggle is on, the browser owns this store and the glass shows how to
+        reach it -- so parking goes through `go_home`, which commits every open
+        editor and app before the browser starts writing underneath them, and
+        `go_home` then re-parks here (and on every later return: a cart launched
+        by PLAY ON DEVICE exits back to THIS screen, not to a shelf the browser
+        is concurrently rewriting).
+
+        On the windowed tier `go_home` also leaves the desk, which is what makes
+        this fullscreen there: windows exist only above the desk (#105), so the
+        play world presents every kind full-screen with no special case."""
+        self._web_parked = True
+        self.web_console_ui.on_enter()
+        self.go_home()
+
+    def stop_web_console(self):
+        """The connection screen's TURN OFF.
+
+        Not `toggle_webhost` directly, and the difference is the one state a
+        toggle gets wrong: if the host stopped UNDERNEATH the parked screen (a
+        socket error, a stop from somewhere else), toggling would read "not
+        serving" and START it again -- a button labelled TURN OFF that turns it
+        on. Ask what the user wants, which is out."""
+        if self.webhost_serving():
+            self.toggle_webhost()
+        else:
+            self.unpark_web_console()
+
+    def unpark_web_console(self):
+        """Give the console back. The desk is home on the windowed tier; the
+        launcher root everywhere else."""
+        self._web_parked = False
+        self._dirty = True
+        if getattr(self.wm, "has_desk", False):
+            self.open_desk()
+        else:
+            self.wm.goto("launcher")
 
     def webhost_serving(self):
         wh = self.webhost
@@ -1908,13 +2028,19 @@ class Workstation:
         return url.replace("http://", "").rstrip("/") or "ON"
 
     def toggle_webhost(self):
-        """Start or stop serving. Errors are CAUGHT and shown on the row.
+        """Start or stop serving, and park or unpark the glass with it (#197).
 
         Starting touches WiFi, which can fail slowly and in ways nobody can act
         on from a Settings screen (no AP, wrong password, DHCP). A raised
         exception here would take the console down from a toggle, so the failure
         becomes the row's own label instead.
-        """
+
+        The park is gated on `serving` AFTER the attempt, never on "we tried to
+        start": a failed start leaves the kid in Settings looking at the reason,
+        which is the only place that reason is readable. This is the ONE funnel
+        -- the Settings row, the dev channel's `web`, and the connection
+        screen's own TURN OFF all come through here -- so the mode and the
+        socket cannot disagree about which of them is on."""
         wh = self.webhost
         if wh is None:
             return
@@ -1926,6 +2052,28 @@ class Workstation:
                 wh.start()
         except Exception as exc:  # noqa: BLE001
             wh.error = "%s" % exc
+        self._dirty = True
+        if getattr(wh, "serving", False):
+            if not self._web_parked:
+                self.park_web_console()
+        elif self._web_parked:
+            self.unpark_web_console()
+
+    def rescan_carts(self):
+        """Re-read the store and rebuild both shelves -- the sync push's board
+        half (moy_webhost wires it as `on_sync`), fired when a browser batch
+        changed what the launcher shows: a manifest, a cover sheet, a cart
+        created or deleted. `_apply_items` does the whole refresh (re-slim,
+        cover caches dropped, generation bumped), the same body every
+        create/dup/delete already runs. Safe between frames: the webhost
+        polls at the frame tail, after present."""
+        if self.carts_store is None or not self.carts_root:
+            return
+        try:
+            self._apply_items(self._with_sd(
+                lambda: self.carts_store.scan(self.carts_root)))
+        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
+            print("Moybyte rescan failed:", exc)
         self._dirty = True
 
     def set_diag_live(self, on, persist=True):
@@ -3136,6 +3284,18 @@ class Workstation:
         marker + the popup read them)."""
         if self.project is None or self.cart is None:
             return False
+        # #197: while WASM MODE is on, the glass is PARKED and the browser owns
+        # authoring. A cart played by PLAY ON DEVICE that crashes must return to
+        # the connection screen, NOT open the Editor on the glass -- an editor
+        # here would edit the same store the browser is syncing, which is exactly
+        # the two-writer case the parked switch is designed to prevent. go_home
+        # releases the dead run and re-parks (its own tail lists "a crash" as one
+        # of the doors it funnels).
+        if self._web_parked:
+            self.cart_error = None
+            self.crash_line = None
+            self.go_home()
+            return True
         err = self.cart_error or "crashed"
         line = self.crash_line
         self.player.release_world()
@@ -3590,6 +3750,66 @@ class Workstation:
                 self.open_picker()
             return
         self.open()
+
+    def launch_named(self, name):
+        """Run the cart `name` names, and return its TITLE (None if none match).
+
+        The ONE lookup behind every remote launch: the serial dev channel's
+        `run`, and the browser's PLAY ON DEVICE (moy_webhost's POST /run). Both
+        arrive with a string somebody else chose, and the two obvious strings
+        disagree -- the browser knows the cart by its TITLE (that is what rides
+        every frame payload), a human at a serial prompt types part of a folder
+        name, and title and folder differ on device by construction (the device
+        seeds from the title slug while the host copies the source folder --
+        `appearance.moy` vs `theme_picker.moy`, the mismatch #202's device-seed
+        parity test exists for). So both are accepted, exact before partial:
+
+            exact title -> exact folder (with or without .moy) -> title
+            substring, in shelf order
+
+        An empty `name` runs the first real cart, which is the dev channel's
+        established `run` with no argument. Pseudo tiles (the pinned Make/New
+        cards, which carry no store path) are never candidates."""
+        # str(): `name` comes off a JSON body a browser wrote, so it is only a
+        # string by convention -- a number there must miss, not raise inside the
+        # frame loop's tail.
+        want = str(name or "").strip().lower()
+        items = getattr(self.launcher, "items", []) or []
+        exact_title = None
+        exact_folder = None
+        partial = None
+        for i in range(len(items)):
+            it = items[i]
+            path = it.get("path")
+            if not path:
+                continue                       # a pseudo tile is not a cart
+            if not want:
+                partial = i
+                break
+            title = str(it.get("title") or "").lower()
+            folder = path.rsplit("/", 1)[-1].lower()
+            if title == want and exact_title is None:
+                exact_title = i
+            elif (folder == want or folder == want + ".moy") \
+                    and exact_folder is None:
+                exact_folder = i
+            elif want in title and partial is None:
+                partial = i
+        pick = exact_title
+        if pick is None:
+            pick = exact_folder
+        if pick is None:
+            pick = partial
+        if pick is None:
+            return None
+        self.launcher.sel = pick
+        self.launch_selected()
+        # Return something TRUTHY whenever a launch actually happened, so a
+        # caller (moy_webhost's /run) can tell "nothing matched" (None, above)
+        # from "launched a cart whose title is empty" -- a titleless cart used to
+        # report as a no-match AFTER it had already started on the glass.
+        it = items[pick]
+        return it.get("title") or it.get("path", "").rsplit("/", 1)[-1] or "cart"
 
     # -- the desk (two-worlds #105: the windowed tier's MAKE world) ----------
 
@@ -4428,6 +4648,14 @@ class Workstation:
         self.show_achievements = False
         self.ach_ui._konami_pos = 0          # fresh Konami run on the home desktop (#21)
         self.ach_ui._clock_taps = 0
+        # #197: while WASM MODE is on, HOME is the connection screen. Here and
+        # not at each exit site, because "return to the launcher" has many doors
+        # -- the bar's context X, hold-BACKSPACE out of a game, an app's own
+        # close, a crash -- and every one of them funnels through this method. A
+        # per-door re-park is the bug class that left the T-Deck without a web
+        # console at all; this is the last line of the one door they share.
+        if self._web_parked:
+            self.wm.goto("webconsole")
 
     # -- cart management (SD) ------------------------------------------------
     #

@@ -455,18 +455,16 @@ class DevChannel:
             print("REMOTE tap %d %d" % r)
             return
         if cmd == "run":
-            name = (" ".join(parts[1:])).lower() if len(parts) > 1 else ""
-            items = getattr(ws.launcher, "items", [])
-            for i in range(len(items)):
-                it = items[i]
-                if not it.get("path"):
-                    continue
-                if not name or name in str(it.get("title") or "").lower():
-                    ws.launcher.sel = i
-                    ws.launch_selected()
-                    print("REMOTE run %s" % it.get("title"))
-                    return
-            print("REMOTE run: no cart match")
+            # The lookup is ws.launch_named -- the SAME body the browser's PLAY
+            # ON DEVICE goes through (moy_webhost POST /run), so a name that
+            # works over serial works from the page and neither can grow its own
+            # idea of what a cart is called.
+            name = " ".join(parts[1:]) if len(parts) > 1 else ""
+            title = ws.launch_named(name)
+            if title:
+                print("REMOTE run %s" % title)
+            else:
+                print("REMOTE run: no cart match")
             return
         if cmd == "diag":
             on = not (len(parts) == 2 and parts[1] == "0")
@@ -628,9 +626,11 @@ class DevChannel:
                   % (order[-1], self._drag["cx"], self._drag["cy"], n, step))
             return
         if cmd == "web":
-            # Serve the wasm console FROM this board (moy_webhost). A dev
-            # command rather than only a Settings row because the endpoint is
-            # unsecured -- see moy_webhost's module docstring.
+            # Serve the wasm console FROM this board (moy_webhost), which since
+            # #197 also parks the glass on the connection screen. The PAIRED url
+            # is what gets printed -- the pin is what the page must carry to
+            # write anything back, so a bare address would be an address that
+            # syncs nothing and says nothing about why.
             try:
                 wh = getattr(ws, "webhost", None)
                 if wh is None:
@@ -638,7 +638,8 @@ class DevChannel:
                 else:
                     if not wh.serving:
                         ws.toggle_webhost()
-                    print("WEB %s %s" % (wh.url(), wh.error or ""))
+                    url = ws.web_console_url() or wh.url()
+                    print("WEB %s %s" % (url, wh.error or ""))
             except Exception as exc:  # noqa: BLE001
                 print("WEB ERR %s: %s" % (type(exc).__name__, exc))
             return

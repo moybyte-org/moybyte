@@ -1,0 +1,12 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "launcher up; tap the MAKE STUDIO tile (left-most)", "wait": 1500},
+  {"click": [63, 120]},
+  {"wait": 1500},
+  {"shot": "picker"},
+  {"note": "tap the +New tile -- a real store mutation through the real UI"},
+  {"click": [63, 120]},
+  {"wait": 2000},
+  {"shot": "after_new"},
+  {"note": "let the commit sweep + POST /sync land (1s pump cadence)"},
+  {"wait": 6000}
+]}

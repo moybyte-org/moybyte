@@ -144,6 +144,7 @@ def _host(tmp_path, web=True):
     h.carts_root = str(root)
     h.web_dir = str(wdir)
     h._with_sd = lambda fn: fn()
+    h.pin = None                                # OPEN: the LAN dev-loop shape
     return h
 
 
@@ -491,14 +492,233 @@ def test_the_asset_probe_never_stats_storage_outside_the_gate(tmp_path,
     assert len(entries) == 1, entries
 
 
-def test_a_write_is_refused_in_a_way_a_newer_page_can_read(tmp_path):
-    """The push half is the next slice. A page from a build that HAS it will
-    POST at a board that does not, and 405-with-a-reason is a thing the page
-    can act on where a 404 reads as a wrong url."""
+def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
+    """The write surface is exactly ONE path. Every other method+path pair
+    stays refused with a reason the page can read (405, not a 404 that reads
+    as a wrong url)."""
     h = _host(tmp_path)
     r = h.handle_http("POST", "/carts.json", b"{}")
     assert b"405" in r.split(b"\r\n")[0]
-    assert b"read-only" in r
+    assert b"/sync" in r
+    r = h.handle_http("PUT", "/sync", b"{}")
+    assert b"405" in r.split(b"\r\n")[0]
+
+
+# ---------------------------------------------------------------------------
+# POST /sync -- the push half (moycore plan 3.4; moy_sync carries the batch
+# semantics and its own suites; what belongs HERE is the endpoint's wiring:
+# routing, the pin gate, the SD gate, and the shelf-refresh hook).
+# ---------------------------------------------------------------------------
+
+
+def _batch(*ops, pin=None, root=None):
+    doc = ({"v": 1, "ops": list(ops)} if root is None else
+           {"v": 2, "root": root, "ops": list(ops)})
+    if pin is not None:
+        doc["pin"] = pin
+    return json.dumps(doc).encode()
+
+
+def test_sync_applies_into_the_store(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync",
+                      _batch({"p": "hop.moy/main.py", "t": "x = 7\n"}))
+    assert b"200" in r.split(b"\r\n")[0]
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body == {"ok": 1, "err": []}
+    assert (root / "hop.moy" / "main.py").read_text() == "x = 7\n"
+
+
+def test_sync_refuses_a_bad_batch_and_a_bad_path(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    assert b"400" in h.handle_http("POST", "/sync", b"junk").split(b"\r\n")[0]
+    r = h.handle_http("POST", "/sync",
+                      _batch({"p": "../../wifi.json", "t": "stolen"}))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and body["err"]
+    assert not (tmp_path / "wifi.json").exists()
+
+
+def test_sync_pin_gate(tmp_path):
+    """pin=None keeps the desk's open dev loop; a host built WITH a pin
+    refuses a batch that does not carry it, before any op is looked at."""
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"), pin="4321")
+    op = {"p": "hop.moy/main.py", "t": "x = 9\n"}
+    r = h.handle_http("POST", "/sync", _batch(op))
+    assert b"403" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text() != "x = 9\n"
+    r = h.handle_http("POST", "/sync", _batch(op, pin="4321"))
+    assert b"200" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text() == "x = 9\n"
+
+
+# ---------------------------------------------------------------------------
+# THE PIN GATES EVERYTHING (owner call 2026-08-25). Everything except the boot
+# assets and the capability marker, and each of those two is open for its own
+# stated reason -- so both the refusals and the exemptions are pinned here.
+# ---------------------------------------------------------------------------
+
+
+def _pinned(tmp_path):
+    h = _host(tmp_path)
+    h.pin = "4321"
+    return h
+
+
+def test_a_pinned_board_refuses_its_store_to_a_page_with_no_pin(tmp_path):
+    """The reversal. This used to be open on the reasoning that a read changes
+    nothing -- what it reads is a child's work off their console, to anyone who
+    can reach the port."""
+    h = _pinned(tmp_path)
+    for path in ("/carts.json", "/files.json"):
+        r = h.handle_http("GET", path, b"")
+        assert isinstance(r, bytes), path
+        assert b"403" in r.split(b"\r\n")[0], path
+        # A JSON body, and a status the page can tell apart from a 404: the
+        # worker branches on exactly this to raise its pin prompt.
+        assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
+        assert b"application/json" in r
+
+
+def test_the_pin_rides_the_query_because_a_get_has_nowhere_else(tmp_path):
+    h = _pinned(tmp_path)
+    r = h.handle_http("GET", "/carts.json?pin=4321", b"")
+    assert hasattr(r, "body_iter"), r
+    assert json.loads("".join(r.body_iter))["hop.moy/main.py"]
+    # Wrong, empty and prefix-lookalike are all refusals.
+    for q in ("?pin=0000", "?pin=", "?pinned=4321", "?dev=1"):
+        r = h.handle_http("GET", "/carts.json" + q, b"")
+        assert isinstance(r, bytes) and b"403" in r.split(b"\r\n")[0], q
+    # ...and the pin survives company on the query.
+    r = h.handle_http("GET", "/carts.json?dev=1&pin=4321", b"")
+    assert hasattr(r, "body_iter")
+
+
+def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path):
+    """The one exemption that is a NECESSITY, not a judgement: the page is what
+    shows the pin prompt, so a board that gated its own console behind the pin
+    would have nothing left to ask the question with. These are the same bytes
+    every build ships and say nothing about this board."""
+    h = _pinned(tmp_path)
+    for path in ("/", "/index.html", "/worker.js", "/micropython.wasm"):
+        assert isinstance(h.handle_http("GET", path, b""), FileResponse), path
+
+
+def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
+    """GET /sync is the page's MODE decision (board store vs browser store),
+    made before it has any pin to offer -- and all it reveals is that a board
+    lives here: no cart, no name, no file."""
+    h = _pinned(tmp_path)
+    r = h.handle_http("GET", "/sync", b"")
+    assert b"200" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"sync": 1}
+
+
+def test_an_open_host_is_open_end_to_end(tmp_path):
+    """pin=None -- a test, the dev server, a pre-#197 board -- keeps the LAN dev
+    loop free of a password."""
+    h = _host(tmp_path)
+    assert hasattr(h.handle_http("GET", "/carts.json", b""), "body_iter")
+    assert b"200" in h.handle_http(
+        "POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x\n"})
+    ).split(b"\r\n")[0]
+
+
+def test_a_refused_read_never_touches_the_store(tmp_path):
+    """Refusing AFTER the walk would leak its timing and, on the T-Deck, take
+    the SD gate to do it -- the gate must come first."""
+    h = _pinned(tmp_path)
+    hits = []
+    h._with_sd = lambda fn: (hits.append(1), fn())[1]
+    h.handle_http("GET", "/carts.json", b"")
+    h.handle_http("GET", "/files.json", b"")
+    assert not hits, "a refused request still entered the storage gate"
+
+
+# ---------------------------------------------------------------------------
+# The receiver journals what it is handed (2026-08-25): this board is the store
+# of record for the page it serves, so a browser commit has to be walkable by
+# the console's own UNDO.
+# ---------------------------------------------------------------------------
+
+
+def test_a_push_extends_the_carts_own_journal(tmp_path):
+    """A browser-made commit is indistinguishable from a keyboard-made one to
+    the Editor's UNDO -- which is the whole point of using `journal_append` and
+    not a second history format. `_store` already seeds the one commit an
+    on-glass edit would have left, so this also pins that the two interleave in
+    ONE timeline rather than the push starting a parallel log."""
+    from runtime import moy_journal
+
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    for src in ("cls(2)\n", "cls(3)\n"):
+        r = h.handle_http("POST", "/sync",
+                          _batch({"p": "hop.moy/main.py", "t": src}))
+        assert b"200" in r.split(b"\r\n")[0]
+    entries = moy_journal._journal_load_entries(
+        str(root / "hop.moy" / "journal" / "journal.jsonl"))
+    assert [e["seq"] for e in entries] == [1, 2, 3], entries
+    # ...and they are real commits: the console's UNDO walks one back.
+    assert moy_journal.journal_undo(str(root / "hop.moy"), ("main.py",))
+    assert (root / "hop.moy" / "main.py").read_text() == "cls(2)\n"
+
+
+def test_the_journal_a_push_writes_still_never_travels_back(tmp_path):
+    """The receiving side journals; the PULL is unchanged. A board that has
+    taken browser commits must not then serve their history to the next page --
+    that is the 2026-08-22 decision ("the browser gets carts, not their
+    history") and the receiver's own journal is not an exception to it."""
+    h = _host(tmp_path)
+    h.handle_http("POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "z\n"}))
+    body = json.loads("".join(h.handle_http("GET", "/carts.json", b"").body_iter))
+    assert not any("journal" in k for k in body), sorted(body)
+
+
+def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
+    """On the T-Deck every one of these writes lands on the card that shares
+    the panel's SPI host -- the whole apply must sit inside ONE gate entry,
+    same law as the asset probe (see that test above)."""
+    root = _store(tmp_path)
+    depth = [0]
+    entries = []
+
+    def gate(fn):
+        depth[0] += 1
+        entries.append(True)
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    seen = []
+    real = wh.moy_sync.apply_ops
+    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
+                                              real(*a, **kw))[1]
+    try:
+        h.handle_http("POST", "/sync",
+                      _batch({"p": "hop.moy/main.py", "t": "x = 1\n"}))
+    finally:
+        wh.moy_sync.apply_ops = real
+    assert seen == [1], "apply ran outside the storage gate"
+    assert len(entries) == 1
+
+
+def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
+    root = _store(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), str(tmp_path / "web"),
+                   on_sync=lambda: hits.append(1))
+    h.handle_http("POST", "/sync",
+                  _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
+    assert not hits, "a code edit repaints nothing on the shelf"
+    h.handle_http("POST", "/sync",
+                  _batch({"p": "hop.moy/manifest.json", "t": '{"title":"H2"}'}))
+    assert hits == [1]
 
 
 def test_the_sd_gate_wraps_the_store_read(tmp_path):
@@ -524,6 +744,149 @@ def test_the_sd_gate_wraps_the_store_read(tmp_path):
     assert calls == [1] and hasattr(r, "body_iter")
     json.loads("".join(r.body_iter))       # the walk, after the gate returned
     assert calls == [1], "the walk re-entered the gate per file"
+
+
+# ---------------------------------------------------------------------------
+# GET /files.json + the files half of POST /sync -- the #108 user-files layer
+# on the same endpoints (2026-08-25). moy_sync owns the batch semantics; what
+# belongs here is the board's wiring: which tree a batch reaches, what the pull
+# is allowed to hand out, and the storage gate around both.
+# ---------------------------------------------------------------------------
+
+
+def _files(tmp_path):
+    """The #108 files root beside the carts one, holding both things that must
+    never leave the board."""
+    root = Path(wh.moy_sync.files_root(str(tmp_path / "carts")))
+    (root / "drawings").mkdir(parents=True)
+    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
+    (root / "recordings" / "take_1").mkdir(parents=True)
+    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / ".history" / "drawings").mkdir(parents=True)
+    (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
+    (root / "trash" / "drawings").mkdir(parents=True)
+    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    return root
+
+
+def test_files_json_serves_the_kinds_and_nothing_else(tmp_path):
+    """The same bundle shape as carts.json, kind-filtered: `.history/` is each
+    side's own undo history and `trash/` is a LOCAL recovery bin, so neither
+    crosses in either direction."""
+    h = _host(tmp_path)
+    _files(tmp_path)
+    r = h.handle_http("GET", "/files.json", b"")
+    assert "application/json" in r.head().decode()
+    body = json.loads("".join(r.body_iter))
+    assert body == {"drawings/sunset.moyimg": "0,1,",
+                    "recordings/take_1/part0.json": "[1]"}
+
+
+def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
+    """An empty object, NEVER a 404: the 404 is what tells the browser this
+    board predates files sync, and returning it for a store that merely holds
+    no drawings would disable the push half for good."""
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/files.json", b"")
+    assert json.loads("".join(r.body_iter)) == {}
+
+
+def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
+                                                                    monkeypatch):
+    """The headless XIAO cart store ships moy_webhost + moy_sync and no
+    moy_carts, so it cannot resolve a files root at all. That is the SAME
+    answer a board flashed before files sync gives -- the page then builds no
+    files watcher, and nothing retries a batch this host could only refuse."""
+    h = wh.WebHost(str(_store(tmp_path)), str(tmp_path / "web"))
+    monkeypatch.setattr(wh.moy_sync, "files_root", lambda root: None)
+    assert h.handle_http("GET", "/files.json", b"") is None
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/x.moyimg", "t": "0,"}, root="files"))
+    assert b"400" in r.split(b"\r\n")[0]
+
+
+def test_the_sd_gate_wraps_the_files_read_too(tmp_path):
+    h = _host(tmp_path)
+    _files(tmp_path)
+    calls = []
+    h._with_sd = lambda fn: (calls.append(1), fn())[1]
+    r = h.handle_http("GET", "/files.json", b"")
+    assert calls == [1], "the files root was read outside the SD gate"
+    json.loads("".join(r.body_iter))
+    assert calls == [1], "the walk re-entered the gate per file"
+
+
+def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
+    root = _store(tmp_path)
+    files = _files(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/sunset.moyimg", "t": "7,"}, root="files"))
+    assert b"200" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 1, "err": []}
+    assert (files / "drawings" / "sunset.moyimg").read_text() == "7,"
+    assert not (root / "drawings").exists(), "it must not land among the carts"
+
+
+def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
+    root = _store(tmp_path)
+    files = _files(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "trash/drawings/gone.moyimg", "t": "stolen"},
+        {"p": ".history/drawings/sunset.jsonl", "t": "stolen"}, root="files"))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and len(body["err"]) == 2
+    assert (files / "trash" / "drawings" / "gone.moyimg").read_text() == "9,"
+
+
+def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
+    """The launcher renders no drawings, and the Files app scans its kinds when
+    it opens -- a rescan here would repaint the shelf for nothing."""
+    root = _store(tmp_path)
+    _files(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), str(tmp_path / "web"),
+                   on_sync=lambda: hits.append(1))
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+    assert not hits
+
+
+def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
+    """Same law as the carts apply: on the T-Deck every one of these writes
+    lands on the card that shares the panel's SPI host."""
+    root = _store(tmp_path)
+    _files(tmp_path)
+    depth = [0]
+
+    def gate(fn):
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    seen = []
+    real = wh.moy_sync.apply_ops
+    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
+                                              real(*a, **kw))[1]
+    try:
+        h.handle_http("POST", "/sync", _batch(
+            {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+    finally:
+        wh.moy_sync.apply_ops = real
+    assert seen == [1], "the files apply ran outside the storage gate"
+
+
+def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "hop.moy/main.py", "t": "x"}, root="wifi"))
+    assert b"400" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text().endswith("cls(1)\n")
 
 
 @pytest.mark.parametrize("name,ctype", sorted(wh.ASSETS.items()))
@@ -772,6 +1135,7 @@ def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
     h.error = None
     h.port = 8080
     h._ensure_online = lambda: "10.0.0.5"
+    h._pin_source = None                    # #197: start() resolves the pin
     h.ip = None
     from moy_webserver import WebServer
     h.__class__.__mro__      # sanity: WebHost derives from WebServer
@@ -948,3 +1312,454 @@ def test_the_link_wait_is_shared_and_not_recopied_per_board():
         src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
+
+
+# ---------------------------------------------------------------------------
+# WASM MODE (#197): the pairing pin, the parked connection screen, and
+# PLAY ON DEVICE. A SWITCH and not a session -- see runtime/web_console_ui.py.
+# ---------------------------------------------------------------------------
+
+
+class _ModeHost(_FakeHost):
+    """_FakeHost plus the two members wasm mode reads: a paired url, and a pin
+    the host resolves at start() the way the real one does."""
+
+    def __init__(self, fail=None, pin_source=None):
+        _FakeHost.__init__(self, fail=fail)
+        self.pin = None
+        self._pin_source = pin_source
+
+    def start(self):
+        if self._pin_source is not None:
+            self.pin = self._pin_source()
+        _FakeHost.start(self)
+
+    def paired_url(self):
+        return wh.WebHost.paired_url(self)
+
+
+def _mode_ws(tmp_path):
+    """A workstation wired the way make_webhost wires a board: the pin comes
+    off the LIVE ws, at start."""
+    ws = _ws(tmp_path)
+    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
+    return ws
+
+
+# -- the pin -----------------------------------------------------------------
+
+def test_the_pin_is_minted_once_and_persisted(tmp_path):
+    """Four digits, kept in system.json beside every other Settings choice. A
+    pin that changed per boot would mean re-scanning after every power cycle,
+    and a phone holding the old url would look like a broken board."""
+    ws = _ws(tmp_path)
+    pin = ws.web_pin()
+    assert len(pin) == 4 and pin.isdigit()
+    assert ws.web_pin() == pin, "a second call minted a second pin"
+    assert ws.system["web_pin"] == pin
+    assert _ws(tmp_path).web_pin() == pin, "it did not survive a fresh console"
+
+
+def test_a_board_that_never_serves_never_writes_a_pin(tmp_path):
+    """Lazy on purpose: a console whose owner never turns the row on has no
+    business having written a secret into its store."""
+    ws = _ws(tmp_path)
+    assert "web_pin" not in ws.system
+    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
+    assert "web_pin" not in ws.system, "constructing the host minted a pin"
+    ws.toggle_webhost()
+    assert ws.system.get("web_pin")
+
+
+def test_the_pin_is_read_at_START_not_at_construction():
+    """THE ORDERING BUG THIS EXISTS TO PREVENT. Boards build the webhost before
+    system.json is loaded, so a pin captured at construction is one minted
+    against an empty store -- the QR would show a pin the store does not agree
+    with, and every batch the page sent would come back 403."""
+    seen = []
+
+    class _WS:
+        wifi = None
+
+        def web_pin(self):
+            seen.append(1)
+            return "1234"
+
+        def rescan_carts(self):
+            pass
+
+        def launch_named(self, name):
+            return None
+
+    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web")
+    assert not seen, "make_webhost read the pin at construction"
+    assert host.pin is None
+    host.start(ip="10.0.0.7")
+    assert seen == [1] and host.pin == "1234"
+
+
+def test_an_explicit_pin_still_wins_over_the_consoles():
+    """A host built with its own policy (a test, the dev server) must not have
+    it silently replaced."""
+    class _WS:
+        wifi = None
+
+        def web_pin(self):
+            raise AssertionError("the explicit pin was ignored")
+
+        def rescan_carts(self):
+            pass
+
+        def launch_named(self, name):
+            return None
+
+    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", pin="0000")
+    host.start(ip="10.0.0.7")
+    assert host.pin == "0000"
+
+
+def test_the_paired_url_is_the_address_plus_the_pin(tmp_path):
+    """What the QR encodes and SHOW ADDRESS reveals. The page forwards its own
+    `?pin=` into every batch it posts, so this string IS the pairing gesture."""
+    ws = _mode_ws(tmp_path)
+    assert ws.web_console_url() == "", "an address while nothing is serving"
+    ws.toggle_webhost()
+    assert ws.web_console_url() == (
+        "http://192.168.1.151:8080/?pin=" + ws.web_pin())
+
+
+def test_a_host_without_a_pin_pairs_with_a_bare_url(tmp_path):
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    host.ip = "10.0.0.5"
+    assert host.paired_url() == "http://10.0.0.5:8080/"
+    host.pin = "4821"
+    assert host.paired_url() == "http://10.0.0.5:8080/?pin=4821"
+
+
+# -- the switch --------------------------------------------------------------
+
+def test_turning_the_row_on_parks_the_glass_and_off_returns_it(tmp_path):
+    """Wasm mode IS the toggle (owner call, 2026-08-25). No heartbeat, no
+    session object: while it is on the glass shows how to reach the browser,
+    and turning it off gives the console back."""
+    ws = _mode_ws(tmp_path)
+    assert ws.wm.top_kind() == "launcher"
+    ws.toggle_webhost()
+    assert ws.wm.top_kind() == "webconsole" and ws._web_parked is True
+    ws.toggle_webhost()
+    assert ws.wm.top_kind() == "launcher" and ws._web_parked is False
+    assert ws.webhost_serving() is False
+
+
+def test_a_failed_start_does_not_park(tmp_path):
+    """The failure's reason is readable in exactly one place -- the Settings row
+    -- so a start that could not bring WiFi up must leave the kid looking at
+    it, not at a connection screen for a console nobody can reach."""
+    ws = _ws(tmp_path)
+    ws.webhost = _ModeHost(fail="no wifi")
+    ws.open_settings()
+    ws.toggle_webhost()
+    assert ws.wm.top_kind() == "settings" and ws._web_parked is False
+    assert "no wifi" in ws.webhost_label()
+
+
+def test_the_parked_screen_owns_the_glass_and_claims_every_event(tmp_path):
+    """A parked surface that let events through would route them to a launcher
+    the kid cannot see."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    layer = ws._content_layer()
+    assert layer.id == "webconsole" and layer.domain == "system"
+    assert layer.handle_pointer(0, 0, False) is True
+    assert layer in ws.wm.draw_stack()
+
+
+def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
+    """#44: nothing here animates, so an idle connection screen costs the board
+    zero painted frames -- and it may sit on a desk for an hour."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    ws.frame(1 / 30.0)
+    ws._splash_until = None                  # the boot logo animates on its own
+    ws.ach.toast = None
+    ws.ach.toast_until = 0
+    ws._dirty = False
+    ws.pointer.visible = False
+    ws._last_ptr = ws._ptr_state()
+    assert ws._animating(1 / 30.0) is False, "the connection screen animates"
+    assert ws._needs_redraw(1 / 30.0) is False
+
+
+def test_show_address_toggles_and_resets_on_every_entry(tmp_path):
+    """A pin left revealed on the glass is a pin the next person in the room
+    reads, so entering the mode always starts hidden."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    ui = ws.web_console_ui
+    assert ui.show_address is False
+    _qr, _addr, show, off = ui.rects()
+    assert show[2] > 0 and off[2] > 0
+    ui.handle_pointer(show[0] + 2, show[1] + 2, True)
+    assert ui.show_address is True
+    ui.handle_pointer(show[0] + 2, show[1] + 2, True)
+    assert ui.show_address is False
+    ui.show_address = True
+    ws.toggle_webhost()                      # off...
+    ws.toggle_webhost()                      # ...and on again
+    assert ui.show_address is False
+
+
+def test_the_turn_off_button_turns_it_off(tmp_path):
+    """The toggle that got here lives in Settings, and Settings is behind this
+    screen -- a mode with no visible way out is a trap."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    _qr, _addr, _show, off = ws.web_console_ui.rects()
+    ws.web_console_ui.handle_pointer(off[0] + 2, off[1] + 2, True)
+    assert ws.webhost_serving() is False
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_turn_off_still_turns_OFF_when_the_host_died_underneath(tmp_path):
+    """The one state a plain toggle gets wrong. If the socket stopped from
+    somewhere else, `toggle_webhost` reads "not serving" and STARTS it -- a
+    button labelled TURN OFF that turns it on, on the one screen whose whole
+    job is being the way out."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    ws.webhost.stop()                        # the host dies under the screen
+    assert ws.webhost_serving() is False and ws._web_parked is True
+    _qr, _addr, _show, off = ws.web_console_ui.rects()
+    ws.web_console_ui.handle_pointer(off[0] + 2, off[1] + 2, True)
+    assert ws.webhost_serving() is False, "TURN OFF restarted the host"
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_the_qr_encodes_the_paired_url(tmp_path):
+    """The screen draws what `web_console_url` says -- not a cached or
+    reconstructed address -- and re-encodes only when it changes."""
+    from runtime import moy_qr
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    url = ws.web_console_url()
+    first = ws.web_console_ui.matrix(url)
+    assert first == moy_qr.encode(url)
+    assert ws.web_console_ui.matrix(url) is first, "re-encoded an unchanged url"
+    assert ws.web_console_ui.matrix("http://10.0.0.9:8080/?pin=0000") != first
+
+
+def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
+    """Windows exist only above the desk (#105), so parking leaves the make
+    world and the play world presents this fullscreen with no special case. A
+    connection screen inside a draggable window would be a QR a kid can hide
+    behind another window."""
+    from ws_helpers import build_desktop_ws
+    ws = build_desktop_ws(tmp_path)
+    ws.webhost = _ModeHost(pin_source=lambda: ws.web_pin())
+    ws.open_desk()
+    assert ws.wm.desk_open() is True
+    ws.toggle_webhost()
+    assert ws.wm.top_kind() == "webconsole"
+    assert ws.wm.desk_open() is False, "the connection screen became a window"
+    ws.toggle_webhost()
+    assert ws.wm.desk_open() is True, "the desk is home on this tier"
+
+
+# -- PLAY ON DEVICE ----------------------------------------------------------
+
+def test_run_plays_the_named_cart_on_the_glass(tmp_path):
+    """The whole protocol is a cart NAME. The answer carries the TITLE that
+    actually started, because the page sent a name it guessed at."""
+    seen = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      on_run=lambda name: (seen.append(name), "Star Catcher")[1])
+    r = host.handle_http("POST", "/run", b'{"cart": "star_catcher"}')
+    assert b"200" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"run": "Star Catcher"}
+    assert seen == ["star_catcher"]
+
+
+def test_run_takes_the_same_pin_gate_as_sync(tmp_path):
+    """Starting code on a kid's console is a WRITE by any reading of the word,
+    and the gate closes before the name is even looked at."""
+    launched = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      pin="4321", on_run=lambda n: (launched.append(n), "X")[1])
+    r = host.handle_http("POST", "/run", b'{"cart": "hop"}')
+    assert b"403" in r.split(b"\r\n")[0]
+    assert not launched, "a pinless request reached the launcher"
+    r = host.handle_http("POST", "/run", b'{"cart": "hop", "pin": "4321"}')
+    assert b"200" in r.split(b"\r\n")[0]
+    assert launched == ["hop"]
+
+
+def test_run_answers_404_for_a_cart_this_board_does_not_have(tmp_path):
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      on_run=lambda n: None)
+    assert b"404" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
+
+
+def test_run_answers_501_where_there_is_no_console_behind_it(tmp_path):
+    """The dev server and the CI harness serve the store with no glass. 501 and
+    not 404, because a page reads 404 as "no such endpoint" and would stop
+    offering the button against a board that simply has no runner."""
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    assert b"501" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
+
+
+def test_run_refuses_a_body_that_is_not_a_json_object(tmp_path):
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      on_run=lambda n: "X")
+    for body in (b"junk", b"[1,2]", b'"hop"', b""):
+        assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
+
+
+def test_run_refuses_an_empty_cart_name_without_launching(tmp_path):
+    """`{"cart": null}` / "" must NOT reach the console -- launch_named("")
+    runs the FIRST cart (the serial `run` with no arg), so a malformed PLAY ON
+    DEVICE would otherwise start a random game. Refused before on_run fires."""
+    launched = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      on_run=lambda n: (launched.append(n), "X")[1])
+    for body in (b'{"cart": null}', b'{"cart": ""}', b'{"cart": "   "}', b'{}'):
+        assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
+    assert launched == [], "on_run fired for an empty name: %r" % launched
+
+
+def test_a_crashing_launch_is_a_500_not_a_dead_request(tmp_path):
+    """`handle_http` runs inside the frame loop's tail. An exception escaping
+    here would take the poll down, and with it the browser's whole session."""
+    def boom(name):
+        raise RuntimeError("nope")
+
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"), on_run=boom)
+    assert b"500" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
+
+
+def test_the_launch_runs_inside_the_storage_gate(tmp_path):
+    """Opening a cart reads its manifest, code, sheet and pmem off the store.
+    On the T-Deck that is the card sharing the panel's SPI host, and this runs
+    at the FRAME TAIL where a painted frame's flush may still be shipping --
+    the documented Cache/MMU panic, same law as the sync apply."""
+    depth = [0]
+    entries = []
+
+    def gate(fn):
+        depth[0] += 1
+        entries.append(1)
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    inside = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      with_sd=gate,
+                      on_run=lambda n: (inside.append(depth[0]), "X")[1])
+    host.handle_http("POST", "/run", b'{"cart": "hop"}')
+    assert inside == [1], "the launch ran outside the storage gate"
+    assert len(entries) == 1
+
+
+def test_get_sync_is_the_capability_marker(tmp_path):
+    """How a page tells a BOARD from a static host: moybyte.com, an export and
+    a plain file server all 404 this, and the page then offers neither PLAY ON
+    DEVICE nor a sync loop against a wall."""
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/sync", b"")
+    assert b"200" in h_status(r)
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"sync": 1}
+
+
+def test_the_405_still_names_where_writes_go(tmp_path):
+    """Both write endpoints, so a wrong method reads as a wrong verb rather
+    than a wrong url."""
+    h = _host(tmp_path)
+    r = h.handle_http("PUT", "/run", b"{}")
+    assert b"405" in h_status(r)
+    assert b"/sync" in r and b"/run" in r
+
+
+def h_status(resp):
+    return resp.split(b"\r\n")[0]
+
+
+# -- the cart-name lookup, and the exit that comes back here -----------------
+
+def test_launch_named_takes_a_title_or_a_folder(tmp_path):
+    """The browser knows a cart by its TITLE (that is what rides every frame
+    payload); a human at a serial prompt types part of a folder name. Both are
+    accepted because on device the two DIFFER by construction -- the board
+    seeds from the title slug while the host copies the source folder."""
+    ws = _ws(tmp_path)
+    for name in ("Star Catcher", "star_catcher", "star_catcher.moy",
+                 "star catch"):
+        assert ws.launch_named(name) == "Star Catcher", name
+        ws.go_home()
+    assert ws.launch_named("no such cart anywhere") is None
+
+
+def test_launch_named_prefers_an_exact_match_to_a_partial_one(tmp_path):
+    """A cart whose title is a substring of another's must still be reachable
+    by its own name."""
+    ws = _ws(tmp_path)
+    titles = [c["title"] for c in ws.launcher.items if c.get("path")]
+    for t in titles:
+        assert ws.launch_named(t) == t, titles
+        ws.go_home()
+
+
+def test_launch_named_survives_a_name_that_is_not_a_string(tmp_path):
+    """The name comes off a JSON body a browser wrote, so it is a string only
+    by convention -- and this runs at the frame loop's tail, where a TypeError
+    takes the poll down with the whole session."""
+    ws = _ws(tmp_path)
+    for junk in (7, 3.5, True, {"a": 1}, ["x"]):
+        assert ws.launch_named(junk) is None, junk
+        assert ws.wm.top_kind() == "launcher", junk
+    # None is not junk -- it is the dev channel's `run` with no argument, which
+    # plays the first real cart.
+    assert ws.launch_named(None) is not None
+
+
+def test_launch_named_never_picks_a_pseudo_tile(tmp_path):
+    """The pinned Make/+New cards carry no store path; running one would open
+    an editor at a browser's request."""
+    ws = _ws(tmp_path)
+    title = ws.launch_named("")
+    assert title and any(c.get("path") and c["title"] == title
+                         for c in ws.launcher.items)
+
+
+def test_a_cart_launched_from_the_browser_exits_BACK_to_the_screen(tmp_path):
+    """The other half of the switch. Every return-to-the-launcher path funnels
+    through go_home, so the exit gesture, the bar's X and a crash all land back
+    on the connection screen rather than on a shelf the browser is rewriting."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    assert ws.launch_named("Star Catcher") == "Star Catcher"
+    assert ws.wm.top_kind() == "desktop", "the cart did not start"
+    ws._exit_to_caller()
+    assert ws.wm.top_kind() == "webconsole"
+    assert ws.webhost_serving() is True, "the exit stopped the host"
+
+
+def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
+    """The switch stays authoritative mid-run: turning the row off while a
+    browser-launched cart plays must clear the mode, not leave the flag set for
+    the next exit to trip over."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    ws.launch_named("Star Catcher")
+    ws.toggle_webhost()
+    assert ws._web_parked is False
+    ws._exit_to_caller()
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_the_dev_channel_run_uses_the_same_lookup():
+    """ONE author for the cart lookup: a name that works over serial works from
+    the page, and neither can grow its own idea of what a cart is called."""
+    src = (ROOT / "runtime" / "dev_channel.py").read_text()
+    assert "ws.launch_named(" in src
+    assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
