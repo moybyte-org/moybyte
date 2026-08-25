@@ -222,3 +222,21 @@ def test_a_capability_appearing_rebuilds_the_rows(tmp_path):
     assert after is not before
     assert "UPDATE FW" in [r[1] for r in after]
     assert lay._settings_rows() is after          # ...and the new set caches too
+
+
+def test_the_c6_row_is_capability_gated_and_opens_the_flow(tmp_path):
+    """UPGRADE C6 RADIO (#7/#58) appears exactly where ws.c6_updater is
+    injected (the P4) and nowhere else -- the same gating as BLUETOOTH/CRISP,
+    so every other board's Settings rows and frozen pixels stay untouched."""
+    ws = _ws(tmp_path)
+    keys = [r[0] for r in ws.settings_layer._settings_rows()]
+    assert "update_c6" not in keys, "no capability -> no row (goldens depend on it)"
+
+    ws.c6_updater = object()
+    keys = [r[0] for r in ws.settings_layer._settings_rows()]
+    assert keys[-1] == "update_c6", "the row joins the update group at the bottom"
+
+    opened = []
+    ws.update_ui.open_update_c6 = lambda: opened.append(1)
+    ws.settings_layer._activate_settings_action("update_c6")
+    assert opened == [1]

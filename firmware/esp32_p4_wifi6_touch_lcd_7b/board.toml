@@ -359,6 +359,15 @@ VFS) and its board identity comes from the generated `_ota_build.py`. Verified
 end to end on this board's glass 2026-08-02."""
 
 [[modules.device.group]]
+files = ["moy_c6_update.py"]
+why = """
+The C6 radio's own updater (#7/#58): Settings -> UPGRADE C6 RADIO downloads
+the shimmed slave image the P4 manifest's `c6` block names and streams it to
+the co-processor over SDIO (moy_c6.ota_*). Only this board has a C6, so only
+this board stages it; the Settings row rides `ws.c6_updater is not None` and
+every other board's rows stay frozen."""
+
+[[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]
 why = """
 The socket/HTTP/WebSocket transport core that survived the streaming sunset,

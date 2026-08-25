@@ -43,6 +43,7 @@ delete the other board's image.
 import argparse
 import datetime
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -259,6 +260,7 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
     manifest = build_manifest(os.path.join(workdir, name),
                               asset_url(tag, name, repo),
                               version, channel, stamp.get("label"), board)
+    stage_c6(manifest, folder, tag, workdir, repo)
 
     # Sign it, or say plainly that we did not. A device checking a BAKED channel
     # url refuses an unsigned manifest (moy_ota._require_signature), so an
@@ -267,7 +269,14 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
     key_pem = ota_sign.read_key()
     if key_pem:
         manifest["sig"] = ota_sign.sign(manifest, key_pem)
-        print("%-6s signed the manifest" % board)
+        if manifest.get("c6"):
+            # Its OWN signature: the app `sig` deliberately covers only the app
+            # fields (widening it would break every deployed verifier), and an
+            # unsigned c6 block inside a signed manifest would hand a network
+            # attacker the radio co-processor. See ota_sign.C6_SCHEME.
+            manifest["c6_sig"] = ota_sign.sign_c6(manifest, key_pem)
+        print("%-6s signed the manifest%s" % (
+            board, " (+ c6 block)" if manifest.get("c6") else ""))
     else:
         print("WARNING: no $%s -- publishing an UNSIGNED manifest, which a "
               "device on a baked channel url will refuse" % ota_sign.ENV_KEY)
@@ -279,6 +288,47 @@ def stage_ota(tag, channel, artifacts, workdir, repo=None, board="tdeck"):
     print("%-6s staged %s + %s (channel=%s version=%s)"
           % (board, name, out, channel, manifest["version"]))
     return manifest
+
+
+C6_IMAGE = "c6_network_adapter.bin"
+C6_STAMP = "c6_build.json"
+
+
+def stage_c6(manifest, folder, tag, workdir, repo=None):
+    """Stage the P4's C6 co-processor image beside its app image, and describe
+    it in the manifest's `c6` block (#7/#58: the radio is a second processor
+    with its own firmware, updated FROM the console over SDIO --
+    device/moy_c6_update.py is the consumer). A run whose artifacts carry no
+    C6 image publishes a manifest without the block, and devices simply see
+    nothing to offer; `version` comes from the artifact's stamp, which the
+    slave build read out of the proto header the image itself was compiled
+    from, so the number a device is offered is the number the flashed slave
+    answers over MOYC6_V_VERSION."""
+    src = os.path.join(folder, C6_IMAGE)
+    stamp_path = os.path.join(folder, C6_STAMP)
+    if not os.path.exists(src) or not os.path.exists(stamp_path):
+        print("%-6s no %s in this run -- manifest carries no c6 block"
+              % (manifest.get("board", "?"), C6_IMAGE))
+        return
+    try:
+        stamp = json.load(open(stamp_path, encoding="utf-8"))
+        version = int(stamp["version"])
+    except (ValueError, KeyError, TypeError) as exc:
+        print("WARNING: unreadable %s (%s) -- manifest carries no c6 block"
+              % (C6_STAMP, exc))
+        return
+    shutil.copyfile(src, os.path.join(workdir, C6_IMAGE))
+    data = open(src, "rb").read()
+    manifest["c6"] = {
+        "version": version,
+        "hosted": stamp.get("hosted") or "",
+        "url": asset_url(tag, C6_IMAGE, repo),
+        "filename": C6_IMAGE,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    print("%-6s staged %s (shim v%d, %d B)"
+          % (manifest.get("board", "?"), C6_IMAGE, version, len(data)))
 
 
 def existing_source(tag, board_id, workdir):

@@ -189,7 +189,9 @@ static void moyc6_on_ack(const uint8_t *data, size_t len) {
     memcpy(&ack, data, sizeof(ack));
     portENTER_CRITICAL(&s_lock);
     s_acks++;
-    if (ack.err != ESP_OK) {
+    // V_VERSION's ACK carries the shim's build identity in err (positive),
+    // not a failure -- counting it would salt the error meters.
+    if (ack.err != ESP_OK && ack.verb != MOYC6_V_VERSION) {
         s_ack_errors++;
         s_last_err = ack.err;
     }
@@ -201,6 +203,13 @@ static void moyc6_on_ack(const uint8_t *data, size_t len) {
         s_send_cb(&info, ESP_NOW_SEND_FAIL);
     }
     if (s_ack_sem != NULL && ack.verb == s_ack_verb) {
+        // THE ANSWER TRAVELS HERE. s_ack_err was declared on day one and
+        // never written, so every handshake returned the static 0 -- PING
+        // "worked" because 0 == ESP_OK, a slave-side INIT failure would have
+        // read as success, and the first consumer that needed a real value
+        // (V_VERSION: the ACK's err carries the shim version) got None from
+        // a slave that was answering correctly (found on glass 2026-08-25).
+        s_ack_err = ack.err;
         xSemaphoreGive(s_ack_sem);
     }
 }
@@ -529,6 +538,23 @@ static mp_obj_t moy_c6_ping(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_ping_obj, moy_c6_ping);
 
+static mp_obj_t moy_c6_shim_version(void) {
+    // WHICH shim the slave runs (MOYC6_SHIM_VERSION, self-reported). None on
+    // timeout: a stock slave has no shim and the v1 shim predates the verb,
+    // and the updater treats both as "older than everything" -- which is what
+    // they are. The handshake's return IS the ACK's err field, where this
+    // verb carries the version.
+    esp_err_t got = moyc6_handshake(MOYC6_V_VERSION);
+    // ESP-IDF error codes are POSITIVE (ESP_ERR_TIMEOUT is 0x107), so "any
+    // positive answer is a version" would read a timeout as shim v263. A
+    // version is small by construction; the 0x100+ space is theirs.
+    if (got <= 0 || got >= 0x100) {
+        return mp_const_none;      // timeout / transport error / impossible 0
+    }
+    return mp_obj_new_int(got);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_c6_shim_version_obj, moy_c6_shim_version);
+
 static mp_obj_t moy_c6_stats(void) {
     mp_obj_t items[8];
     portENTER_CRITICAL(&s_lock);
@@ -591,6 +617,7 @@ static const mp_rom_map_elem_t moy_c6_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_bt_up), MP_ROM_PTR(&moy_c6_bt_up_obj) },
     { MP_ROM_QSTR(MP_QSTR_fwversion), MP_ROM_PTR(&moy_c6_fwversion_obj) },
     { MP_ROM_QSTR(MP_QSTR_ping), MP_ROM_PTR(&moy_c6_ping_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shim_version), MP_ROM_PTR(&moy_c6_shim_version_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_c6_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_ota_begin), MP_ROM_PTR(&moy_c6_ota_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_ota_write), MP_ROM_PTR(&moy_c6_ota_write_obj) },

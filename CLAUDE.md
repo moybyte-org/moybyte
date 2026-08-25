@@ -625,7 +625,12 @@ only what a coder must not undo:
   fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
   (2026-08-25) is the stall-rate hunt: the shim's blocking send RPC moved off
   the VM core onto a TX queue (10.2ms -> 20us per send), and the pair now
-  plays 0.7-2.8% stalled ticks at 29.6 ticks/s.
+  plays 0.7-2.8% stalled ticks at 29.6 ticks/s. Phase G (same day): the C6
+  image SHIPS -- CI builds and publishes it, `latest-p4.json` carries a `c6`
+  block under its own signature, and Settings -> UPGRADE C6 RADIO
+  (`device/moy_c6_update.py`, P4-gated) downloads and flashes the slave over
+  SDIO with the slave self-reporting its version (MOYC6_V_VERSION). On-glass
+  end to end, including the second-run UP TO DATE.
   **FLOAT WIDTH IS PART OF THE LOCKSTEP CONTRACT** (found by the owner's
   hands, first cross-arch match): two consoles in a match run the same sim,
   and REPR_C's 30-bit floats against boxed 32-bit singles diverge the worlds

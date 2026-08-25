@@ -575,6 +575,16 @@ def run_desktop(fps_cap=60):
         ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: OTA updater unavailable:", exc)
+    # The C6 radio's own updater (#7/#58): Settings -> UPGRADE C6 RADIO.
+    # Rides ws.updater for the manifest + download, moy_c6.ota_* for the
+    # flash; the backend module's header carries the whole design. Failure
+    # is a missing Settings row, never a boot failure.
+    try:
+        if ws.updater is not None:
+            from moy_c6_update import C6Updater
+            ws.c6_updater = C6Updater(ws.updater)
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: C6 updater unavailable:", exc)
     try:
         import machine
         ws.reboot_hook = machine.reset

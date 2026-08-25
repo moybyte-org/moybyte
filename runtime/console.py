@@ -936,6 +936,7 @@ class Workstation:
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
         self.updater = None
+        self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
         # build without it, which is what makes the Settings row appear only where
@@ -5117,9 +5118,14 @@ class Workstation:
         # like any static UI and the web view idles at ~0 KB/s there.)
         # A firmware install (#53) advances a chunk per frame; "done" runs a short
         # reboot countdown; "checking"/"downloading" (Phase 3) step the online flow.
-        # All must keep redrawing so progress animates and the work proceeds without input.
+        # All must keep redrawing so progress animates and the work proceeds without
+        # input -- and the C6 radio flow (#7/#58) pumps from the same draw, so its
+        # working phases join the list (its confirm/uptodate phases wait on input
+        # like everything else and are deliberately absent: the first on-glass run
+        # of the flow stalled at "downloading" forever because the gate closed).
         if kind == "update" and self.update_ui._upd_phase in (
-                "install", "done", "checking", "downloading"):
+                "install", "done", "checking", "downloading",
+                "c6_checking", "c6_downloading", "c6_flashing", "c6_done"):
             return True
         # Transient overlays redraw while they're up.
         if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:

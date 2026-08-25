@@ -701,36 +701,7 @@ class OtaUpdater:
         block that a valid signature must decrypt to and compare it entire. Parsing
         the padding is where the classic signature forgeries live, and there is
         nothing in it worth parsing."""
-        sig = manifest.get("sig")
-        keys = OTA_PUBLIC_KEYS if keys is None else keys
-        if not sig or not keys:
-            return False
-        try:
-            s = int(sig, 16)
-        except (TypeError, ValueError):
-            return False
-
-        import hashlib
-
-        digest = hashlib.sha256(self._canonical(manifest)).digest()
-        for mod_hex, exp in keys:
-            try:
-                n = int(mod_hex, 16)
-            except (TypeError, ValueError):
-                continue
-            # From the hex, not n.bit_length(): MicroPython has no bit_length.
-            k = (len(mod_hex) + 1) // 2
-            if not 0 < s < n:
-                continue
-            tail = _SHA256_DER + digest
-            want = b"\x00\x01" + b"\xff" * (k - len(tail) - 3) + b"\x00" + tail
-            try:
-                got = pow(s, exp, n).to_bytes(k, "big")
-            except (OverflowError, ValueError):
-                continue
-            if got == want:
-                return True
-        return False
+        return verify_sig(self._canonical(manifest), manifest.get("sig"), keys)
 
     def _require_signature(self, from_card):
         """Whether an unsigned manifest may be installed.
@@ -801,6 +772,10 @@ class OtaUpdater:
         _log("check_online channel=%r running=%s/%s" % (
             channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
         url, from_card = self._manifest_source(channel)
+        # Remembered for the manifest's OTHER consumers (the C6 updater rides
+        # the same fetch): where the url came from decides whether an unsigned
+        # block is acceptable, exactly as it does for the app image.
+        self.from_card = from_card
         _log("manifest_url ->", url, "(from card)" if from_card else "(baked)")
         if not url:
             self.error = "no manifest url"
@@ -1170,3 +1145,41 @@ def _log(*a):
         print("Moybyte OTA:", *a)
     except Exception:
         pass
+
+
+def verify_sig(payload, sig, keys=None):
+    """True when `sig` (hex) validly signs `payload` under a baked key.
+
+    Module-level so the manifest's OTHER signed blocks -- the C6 image's
+    c6_sig (device/moy_c6_update.py) -- verify through the SAME arithmetic as
+    the manifest's own signature instead of a second copy of the PKCS#1 block
+    compare (whole-block, never a padding parser -- see _verify_manifest)."""
+    keys = OTA_PUBLIC_KEYS if keys is None else keys
+    if not sig or not keys:
+        return False
+    try:
+        s = int(sig, 16)
+    except (TypeError, ValueError):
+        return False
+
+    import hashlib
+
+    digest = hashlib.sha256(payload).digest()
+    for mod_hex, exp in keys:
+        try:
+            n = int(mod_hex, 16)
+        except (TypeError, ValueError):
+            continue
+        # From the hex, not n.bit_length(): MicroPython has no bit_length.
+        k = (len(mod_hex) + 1) // 2
+        if not 0 < s < n:
+            continue
+        tail = _SHA256_DER + digest
+        want = b"\x00\x01" + b"\xff" * (k - len(tail) - 3) + b"\x00" + tail
+        try:
+            got = pow(s, exp, n).to_bytes(k, "big")
+        except (OverflowError, ValueError):
+            continue
+        if got == want:
+            return True
+    return False

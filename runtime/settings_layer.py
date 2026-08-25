@@ -143,6 +143,7 @@ class SettingsLayer:
         self._rows_onl = False
         self._rows_web = False
         self._rows_crisp = False
+        self._rows_c6 = False
         self._rows_split = False
 
     def reset(self):
@@ -712,10 +713,11 @@ class SettingsLayer:
         web = getattr(ws, "webhost", None) is not None
         crisp = getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
         split = ws.second_keyboard() is not None
+        c6u = getattr(ws, "c6_updater", None) is not None
         if (self._rows_cache is not None and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
                 and web == self._rows_web and crisp == self._rows_crisp
-                and split == self._rows_split):
+                and split == self._rows_split and c6u == self._rows_c6):
             return self._rows_cache
         rows = self._SETTINGS_ROWS
         if bt:
@@ -755,12 +757,22 @@ class SettingsLayer:
         if onl:
             rows = rows + (("ota_channel", "CHANNEL", "channel"),)
             rows = rows + (("update_online", "UPDATE ONLINE", "action"),)
+        if c6u:
+            # UPGRADE C6 RADIO (#7/#58): the P4's radio is a second processor
+            # with its own firmware, flashed FROM the console over SDIO. The
+            # row is unconditional where the capability exists -- "is the shim
+            # current" costs a 2s RPC timeout against a stock slave, which is
+            # a price to pay on TAP (the flow's CHECKING screen), never per
+            # frame or per Settings open. Capability-gated like the others so
+            # every other board's rows and pixels stay frozen.
+            rows = rows + (("update_c6", "UPGRADE C6 RADIO", "action"),)
         self._rows_bt = bt
         self._rows_upd = upd
         self._rows_onl = onl
         self._rows_web = web
         self._rows_crisp = crisp
         self._rows_split = split
+        self._rows_c6 = c6u
         self._rows_cache = rows
         return rows
 
@@ -775,6 +787,8 @@ class SettingsLayer:
             ws.update_ui.open_update()
         elif key == "update_online":
             ws.update_ui.open_update_online()
+        elif key == "update_c6":
+            ws.update_ui.open_update_c6()
         else:
             ws.open_theme()       # EDIT ICONS (#52)
 
