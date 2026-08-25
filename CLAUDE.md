@@ -412,6 +412,16 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   still replayable) all share. Per-file last-writer-wins; journals stay home;
   a batch that changes the SHELF fires `ws.rescan_carts()` so the launcher
   follows with no reboot (on-glass: `test_guition_on_glass.py`'s sync test).
+  **The #108 user files ride the same protocol as a SECOND root (2026-08-25,
+  owner call "they should get synced")** — `GET /files.json` pulls them and a
+  batch stamped `{"v": 2, "root": "files"}` pushes them back, the bump being
+  what makes a board flashed before this REFUSE the batch instead of writing
+  `drawings/…` into its carts store; a files path must start with a
+  `moy_carts.FILE_KINDS` kind, which is the one rule that keeps `.history/`
+  (each side's own undo) and `trash/` (a local recovery bin — syncing a
+  still-undoable delete is how LWW becomes data loss) home in both directions,
+  and the browser builds its files watcher only when the pull answered, so an
+  older board's 404 cannot disable the carts push with it.
   The write endpoint takes an optional `pin` (403 without it; the page passes
   `?pin=`) but the boards pass NONE today — same standing as the open read
   half, and the named follow-up before this points at a classroom. The

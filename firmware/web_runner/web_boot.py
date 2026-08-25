@@ -371,9 +371,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     try:
         import moy_sync
         _S["sync"] = moy_sync.StoreWatcher(carts_root)
+        _S["sync_files"] = _files_watcher(moy_sync, carts_root)
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
         _S["sync"] = None
+        _S["sync_files"] = None
     # The canvas the PAGE presents: the system canvas on the desktop tier, the
     # one shared canvas on the handheld tier. Its buffer is what fb_addr()
     # publishes, so this is the single place the two tiers differ downstream.
@@ -385,6 +387,28 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     if cart:
         open_cart(cart)
     return True
+
+
+def _files_watcher(moy_sync, carts_root):
+    """The #108 files watcher, or None when this page's server has no files half.
+
+    CAPABILITY, not configuration, and the mechanism is deliberately the pull's
+    own result: worker.js creates the files root in the VFS only when its
+    GET /files.json answered, so an older board -- one that serves carts and
+    /sync but predates this -- leaves no directory here and no files batch is
+    ever aimed at a receiver that would misapply it. (The wire's v2 bump would
+    refuse such a batch anyway; this is what keeps it from being sent, and it
+    is why one 404 cannot disable the CARTS push along with it.)
+    """
+    import os
+    root = moy_sync.files_root(carts_root)
+    if root is None:
+        return None
+    try:
+        os.stat(root)
+    except OSError:
+        return None
+    return moy_sync.StoreWatcher(root, root_id=moy_sync.FILES_ROOT_ID)
 
 
 def kiosk(name):
@@ -415,12 +439,14 @@ def reload_cart(name=None):
     ws.launcher.items = ws._launcher_items(ws._all_carts)
     ws.slim_carts()
     ws._dirty = True
-    w = _S.get("sync")
-    if w is not None:
-        # The reload just re-pulled the served store over the VFS -- adopt it
-        # as the new baseline (deliberate LWW: replaying local unpushed edits
-        # over a state the human just asked for would undo the reload).
-        w.rebase()
+    for key in _SYNC_ROOTS:
+        w = _S.get(key)
+        if w is not None:
+            # The reload just re-pulled the served store over the VFS -- adopt
+            # it as the new baseline (deliberate LWW: replaying local unpushed
+            # edits over a state the human just asked for would undo the
+            # reload).
+            w.rebase()
     return open_cart(name) if name else True
 
 
@@ -584,32 +610,63 @@ def sync_config(pin=None):
     return ""
 
 
+# The watched roots, drained in this order. CARTS FIRST is a deliberate
+# priority and not an accident of the tuple: a cart edit is what the kid is
+# looking at on the board's glass, and a drawing landing a second later costs
+# nobody anything.
+_SYNC_ROOTS = ("sync", "sync_files")
+
+
 def sync_poll_json():
     """One sweep + the next wire batch as JSON, or "" (nothing changed, or a
     batch is already awaiting its answer). The worker calls this about once a
     second -- the sweep is a stat walk of an in-memory VFS, so its cost is
-    noise; the READ of changed files happens only when something committed."""
-    w = _S.get("sync")
-    if w is None:
-        return ""
-    w.sweep()
-    return w.take_json(_S.get("sync_pin"))
+    noise; the READ of changed files happens only when something committed.
+
+    ONE BATCH IN FLIGHT is a rule about the TRANSPORT, so it is enforced here
+    across both roots rather than left to each watcher's own `take`. The worker
+    posts one body at a time and acks before polling again -- but a poll that
+    fell through to the files root while a carts batch was still unanswered
+    would hand out a second body on that promise, and `sync_ack` would then
+    settle the wrong one."""
+    for key in _SYNC_ROOTS:
+        w = _S.get(key)
+        if w is not None and w.busy():
+            return ""
+    for key in _SYNC_ROOTS:
+        w = _S.get(key)
+        if w is None:
+            continue
+        w.sweep()
+        body = w.take_json(_S.get("sync_pin"))
+        if body:
+            _S["sync_took"] = key
+            return body
+    return ""
 
 
 def sync_ack(ok):
     """Settle the in-flight batch: the worker's POST got an answer (ok=True
-    clears it; anything else requeues every path it carried)."""
-    w = _S.get("sync")
+    clears it; anything else requeues every path it carried). Routed to the
+    watcher that TOOK it -- acking the wrong root would strand its batch in
+    flight forever and requeue nothing."""
+    w = _S.get(_S.get("sync_took") or "sync")
     if w is not None:
         w.ack(bool(ok))
     return ""
 
 
 def sync_off():
-    """The far end has no /sync (a static host, an old read-only board): stop
-    sweeping for good. One failed probe, then silence -- the standalone
-    browser console must not retry-log forever."""
+    """The far end has no /sync at all (a static host, an old read-only board):
+    stop sweeping for good. One failed probe, then silence -- the standalone
+    browser console must not retry-log forever.
+
+    BOTH roots, because this is the "there is no push half here" answer. A board
+    that has /sync but no files layer is a different case entirely, and it is
+    settled at boot: no files.json means no files watcher, so nothing ever
+    probes for a files endpoint that would 404."""
     _S["sync"] = None
+    _S["sync_files"] = None
     return ""
 
 

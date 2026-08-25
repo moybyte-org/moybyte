@@ -510,8 +510,9 @@ def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _batch(*ops, pin=None):
-    doc = {"v": 1, "ops": list(ops)}
+def _batch(*ops, pin=None, root=None):
+    doc = ({"v": 1, "ops": list(ops)} if root is None else
+           {"v": 2, "root": root, "ops": list(ops)})
     if pin is not None:
         doc["pin"] = pin
     return json.dumps(doc).encode()
@@ -618,6 +619,148 @@ def test_the_sd_gate_wraps_the_store_read(tmp_path):
     assert calls == [1] and hasattr(r, "body_iter")
     json.loads("".join(r.body_iter))       # the walk, after the gate returned
     assert calls == [1], "the walk re-entered the gate per file"
+
+
+# ---------------------------------------------------------------------------
+# GET /files.json + the files half of POST /sync -- the #108 user-files layer
+# on the same endpoints (2026-08-25). moy_sync owns the batch semantics; what
+# belongs here is the board's wiring: which tree a batch reaches, what the pull
+# is allowed to hand out, and the storage gate around both.
+# ---------------------------------------------------------------------------
+
+
+def _files(tmp_path):
+    """The #108 files root beside the carts one, holding both things that must
+    never leave the board."""
+    root = Path(wh.moy_sync.files_root(str(tmp_path / "carts")))
+    (root / "drawings").mkdir(parents=True)
+    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
+    (root / "recordings" / "take_1").mkdir(parents=True)
+    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / ".history" / "drawings").mkdir(parents=True)
+    (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
+    (root / "trash" / "drawings").mkdir(parents=True)
+    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    return root
+
+
+def test_files_json_serves_the_kinds_and_nothing_else(tmp_path):
+    """The same bundle shape as carts.json, kind-filtered: `.history/` is each
+    side's own undo history and `trash/` is a LOCAL recovery bin, so neither
+    crosses in either direction."""
+    h = _host(tmp_path)
+    _files(tmp_path)
+    r = h.handle_http("GET", "/files.json", b"")
+    assert "application/json" in r.head().decode()
+    body = json.loads("".join(r.body_iter))
+    assert body == {"drawings/sunset.moyimg": "0,1,",
+                    "recordings/take_1/part0.json": "[1]"}
+
+
+def test_files_json_answers_on_a_board_that_has_made_nothing_yet(tmp_path):
+    """An empty object, NEVER a 404: the 404 is what tells the browser this
+    board predates files sync, and returning it for a store that merely holds
+    no drawings would disable the push half for good."""
+    h = _host(tmp_path)
+    r = h.handle_http("GET", "/files.json", b"")
+    assert json.loads("".join(r.body_iter)) == {}
+
+
+def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
+                                                                    monkeypatch):
+    """The headless XIAO cart store ships moy_webhost + moy_sync and no
+    moy_carts, so it cannot resolve a files root at all. That is the SAME
+    answer a board flashed before files sync gives -- the page then builds no
+    files watcher, and nothing retries a batch this host could only refuse."""
+    h = wh.WebHost(str(_store(tmp_path)), str(tmp_path / "web"))
+    monkeypatch.setattr(wh.moy_sync, "files_root", lambda root: None)
+    assert h.handle_http("GET", "/files.json", b"") is None
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/x.moyimg", "t": "0,"}, root="files"))
+    assert b"400" in r.split(b"\r\n")[0]
+
+
+def test_the_sd_gate_wraps_the_files_read_too(tmp_path):
+    h = _host(tmp_path)
+    _files(tmp_path)
+    calls = []
+    h._with_sd = lambda fn: (calls.append(1), fn())[1]
+    r = h.handle_http("GET", "/files.json", b"")
+    assert calls == [1], "the files root was read outside the SD gate"
+    json.loads("".join(r.body_iter))
+    assert calls == [1], "the walk re-entered the gate per file"
+
+
+def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
+    root = _store(tmp_path)
+    files = _files(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/sunset.moyimg", "t": "7,"}, root="files"))
+    assert b"200" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"ok": 1, "err": []}
+    assert (files / "drawings" / "sunset.moyimg").read_text() == "7,"
+    assert not (root / "drawings").exists(), "it must not land among the carts"
+
+
+def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
+    root = _store(tmp_path)
+    files = _files(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "trash/drawings/gone.moyimg", "t": "stolen"},
+        {"p": ".history/drawings/sunset.jsonl", "t": "stolen"}, root="files"))
+    body = json.loads(r.split(b"\r\n\r\n", 1)[1])
+    assert body["ok"] == 0 and len(body["err"]) == 2
+    assert (files / "trash" / "drawings" / "gone.moyimg").read_text() == "9,"
+
+
+def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
+    """The launcher renders no drawings, and the Files app scans its kinds when
+    it opens -- a rescan here would repaint the shelf for nothing."""
+    root = _store(tmp_path)
+    _files(tmp_path)
+    hits = []
+    h = wh.WebHost(str(root), str(tmp_path / "web"),
+                   on_sync=lambda: hits.append(1))
+    h.handle_http("POST", "/sync", _batch(
+        {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+    assert not hits
+
+
+def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
+    """Same law as the carts apply: on the T-Deck every one of these writes
+    lands on the card that shares the panel's SPI host."""
+    root = _store(tmp_path)
+    _files(tmp_path)
+    depth = [0]
+
+    def gate(fn):
+        depth[0] += 1
+        try:
+            return fn()
+        finally:
+            depth[0] -= 1
+
+    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    seen = []
+    real = wh.moy_sync.apply_ops
+    wh.moy_sync.apply_ops = lambda *a: (seen.append(depth[0]), real(*a))[1]
+    try:
+        h.handle_http("POST", "/sync", _batch(
+            {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
+    finally:
+        wh.moy_sync.apply_ops = real
+    assert seen == [1], "the files apply ran outside the storage gate"
+
+
+def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    r = h.handle_http("POST", "/sync", _batch(
+        {"p": "hop.moy/main.py", "t": "x"}, root="wifi"))
+    assert b"400" in r.split(b"\r\n")[0]
+    assert (root / "hop.moy" / "main.py").read_text().endswith("cls(1)\n")
 
 
 @pytest.mark.parametrize("name,ctype", sorted(wh.ASSETS.items()))
@@ -866,6 +1009,7 @@ def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
     h.error = None
     h.port = 8080
     h._ensure_online = lambda: "10.0.0.5"
+    h._pin_source = None                    # #197: start() resolves the pin
     h.ip = None
     from moy_webserver import WebServer
     h.__class__.__mro__      # sanity: WebHost derives from WebServer

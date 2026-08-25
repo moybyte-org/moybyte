@@ -8,12 +8,14 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
     python serve.py [port] [dir]            # defaults: 8321, dist/
                                             # dir may be absolute (the _site build)
     python serve.py [port] [dir] --carts D  # BOARD-TWIN mode: serve carts.json
-                                            # LIVE from D and accept POST /sync
-                                            # back into it -- the same pull+push
-                                            # pair moy_webhost serves on a board,
-                                            # against a plain directory. The
-                                            # no-hardware way to watch a browser
-                                            # edit land as files on disk.
+                                            # (and files.json, the #108 layer
+                                            # beside D) LIVE and accept POST
+                                            # /sync back into either -- the same
+                                            # pull+push pair moy_webhost serves
+                                            # on a board, against a plain
+                                            # directory. The no-hardware way to
+                                            # watch a browser edit land as files
+                                            # on disk.
 
 Bind the directory by PATH, never by chdir. Every build here REPLACES its output
 folder (build.sh and site/build.py both remove and recreate it), and a server
@@ -68,10 +70,20 @@ else:
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.path.split("?", 1)[0] == "/carts.json":
+            path = self.path.split("?", 1)[0]
+            if path == "/carts.json":
                 # The board's own packer, over a plain directory -- one body,
                 # so this twin cannot drift from what a board serves.
                 body = json.dumps(moy_webhost.pack_store(carts_dir)).encode()
+                self._send(200, body)
+                return
+            if path == "/files.json":
+                # The #108 user files beside the carts, kind-filtered so
+                # .history/ and trash/ stay home -- and serving this at all is
+                # what tells the page this twin speaks files.
+                body = json.dumps(moy_webhost.pack_store(
+                    moy_sync.files_root(carts_dir),
+                    tops=moy_sync.file_kinds())).encode()
                 self._send(200, body)
                 return
             super().do_GET()
@@ -81,11 +93,13 @@ else:
                 self._send(404, b'{"error":"not found"}')
                 return
             n = int(self.headers.get("Content-Length") or 0)
-            ops, _pin = moy_sync.parse_batch(self.rfile.read(n))
+            ops, _pin, root_id = moy_sync.parse_batch(self.rfile.read(n))
             if ops is None:
                 self._send(400, b'{"error":"bad batch"}')
                 return
-            applied, errors, _ = moy_sync.apply_ops(carts_dir, ops)
+            target = (moy_sync.files_root(carts_dir)
+                      if root_id == moy_sync.FILES_ROOT_ID else carts_dir)
+            applied, errors, _ = moy_sync.apply_ops(target, ops, root_id)
             if errors:
                 print("sync: %d applied, %d refused: %s"
                       % (applied, len(errors), errors[0][1]))

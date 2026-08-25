@@ -17,7 +17,8 @@ sys.path.insert(0, str(ROOT))
 
 from runtime import moy_sync                                    # noqa: E402
 from runtime.moy_sync import (StoreWatcher, apply_ops, parse_batch,  # noqa: E402
-                              safe_segments, PART_MAX, BATCH_BUDGET)
+                              safe_segments, PART_MAX, BATCH_BUDGET,
+                              FILES_ROOT_ID)
 
 
 def _store(tmp_path, name="carts"):
@@ -153,12 +154,13 @@ def test_publish_without_staged_tmp_is_an_error_not_a_truncation(tmp_path):
 
 
 def test_parse_batch_refuses_malformed_bodies():
-    assert parse_batch(b"not json") == (None, None)
-    assert parse_batch(b"[1,2]") == (None, None)
-    assert parse_batch(json.dumps({"v": 99, "ops": []})) == (None, None)
-    assert parse_batch(json.dumps({"v": 1, "ops": {}})) == (None, None)
-    ops, pin = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
-    assert (ops, pin) == ([], "77")
+    none = (None, None, None)
+    assert parse_batch(b"not json") == none
+    assert parse_batch(b"[1,2]") == none
+    assert parse_batch(json.dumps({"v": 99, "ops": []})) == none
+    assert parse_batch(json.dumps({"v": 1, "ops": {}})) == none
+    ops, pin, root = parse_batch(json.dumps({"v": 1, "pin": "77", "ops": []}))
+    assert (ops, pin, root) == ([], "77", "carts")
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +285,260 @@ def test_take_json_carries_the_protocol_and_the_pin(tmp_path):
     w.sweep()
     doc = json.loads(w.take_json("1234"))
     assert doc["v"] == moy_sync.PROTOCOL_V and doc["pin"] == "1234"
-    ops, pin = parse_batch(json.dumps(doc))
-    assert pin == "1234" and ops == doc["ops"]
+    assert "root" not in doc, "a carts batch stays byte-shaped as v1 boards read it"
+    ops, pin, root = parse_batch(json.dumps(doc))
+    assert pin == "1234" and ops == doc["ops"] and root == "carts"
+
+
+# ---------------------------------------------------------------------------
+# The #108 files root: the second store the same protocol carries. Everything
+# below is a refusal or a routing rule, which is the whole of what makes a
+# files batch safe -- it is the same apply reaching a different tree.
+# ---------------------------------------------------------------------------
+
+
+def _files_store(tmp_path, name="files"):
+    """A files root shaped like a real one: two kinds, a folder-valued
+    recording, and the two directories that must never travel."""
+    root = tmp_path / name
+    (root / "drawings").mkdir(parents=True)
+    (root / "drawings" / "sunset.moyimg").write_text("0,1,")
+    (root / "recordings" / "take_1").mkdir(parents=True)
+    (root / "recordings" / "take_1" / "part0.json").write_text("[1]")
+    (root / ".history" / "drawings").mkdir(parents=True)
+    (root / ".history" / "drawings" / "sunset.jsonl").write_text('{"t": "kf"}\n')
+    (root / "trash" / "drawings").mkdir(parents=True)
+    (root / "trash" / "drawings" / "gone.moyimg").write_text("9,")
+    return root
+
+
+def _files_batch(*ops):
+    doc = {"v": moy_sync.PROTOCOL_V_ROOTED, "root": FILES_ROOT_ID,
+           "ops": list(ops)}
+    return json.dumps(doc)
+
+
+def test_a_files_batch_names_its_root_and_a_v1_board_refuses_it():
+    """The back-compat mechanism, and it is a SAFETY property. A board flashed
+    before files sync checks `v != 1` and answers "bad batch"; without the bump
+    its apply would read `drawings/sunset.moyimg` as a cart-relative path and
+    write it into the CARTS root, inventing a `drawings` cart on the shelf."""
+    body = _files_batch({"p": "drawings/sunset.moyimg", "t": "0,"})
+    ops, _pin, root = parse_batch(body)
+    assert root == FILES_ROOT_ID and len(ops) == 1
+
+    def old_parse_batch(doc):                # the shipped v1 receiver, verbatim
+        return doc.get("v") == moy_sync.PROTOCOL_V
+
+    assert not old_parse_batch(json.loads(body)), "a v1 board must refuse this"
+    assert old_parse_batch({"v": 1, "ops": []}), \
+        "...while the carts batch it already speaks keeps working"
+
+
+def test_a_files_batch_misrouted_to_carts_would_have_made_a_bogus_cart(tmp_path):
+    """The concrete damage the version bump prevents, pinned so nobody
+    'simplifies' the two versions back into one."""
+    root = _store(tmp_path)
+    applied, errors, shelf = apply_ops(
+        str(root), [{"p": "drawings/sunset.moyimg", "t": "0,"}], "carts")
+    assert (applied, errors) == (1, []) and shelf
+    assert (root / "drawings" / "sunset.moyimg").exists(), \
+        "a carts receiver has no way to know this was never a cart"
+
+
+def test_a_v1_batch_may_not_smuggle_another_root():
+    """The version is what a v1 receiver checks, so the two must never be able
+    to disagree about the same bytes."""
+    assert parse_batch(json.dumps(
+        {"v": 1, "root": "files", "ops": []})) == (None, None, None)
+    assert parse_batch(json.dumps(
+        {"v": 2, "root": "wifi", "ops": []})) == (None, None, None)
+    assert parse_batch(json.dumps({"v": 2, "ops": []})) == (None, None, None)
+
+
+def test_files_paths_must_start_with_a_kind_the_store_knows(tmp_path):
+    """An ALLOWLIST over moy_carts.FILE_KINDS, which is also the ONE rule that
+    keeps .history/ and trash/ off the wire -- neither is a kind."""
+    root = _files_store(tmp_path)
+    applied, errors, _ = apply_ops(str(root), [
+        {"p": ".history/drawings/sunset.jsonl", "t": "no"},
+        {"p": "trash/drawings/gone.moyimg", "t": "no"},
+        {"p": "wifi.json", "t": "no"},
+        {"p": "carts/hop.moy/main.py", "t": "no"},
+        {"p": "drawings/ok.moyimg", "t": "1,"},
+    ], FILES_ROOT_ID)
+    assert applied == 1
+    assert [i for i, _ in errors] == [0, 1, 2, 3]
+    assert (root / "drawings" / "ok.moyimg").read_text() == "1,"
+    assert (root / ".history" / "drawings" / "sunset.jsonl").read_text() \
+        == '{"t": "kf"}\n'
+
+
+def test_dc_deletes_an_item_and_never_a_whole_kind(tmp_path):
+    """A recording is folder-valued and must die as a unit; a kind dir must
+    not, or one item leaving our copy would wipe the peer's whole drawings."""
+    root = _files_store(tmp_path)
+    _, errors, _ = apply_ops(str(root), [{"p": "drawings", "dc": 1}],
+                             FILES_ROOT_ID)
+    assert errors and (root / "drawings").is_dir()
+    applied, errors, shelf = apply_ops(
+        str(root), [{"p": "recordings/take_1", "dc": 1}], FILES_ROOT_ID)
+    assert (applied, errors) == (1, [])
+    assert not (root / "recordings" / "take_1").exists()
+    assert (root / "recordings").is_dir(), "the kind dir survives its item"
+    assert not shelf, "the launcher renders no recordings"
+
+
+def test_a_files_batch_never_dirties_the_shelf(tmp_path):
+    root = _files_store(tmp_path)
+    for ops in ([{"p": "drawings/new.moyimg", "t": "0,"}],
+                [{"p": "drawings/sunset.moyimg", "d": 1}],
+                [{"p": "docs/story.moytext", "t": "hi"}]):
+        _, errors, shelf = apply_ops(str(root), ops, FILES_ROOT_ID)
+        assert not errors and not shelf
+
+
+def test_the_files_root_is_created_on_demand(tmp_path):
+    """The carts root always exists; the files root does not until the kid
+    makes something -- and the first thing a peer sends may BE that."""
+    root = tmp_path / "files"
+    applied, errors, _ = apply_ops(
+        str(root), [{"p": "drawings/first.moyimg", "t": "0,"}], FILES_ROOT_ID)
+    assert (applied, errors) == (1, [])
+    assert (root / "drawings" / "first.moyimg").read_text() == "0,"
+
+
+def test_the_files_watcher_walks_kinds_and_nothing_else(tmp_path):
+    root = _files_store(tmp_path)
+    w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
+    assert not w.sweep(), "the freshly pulled files root has nothing to tell"
+    shipped = {rel for rel in w._snap}
+    assert shipped == {"drawings/sunset.moyimg", "recordings/take_1/part0.json"}
+    assert not any(r.startswith(".history/") or r.startswith("trash/")
+                   for r in shipped)
+    # A write inside either stays invisible, sweep after sweep.
+    p = root / "trash" / "drawings" / "gone.moyimg"
+    p.write_text("still here")
+    _bump_mtime(p)
+    assert not w.sweep()
+    assert w.take() is None
+
+
+def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
+    root = _files_store(tmp_path)
+    w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
+    p = root / "drawings" / "sunset.moyimg"
+    p.write_text("2,")
+    _bump_mtime(p)
+    w.sweep()
+    doc = json.loads(w.take_json("1234"))
+    assert doc["v"] == moy_sync.PROTOCOL_V_ROOTED
+    assert doc["root"] == FILES_ROOT_ID and doc["pin"] == "1234"
+    ops, pin, root_id = parse_batch(json.dumps(doc))
+    assert (pin, root_id) == ("1234", FILES_ROOT_ID)
+    assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
+
+
+def test_a_missing_files_root_is_an_empty_watcher_not_a_crash(tmp_path):
+    """web_boot only builds this watcher when the pull made the directory, but
+    a root can also vanish under a running sweep."""
+    root = tmp_path / "nothing"
+    w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
+    assert not w.sweep() and w.take() is None
+
+
+# ---------------------------------------------------------------------------
+# The browser's TWO-ROOT pump (firmware/web_runner/web_boot.py). One batch is
+# in flight at a time across BOTH roots, so which watcher took the batch the
+# worker is answering is a fact somebody has to remember -- and the files
+# watcher existing at all is a capability the pull decided.
+# ---------------------------------------------------------------------------
+
+
+def _web_boot():
+    """web_boot imported for its sync verbs only -- no VM, no canvas."""
+    import pytest
+    for p in ("firmware/web_runner", "device", "runtime"):
+        d = str(ROOT / p)
+        if d not in sys.path:
+            sys.path.insert(0, d)
+    try:
+        import web_boot
+    except Exception as exc:  # noqa: BLE001 -- a wasm-only dep would skip, not fail
+        pytest.skip("web_boot not importable on the host: %s" % exc)
+    return web_boot
+
+
+def _wired(tmp_path, files=True):
+    """web_boot's `_S` wired the way boot() wires it: a carts watcher always, a
+    files watcher only when the pull left a files root behind."""
+    wb = _web_boot()
+    carts = tmp_path / "carts"
+    (carts / "hop.moy").mkdir(parents=True)
+    (carts / "hop.moy" / "main.py").write_text("x = 1\n")
+    if files:
+        _files_store(tmp_path)
+    wb._S["sync"] = StoreWatcher(str(carts))
+    wb._S["sync_files"] = wb._files_watcher(moy_sync, str(carts))
+    wb._S.pop("sync_took", None)
+    wb._S.pop("sync_pin", None)
+    return wb, carts
+
+
+def test_no_files_root_means_no_files_watcher(tmp_path):
+    """The capability probe, and the reason one 404 cannot disable the carts
+    push: worker.js creates the files root only when GET /files.json answered,
+    so a board that predates files sync leaves nothing here to watch."""
+    wb, _carts = _wired(tmp_path, files=False)
+    assert wb._S["sync"] is not None
+    assert wb._S["sync_files"] is None
+    assert wb.sync_poll_json() == "", "a quiet store says nothing either way"
+
+
+def test_the_pump_drains_carts_first_then_files(tmp_path):
+    """A cart edit is what the kid is looking at on the glass; a drawing
+    landing a second later costs nobody anything."""
+    wb, carts = _wired(tmp_path)
+    p = carts / "hop.moy" / "main.py"
+    p.write_text("x = 2\n")
+    _bump_mtime(p)
+    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d.write_text("9,")
+    _bump_mtime(d)
+    first = json.loads(wb.sync_poll_json())
+    assert first["v"] == moy_sync.PROTOCOL_V and "root" not in first
+    assert wb.sync_poll_json() == "", "one batch in flight across BOTH roots"
+    wb.sync_ack(True)
+    second = json.loads(wb.sync_poll_json())
+    assert second["root"] == FILES_ROOT_ID
+    assert second["ops"] == [{"p": "drawings/sunset.moyimg", "t": "9,"}]
+    wb.sync_ack(True)
+    assert wb.sync_poll_json() == ""
+
+
+def test_the_ack_goes_back_to_the_watcher_that_took(tmp_path):
+    """Acking the wrong root would strand its batch in flight forever and
+    requeue nothing -- the edit would be silently dropped."""
+    wb, _carts = _wired(tmp_path)
+    d = tmp_path / "files" / "drawings" / "sunset.moyimg"
+    d.write_text("9,")
+    _bump_mtime(d)
+    batch = json.loads(wb.sync_poll_json())
+    assert batch["root"] == FILES_ROOT_ID
+    wb.sync_ack(False)                       # the POST never got an answer
+    again = json.loads(wb.sync_poll_json())
+    assert again["ops"] == batch["ops"], "the files edit requeued, not vanished"
+    wb.sync_ack(True)
+    assert wb.sync_poll_json() == ""
+
+
+def test_sync_off_stops_both_roots(tmp_path):
+    """This is the "there is no push half HERE" answer (a static host), which
+    is a different thing from a board that has /sync and no files layer."""
+    wb, _carts = _wired(tmp_path)
+    wb.sync_off()
+    assert wb._S["sync"] is None and wb._S["sync_files"] is None
+    assert wb.sync_poll_json() == ""
 
 
 def test_same_second_second_write_is_caught_by_the_hot_set(tmp_path):

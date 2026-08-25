@@ -1,19 +1,24 @@
-"""Commit-shaped cart sync between the wasm head and a board's store (#197
-mode 2, moycore plan 3.4 -- the PUSH half; the pull half is moy_webhost's
-GET /carts.json, which shipped 2026-08-15).
+"""Commit-shaped store sync between the wasm head and a board (#197 mode 2,
+moycore plan 3.4 -- the PUSH half; the pull half is moy_webhost's
+GET /carts.json + GET /files.json).
 
 The unit of sync is the COMMIT, and the design rides what already exists: the
 console has no SAVE button, so a cart's durable state changes only at the
 #111 commit points (typing-idle debounce + every exit path), each atomic and
 whole-file-shaped. Sync therefore never needs an operation log or a session
 model (the buried docked-mode machinery, plan 3.4): the browser WATCHES its
-own carts root for files whose bytes changed, and ships the changed files.
+own store for files whose bytes changed, and ships the changed files.
 Per-file last-writer-wins, both sides keep their own journal, done.
+
+TWO ROOTS since 2026-08-25 (owner call, "they should get synced"): the carts
+root, and the #108 user-files layer beside it -- the kid's drawings, docs,
+tables, sprite sheets, songs and recordings. One protocol, one watcher class,
+one apply; a batch carries which root it speaks for and never mixes the two.
 
 One body, three consumers, so the two sides cannot disagree about the wire:
 
-  * `StoreWatcher` -- the BROWSER half (web_boot constructs one over the wasm
-    VFS carts root). A stat-walk sweep (~1/s, driven by worker.js) detects
+  * `StoreWatcher` -- the BROWSER half (web_boot constructs one per root over
+    the wasm VFS). A stat-walk sweep (~1/s, driven by worker.js) detects
     changed/new/deleted files with no hook into the store at all -- the store
     writes through several funnels (moy_fs atomic dances, raw journal
     appends, os.rename), and watching the filesystem catches every writer by
@@ -34,9 +39,15 @@ What deliberately does NOT sync, recorded so it is not read as a gap:
     shared sheet) -- system state, not the kid's work, and wifi.json is a
     secret. The pull skips non-directories at the root for the same reason;
     `apply_ops` refuses single-segment file paths outright.
-  * The user-files layer (#108 files/) -- a SIBLING of the carts root, so
-    neither walker ever sees it. The day drawings sync, they ride this same
-    protocol with files_root as a second watched root.
+  * In the files root, anything whose first segment is not one of
+    moy_carts.FILE_KINDS -- which is how `files/.history/` and `files/trash/`
+    stay home, in BOTH directions, with no second skip list to keep in step.
+    `.history` is the files layer's journal-equivalent (#111 op sidecars), so
+    it stays for the same reason journal/ does: each side keeps its own undo
+    history. `trash` is a LOCAL recovery bin, and syncing a deletion that is
+    still recoverable here but not there turns last-writer-wins into data
+    loss -- a peer would land the trashed copy back as a live file, or drop
+    the only copy the kid could still restore.
   * Binary/unreadable files -- the wire is JSON text, same rule as the pull.
 
 Wire shape (one POST per batch, bounded so it fits the transport's 64KB
@@ -52,6 +63,24 @@ so ops apply in order):
       {"p": "cart.moy", "dc": 1}]}                           # delete cart
 
     -> {"ok": <applied count>, "err": [[index, "reason"], ...]}
+
+A files batch is the same ops under a VERSION BUMP that names its root:
+
+    {"v": 2, "root": "files", "ops": [
+      {"p": "drawings/sunset.moyimg", "t": "<whole text>"},
+      {"p": "recordings/take_1", "dc": 1}]}                  # a folder item
+
+The bump is the back-compat mechanism, and it is a safety property rather
+than politeness. A board flashed before this reads `v != 1` and answers 400
+"bad batch"; without the bump its `apply_ops` would happily take
+`drawings/sunset.moyimg` for a cart-relative path and write it into the CARTS
+root, inventing a `drawings` cart on the kid's shelf. A refusal is the only
+acceptable failure. `v: 1` keeps the carts batch byte-identical to what those
+boards already parse, so the pull-and-push loop they have keeps working
+untouched -- and a v1 batch that tries to smuggle a `root` key is refused too.
+In practice no files batch is ever aimed at such a board: the browser only
+builds a files watcher when the board answered GET /files.json (web_boot),
+so the version check is the second line of defense, not the first.
 
 A chunked file spans REQUESTS when it must (a 200KB main.lua cannot fit one
 64KB POST): parts accumulate in `<path>.tmp` on the receiver and only `pub`
@@ -82,7 +111,16 @@ except ImportError:  # pragma: no cover -- every target ships binascii
         return h
 
 
+# The carts batch keeps v1 FOREVER: it is the shape every already-flashed
+# board parses, and a carts push must keep working across an old board and a
+# new browser. A batch for any other root carries v2 + an explicit `root`, so
+# a v1 receiver refuses it instead of applying files paths into the carts
+# store (see the module docstring's back-compat note).
 PROTOCOL_V = 1
+PROTOCOL_V_ROOTED = 2
+CARTS_ROOT_ID = "carts"
+FILES_ROOT_ID = "files"
+ROOT_IDS = (CARTS_ROOT_ID, FILES_ROOT_ID)
 
 # One chunk of a large file per op, and the total text budget of one batch.
 # The transport (`moy_webserver._recv_request`) refuses requests past 64KB as
@@ -107,6 +145,49 @@ def _skip(name):
         if name.endswith(suf):
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# The #108 files layer, reached through ONE window so the guarded import (frozen
+# `moy_carts` on a board, `runtime.moy_carts` on the host) is written once. The
+# push sweep, the receiving apply and moy_webhost's pull walker all come here
+# rather than importing moy_carts themselves.
+# ---------------------------------------------------------------------------
+
+_CARTS = []
+
+
+def _moy_carts():
+    if not _CARTS:
+        try:
+            import moy_carts as mc
+        except ImportError:                  # host / CPython: the runtime package
+            try:
+                from runtime import moy_carts as mc
+            except ImportError:              # pragma: no cover -- no store at all
+                return None
+        _CARTS.append(mc)
+    return _CARTS[0]
+
+
+def file_kinds():
+    """The names a files-root path may start with -- moy_carts.FILE_KINDS, never
+    a second copy of it, so a kind added there reaches the wire by default.
+
+    This ONE allowlist is also what keeps `files/.history/` and `files/trash/`
+    home in both directions: neither is a kind, so no walker descends into them
+    and no op naming one is ever applied. Returns None when there is no store
+    module to ask, which every caller reads as "refuse", never as "allow".
+    """
+    mc = _moy_carts()
+    return None if mc is None else mc.FILE_KINDS
+
+
+def files_root(carts_root):
+    """The user-files root beside `carts_root` (moy_carts' own sibling rule), or
+    None when the store module is missing."""
+    mc = _moy_carts()
+    return None if mc is None else mc.files_root(carts_root)
 
 
 def _entries(path, _listdir=None, _isdir=None):
@@ -203,41 +284,64 @@ def _full(root, parts):
 
 
 def parse_batch(body):
-    """The POST body -> (ops, pin) or (None, None) on anything malformed.
-    Tolerant of bytes (the transport hands bytes)."""
+    """The POST body -> (ops, pin, root_id) or (None, None, None) on anything
+    malformed. Tolerant of bytes (the transport hands bytes).
+
+    `root_id` is which store the ops speak for: "carts" for the v1 shape every
+    flashed board already parses, or whatever a v2 batch names. An unknown root
+    is malformed on purpose -- a receiver must never guess where a path lands.
+    """
     if isinstance(body, bytes):
         try:
             body = body.decode("utf-8")
         except Exception:  # noqa: BLE001
-            return None, None
+            return None, None, None
     try:
         doc = json.loads(body)
     except Exception:  # noqa: BLE001
-        return None, None
-    if not isinstance(doc, dict) or doc.get("v") != PROTOCOL_V:
-        return None, None
+        return None, None, None
+    if not isinstance(doc, dict):
+        return None, None, None
+    v = doc.get("v")
+    if v == PROTOCOL_V:
+        # A v1 batch is carts BY DEFINITION. It carries no root, and one that
+        # smuggles a different one in is refused rather than quietly read as
+        # carts: the version is what a v1 receiver checks, so the two must not
+        # be able to disagree about the same bytes.
+        if doc.get("root", CARTS_ROOT_ID) != CARTS_ROOT_ID:
+            return None, None, None
+        root = CARTS_ROOT_ID
+    elif v == PROTOCOL_V_ROOTED:
+        root = doc.get("root")
+        if root not in ROOT_IDS:
+            return None, None, None
+    else:
+        return None, None, None
     ops = doc.get("ops")
     if not isinstance(ops, list):
-        return None, None
-    return ops, doc.get("pin")
+        return None, None, None
+    return ops, doc.get("pin"), root
 
 
-def apply_ops(root, ops):
-    """Apply one batch into the store at `root`.
+def apply_ops(root, ops, root_id=CARTS_ROOT_ID):
+    """Apply one batch into the store at path `root`, whose SHAPE is `root_id`
+    ("carts" or "files" -- what parse_batch returned).
 
     Returns (applied, errors, shelf_dirty): how many ops landed, [(index,
     reason)] for the ones that did not (a bad op skips, it never aborts the
     batch -- the client's retry would just replay the same poison forever),
     and whether the SHELF needs a re-scan -- a cart appeared or disappeared,
     or a manifest/sheet changed (covers + titles live in RAM on the boards; a
-    main.py edit needs no scan because code is read at cart open).
+    main.py edit needs no scan because code is read at cart open). A files
+    batch never dirties the shelf: the launcher renders no drawings, and the
+    Files app scans its kinds when it opens.
     """
     applied = 0
     errors = []
     shelf_dirty = False
     for i, op in enumerate(ops):
         try:
-            reason, shelf = _apply_one(root, op)
+            reason, shelf = _apply_one(root, op, root_id)
         except Exception as exc:  # noqa: BLE001 -- one bad op never kills a batch
             reason, shelf = ("%s: %s" % (type(exc).__name__, exc)), False
         if reason is None:
@@ -248,40 +352,73 @@ def apply_ops(root, ops):
     return applied, errors, shelf_dirty
 
 
-def _apply_one(root, op):
+def _files_shape(parts, op):
+    """None when `parts` is a legal user-files path, else the refusal reason.
+
+    Tighter than the carts root because the files root has a fixed vocabulary:
+    the first segment must be a kind moy_carts knows, which refuses `.history`
+    and `trash` by construction. `dc` is a whole-FOLDER delete, so it is refused
+    on a kind dir (that would wipe every drawing the kid owns because one item
+    left our copy) and allowed from depth 2 down, where a folder-valued
+    recording is exactly one item.
+    """
+    kinds = file_kinds()
+    if kinds is None:                    # no store module: refuse, never guess
+        return "no files layer"
+    if parts[0] not in kinds:
+        return "not a file kind"
+    if len(parts) < 2:
+        return "dc wants an item" if op.get("dc") else "not a file"
+    return None
+
+
+def _apply_one(root, op, root_id):
     """-> (error_reason_or_None, shelf_dirty)."""
     if not isinstance(op, dict):
         return "not an op", False
     parts = safe_segments(op.get("p", ""))
     if parts is None:
         return "bad path", False
+    files = (root_id == FILES_ROOT_ID)
+    if files:
+        bad = _files_shape(parts, op)
+        if bad:
+            return bad, False
     if op.get("dc"):
-        # Whole-cart delete: exactly one segment, and the receiver removes
-        # everything under it INCLUDING what never crossed the wire (its
-        # journal, its thumbs) -- a deleted cart's history dies with it, the
-        # same as the on-device picker's delete.
-        if len(parts) != 1:
+        # Whole-folder delete, and the receiver removes everything under it
+        # INCLUDING what never crossed the wire (a cart's journal, its thumbs)
+        # -- a deleted cart's history dies with it, the same as the on-device
+        # picker's delete. In the carts root that folder is a CART, so exactly
+        # one segment; in the files root it is an item, checked above.
+        if not files and len(parts) != 1:
             return "dc wants a cart folder", False
         _rmtree(_full(root, parts))
-        return None, True
+        return None, not files
     if len(parts) < 2:
         # Never a top-level file: system.json / wifi.json / the shared sheet
         # are system state beside the carts, not the kid's work.
         return "not a cart file", False
     full = _full(root, parts)
-    new_cart = not _exists(root + "/" + parts[0])
+    new_cart = not files and not _exists(root + "/" + parts[0])
     if op.get("d"):
         _remove(full)
-        return None, parts[-1] in ("manifest.json", "sheet.json")
+        return None, not files and parts[-1] in ("manifest.json", "sheet.json")
     if op.get("pub"):
         _publish(full)
-        shelf = (new_cart or parts[-1] in ("manifest.json", "sheet.json"))
+        shelf = (new_cart or (not files
+                              and parts[-1] in ("manifest.json", "sheet.json")))
         return None, shelf
     text = op.get("t")
     if not isinstance(text, str):
         return "no text", False
     if len(text) > PART_MAX * 2:
         return "op too large", False
+    if files:
+        # The carts root always exists; the files root does not until the kid
+        # makes something, and the first thing a peer sends may BE that -- so
+        # create it here, the same on-demand mkdir moy_carts._ensure_kind_dir
+        # does. Its parent is the carts root's parent, which is already there.
+        _mkdir(root)
     _mkdirs(root, parts[:-1])
     part = op.get("part")
     if part is None:
@@ -293,7 +430,8 @@ def _apply_one(root, op):
         with open(full + ".tmp", "a") as f:
             f.write(text)
         return None, False
-    shelf = (new_cart or parts[-1] in ("manifest.json", "sheet.json"))
+    shelf = (new_cart or (not files
+                          and parts[-1] in ("manifest.json", "sheet.json")))
     return None, shelf
 
 
@@ -349,15 +487,20 @@ def _rmtree(path, depth=0):
 
 
 # ---------------------------------------------------------------------------
-# The browser half: watch a carts root, ship what changed.
+# The browser half: watch a root, ship what changed.
 # ---------------------------------------------------------------------------
 
 
 class StoreWatcher:
-    """Detect changes to a carts root by sweeping it, and hand them out as
+    """Detect changes to a store root by sweeping it, and hand them out as
     wire batches. One in-flight batch at a time (`take` returns None until the
     caller `ack`s), so ops arrive at the receiver in the order they were
     taken and a failed send simply requeues.
+
+    `root_id` picks which store this watches -- "carts" (cart folders, the
+    default) or "files" (the #108 user-files root). It is the only difference
+    between the two: which top-level names are legal, what a whole-folder
+    delete is a folder OF, and the protocol version the batch is stamped with.
 
     The snapshot holds (size, mtime, crc) per file. The fast path is the stat
     walk alone; content is only read (and crc'd) when size/mtime moved, or for
@@ -368,8 +511,10 @@ class StoreWatcher:
     the whole store.
     """
 
-    def __init__(self, root, listdir=None, isdir=None, read=None):
+    def __init__(self, root, listdir=None, isdir=None, read=None,
+                 root_id=CARTS_ROOT_ID):
         self.root = root
+        self.root_id = root_id
         self._listdir = listdir      # injected for host tests; None = real fs
         self._isdir = isdir
         self._read = read or _read_text
@@ -406,11 +551,13 @@ class StoreWatcher:
         """One pass over the store; queue every difference. Returns True when
         anything is pending (including carried-over failures)."""
         seen = {}
-        carts = set()
+        units = set()
         maxm = 0
         for rel, size, mtime in self._walk():
             seen[rel] = True
-            carts.add(rel.split("/", 1)[0])
+            unit = self._unit(rel)
+            if unit is not None:
+                units.add(unit)
             if mtime > maxm:
                 maxm = mtime
             old = self._snap.get(rel)
@@ -431,10 +578,10 @@ class StoreWatcher:
                 continue
             del self._snap[rel]
             self._pending.pop(rel, None)
-            top = rel.split("/", 1)[0]
-            if top not in carts:
-                if top not in self._pending_dc:
-                    self._pending_dc.append(top)
+            unit = self._unit(rel)
+            if unit is not None and unit not in units:
+                if unit not in self._pending_dc:
+                    self._pending_dc.append(unit)
             else:
                 self._pending[rel] = "d"
         # Files written in the newest observed second get re-read next sweep:
@@ -443,13 +590,34 @@ class StoreWatcher:
                           if v[1] >= maxm - 1)
         return bool(self._pending or self._pending_dc or self._partial)
 
+    def _unit(self, rel):
+        """The FOLDER a vanished `rel` would be deleted as part of, or None when
+        the file is its own unit and a plain `d` is the right op.
+
+        In the carts root the unit is the cart folder. In the files root it is
+        the ITEM -- `<kind>/<name>` -- and only for a path deeper than that: a
+        flat drawing is one file, and shipping `dc drawings/x.moyimg` would ask
+        the receiver to rmtree a file (which quietly does nothing), while a kind
+        dir is never a unit at all, or losing one recording would delete the
+        peer's whole recordings folder.
+        """
+        parts = rel.split("/")
+        if self.root_id != FILES_ROOT_ID:
+            return parts[0]
+        return parts[0] + "/" + parts[1] if len(parts) > 2 else None
+
     def _walk(self):
-        """Yield (rel, size, mtime) for every syncable file: cart DIRS only
-        (top-level files are system state), skip-filtered at every level."""
-        for cart, isdir in self._sorted_entries(self.root):
-            if not isdir or _skip(cart):
+        """Yield (rel, size, mtime) for every syncable file, skip-filtered at
+        every level. Top-level FILES are never syncable (system state beside the
+        store), and in the files root a top-level dir must be a known kind --
+        which is what leaves `.history` and `trash` unwalked."""
+        kinds = file_kinds() if self.root_id == FILES_ROOT_ID else None
+        for top, isdir in self._sorted_entries(self.root):
+            if not isdir or _skip(top):
                 continue
-            for item in self._walk_dir(self.root + "/" + cart, cart, 0):
+            if kinds is not None and top not in kinds:
+                continue
+            for item in self._walk_dir(self.root + "/" + top, top, 0):
                 yield item
 
     def _walk_dir(self, path, prefix, depth):
@@ -476,6 +644,13 @@ class StoreWatcher:
 
     # -- shipping ------------------------------------------------------------
 
+    def busy(self):
+        """True while a batch is out and unanswered. `take` already declines in
+        that state; a caller watching SEVERAL roots needs to ask before it moves
+        on to the next one, because the one-batch-in-flight rule is about the
+        transport, not about any single root."""
+        return self._inflight is not None
+
     def take(self):
         """The next wire batch as a list of ops, or None (nothing pending, or
         a batch is already in flight). Marks what it takes; `ack` settles it.
@@ -498,9 +673,9 @@ class StoreWatcher:
                 self._inflight = ([], [])
                 return ops
             paths.append(rel)
-        for cart in self._pending_dc:
-            ops.append({"p": cart, "dc": 1})
-            dcs.append(cart)
+        for unit in self._pending_dc:
+            ops.append({"p": unit, "dc": 1})
+            dcs.append(unit)
         for rel in sorted(self._pending):
             if budget <= 0:
                 break
@@ -529,7 +704,7 @@ class StoreWatcher:
             return None
         for rel in paths:
             self._pending.pop(rel, None)
-        self._pending_dc = [c for c in self._pending_dc if c not in dcs]
+        self._pending_dc = [u for u in self._pending_dc if u not in dcs]
         self._inflight = (paths, dcs)
         return ops
 
@@ -550,10 +725,16 @@ class StoreWatcher:
         return budget
 
     def take_json(self, pin=None):
+        """The next batch as wire JSON. A carts batch keeps the v1 shape older
+        boards parse; any other root rides v2 + an explicit `root`, which is
+        what makes those boards REFUSE it instead of misapplying its paths."""
         ops = self.take()
         if not ops:
             return ""
-        doc = {"v": PROTOCOL_V, "ops": ops}
+        if self.root_id == CARTS_ROOT_ID:
+            doc = {"v": PROTOCOL_V, "ops": ops}
+        else:
+            doc = {"v": PROTOCOL_V_ROOTED, "root": self.root_id, "ops": ops}
         if pin:
             doc["pin"] = pin
         return json.dumps(doc)
@@ -579,9 +760,9 @@ class StoreWatcher:
         for rel in paths:
             if rel not in self._pending:
                 self._pending[rel] = "w" if rel in self._snap else "d"
-        for cart in dcs:
-            if cart not in self._pending_dc:
-                self._pending_dc.append(cart)
+        for unit in dcs:
+            if unit not in self._pending_dc:
+                self._pending_dc.append(unit)
 
 
 def _crc(text):

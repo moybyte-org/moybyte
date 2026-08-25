@@ -23,7 +23,7 @@
 //   {t:"ahead", v}       the page's scheduled-ahead audio depth, seconds (-1 = none)
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
-//   {t:"reload"}         dev hot-reload: re-read carts.json and restart the cart
+//   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
@@ -36,11 +36,17 @@ let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
 // The 3.4 sync push: about once a second, ask the console (moy_sync's
-// watcher) for a batch of committed changes and POST it to the RELATIVE
+// watchers) for a batch of committed changes and POST it to the RELATIVE
 // /sync -- a page served from a board writes back to that board; one served
 // by a static host gets a 404/405/501 on the first try and push turns off
 // for good. ONE batch in flight at a time, so ops arrive in order and a
 // failed send simply requeues on the Python side (syncAck false).
+//
+// The batch is an OPAQUE string here, which is what lets the carts store and
+// the #108 user files share this pump untouched: which root a batch speaks
+// for is inside the body, chosen by web_boot, and the disable-on-404 above is
+// about the ENDPOINT, not about either store. Whether the files half runs at
+// all is settled once at boot by the files.json fetch (see writeFiles).
 let syncPoll = null, syncAck = null, syncOff = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
@@ -101,14 +107,28 @@ function mkdirs(p) {
     }
 }
 
-function writeCarts(carts) {
-    mkdirs("/moy/carts");
-    for (const rel in carts) {
-        const full = "/moy/carts/" + rel;
+// The two pulled stores. FILES_ROOT is the SIBLING of the carts root, which is
+// moy_carts.files_root's own rule (/moy/carts -> /moy/files); web_boot derives
+// the identical path in Python and watches it there.
+const CARTS_ROOT = "/moy/carts", FILES_ROOT = "/moy/files";
+
+function writeStore(root, files) {
+    mkdirs(root);
+    for (const rel in files) {
+        const full = root + "/" + rel;
         mkdirs(full.slice(0, full.lastIndexOf("/")));
-        mp.FS.writeFile(full, carts[rel]);
+        mp.FS.writeFile(full, files[rel]);
     }
 }
+
+// GET /files.json is also the CAPABILITY PROBE for the #108 files push: this
+// creates the files root only when the server answered, and web_boot builds its
+// files watcher only when the directory is there. So a board that serves carts
+// and /sync but predates files sync is never sent a files batch -- which is
+// what keeps its one 404 from disabling the carts push along with it. mkdirs
+// runs even for an empty answer: a board with no drawings YET still speaks
+// files, and skipping it would leave the kid's first drawing unable to travel.
+function writeFiles(files) { writeStore(FILES_ROOT, files); }
 
 async function init(search) {
     say("loading vm...");
@@ -121,16 +141,18 @@ async function init(search) {
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
-    const [mods, carts] = await Promise.all([
+    const [mods, carts, files] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch("carts.json").then((r) => r.json())]);
+        fetch("carts.json").then((r) => r.json()),
+        fetch("files.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
     let boot = "";
     if (mods) {
         mkdirs("/modules");
         for (const n in mods) mp.FS.writeFile("/modules/" + n, mods[n]);
         boot = "import sys\nsys.path.insert(0, '/modules')\n";
     }
-    writeCarts(carts);
+    writeStore(CARTS_ROOT, carts);
+    if (files) writeFiles(files);
     say("booting console...");
 
     const qs = new URLSearchParams(search || "");
@@ -357,8 +379,12 @@ self.onmessage = async (ev) => {
             // hold megabytes hostage.
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
-            const carts = await fetch("carts.json").then((r) => r.json());
-            writeCarts(carts);
+            const [carts, files] = await Promise.all([
+                fetch("carts.json").then((r) => r.json()),
+                fetch("files.json").then((r) => r.ok ? r.json() : null)
+                    .catch(() => null)]);
+            writeStore(CARTS_ROOT, carts);
+            if (files) writeFiles(files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
         }
