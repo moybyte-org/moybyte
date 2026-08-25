@@ -39,6 +39,67 @@ def _bump_mtime(path):
     os.utime(path, (st.st_atime, st.st_mtime + 2))
 
 
+def _drain_batches(w, pin=None):
+    """Every wire batch the watcher produces, acked ok -- the worker's pump."""
+    out = []
+    while True:
+        body = w.take_json(pin)
+        if not body:
+            return out
+        out.append(json.loads(body))
+        w.ack(True)
+
+
+def test_no_batch_overshoots_the_transport_request_cap(tmp_path):
+    """A whole-file op subtracts from the budget AFTER it is appended, so an
+    unguarded take() could pack ~48KB into one batch -- which, JSON-escaped, can
+    breach the receiver's 64KB request cap and wedge the client on a permanent
+    400/requeue. Each batch's ENCODED body must stay under the cap, and every
+    file must still arrive."""
+    root = tmp_path / "carts"
+    (root / "big.moy").mkdir(parents=True)
+    w = StoreWatcher(str(root))              # baseline is the empty cart dir
+    for i in range(6):
+        # 15KB each: two fit a 32KB batch, a third would overshoot.
+        (root / "big.moy" / ("f%d.txt" % i)).write_text("x" * 15000)
+    w.sweep()
+    batches = _drain_batches(w)
+    assert len(batches) >= 3, "the files must span batches, or the test is moot"
+    for doc in batches:
+        body = json.dumps(doc)
+        assert len(body) <= 65536, "a batch breached the 64KB transport cap: %d" % len(body)
+    got = set()
+    for doc in batches:
+        for op in doc["ops"]:
+            if op.get("t") is not None and op.get("part") is None:
+                got.add(op["p"])
+    assert got == {"big.moy/f%d.txt" % i for i in range(6)}, got
+
+
+def test_a_delete_cart_is_not_re_emitted_across_a_multi_batch_file(tmp_path):
+    """A dc emitted in a batch that then starts a big file must not ride again
+    in the next batch -- a no-op if the cart stays gone, but a wrong re-delete
+    if it was recreated between the two batches."""
+    root = tmp_path / "carts"
+    (root / "keep.moy").mkdir(parents=True)
+    (root / "gone.moy").mkdir()
+    (root / "gone.moy" / "main.py").write_text("z")
+    w = StoreWatcher(str(root))              # baseline: keep.moy empty, gone.moy present
+    # A big new file that spans batches AND a whole-cart delete, both pending
+    # in the same sweep -- the batch that starts the file must not re-ship the dc.
+    (root / "keep.moy" / "big.lua").write_text("y" * (BATCH_BUDGET + PART_MAX * 2))
+    import shutil
+    shutil.rmtree(root / "gone.moy")
+    w.sweep()
+    dc_ops = 0
+    for doc in _drain_batches(w):
+        for op in doc["ops"]:
+            if op.get("dc"):
+                assert op["p"] == "gone.moy", op
+                dc_ops += 1
+    assert dc_ops == 1, "the dc rode %d times, not once" % dc_ops
+
+
 # ---------------------------------------------------------------------------
 # Store-walk resilience -- a removable card can EIO under a socket-paced pull.
 # ---------------------------------------------------------------------------

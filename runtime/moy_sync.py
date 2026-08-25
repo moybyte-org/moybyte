@@ -848,6 +848,13 @@ class StoreWatcher:
         for unit in self._pending_dc:
             ops.append({"p": unit, "dc": 1})
             dcs.append(unit)
+        # CLEAR the dcs the moment they are emitted, not at the completion path
+        # below -- a batch that then starts a big file returns early (mid-file),
+        # and leaving them pending re-emits the same dc on the next batch. That
+        # is a no-op if the cart stays deleted, but re-deletes a cart that was
+        # RECREATED between the two batches. `dcs` rides `_inflight`, so ack(False)
+        # requeues them.
+        self._pending_dc = []
         for rel in sorted(self._pending):
             if budget <= 0:
                 break
@@ -869,6 +876,15 @@ class StoreWatcher:
                     return ops
                 paths.append(rel)
                 continue
+            # A whole-file op (<=PART_MAX) subtracts AFTER it is appended, so
+            # left unguarded it can push a batch past BATCH_BUDGET by a whole
+            # file -- and a ~48KB batch, JSON-escaped, can breach the transport's
+            # 64KB request cap, truncating the body to invalid JSON and wedging
+            # the client on a permanent 400/requeue. Defer a file that would
+            # overshoot to the next batch; a single op on an EMPTY batch always
+            # ships (it is <=PART_MAX, comfortably under the cap).
+            if ops and len(text) > budget:
+                break
             ops.append({"p": rel, "t": text})
             budget -= len(text)
             paths.append(rel)
@@ -876,7 +892,6 @@ class StoreWatcher:
             return None
         for rel in paths:
             self._pending.pop(rel, None)
-        self._pending_dc = [u for u in self._pending_dc if u not in dcs]
         self._inflight = (paths, dcs)
         return ops
 

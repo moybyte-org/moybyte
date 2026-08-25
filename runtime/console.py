@@ -3283,6 +3283,18 @@ class Workstation:
         marker + the popup read them)."""
         if self.project is None or self.cart is None:
             return False
+        # #197: while WASM MODE is on, the glass is PARKED and the browser owns
+        # authoring. A cart played by PLAY ON DEVICE that crashes must return to
+        # the connection screen, NOT open the Editor on the glass -- an editor
+        # here would edit the same store the browser is syncing, which is exactly
+        # the two-writer case the parked switch is designed to prevent. go_home
+        # releases the dead run and re-parks (its own tail lists "a crash" as one
+        # of the doors it funnels).
+        if self._web_parked:
+            self.cart_error = None
+            self.crash_line = None
+            self.go_home()
+            return True
         err = self.cart_error or "crashed"
         line = self.crash_line
         self.player.release_world()
@@ -3791,7 +3803,12 @@ class Workstation:
             return None
         self.launcher.sel = pick
         self.launch_selected()
-        return items[pick].get("title")
+        # Return something TRUTHY whenever a launch actually happened, so a
+        # caller (moy_webhost's /run) can tell "nothing matched" (None, above)
+        # from "launched a cart whose title is empty" -- a titleless cart used to
+        # report as a no-match AFTER it had already started on the glass.
+        it = items[pick]
+        return it.get("title") or it.get("path", "").rsplit("/", 1)[-1] or "cart"
 
     # -- the desk (two-worlds #105: the windowed tier's MAKE world) ----------
 

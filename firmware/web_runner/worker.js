@@ -198,14 +198,14 @@ async function initStore(carts) {
             // so the shelf is never empty and the first sweep has nothing to say.
             writeStore(CARTS_ROOT, carts);
             const n = await store.seed(opfs, carts);
-            persist("site", "carts are saved in this browser", "seeded " + n
+            persist("site", "carts saved here (drawings/docs not yet)", "seeded " + n
                 + " files in " + (performance.now() - t0).toFixed(0) + "ms");
         } else {
             // The local store WINS over carts.json: it is the kid's work, and
             // the served bundle is only ever the factory seed.
             const local = await store.readAll(opfs);
             writeStore(CARTS_ROOT, local);
-            persist("site", "carts are saved in this browser",
+            persist("site", "carts saved here (drawings/docs not yet)",
                     "loaded " + Object.keys(local).length + " files in "
                     + (performance.now() - t0).toFixed(0) + "ms");
         }
@@ -482,7 +482,7 @@ async function pumpLocal(body) {
         persistFails = 0;
         persistBatches++;
         try { syncAck(1); } catch (e) { }
-        persist("site", "carts are saved in this browser",
+        persist("site", "carts saved here (drawings/docs not yet)",
                 ops.length + " ops in " + (performance.now() - t0).toFixed(1) + "ms");
     } catch (e) {
         // Quota, or the browser evicted the store under us. Requeue; after a

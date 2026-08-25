@@ -1614,6 +1614,18 @@ def test_run_refuses_a_body_that_is_not_a_json_object(tmp_path):
         assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
 
 
+def test_run_refuses_an_empty_cart_name_without_launching(tmp_path):
+    """`{"cart": null}` / "" must NOT reach the console -- launch_named("")
+    runs the FIRST cart (the serial `run` with no arg), so a malformed PLAY ON
+    DEVICE would otherwise start a random game. Refused before on_run fires."""
+    launched = []
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                      on_run=lambda n: (launched.append(n), "X")[1])
+    for body in (b'{"cart": null}', b'{"cart": ""}', b'{"cart": "   "}', b'{}'):
+        assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
+    assert launched == [], "on_run fired for an empty name: %r" % launched
+
+
 def test_a_crashing_launch_is_a_500_not_a_dead_request(tmp_path):
     """`handle_http` runs inside the frame loop's tail. An exception escaping
     here would take the poll down, and with it the browser's whole session."""

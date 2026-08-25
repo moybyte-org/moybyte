@@ -650,6 +650,13 @@ class WebHost(WebServer):
             # and stop offering the button over a board that simply has none.
             return http_response(501, '{"error":"no runner"}')
         name = doc.get("cart")
+        # A named launch, not a bare one: `launch_named("")` runs the FIRST cart
+        # (the serial `run` with no argument), which is wrong for a PLAY ON DEVICE
+        # whose body arrived without a cart -- it would start a random game and,
+        # for a titleless one, then answer 404. The page always names its cart;
+        # an empty name is a malformed request, refused before anything launches.
+        if not name or not str(name).strip():
+            return http_response(400, '{"error":"no cart named"}')
         try:
             title = self._with_sd(lambda: self.on_run(name))
         except Exception as exc:         # noqa: BLE001 -- never fail the request
