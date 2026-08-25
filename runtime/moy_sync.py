@@ -8,7 +8,36 @@ console has no SAVE button, so a cart's durable state changes only at the
 whole-file-shaped. Sync therefore never needs an operation log or a session
 model (the buried docked-mode machinery, plan 3.4): the browser WATCHES its
 own store for files whose bytes changed, and ships the changed files.
-Per-file last-writer-wins, both sides keep their own journal, done.
+Per-file last-writer-wins, done.
+
+THE JOURNAL LIVES WITH THE STORE OF RECORD (owner call 2026-08-25). This
+replaces "both sides keep their own journal", which was true and useless: the
+browser's VFS is a scratch copy that dies with the tab, so a kid's undo history
+lived in the one place it could not survive, and a board that took a browser's
+edits had no record of them at all. There is exactly ONE durable journal per
+cart, and it sits wherever that cart durably LIVES:
+
+  * a page served BY A BOARD -- the board's store is of record, so the RECEIVER
+    journals: `apply_ops(..., journal=True)` appends a #111 commit for every
+    carts-root file a batch publishes, in the shape the console's own commits
+    use, so on-glass UNDO walks back through work done in the browser. The
+    browser's VFS journal is still written locally and still never crosses; it
+    is now correctly read as session-local undo.
+  * a page on a STATIC host -- the browser's OPFS is of record (#193), so the
+    journal persists THERE: web_boot builds its carts watcher with
+    `skip=skip_keep_journal` and the journal files ride the ordinary sweep into
+    the local store, coming back on the next visit with the carts.
+
+The wire predicate itself never moves: `_skip` refuses journal paths, so a
+BOARD-mode batch is byte-identical to what it always was and no board is ever
+sent somebody else's history. The site-mode relaxation is a watcher argument,
+not a change of what "the wire" means.
+
+The #108 files root is deliberately NOT part of this. Its undo lives in
+`files/.history/` op sidecars (a different mechanism with a different shape),
+and no half of it is journaled by the receiver: a drawing pushed from a browser
+lands as a file and nothing else. That asymmetry is recorded rather than fixed
+because the two histories are not the same object.
 
 TWO ROOTS since 2026-08-25 (owner call, "they should get synced"): the carts
 root, and the #108 user-files layer beside it -- the kid's drawings, docs,
@@ -32,7 +61,8 @@ One body, three consumers, so the two sides cannot disagree about the wire:
     sweep. journal/ + thumbs/ + .bak stay home in BOTH directions: the pull
     decision (2026-08-22, "the browser gets carts, not their history") and
     its mirror -- a pushed journal line could only replay browser-era ops
-    onto a board that has its own log.
+    onto a board that has its own log. `skip_keep_journal` is the SITE-MODE
+    variant, and it is a watcher argument rather than a second wire rule.
 
 What deliberately does NOT sync, recorded so it is not read as a gap:
   * Top-level files beside the cart folders (system.json, wifi.json, the
@@ -138,8 +168,36 @@ SKIP_FILES = ("journal.jsonl",)
 SKIP_SUFFIXES = (".bak", ".tmp")
 
 
+# The SITE-MODE store's skip list: the same rule minus the journal. In mode 1
+# the browser's OPFS is the store of record, so its undo history has to travel
+# with it or die at the next reload -- which is #193's "with its undo history",
+# and the whole of what the relaxation buys. thumbs/ stays out (a regenerable
+# per-size cache), and .bak/.tmp stay out because they are moy_fs's crash-safety
+# artifacts and this module's own chunk staging: re-shipping a .tmp would hand
+# the store a half-written file under a name the next sweep would then re-read.
+SITE_SKIP_DIRS = ("thumbs", "__pycache__")
+SITE_SKIP_FILES = ()
+
+
 def _skip(name):
     if name in SKIP_DIRS or name in SKIP_FILES:
+        return True
+    for suf in SKIP_SUFFIXES:
+        if name.endswith(suf):
+            return True
+    return False
+
+
+def skip_keep_journal(name):
+    """`_skip` with journal/ + journal.jsonl allowed through -- the predicate a
+    SITE-MODE watcher takes, and nothing else ever does.
+
+    Never the wire's rule and never a receiver's: `safe_segments` still refuses
+    a journal path outright, so a board cannot be handed one no matter which
+    watcher built the batch. What this changes is only which files a browser
+    sweeps out of its own VFS and into its own OPFS.
+    """
+    if name in SITE_SKIP_DIRS or name in SITE_SKIP_FILES:
         return True
     for suf in SKIP_SUFFIXES:
         if name.endswith(suf):
@@ -168,6 +226,26 @@ def _moy_carts():
                 return None
         _CARTS.append(mc)
     return _CARTS[0]
+
+
+_JOURNAL = []
+
+
+def _moy_journal():
+    """The #111 journal module, through the same guarded window `moy_carts`
+    rides. None where there is none -- a receiver with no journal module (the
+    convergence harness, an old headless store) simply does not journal, which
+    is a missing history and never a refused write."""
+    if not _JOURNAL:
+        try:
+            import moy_journal as mj
+        except ImportError:              # host / CPython: the runtime package
+            try:
+                from runtime import moy_journal as mj
+            except ImportError:          # pragma: no cover -- no journal at all
+                return None
+        _JOURNAL.append(mj)
+    return _JOURNAL[0]
 
 
 def file_kinds():
@@ -323,7 +401,7 @@ def parse_batch(body):
     return ops, doc.get("pin"), root
 
 
-def apply_ops(root, ops, root_id=CARTS_ROOT_ID):
+def apply_ops(root, ops, root_id=CARTS_ROOT_ID, journal=False):
     """Apply one batch into the store at path `root`, whose SHAPE is `root_id`
     ("carts" or "files" -- what parse_batch returned).
 
@@ -335,13 +413,26 @@ def apply_ops(root, ops, root_id=CARTS_ROOT_ID):
     main.py edit needs no scan because code is read at cart open). A files
     batch never dirties the shelf: the launcher renders no drawings, and the
     Files app scans its kinds when it opens.
+
+    `journal=True` says THIS STORE IS OF RECORD, so every carts-root file the
+    batch publishes also gets a #111 commit (see the module docstring). The
+    boards pass it; the browser's own OPFS apply is JavaScript and journals by
+    sweeping the files rather than by calling this.
+
+    The cost is honest and worth stating where it is paid: `journal_append`
+    writes a FULL SNAPSHOT per file plus a log line plus an atomic cursor
+    rewrite, so a three-file cart commit is ~a dozen small littlefs/FAT
+    operations. That is fine at cart sizes -- the console's own commits have
+    always paid exactly this -- and it is why the flag exists rather than the
+    behaviour being unconditional: a receiver that is a scratch directory (the
+    convergence harness) should not grow a history nobody will ever walk.
     """
     applied = 0
     errors = []
     shelf_dirty = False
     for i, op in enumerate(ops):
         try:
-            reason, shelf = _apply_one(root, op, root_id)
+            reason, shelf = _apply_one(root, op, root_id, journal)
         except Exception as exc:  # noqa: BLE001 -- one bad op never kills a batch
             reason, shelf = ("%s: %s" % (type(exc).__name__, exc)), False
         if reason is None:
@@ -372,7 +463,29 @@ def _files_shape(parts, op):
     return None
 
 
-def _apply_one(root, op, root_id):
+def _journal_commit(root, parts, text):
+    """Record a #111 commit for a carts-root file this batch just published.
+
+    The exact call `Project.commit_*` makes -- `journal_append(cart_dir,
+    rel_file, new_bytes)` -- so a browser-made edit is indistinguishable from a
+    keyboard-made one to the Editor's UNDO, which is the whole point. One batch
+    is one commit's worth of files, which is already the shape a sweep hands
+    over.
+
+    Guarded end to end: the FILE HAS ALREADY LANDED by the time this runs, so a
+    journal that cannot be written costs a history entry and must never cost the
+    write. A store with no journal module simply has no history.
+    """
+    mj = _moy_journal()
+    if mj is None:
+        return
+    try:
+        mj.journal_append(root + "/" + parts[0], "/".join(parts[1:]), text)
+    except Exception as exc:  # noqa: BLE001 -- the file is already durable
+        print("SYNC journal failed:", exc)
+
+
+def _apply_one(root, op, root_id, journal=False):
     """-> (error_reason_or_None, shelf_dirty)."""
     if not isinstance(op, dict):
         return "not an op", False
@@ -405,6 +518,13 @@ def _apply_one(root, op, root_id):
         return None, not files and parts[-1] in ("manifest.json", "sheet.json")
     if op.get("pub"):
         _publish(full)
+        if journal and not files:
+            # Read the file BACK rather than re-assembling the chunks: the
+            # parts arrived across several requests and were never all resident
+            # here at once, which is the point of chunking. One bounded read of
+            # a cart file is the cheap half of the snapshot this is about to
+            # write anyway.
+            _journal_commit(root, parts, _read_text(full))
         shelf = (new_cart or (not files
                               and parts[-1] in ("manifest.json", "sheet.json")))
         return None, shelf
@@ -423,6 +543,8 @@ def _apply_one(root, op, root_id):
     part = op.get("part")
     if part is None:
         _write_atomic(full, text)
+        if journal and not files:
+            _journal_commit(root, parts, text)
     elif part == 0:
         _write(full + ".tmp", text)
         return None, False           # nothing published yet
@@ -502,6 +624,12 @@ class StoreWatcher:
     between the two: which top-level names are legal, what a whole-folder
     delete is a folder OF, and the protocol version the batch is stamped with.
 
+    `skip` is what this watcher will not sweep, defaulting to the wire's own
+    `_skip`. The ONE caller that passes anything else is a SITE-MODE web_boot,
+    which hands it `skip_keep_journal` so the browser's undo history reaches the
+    browser's own store (see the module docstring). A board-mode watcher takes
+    the default and is byte-identical to what it always was.
+
     The snapshot holds (size, mtime, crc) per file. The fast path is the stat
     walk alone; content is only read (and crc'd) when size/mtime moved, or for
     files still "hot" -- whose mtime sat at the sweep's newest observed second
@@ -512,9 +640,10 @@ class StoreWatcher:
     """
 
     def __init__(self, root, listdir=None, isdir=None, read=None,
-                 root_id=CARTS_ROOT_ID):
+                 root_id=CARTS_ROOT_ID, skip=None):
         self.root = root
         self.root_id = root_id
+        self.skip = skip or _skip    # what this watcher will not sweep
         self._listdir = listdir      # injected for host tests; None = real fs
         self._isdir = isdir
         self._read = read or _read_text
@@ -613,7 +742,7 @@ class StoreWatcher:
         which is what leaves `.history` and `trash` unwalked."""
         kinds = file_kinds() if self.root_id == FILES_ROOT_ID else None
         for top, isdir in self._sorted_entries(self.root):
-            if not isdir or _skip(top):
+            if not isdir or self.skip(top):
                 continue
             if kinds is not None and top not in kinds:
                 continue
@@ -624,7 +753,7 @@ class StoreWatcher:
         if depth > 6:
             return
         for name, isdir in self._sorted_entries(path):
-            if _skip(name):
+            if self.skip(name):
                 continue
             full = path + "/" + name
             rel = prefix + "/" + name

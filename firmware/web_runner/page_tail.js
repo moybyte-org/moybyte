@@ -52,9 +52,59 @@ pzMode(m.mode,m.s);}
 else if(m.t==="carts"){pzFill(m.names);}
 else if(m.t==="exported"){pzDownload(m.name,m.buf);}
 else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();}
+else if(m.t==="pin"){pinAsk(m.tried);}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 else if(m.t==="error"){console.error("[moy]",m.s);
 sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";}}
+// ---- the pin prompt (2026-08-25) --------------------------------------------
+// A board serves its console to anyone and its CARTS to nobody without the
+// pairing pin, so a page opened by hand -- typing the address instead of
+// scanning the QR -- has to ask. The worker discovers it (carts.json answers
+// 403) and stops before booting the VM; this is the asking.
+//
+// REMEMBERED PER ORIGIN, in localStorage: a kid types four digits once per
+// browser per board, not once per visit. Keyed by origin because that IS the
+// board -- two consoles on one network are two origins with two pins, and one
+// key would have them overwriting each other.
+//
+// SUBMITTING RELOADS with ?pin= on the url rather than re-messaging the worker.
+// It costs a wasm re-fetch (~1.5s off a board) on a gesture that happens once,
+// and it buys the one thing worth having here: after it, every path that reads
+// location.search -- the worker's own boot, PLAY ON DEVICE below, the sync
+// pump's batches -- sees the pin with no second source of truth to keep in step.
+var PINEL=document.getElementById("pin"),PINF=document.getElementById("pinf"),
+PINB=document.getElementById("pinb"),PINM=document.getElementById("pinm");
+function pinKey(){return "moybyte.pin:"+location.origin;}
+function pinStored(){try{return localStorage.getItem(pinKey())||"";}
+catch(e){return "";}}
+// Called by the loader BEFORE the worker is constructed: if this browser
+// already knows this board's pin, put it on the url so the worker's very first
+// carts.json carries it and nobody is asked anything.
+window.__moyPinRestore=function(){
+try{var q=new URLSearchParams(location.search);
+if(q.get("pin"))return;                       // a QR arrival: leave it alone
+var p=pinStored();if(!p)return;
+q.set("pin",p);
+history.replaceState(null,"","?"+q.toString()+location.hash);}
+catch(e){/* no history, no storage: the prompt still works */}};
+function pinAsk(tried){if(!PINEL)return;
+// A pin was offered and refused: say so plainly. Without this the same empty
+// box comes back and reads as the page having ignored the keystrokes.
+PINM.textContent=tried?"that pin did not work -- try again":"";
+if(tried){try{localStorage.removeItem(pinKey());}catch(e){}}
+PINEL.style.display="flex";
+try{PINF.value="";PINF.focus();}catch(e){}}
+function pinSubmit(){var v=(PINF.value||"").trim();
+if(!v){PINM.textContent="type the four digits";return;}
+try{localStorage.setItem(pinKey(),v);}catch(e){/* private window: this visit only */}
+// Keep whatever the url already said (?handheld=1, ?dev=1, ?cart=...): dropping
+// those would answer the pin question by silently changing which console loads.
+var q=new URLSearchParams(location.search);q.set("pin",v);
+PINM.textContent="opening...";
+location.search="?"+q.toString();}
+if(PINB)PINB.addEventListener("click",pinSubmit);
+if(PINF)PINF.addEventListener("keydown",function(e){
+if(e.key==="Enter"){e.preventDefault();pinSubmit();}});
 // ---- persistence row (#193) -------------------------------------------------
 // The worker decides the MODE (board vs browser-local) and this only reports it.
 // On a board-served page the row never appears: the console owns the carts.
@@ -183,6 +233,10 @@ try {
   // document is no-store from the board, so a reload always fetches this line
   // fresh, and a changed token makes the worker a different url the cache has
   // never seen.
+  // A pin this browser already knows for this board goes onto the url FIRST, so
+  // the worker's first carts.json carries it and a returning kid is never asked
+  // again (see __moyPinRestore). A QR arrival already has one and is untouched.
+  window.__moyPinRestore();
   const w = new Worker("worker.js?v=" + MOY_BUILD, { type: "module" });
   window.__moyAttach(w);
   w.postMessage({ t: "init", search: location.search });

@@ -248,6 +248,19 @@ def test_the_probe_goes_through_the_pin_gate_too():
     assert b"403" in zero_gpio.handle("POST", _batch([]), pin="4242")
 
 
+def test_the_gpio_get_is_gated_too_now():
+    """THE PIN GATES EVERYTHING (2026-08-25). The GET was open on the reasoning
+    that it changes nothing -- what it hands over is this board's wiring, which
+    is a fact about somebody's house. It carries its pin the only place a GET
+    can, and an unpinned board answers everyone as before."""
+    assert b"403" in zero_gpio.handle("GET", b"", pin="4242")
+    assert b"403" in zero_gpio.handle("GET", b"", pin="4242",
+                                      query="/gpio?pin=0000")
+    r = zero_gpio.handle("GET", b"", pin="4242", query="/gpio?pin=4242")
+    assert b"200 OK" in r and b'"pins"' in r
+    assert b"200 OK" in zero_gpio.handle("GET", b"", pin=None)
+
+
 def test_a_method_that_is_neither_is_a_405():
     assert b"405" in zero_gpio.handle("PUT", _batch([]))
 

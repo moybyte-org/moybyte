@@ -33,6 +33,11 @@
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
 //   {t:"error", s}       fatal: the page shows it and stops
 //   {t:"persist", mode, s}   where carts are being kept, in the page's words
+//   {t:"pin", tried}     this board is PINNED and this page cannot read it, so
+//                        the boot stopped before the VM: the page prompts.
+//                        `tried` = a pin WAS offered and refused (a wrong one),
+//                        which is the difference between "type it" and "that
+//                        one did not work".
 //   {t:"carts", names}   the shelf's folder names
 //   {t:"exported", name, buf}  a .moy zip, TRANSFERRED
 //   {t:"imported", s, ok}    the result of an import, in the page's words
@@ -270,7 +275,19 @@ async function importZip(name, buf) {
     return { dir, n };
 }
 
+// THE PIN, on every request that needs it. A GET has nowhere else to carry a
+// credential, so it rides the query -- the same `?pin=` the page itself was
+// opened with (a QR scan, or the prompt's remembered value). A page with no pin
+// asks for the bare url and finds out from the answer.
+let pin = null;
+const withPin = (url) => (pin ? url + (url.indexOf("?") >= 0 ? "&" : "?")
+                              + "pin=" + encodeURIComponent(pin) : url);
+
 async function init(search) {
+    const qs = new URLSearchParams(search || "");
+    // Read BEFORE the first fetch, not after: since 2026-08-25 the board's read
+    // half is gated too, so carts.json is the first request that needs it.
+    pin = qs.get("pin") || null;
     say("loading vm...");
     // 16MB: the per-frame GC sweep scales with heap SIZE under this build's
     // GC_SPLIT_HEAP_AUTO (~0.13ms/MB/frame, #176), so a generous heap is a
@@ -281,10 +298,22 @@ async function init(search) {
     // FROZEN-first, like the page was: a ship build bakes the console into the wasm
     // and has no modules.json; a --stage-only dev dist adds one, and loading it into
     // /modules (first on sys.path) shadows the frozen copies.
-    const [mods, carts, files] = await Promise.all([
+    const [mods, cartsRes, files] = await Promise.all([
         fetch("modules.json").then((r) => r.ok ? r.json() : null).catch(() => null),
-        fetch("carts.json").then((r) => r.json()),
-        fetch("files.json").then((r) => r.ok ? r.json() : null).catch(() => null)]);
+        fetch(withPin("carts.json")),
+        fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
+            .catch(() => null)]);
+    if (cartsRes.status === 403) {
+        // A PINNED BOARD, and this page cannot read it. Stop the boot here --
+        // there is nothing to boot, and seeding the VFS from an error body
+        // would build a shelf out of the refusal. The page prompts; a submitted
+        // pin comes back as a fresh load with ?pin= on it.
+        say("this console needs a pin");
+        self.postMessage({ t: "pin", tried: !!pin });
+        console.log("[moy] carts.json refused the pin");
+        return;
+    }
+    const carts = await cartsRes.json();
     let boot = "";
     if (mods) {
         mkdirs("/modules");
@@ -295,7 +324,6 @@ async function init(search) {
     if (mode === "board" && files) writeFiles(files);
     say("booting console...");
 
-    const qs = new URLSearchParams(search || "");
     let cart = qs.get("cart");
     const names = [...new Set(Object.keys(carts).map((k) => k.split("/")[0]))];
     if (!cart && names.length === 1) cart = names[0];
@@ -315,7 +343,6 @@ async function init(search) {
     const bootArgs = desktop
         ? ", None, " + dw + ", " + dh + ", True"
         : (cart ? ", cart=" + JSON.stringify(cart) : "");
-    const pin = qs.get("pin");
     // #9: does whoever served this page have PINS? ONE probe, here, before the
     // console exists -- so `pin_write`/`pin_read` are decided once and a cart
     // either has the names or has never heard of them. An empty batch is the
@@ -324,6 +351,11 @@ async function init(search) {
     // ?pin= is refused now rather than on every write it later makes.
     const gpioPins = await probeGpio(pin);
     mp.runPython(boot + "import web_boot\n"
+        // BEFORE boot(): the mode is what decides whether the carts watcher
+        // sweeps the journal, and boot() is where that watcher is built.
+        // `mode || ""` and not `mode`: JSON.stringify(null) is the token `null`,
+        // which is a NameError in the Python this string becomes.
+        + "web_boot.store_mode(" + JSON.stringify(mode || "") + ")\n"
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
@@ -333,8 +365,8 @@ async function init(search) {
             ? "web_boot.kiosk(" + JSON.stringify(cart) + ")\n" : "")
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
-        + "sync_poll_json, sync_ack, sync_off, sync_config, rescan_store, "
-        + "gpio_poll_json, gpio_ack_json, gpio_off");
+        + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
+        + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -631,8 +663,8 @@ self.onmessage = async (ev) => {
             if (m.b && fbPool.length < 2) fbPool.push(m.b);
         } else if (m.t === "reload") {
             const [carts, files] = await Promise.all([
-                fetch("carts.json").then((r) => r.json()),
-                fetch("files.json").then((r) => r.ok ? r.json() : null)
+                fetch(withPin("carts.json")).then((r) => r.json()),
+                fetch(withPin("files.json")).then((r) => r.ok ? r.json() : null)
                     .catch(() => null)]);
             writeStore(CARTS_ROOT, carts);
             if (files) writeFiles(files);

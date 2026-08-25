@@ -1,0 +1,24 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 8000, "steps": [
+  {"note": "opened with NO ?pin= against a pinned board twin: the boot stops"},
+  {"js": "JSON.stringify({at:'prompted',overlay:getComputedStyle(document.getElementById('pin')).display,msg:document.getElementById('pinm').textContent,status:document.getElementById('s').textContent})"},
+  {"shot": "prompted"},
+
+  {"note": "a WRONG pin first -- it must come back and say so, not hang"},
+  {"js": "JSON.stringify({at:'sent-wrong',ok:(document.getElementById('pinf').value='0000',document.getElementById('pinb').click(),true)})"},
+  {"wait": 10000},
+  {"js": "JSON.stringify({at:'refused',overlay:getComputedStyle(document.getElementById('pin')).display,msg:document.getElementById('pinm').textContent,search:location.search})"},
+  {"shot": "refused"},
+
+  {"note": "now the real one; the page reloads with ?pin= and the shelf loads"},
+  {"js": "JSON.stringify({at:'sent-right',ok:(document.getElementById('pinf').value='4321',document.getElementById('pinb').click(),true)})"},
+  {"wait": 20000},
+  {"js": "JSON.stringify({at:'opened',overlay:getComputedStyle(document.getElementById('pin')).display,search:location.search,status:document.getElementById('s').textContent,stored:localStorage.getItem('moybyte.pin:'+location.origin)})"},
+  {"shot": "shelf"},
+
+  {"note": "and the shelf is REAL: Make -> +New, which must reach the store"},
+  {"click": [63, 120]},
+  {"wait": 1500},
+  {"click": [63, 120]},
+  {"wait": 8000},
+  {"shot": "after_new"}
+]}

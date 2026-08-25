@@ -6,9 +6,12 @@ is the other half: PINS. A cart runs in the browser and still lights an LED,
 because `pin_write` queues an op that the page POSTs to whichever board served
 it (firmware/web_runner/gpio_link.py is the queue at the far end).
 
-    GET  /gpio   -> {"v": 1, "pins": [...]}         the allowlist, for a human
-    POST /gpio   -> {"v": 1, "ops": [...], "pin": "1234"}
+    GET  /gpio?pin=1234  -> {"v": 1, "pins": [...]}  the allowlist, for a human
+    POST /gpio           -> {"v": 1, "ops": [...], "pin": "1234"}
                  -> {"ok": n, "reads": {"<pin>": 0|1}, "err": [[i, why], ...]}
+
+Both are PIN-GATED (2026-08-25): on a board that has a pin, nothing here
+answers without it.
 
 An op is one of:
 
@@ -37,7 +40,7 @@ forever -- and here the neighbours are the write that turns a motor OFF.
 
 import json
 
-from moy_webserver import http_response
+from moy_webserver import http_response, query_param
 
 # Wire version. Bumped only if the op shape changes; the browser sends it and a
 # batch without it is refused, so an old page cannot half-speak to a new board.
@@ -203,17 +206,21 @@ def _default_factory():
     return _FACTORY[0]
 
 
-def handle(method, body, pin=None, get_pin=None, pins=PINS):
+def handle(method, body, pin=None, get_pin=None, pins=PINS, query=""):
     """One /gpio request -> complete http_response bytes.
 
-    `pin` is the console's setup PIN (zero.json) when one is configured. It
-    gates the POST and NOT the GET: a GET changes nothing and answering it is
-    what lets a page discover whether this host has pins at all. The browser
-    probes with an EMPTY POST for the same reason in reverse -- a page that
-    cannot pass the gate must find out before the verbs exist, not after every
-    write it makes comes back 403.
+    `pin` is this board's PIN (zero.json) when one is configured, and since
+    2026-08-25 it gates BOTH methods -- the owner call that made the pin gate
+    everything but the boot assets. The GET used to be open on the reasoning
+    that it changes nothing; what it hands over is this board's wiring, which
+    is a fact about somebody's house, and the page never needed it (it probes
+    with an EMPTY POST, which was always gated). The GET carries its pin the
+    only place a GET can, `?pin=` -- `query` is the request target the caller
+    read it from; the POST keeps carrying it in the batch body.
     """
     if method == "GET":
+        if pin and query_param(query, "pin") != pin:
+            return http_response(403, '{"error":"pin"}')
         return http_response(200, json.dumps({"v": PROTOCOL_V,
                                               "pins": list(pins)}))
     if method != "POST":

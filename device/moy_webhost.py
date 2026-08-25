@@ -9,11 +9,14 @@ thing that crosses the wire afterwards is cart data.
 
     GET  /               -> index.html          (the wasm console)
     GET  /<asset>        -> micropython.wasm, worker.js, ...   [streamed]
-    GET  /carts.json     -> THIS BOARD's cart store, packed live
-    GET  /files.json     -> its #108 user files (drawings/docs/...), same shape
     GET  /sync           -> {"sync": 1}: this host HAS the push half
-    POST /sync           -> apply a commit-shaped batch INTO either store
-    POST /run            -> play a cart on the BOARD's own glass (#197)
+    GET  /carts.json     -> THIS BOARD's cart store, packed live        [pin]
+    GET  /files.json     -> its #108 user files (drawings/docs/...)     [pin]
+    POST /sync           -> apply a commit-shaped batch INTO either store [pin]
+    POST /run            -> play a cart on the BOARD's own glass (#197)   [pin]
+
+[pin] = refused 403 without the host's pairing pin (SECURITY, below). The two
+lines above it are open on purpose, and each for its own reason.
 
 The assets come from the FIRMWARE IMAGE (native/moy_web, gzipped, ~573KB of
 the app slot), and a copy pushed onto the board's storage overrides them. That
@@ -53,17 +56,42 @@ know nothing else about device state, because the exit is the console's own
 browser may be rewriting). The launch itself is `ws.launch_named`, the same body
 the serial dev channel's `run` goes through.
 
-SECURITY: the read half stays open by the standing owner call (any device on
-the network that can reach the port gets the store); the WRITE half -- POST
-/sync and POST /run alike -- takes a `pin`, and a request without the right one
-is refused 403 before anything is looked at. The BOARDS PASS ONE SINCE #197:
-`make_webhost` reads `ws.web_pin()` at START, the connection screen shows it as
-a QR of `http://<ip>:8080/?pin=NNNN`, and the page forwards its own `?pin=` into
-every batch. Read that order carefully -- the pin is resolved in `start()`, not
-in `__init__`, because a board CONSTRUCTS this before system.json is loaded and
-a pin captured then would be a pin minted from an empty store. A host built with
-`pin=None` (a test, the dev server) stays as open as the read half, which is what
-keeps the LAN dev loop working.
+SECURITY: THE PIN GATES EVERYTHING (owner call 2026-08-25, reversing the
+standing "the read half stays open"). A host that has a pin serves exactly one
+thing to a stranger -- the boot assets -- and refuses every request that would
+reveal or change what is on the board:
+
+    OPEN, always      index.html, worker.js, moy_store.mjs, micropython.mjs,
+                      micropython.wasm      the page must LOAD in order to ask
+    OPEN, always      GET /sync             the capability marker: it says "a
+                      board lives here" and nothing else, and the page's mode
+                      decision is made before it has a pin to offer
+    PIN               GET /carts.json, GET /files.json    the kid's work
+    PIN               POST /sync, POST /run              (and /gpio on the Zero)
+
+The old split gave any device on the same WiFi the whole cart store for the
+asking, on the reasoning that reading changes nothing. It reads a child's
+work off their console, which is the part that reasoning left out.
+
+A GET carries its pin the only place a GET can, `?pin=NNNN` -- which is why
+`moy_webserver.parse_request` stopped stripping query strings: it was spending
+the credential before any handler saw it. A gated GET without the right pin is
+403 with `{"error":"pin"}`, deliberately distinguishable from the transport's
+plain-text 404, because the PAGE branches on it: worker.js stops its boot and
+the page prompts for a pin instead of showing a broken console.
+
+The BOARDS PASS ONE SINCE #197: `make_webhost` reads `ws.web_pin()` at START,
+the connection screen shows it as a QR of `http://<ip>:8080/?pin=NNNN`, and the
+page forwards its own `?pin=` into every request. Read that order carefully --
+the pin is resolved in `start()`, not in `__init__`, because a board CONSTRUCTS
+this before system.json is loaded and a pin captured then would be a pin minted
+from an empty store. A host built with `pin=None` (a test, the dev server) is
+open end to end, which is what keeps the LAN dev loop free of a password.
+
+THE JOURNAL: this board is the STORE OF RECORD for a page it serves, so the
+apply path journals (`moy_sync.apply_ops(..., journal=True)`) -- a browser-made
+commit lands in the cart's own `journal/` and the console's UNDO walks back
+through it. moy_sync's docstring carries the doctrine and the cost.
 """
 
 try:
@@ -74,7 +102,7 @@ except ImportError:                      # pragma: no cover
 import json as _json
 
 from moy_webserver import (WebServer, http_response, FileResponse,
-                           ChunkedResponse, BlobResponse)
+                           ChunkedResponse, BlobResponse, query_param)
 
 # The console BAKED INTO THIS IMAGE (native/moy_web + tools/gen_web_blob.py).
 # Optional by construction: a build without it (a host test, an older image, a
@@ -104,6 +132,20 @@ INTERNAL_WEB_DIR = "/moy/web"
 # from serving /moy/carts/../wifi.json -- and the set of files the console needs
 # to hand a browser is FIXED and known at build time, so there is no reason to
 # accept a path from the network at all.
+# The one refusal body every gated endpoint answers with, here rather than
+# spelled five times: the page tests for it, and a page and a board disagreeing
+# about the shape of "you need a pin" is a prompt that never appears.
+PIN_REFUSED = '{"error":"pin"}'
+
+
+def pin_ok(pin, sent):
+    """May a request carrying `sent` proceed against a host holding `pin`?
+    No pin configured = open (a test, the dev server, a pre-#197 board). ONE
+    body, so the device host and the dev twin cannot drift about what the gate
+    means -- serve.py imports it."""
+    return (not pin) or (sent == pin)
+
+
 ASSETS = {
     "index.html": "text/html; charset=utf-8",
     "worker.js": "text/javascript; charset=utf-8",
@@ -430,33 +472,54 @@ class WebHost(WebServer):
             return base
         return base + "?pin=" + str(self.pin)
 
+    def gate(self, target):
+        """None when a gated request may proceed, else the 403 to answer with.
+
+        `target` is the request target, so the pin comes off `?pin=`. Called
+        before the endpoint does any work at all -- refusing after a store walk
+        would leak its timing and, on the T-Deck, take the SD gate to do it.
+        """
+        if pin_ok(self.pin, query_param(target, "pin")):
+            return None
+        return http_response(403, PIN_REFUSED)
+
     def handle_http(self, method, path, body):
+        # `path` is the request TARGET (query string included, since 2026-08-25
+        # -- see the SECURITY note). Route on the bare path, gate on the target.
+        target = path
+        path = target.split("?", 1)[0]
         if method == "POST":
-            posted = path.split("?", 1)[0]
-            if posted == "/sync":
+            if path == "/sync":
                 return self._sync(body)
-            if posted == "/run":
+            if path == "/run":
                 return self._run(body)
         if method != "GET":
             return http_response(
                 405, '{"error":"GET only (writes ride POST /sync and /run)"}')
-        path = path.split("?", 1)[0]
+        if path == "/sync":
+            # The CAPABILITY MARKER, and the one GET that stays OPEN on a
+            # pinned board. It reveals that a board lives here and nothing
+            # else -- no cart, no name, no file -- and the page has to make its
+            # mode decision (board store vs browser store) BEFORE it has any
+            # pin to offer. A static host (moybyte.com, an export, `python -m
+            # http.server` over dist/) 404s it, which is exactly how the page
+            # learns not to offer PLAY ON DEVICE and not to build a sync loop
+            # against a wall.
+            return http_response(200, '{"sync":1}')
         if path == "/" or path == "/index.html":
             return self._asset("index.html")
-        if path == "/carts.json":
-            return self._carts_json()
-        if path == "/files.json":
-            return self._files_json()
-        if path == "/sync":
-            # The CAPABILITY MARKER, and a GET because that is what a page can
-            # ask cheaply before it has anything to send. A static host
-            # (moybyte.com, an export, `python -m http.server` over dist/) 404s
-            # it, which is exactly how the page learns not to offer PLAY ON
-            # DEVICE and not to build a sync loop against a wall.
-            return http_response(200, '{"sync":1}')
         name = path[1:]
         if name in ASSETS:
+            # The boot assets are open BY NECESSITY: the page is what shows the
+            # pin prompt, so a board that gated its own console behind a pin
+            # would have nothing left to ask the question with. They are the
+            # same bytes every build of the console ships and say nothing about
+            # this board.
             return self._asset(name)
+        if path == "/carts.json":
+            return self.gate(target) or self._carts_json()
+        if path == "/files.json":
+            return self.gate(target) or self._files_json()
         return None                      # -> 404 from the transport
 
     def _asset(self, name):
@@ -522,17 +585,25 @@ class WebHost(WebServer):
         A bad op SKIPS (reported in `err`), it never aborts the batch: the
         client clears an answered batch either way, so aborting would just
         make one poison op eat its innocent neighbours forever.
+
+        AND IT JOURNALS (2026-08-25). This board is the store of record for the
+        page that sent this, so every carts-root file the batch publishes gets
+        a #111 commit in the shape the console's own commits use -- which is
+        what makes the kid's on-glass UNDO able to walk back through an edit
+        made in a browser. Inside the same gate entry as the writes, because
+        the snapshot lands on the same card. The pin rides the BODY here (a
+        POST has somewhere to put it); the gated GETs read `?pin=`.
         """
         ops, pin, root_id = moy_sync.parse_batch(body)
         if ops is None:
             return http_response(400, '{"error":"bad batch"}')
-        if self.pin and pin != self.pin:
-            return http_response(403, '{"error":"pin"}')
+        if not pin_ok(self.pin, pin):
+            return http_response(403, PIN_REFUSED)
         target = self._root_for(root_id)
         if target is None:
             return http_response(400, '{"error":"no such store"}')
         applied, errors, shelf_dirty = self._with_sd(
-            lambda: moy_sync.apply_ops(target, ops, root_id))
+            lambda: moy_sync.apply_ops(target, ops, root_id, journal=True))
         if errors:
             try:
                 print("SYNC %d applied, %d refused: %s"
@@ -571,8 +642,8 @@ class WebHost(WebServer):
             doc = None
         if not isinstance(doc, dict):
             return http_response(400, '{"error":"bad body"}')
-        if self.pin and doc.get("pin") != self.pin:
-            return http_response(403, '{"error":"pin"}')
+        if not pin_ok(self.pin, doc.get("pin")):
+            return http_response(403, PIN_REFUSED)
         if self.on_run is None:
             # A host with no console behind it (the dev server, a test): say so
             # rather than 404, which the page would read as "no such endpoint"

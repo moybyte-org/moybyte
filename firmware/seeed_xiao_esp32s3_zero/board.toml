@@ -11,11 +11,14 @@
 #  (ESP32_GENERIC_S3-SPIRAM_OCT, flashed once -- README.md) with the shared
 #  modules PUSHED as plain files by provision.sh, which is why this file has
 #  no [modules]/[native] staging sections and no build.sh: the module set is
-#  provision.sh's cp list, six shared files. If this board ever earns a frozen
-#  image (a store big enough to want the fs headroom, or the #9 GPIO verbs),
-#  it graduates to the ordinary port-kit shape and this file grows the
-#  sections. Until then a board.toml exists so the tools that ENUMERATE boards
-#  (push_cart's glob, the serial-fact readers) see the true facts.
+#  provision.sh's cp list -- nine shared files since 2026-08-25, when the owner
+#  call "the Zero supports all features" added the #108 files layer and the
+#  store-of-record journal (moy_carts + moy_image + moy_journal), which is a
+#  measurable step toward the fs headroom below. If this board ever earns a
+#  frozen image, it graduates to the ordinary port-kit shape and this file
+#  grows the sections. Until then a board.toml exists so the tools that
+#  ENUMERATE boards (push_cart's glob, the serial-fact readers) see the true
+#  facts. `tests/test_zero_provision.py` is what keeps the cp list honest.
 
 [board]
 name    = "seeed_xiao_esp32s3_zero"

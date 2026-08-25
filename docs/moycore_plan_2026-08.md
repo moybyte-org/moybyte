@@ -1227,7 +1227,12 @@ glass and is therefore waiting on the same flash stage 3 is.*
   Still open: how a two-sided collision *presents* to a kid — the rule is
   LWW + journal; the UX of "your device copy moved" is undesigned. (The
   switch UX shrinks the window — a parked glass does not author — but PLAY
-  ON DEVICE still writes pmem under a live browser copy.)
+  ON DEVICE still writes pmem under a live browser copy. **Shrunk again
+  2026-08-25:** the journal now lives with the store of record, so a push
+  the browser wins lands as a real commit on the board and the overwritten
+  version is one UNDO away on the glass it was made on. That turns the
+  worst case from silent loss into a recoverable surprise — which is not
+  the same as designing the surprise away, so this stays open.)
 - **Whether stage 1 alone captures most of the S3 win** — M0's attribution
   plus stage 1's measurement settle this before stage 2 is built (v1's
   question, now with the instrument named).

@@ -141,11 +141,13 @@ def zero_host_class():
                                     # import machine.Pin to find that out
 
         def handle_http(self, method, path, body):
+            # `path` is the request TARGET; /gpio's GET reads its pin off the
+            # query exactly as carts.json does, so the whole target goes down.
             if path.split("?", 1)[0] == "/gpio":
                 if self._pins is None:
                     self._pins = zero_gpio.pin_factory()
                 return zero_gpio.handle(method, body, pin=self.pin,
-                                        get_pin=self._pins)
+                                        get_pin=self._pins, query=path)
             return WebHost.handle_http(self, method, path, body)
 
     return ZeroHost

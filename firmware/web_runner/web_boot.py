@@ -389,7 +389,17 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # export) gets one failed POST and the worker calls sync_off().
     try:
         import moy_sync
-        _S["sync"] = moy_sync.StoreWatcher(carts_root)
+        # THE JOURNAL FOLLOWS THE STORE OF RECORD (2026-08-25). In SITE mode
+        # this browser's OPFS is that store, so its watcher sweeps the journal
+        # too and the kid's undo history survives the tab. In BOARD mode the
+        # board is of record and journals the pushes itself, so this watcher
+        # keeps the default predicate and the wire is byte-identical to what it
+        # always was -- the VFS journal here is written, never shipped, and dies
+        # with the session, which is now correct rather than a gap.
+        _S["sync"] = moy_sync.StoreWatcher(
+            carts_root,
+            skip=moy_sync.skip_keep_journal
+            if _S.get("store_mode") == "site" else None)
         _S["sync_files"] = _files_watcher(moy_sync, carts_root)
     except Exception as exc:  # noqa: BLE001 -- sync must never block a boot
         print("sync watcher unavailable:", exc)
@@ -639,6 +649,26 @@ def _apply(events):
         rest, d.input, _S["sink"],
         on_press=d.press, on_pan=d.pan, on_key=d.type_char,
         on_esc=d.escape, on_hold=d.hold, on_key_hold=d.key_hold)
+
+
+def store_mode(mode=None):
+    """Which world this page is in, told to us by the worker BEFORE boot().
+
+    The worker decides it (moy_store.probeMode) before anything is written,
+    because the answer is what the VFS gets seeded FROM. boot() then needs it
+    for one decision only: whether the carts watcher sweeps the journal, which
+    it does exactly when THIS browser is the store of record ("site"). So this
+    must be called before boot() -- after it, the watcher already exists and a
+    late mode would be a setting with no effect, which is the shape of bug this
+    whole file is careful about.
+
+    Anything other than "site" ("board", "none", or never called at all) leaves
+    the wire's own predicate in place. That default matters more than the
+    setting: a mode that fails to arrive must not start shipping journals at a
+    board.
+    """
+    _S["store_mode"] = mode or None
+    return ""
 
 
 def sync_config(pin=None):

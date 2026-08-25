@@ -12,6 +12,14 @@
 // for the batch the sweep already built. Writes, deletes and cart-deletes all
 // arrive in the one op vocabulary.
 //
+// AND THE UNDO HISTORY COMES WITH THEM (2026-08-25). The journal lives with the
+// store of record: board mode leaves it on the board (its `apply_ops` writes
+// one), and site mode keeps it HERE, because here is where the cart durably
+// lives. The mechanism is not a second path -- web_boot hands its site-mode
+// watcher `skip_keep_journal` and the journal files ride the same sweep as
+// everything else. What that costs is disk: a cart's `journal/s/` holds full
+// snapshots, capped by moy_journal at 64 entries / 512KB per cart.
+//
 // SUBSTRATE: OPFS, not IndexedDB (moycore plan 9's open question, closed here).
 // The ops ARE file writes at paths, so OPFS applies them 1:1 -- a cart folder
 // in OPFS is a cart folder, the same shape moy_carts already speaks on every
@@ -25,7 +33,7 @@
 // Everything here is deliberately free of the VM and of the Worker globals, so
 // node can drive it directly (worker_persist_test.mjs) against a fake OPFS.
 
-// What never reaches the local store or a zip -- the JS mirror of
+// What never crosses THE WIRE or goes into a zip -- the JS mirror of
 // runtime/moy_sync's `_skip`, which is the ONE predicate for what stays home.
 // journal/ is the durable undo history, thumbs/ a regenerable cache, .bak/.tmp
 // moy_fs's crash-safety artifacts.
@@ -33,21 +41,38 @@ const SKIP_DIRS = ["thumbs", "__pycache__", "journal"];
 const SKIP_FILES = ["journal.jsonl"];
 const SKIP_SUFFIXES = [".bak", ".tmp"];
 
-export function skipName(name) {
-    if (SKIP_DIRS.indexOf(name) >= 0 || SKIP_FILES.indexOf(name) >= 0) return true;
+// ...and what never reaches THE LOCAL STORE, which since 2026-08-25 is a
+// SHORTER list: in mode 1 this OPFS store is the store of record, so the undo
+// history belongs in it (moy_sync's "the journal lives with the store of
+// record"; #193's "with its undo history"). The mirror of moy_sync's
+// SITE_SKIP_*. A zip and a wire batch keep the longer list: a board has its own
+// journal and must never be handed somebody else's.
+const SITE_SKIP_DIRS = ["thumbs", "__pycache__"];
+const SITE_SKIP_FILES = [];
+
+function skipIn(name, dirs, files) {
+    if (dirs.indexOf(name) >= 0 || files.indexOf(name) >= 0) return true;
     return SKIP_SUFFIXES.some((s) => name.endsWith(s));
+}
+
+export function skipName(name) { return skipIn(name, SKIP_DIRS, SKIP_FILES); }
+
+export function skipLocal(name) {
+    return skipIn(name, SITE_SKIP_DIRS, SITE_SKIP_FILES);
 }
 
 // A path the local store will accept: the JS half of moy_sync.safe_segments.
 // An allowlist of shape, not a blocklist of tricks -- the store is a real
-// filesystem and `..` in a cart name must never resolve.
-export function safeSegments(rel) {
+// filesystem and `..` in a cart name must never resolve. `skip` defaults to the
+// WIRE's rule; every store-side caller here passes `skipLocal`, so a journal
+// path lands locally and still cannot be shipped.
+export function safeSegments(rel, skip = skipName) {
     if (typeof rel !== "string" || !rel || rel.length > 256) return null;
     const parts = rel.split("/");
     for (const seg of parts) {
         if (!seg || seg === "." || seg === "..") return null;
         if (/[\\\0\r\n]/.test(seg)) return null;
-        if (skipName(seg)) return null;
+        if (skip(seg)) return null;
     }
     return parts;
 }
@@ -167,7 +192,10 @@ export async function applyOps(store, ops) {
 
 async function applyOne(store, op) {
     if (!op || typeof op !== "object") return "not an op";
-    const parts = safeSegments(op.p || "");
+    // skipLocal, not skipName: in site mode the sweep ships this store's own
+    // journal to this store, and the wire predicate would refuse every line of
+    // it -- silently, as "bad path" errors nobody reads.
+    const parts = safeSegments(op.p || "", skipLocal);
     if (!parts) return "bad path";
     if (op.dc) {
         if (parts.length !== 1) return "dc wants a cart folder";
@@ -217,7 +245,7 @@ async function walk(dir, prefix, out, depth) {
     for await (const [name, handle] of dir.entries()) entries.push([name, handle]);
     entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     for (const [name, handle] of entries) {
-        if (skipName(name)) continue;
+        if (skipLocal(name)) continue;      // the journal comes BACK too
         const rel = prefix ? prefix + "/" + name : name;
         if (handle.kind === "directory") {
             await walk(handle, rel, out, depth + 1);
@@ -233,7 +261,7 @@ async function walk(dir, prefix, out, depth) {
 
 export async function isEmpty(store) {
     for await (const [name, handle] of store.carts.entries()) {
-        if (handle.kind === "directory" && !skipName(name)) return false;
+        if (handle.kind === "directory" && !skipLocal(name)) return false;
     }
     return true;
 }
@@ -242,7 +270,7 @@ export async function isEmpty(store) {
 export async function seed(store, carts) {
     let n = 0;
     for (const rel in carts) {
-        const parts = safeSegments(rel);
+        const parts = safeSegments(rel, skipLocal);
         if (!parts || parts.length < 2) continue;
         await writeText(store, parts, carts[rel]);
         n++;
@@ -252,6 +280,10 @@ export async function seed(store, carts) {
 
 // ---------------------------------------------------------------------------
 // The .moy zip -- the no-account escape hatch (#193).
+//
+// A zip carries NO journal, deliberately: it is built with `skipName` (the wire
+// rule) because a .moy is meant to drop into somebody else's board store, and a
+// history of edits made on another machine is neither useful there nor theirs.
 // ---------------------------------------------------------------------------
 
 const CRC_TABLE = (() => {

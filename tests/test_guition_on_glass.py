@@ -219,6 +219,22 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
                 assert False, "a pinless batch was accepted"
             except urllib.error.HTTPError as exc:
                 assert exc.code == 403, exc.code
+            # ...and the READ half is gated too since 2026-08-25: this board's
+            # store is a child's work, and it used to be there for the asking
+            # to anything on the same WiFi. The boot assets stay open, because
+            # the page is what asks for the pin.
+            for path in ("/carts.json", "/files.json"):
+                try:
+                    urllib.request.urlopen(url + path, timeout=20)
+                    assert False, "%s answered without a pin" % path
+                except urllib.error.HTTPError as exc:
+                    assert exc.code == 403, (path, exc.code)
+            r = urllib.request.urlopen(url + "/carts.json?pin=" + pin,
+                                       timeout=60)
+            assert "pytest_sync.moy/main.py" in _json.loads(r.read())
+            r = urllib.request.urlopen(url + "/sync", timeout=15)
+            assert _json.loads(r.read()) == {"sync": 1}, \
+                "the capability marker must stay open, or no page finds a board"
         board.drain(0.5)
         line = board.cmd(
             "py print('SYNCED=' + repr(any((c.get('path') or '')"

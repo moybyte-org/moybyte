@@ -144,6 +144,7 @@ def _host(tmp_path, web=True):
     h.carts_root = str(root)
     h.web_dir = str(wdir)
     h._with_sd = lambda fn: fn()
+    h.pin = None                                # OPEN: the LAN dev-loop shape
     return h
 
 
@@ -554,6 +555,129 @@ def test_sync_pin_gate(tmp_path):
     assert (root / "hop.moy" / "main.py").read_text() == "x = 9\n"
 
 
+# ---------------------------------------------------------------------------
+# THE PIN GATES EVERYTHING (owner call 2026-08-25). Everything except the boot
+# assets and the capability marker, and each of those two is open for its own
+# stated reason -- so both the refusals and the exemptions are pinned here.
+# ---------------------------------------------------------------------------
+
+
+def _pinned(tmp_path):
+    h = _host(tmp_path)
+    h.pin = "4321"
+    return h
+
+
+def test_a_pinned_board_refuses_its_store_to_a_page_with_no_pin(tmp_path):
+    """The reversal. This used to be open on the reasoning that a read changes
+    nothing -- what it reads is a child's work off their console, to anyone who
+    can reach the port."""
+    h = _pinned(tmp_path)
+    for path in ("/carts.json", "/files.json"):
+        r = h.handle_http("GET", path, b"")
+        assert isinstance(r, bytes), path
+        assert b"403" in r.split(b"\r\n")[0], path
+        # A JSON body, and a status the page can tell apart from a 404: the
+        # worker branches on exactly this to raise its pin prompt.
+        assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
+        assert b"application/json" in r
+
+
+def test_the_pin_rides_the_query_because_a_get_has_nowhere_else(tmp_path):
+    h = _pinned(tmp_path)
+    r = h.handle_http("GET", "/carts.json?pin=4321", b"")
+    assert hasattr(r, "body_iter"), r
+    assert json.loads("".join(r.body_iter))["hop.moy/main.py"]
+    # Wrong, empty and prefix-lookalike are all refusals.
+    for q in ("?pin=0000", "?pin=", "?pinned=4321", "?dev=1"):
+        r = h.handle_http("GET", "/carts.json" + q, b"")
+        assert isinstance(r, bytes) and b"403" in r.split(b"\r\n")[0], q
+    # ...and the pin survives company on the query.
+    r = h.handle_http("GET", "/carts.json?dev=1&pin=4321", b"")
+    assert hasattr(r, "body_iter")
+
+
+def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path):
+    """The one exemption that is a NECESSITY, not a judgement: the page is what
+    shows the pin prompt, so a board that gated its own console behind the pin
+    would have nothing left to ask the question with. These are the same bytes
+    every build ships and say nothing about this board."""
+    h = _pinned(tmp_path)
+    for path in ("/", "/index.html", "/worker.js", "/micropython.wasm"):
+        assert isinstance(h.handle_http("GET", path, b""), FileResponse), path
+
+
+def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
+    """GET /sync is the page's MODE decision (board store vs browser store),
+    made before it has any pin to offer -- and all it reveals is that a board
+    lives here: no cart, no name, no file."""
+    h = _pinned(tmp_path)
+    r = h.handle_http("GET", "/sync", b"")
+    assert b"200" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"sync": 1}
+
+
+def test_an_open_host_is_open_end_to_end(tmp_path):
+    """pin=None -- a test, the dev server, a pre-#197 board -- keeps the LAN dev
+    loop free of a password."""
+    h = _host(tmp_path)
+    assert hasattr(h.handle_http("GET", "/carts.json", b""), "body_iter")
+    assert b"200" in h.handle_http(
+        "POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "x\n"})
+    ).split(b"\r\n")[0]
+
+
+def test_a_refused_read_never_touches_the_store(tmp_path):
+    """Refusing AFTER the walk would leak its timing and, on the T-Deck, take
+    the SD gate to do it -- the gate must come first."""
+    h = _pinned(tmp_path)
+    hits = []
+    h._with_sd = lambda fn: (hits.append(1), fn())[1]
+    h.handle_http("GET", "/carts.json", b"")
+    h.handle_http("GET", "/files.json", b"")
+    assert not hits, "a refused request still entered the storage gate"
+
+
+# ---------------------------------------------------------------------------
+# The receiver journals what it is handed (2026-08-25): this board is the store
+# of record for the page it serves, so a browser commit has to be walkable by
+# the console's own UNDO.
+# ---------------------------------------------------------------------------
+
+
+def test_a_push_extends_the_carts_own_journal(tmp_path):
+    """A browser-made commit is indistinguishable from a keyboard-made one to
+    the Editor's UNDO -- which is the whole point of using `journal_append` and
+    not a second history format. `_store` already seeds the one commit an
+    on-glass edit would have left, so this also pins that the two interleave in
+    ONE timeline rather than the push starting a parallel log."""
+    from runtime import moy_journal
+
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    for src in ("cls(2)\n", "cls(3)\n"):
+        r = h.handle_http("POST", "/sync",
+                          _batch({"p": "hop.moy/main.py", "t": src}))
+        assert b"200" in r.split(b"\r\n")[0]
+    entries = moy_journal._journal_load_entries(
+        str(root / "hop.moy" / "journal" / "journal.jsonl"))
+    assert [e["seq"] for e in entries] == [1, 2, 3], entries
+    # ...and they are real commits: the console's UNDO walks one back.
+    assert moy_journal.journal_undo(str(root / "hop.moy"), ("main.py",))
+    assert (root / "hop.moy" / "main.py").read_text() == "cls(2)\n"
+
+
+def test_the_journal_a_push_writes_still_never_travels_back(tmp_path):
+    """The receiving side journals; the PULL is unchanged. A board that has
+    taken browser commits must not then serve their history to the next page --
+    that is the 2026-08-22 decision ("the browser gets carts, not their
+    history") and the receiver's own journal is not an exception to it."""
+    h = _host(tmp_path)
+    h.handle_http("POST", "/sync", _batch({"p": "hop.moy/main.py", "t": "z\n"}))
+    body = json.loads("".join(h.handle_http("GET", "/carts.json", b"").body_iter))
+    assert not any("journal" in k for k in body), sorted(body)
+
+
 def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
     """On the T-Deck every one of these writes lands on the card that shares
     the panel's SPI host -- the whole apply must sit inside ONE gate entry,
@@ -573,7 +697,8 @@ def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
     h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
     seen = []
     real = wh.moy_sync.apply_ops
-    wh.moy_sync.apply_ops = lambda *a: (seen.append(depth[0]), real(*a))[1]
+    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
+                                              real(*a, **kw))[1]
     try:
         h.handle_http("POST", "/sync",
                       _batch({"p": "hop.moy/main.py", "t": "x = 1\n"}))
@@ -745,7 +870,8 @@ def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
     h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
     seen = []
     real = wh.moy_sync.apply_ops
-    wh.moy_sync.apply_ops = lambda *a: (seen.append(depth[0]), real(*a))[1]
+    wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
+                                              real(*a, **kw))[1]
     try:
         h.handle_http("POST", "/sync", _batch(
             {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))

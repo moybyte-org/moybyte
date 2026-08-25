@@ -215,6 +215,126 @@ def test_watcher_skips_what_never_crosses(tmp_path):
     assert w.take() is None
 
 
+def test_a_site_mode_watcher_sweeps_the_journal_and_a_board_one_never_does(
+        tmp_path):
+    """THE JOURNAL LIVES WITH THE STORE OF RECORD (2026-08-25), and the whole
+    of the site-mode half is this one argument.
+
+    In mode 1 the browser's OPFS is where the cart durably lives, so its undo
+    history has to ride the same sweep or die at the next reload. In board mode
+    the board is of record and journals the pushes itself -- so the DEFAULT
+    watcher must stay byte-identical, which is what the second half asserts.
+    A regression either way is silent: a lost history, or a board handed
+    somebody else's."""
+    root = _store(tmp_path)
+    (root / "hop.moy" / "journal").mkdir()
+    (root / "hop.moy" / "journal" / "journal.jsonl").write_text('{"seq": 1}\n')
+    (root / "hop.moy" / "journal" / "s").mkdir()
+    (root / "hop.moy" / "journal" / "s" / "0001-main.py").write_text("x = 1\n")
+    (root / "hop.moy" / "main.py.bak").write_text("crash-safety leftovers")
+    (root / "hop.moy" / "thumbs").mkdir()
+    (root / "hop.moy" / "thumbs" / "wp1x1.mct").write_text("cache")
+
+    board = StoreWatcher(str(root))
+    board.sweep()
+    assert board.take() is None, "a board must never be sent a journal"
+
+    site = StoreWatcher(str(root), skip=moy_sync.skip_keep_journal)
+    assert not site.sweep(), "the baseline adopts the store as it stands"
+    p = root / "hop.moy" / "journal" / "journal.jsonl"
+    p.write_text('{"seq": 1}\n{"seq": 2}\n')
+    _bump_mtime(p)
+    site.sweep()
+    paths = [op["p"] for op in _drain(site)]
+    assert "hop.moy/journal/journal.jsonl" in paths
+    # ...and only the journal was let through: the crash-safety artifacts and
+    # the regenerable cache stay home in BOTH modes.
+    assert not any(x.endswith(".bak") or "/thumbs/" in x for x in paths), paths
+
+
+def test_the_receiver_journals_a_push_and_only_when_asked(tmp_path):
+    """The board half of the same doctrine: a browser commit lands in the
+    cart's own journal, in the shape `Project.commit_*` writes, so the
+    console's on-glass UNDO can walk back through it.
+
+    `journal=False` is the default and stays the default -- a receiver that is
+    a scratch directory should not grow a history nobody walks."""
+    from runtime import moy_journal
+
+    root = _store(tmp_path)
+    cart = str(root / "hop.moy")
+
+    apply_ops(str(root), [{"p": "hop.moy/main.py", "t": "cls(2)\n"}])
+    assert not (root / "hop.moy" / "journal").exists(), "unasked-for history"
+
+    apply_ops(str(root), [{"p": "hop.moy/main.py", "t": "cls(3)\n"}],
+              journal=True)
+    apply_ops(str(root), [{"p": "hop.moy/main.py", "t": "cls(4)\n"}],
+              journal=True)
+    entries = moy_journal._journal_load_entries(
+        str(root / "hop.moy" / "journal" / "journal.jsonl"))
+    assert [e["file"] for e in entries] == ["main.py", "main.py"], entries
+    # The commit is REAL: an undo walks the live file back a step.
+    assert moy_journal.journal_can_undo(cart, ("main.py",))
+    assert moy_journal.journal_undo(cart, ("main.py",)) == "main.py"
+    assert (root / "hop.moy" / "main.py").read_text() == "cls(3)\n"
+
+
+def test_a_chunked_publish_is_journaled_from_what_landed(tmp_path):
+    """The parts never were all resident here at once, so the snapshot has to
+    come from the published FILE. Getting this wrong journals one chunk."""
+    from runtime import moy_journal
+
+    root = _store(tmp_path)
+    big = "y" * 40
+    apply_ops(str(root), [
+        {"p": "hop.moy/big.lua", "t": big[:20], "part": 0},
+        {"p": "hop.moy/big.lua", "t": big[20:], "part": 1},
+        {"p": "hop.moy/big.lua", "pub": 1}], journal=True)
+    assert (root / "hop.moy" / "big.lua").read_text() == big
+    entries = moy_journal._journal_load_entries(
+        str(root / "hop.moy" / "journal" / "journal.jsonl"))
+    assert len(entries) == 1 and entries[0]["file"] == "big.lua"
+    snap = root / "hop.moy" / "journal" / entries[0]["snap"]
+    assert snap.read_text() == big, "the snapshot is one chunk, not the file"
+
+
+def test_a_files_push_is_never_journaled(tmp_path):
+    """The #108 layer's undo is `files/.history/` op sidecars -- a different
+    mechanism with a different shape, and deliberately not grown here. A
+    drawing pushed from a browser lands as a file and nothing else."""
+    _store(tmp_path)
+    files = _files_store(tmp_path)
+    apply_ops(str(files), [{"p": "drawings/sunset.moyimg", "t": "0,1,"}],
+              root_id=moy_sync.FILES_ROOT_ID, journal=True)
+    assert (files / "drawings" / "sunset.moyimg").read_text() == "0,1,"
+    assert not (files / "drawings" / "journal").exists()
+    assert not any(p.name == "journal.jsonl" for p in files.rglob("*"))
+
+
+def test_a_journal_that_cannot_be_written_never_costs_the_write(tmp_path):
+    """The file has already landed by the time the journal is touched, so a
+    journal failure is a missing history entry and must never be a lost edit."""
+    root = _store(tmp_path)
+    real = moy_sync._moy_journal()
+    assert real is not None
+
+    class Broken:
+        @staticmethod
+        def journal_append(*a, **kw):
+            raise OSError("no space left on device")
+
+    moy_sync._JOURNAL[:] = [Broken]
+    try:
+        applied, errors, _ = apply_ops(
+            str(root), [{"p": "hop.moy/main.py", "t": "cls(5)\n"}],
+            journal=True)
+    finally:
+        moy_sync._JOURNAL[:] = [real]
+    assert (applied, errors) == (1, [])
+    assert (root / "hop.moy" / "main.py").read_text() == "cls(5)\n"
+
+
 def test_new_and_deleted_files_and_carts(tmp_path):
     root = _store(tmp_path)
     w = StoreWatcher(str(root))

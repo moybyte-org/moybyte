@@ -49,6 +49,28 @@ def test_the_two_skip_predicates_agree():
     assert arr("SKIP_DIRS") == moy_sync.SKIP_DIRS
     assert arr("SKIP_FILES") == moy_sync.SKIP_FILES
     assert arr("SKIP_SUFFIXES") == moy_sync.SKIP_SUFFIXES
+    # ...and the SITE-mode pair, which is the same rule minus the journal
+    # (2026-08-25: the journal lives with the store of record, and in mode 1
+    # that is the browser). Two languages, two lists, same drift risk.
+    assert arr("SITE_SKIP_DIRS") == moy_sync.SITE_SKIP_DIRS
+    assert arr("SITE_SKIP_FILES") == moy_sync.SITE_SKIP_FILES
+
+
+def test_the_journal_crosses_only_into_the_local_store():
+    """The distinction the whole doctrine rests on, in both languages: a
+    journal path is refused by the WIRE predicate and accepted by the LOCAL
+    one. Collapse them and either a board is handed somebody else's history, or
+    the kid's undo dies at the next reload -- neither of which fails loudly."""
+    from runtime import moy_sync
+
+    for name in ("journal", "journal.jsonl"):
+        assert moy_sync._skip(name), name
+        assert not moy_sync.skip_keep_journal(name), name
+    for name in ("thumbs", "__pycache__", "main.py.bak", "main.py.tmp"):
+        assert moy_sync._skip(name) and moy_sync.skip_keep_journal(name), name
+    # The wire's own validator never softens: a batch aimed at a BOARD carries
+    # no journal path no matter which watcher built it.
+    assert moy_sync.safe_segments("a.moy/journal/journal.jsonl") is None
 
 
 def test_an_import_stays_pending_but_a_reload_rebases():
@@ -86,6 +108,29 @@ def test_the_store_module_reaches_every_host_that_serves_the_console():
     assert "moy_store.mjs?v=" in build
     assert "moy_store.mjs" in build[build.index("MOY_BUILD=\""):
                                     build.index("MOY_BUILD=\"") + 400]
+
+
+def test_the_mode_reaches_web_boot_before_the_watcher_is_built():
+    """Which store is of record decides whether the carts watcher sweeps the
+    journal, and `boot()` is where that watcher is constructed -- so the mode
+    has to arrive FIRST. Arriving late would be a setting with no effect, which
+    is exactly the shape of the bug that hid in `PUMP fold=`: a lever wired to
+    nothing, reading as a decision that had been made."""
+    worker = _read("firmware", "web_runner", "worker.js")
+    body = worker[worker.index("async function init("):]
+    assert body.index("web_boot.store_mode(") < body.index("web_boot.boot(")
+    # A name the boot script imports but web_boot does not export is a
+    # NameError at boot, in a worker, on somebody else's machine.
+    assert "store_mode" in worker[worker.index("from web_boot import"):
+                                  worker.index("from web_boot import") + 400]
+
+    boot = _read("firmware", "web_runner", "web_boot.py")
+    assert "def store_mode(" in boot
+    made = boot[boot.index("import moy_sync"):boot.index('_S["canvas"]')]
+    assert "skip_keep_journal" in made and '"site"' in made, made
+    # The DEFAULT is the wire's own predicate: a mode that fails to arrive must
+    # not start shipping journals at a board.
+    assert "else None" in made, made
 
 
 def test_the_mode_is_decided_before_anything_is_written():

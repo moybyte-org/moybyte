@@ -149,18 +149,47 @@ for (const sync of [true, false]) {
     ok("a cart delete takes the folder (" + label + ")",
        !Object.keys(all).some((k) => k.startsWith("b.moy/")), JSON.stringify(Object.keys(all)));
 
-    // Nothing that must stay home, and nothing that escapes the store.
+    // Nothing that escapes the store, and nothing crash-safety leaves behind.
     const bad = await store.applyOps(s, [
         { p: "../escape.py", t: "x" },
-        { p: "a.moy/journal/1.json", t: "x" },
-        { p: "a.moy/journal.jsonl", t: "x" },
         { p: "a.moy/main.py.bak", t: "x" },
+        { p: "a.moy/main.py.tmp", t: "x" },
         { p: "system.json", t: "x" },
-        { p: "a.moy", dc: 1, p2: 0 },
     ]);
-    ok("traversal, journals, .bak and top-level files are all refused (" + label + ")",
-       bad.applied === 1 && bad.errors.length === 5, JSON.stringify(bad.errors));
+    ok("traversal, .bak/.tmp and top-level files are all refused (" + label + ")",
+       bad.applied === 0 && bad.errors.length === 4, JSON.stringify(bad.errors));
+
+    // ...but THE JOURNAL LANDS (2026-08-25). In mode 1 this store is of record,
+    // so the kid's undo history has to live here or die at the next reload --
+    // the whole of #193's "with its undo history". It used to be refused, on
+    // the wire's rule, which is a different question with a different answer.
+    const jr = await store.applyOps(s, [
+        { p: "a.moy/journal/journal.jsonl", t: '{"seq": 1}\n' },
+        { p: "a.moy/journal/s/0001-main.py", t: "print(1)\n" },
+        { p: "a.moy/journal/cursor.json", t: '{"seq": 1}' },
+    ]);
+    const back = await store.readAll(s);
+    ok("the journal lands in the local store and reads back (" + label + ")",
+       jr.applied === 3 && !jr.errors.length
+       && back["a.moy/journal/journal.jsonl"] === '{"seq": 1}\n'
+       && back["a.moy/journal/s/0001-main.py"] === "print(1)\n",
+       JSON.stringify(jr.errors) + " " + JSON.stringify(Object.keys(back)));
 }
+
+// The two predicates are two QUESTIONS, and the answers differ on exactly one
+// thing. Pinned here because a single predicate is what this used to be, and
+// collapsing them again would either ship a board somebody else's history or
+// drop the kid's on the next reload -- neither of which fails loudly.
+ok("the wire refuses a journal, the local store keeps it",
+   store.skipName("journal") && store.skipName("journal.jsonl")
+   && !store.skipLocal("journal") && !store.skipLocal("journal.jsonl"));
+ok("both still refuse thumbs and the crash-safety artifacts",
+   store.skipName("thumbs") && store.skipLocal("thumbs")
+   && store.skipName("x.bak") && store.skipLocal("x.bak")
+   && store.skipName("x.tmp") && store.skipLocal("x.tmp"));
+ok("safeSegments takes the predicate it is given",
+   store.safeSegments("a.moy/journal/journal.jsonl") === null
+   && (store.safeSegments("a.moy/journal/journal.jsonl", store.skipLocal) || []).length === 3);
 
 // ---- the .moy zip -----------------------------------------------------------
 const files = [
