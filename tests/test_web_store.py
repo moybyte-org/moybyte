@@ -95,7 +95,7 @@ def test_the_mode_is_decided_before_anything_is_written():
     worker = _read("firmware", "web_runner", "worker.js")
     init = worker[worker.index("async function initStore("):
                   worker.index("async function init(")]
-    assert init.index("probeMode") < init.index("writeCarts")
+    assert init.index("probeMode") < init.index("writeStore")
     # The console boots AFTER the store is seeded: web_boot rebases the watcher
     # on whatever it finds, so a late seed would ship the whole store as changes.
     body = worker[worker.index("async function init("):]

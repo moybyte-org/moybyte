@@ -1218,10 +1218,16 @@ glass and is therefore waiting on the same flash stage 3 is.*
   **DROPPED (owner, 2026-08-25):** the wasm head covers the show-and-tell
   jobs — the browser IS the console, so sharing happens there; the capture
   job dies with the mirror as §3.2 priced in.
-- **Sync mechanics** (§3.4): the browser-local store substrate (OPFS vs
-  IndexedDB), pairing-token lifetime vs plain re-pair-by-QR, and how a
-  two-sided collision *presents* to a kid — the rule is LWW + journal; the
-  UX of "your device copy moved" is undesigned.
+- **Sync mechanics** (§3.4) — two of three CLOSED 2026-08-25 with the RPC's
+  landing: the browser-local substrate is **OPFS** (the ops are file writes
+  at paths, so OPFS applies them 1:1 with no invented keyspace; measured 89
+  files seeded in 184ms, a commit applied in 9ms — `moy_store.mjs`, #193),
+  and pairing is **no token at all**: a pin in the QR-encoded url, checked
+  per batch, re-pair by re-scanning the connection screen (#197's switch).
+  Still open: how a two-sided collision *presents* to a kid — the rule is
+  LWW + journal; the UX of "your device copy moved" is undesigned. (The
+  switch UX shrinks the window — a parked glass does not author — but PLAY
+  ON DEVICE still writes pmem under a live browser copy.)
 - **Whether stage 1 alone captures most of the S3 win** — M0's attribution
   plus stage 1's measurement settle this before stage 2 is built (v1's
   question, now with the instrument named).

@@ -645,7 +645,7 @@ self.onmessage = async (ev) => {
             // outer catch would send -- the console is fine, the ask was not.
             try {
                 const files = [];
-                walkVfs(CARTS + "/" + m.cart, m.cart, files, 0);
+                walkVfs(CARTS_ROOT + "/" + m.cart, m.cart, files, 0);
                 if (!files.length) throw new Error("no such cart");
                 const zip = store.zipStore(files);
                 self.postMessage({ t: "exported", name: m.cart + ".zip",
