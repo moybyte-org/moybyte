@@ -112,7 +112,10 @@ ESCALATE_AT = 12       # distinct stalled ticks (~13%) in one window buy the rai
                        # answer to it when it does happen.
 REDUNDANCY = 4     # frames of input per packet; one byte each, so ~free
 MAX_SPAN = 24      # the widest history one packet may carry (see _emit)
-GIVE_UP = 300      # consecutive stalled frames before a match is declared dead
+GIVE_UP = 300      # consecutive stalled advance() calls before a match is
+                   # declared dead. Since the loop-rate stall retry (2026-08-25)
+                   # these accumulate at the FRAME rate, not the tick rate, so
+                   # this is ~7s of continuous stall at a 45fps loop (was ~10s)
 
 _TAPE = 256        # frames of ring. 8.5s at 30Hz, vs a delay+redundancy window
                    # of six -- big enough that wrap can never race the window.
