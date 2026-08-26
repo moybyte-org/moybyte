@@ -320,11 +320,11 @@ def _surface_plan(ws, cfg):
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():
             ws.toggle_webhost()          # the real funnel: start, then park
-        ws.web_console_ui.show_address = False
+        ws.web.ui.show_address = False
 
     def park_revealed():
         park()
-        ws.web_console_ui.show_address = True
+        ws.web.ui.show_address = True
 
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))

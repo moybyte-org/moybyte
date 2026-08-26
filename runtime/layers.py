@@ -165,20 +165,20 @@ class _WebConsoleLayer(Layer):
     A parked fullscreen surface in the shape of the update screen -- it owns
     every pixel and claims every event, because while the toggle is on there is
     nothing else for the glass to be doing. Entry state (the revealed address is
-    cleared) is reset by `Workstation.park_web_console`, NOT by the Layer
+    cleared) is reset by `WebConsole.park` (web_console.py), NOT by the Layer
     protocol's `on_enter`: nothing in the router calls that hook today."""
 
     id = "webconsole"
     domain = "system"
 
     def draw(self, dt):
-        self.ws.web_console_ui.draw(dt)
+        self.ws.web.ui.draw(dt)
 
     def handle_input(self, i):
-        return self.ws.web_console_ui.handle_input(i)
+        return self.ws.web.ui.handle_input(i)
 
     def handle_pointer(self, px, py, click):
-        return self.ws.web_console_ui.handle_pointer(px, py, click)
+        return self.ws.web.ui.handle_pointer(px, py, click)
 
 
 class _MapLayer(Layer):

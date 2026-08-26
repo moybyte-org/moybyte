@@ -1445,9 +1445,9 @@ def test_turning_the_row_on_parks_the_glass_and_off_returns_it(tmp_path):
     ws = _mode_ws(tmp_path)
     assert ws.wm.top_kind() == "launcher"
     ws.toggle_webhost()
-    assert ws.wm.top_kind() == "webconsole" and ws._web_parked is True
+    assert ws.wm.top_kind() == "webconsole" and ws.web.parked is True
     ws.toggle_webhost()
-    assert ws.wm.top_kind() == "launcher" and ws._web_parked is False
+    assert ws.wm.top_kind() == "launcher" and ws.web.parked is False
     assert ws.webhost_serving() is False
 
 
@@ -1459,8 +1459,53 @@ def test_a_failed_start_does_not_park(tmp_path):
     ws.webhost = _ModeHost(fail="no wifi")
     ws.open_settings()
     ws.toggle_webhost()
-    assert ws.wm.top_kind() == "settings" and ws._web_parked is False
+    assert ws.wm.top_kind() == "settings" and ws.web.parked is False
     assert "no wifi" in ws.webhost_label()
+
+
+def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
+    """ORDER, not just outcome. `go_home` is what routes to the connection
+    screen and it decides by reading the flag, so a park that called it first
+    would leave the glass on the launcher with the mode on. The screen's entry
+    state (a revealed pin) is cleared here too -- nothing in the router calls a
+    Layer's `on_enter`."""
+    ws = _mode_ws(tmp_path)
+    seen = []
+    ws.web.ui.on_enter = lambda: seen.append(("on_enter", ws.web.parked))
+    ws.go_home = lambda: seen.append(("go_home", ws.web.parked))
+    ws.park_web_console()
+    assert seen == [("on_enter", True), ("go_home", True)]
+
+
+def test_go_home_re_parks_exactly_while_the_flag_is_set(tmp_path):
+    """The other half: every door back to the launcher funnels through go_home,
+    so the flag is the only thing that has to be right for a browser-launched
+    cart, the bar's X, a crash and hold-BACKSPACE to all land back here."""
+    ws = _mode_ws(tmp_path)
+    ws.web.parked = True
+    ws.go_home()
+    assert ws.wm.top_kind() == "webconsole"
+    ws.web.parked = False
+    ws.go_home()
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_turn_off_stops_the_host_before_it_gives_the_glass_back(tmp_path):
+    """ORDER again, and the reason the mode exists: unparking first would put a
+    kid on a launcher over a store a browser is still free to write."""
+    ws = _mode_ws(tmp_path)
+    ws.toggle_webhost()
+    seen = []
+    unpark = ws.web.unpark
+
+    def _unpark():
+        seen.append(ws.web.serving())
+        unpark()
+
+    ws.web.unpark = _unpark
+    ws.stop_web_console()
+    assert seen == [False], "the glass came back while the host still served"
+    assert ws.web.parked is False and ws.webhost_serving() is False
 
 
 def test_the_parked_screen_owns_the_glass_and_claims_every_event(tmp_path):
@@ -1495,7 +1540,7 @@ def test_show_address_toggles_and_resets_on_every_entry(tmp_path):
     reads, so entering the mode always starts hidden."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    ui = ws.web_console_ui
+    ui = ws.web.ui
     assert ui.show_address is False
     _qr, _addr, show, off = ui.rects()
     assert show[2] > 0 and off[2] > 0
@@ -1514,8 +1559,8 @@ def test_the_turn_off_button_turns_it_off(tmp_path):
     screen -- a mode with no visible way out is a trap."""
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
-    _qr, _addr, _show, off = ws.web_console_ui.rects()
-    ws.web_console_ui.handle_pointer(off[0] + 2, off[1] + 2, True)
+    _qr, _addr, _show, off = ws.web.ui.rects()
+    ws.web.ui.handle_pointer(off[0] + 2, off[1] + 2, True)
     assert ws.webhost_serving() is False
     assert ws.wm.top_kind() == "launcher"
 
@@ -1528,9 +1573,9 @@ def test_turn_off_still_turns_OFF_when_the_host_died_underneath(tmp_path):
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
     ws.webhost.stop()                        # the host dies under the screen
-    assert ws.webhost_serving() is False and ws._web_parked is True
-    _qr, _addr, _show, off = ws.web_console_ui.rects()
-    ws.web_console_ui.handle_pointer(off[0] + 2, off[1] + 2, True)
+    assert ws.webhost_serving() is False and ws.web.parked is True
+    _qr, _addr, _show, off = ws.web.ui.rects()
+    ws.web.ui.handle_pointer(off[0] + 2, off[1] + 2, True)
     assert ws.webhost_serving() is False, "TURN OFF restarted the host"
     assert ws.wm.top_kind() == "launcher"
 
@@ -1542,10 +1587,10 @@ def test_the_qr_encodes_the_paired_url(tmp_path):
     ws = _mode_ws(tmp_path)
     ws.toggle_webhost()
     url = ws.web_console_url()
-    first = ws.web_console_ui.matrix(url)
+    first = ws.web.ui.matrix(url)
     assert first == moy_qr.encode(url)
-    assert ws.web_console_ui.matrix(url) is first, "re-encoded an unchanged url"
-    assert ws.web_console_ui.matrix("http://10.0.0.9:8080/?pin=0000") != first
+    assert ws.web.ui.matrix(url) is first, "re-encoded an unchanged url"
+    assert ws.web.ui.matrix("http://10.0.0.9:8080/?pin=0000") != first
 
 
 def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):
@@ -1752,7 +1797,7 @@ def test_leaving_the_mode_from_inside_a_cart_gives_the_console_back(tmp_path):
     ws.toggle_webhost()
     ws.launch_named("Star Catcher")
     ws.toggle_webhost()
-    assert ws._web_parked is False
+    assert ws.web.parked is False
     ws._exit_to_caller()
     assert ws.wm.top_kind() == "launcher"
 

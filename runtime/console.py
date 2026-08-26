@@ -129,13 +129,13 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.update_ui import UpdateUI
 
-# The WEB CONSOLE connection screen (#197): the surface the glass parks on while
-# wasm mode is on -- the QR of the paired url, the tap-to-reveal address, and
-# TURN OFF. Same shape and the same construction point as UpdateUI.
+# The WEB CONSOLE switch (#197, web_console.py): wasm mode's own object -- the
+# pin, the paired url, the park/unpark of the glass, and the connection screen
+# (web_console_ui.py) it holds. The first Workstation collaborator (#209).
 try:
-    from web_console_ui import WebConsoleUI
+    from web_console import WebConsole
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.web_console_ui import WebConsoleUI
+    from runtime.web_console import WebConsole
 
 # The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
 # builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
@@ -969,14 +969,11 @@ class Workstation:
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
         self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
-        # The WEB CONSOLE connection screen (#197, web_console_ui.py) + the flag
-        # that says the glass is parked on it. `_web_parked` is what makes wasm
-        # mode a MODE and not a screen: every return-to-the-launcher path
-        # (go_home) re-parks while it is set, so a cart launched from the browser
-        # comes back HERE rather than dropping a kid onto a shelf the browser is
-        # concurrently rewriting.
-        self.web_console_ui = WebConsoleUI(self, NAMES, _in)
-        self._web_parked = False
+        # WASM MODE (#197): the pin, the paired url, the connection screen and
+        # the parked flag, all on one object (web_console.py). The webhost above
+        # stays a flat Workstation attribute -- `poll_webhost` reads it at every
+        # frame tail on all three boards -- and this reads it through `self`.
+        self.web = WebConsole(self, NAMES, _in)
         # The scanned cart list is the single source both grids derive from (#carts):
         # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and the
         # Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every editable cart.
@@ -1892,172 +1889,42 @@ class Workstation:
         self.system["font_scale"] = self.font_scale
         self._persist_system()
 
-    # -- WEB CONSOLE (moycore plan 3.4 pull half) ----------------------------
+    # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
     #
-    # Thin verbs over the injected `webhost`, so settings_layer never touches a
-    # socket and every tier without the service is untouched. The service
-    # contract is `.serving` / `.start()` / `.stop()` / `.url()`.
-    #
-    # Since #197 the toggle is also a MODE: turning it on parks the glass on the
-    # connection screen (web_console_ui.py) and turning it off returns the
-    # console. See park_web_console below for why that is a switch and not a
-    # session.
-
-    _WEB_PIN_DIGITS = 4
+    # The switch itself lives in web_console.py; these keep the names its
+    # callers already speak. Fixed signatures, one delegation each (#209).
 
     def web_pin(self):
-        """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
-
-        MINTED ONCE, LAZILY, and then persisted in system.json beside every
-        other Settings choice. Lazily because a board that never serves the web
-        console should never have written a secret to its store; once because a
-        pin that changed per boot would mean re-scanning the QR after every
-        power cycle, and a kid's phone keeping the old url would look like the
-        board had broken.
-
-        Four digits is the strength a kid can read off a panel and a grown-up
-        can type. It is not a password: it stops the OTHER machine on the
-        network from writing to this store by accident, which is the threat an
-        open write endpoint on a classroom LAN actually poses (moy_webhost's
-        SECURITY note). The read half stays open, by the standing owner call."""
-        pin = self.system.get("web_pin")
-        if pin:
-            return str(pin)
-        pin = self._mint_web_pin()
-        self.system["web_pin"] = pin
-        self._persist_system()
-        return pin
-
-    def _mint_web_pin(self):
-        """A fresh 4-digit pin. `os.urandom` where there is one (both boards and
-        the host have it); the clock is the fallback, and is only ever reached
-        on a build with no urandom at all."""
-        n = None
-        try:
-            import os as _os
-            n = int.from_bytes(_os.urandom(3), "big")
-        except Exception:  # noqa: BLE001 -- no urandom: fall through to the clock
-            n = None
-        if n is None:
-            n = _ticks_us()
-        return "%04d" % (n % (10 ** self._WEB_PIN_DIGITS))
+        """`web.pin()` -- moy_webhost's start-time lambda + the tests."""
+        return self.web.pin()
 
     def web_console_url(self):
-        """The PAIRED url -- what the QR encodes and SHOW ADDRESS reveals.
-
-        `http://<ip>:8080/?pin=NNNN`: the page forwards its own `?pin=` into
-        every sync batch, so scanning this is the whole pairing gesture. Empty
-        when nothing is serving -- there is no address to show then, and a
-        placeholder would encode to a QR that sends a phone nowhere."""
-        wh = self.webhost
-        if wh is None or not getattr(wh, "serving", False):
-            return ""
-        try:
-            paired = getattr(wh, "paired_url", None)
-            return (paired() if paired is not None else wh.url()) or ""
-        except Exception:  # noqa: BLE001 -- a url is not worth a crash
-            return ""
+        """`web.url()` -- the dev channel's `web` and the tests."""
+        return self.web.url()
 
     def park_web_console(self):
-        """Take the glass over with the connection screen (#197).
-
-        WASM MODE IS A SWITCH, NOT A SESSION (owner call, 2026-08-25). While the
-        toggle is on, the browser owns this store and the glass shows how to
-        reach it -- so parking goes through `go_home`, which commits every open
-        editor and app before the browser starts writing underneath them, and
-        `go_home` then re-parks here (and on every later return: a cart launched
-        by PLAY ON DEVICE exits back to THIS screen, not to a shelf the browser
-        is concurrently rewriting).
-
-        On the windowed tier `go_home` also leaves the desk, which is what makes
-        this fullscreen there: windows exist only above the desk (#105), so the
-        play world presents every kind full-screen with no special case."""
-        self._web_parked = True
-        self.web_console_ui.on_enter()
-        self.go_home()
+        """`web.park()` -- the layers.py contract comment and the tests."""
+        return self.web.park()
 
     def stop_web_console(self):
-        """The connection screen's TURN OFF.
-
-        Not `toggle_webhost` directly, and the difference is the one state a
-        toggle gets wrong: if the host stopped UNDERNEATH the parked screen (a
-        socket error, a stop from somewhere else), toggling would read "not
-        serving" and START it again -- a button labelled TURN OFF that turns it
-        on. Ask what the user wants, which is out."""
-        if self.webhost_serving():
-            self.toggle_webhost()
-        else:
-            self.unpark_web_console()
+        """`web.stop()` -- the Guition on-glass suite's serial vocabulary."""
+        return self.web.stop()
 
     def unpark_web_console(self):
-        """Give the console back. The desk is home on the windowed tier; the
-        launcher root everywhere else."""
-        self._web_parked = False
-        self._dirty = True
-        if getattr(self.wm, "has_desk", False):
-            self.open_desk()
-        else:
-            self.wm.goto("launcher")
+        """`web.unpark()` -- the tests."""
+        return self.web.unpark()
 
     def webhost_serving(self):
-        wh = self.webhost
-        return bool(wh is not None and getattr(wh, "serving", False))
+        """`web.serving()` -- settings_layer, tools/p4_push_web.py."""
+        return self.web.serving()
 
     def webhost_label(self):
-        """What the Settings row shows: the ADDRESS while serving, else OFF.
-
-        The address IS the feature -- the kid has to type it into a browser --
-        so a row that said only "ON" would be telling them to go and find the
-        IP somewhere else. A failure shows its reason here too, for the same
-        reason: this row is the only surface this feature has.
-        """
-        wh = self.webhost
-        if wh is None:
-            return "OFF"
-        if getattr(wh, "error", None):
-            return str(wh.error)[:22]
-        if not getattr(wh, "serving", False):
-            return "OFF"
-        url = ""
-        try:
-            url = wh.url() or ""
-        except Exception:  # noqa: BLE001 -- a url is not worth a crash
-            url = ""
-        # Strip the scheme: the row is ~22 chars at 1x and "http://" spends 7 of
-        # them on something every browser assumes anyway.
-        return url.replace("http://", "").rstrip("/") or "ON"
+        """`web.label()` -- the Settings row, tools/p4_push_web.py."""
+        return self.web.label()
 
     def toggle_webhost(self):
-        """Start or stop serving, and park or unpark the glass with it (#197).
-
-        Starting touches WiFi, which can fail slowly and in ways nobody can act
-        on from a Settings screen (no AP, wrong password, DHCP). A raised
-        exception here would take the console down from a toggle, so the failure
-        becomes the row's own label instead.
-
-        The park is gated on `serving` AFTER the attempt, never on "we tried to
-        start": a failed start leaves the kid in Settings looking at the reason,
-        which is the only place that reason is readable. This is the ONE funnel
-        -- the Settings row, the dev channel's `web`, and the connection
-        screen's own TURN OFF all come through here -- so the mode and the
-        socket cannot disagree about which of them is on."""
-        wh = self.webhost
-        if wh is None:
-            return
-        try:
-            wh.error = None
-            if getattr(wh, "serving", False):
-                wh.stop()
-            else:
-                wh.start()
-        except Exception as exc:  # noqa: BLE001
-            wh.error = "%s" % exc
-        self._dirty = True
-        if getattr(wh, "serving", False):
-            if not self._web_parked:
-                self.park_web_console()
-        elif self._web_parked:
-            self.unpark_web_console()
+        """`web.toggle()` -- settings_layer, the dev channel, p4_push_web."""
+        return self.web.toggle()
 
     def rescan_carts(self):
         """Re-read the store and rebuild both shelves -- the sync push's board
@@ -3291,7 +3158,7 @@ class Workstation:
         # the two-writer case the parked switch is designed to prevent. go_home
         # releases the dead run and re-parks (its own tail lists "a crash" as one
         # of the doors it funnels).
-        if self._web_parked:
+        if self.web.parked:
             self.cart_error = None
             self.crash_line = None
             self.go_home()
@@ -4654,7 +4521,7 @@ class Workstation:
         # close, a crash -- and every one of them funnels through this method. A
         # per-door re-park is the bug class that left the T-Deck without a web
         # console at all; this is the last line of the one door they share.
-        if self._web_parked:
+        if self.web.parked:
             self.wm.goto("webconsole")
 
     # -- cart management (SD) ------------------------------------------------
