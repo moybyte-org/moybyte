@@ -754,6 +754,23 @@ def _retained_n(cv):
     return n if n > 2 else 2
 
 
+def _advance_streak(layer, cv):
+    """Advance (or restart) a grid layer's consecutive-full-paint streak --
+    the gate `_try_drag_partial` reads, so a partial only runs once every
+    retained framebuffer already holds this frame's statics. A full paint
+    under an unchanged `_statics_key` counts up to `_retained_n(cv)`; a
+    changed key restarts at one. ONE body for the home shelf and the Editor
+    picker (#209): repeated invalidation logic is the family
+    ui_damage_model_v1.md names as the silent-cache bug."""
+    key = layer._statics_key(cv)
+    if key == layer._statics:
+        if layer._full_streak < _retained_n(cv):
+            layer._full_streak += 1
+    else:
+        layer._statics = key
+        layer._full_streak = 1
+
+
 def _cursor_stamp(ws):
     """The cursor sprite's footprint on the system canvas this frame, or None
     when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
@@ -1039,13 +1056,7 @@ class LauncherHomeLayer:
                 ws._frames_drawn,
                 (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
                 _cursor_stamp(ws))
-            key = self._statics_key(cv)
-            if key == self._statics:
-                if self._full_streak < _retained_n(cv):
-                    self._full_streak += 1
-            else:
-                self._statics = key
-                self._full_streak = 1
+            _advance_streak(self, cv)
             return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
         # wallpaper / grid / bar streams so the web delta can skip the static grid +
@@ -1083,15 +1094,8 @@ class LauncherHomeLayer:
             _t3 = _ticks_ms()
             ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
-        # A FULL paint landed in the current framebuffer: advance (or restart)
-        # the partial path's statics streak.
-        key = self._statics_key(cv)
-        if key == self._statics:
-            if self._full_streak < _retained_n(cv):
-                self._full_streak += 1
-        else:
-            self._statics = key
-            self._full_streak = 1
+        # A FULL paint landed in the current framebuffer.
+        _advance_streak(self, cv)
         self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
 
     def _draw_shelf_panel(self, cv):
@@ -1561,13 +1565,7 @@ class EditorPickerLayer:
             ws._frames_drawn,
             (ws.picker.sel, self._statics_key(cv), ws._cover_gen),
             _cursor_stamp(ws))
-        key = self._statics_key(cv)
-        if key == self._statics:
-            if self._full_streak < _retained_n(cv):
-                self._full_streak += 1
-        else:
-            self._statics = key
-            self._full_streak = 1
+        _advance_streak(self, cv)
         ws.bar_layer._draw_status_strip("picker")
 
     def handle_input(self, i):

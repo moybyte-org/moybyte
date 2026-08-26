@@ -404,3 +404,56 @@ def test_set_layout_keeps_the_paint_ring(tmp_path):
     # ... but the geometry IS pinned: the statics key carries the grid rect.
     key = ws.editor_picker._statics_key(ws.sys_canvas)
     assert ws.picker.layout.lib_grid in key
+
+
+# -- the shared streak-advance body (#209 W3) --------------------------------
+
+def _streak_layers(tmp_path):
+    """The two grid layers that keep a consecutive-full-paint streak: the home
+    shelf and the Editor picker. Same helper, own `_statics_key`/`_statics`/
+    `_full_streak` each."""
+    ws = _ws_with_carts(tmp_path, 0)
+    return ws, (ws.launcher_layer, ws.editor_picker)
+
+
+def test_advance_streak_counts_up_to_the_retained_horizon(tmp_path):
+    """An unchanged statics key advances the streak by one per full paint and
+    STOPS at `_retained_n(cv)` -- the horizon `_try_drag_partial` gates on."""
+    from runtime import launcher_layer
+
+    ws, layers = _streak_layers(tmp_path)
+    cv = ws.sys_canvas
+    cap = launcher_layer._retained_n(cv)
+    for layer in layers:
+        key = layer._statics_key(cv)
+        layer._statics, layer._full_streak = key, 0
+        for expected in range(1, cap + 1):
+            launcher_layer._advance_streak(layer, cv)
+            assert (layer._statics, layer._full_streak) == (key, expected)
+        launcher_layer._advance_streak(layer, cv)      # already at the horizon
+        assert layer._full_streak == cap
+
+
+def test_advance_streak_restarts_on_a_changed_key(tmp_path):
+    """A changed key adopts it and restarts the streak at ONE -- a streak
+    carried across a statics change is what lets a partial repaint over a
+    framebuffer holding the OLD chrome."""
+    from runtime import launcher_layer
+
+    ws, layers = _streak_layers(tmp_path)
+    cv = ws.sys_canvas
+    for layer in layers:
+        for stale in (None, ("some", "other", "state")):
+            layer._statics, layer._full_streak = stale, 5
+            launcher_layer._advance_streak(layer, cv)
+            assert layer._statics == layer._statics_key(cv)
+            assert layer._full_streak == 1
+
+
+def test_the_streak_advance_has_exactly_one_body():
+    """#209 W3: this bookkeeping stood in three copies, which is the shape
+    ui_damage_model_v1.md names as the silent-cache family. A fourth copy must
+    not grow back beside the helper."""
+    src = (ROOT / "runtime" / "launcher_layer.py").read_text()
+    assert src.count("_full_streak += 1") == 1
+    assert src.count("_advance_streak(self, cv)") >= 3
