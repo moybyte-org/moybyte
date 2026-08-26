@@ -46,6 +46,12 @@ try:
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
     from runtime.chrome import _gbtn as _chrome_gbtn
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 # World view (left): the panned window onto the world, same rectangle the map
 # editor uses (clear of the palette column at x >= 206 and the bottom row).
 _SV_X0 = 14
@@ -87,11 +93,8 @@ _SC_BACK = (280, 17, 26, 13)
 # Drag-vs-tap threshold (px), the map editor's gesture rule (#37).
 _SC_PAN_THRESH = 6
 
-_BASE_W = 320
-_BASE_H = 240
 
-
-class SceneLayout:
+class SceneLayout(LayoutBase):
     """Responsive scene-editor geometry (#39): the panel, the panned world view,
     the paged tile palette + pan/zoom column, the props row and the toolbar,
     derived from the SYSTEM canvas size (w, h) + font scale.
@@ -103,17 +106,13 @@ class SceneLayout:
     beyond) with no panning."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
-        fs = self.fs
         # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
         # system canvas -- the right pane of the combined Blocks+Scene workspace
         # (blocks-left / objects-right, Scratch-style). A bounded layout never takes
         # the frozen 320x240 branch (it's a big-screen feature), so `_base` excludes
         # it and the T-Deck's scene tab is byte-identical.
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1
-                      and bounds is None)
+        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None)
+        fs = self.fs
         self.zooms = _SV_ZOOMS
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)

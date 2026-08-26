@@ -35,6 +35,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 
 # -- card geometry (single source; console.py imports these back) -------------
@@ -57,11 +63,8 @@ _CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
 # the "MAKE IT MINE" label (ends ~x234 at scale 2) and the scroll chevrons (y>=44).
 _CARD_INFO_BTN = (278, 21, 36, 14)
 
-_BASE_W = 320
-_BASE_H = 240
 
-
-class CardsLayout:
+class CardsLayout(LayoutBase):
     """Responsive "Make it mine" geometry (#39 step 3): the full-width panel, the
     card column + scroll chevrons, the per-display card heights and the picture-cell
     sizes, derived from the SYSTEM canvas size (w, h) + font scale.
@@ -73,11 +76,8 @@ class CardsLayout:
     view band grows) and the cards span its full width."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.body = (0, 18, _BASE_W, _BASE_H - 18)
             self.head_glyph = (8, 22, 14, 14)

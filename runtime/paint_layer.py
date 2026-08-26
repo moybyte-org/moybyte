@@ -58,6 +58,12 @@ try:
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
     from runtime.chrome import _GLYPHS
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 # -- paint geometry (single source; console.py imports these back) ------------
 # The frozen 320x240 baseline PaintLayout reproduces VERBATIM (#39 graceful
@@ -94,9 +100,6 @@ _PAINT_PUT = (210, 154, 92, 20)
 # spare, matching the responsive branch's already-correct sequencing below).
 # Hidden in the theme editor, like GET/PUT.
 _PAINT_FILES = (210, 178, 92, 20)
-
-_BASE_W = 320
-_BASE_H = 240
 
 # -- tool palette (#90) -------------------------------------------------------
 # TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
@@ -153,7 +156,7 @@ def _tool_row(x0, y0, cw, h, n):
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
 
 
-class PaintLayout:
+class PaintLayout(LayoutBase):
     """Responsive paint-editor geometry (#39 step 3): the panel, the zoomed pixel
     grid, the 16-color swatch column, the sprite-selector / SIZE / GET / PUT buttons
     and the SAVE/CLOSE row, derived from the SYSTEM canvas size (w, h) + font scale.
@@ -170,11 +173,8 @@ class PaintLayout:
     a hugely bigger drawing surface, not just scaled chrome."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
             self.panel = (8, 16, 304, 204)

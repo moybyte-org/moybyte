@@ -52,18 +52,22 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import _gbtn as _chrome_gbtn
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 # --- Layout geometry (baseline 320x240 constants + BlockLayout) -------------
 #
 # Mirrors CodeLayout in console.py (same responsive-reflow contract, #39 step
 # 2): at (320, 240, 1) every field below equals the frozen `_BLK_*` constant
 # verbatim (the `_base` branch), so the reflow is pixel-identical to the
-# pre-#39 fixed layout. _BASE_W/_BASE_H/_FONT_W are duplicated (not imported)
-# from console.py's own copies -- they're foundational, unchanging screen
-# constants shared by every Layout class, and importing them back would be
-# the same circular import BlockEditorUI's __init__ comment explains below.
-_BASE_W = 320
-_BASE_H = 240
+# pre-#39 fixed layout. _BASE_W/_BASE_H come from the layout_base leaf above;
+# _FONT_W is duplicated (not imported) from console.py's own copy -- a
+# foundational, unchanging screen constant, and importing it back would be the
+# same circular import BlockEditorUI's __init__ comment explains below.
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 
 # Blocks + Scene side-by-side workspace (#93 blocks / #85 scene): on a wide enough
@@ -227,7 +231,7 @@ _BLK_HINTS = {
 }
 
 
-class BlockLayout:
+class BlockLayout(LayoutBase):
     """Responsive block-editor geometry (#39 step 2): the scrolling outline (X0/W/
     Y0, row height + indent, visible ROWS), the bottom action bar, and the modal
     insert menu -- derived from the SYSTEM canvas size (w, h) + font scale instead of
@@ -239,18 +243,14 @@ class BlockLayout:
     pixel-identical to today."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
-        fs = self.fs
-        self.cell = _FONT_W * fs
         # `bounds` (bx, by, bw, bh) confines the OUTLINE + action bar to a sub-rect
         # -- the left pane of the combined Blocks+Scene workspace (blocks-left /
         # objects-right). The modal overlays (insert menu / prompts) stay centered
         # on the full canvas. A bounded layout never takes the frozen 320x240 branch
         # (big-screen feature), so `_base` excludes it and the T-Deck is unchanged.
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1
-                      and bounds is None)
+        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None)
+        fs = self.fs
+        self.cell = _FONT_W * fs
         # The hint + SAVE-status strip sits just below the 18px unified bar (the old
         # title row was dissolved into the bar, Stage-4 rollout).
         self.hint_y = _BLK_HINT_Y * fs
