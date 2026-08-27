@@ -486,11 +486,14 @@ def test_the_web_console_is_baked_into_this_image(board):
         "this image has NO baked web console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
     count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    assert count == 4, stamp
+    # Self-consistent like the rest of this test: the baked set must be the
+    # image's OWN serve allowlist (moy_webhost.ASSETS), not a count restated
+    # here -- a hand-pinned 4 went stale the day moy_store.mjs joined the set.
+    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    assert count == len(declared), (stamp, declared)
     assert total > 400000, "a bundle this small is not the wasm console"
     names = board.pyval("__import__('moy_web').assets()")
-    assert set(names) == {"index.html.gz", "worker.js.gz",
-                          "micropython.mjs.gz", "micropython.wasm.gz"}, names
+    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
     # Each blob read back at its recorded length, starting with the gzip magic.
     # A misplaced symbol still gives plausible lengths -- it is the first bytes
     # that say the pointer landed on the right thing.
