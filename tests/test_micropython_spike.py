@@ -1787,6 +1787,56 @@ def test_psram_temperature_retune_wired():
         assert "mspi_timing_by_mspi_delay.c" not in build.read_text(
             encoding="utf-8"), ("%s carries its own #169 patch again" % build)
 
+def _idf_candidates(build):
+    """The sibling ESP-IDF checkouts this build.sh offers moybyte_setup_idf."""
+    out = []
+    for line in build.read_text(encoding="utf-8").splitlines():
+        _, sep, rest = line.partition("${REPO_ROOT}/firmware/")
+        if sep and "/.build/esp-idf" in rest:
+            out.append(rest.partition("/.build/esp-idf")[0])
+    return out
+
+
+def test_exactly_one_board_owns_the_esp_idf_checkout():
+    """ESP-IDF v5.5.1 is ~600MB and identical for all three boards, so they
+    share ONE clone: `moybyte_setup_idf` takes a candidate list and falls back
+    to cloning into its own `.build/esp-idf`. That makes the ownership a
+    GRAPH, and the graph is what rots.
+
+    It rotted once. Each board used to clone its own; when the shared build lib
+    landed (2026-08-17) the T-Deck started naming the P4's, which left the
+    T-Deck's own clone an orphan its own build no longer resolved -- while the
+    P4 named it FIRST and the Guition named it first too. Two boards' CMake
+    caches ended up pinning CMAKE_TOOLCHAIN_FILE into a directory nobody
+    owned, and CMake will not re-point that entry after the first configure: the
+    day the orphan was deleted, both builds would have failed on a dead path
+    rather than reconfiguring. (2026-08-27: it was, and they were wiped.)
+
+    So the shape is pinned, not the paths. One owner, every other board names
+    it and nothing else, and the owner names nobody -- a cycle or a second
+    orphan cannot be spelled.
+    """
+    named = {b.parent.name: _idf_candidates(b) for b in _esp32_builds()}
+    for board, cands in named.items():
+        assert len(set(cands)) == len(cands), (
+            "%s lists the same ESP-IDF checkout twice" % board)
+    owners = {c for cands in named.values() for c in cands}
+    assert len(owners) == 1, (
+        "the boards reach for %d ESP-IDF checkouts (%s) -- one of them is "
+        "nobody's, and a CMake cache that pins it cannot be re-pointed"
+        % (len(owners), ", ".join(sorted(owners)) or "none"))
+    owner = owners.pop()
+    assert owner in named, (
+        "%s is named as the shared ESP-IDF owner but builds nothing here"
+        % owner)
+    assert not named[owner], (
+        "%s owns the shared ESP-IDF checkout and also borrows one" % owner)
+    for board, cands in named.items():
+        if board != owner:
+            assert cands == [owner], (
+                "%s reaches past the owner (%s): %s" % (board, owner, cands))
+
+
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
