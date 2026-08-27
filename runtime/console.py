@@ -137,6 +137,16 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.web_console import WebConsole
 
+# system.json's owner (#209 landing B, system_store.py): the settings dict
+# `ws.system` aliases, the one persist funnel behind every Settings toggle, and
+# the achievements list's store halves -- over a StoreHandle that reads the
+# store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
+# settings (load_system's cascade) stays kernel policy, below.
+try:
+    from system_store import StoreHandle, SystemStore
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.system_store import StoreHandle, SystemStore
+
 # The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
 # builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
 # and toggle_sysmenu() stay on Workstation (tested ws. surface + device). Same
@@ -149,8 +159,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from this
 # file): the 3 hidden eggs + their state + _draw_egg/_draw_confetti/
 # _draw_achievements. The achievement CORE (ach, show_achievements,
-# load_achievements/_save_achievements/_achievement_unlocked) stays on Workstation
-# (tested ws.ach.* + device ws.load_achievements()). Same bare-or-package fallback.
+# load_achievements/_achievement_unlocked) stays on Workstation (tested ws.ach.*
+# + device ws.load_achievements()), and so do the three overlay DEADLINES those
+# objects push into at event time (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -260,11 +271,13 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from widgets import (
         _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
+        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
+        _POPUP_SEP_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (
         _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
+        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
+        _POPUP_SEP_H)
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
@@ -1113,12 +1126,16 @@ class Workstation:
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
         # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
         # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
-        self.system = {}              # system settings dict (moy_carts system.json)
-        # Crash isolation (#160 / Phase 8). The store is passed as a CALLABLE
-        # because load_system() rebinds self.system to what it read off the
-        # card -- a guard holding this boot-time dict would count strikes into
-        # an object nobody ever writes.
-        self.app_guard = CrashGuard(lambda: self.system, self._persist_system)
+        # system.json (#209 landing B): the store owns the dict and every
+        # persist funnel; `self.system` is a plain ALIAS of it and neither name
+        # is ever rebound -- prefs.load() clears and updates in place, which is
+        # what keeps settings_layer's raw writes, the launcher's per-paint
+        # favorites read and app_context's Prefs role honest with no migration.
+        self.prefs = SystemStore(self, StoreHandle(self))
+        self.system = self.prefs.settings
+        # Crash isolation (#160 / Phase 8): the dict itself, because it stays
+        # the same object across a load.
+        self.app_guard = CrashGuard(self.system, self.prefs.persist)
         self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
                                       # the single source; select_wallpaper drives it.
         # The wallpaper RENDERING + compiled-cart cache is its own component (#28); both
@@ -1313,18 +1330,32 @@ class Workstation:
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
         #44 redraw gate."""
+        # THE OVERLAY DEADLINES (#209 landing B, rev 3). The achievement objects
+        # PUSH here at event time -- an unlock arms the toast, an egg arms the
+        # popup, the Konami code arms the confetti -- and the per-frame gates
+        # (`_animating`, the WM's `_overlay_sig`) read these plain ints and
+        # nothing else. Before this they POLLED `ach.toast_active()` /
+        # `ach_ui._egg_active()` / `ach_ui._confetti_until` every loop on every
+        # tier, to be told "no" on essentially every frame of the console's life.
+        # Same shape as `_notice_until` below; 0 means down, and the objects keep
+        # only the PAYLOAD they draw, which is read only while its deadline is up.
+        self._toast_until = 0          # _ticks_ms the achievement banner hides at
+        self._egg_until = 0            # _ticks_ms the Easter-egg popup hides at
+        self._confetti_until = 0       # _ticks_ms the Konami confetti ends at
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
-        # rewards. Starts empty/volatile; load_achievements() wires the SD store +
-        # the unlock beep. The Workstation calls ach.note(event) at the flow points
-        # below (open/run/save_*/editor opens) and draws ach.toast each frame.
-        self.ach = Achievements()
+        # rewards. Starts empty/volatile; load_achievements() adds the SD store.
+        # The unlock hook is wired from the START, not at that load: persistence
+        # waits for a store, but arming the toast is kernel behavior a build with
+        # no card still owes the kid.
+        self.ach = Achievements(on_unlock=self._achievement_unlocked)
         # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from
         # this class -- see achievements_ui.py): the 3 hidden eggs + their trigger/
-        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg/egg_until/
-        # _confetti_until) + _draw_egg/_draw_confetti/_draw_achievements. The
-        # achievement core (ach/show_achievements/load_achievements/...) stays here.
-        # Egg trigger state is reset on screen changes (go_home/settings/desktop tap)
-        # via self.ach_ui.* so a stray sequence never carries between contexts.
+        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg) +
+        # _draw_egg/_draw_confetti/_draw_achievements. The achievement core
+        # (ach/show_achievements/load_achievements/...) and the deadlines above
+        # stay here. Egg trigger state is reset on screen changes
+        # (go_home/settings/desktop tap) via self.ach_ui.* so a stray sequence
+        # never carries between contexts.
         self.ach_ui = AchievementsUI(self, NAMES, ACHIEVEMENTS)
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
         # A transient SYSTEM banner (#53): something the machine did on its own and
@@ -1639,16 +1670,14 @@ class Workstation:
         return None
 
     def load_system(self):
-        """Load the system settings (moy_carts system.json) and apply the saved
-        wallpaper + font scale (#39). Safe no-op if no store/root is wired (embedded
-        boot)."""
-        if self.carts_store is not None and self.carts_root is not None:
-            try:
-                self.system = self._with_sd(
-                    lambda: self.carts_store.load_system(self.carts_root)) or {}
-            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("Moybyte system load failed:", _err_text(exc))
-                self.system = {}
+        """Read the system settings (`self.prefs`) and APPLY them -- the saved
+        wallpaper, font scale, theme, skin and every persisted toggle (#39).
+
+        The read is the store's; this cascade is kernel policy and stays here.
+        What a setting MEANS is the shell's business -- each one relays through
+        the same `set_*` verb the Settings row calls, with persist=False so
+        loading never re-writes what it just read."""
+        self.prefs.load()
         # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
         # boots at the saved text size. set_font_scale relays it into the system
         # canvas + relayouts; persist=False so loading doesn't re-write the store.
@@ -1817,7 +1846,7 @@ class Workstation:
         if persist:
             self.system["theme"] = self.theme_name
             self.system["theme_variant"] = self.theme_variant
-            self._persist_system()
+            self.prefs.persist()
 
     def set_theme_variant(self, variant, persist=True):
         """Flip the current theme between its dark and light presentation
@@ -1847,7 +1876,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["skin"] = self.skin_name
-            self._persist_system()
+            self.prefs.persist()
 
     def cycle_theme(self, d):
         """Step the panel theme through chrome.THEMES (programmatic verb; the UI
@@ -1887,7 +1916,7 @@ class Workstation:
 
     def _persist_font_scale(self):
         self.system["font_scale"] = self.font_scale
-        self._persist_system()
+        self.prefs.persist()
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
     #
@@ -1951,7 +1980,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_live"] = self.diag_live
-            self._persist_system()
+            self.prefs.persist()
 
     def set_diag_sd(self, on, persist=True):
         """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
@@ -1963,7 +1992,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_sd"] = self.diag_sd
-            self._persist_system()
+            self.prefs.persist()
 
     def set_frameskip(self, on, persist=True):
         """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
@@ -1974,7 +2003,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["frameskip"] = self.frameskip
-            self._persist_system()
+            self.prefs.persist()
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.
@@ -2018,7 +2047,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["two_player"] = self.two_player
-            self._persist_system()
+            self.prefs.persist()
 
     def set_crisp_pixels(self, on, persist=True):
         """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
@@ -2034,7 +2063,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["crisp_pixels"] = self.crisp_pixels
-            self._persist_system()
+            self.prefs.persist()
 
     def set_show_fps(self, on, persist=True):
         """Flip the in-game FPS chip (Settings -> SHOW FPS) and persist it.
@@ -2049,18 +2078,12 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["show_fps"] = self.show_fps
-            self._persist_system()
+            self.prefs.persist()
 
     def _persist_system(self):
-        """Write self.system to system.json when a writable store is wired. Shared by the
-        persisting Settings toggles (font, wallpaper, OTA channel)."""
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        try:
-            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("Moybyte system save failed:", _err_text(exc))
+        """`prefs.persist()` -- app_context's Prefs role and the dev channel's
+        `vol`, which keep speaking this name."""
+        return self.prefs.persist()
 
     # -- favorites + recents (#105) -------------------------------------------
     #
@@ -2092,7 +2115,7 @@ class Workstation:
             favs.append(path)
         self.system["favorites"] = favs
         self._dirty = True
-        self._persist_system()
+        self.prefs.persist()
 
     def _note_recent(self, cart):
         """Record `cart` as most-recently-run: move its path to the front of
@@ -2105,7 +2128,7 @@ class Workstation:
         mru = [p for p in self.system.get("desk_mru", []) if p != path]
         mru.insert(0, path)
         self.system["desk_mru"] = mru[:self._MRU_CAP]
-        self._persist_system()
+        self.prefs.persist()
 
     def recent_carts(self):
         """The desk_mru path list resolved back to live cart dicts (newest first),
@@ -2152,38 +2175,34 @@ class Workstation:
         rollback still guards a bad beta image)."""
         self.system["ota_channel"] = (
             "stable" if self._ota_channel() == "unstable" else "unstable")
-        self._persist_system()
+        self.prefs.persist()
 
     def load_achievements(self):
-        """Load the unlocked achievements (moy_carts achievements.json) and wire the
-        store + unlock-beep into a fresh Achievements (#21). Safe no-op on an
-        embedded/no-store boot -- then the achievements stay in volatile RAM (still
-        awarded + toasted this session, just not remembered). Call after the store +
-        carts_root are injected (host build_workstation / device run_desktop)."""
-        unlocked = []
-        if self.carts_store is not None and self.carts_root is not None:
-            try:
-                unlocked = self._with_sd(
-                    lambda: self.carts_store.load_achievements(self.carts_root)) or []
-            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("Moybyte achievements load failed:", _err_text(exc))
-                unlocked = []
-        self.ach = Achievements(unlocked, on_save=self._save_achievements,
+        """Wire a fresh Achievements over the badges the store remembers (#21).
+
+        The read is `prefs`'; the WIRING is kernel -- persistence goes back to
+        the store, the unlock effects (the toast deadline + the beep) are the
+        kernel's own. Call after the store + carts_root are injected (host
+        build_workstation / device run_desktop)."""
+        self.ach = Achievements(self.prefs.load_achievements(),
+                                on_save=self.prefs.save_achievements,
                                 on_unlock=self._achievement_unlocked)
 
-    def _save_achievements(self, ids):
-        """Persist the unlocked-id list through the SD wrapper, when writes are on.
-        A failed/disabled write just isn't remembered (the badge still shows this
-        session) -- never fatal."""
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        self._with_sd(lambda: self.carts_store.save_achievements(ids, self.carts_root))
-
     def _achievement_unlocked(self, ach_id):
-        """Celebrate a fresh unlock with a short rising beep, when audio is wired.
-        Best-effort -- a silent backend (or none) just skips it. The toast is the
-        primary, always-present feedback; the beep is the cherry on top."""
+        """A fresh unlock's EFFECTS: arm the toast overlay, then celebrate with a
+        short rising beep when audio is wired (#21, rev-3 event push).
+
+        `Achievements` generates the effect and the kernel executes it. The
+        deadline is written HERE, at the unlock, rather than polled per frame off
+        the object -- `_animating` and the WM's overlay signature read the flat
+        field and never call into `ach` on the frame path. There is no toast
+        QUEUE to preserve: `award()` overwrites its payload, so a second unlock
+        inside the window replaces the banner and extends the deadline, which is
+        exactly what a later write to this field does.
+
+        The deadline is armed BEFORE the beep so a silent (or broken) backend
+        cannot cost the kid the banner; the beep itself is best-effort."""
+        self._toast_until = _ticks_ms() + TOAST_MS
         au = self.audio
         if au is not None:
             try:
@@ -2193,10 +2212,10 @@ class Workstation:
                 pass
 
     # -- hidden Easter eggs (#21) now live on self.ach_ui (achievements_ui.py,
-    # AchievementsUI): the 3 eggs + their trigger/popup state + _show_egg/
-    # _egg_active + _draw_egg/_draw_confetti/_draw_achievements. The achievement
-    # core above (load_achievements/_save_achievements/_achievement_unlocked +
-    # self.ach) stays here.
+    # AchievementsUI): the 3 eggs + their trigger state + the popup payload +
+    # _show_egg + _draw_egg/_draw_confetti/_draw_achievements. The achievement
+    # core above (load_achievements/_achievement_unlocked + self.ach) and the
+    # overlay deadlines those objects arm (_init_overlays) stay here.
 
     def select_wallpaper(self, wp_id, persist=True):
         """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
@@ -2226,13 +2245,7 @@ class Workstation:
 
     def _persist_wallpaper(self):
         self.system["wallpaper"] = self.wallpaper_id
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        try:
-            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("Moybyte system save failed:", _err_text(exc))
+        self.prefs.persist()
 
     def cycle_wallpaper(self, d):
         """Step the wallpaper choice by d (programmatic verb; the UI pick is the
@@ -5222,12 +5235,15 @@ class Workstation:
                 "install", "done", "checking", "downloading",
                 "c6_checking", "c6_downloading", "c6_flashing", "c6_done"):
             return True
-        # Transient overlays redraw while they're up.
-        if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:
+        # Transient overlays redraw while they're up. Three plain int reads (#209
+        # landing B): the achievement objects wrote these at their event, so this
+        # gate never calls into them -- and one clock read serves all three.
+        now = _ticks_ms()
+        if self._confetti_until and _ticks_diff(self._confetti_until, now) > 0:
             return True
-        if self.ach_ui._egg_active():
+        if self._egg_until and _ticks_diff(self._egg_until, now) > 0:
             return True
-        if self.ach.toast_active():
+        if self._toast_until and _ticks_diff(self._toast_until, now) > 0:
             return True
         if self.notice_active():
             return True

@@ -131,7 +131,7 @@ def test_small_canvas_run_binds_and_composites(tmp_path):
     assert stock is not ws.canvas
     # No view: 128x128 on 320x240 composites at 1x, centered (96, 56).
     assert ws.wm.viewport() == (96, 56, 1)
-    ws.ach.toast = None                  # the first-play achievement toast is
+    ws._toast_until = 0                  # the first-play achievement toast is
     for _ in range(3):                   # wall-clock timed -- clear, don't wait
         drv.frame(DT)
     # pix() reads a palette INDEX back on every tier, so the cart's own colour

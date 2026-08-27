@@ -45,8 +45,7 @@ def _quiesce(ws):
     """
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
     ws.bar_layer._clock_text = lambda: "00:00"
 
 

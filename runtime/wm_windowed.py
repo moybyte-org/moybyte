@@ -57,14 +57,15 @@ try:
     from wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from layers import Layer
     from chrome import NAMES          # not palette: chrome is the device-safe home
-    from widgets import _Blit, _in    # (runtime/palette.py needs colorsys -- host-only)
+    # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
+    from widgets import _Blit, _in, _ticks_ms, _ticks_diff
     import ui as _ui                  # desk icon label pills (ui.chip)
     from surface import SurfaceSet    # surface model v1 (docs/surface_model_v1.md)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.chrome import NAMES
-    from runtime.widgets import _Blit, _in
+    from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
     from runtime import ui as _ui
     from runtime.surface import SurfaceSet
 
@@ -1338,10 +1339,12 @@ class WindowedWM(FullscreenStackWM):
         last = ws._last_ptr
         ptr = ((cur is not None and (cur[3] or cur[4]))
                or (last is not None and (last[3] or last[4])))
+        now = _ticks_ms()
         overlay = (ws._splash_until is not None
-                   or (ws.ach_ui._confetti_until
-                       and ws.ach_ui._confetti_until is not None)
-                   or ws.ach_ui._egg_active() or ws.ach.toast_active())
+                   or (ws._confetti_until
+                       and _ticks_diff(ws._confetti_until, now) > 0)
+                   or (ws._egg_until and _ticks_diff(ws._egg_until, now) > 0)
+                   or (ws._toast_until and _ticks_diff(ws._toast_until, now) > 0))
         gesture = self._drag if self._drag is not None else self._resize
         if ws._dirty or overlay:
             ss.epoch()

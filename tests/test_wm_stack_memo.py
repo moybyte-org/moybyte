@@ -32,10 +32,10 @@ def _running_cart(tmp_path):
     ws.launcher.sel = 0
     ws.open()                      # PLAY the first seed cart -> screen "desktop"
     ws._splash_until = None
-    ws.ach.toast = None
+    ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
-    ws.ach.toast = None            # drop any "First Steps" toast so the overlays are static
+    ws._toast_until = 0            # drop any "First Steps" toast so the overlays are static
     for _ in range(2):
         drv.frame(DT)
     return ws, drv
@@ -88,10 +88,10 @@ def test_static_launcher_stack_is_memoized(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.select_wallpaper("fill:dark_blue", persist=False)
     ws._splash_until = None
-    ws.ach.toast = None
+    ws._toast_until = 0
     for _ in range(3):
         drv.frame(DT)
-    ws.ach.toast = None
+    ws._toast_until = 0
     a = ws.wm.draw_stack()
     calls = _count_rebuilds(ws)
     for _ in range(20):

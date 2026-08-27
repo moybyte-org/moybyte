@@ -594,15 +594,18 @@ def test_the_guard_disables_after_three_unhealed_opens():
     assert g.arm("app") is True
 
 
-def test_the_guard_holds_state_across_a_rebound_store():
-    """`load_system()` REBINDS `ws.system`, so the guard must read the store
-    through a callable. A guard holding the boot-time dict counts strikes into
-    an object nobody persists -- i.e. silently does nothing."""
-    holder = {"system": {}}
-    g = CrashGuard(lambda: holder["system"])
+def test_the_guard_holds_state_across_a_reload():
+    """The guard holds the settings DICT, not a callable that fetches it -- so
+    a reload has to arrive IN that object. `SystemStore.load()` clears and
+    updates in place for exactly this reason (#209 landing B); a load that
+    rebound the name instead would leave the guard counting strikes into an
+    orphan nobody persists, silently."""
+    settings = {}
+    g = CrashGuard(settings)
     g.arm("app")
-    carried = holder["system"][crash_guard.KEY]
-    holder["system"] = {crash_guard.KEY: carried}      # what load_system does
+    carried = settings[crash_guard.KEY]
+    settings.clear()                                   # what SystemStore.load does
+    settings.update({crash_guard.KEY: carried})
     assert g.strikes("app") == 1
 
 

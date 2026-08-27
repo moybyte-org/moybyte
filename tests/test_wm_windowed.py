@@ -42,8 +42,7 @@ def _drv(ws):
 
 def _quiesce(ws):
     ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
 
 
 # ---------------------------------------------------------------------------

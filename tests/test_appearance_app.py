@@ -81,8 +81,7 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     # The monitor shows a COMPUTED still on every tier (no live/static drift),
     # so the appearance screen closes the redraw gate even for a live cart
     # (once the "Home Decorator" unlock toast this pick raised has cleared).
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
     assert ws._animating(1 / 30) is False
 
     app._set_mode("themes")
@@ -192,8 +191,7 @@ def test_small_tier_monitor_shows_whole_my_art_image(tmp_path):
     assert ws.artwork.set_wallpaper()
     app = _open_appearance(ws)
     assert app.mode == "images"
-    ws.ach.toast = None                        # the unlock toast would overlap
-    ws.ach.toast_until = 0                     # the monitor's top rows
+    ws._toast_until = 0        # the unlock toast would overlap the top rows
     ws.mark_dirty()
     ws.input.begin_frame()
     ws.frame(1 / 30)

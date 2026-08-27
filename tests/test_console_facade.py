@@ -31,10 +31,10 @@ from ws_helpers import build_desktop_ws, build_ws
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
 
-# The collaborator attributes on Workstation. Landings B-E add: prefs
-# (SystemStore), covers (CoverCache), carts (CartManager), look (Appearance),
-# history (HistoryRouter).
-COLLABORATORS = ("web",)
+# The collaborator attributes on Workstation. Landings C-E add: covers
+# (CoverCache), carts (CartManager), look (Appearance), history
+# (HistoryRouter).
+COLLABORATORS = ("web", "prefs")
 
 # name on Workstation -> method on the collaborator. Every entry is a caller
 # that has not moved; the comment says who, so retiring one is a search with an
@@ -49,6 +49,14 @@ FORWARDS = {
         "webhost_serving": "serving",        # settings_layer, tools/p4_push_web
         "webhost_label": "label",            # settings_layer, tools/p4_push_web
         "toggle_webhost": "toggle",          # settings_layer, dev_channel, p4_push_web
+    },
+    # Landing B. The dict itself needed no forward at all -- `ws.system` is a
+    # plain alias of `prefs.settings` and SystemStore loads it IN PLACE, so
+    # every raw reader and writer (settings_layer, the dev channel, the
+    # launcher's favorites, app_context's Prefs role) kept working untouched.
+    # Only the WRITE verb has callers left outside the kernel.
+    "prefs": {
+        "_persist_system": "persist",        # app_context's Prefs, dev_channel's `vol`
     },
 }
 

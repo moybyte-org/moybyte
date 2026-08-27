@@ -51,7 +51,7 @@ frames is ~100 ms. A false strike is cleared by the next healthy open anyway.
 ## Storage
 
 One key inside the shell's existing `system.json` (`ws.system` +
-`ws._persist_system`) -- no new store surface, no new file, and it inherits that
+`ws.prefs.persist`) -- no new store surface, no new file, and it inherits that
 store's atomic write, so an interrupted write cannot leave a half-parsed guard
 that disables everything. The state is injected as a `(store, save)` pair rather
 than a `ws`, so this stays a leaf that a test can drive with a plain dict.
@@ -69,13 +69,16 @@ KEY = "app_guard"
 class CrashGuard:
     """Per-cart strike counting around a risky open.
 
-    `store` is the persisted settings dict (`ws.system`) or a zero-argument
-    callable returning it; `save` is the callable that writes it
-    (`ws._persist_system`). A CALLABLE is what the shell passes, because
-    `load_system()` REBINDS `ws.system` to the dict it read off the card -- a
-    guard holding the boot-time dict would then be counting strikes into an
-    object nobody persists. Neither is touched at construction, so a guard built
-    before the store is loaded still works."""
+    `store` is the persisted settings dict itself (`ws.system`); `save` is the
+    callable that writes it (`ws.prefs.persist`). It used to be a zero-argument
+    CALLABLE returning the dict, because the old `load_system()` REBOUND
+    `ws.system` to what it read off the card and a guard holding the boot-time
+    dict would have counted strikes into an object nobody persists. `SystemStore`
+    owns that dict now and loads it IN PLACE (#209 landing B), so the object a
+    guard is handed at construction is the object the card's contents arrive in
+    -- there is nothing left for the indirection to protect against. Neither
+    argument is touched at construction, so a guard built before the store is
+    even wired still works."""
 
     # Three failed opens disable it. Deliberately not two: an app can lose one
     # open to something that is not its fault (a card pulled mid-save, a
@@ -88,7 +91,7 @@ class CrashGuard:
     HEAL_FRAMES = 3
 
     def __init__(self, store, save=None):
-        self._store = store if callable(store) else (lambda: store)
+        self._store = store
         self._save = save
         self._armed = None        # the id this run is holding a strike for
         self._frames = 0
@@ -101,7 +104,7 @@ class CrashGuard:
         Tolerant of garbage: a hand-edited or half-migrated `system.json` whose
         `app_guard` is not a dict is REPLACED, never allowed to raise. A corrupt
         guard must not be able to do what the guard exists to prevent."""
-        store = self._store()
+        store = self._store
         d = store.get(KEY)
         if not isinstance(d, dict):
             d = {}

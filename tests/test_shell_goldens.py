@@ -230,12 +230,9 @@ def _quiesce(ws):
     notes achievements, which can re-arm the toast/confetti mid-sequence."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
-    au = ws.ach_ui
-    au.egg_msg = None
-    au.egg_until = 0
-    au._confetti_until = 0
+    ws._toast_until = 0
+    ws._egg_until = 0
+    ws._confetti_until = 0
     ws.show_achievements = False
     ws.show_fps = False
     ws.perf_hud = False

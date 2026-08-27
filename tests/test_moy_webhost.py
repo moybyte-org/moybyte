@@ -1526,8 +1526,7 @@ def test_the_parked_screen_is_static_so_the_redraw_gate_closes(tmp_path):
     ws.toggle_webhost()
     ws.frame(1 / 30.0)
     ws._splash_until = None                  # the boot logo animates on its own
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
     ws._dirty = False
     ws.pointer.visible = False
     ws._last_ptr = ws._ptr_state()

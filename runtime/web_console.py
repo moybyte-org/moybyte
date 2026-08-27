@@ -11,9 +11,12 @@ socket and every tier without the service is untouched. The service contract
 is `.serving` / `.start()` / `.stop()` / `.url()`.
 
 The webhost is read THROUGH `ws` on every call and never captured here: it is
-`None` at construction and injected later by `wire_workstation_core`, and
-`ws.system` loads later still (the same ordering `make_webhost` respects by
-reading the pin at `start()` rather than at construction).
+`None` at construction and injected later by `wire_workstation_core`, and the
+settings load later still (the same ordering `make_webhost` respects by reading
+the pin at `start()` rather than at construction). The pin's own persistence
+goes to the sibling collaborator that owns system.json (`ws.prefs`, #209
+landing B); `ws.system` stays a plain alias of the dict it holds, so reading and
+writing a key through it needs nothing from this object.
 """
 
 try:
@@ -71,7 +74,7 @@ class WebConsole:
             return str(pin)
         pin = self._mint_pin()
         ws.system["web_pin"] = pin
-        ws._persist_system()
+        ws.prefs.persist()
         return pin
 
     def _mint_pin(self):

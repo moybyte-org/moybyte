@@ -65,11 +65,11 @@ def gen_cover(slug):
         if ws.pointer is not None:
             ws.pointer.visible = False
         for _ in range(FRAMES):
-            ws.ach.toast = None          # keep system toasts out of the artwork
+            ws._toast_until = 0          # keep system toasts out of the artwork
             if ws.pointer is not None:
                 ws.pointer.visible = False
             ws.frame(1 / 30)
-        ws.ach.toast = None
+        ws._toast_until = 0
         ws._dirty = True
         ws.frame(1 / 30)                 # one clean frame after the last toast clear
         if ws.cart_error:
