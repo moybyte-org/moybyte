@@ -293,7 +293,7 @@ def _open_app_kind(ws, kind):
         colour = 7 if names is None else 7
         app.draw = lambda dt, cv=ws.sys_canvas, c=colour: cv.cls(c)
         ws.register_app(app)
-        ws.open_app(app, cart=ws._all_carts[0])
+        ws.open_app(app, cart=ws.carts.all[0])
         return app
     app = ws._apps_by_id[kind]
     assert ws.open_app(app), kind + " has no identity cart"

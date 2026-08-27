@@ -444,7 +444,7 @@ class Wallpaper:
             # #66 live-set diet: the slimmed cart rehydrates for this compile
             # (src/sheet bake into the preview ns), then re-slims -- the same
             # dance select_wallpaper does for the backdrop compile.
-            ws._rehydrate_cart(cart)
+            ws.carts.rehydrate(cart)
             try:
                 sheet = ws._build_sheet(cart)
                 tilemap = ws._build_tilemap(cart)
@@ -455,7 +455,7 @@ class Wallpaper:
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
-                    ws._reslim_cart(cart)
+                    ws.carts.reslim(cart)
             if ns.get("_init"):
                 ns["_init"]()
             self._pv_ns = ns
@@ -477,11 +477,11 @@ class Wallpaper:
         if src is None:
             ws = self.ws
             try:
-                ws._rehydrate_cart(cart)
+                ws.carts.rehydrate(cart)
                 src = cart.get("src")
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
-                    ws._reslim_cart(cart)
+                    ws.carts.reslim(cart)
         return cover_sig(src) if src else None
 
     def _static_preview(self, w, h):

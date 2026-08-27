@@ -8,13 +8,13 @@ bug it fixes:
   * **the #186 free order.** Payloads live off the gc heap on device, an
     in-flight `_CoverJob` aliases both a runs blob and the shared decode
     scratch, and the invariant is that jobs are dropped BEFORE anything is
-    freed. It used to be two hand-copies (`_apply_items` and the diet release);
+    freed. It used to be two hand-copies (`carts.apply` and the diet release);
     it is one body now, so it gets a perturbation test rather than a comment --
     including the reversed order EXECUTED, so the leak it causes is on the
     record rather than asserted about.
   * **the icon cache is invalidated.** It was written at one site and cleared
     at none, so a re-seed or a browser sync kept stale desk icons and a deleted
-    cart's Image leaked. And the clear has an ORDER of its own: `slim_carts`
+    cart's Image leaked. And the clear has an ORDER of its own: `carts.slim`
     bakes each icon and then deletes the sprite art, so a clear that ran after
     it would leave a slimmed cart with no icon and nothing to rebuild from.
   * **`gen` has one author and three bump sites**, because eight launcher keys
@@ -219,26 +219,26 @@ def test_a_rescan_rebuilds_the_icon_from_the_new_art(tmp_path):
     for the rest of the session -- on the shelf card and the desk column both.
 
     Driven end to end through the real re-scan path, because the fix is as much
-    about ORDER as about clearing: `_apply_items` clears BEFORE `slim_carts`,
+    about ORDER as about clearing: `carts.apply` clears BEFORE `carts.slim`,
     which is what bakes the icon and then deletes the sprite art."""
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     made = moy_carts.create("Iconic", root, src="def _draw():\n    pass\n")
     moy_carts.save_sprites(made, _tile0("5"))
     ws = build_ws(tmp_path)
-    cart = next(c for c in ws._all_carts if c["title"] == "Iconic")
+    cart = next(c for c in ws.carts.all if c["title"] == "Iconic")
     before = _icon_pixels(ws.covers.icon_sheet_for(cart))
     assert before is not None, "seed cart drew no icon -- the test proves nothing"
 
     stored = next(c for c in moy_carts.scan(root) if c["title"] == "Iconic")
     moy_carts.save_sprites(stored, _tile0("e"))      # repaint the icon's tile
-    ws._apply_items(moy_carts.scan(root))
+    ws.carts.apply(moy_carts.scan(root))
 
-    fresh = next(c for c in ws._all_carts if c["title"] == "Iconic")
+    fresh = next(c for c in ws.carts.all if c["title"] == "Iconic")
     after = _icon_pixels(ws.covers.icon_sheet_for(fresh))
     assert after is not None, (
         "the icon was cleared with nothing left to rebuild it from -- the clear "
-        "ran AFTER slim_carts deleted the art")
+        "ran AFTER carts.slim deleted the art")
     assert after != before, "the stale icon survived the re-scan"
 
 
@@ -249,13 +249,13 @@ def test_a_deleted_carts_icon_does_not_outlive_it(tmp_path):
     moy_carts.ensure_dirs(root)
     cart = moy_carts.create("Doomed", root, src="def _draw():\n    pass\n")
     ws = build_ws(tmp_path)
-    live = next(c for c in ws._all_carts if c["title"] == "Doomed")
+    live = next(c for c in ws.carts.all if c["title"] == "Doomed")
     ws.covers.icon_sheet_for(live)
     key = live.get("path") or live.get("title")
     assert key in ws.covers.icons
 
     moy_carts.delete(cart)
-    ws._apply_items(moy_carts.scan(root))
+    ws.carts.apply(moy_carts.scan(root))
 
     assert key not in ws.covers.icons
 
@@ -290,7 +290,7 @@ def test_gen_bumps_on_a_build_a_diet_release_and_a_rescan(tmp_path):
     after_diet = covers.gen
     assert after_diet > after_build
 
-    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))   # invalidate_all
+    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))   # invalidate_all
     assert covers.gen > after_diet
 
 
@@ -301,7 +301,7 @@ def test_a_definitive_miss_bumps_gen_too(tmp_path):
     moy_carts.ensure_dirs(root)
     bare = moy_carts.create("Bare", root, src="def _draw():\n    pass\n")
     ws = build_ws(tmp_path)
-    cart = next(c for c in ws._all_carts if c["path"] == bare["path"])
+    cart = next(c for c in ws.carts.all if c["path"] == bare["path"])
     before = ws.covers.gen
     ws.covers.begin_frame()
     assert ws.covers.cover_for(cart, 40, 30) is None
@@ -415,8 +415,8 @@ def test_the_diet_release_keeps_the_newest_entries_of_both_lrus(tmp_path):
     covers = ws.covers
     keep = cover_cache._COVER_DIET_KEEP
     carts = [_mk_cart(tmp_path, "Cover%d" % i, i + 1) for i in range(keep + 3)]
-    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))
-    live = {c["path"]: c for c in ws._all_carts}
+    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    live = {c["path"]: c for c in ws.carts.all}
     order = [live[c["path"]] for c in carts]
     for cart in order:
         _land(ws, cart, 40, 30)
@@ -451,7 +451,7 @@ def test_a_run_releases_the_caches_only_on_the_diet_tier(tmp_path):
     cart = _mk_cart(tmp_path)
     ws = build_ws(tmp_path)
     _land(ws, cart, 40, 30)
-    live = next(c for c in ws._all_carts if c["path"] == cart["path"])
+    live = next(c for c in ws.carts.all if c["path"] == cart["path"])
     ws._open_workspace(live)
     assert ws.covers.diet is False
     warm = ws.covers.gen
@@ -474,7 +474,7 @@ def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
     moy_carts.ensure_dirs(root)
     bare = moy_carts.create("Bare", root, src="def _draw():\n    pass\n")
     ws = build_ws(tmp_path)
-    cart = next(c for c in ws._all_carts if c["path"] == bare["path"])
+    cart = next(c for c in ws.carts.all if c["path"] == bare["path"])
     ws.covers.begin_frame()
     assert ws.covers.cover_for(cart, 40, 30) is None
     assert cart["path"] in ws.covers._none
@@ -484,8 +484,8 @@ def test_a_rescan_forgets_that_a_cart_had_no_cover(tmp_path):
 
     stored = next(c for c in moy_carts.scan(root) if c["path"] == bare["path"])
     moy_carts.save_image(stored, "cover", _cover_text(64, 48, 7))
-    ws._apply_items(moy_carts.scan(root))
+    ws.carts.apply(moy_carts.scan(root))
     assert ws.covers._none == {}
 
-    fresh = next(c for c in ws._all_carts if c["path"] == bare["path"])
+    fresh = next(c for c in ws.carts.all if c["path"] == bare["path"])
     assert _land(ws, fresh, 40, 30) is not None

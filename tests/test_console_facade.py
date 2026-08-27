@@ -31,9 +31,9 @@ from ws_helpers import build_desktop_ws, build_ws
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
 
-# The collaborator attributes on Workstation. Landings C-E add: carts
-# (CartManager), look (Appearance), history (HistoryRouter).
-COLLABORATORS = ("web", "prefs", "covers")
+# The collaborator attributes on Workstation. Landings D-E add: look
+# (Appearance), history (HistoryRouter).
+COLLABORATORS = ("web", "prefs", "covers", "carts")
 
 # name on Workstation -> method on the collaborator. Every entry is a caller
 # that has not moved; the comment says who, so retiring one is a search with an
@@ -68,6 +68,15 @@ FORWARDS = {
     # `ws.covers.icon_sheet_for` draw arguments, wm_windowed's desk icon, and
     # the direct suites.
     "covers": {},
+    # Landing C, commit 2. ONE forward, and it is the one #209's own 3d blind
+    # spot names: `moy_webhost` captures `lambda: ws.rescan_carts()` when the
+    # webhost is CONSTRUCTED, and the Guition on-glass suite's sync test drives
+    # it end to end from a browser batch. Everything else migrated in-commit --
+    # the roster attribute (`carts.all`) has no `ws` mirror at all, because a
+    # re-scan REBINDS the list and an alias would go stale on the first sync.
+    "carts": {
+        "rescan_carts": "rescan",            # device/moy_webhost's on_sync lambda
+    },
 }
 
 # `getattr(ws, "X")` names that are deliberately absent from a host console.

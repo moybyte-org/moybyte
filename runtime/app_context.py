@@ -232,10 +232,19 @@ class _StoreRole:
     Subclasses call `_StoreRole.__init__(self, ws)`, set `self.raw` to their
     in-session view, and reach the shell through `_store()` / `_shell()` -- the
     Workstation is held HERE, once, so there is a single mangled reference
-    rather than one per subclass."""
+    rather than one per subclass.
+
+    The (store, root, can_manage, with_sd) guard is NOT re-derived here (#209
+    landing C, architecture doc 2a): the shell's ONE `StoreHandle` is taken off
+    it at construction, and `readable`/`ready`/`_session` are that object's
+    `ready`/`writable`/`call`. It arrives as an object rather than an import, so
+    this module stays the leaf it is -- it imports nothing of the shell -- and
+    it still reads the store THROUGH `ws` per call, so the late service
+    injection cannot become a wiring-order trap here either."""
 
     def __init__(self, ws):
         self.__ws = ws
+        self.__store = ws.store
 
     # -- the shell, for subclasses ------------------------------------------
 
@@ -246,21 +255,20 @@ class _StoreRole:
 
     def _shell(self):
         """The Workstation. Module-internal, for the handful of verbs that
-        reach past the store itself (`_all_carts`, `_rehydrate_cart`,
-        `wallpaper_id`, ...)."""
+        reach past the store itself (`wallpaper_id`, the wallpaper cart
+        lookups, ...)."""
         return self.__ws
 
     # -- readiness -----------------------------------------------------------
 
     def readable(self):
         """A store exists to READ from."""
-        ws = self.__ws
-        return ws.carts_store is not None and ws.carts_root is not None
+        return self.__store.ready()
 
     def ready(self):
         """A store exists AND writes are enabled (the `_store_ready` predicate
         every Desk-Lab app used to spell out)."""
-        return self.readable() and bool(self.__ws.can_manage)
+        return self.__store.writable()
 
     # -- the session ---------------------------------------------------------
 
@@ -268,7 +276,7 @@ class _StoreRole:
         """`fn()` inside ONE storage session, as `(value, err)`. The single
         try/except in this module's storage path."""
         try:
-            return (self.__ws._with_sd(fn), None)
+            return (self.__store.call(fn), None)
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
             return (None, str(exc))
 
@@ -546,7 +554,7 @@ class Carts(_StoreRole):
 
     def all(self):
         """Every scanned cart (the FULL list, not the launcher run-grid)."""
-        return self._shell()._all_carts
+        return self._shell().carts.all
 
     def can_journal(self):
         """True when the store carries the #111 journal verbs (an older store
@@ -560,11 +568,11 @@ class Carts(_StoreRole):
 
     def hydrate(self, cart):
         """Load a slimmed cart's full payloads back IN PLACE (#66)."""
-        return self._shell()._rehydrate_cart(cart)
+        return self._shell().carts.rehydrate(cart)
 
     def apply(self, items):
         """Adopt a fresh scan as the live cart list (re-derives both grids)."""
-        self._shell()._apply_items(items)
+        self._shell().carts.apply(items)
 
     def load_deck(self, cart):
         return self._read(self.raw.load_deck, cart)

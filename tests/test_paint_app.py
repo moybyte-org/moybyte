@@ -131,7 +131,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     paint_app = _open_paint(ws)
     assert paint_app.ctx.artwork is ws.artwork      # the AppContext handle
 
-    other = next(c for c in ws._all_carts if c["title"] == "Star Catcher")
+    other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
     ws._open_workspace(other)
     ws.run(ws.project, ws.launcher_layer)

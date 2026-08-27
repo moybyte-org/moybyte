@@ -132,6 +132,14 @@ class FakeWM:
     _stack = ["home"]
 
 
+class _FakeCarts:
+    """`ws.carts` narrowed to the one member `_remote_state` reads (#209
+    landing C): the roster is a plain attribute on the collaborator now."""
+
+    def __init__(self):
+        self.all = []
+
+
 class FakeWS:
     """The `_remote_state` surface, plus a compositor."""
 
@@ -140,7 +148,7 @@ class FakeWS:
         self.comp = comp
         self.screen = "home"
         self.wifi = None
-        self._all_carts = []
+        self.carts = _FakeCarts()
         self._apps = ()
         self._psave_ms = 0
         self._psave_asleep = False

@@ -243,7 +243,7 @@ def test_attach_sheet_lands_the_table_in_the_target_cart(tmp_path):
         "def _draw():\n    cls(0)\n"
     )
     game = ws.carts_store.create("Coin Quest 2", carts, src=game_src, type="game")
-    ws._apply_items(ws.carts_store.scan(carts))
+    ws.carts.apply(ws.carts_store.scan(carts))
     app = _open_sheets(ws)
     app._new_sheet()                         # + NEW
     # Name the sheet file "wave" -- attach slugs the FILE name into the cart, and
@@ -272,7 +272,7 @@ def test_attach_sheet_lands_the_table_in_the_target_cart(tmp_path):
     assert app.sheet is not None and app.sheet_name == "wave"
     # And the game reads it back at runtime through table() (#78's cart verb --
     # already shipped; this proves the attach UI feeds it end to end).
-    ws._apply_items(ws.carts_store.scan(carts))
+    ws.carts.apply(ws.carts_store.scan(carts))
     for i, c in enumerate(ws.launcher.items):
         if c.get("title") == "Coin Quest 2":
             ws.launcher.sel = i
@@ -476,7 +476,7 @@ def test_attach_unaffected_by_op_history(tmp_path):
         "def _draw():\n    cls(0)\n"
     )
     game = ws.carts_store.create("Coin Quest 3", carts, src=game_src, type="game")
-    ws._apply_items(ws.carts_store.scan(carts))
+    ws.carts.apply(ws.carts_store.scan(carts))
     app = _open_sheets(ws)
     app._new_sheet()
     app._begin_rename()
@@ -547,7 +547,7 @@ def test_cart_reads_table_and_text_at_runtime(tmp_path):
     moy_carts.save_text(cart, "dialog",
                         json.dumps({"format": "moytext-v1",
                                     "body": "Hello\nAdventurer"}))
-    ws._apply_items(ws.carts_store.scan(carts))
+    ws.carts.apply(ws.carts_store.scan(carts))
     for i, c in enumerate(ws.launcher.items):
         if c.get("title") == "Reader":
             ws.launcher.sel = i

@@ -154,7 +154,8 @@ class Launcher:
                                       # draw the real themeable pencil/plus icon big
         self.cover_for = None         # optional (cart, w, h) -> full-bleed cover
                                       # blittable (visual identity v1 Section 11.4)
-        self.favorite_for = None      # optional cart -> bool (console wires ws.is_favorite,
+        self.favorite_for = None      # optional cart -> bool (console wires
+                                      # ws.carts.is_favorite as a bound method,
                                       # #105): when set, the SELECTED card's corner star
                                       # badge draws + is tappable (favorite_rect below)
         if layout is None:
@@ -1235,7 +1236,7 @@ class LauncherHomeLayer:
             # never fall through to the card's primary activation underneath it.
             frect = ws.launcher.favorite_rect(ws.launcher.sel)
             if frect is not None and self._in(px, py, frect):
-                ws.toggle_favorite(ws.launcher.selected())
+                ws.carts.toggle_favorite(ws.launcher.selected())
                 return True
             # The selected card's PLAY / CHANGE buttons (wide-card tiers).
             # Checked before the grid press so a button tap never falls through to
@@ -1389,7 +1390,7 @@ class EditorPickerLayer:
 
     Cart management lives HERE now (docs/shell_ux_v1.md: the launcher is for PLAYING,
     the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
-    via the lent zone (ws.dup_cart/ws.del_cart, which read `ws.picker`'s selection
+    via the lent zone (ws.carts.dup/ws.carts.delete, which read `ws.picker`'s selection
     instead of the launcher's -- see console.py). "+ New" was already picker-only (the
     pinned grid tile). DEL is two-tap guarded (`_del_armed`): a project sits right next
     to its icon in this grid, so a single accidental tap must not delete it -- the
@@ -1678,12 +1679,12 @@ class EditorPickerLayer:
         real = ws._real_selected(ws.picker)
         if ws.can_manage and real is not None and self._in(px, py, lay.dup_btn):
             self._disarm_delete()
-            ws.dup_cart()
+            ws.carts.dup()
             return True
         if ws.can_manage and real is not None and self._in(px, py, lay.del_btn):
             if self._del_armed:
                 self._disarm_delete()
-                ws.del_cart()
+                ws.carts.delete()
             else:
                 self._arm_delete()
             return True

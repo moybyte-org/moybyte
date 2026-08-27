@@ -465,7 +465,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
 
     demo = Demo()
     ws.register_app(demo)
-    ws.open_app(demo, cart=ws._all_carts[0])
+    ws.open_app(demo, cart=ws.carts.all[0])
     assert ws.screen == "leaver"
     ws.go_home()
     assert ws.screen == "launcher"

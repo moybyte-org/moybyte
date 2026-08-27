@@ -62,12 +62,12 @@ def test_empty_query_restores_the_full_grid(tmp_path):
 
 
 def test_a_rescan_reapplies_the_active_search_filter(tmp_path):
-    """A create/dup/delete re-syncs the grid from a fresh scan (_apply_items) --
+    """A create/dup/delete re-syncs the grid from a fresh scan (carts.apply) --
     an active search must survive that resync, not silently revert to the full
     list."""
     ws = _ws(tmp_path)
     ws.set_search_query("star")
-    ws._apply_items(ws._all_carts)   # the shape every cart-management verb calls
+    ws.carts.apply(ws.carts.all)   # the shape every cart-management verb calls
     assert [it["title"] for it in _real_items(ws)] == ["Star Catcher"]
 
 
@@ -135,11 +135,11 @@ def test_search_row_is_absent_off_the_launcher(tmp_path):
 def test_favorite_toggle_and_query(tmp_path):
     ws = _ws(tmp_path)
     cart = _find(ws, "Star Catcher")
-    assert ws.is_favorite(cart) is False
-    ws.toggle_favorite(cart)
-    assert ws.is_favorite(cart) is True
-    ws.toggle_favorite(cart)
-    assert ws.is_favorite(cart) is False
+    assert ws.carts.is_favorite(cart) is False
+    ws.carts.toggle_favorite(cart)
+    assert ws.carts.is_favorite(cart) is True
+    ws.carts.toggle_favorite(cart)
+    assert ws.carts.is_favorite(cart) is False
 
 
 def test_favorite_persists_across_reboot(tmp_path):
@@ -147,12 +147,12 @@ def test_favorite_persists_across_reboot(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
     cart = _find(ws, "Star Catcher")
-    ws.toggle_favorite(cart)
+    ws.carts.toggle_favorite(cart)
     assert moy_carts.load_system(carts_dir).get("favorites") == [cart["path"]]
 
     ws2 = host_app.build_workstation(carts_dir)
     cart2 = _find(ws2, "Star Catcher")
-    assert ws2.is_favorite(cart2) is True
+    assert ws2.carts.is_favorite(cart2) is True
 
 
 def test_favorite_star_badge_tap_toggles_without_launching(tmp_path):
@@ -170,7 +170,7 @@ def test_favorite_star_badge_tap_toggles_without_launching(tmp_path):
     drv.click(x + w // 2, y + h // 2)
     drv.frame(1 / 30)
     assert ws.screen == "launcher"             # the badge tap must not launch the cart
-    assert ws.is_favorite(cart) is True
+    assert ws.carts.is_favorite(cart) is True
 
 
 def test_favorite_rect_is_none_for_the_make_tile(tmp_path):
@@ -198,7 +198,7 @@ def test_recent_carts_ordering_after_runs(tmp_path):
     assert ws.system["desk_mru"] == [battle["path"], star["path"]]
     ws.go_home()
 
-    recent = ws.recent_carts()
+    recent = ws.carts.recent()
     assert [c["title"] for c in recent] == ["Brick Siege", "Star Catcher"]
 
 
@@ -225,7 +225,7 @@ def test_recents_persist_across_reboot(tmp_path):
 
     ws2 = host_app.build_workstation(carts_dir)
     assert ws2.system.get("desk_mru") == [star["path"]]
-    assert [c["title"] for c in ws2.recent_carts()] == ["Star Catcher"]
+    assert [c["title"] for c in ws2.carts.recent()] == ["Star Catcher"]
 
 
 def test_recents_cap_at_mru_limit(tmp_path):
@@ -234,11 +234,11 @@ def test_recents_cap_at_mru_limit(tmp_path):
     moy_carts.ensure_dirs(carts_dir)
     ws = host_app.build_workstation(carts_dir)
     # Pad the library with enough synthetic games to exceed the recents cap.
-    n = ws._MRU_CAP + 3
+    n = ws.carts._MRU_CAP + 3
     for k in range(n):
         moy_carts.create("Pad%d" % k, carts_dir, src="def _draw():\n    cls(1)\n",
                           type="game")
-    ws._apply_items(moy_carts.scan(carts_dir))
+    ws.carts.apply(moy_carts.scan(carts_dir))
     pads = [it for it in ws.launcher.items if it.get("title", "").startswith("Pad")]
     assert len(pads) == n
     for it in pads:
@@ -246,7 +246,7 @@ def test_recents_cap_at_mru_limit(tmp_path):
         ws.launch_selected()
         ws.go_home()
 
-    assert len(ws.system["desk_mru"]) == ws._MRU_CAP
+    assert len(ws.system["desk_mru"]) == ws.carts._MRU_CAP
     # Newest-first: the last cart run is at the front.
     assert ws.system["desk_mru"][0] == pads[-1]["path"]
 
@@ -257,7 +257,7 @@ def test_recent_carts_skips_a_deleted_cart(tmp_path):
     ws.launcher.sel = ws.launcher.items.index(star)
     ws.launch_selected()
     ws.go_home()
-    assert ws.recent_carts()                    # sanity: recorded
+    assert ws.carts.recent()                    # sanity: recorded
 
     ws.system["desk_mru"] = ["nonexistent/path"] + ws.system["desk_mru"]
-    assert all(c["path"] != "nonexistent/path" for c in ws.recent_carts())
+    assert all(c["path"] != "nonexistent/path" for c in ws.carts.recent())

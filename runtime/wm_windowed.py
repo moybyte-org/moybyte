@@ -378,7 +378,7 @@ class _BackdropLayer(Layer):
         return (cv.w, cv.h, ws.theme_name, ws.theme_variant,
                 ws._effective_font_scale(), id(ws.icon_sheet),
                 getattr(ws, "wallpaper_id", None),
-                len(getattr(ws, "_apps", ())), len(ws._all_carts))
+                len(getattr(ws, "_apps", ())), len(ws.carts.all))
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)
@@ -403,7 +403,7 @@ class _BackdropLayer(Layer):
             if app.id in self.HIDDEN_APPS:
                 continue
             cart = None
-            for c in ws._all_carts:
+            for c in ws.carts.all:
                 if app.is_app(c):
                     cart = c
                     break

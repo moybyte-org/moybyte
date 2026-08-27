@@ -75,7 +75,7 @@ each):
   * ORDER MATTERS for Sheets: open_named(name) only sets _pending_open, which is
            consumed by the app's open(). Call it BEFORE open_app(), not after.
   * cart:  carts_store.create(title, root, src=...) then
-           ws._apply_items(store.scan(root)).
+           ws.carts.apply(store.scan(root)).
   * There is no load_code(path); reading a cart's source goes through load(path).
 
 STRUCTURAL NOTE (content-independent): the Editor tabs and the Desk Lab apps share

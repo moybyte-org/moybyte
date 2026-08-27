@@ -191,8 +191,8 @@ class Recorder:
             with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(base, f)
         items = host_app.moy_carts.scan(self.ws.carts_root)
-        self.ws._apply_items(items)
-        cart = next(c for c in self.ws._all_carts
+        self.ws.carts.apply(items)
+        cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)
         for i, it in enumerate(self.ws.launcher.items):
             if it.get("path") == cart.get("path"):

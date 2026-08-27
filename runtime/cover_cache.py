@@ -36,7 +36,8 @@ the only place that order exists, and `tests/test_cover_cache.py` perturbs it.
 
 ## What is read THROUGH `ws`, per call
 
-The cart store, the storage gate (`_with_sd`), the cost meter, `_all_carts` and
+The cart store, the storage gate (`_with_sd`), the cost meter, the roster
+(`ws.carts.all`) and
 the two grids. None of them is knowable when this object is built: the store is
 injected by `wire_workstation_core`, and on the boards `_with_sd` is swapped for
 the native SD attach after that. Same rule the sibling collaborators follow.
@@ -314,7 +315,7 @@ class CoverCache:
                                  # surface opens, not after (p4_clicks measured the
                                  # cold pipeline as two ~1s clicks). Latched False once
                                  # every cart is known; re-armed by a store re-scan.
-        self._pf_i = 0           # round-robin cursor over ws._all_carts
+        self._pf_i = 0           # round-robin cursor over ws.carts.all
 
     # -- the frame loop's two touches ----------------------------------------
 
@@ -487,7 +488,7 @@ class CoverCache:
     def invalidate_all(self):
         """Drop EVERYTHING a store re-scan could have changed under us.
 
-        The cover half of `Workstation._apply_items`: a create/duplicate/delete,
+        The cover half of `CartManager.apply`: a create/duplicate/delete,
         a re-seed or a browser sync can carry new or changed cover art, can
         change a cart's icon tile, and can take a cart away entirely -- so the
         card bitmaps, the parsed sources (77KB apiece; holding a departed
@@ -509,14 +510,14 @@ class CoverCache:
         lose for the rest of the session: a cart still on the shelf that has
         already been slimmed (#66), whose sprite art is no longer in RAM.
 
-        The predicate is `lazy`, which is exactly the flag `slim_carts` sets
+        The predicate is `lazy`, which is exactly the flag `CartManager.slim` sets
         after it bakes an icon and deletes the art -- so "will something re-bake
         this?" and "will this survive the prune?" are answers to the same
         question and cannot drift apart. A slimmed cart's icon also cannot have
         gone stale: a real edit arrives as a fresh FAT scan, which is the branch
         that drops."""
         keep = {}
-        for cart in self.ws._all_carts:
+        for cart in self.ws.carts.all:
             if not cart.get("lazy"):
                 continue          # its art is in hand -- a fresh bake is possible
             key = cart.get("path") or cart.get("title")
@@ -619,7 +620,7 @@ class CoverCache:
         calls this never executes. Runs only after a couple of quiet frames so
         the gap between two gestures is not spent on flash."""
         ws = self.ws
-        carts = ws._all_carts
+        carts = ws.carts.all
         if not self._seen or ws.carts_store is None or not carts:
             return
         n = len(carts)

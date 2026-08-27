@@ -84,7 +84,7 @@ def test_rescan_frees_every_payload(tmp_path, monkeypatch):
     _land(ws, a, 40, 30)
     _land(ws, b, 40, 30)
     assert tr.live                                       # payloads are warm
-    ws._apply_items(list(ws._all_carts))                 # the store re-scan
+    ws.carts.apply(list(ws.carts.all))                 # the store re-scan
     assert tr.live == {}                                 # ...frees ALL of it
 
 

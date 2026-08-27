@@ -21,7 +21,7 @@ surface where the *dangerous* privileged verbs concentrate, through `self.ws`:
   * shared (non-privileged): ws.sys_canvas, ws.sysmenu, ws._dirty, ws.cart,
                              ws.launcher, ws.apply, ws.go_home, ws.open_settings,
                              ws.updater (read-only, for the version string)
-  * privileged (draft make_system_api): ws.reboot_hook (REBOOT), ws.del_cart
+  * privileged (draft make_system_api): ws.reboot_hook (REBOOT), ws.carts.delete
                              (DELETE a cart), ws._about (open the about modal)
 
 `NAMES` is injected at construction (circular-import reason as the other UIs).
@@ -80,13 +80,14 @@ class SystemMenuUI:
             self.ws.apply()
 
     def _menu_delete_cart(self):
-        # Delete the OPEN cart (del_cart targets self.cart when a cart is open -- which a
-        # picker-opened cart is, even if it's not the launcher selection), then go home.
-        # del_cart guards read-only / last-cart. Count the FULL cart list (a wallpaper
-        # isn't in the launcher run-grid) to detect the deletion.
-        before = len(self.ws._all_carts)
-        self.ws.del_cart()
-        if len(self.ws._all_carts) < before:
+        # Delete the OPEN cart (carts.delete() targets ws.cart when a cart is open --
+        # which a picker-opened cart is, even if it's not the launcher selection),
+        # then go home.
+        # carts.delete() guards read-only / last-cart. Count the FULL cart list (a
+        # wallpaper isn't in the launcher run-grid) to detect the deletion.
+        before = len(self.ws.carts.all)
+        self.ws.carts.delete()
+        if len(self.ws.carts.all) < before:
             self.ws.go_home()
 
     def _menu_about(self):

@@ -144,6 +144,15 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cover_cache import CoverCache
 
+# CartManager (cart_manager.py): ws.carts -- the scanned roster `carts.all`, the
+# store-writing verbs (new/dup/delete), the sync re-scan, the #66 live-set diet
+# and the #105 favorites/recents. What a shelf CARD looks like (the pseudo
+# tiles, the search filter, the app-claim hiding) stays kernel, below.
+try:
+    from cart_manager import CartManager
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.cart_manager import CartManager
+
 # system.json's owner (#209 landing B, system_store.py): the settings dict
 # `ws.system` aliases, the one persist funnel behind every Settings toggle, and
 # the achievements list's store halves -- over a StoreHandle that reads the
@@ -503,14 +512,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     )
 
 
-# The heavy per-cart payloads the launcher list does NOT need (#66 live-set diet):
-# kept resident they are ~300-500KB of permanently-live strings the GC MARK phase
-# pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
-# slim_carts() strips them after the icons are cached; opening a cart rehydrates
-# from the store, and switching carts re-slims the previous one.
-_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
-
-
 _SPLASH_IMG = None
 
 
@@ -712,6 +713,13 @@ class Workstation:
         """Injected-service attach points + the shell processes (Project/Player/
         EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
+        # The (store, root, can_manage, with_sd) guard 4-tuple as ONE object
+        # (#209 landing B, system_store.py). FIRST, because everything that
+        # touches storage takes it: both store-owning collaborators below AND
+        # app_context's storage roles -- and the ArtworkService a few lines down
+        # already builds an AppContext. It captures nothing; every field is read
+        # through `self` at the moment of use, because none of them is wired yet.
+        self.store = StoreHandle(self)
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         # A narrow capability for the shipped Paint app. It is not a Layer, so
         # it is not in app_decls -- but it is on the APP side of the seam, so it
@@ -785,12 +793,12 @@ class Workstation:
         # `begin_frame` at its top and `take_deferred` at its tail. `covers.gen`
         # is the shelf's repaint key and has no `ws` mirror.
         self.covers = CoverCache(self)
-        # The scanned cart list is the single source both grids derive from (#carts):
-        # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and the
-        # Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every editable cart.
-        # Kept here so wallpaper discovery + the wifi-tool lookup read the FULL list
-        # rather than either display grid (the Make/New pseudo tiles never leak out).
-        self._all_carts = list(carts) if carts else []
+        # The shelf's ROSTER (#209 landing C, cart_manager.py): the scanned cart
+        # list plus everything that changes it -- new/duplicate/delete, the sync
+        # re-scan, the #66 slim/rehydrate diet and the #105 favorites/recents.
+        # `carts.all` is the single source both grids derive from and has no `ws`
+        # mirror: a re-scan REBINDS the list, so an alias could not stay honest.
+        self.carts = CartManager(self, self.store, carts)
         self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         # Launcher search (#105): plain-text substring filter over the run-grid,
         # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
@@ -800,7 +808,7 @@ class Workstation:
         # capture sub-state. See _launcher_view_items/open_search/close_search.
         self.search_query = ""
         self.search_typing = False
-        self.launcher = Launcher(self._launcher_items(self._all_carts),
+        self.launcher = Launcher(self._launcher_items(self.carts.all),
                                  self.layout, NAMES, _blit_glyph)
         # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
         # density tiers (visual identity v1 Section 1.2); the picker below keeps the
@@ -813,7 +821,7 @@ class Workstation:
         self.launcher.cover_for = self.covers.cover_for
         # The favorite-star corner badge (#105): only the RUN grid plays, so only
         # ws.launcher (not the Editor's project-picker) gets the toggle.
-        self.launcher.favorite_for = self.is_favorite
+        self.launcher.favorite_for = self.carts.is_favorite
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -823,7 +831,7 @@ class Workstation:
         # instance so it keeps an independent selection/page, reusing the SAME tile
         # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
         # opens the chosen cart in the Editor.
-        self.picker = Launcher(self._picker_items(self._all_carts),
+        self.picker = Launcher(self._picker_items(self.carts.all),
                                self.layout, NAMES, _blit_glyph)
         self.picker.icon_for = self._icon_image_keyed
         self.picker.cover_for = self.covers.cover_for
@@ -929,7 +937,7 @@ class Workstation:
         # is ever rebound -- prefs.load() clears and updates in place, which is
         # what keeps settings_layer's raw writes, the launcher's per-paint
         # favorites read and app_context's Prefs role honest with no migration.
-        self.prefs = SystemStore(self, StoreHandle(self))
+        self.prefs = SystemStore(self, self.store)
         self.system = self.prefs.settings
         # Crash isolation (#160 / Phase 8): the dict itself, because it stays
         # the same object across a load.
@@ -1407,7 +1415,7 @@ class Workstation:
         launcher grid -- wallpapers are a backdrop category chosen in the Appearance app,
         so they leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable
         here."""
-        return [c for c in self._all_carts if c.get("type") == "wallpaper"]
+        return [c for c in self.carts.all if c.get("type") == "wallpaper"]
 
     def wallpaper_options(self):
         """All selectable wallpaper ids: each wallpaper cart's slug, then the
@@ -1722,21 +1730,10 @@ class Workstation:
         return self.web.toggle()
 
     def rescan_carts(self):
-        """Re-read the store and rebuild both shelves -- the sync push's board
-        half (moy_webhost wires it as `on_sync`), fired when a browser batch
-        changed what the launcher shows: a manifest, a cover sheet, a cart
-        created or deleted. `_apply_items` does the whole refresh (re-slim,
-        cover caches dropped, generation bumped), the same body every
-        create/dup/delete already runs. Safe between frames: the webhost
-        polls at the frame tail, after present."""
-        if self.carts_store is None or not self.carts_root:
-            return
-        try:
-            self._apply_items(self._with_sd(
-                lambda: self.carts_store.scan(self.carts_root)))
-        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
-            print("Moybyte rescan failed:", exc)
-        self._dirty = True
+        """`carts.rescan()` -- moy_webhost captures this name in its `on_sync`
+        lambda at construction, and the Guition on-glass suite's sync test
+        depends on the shelf following a browser batch with no reboot."""
+        return self.carts.rescan()
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
@@ -1851,64 +1848,6 @@ class Workstation:
         `vol`, which keep speaking this name."""
         return self.prefs.persist()
 
-    # -- favorites + recents (#105) -------------------------------------------
-    #
-    # Both ride the SAME system.json persistence Settings already uses for
-    # theme/wallpaper/font/OTA channel (self.system + _persist_system) -- no new
-    # store surface. `favorites` is a plain path list (order = the order a kid
-    # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
-    # capped most-recently-run path list, newest first. Cart identity is the
-    # store PATH (stable across a rename/rescan, unlike an in-memory dict).
-
-    _MRU_CAP = 8          # how many recents system.json remembers
-
-    def is_favorite(self, cart):
-        path = cart.get("path") if cart else None
-        if not path:
-            return False
-        return path in self.system.get("favorites", [])
-
-    def toggle_favorite(self, cart):
-        """Star/unstar `cart` (the launcher card's corner badge tap) and persist.
-        A no-op for a pseudo tile (no path)."""
-        path = cart.get("path") if cart else None
-        if not path:
-            return
-        favs = list(self.system.get("favorites", []))
-        if path in favs:
-            favs.remove(path)
-        else:
-            favs.append(path)
-        self.system["favorites"] = favs
-        self._dirty = True
-        self.prefs.persist()
-
-    def _note_recent(self, cart):
-        """Record `cart` as most-recently-run: move its path to the front of
-        system.json's `desk_mru` list (issue #105's naming), capped at
-        _MRU_CAP. Called from every launcher-driven run/open (open/open_app) --
-        a pseudo tile (no path) is never recorded."""
-        path = cart.get("path") if cart else None
-        if not path:
-            return
-        mru = [p for p in self.system.get("desk_mru", []) if p != path]
-        mru.insert(0, path)
-        self.system["desk_mru"] = mru[:self._MRU_CAP]
-        self.prefs.persist()
-
-    def recent_carts(self):
-        """The desk_mru path list resolved back to live cart dicts (newest first),
-        silently dropping any path that no longer scans (deleted/renamed since).
-        Read-only convenience for a future recents surface; #105 only settled the
-        system.json key, not where it renders."""
-        by_path = {c.get("path"): c for c in self._all_carts if c.get("path")}
-        out = []
-        for path in self.system.get("desk_mru", []):
-            c = by_path.get(path)
-            if c is not None:
-                out.append(c)
-        return out
-
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
         manifest UPDATE ONLINE checks; persisted in system.json once chosen.
@@ -1999,10 +1938,10 @@ class Workstation:
                 # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
                 # compile (which bakes src/sheet into the wallpaper's own ns), then
                 # re-slims -- unless it IS the open project's cart (stays fat).
-                self._rehydrate_cart(cart)
+                self.carts.rehydrate(cart)
                 self.wallpaper.compile(cart)   # compile into the backdrop component (#28)
                 if cart is not getattr(self, "_fat_cart", None):
-                    self._reslim_cart(cart)
+                    self.carts.reslim(cart)
         if persist:
             self._persist_wallpaper()
             # "Home Decorator": any persisted pick counts -- the Appearance app,
@@ -2580,58 +2519,6 @@ class Workstation:
         # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
         self.player._draw_error_panel()
 
-    def slim_carts(self):
-        """The #66 live-set diet: after the backend wires the cart store, drop every
-        SD-backed cart's heavy payloads (source/sprites/sounds/map/images/blocks)
-        from the scanned list -- the launcher only needs metadata + the icon, which
-        is baked into the icon cache here first. Cuts the permanently-live heap by
-        ~300-500KB, which is most of a GC collect's mark cost (~0.2ms/KB on device).
-        Embedded carts (no path / no store) stay fat -- they cannot be reloaded."""
-        if self.carts_store is None:
-            return
-        for cart in self._all_carts:
-            if not cart.get("path") or cart.get("lazy"):
-                continue
-            try:
-                self.covers.icon_sheet_for(cart)   # bake the grid icon while the art is here
-            except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
-                pass
-            for k in _HEAVY_CART_KEYS:
-                if k in cart:
-                    del cart[k]
-            cart["lazy"] = True
-        try:
-            import gc
-            gc.collect()                       # reclaim the dropped payloads NOW
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _rehydrate_cart(self, cart):
-        """Load a slimmed cart's full payloads back from the store IN PLACE (the
-        launcher/picker hold the same dict, so every reference fattens at once).
-        No-op for fat/embedded carts; a failed load leaves the cart slim and the
-        caller's error handling surfaces it (missing src -> the crash panel)."""
-        if not cart.get("lazy") or self.carts_store is None or not cart.get("path"):
-            return cart
-        try:
-            full = self._with_sd(lambda: self.carts_store.load(cart["path"]))
-        except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
-            full = None
-        if full:
-            cart.update(full)
-            cart["lazy"] = False
-        return cart
-
-    def _reslim_cart(self, cart):
-        # Re-slim a previously-opened cart when the workspace moves on (keeps at
-        # most ~one fat cart live). Only SD-backed carts that slim_carts managed.
-        if cart is None or not cart.get("path") or cart.get("lazy") is not False:
-            return
-        for k in _HEAVY_CART_KEYS:
-            if k in cart:
-                del cart[k]
-        cart["lazy"] = True
-
     def _open_workspace(self, cart=None):
         # Build a fresh Project for `cart` (default: the launcher selection) + start it,
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
@@ -2671,8 +2558,8 @@ class Workstation:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
         prev = getattr(self, "_fat_cart", None)
         if prev is not None and prev is not cart:
-            self._reslim_cart(prev)            # at most ~one fat cart stays live (#66)
-        self._rehydrate_cart(cart)
+            self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
+        self.carts.rehydrate(cart)
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
@@ -2775,8 +2662,9 @@ class Workstation:
         # re-derive it here or the first-built grid keeps the app carts it was
         # built without knowing about. Cheap: a handful of app registrations at
         # boot, each a list rebuild over the already-scanned carts.
-        if getattr(self, "_all_carts", None) and getattr(self, "picker", None):
-            self.picker.set_items(self._picker_items(self._all_carts))
+        _carts = getattr(self, "carts", None)
+        if _carts is not None and _carts.all and getattr(self, "picker", None):
+            self.picker.set_items(self._picker_items(_carts.all))
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""
@@ -2837,7 +2725,7 @@ class Workstation:
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         selected = self.launcher.selected()
-        self._note_recent(selected)    # #105 desk_mru: every launcher-tap run counts
+        self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
         # responsive system process. Deliberately NOT the Player: the Player is
@@ -2858,7 +2746,7 @@ class Workstation:
         mode BOTH ways, so a jump out of a typing app restores the raw
         keyboard. Returns False when no cart carries the app's identity."""
         if cart is None:
-            for c in self._all_carts:
+            for c in self.carts.all:
                 if app.is_app(c):
                     cart = c
                     break
@@ -3038,19 +2926,13 @@ class Workstation:
             self.open_in_editor(sel)
 
     def new_cart_and_edit(self):
-        """The picker's "+ New": create a fresh GAME cart (NEW_TEMPLATE), re-sync both
-        grids, then open the new cart in the Editor. A no-op on a read-only store (a
-        device without SD writes), leaving the picker up rather than crashing."""
-        if not self.carts_root or not self.can_manage:
+        """The picker's "+ New": create a fresh GAME cart (`carts.new()` does the
+        create, the re-scan and both grids), then open it in the Editor. A no-op
+        on a read-only store (a device without SD writes) or a failed write --
+        `carts.new()` returns None and the picker simply stays up."""
+        new = self.carts.new()
+        if new is None:
             return
-        try:
-            new, items = self._with_sd(lambda: (
-                self.carts_store.new_from_template(self.carts_root),
-                self.carts_store.scan(self.carts_root)))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte new cart failed:", exc)
-            return
-        self._apply_items(items)
         # Select the new cart in the picker so returning to it (the Editor's "projects"
         # affordance) lands on the freshly-created project, then open it in the Editor.
         for i, it in enumerate(self.picker.items):
@@ -3801,7 +3683,7 @@ class Workstation:
         # editing state, not a corpse.
         _fat = getattr(self, "_fat_cart", None)
         if _fat is not None:
-            self._reslim_cart(_fat)
+            self.carts.reslim(_fat)
             self._fat_cart = None
         self.project = Project(self)
         self.cart_error = None
@@ -3852,9 +3734,9 @@ class Workstation:
         active search query (#105), if any -- a plain case-insensitive substring
         match on the title. The pinned Make tile always survives a filter (it's
         not a cart to search for, it's the way to keep making one). The single
-        place a rescan (_apply_items) and a query edit (set_search_query) both
+        place a rescan (carts.apply) and a query edit (set_search_query) both
         call, so the two can never desync on which list is "current"."""
-        base = self._launcher_items(self._all_carts)
+        base = self._launcher_items(self.carts.all)
         q = self.search_query.strip().lower()
         if not q:
             return base
@@ -3937,72 +3819,11 @@ class Workstation:
             carts = keep
         return [new_tile()] + list(carts)
 
-    def _apply_items(self, items):
-        # Re-sync BOTH display grids from a fresh scan (the single source `_all_carts`),
-        # re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
-        if items:
-            self._all_carts = list(items)
-            # Cover bitmaps, parsed sources, the cover-less set AND the icon
-            # cache: a re-scan may carry new or changed art and may take a cart
-            # away entirely. BEFORE slim_carts, and that order is load-bearing:
-            # slim_carts bakes each cart's icon and then DELETES its sprite art,
-            # so it is the last moment the art exists in RAM -- clearing after it
-            # would leave a slimmed cart with no icon and nothing to rebuild one
-            # from, and clearing nothing (what this did before #209 landing C)
-            # let slim_carts' bake hit the STALE entry and make it permanent.
-            self.covers.invalidate_all()
-            self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
-            self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
-            self.picker.set_items(self._picker_items(items))
-
     def _real_selected(self, grid):
         """The selected cart on `grid`, or None if it's a pinned pseudo tile (Make/New)
         -- so cart management (dup/del) never acts on a non-cart."""
         sel = grid.selected()
         return sel if (sel and sel.get("path")) else None
-
-    def new_cart(self):
-        if not self.carts_root or not self.can_manage:
-            return
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.new_from_template(self.carts_root),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte new cart failed:", exc)
-
-    def dup_cart(self):
-        # DUP now fires from the Editor picker's zone (docs/shell_ux_v1.md: the picker
-        # manages projects, the launcher only plays) -- so it acts on the PICKER's
-        # selection, not the launcher's.
-        sel = self._real_selected(self.picker)
-        if not self.carts_root or not self.can_manage or sel is None:
-            return
-        self._rehydrate_cart(sel)   # #66: duplicate() copies src/cfg FROM the dict
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.duplicate(sel, self.carts_root),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte duplicate failed:", exc)
-
-    def del_cart(self):
-        # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened
-        # from the picker is NOT necessarily the picker's current selection), else the
-        # picker's selection (the picker-zone DEL, docs/shell_ux_v1.md -- moved off the
-        # launcher, which no longer has a management cluster at all). Keep at least one
-        # real cart on the device.
-        target = self.cart if (self.cart is not None and self.cart.get("path")) \
-            else self._real_selected(self.picker)
-        if not self.carts_root or not self.can_manage or target is None \
-                or len(self._all_carts) <= 1:
-            return
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.delete(target),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte delete failed:", exc)
 
     def adjust(self, d):
         # Config mutation stays on Workstation (ws.config is the single source of cart
@@ -5404,7 +5225,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     run_desktop -- the P4 literally carried a "same order as host" comment).
     The caller builds its board-specific backends (api/audio/wifi/lua/SD/OTA)
     and hands them in; board glue that must land between the store hookup and
-    the #66 slim_carts diet (the T-Deck's _with_sd + OTA updater) goes through
+    the #66 cart diet (the T-Deck's _with_sd + OTA updater) goes through
     `before_slim(ws)`. can_manage defaults to "the store root is known"; the
     host passes True. Ends with the three boot loads (system.json settings /
     icon theme / achievements) -- install a WindowedWM AFTER this returns, so
@@ -5421,7 +5242,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     ws.wifi = wifi
     if before_slim is not None:
         before_slim(ws)
-    ws.slim_carts()   # #66 live-set diet: heavy payloads reload from the store
+    ws.carts.slim()   # #66 live-set diet: heavy payloads reload from the store
     if pointer is not None:
         ws.pointer = pointer
         if inp is not None:

@@ -118,8 +118,8 @@ def test_an_edited_cover_is_picked_up_after_a_rescan(tmp_path):
     img = _land_cover(ws, cart, 40, 30)
     assert img.pix[0] == 5
     moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
-    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))
-    cart = next(c for c in ws._all_carts if c.get("path") == cart["path"])
+    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    cart = next(c for c in ws.carts.all if c.get("path") == cart["path"])
     img = _land_cover(ws, cart, 24, 18)
     assert img.pix[0] == 9, "a re-scan did not drop the cached runs"
 
@@ -211,7 +211,7 @@ def test_idle_frames_prefetch_cover_runs(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
     ws = host_app.build_workstation(root)
-    covered = [c for c in ws._all_carts if c.get("path") in
+    covered = [c for c in ws.carts.all if c.get("path") in
                [x["path"] for x in carts[:3]]]
     assert covered, "fixture carts missing from the store"
 
@@ -234,7 +234,7 @@ def test_rescan_rearms_the_prefetch(tmp_path):
     for _ in range(200):
         ws.covers.prefetch_tick()
     assert ws.covers._seen is False          # exhausted: every cart known
-    ws._apply_items(list(ws._all_carts))    # the re-scan path (create/dup/delete)
+    ws.carts.apply(list(ws.carts.all))    # the re-scan path (create/dup/delete)
     assert ws.covers._seen                   # re-armed...
     want = carts[0]["path"]
     assert ws.covers._runs_get(want) is None  # ...and the cache really was cleared
@@ -269,11 +269,11 @@ def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=3)
     ws = host_app.build_workstation(root)
-    # By PATH: _all_carts also holds the seeded built-ins, most of which have no
+    # By PATH: carts.all also holds the seeded built-ins, most of which have no
     # cover at all, so an index into it is not necessarily a fixture cart.
     want = carts[-1]["path"]
-    target = next(c for c in ws._all_carts if c.get("path") == want)
-    first = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    target = next(c for c in ws.carts.all if c.get("path") == want)
+    first = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
     _land_cover(ws, first, 20, 15)                 # arm
     for _ in range(200):
         ws.covers.prefetch_tick()
@@ -296,10 +296,10 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
     ws = host_app.build_workstation(root)
-    # Land the one fixture cart that HAS a cover, looked up by path -- _all_carts[0]
+    # Land the one fixture cart that HAS a cover, looked up by path -- carts.all[0]
     # is whichever seeded system cart sorts first, which is not a fixture cart and
     # need not have cover art at all.
-    covered = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    covered = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
     _land_cover(ws, covered, 20, 15)
     for _ in range(200):
         ws.covers.prefetch_tick()
@@ -317,7 +317,7 @@ def test_cover_blob_read_budget(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=4)
     ws = host_app.build_workstation(root)
-    mine = [c for c in ws._all_carts
+    mine = [c for c in ws.carts.all
             if c.get("path") in [x["path"] for x in carts]]
     ws.costs.clear()
     for size in ((40, 30), (24, 18), (40, 30)):      # includes a RELAYOUT
@@ -369,7 +369,7 @@ def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
 
     ws._with_sd = gate
     ws.carts_store = _Spy(ws.carts_store)
-    for c in [c for c in ws._all_carts
+    for c in [c for c in ws.carts.all
               if c.get("path") in [x["path"] for x in carts]]:
         _land_cover(ws, c, 40, 30)
 

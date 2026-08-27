@@ -47,13 +47,13 @@ def test_picker_lists_the_new_tile_then_every_editable_cart(tmp_path):
     # as a project meant editing code the kid can never see run. TEMPORARY --
     # #181 (editable system apps) makes them real and this exclusion goes
     # away; shell_ux_v1's "everything is editable" line is right again then.
-    claimed = [c for c in ws._all_carts
+    claimed = [c for c in ws.carts.all
                if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]
     assert claimed, "fixture has no app carts -- the exclusion is untested"
     listed = {id(c) for c in real}
     for cart in claimed:
         assert id(cart) not in listed, cart.get("title")
-    assert len(real) == len(ws._all_carts) - len(claimed)
+    assert len(real) == len(ws.carts.all) - len(claimed)
 
 
 def test_wallpaper_is_present_in_the_picker(tmp_path):
@@ -78,7 +78,7 @@ def test_wallpapers_leave_the_launcher_grid(tmp_path):
     assert any(c.get("type") == "wallpaper" for c in ws.picker.items if c.get("path"))
     assert any(c.get("type") == "wallpaper" for c in ws.wallpaper_carts())
     # every wallpaper in the store is discoverable as a backdrop
-    store_wp = {c["path"] for c in ws._all_carts if c.get("type") == "wallpaper"}
+    store_wp = {c["path"] for c in ws.carts.all if c.get("type") == "wallpaper"}
     picker_wp = {c["path"] for c in ws.wallpaper_carts()}
     assert store_wp and store_wp == picker_wp
 
@@ -115,7 +115,7 @@ def test_new_tile_creates_a_game_and_opens_the_editor(tmp_path):
     from runtime.launcher_layer import NEW_TILE_TYPE
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    n0 = len(ws._all_carts)
+    n0 = len(ws.carts.all)
     ws.open_picker()
     ws.picker.sel = 0
     assert ws.picker.selected()["type"] == NEW_TILE_TYPE
@@ -125,7 +125,7 @@ def test_new_tile_creates_a_game_and_opens_the_editor(tmp_path):
     assert ws.screen == "menu"                 # opened the Editor on the new cart
     assert ws.cart is not None and ws.cart.get("type") == "game"   # NEW_TEMPLATE is a game
     assert ws.cart.get("edit")                 # ...with "Make it mine" cards
-    assert len(ws._all_carts) == n0 + 1        # a real cart was created on the store
+    assert len(ws.carts.all) == n0 + 1        # a real cart was created on the store
     # the new cart is now a pickable project too (present in both grids)
     assert any(c.get("path") == ws.cart.get("path") for c in ws.picker.items)
 
@@ -181,8 +181,8 @@ def test_picker_bar_lends_a_title_and_shows_an_exit_x(tmp_path):
 # projects -- see tests/test_top_bar.py for the icon-tap coverage; these drive the
 # ws.* verbs directly, proving they now read the PICKER's grid, not the launcher's).
 
-def test_dup_cart_duplicates_the_pickers_selection_not_the_launchers(tmp_path):
-    """ws.dup_cart() now reads ws.picker's selection, not ws.launcher's -- the two
+def test_dup_duplicates_the_pickers_selection_not_the_launchers(tmp_path):
+    """ws.carts.dup() now reads ws.picker's selection, not ws.launcher's -- the two
     grids can point at different carts (the picker lists every editable cart,
     including wallpapers/built-ins the launcher run-grid excludes), so a stale
     launcher selection must never leak into a picker-triggered duplicate."""
@@ -194,27 +194,27 @@ def test_dup_cart_duplicates_the_pickers_selection_not_the_launchers(tmp_path):
                       if it.get("path") and it["path"] != launcher_target)
     ws.picker.sel = picker_idx
     target = ws.picker.selected()
-    n0 = len(ws._all_carts)
-    ws.dup_cart()
-    assert len(ws._all_carts) == n0 + 1
-    assert any(c["title"] == target["title"] + " copy" for c in ws._all_carts)
+    n0 = len(ws.carts.all)
+    ws.carts.dup()
+    assert len(ws.carts.all) == n0 + 1
+    assert any(c["title"] == target["title"] + " copy" for c in ws.carts.all)
 
 
-def test_del_cart_deletes_the_pickers_selection_when_no_cart_is_open(tmp_path):
-    """ws.del_cart()'s fallback (no cart currently open, self.cart is None) now reads
+def test_delete_removes_the_pickers_selection_when_no_cart_is_open(tmp_path):
+    """ws.carts.delete()'s fallback (no cart currently open, ws.cart is None) now reads
     ws.picker's selection instead of ws.launcher's."""
     from runtime import moy_carts
     ws = _ws(tmp_path)
     moy_carts.create("Extra", str(ws.carts_root), src="def _draw():\n    cls(1)\n",
                      type="app")
-    ws._apply_items(moy_carts.scan(str(ws.carts_root)))
+    ws.carts.apply(moy_carts.scan(str(ws.carts_root)))
     assert ws.cart is None
     idx = next(i for i, it in enumerate(ws.picker.items) if it.get("title") == "Extra")
     ws.picker.sel = idx
-    n0 = len(ws._all_carts)
-    ws.del_cart()
-    assert len(ws._all_carts) == n0 - 1
-    assert all(c.get("title") != "Extra" for c in ws._all_carts)
+    n0 = len(ws.carts.all)
+    ws.carts.delete()
+    assert len(ws.carts.all) == n0 - 1
+    assert all(c.get("title") != "Extra" for c in ws.carts.all)
 
 
 # -- the DELETE two-tap confirm guard ----------------------------------------
