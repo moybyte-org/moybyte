@@ -1352,7 +1352,7 @@ class Workstation:
         records the strike. This is the shell-vocabulary query (is_user_app +
         the title-slug id in one call): `tests/test_user_apps.py` asserts
         against it, and it is half of what the deferred picker BADGE needs
-        (docs/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
+        (docs/history/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
         the Editor picker either way, because editing it is how it gets
         fixed."""
         if not self.is_user_app(cart):
@@ -3592,7 +3592,7 @@ class Workstation:
         `ws.canvas` into it: with the system canvas bound, the window blits the
         screen into a rectangle OF that screen and the desktop renders as a
         recursive smear of its own bar. Giving a cart its own window surface is a
-        `wm_windowed` change, which `docs/ui_refactor_2026-08.md` Section 6 puts
+        `wm_windowed` change, which `docs/history/ui_refactor_2026-08.md` Section 6 puts
         out of scope -- so in the desk world a responsive cart keeps the fixed
         raster and is told (320, 240) by `_layout`, which is the truth. From the
         fullscreen Library (the play world, where `windowed_chrome` is False

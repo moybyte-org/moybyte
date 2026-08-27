@@ -629,9 +629,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 ### The UI refactor landed (2026-08-19) -- one widget vocabulary, apps as data, user apps
 
-`docs/ui_refactor_2026-08.md` is the plan and the authority; it folds
-`docs/ui_widgets_2026-08.md` and `docs/shell_decoupling_2026-08.md` (both of which
-stay as their evidence) after four parallel adversarial reviews, and **cuts about
+`docs/history/ui_refactor_2026-08.md` is the plan and the authority; it folds
+`docs/history/ui_widgets_2026-08.md` and
+`docs/history/shell_decoupling_2026-08.md` (both of which stay as their
+evidence) after four parallel adversarial reviews, and **cuts about
 half of the combined program on evidence**. Read its Section 1 before proposing any
 of the cut parts again. What shipped, in ten commits on dev:
 
@@ -883,7 +884,7 @@ was promoted into one body and nothing executable guarded it.**
 
 ### The shell carve LANDED (2026-08-27) — six collaborators behind the Workstation façade
 
-`docs/console_architecture_2026-08.md` (rev 3, tracked #209) executed in five
+`docs/history/console_architecture_2026-08.md` (rev 3, tracked #209) executed in five
 gated landings, one object per commit: **W1** `tools/vendor_common.py`
 (`c07a5b5`), **W2** `runtime/layout_base.py` — the eight layout heads' one
 `_base` body (`7a7f9d8`), **W3** the launcher's one streak-advance body

@@ -7,7 +7,7 @@ layouts in their own files (cards/paint/map/music/scene/block). `_base` is what
 decides whether a layout reproduces the pre-#39 constants VERBATIM or runs the
 reflow formulas, so eight copies of it is eight chances for the T-Deck's
 byte-identical guarantee to become a discipline rather than a structure
-(`docs/console_architecture_2026-08.md` §6).
+(`docs/history/console_architecture_2026-08.md` §6).
 
 Two halves, deliberately:
 

@@ -9,9 +9,10 @@ collaborator commits' own messages. Originally:
 **PROPOSAL, REVISION 3 (2026-08-26)** — rev 2 folded the three
 parallel adversarial reviews (architecture, performance, evidence); rev 3
 folds the owner's first-pass comments (achievements event-push; gates batched
-9 → 5). The forward-looking half of the debt program: `docs/refactor_debt_2026-08.md`
-(tracked **#209**) is the survey and stays as evidence; this doc is the target
-architecture and the migration program. Related standing issues: #208 (shared
+9 → 5). The forward-looking half of the debt program:
+`docs/history/refactor_debt_2026-08.md` (tracked **#209**) is the survey and
+stays as evidence; this doc is the target architecture and the migration
+program. Related standing issues: #208 (shared
 bodies with no executable coverage), #207 (the `colors=` skin hatch), #206
 (board-port copies), #203 (the PPI chrome floor).
 

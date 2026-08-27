@@ -24,7 +24,7 @@ runtime tree, because the obvious home -- beside `chrome.Layout` -- is not
 importable by the classes that need it: `chrome.py` imports its geometry
 constants FROM `bar_layer`/`settings_layer`/`code_layer`, so a base living
 there is a cycle for exactly the editor surfaces that subclass it
-(`docs/console_architecture_2026-08.md` §6).
+(`docs/history/console_architecture_2026-08.md` §6).
 
 The APP tier is a declared second vocabulary and is not here:
 `app_shell.ListShellLayout` and the calc/appearance/artwork heads speak

@@ -1,4 +1,4 @@
-"""`CartManager` direct (#209 landing C, docs/console_architecture_2026-08.md).
+"""`CartManager` direct (#209 landing C, docs/history/console_architecture_2026-08.md).
 
 The roster is the shell's most-read piece of state, and what the extraction put
 at risk is not "does a cart appear" -- the goldens and `test_editor_picker`

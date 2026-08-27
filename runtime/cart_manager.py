@@ -4,7 +4,7 @@ The scanned cart list and everything that changes it: the store-writing verbs
 (new / duplicate / delete), the re-scan the browser sync fires, the #66 live-set
 diet (slim / rehydrate / re-slim) and the #105 favorites + recents. One object
 owns the list, so "what carts exist" has one author and one place a second cart
-SOURCE registers (docs/console_architecture_2026-08.md Section 5: #123/#124/#125
+SOURCE registers (docs/history/console_architecture_2026-08.md Section 5: #123/#124/#125
 gallery browse/install/publish).
 
 ## `all` is a plain attribute with no `ws` mirror

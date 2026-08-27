@@ -1,4 +1,4 @@
-"""`Appearance` direct (#209 landing D, docs/console_architecture_2026-08.md).
+"""`Appearance` direct (#209 landing D, docs/history/console_architecture_2026-08.md).
 
 The LOOK cluster is the one the pixel goldens cover best -- 97 whole-screen
 hashes x 5 configs plus 298 sub-surface hashes are, between them, a very

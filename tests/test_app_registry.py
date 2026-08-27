@@ -1,4 +1,5 @@
-"""The system-app registry is DATA -- the ratchet for docs/ui_refactor_2026-08.md §3 Phase 5.
+"""The system-app registry is DATA -- the ratchet for
+docs/history/ui_refactor_2026-08.md §3 Phase 5.
 
 Adding a system app used to cost EIGHT files, five of which held the app's name
 in a hand-maintained list:
@@ -115,7 +116,7 @@ def test_console_has_no_per_app_registration_line():
 def test_no_app_is_constructed_by_name_in_console(app_id):
     """The seven `self.<id>_app = SomeAppLayer(...)` lines are gone. The class
     IMPORTS stay -- console.py's barrel is deliberately frozen, not migrated
-    (docs/shell_decoupling_2026-08.md row 3) -- but nothing may assign one."""
+    (docs/history/shell_decoupling_2026-08.md row 3) -- but nothing may assign one."""
     tree = ast.parse(_read("runtime/console.py"))
     attr = app_id + "_app"
     for node in ast.walk(tree):

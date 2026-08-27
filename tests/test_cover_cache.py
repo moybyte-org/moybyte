@@ -1,4 +1,4 @@
-"""`CoverCache` direct (#209 landing C, docs/console_architecture_2026-08.md).
+"""`CoverCache` direct (#209 landing C, docs/history/console_architecture_2026-08.md).
 
 The cover pipeline is the FRAME-HOT collaborator, so what has to be pinned here
 is not "does a cover render" -- `tests/test_cover_pipeline.py` and the goldens

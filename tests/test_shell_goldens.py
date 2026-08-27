@@ -108,7 +108,7 @@ or  .venv/bin/python -m pytest tests/test_shell_goldens.py --update-goldens -p n
 
 Nothing re-baselines automatically. If a golden moves and you cannot say in
 one sentence which pixel moved and why, the change is a revert, not an update
-(`docs/ui_refactor_2026-08.md` Section 8).
+(`docs/history/ui_refactor_2026-08.md` Section 8).
 """
 
 import hashlib

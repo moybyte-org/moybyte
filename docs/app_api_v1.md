@@ -106,7 +106,7 @@ map. Four things about it are load-bearing:
   over-declaration is a capability granted for nothing, and user apps will be
   handed exactly these tuples.
 - **Roles expose METHODS, and there is not one `property` in the module.**
-  Measured (`docs/ui_refactor_2026-08.md` Section 2.4): a plain attribute hop
+  Measured (`docs/history/ui_refactor_2026-08.md` Section 2.4): a plain attribute hop
   costs +0.5us on the P4 and the same forward written as a descriptor costs
   +5.1us. So `cv = ctx.surface.canvas()`, and a test asserts the absence.
 - **Hoist.** Bind the roles you use every frame once in `__init__`

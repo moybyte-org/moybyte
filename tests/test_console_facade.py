@@ -1,4 +1,4 @@
-"""The two façade ratchets (#209, docs/console_architecture_2026-08.md 3d).
+"""The two façade ratchets (#209, docs/history/console_architecture_2026-08.md 3d).
 
 The carve moves state and verbs off `Workstation` onto collaborator objects,
 and leaves fixed-signature forwards behind for the long tail of callers. Two

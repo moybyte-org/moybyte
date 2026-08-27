@@ -3,9 +3,10 @@
 **Status: LANDED 2026-08-19** — ten commits on `dev`, `bc2586a`…`3b22d5a`, one
 per phase (Phase 3's four sub-phases are four of them; Phases 7 and 8 share the
 last). Each phase below carries its own landing note. This doc supersedes the
-*plans* in `docs/ui_widgets_2026-08.md` (DRAFT v0.2) and `docs/shell_decoupling_2026-08.md`
-(PLAN/OPEN) by folding both, plus four parallel adversarial reviews run against
-them on 2026-08-19 (architecture / performance / app-authoring / execution).
+*plans* in `docs/history/ui_widgets_2026-08.md` (DRAFT v0.2) and
+`docs/history/shell_decoupling_2026-08.md` (PLAN/OPEN) by folding both, plus
+four parallel adversarial reviews run against them on 2026-08-19
+(architecture / performance / app-authoring / execution).
 Those two docs stay as the **evidence and analysis** they are — their
 measurements, their inventories and their review ledgers are cited from here and
 are not re-derived. What changes is the SEQUENCE and the SCOPE: roughly half of

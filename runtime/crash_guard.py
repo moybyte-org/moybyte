@@ -203,7 +203,7 @@ class CrashGuard:
         """Every disabled id.
 
         Nothing calls it yet: the picker BADGE is Phase 8's recorded open tail
-        (docs/ui_refactor_2026-08.md), which needs a `launcher_layer` chrome
+        (docs/history/ui_refactor_2026-08.md), which needs a `launcher_layer` chrome
         idiom and a visual-identity call, not more guard state. Kept because
         that doc names this as the half already built, and pinned by
         `tests/test_user_apps.py`."""

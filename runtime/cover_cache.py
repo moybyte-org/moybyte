@@ -497,7 +497,7 @@ class CoverCache:
         The icon cache is the one this used to miss: it was written by
         `icon_sheet_for` and cleared nowhere, so a re-scan kept drawing the icon
         a cart had before it was edited, and a deleted cart's Image stayed live
-        forever (docs/console_architecture_2026-08.md rev-2 item 10)."""
+        forever (docs/history/console_architecture_2026-08.md rev-2 item 10)."""
         self._drop_payloads(0)
         self._none = {}
         self._prune_icons()
