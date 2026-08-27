@@ -762,7 +762,7 @@ def _advance_streak(layer, cv):
     under an unchanged `_statics_key` counts up to `_retained_n(cv)`; a
     changed key restarts at one. ONE body for the home shelf and the Editor
     picker (#209): repeated invalidation logic is the family
-    ui_damage_model_v1.md names as the silent-cache bug."""
+    surface_model_v1.md §14.2 names as the silent-cache bug."""
     key = layer._statics_key(cv)
     if key == layer._statics:
         if layer._full_streak < _retained_n(cv):
@@ -849,8 +849,8 @@ class LauncherHomeLayer:
         icon theme; reusing it means the bar's cache discipline IS this cache's
         discipline). Anything that draws a pixel of the home frame and is NOT
         derivable from this tuple is a staleness bug -- the silent-cache family
-        ui_damage_model §2.1 documents -- so additions to the home draw must
-        extend this key."""
+        surface_model_v1.md §14.2 documents -- so additions to the home draw
+        must extend this key."""
         ws = self.ws
         return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
                 ws.covers.gen, self._lhover,

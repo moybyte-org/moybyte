@@ -452,8 +452,8 @@ def test_advance_streak_restarts_on_a_changed_key(tmp_path):
 
 def test_the_streak_advance_has_exactly_one_body():
     """#209 W3: this bookkeeping stood in three copies, which is the shape
-    ui_damage_model_v1.md names as the silent-cache family. A fourth copy must
-    not grow back beside the helper."""
+    surface_model_v1.md §14.2 names as the silent-cache family. A fourth copy
+    must not grow back beside the helper."""
     src = (ROOT / "runtime" / "launcher_layer.py").read_text()
     assert src.count("_full_streak += 1") == 1
     assert src.count("_advance_streak(self, cv)") >= 3

@@ -1165,7 +1165,7 @@ net, textmode/quit/view. That is exactly audio's shipped shape (thin
   of moycore's stages; controllers survive as designed; the session model is
   buried with its reasoning in §3.4. Only the §3.2 sunset's *completion*
   waits on stage 4.
-- **`docs/ui_damage_model_v1.md` / `visual_identity_v1.md` / `shell_ux_v1.md`:**
+- **`docs/history/ui_damage_model_v1.md` / `visual_identity_v1.md` / `shell_ux_v1.md`:**
   untouched; the why-not-LVGL record and the UX spec are not in play.
 
 ## 9. Open questions (pruned — v1 had five; the LADDER's are all closed)

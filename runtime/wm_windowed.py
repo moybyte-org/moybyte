@@ -1728,7 +1728,7 @@ class WindowedWM(FullscreenStackWM):
         """True when this PAINTED frame provably did not change WIN's content,
         so the focused window's draw may be skipped and the stamp reuse the
         retained win.buf (the surface-granularity damage model,
-        docs/ui_damage_model_v1.md §5.0 -- this is its first slice).
+        docs/surface_model_v1.md §14.1 -- this is its first slice).
 
         "Provably" is three facts together:
 
@@ -1822,7 +1822,7 @@ class WindowedWM(FullscreenStackWM):
                     and self._direct_render(win, dt)):
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 return
-            # CONTENT FREEZE (docs/ui_damage_model_v1.md §5.0 first slice): on a
+            # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
             # painted frame that provably did not change this window's content
             # (see _content_static), skip the re-render and let the retained-
             # buffer stamp below present it -- the map tab's draw is ~70ms on P4

@@ -50,7 +50,7 @@ What the seeding then established, and it is the useful part:
     cell fills and the comparison had no power. Attributed directly with
     tools/p4_attrib.py, a populated map costs 74.4ms against an empty map's 65.0
     -- and the real finding is that 50-75% of every editor frame is per-call
-    DISPATCH, not pixels. See docs/ui_damage_model_v1.md Section 0.06.)
+    DISPATCH, not pixels. See docs/history/ui_damage_model_v1.md Section 0.06.)
   * CODE is only weakly content-sensitive (48ms on a system-app cart, 52ms on a
     302-line one).
   * SETTINGS at 24ms is the only surface close to budget, and it is the one that

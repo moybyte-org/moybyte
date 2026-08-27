@@ -55,8 +55,8 @@ TRAPS (each of these produced a confident wrong number first)
 
 RESULTS (2026-07-27, P4 on glass @ 1024x600, per painted frame during a drag)
 ------------------------------------------------------------------------------
-See docs/ui_damage_model_v1.md Section 0.05 -- the numbers live there because
-they redirected that plan and the doc has to carry the reasoning.
+See docs/history/ui_damage_model_v1.md Section 0.05 -- the numbers live there
+because they redirected that plan and the doc has to carry the reasoning.
 """
 
 from __future__ import annotations
