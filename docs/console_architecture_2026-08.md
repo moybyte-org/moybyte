@@ -1,6 +1,12 @@
 # Console architecture 2026-08 — the shape that sticks
 
-**Status: PROPOSAL, REVISION 3 (2026-08-26)** — rev 2 folded the three
+**Status: EXECUTED (2026-08-27)** — all five landings shipped on the
+`shell-carve` branch, one object per commit, every gate run the same night
+(the record is #209's landing comment; CLAUDE.md carries the dated entry).
+This document is now the record of the shape, kept at revision 3 as landed;
+the per-landing deviations it did not predict are recorded in the six
+collaborator commits' own messages. Originally:
+**PROPOSAL, REVISION 3 (2026-08-26)** — rev 2 folded the three
 parallel adversarial reviews (architecture, performance, evidence); rev 3
 folds the owner's first-pass comments (achievements event-push; gates batched
 9 → 5). The forward-looking half of the debt program: `docs/refactor_debt_2026-08.md`

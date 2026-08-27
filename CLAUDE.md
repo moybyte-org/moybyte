@@ -881,6 +881,61 @@ was promoted into one body and nothing executable guarded it.**
   That was 137ms of a 278ms browser page load, and the same wiring order runs on
   every tier, so all three boards get it. Per-cart numbers belong in #66.
 
+### The shell carve LANDED (2026-08-27) — six collaborators behind the Workstation façade
+
+`docs/console_architecture_2026-08.md` (rev 3, tracked #209) executed in five
+gated landings, one object per commit: **W1** `tools/vendor_common.py`
+(`c07a5b5`), **W2** `runtime/layout_base.py` — the eight layout heads' one
+`_base` body (`7a7f9d8`), **W3** the launcher's one streak-advance body
+(`05866c9`); then **WebConsole** `ws.web` (`e66bb27`, the pilot),
+**SystemStore + StoreHandle** `ws.prefs` (`ce4204a`), **CoverCache**
+`ws.covers` (`c3ceb1c`), **CartManager** `ws.carts` (`f4cf8c5`),
+**Appearance** `ws.look` (`f60523a`), **HistoryRouter** `ws.history`
+(`b58e944`). `Workstation` went 5,435 → 3,950 lines / 275 → 208 methods.
+Exactly TEN forwards remain on the façade and
+`tests/test_console_facade.py` pins every one with its caller (web 8, prefs 1,
+carts 1 — covers/look/history landed with ZERO), beside the getattr-name
+ratchet over every `getattr(ws, "…")` probe in runtime/device/tools. Facts a
+coder must not undo:
+
+- **`ws.system` is an ALIAS of the SystemStore dict and is never rebound** —
+  `SystemStore.load()` mutates it in place. That identity is why
+  settings_layer's and dev_channel's raw writes never migrated, and why
+  CrashGuard takes the dict itself (the takes-a-callable wart retired with the
+  rebind that justified it).
+- **The achievement overlays are EVENT-PUSH**: an unlock/egg/konami writes the
+  flat kernel deadlines (`_toast_until`/`_egg_until`/`_confetti_until`) from
+  the arm site; `_animating` and both WMs' overlay signatures read plain ints
+  and never call into `ach`/`ach_ui`. Proven on T-Deck glass: an award over
+  serial armed the deadline, the overlay painted, the desk went static again
+  after expiry.
+- **`theme_colors` stays a flat kernel rebind on purpose**: the launcher's
+  cache keys fold `id(ws.theme_colors)`, so the REBIND is the shelf
+  invalidation — an in-place alias there would be a live bug.
+- **The frame loop reaches collaborators directly, never through a forward**
+  (`covers.begin_frame`/`take_deferred`, `history.idle_tick`); per-card grid
+  paths use injected BOUND methods (`covers.cover_for`, `carts.is_favorite`).
+- **`_icon_cache` is CoverCache's and invalidates on a rescan** (the rev-2
+  item-10 bug, fixed in `c3ceb1c`) — and the invalidate runs BEFORE
+  `slim_carts` re-bakes, because slimming is the last moment a cart's sprite
+  art exists in RAM; the goldens catch a blanket clear.
+- **Serial vocabulary moved with the code** (§3d): `p4_conformance` speaks
+  `ws.carts.all`, `p4_hitch` wraps `ws.history.idle_tick`,
+  `p4_chrome_freeze`/`p4_scroll_ab` speak `ws.look`.
+- **Every landing was built and flashed on all three boards the same night**:
+  host suite 100% green at every step (3,364 tests at the end), `p4_bench`/
+  `p4_clicks` p50 AND p90/max inside noise at every gate, the cart roster
+  unchanged, idle-paints-zero on every arm, all three on-glass suites green
+  throughout (the OTA-verifier trio's chunked-`pyexec` flake reproduced
+  identically on dev-era images that night — chronic, not the carve). Whole-
+  program image delta ≈ +4.6 KB per board. The full gate record is #209's
+  landing comment; per-cart fps stays #66's.
+- **Fixed on the way** (`9ba6498`): `tools/p4_push_web.py` and the P4 on-glass
+  web test both hand-pinned the four-asset era, so the push could never take
+  over from the baked bundle after `moy_store.mjs` joined `ASSETS`
+  (2026-08-25) — and printed "all 4 files match" while doing it. Both now read
+  the one list (`gen_web_blob.asset_names()` over `moy_webhost.ASSETS`).
+
 ### Host == device: the shared console (important)
 
 The console UI is **one codebase** that both the host simulator and the
