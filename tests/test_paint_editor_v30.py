@@ -478,7 +478,7 @@ def _blank_map(ws):
 def test_map_undo_redo_walk_gestures(tmp_path):
     # #91/#111: two stamp taps are two undo steps; the shared bar UNDO reverts the
     # last, REDO re-applies it. The map's local toolbar UNDO/REDO buttons were
-    # removed in #111 -- ws.undo()/ws.redo() (the ONE bar pair, routed to this
+    # removed in #111 -- ws.history.undo()/ws.history.redo() (the ONE bar pair, routed to this
     # editor's op-history) is now the walk.
     ws, drv = _open_map(tmp_path)
     _blank_map(ws)
@@ -490,9 +490,9 @@ def test_map_undo_redo_walk_gestures(tmp_path):
     c2 = (me.cam_x + 2, me.cam_y + 1)
     assert ws.tilemap.mget(*c1) == 4 and ws.tilemap.mget(*c2) == 4
 
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     assert ws.tilemap.mget(*c2) == ws.tilemap.EMPTY and ws.tilemap.mget(*c1) == 4
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert ws.tilemap.mget(*c2) == 4               # the step came back
 
 

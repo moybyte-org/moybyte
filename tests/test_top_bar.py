@@ -480,7 +480,7 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     load (so shipped icon changes land on an already-themed device/desktop without a
     manual wipe, #47-style); a theme stamped at the current version is kept (a user's
     EDIT ICONS edit survives until the next bump)."""
-    from runtime import chrome as _chrome, console as C
+    from runtime import chrome as _chrome
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     store, root = ws.carts_store, ws.carts_root
@@ -492,10 +492,10 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     store.save_system_icons(other, root, 0)
     ws.look.load_icon_sheet()
     assert ws.look.icon_sheet.to_hex() == default_hex
-    assert store.load_system_icons_version(root) == C._ICON_VERSION
+    assert store.load_system_icons_version(root) == _chrome._ICON_VERSION
 
     # CURRENT (>= _ICON_VERSION): the saved theme is kept untouched.
-    store.save_system_icons(other, root, C._ICON_VERSION)
+    store.save_system_icons(other, root, _chrome._ICON_VERSION)
     ws.look.load_icon_sheet()
     assert ws.look.icon_sheet.to_hex() == other
 
@@ -732,7 +732,7 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     """#88: the Editor's lent bar zone grows shared UNDO/REDO icons wired to the
     SAME journal verbs the code editor's Ctrl+Z/Y already drives -- reachable from
     every tab, not just code. Two real commits, then a tap on each bar icon must
-    actually walk the live source, and ws.can_undo()/can_redo() must track the
+    actually walk the live source, and ws.history.can_undo()/can_redo() must track the
     journal cursor (the icons' dimmed/enabled state) at each step."""
     from runtime import host_app, editor_app as EA
     ws = _ws(tmp_path)
@@ -743,33 +743,33 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     drv.frame(1 / 30)
 
     # Nothing journaled for this cart yet -- UNDO must read disabled.
-    assert ws.can_undo() is False
-    assert ws.can_redo() is False
+    assert ws.history.can_undo() is False
+    assert ws.history.can_redo() is False
 
     ws.editor.set_text(ws.editor.text() + "\n# commit A\n")
     assert ws.save_code() is True          # commit #1: the floor -- still nothing before it
-    assert ws.can_undo() is False
+    assert ws.history.can_undo() is False
 
     ws.editor.set_text(ws.editor.text() + "# commit B\n")
     assert ws.save_code() is True          # commit #2: now there's a step back to A
-    assert ws.can_undo() is True
-    assert ws.can_redo() is False
+    assert ws.history.can_undo() is True
+    assert ws.history.can_redo() is False
     src_b = ws.editor.text()
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_UNDO))    # the bar's UNDO icon
     drv.frame(1 / 30)
     assert "# commit A" in ws.editor.text() and "# commit B" not in ws.editor.text(), \
         "the bar UNDO icon must walk the journal back to commit A"
-    assert ws.can_redo() is True
+    assert ws.history.can_redo() is True
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_REDO))    # the bar's REDO icon
     drv.frame(1 / 30)
     assert ws.editor.text() == src_b, "the bar REDO icon must re-apply commit B"
-    assert ws.can_redo() is False
+    assert ws.history.can_redo() is False
 
 
 def test_bar_undo_redo_icons_are_a_no_op_when_disabled(tmp_path):
-    """A tap on a disabled UNDO/REDO icon must be a safe no-op (ws.undo()/redo()
+    """A tap on a disabled UNDO/REDO icon must be a safe no-op (ws.history.undo()/redo()
     already floor/ceiling-guard the walk) -- no crash, no spurious reload."""
     from runtime import host_app, editor_app as EA
     ws = _ws(tmp_path)
@@ -778,7 +778,7 @@ def test_bar_undo_redo_icons_are_a_no_op_when_disabled(tmp_path):
     ws.open_in_editor()
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
     src = ws.editor.text()
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_UNDO))

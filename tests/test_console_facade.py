@@ -18,8 +18,10 @@ things have to be pinned, and neither is visible to the goldens:
      channel's `state` snapshot quietly reports "no service" forever, and every
      host test stays green.
 
-Both are meant to GROW: `COLLABORATORS` gains a name per landing (prefs,
-covers, carts, look, history), and `FORWARDS` gains that landing's set.
+`COLLABORATORS` grew a name per landing (prefs, covers, carts, look, history)
+and `FORWARDS` grew that landing's set; landing E is the last of the six, so
+what is pinned below is now the END STATE rather than a waypoint -- every
+surviving forward is a deliberate public surface with a named caller.
 """
 
 import ast
@@ -31,9 +33,9 @@ from ws_helpers import build_desktop_ws, build_ws
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
 
-# The collaborator attributes on Workstation. Landing E adds: history
-# (HistoryRouter).
-COLLABORATORS = ("web", "prefs", "covers", "carts", "look")
+# The collaborator attributes on Workstation -- all six of the architecture
+# doc's clusters, complete as of landing E.
+COLLABORATORS = ("web", "prefs", "covers", "carts", "look", "history")
 
 # name on Workstation -> method on the collaborator. Every entry is a caller
 # that has not moved; the comment says who, so retiring one is a search with an
@@ -90,6 +92,21 @@ FORWARDS = {
     # themselves: `ws.theme_colors` stays a flat attribute ~70 surface sites
     # read per draw, with `look.set_theme` as its only author.
     "look": {},
+    # Landing E. ZERO forwards -- the third of the six to land with none, and
+    # the reason is the same each time: every caller was IN this tree and moved
+    # with the verbs. The #111 bar pair had four external callers and they are
+    # all shell surfaces (editor_app's UNDO/REDO icons + their dim state,
+    # code_layer's Ctrl+Z/Ctrl+Y and its nine typing-burst pokes, bar_layer's
+    # strip cache key, project.py's commit_code drain), so they name
+    # `ws.history.*` directly on a per-TAP path. The three 3d blind spots were
+    # swept before the move: the dev channel speaks no history vocabulary
+    # (`state` carries no undo/journal field), none of the three on-glass suites
+    # names one, `moy_webhost` captures none -- and the one SERIAL tool that
+    # does, `tools/p4_hitch.py`, moved in THIS commit: it wraps the idle tick BY
+    # NAME over `pyexec` and its `_wrapm` returns silently on a name that is
+    # gone, so against this tree it would have reported `journal=0` on every
+    # hitch forever rather than raising.
+    "history": {},
 }
 
 # `getattr(ws, "X")` names that are deliberately absent from a host console.

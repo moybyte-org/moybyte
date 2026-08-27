@@ -294,7 +294,7 @@ def test_save_persists_and_journal_undo_reaches_live_workspace(tmp_path):
     assert len(json.loads(live.read_text())) == 4
     # The durable journal walk restores the file AND the open workspace's live
     # Scenes (the _reload_after_walk rebuild), so the next run spawns 3 again.
-    assert ws._journal_walk(redo=False)
+    assert ws.history._journal_walk(redo=False)
     assert len(json.loads(live.read_text())) == 3
     assert len(ws.scenes.scene("main")) == 3
     # The rebuilt scene TAB reopens on the restored rows.

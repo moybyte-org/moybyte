@@ -2301,7 +2301,7 @@ class WindowedWM(FullscreenStackWM):
             # (Settings -> EDIT ICONS, paint_layer.ThemeLayer -- it spawns on the
             # same back-stack slot); each has its own commit verb.
             if ws._editing_icons:
-                ws.save_icons()
+                ws.look.save_icons()
             else:
                 ws.editor_app.save_current()      # the Editor's active tab
         if kind == "desktop":

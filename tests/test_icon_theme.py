@@ -77,7 +77,7 @@ def test_edit_icons_reachable_by_keyboard_a(tmp_path):
 
 # -- paint a pixel + a hard commit persists + round-trips + re-themes the bar --
 #
-# There is no SAVE button (#111): ws.save_icons() is the hard-commit verb every
+# There is no SAVE button (#111): ws.look.save_icons() is the hard-commit verb every
 # real exit path (CLOSE/leave, a window/context-X, going home) now dispatches to
 # automatically -- these tests call it directly to verify the persistence
 # mechanism itself; test_close_auto_commits_the_icon_edit below (and the CLOSE/
@@ -101,7 +101,7 @@ def test_paint_and_save_persists_and_round_trips(tmp_path):
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
     assert ws.look.icon_sheet.pget(0, 0) == 9 and before != 9      # painted in-RAM
-    ws.save_icons()
+    ws.look.save_icons()
     assert ws.save_status is None      # invisible save: no failure, no "SAVED"
     # Persisted: the file now exists, loads non-None, and the edit round-trips.
     hexs = moy_carts.load_system_icons(carts_dir)
@@ -126,7 +126,7 @@ def test_save_invalidates_bar_cache_and_bar_still_draws(tmp_path):
     ws.paint.color = 11
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
-    ws.save_icons()
+    ws.look.save_icons()
     assert ws._bar_img_cache == {}                            # cache invalidated by save
     # Back to a desktop bar so the changed pixels are actually re-blit; no crash.
     drv.click(*_center(C._PAINT_CLOSE))
@@ -242,7 +242,7 @@ def test_editing_icons_does_not_modify_a_cart_sheet(tmp_path):
     ws.paint.color = 7
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
-    ws.save_icons()
+    ws.look.save_icons()
     # No cart sheet changed on disk.
     for c in moy_carts.scan(carts_dir):
         assert c.get("sprites") == before.get(c["path"]), c["path"]

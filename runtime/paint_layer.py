@@ -17,7 +17,7 @@ Boundary (the anti-spaghetti line, per the doc): the SHEETS + the current-editor
 + the persistence verbs stay on Workstation -- `ws.project.sheet` / `ws.look.icon_sheet` (single
 source of the pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like
 ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
-`ws.save_sprites` / `ws.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
+`ws.save_sprites` / `ws.look.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
 system state the device + tests pin). PaintLayer READS those and DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
@@ -761,8 +761,9 @@ class ThemeLayer:
 
     The lifecycle stays reachable on Workstation as thin forwarders (ws.open_theme is
     device/test-pinned; ws._leave_theme is called by PaintLayer's CLOSE tap); the mode
-    flag ws._editing_icons + the sheet/save methods (look.load_icon_sheet/set_icon_sheet/
-    save_icons) stay on ws (the device backend calls them) -- ThemeLayer dispatches."""
+    flag ws._editing_icons stays on ws (the device backend reads it) and the
+    sheet/save trio is ws.look's (load_icon_sheet/set_icon_sheet/save_icons) --
+    ThemeLayer dispatches."""
 
     id = "theme"
     domain = "system"
@@ -823,7 +824,7 @@ class ThemeLayer:
         next time."""
         ws = self.ws
         ws._dirty = True                 # screen change repaints (#44)
-        ws.save_icons()                  # hard-commit BEFORE the editor drops (#111)
+        ws.look.save_icons()             # hard-commit BEFORE the editor drops (#111)
         ws._editing_icons = False
         ws.paint = None
         self._paint.reset_drag()

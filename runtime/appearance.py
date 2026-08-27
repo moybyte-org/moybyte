@@ -285,6 +285,41 @@ class Appearance:
                     print("Moybyte icons re-seed failed:", _err_text(exc))
         self.set_icon_sheet(sheet)
 
+    def save_icons(self):
+        """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
+        the exact mirror of the cart-sprite save: to_hex -> the SAME SD wrapper
+        (host: direct write; device: with_sd_live). Then invalidate the bar caches so
+        the NEXT bar draw shows the new pixels live: set_icon_sheet drops the per-kind
+        _SheetSprite cache (and with it the device's per-Image RGB565 blit cache), and
+        the sheet's gen already bumped on each pset so any gen-keyed cache rebuilds
+        too. Surfaces a save status like the cart paint editor. A bad store/no SD root
+        is a no-op (writes deferred).
+
+        The theme editor has no SAVE tap (#111): this is the hard-commit verb its
+        every exit path calls -- ThemeLayer.leave, the windowed WM's window-X and
+        go_home."""
+        ws = self.ws
+        sheet = self.icon_sheet
+        if not (sheet and ws.carts_root and ws.can_manage):
+            return
+        hexs = sheet.to_hex()
+        try:
+            ws._with_sd(lambda: ws.carts_store.save_system_icons(
+                hexs, ws.carts_root, _ICON_VERSION))
+            sheet.dirty = False
+            ws.save_status = None           # clear stale failure text (see commit_code)
+            # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
+            # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
+            self.set_icon_sheet(sheet)
+            ws.ach.note("paint_save")       # "Little Artist": a theme saved (#21)
+        except Exception as exc:  # noqa: BLE001
+            # A failed save must be VISIBLE on device (no serial in the run loop), not
+            # silent. _err_text-guarded so a weird __str__ can't escape.
+            txt = _err_text(exc)
+            ws.save_status = "CAN'T SAVE"
+            ws.cart_error = "Could not save icons -- " + txt
+            print("Moybyte save icons failed:", txt)
+
     # -- system font scale (#39) ---------------------------------------------
 
     def effective_font_scale(self):

@@ -356,7 +356,7 @@ class Project:
     def reset_config_history(self):
         """Fresh #111 op-history for `config`: called whenever the live dict is
         replaced WHOLESALE (Project.__init__ via a fresh workspace open, and a
-        journal walk's console._reload_after_walk) so a stale field op from a
+        journal walk's HistoryRouter._reload_after_walk) so a stale field op from a
         superseded config can never be replayed against the new one -- the same
         "clean boundary" reset paint/map/scene/music get from dropping their
         whole editor instance on a reload."""
@@ -435,7 +435,7 @@ class Project:
         surface (ws.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
 
-        `quiet` is set by the Stage-7 idle-debounce autosave (ws._autosave_code): that
+        `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that
         save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
         achievement toast -- a visible side effect on a nominally-invisible save. The
         badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
@@ -469,8 +469,8 @@ class Project:
             # source of truth for graduation, so the additive ops never disturb it (the
             # journal WALK reloads snapshots + a fresh empty History; the ops ride along
             # for parity/future replay). flush() only after the store write succeeded.
-            ws._close_code_burst()
-            hist = ws._code_op_history()
+            ws.history.close_code_burst()
+            hist = ws.history.code_op_history()
             _t_burst = _ticks_diff(_ticks_ms(), _t0) - _t_write
             ops = hist.flush() if hist is not None else None
             _t_ops = _ticks_diff(_ticks_ms(), _t0) - _t_write - _t_burst
@@ -525,11 +525,11 @@ class Project:
 
     def _code_history(self):
         """The op-history of the OPEN code editor (#111 phase 4), or None -- created
-        lazily on the Workstation over the live CodeEditor and rebound when a fresh
-        editor is built (ws._code_op_history). The code burst + this History live on
-        ws where the keyboard input is handled; Project just references it (and
-        commit_code drains it, mirroring commit_sprites/commit_map)."""
-        return self.ws._code_op_history()
+        lazily on the UNDO ROUTER over the live CodeEditor and rebound when a fresh
+        editor is built (ws.history.code_op_history). The code burst + this History
+        live there, with the routing that consumes them; Project just references it
+        (and commit_code drains it, mirroring commit_sprites/commit_map)."""
+        return self.ws.history.code_op_history()
 
     def _blocks_history(self):
         """The op-history of the OPEN BlockEditor (#111 phase 4), or None. A
@@ -548,7 +548,7 @@ class Project:
     # menu_view maps to the Project method returning that tab's live History (or
     # None for a tab with no in-RAM op stack). One entry per surface, ADDITIVE:
     # paint/map (#111 phase 2) + code/blocks (phase 4) here; scene/music/config
-    # wire theirs in the same shape. Console._active_history reads it -- keeping
+    # wire theirs in the same shape. HistoryRouter.active_history reads it -- keeping
     # this a data table (not a switch ladder in console) is why new tabs merge
     # cleanly (one line each) instead of colliding in one growing if/elif.
     _HISTORY_TABS = {

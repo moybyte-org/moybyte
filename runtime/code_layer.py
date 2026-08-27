@@ -444,33 +444,33 @@ class CodeLayer:
             elif self._find_open:
                 self._find_key(k)              # find field owns the keyboard while open
             elif k == 0x1A:
-                ws.undo()
+                ws.history.undo()
             elif k == 0x19:
-                ws.redo()
+                ws.history.redo()
             elif k == 0x01:                    # Ctrl+A: select all (#132 parity)
                 ed.select_all()
             elif k == 0x03:
                 ed.copy()
             elif k == 0x18:
-                ws._code_burst_open()          # #111: a cut joins the live typing burst
+                ws.history.code_burst_open()   # #111: a cut joins the typing burst
                 if ed.cut():
                     self._recheck_err()
             elif k == 0x16:
-                ws._code_burst_open()          # #111: a paste joins the live typing burst
+                ws.history.code_burst_open()   # #111: a paste joins the typing burst
                 if ed.paste():
                     self._recheck_err()
             else:
                 # A text-editing key (printable / backspace / tab / enter). Open the
                 # typing burst BEFORE the edit lands (#111 phase 4), then close it on
                 # Enter -- the burst edge the spec names, alongside the autosave
-                # debounce + an undo press (both handled on the Workstation). ed.key
+                # debounce + an undo press (both handled by ws.history). ed.key
                 # ignores control bytes it doesn't know, so a no-op key just leaves the
                 # burst open with an unchanged pre-image (a harmless later net no-op).
-                ws._code_burst_open()
+                ws.history.code_burst_open()
                 if ed.key(k):                  # text changed -> re-check the marker
                     self._recheck_err()
                 if k in (0x0D, 0x0A):
-                    ws._close_code_burst()
+                    ws.history.close_code_burst()
         # (self._ekey.hit above already recorded k as the new previous byte.)
 
     # -- #89 helpers: clipboard/find/tool/select routing ---------------------
@@ -517,7 +517,7 @@ class CodeLayer:
         if self._find_open:
             self._find_key(code)
         elif self.ws.editor is not None:
-            self.ws._code_burst_open()         # #111: a palette/tapped char joins the burst
+            self.ws.history.code_burst_open()   # #111: a palette char joins the burst
             if self.ws.editor.key(code):
                 self._recheck_err()
 
@@ -534,21 +534,21 @@ class CodeLayer:
         elif name == "copy":
             ed.copy()
         elif name == "cut":
-            ws._code_burst_open()              # #111: tool-row edits join the typing burst
+            ws.history.code_burst_open()     # #111: tool-row edits join the burst
             if ed.cut():
                 self._clear_err()
         elif name == "paste":
-            ws._code_burst_open()
+            ws.history.code_burst_open()
             if ed.paste():
                 self._clear_err()
         elif name == "find":
             self._toggle_find()
         elif name == "indent":
-            ws._code_burst_open()
+            ws.history.code_burst_open()
             ed.indent_selection()
             self._clear_err()
         elif name == "outdent":
-            ws._code_burst_open()
+            ws.history.code_burst_open()
             if ed.outdent_selection():
                 self._clear_err()
         elif name == "gutter":
@@ -558,9 +558,9 @@ class CodeLayer:
         elif name == "goto":
             self._open_jump(ed)
         elif name == "undo":
-            ws.undo()
+            ws.history.undo()
         elif name == "redo":
-            ws.redo()
+            ws.history.redo()
         ws.mark_dirty()
 
     def _tool_tap(self, px, py, lay, ed):

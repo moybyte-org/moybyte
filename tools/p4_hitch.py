@@ -39,7 +39,8 @@ def _wrapm(obj, nm, tag):
         return
     f = getattr(obj, nm, None)
     if f is None:
-        return
+        return          # a renamed phase measures ZERO here, it does not raise --
+                        # keep these names in step with the shell (arch doc 3d)
     def g(*a, **k2):
         if not ws._rec:
             return f(*a, **k2)
@@ -71,7 +72,7 @@ ws._wrapm(ws.wm, '_draw_windows', 'wm.windows')
 ws._wrapm(ws.wm, '_win_chrome', 'wm.chrome')
 ws._wrapm(ws.wm, '_blit_backdrop_cache', 'desk.cache')
 ws._wrapm(ws, '_composite_game', 'composite')
-ws._wrapm(ws, '_journal_idle_tick', 'journal')
+ws._wrapm(ws.history, 'idle_tick', 'journal')
 _c = ws.canvas._comp
 for _m in ('flush', 'present_pending'):
     ws._wrapm(_c, _m, 'comp.' + _m)

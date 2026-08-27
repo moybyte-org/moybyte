@@ -12,10 +12,8 @@ free apart from the shared editor cores below.
 import time
 
 from editors import CodeEditor, SpriteSheet, _SheetSprite
-try:
-    from op_history import History, TextEditCodec, text_diff_op   # #111 phase 4: code-tab undo
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, TextEditCodec, text_diff_op
+# (the #111 op-history core is history_router.py's import now, not this file's --
+# #209 landing E took the code tab's History and its typing-burst codec with it)
 # The block editor's UI layer (issue #29 Part 2, extracted from this file): the
 # structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
 # the module constants/sentinels its rows/menu render. Re-exported under their
@@ -161,6 +159,15 @@ try:
     from system_store import StoreHandle, SystemStore
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.system_store import StoreHandle, SystemStore
+
+# The #111 undo ROUTER (#209 landing E, history_router.py): the bar UNDO/REDO
+# pair, the code tab's typing burst, the tab-scoped journal walk they fall
+# through to, and the idle-typing autosave the frame loop ticks. Takes the same
+# StoreHandle -- the walk re-derived that guard by hand until this landing.
+try:
+    from history_router import HistoryRouter
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.history_router import HistoryRouter
 
 # The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
 # builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
@@ -478,7 +485,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The console's stateless base layer -- the MOY64 palette (NAMES/color), the responsive
 # Layout/CodeLayout geometry (#39), the icon-glyph vocabulary (_GLYPHS/_blit_glyph), the
-# themeable top-bar IconSheet slot map + art (_ICON/_ICON_ART/_ICON_VERSION),
+# themeable top-bar IconSheet slot map + art (_ICON/_ICON_ART),
 # the cursor sprite (CURSOR), and the small pure helpers (_in/_clamp_scroll/_cursor_delta/
 # _ticks_*/_err_text/_from_ascii) -- now live in chrome.py (extracted so the Workstation
 # kernel is alone in this file). Imported back + re-exported under the pre-extraction names
@@ -492,7 +499,7 @@ try:
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble,
+        _blit_glyph, _ICON, _ICON_ART, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -502,7 +509,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble,
+        _blit_glyph, _ICON, _ICON_ART, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
     )
 
@@ -864,12 +871,16 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
-        # #111 phase 4: the code editor's in-RAM op-history (a typing-burst codec
-        # over the live CodeEditor) + the open burst's pre-image text. Created/
-        # rebound lazily by _code_op_history() over whatever editor is live, so a
-        # rebuilt editor (fresh cart / reopen) starts a fresh, empty History.
-        self._code_hist = None
-        self._code_burst_before = None
+        # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
+        # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
+        # stack, then the tab-scoped durable journal walk), the code tab's typing
+        # burst, and the idle-typing autosave `frame()` ticks. Built here, where
+        # its state used to sit -- it reaches the project, the editor and the
+        # store through `self` per call, so nothing it needs has to exist yet.
+        # `history.edit_ms` is the ONE piece the kernel writes: handle_input
+        # stores the keystroke tick straight onto it (doc 3e -- an attribute
+        # store per keypress, never a call).
+        self.history = HistoryRouter(self, self.store)
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
         # self.player now -- Stage 2; both exposed as forwarding properties, so
@@ -962,15 +973,8 @@ class Workstation:
                                       # editor shows after a crash-to-code throw
                                       # (owner ask 2026-07-23); dismissed by a
                                       # tap or the first edit
-        # Undo-journal idle-typing debounce (Stage 7 of docs/history/shell_ux_technical_plan_v1.md):
-        # _edit_ms is the ticks of the last keystroke in the code editor (None = no
-        # pending edit); frame() fires a durable, INVISIBLE autosave-commit once
-        # _edit_debounce_ms of no keystroke elapse, so the SD write lands in a typing
-        # GAP (never mid-burst, where it would stall the keystroke echo) -- the soft
-        # trigger alongside the hard SAVE/PLAY/tab-leave commits. The ~1.5s default is
-        # v1.1's pinned starting point, TO BE CONFIRMED BY THE STAGE-7 HARDWARE MEASUREMENT.
-        self._edit_ms = None
-        self._edit_debounce_ms = 1500
+        # (The Stage-7 idle-typing debounce -- edit_ms + edit_debounce_ms -- lives
+        # on self.history now; #209 landing E.)
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -2861,350 +2865,14 @@ class Workstation:
             # (still reachable -> the kid can reopen the editor to fix it).
             self.run(self.project, self.editor_app)
 
-    # -- durable undo/redo (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) ------
-    #
-    # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER: resolved by
-    # owner decision (#88, 2026-07-18) -- shared UNDO/REDO icons in the Editor's lent
-    # top-bar zone (EditorApp.draw_zone/_ZONE_TABS), reachable from every tab
-    # (Code/Blocks/Sprites/Map/Scene/Music), on top of the code editor's existing
-    # Ctrl+Z / Ctrl+Y host shortcut (code_layer.py) -- both drive the SAME
-    # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
-
-    def _active_history(self):
-        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint/map
-        (phase 2) + code/blocks/scene/music/config (phase 4): every tab keeps an
-        in-RAM op stack now, or None with no live editor. Resolved through the
-        project's per-tab registry keyed on `menu_view` (Project.history_for), so a
-        stale editor from an earlier tab is never consulted; the caller (the bar
-        UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
-        the focused surface, so no back-stack check is needed."""
-        return self.project.history_for(self.menu_view)
-
-    # -- code editor op-history + typing burst (#111 phase 4) -------------------
-    # The code tab's History + its open typing burst live HERE (where the keyboard
-    # input is handled), not on the pure CodeEditor core. A burst opens on the
-    # first edit and CLOSES (records one net-diff op) on the autosave debounce, an
-    # Enter, and an undo press -- the three edges the spec names.
-
-    def _code_op_history(self):
-        """The code editor's History, created lazily over the live CodeEditor and
-        rebound when a fresh editor is built (a new cart / reopen). None with no
-        editor open. Rebinding resets the open burst so a stale pre-image can't
-        leak across editors."""
-        ed = self.editor
-        if ed is None:
-            return None
-        h = self._code_hist
-        if h is None or h.doc is not ed:
-            self._code_hist = History(ed, TextEditCodec())
-            self._code_burst_before = None
-        return self._code_hist
-
-    def _code_burst_open(self):
-        """Mark a code typing/delete burst's start: snapshot the buffer text ONCE
-        (idempotent while a burst is open), so the net change since it began becomes
-        one undo op when it closes. No-op with no code editor."""
-        if self.editor is None:
-            return
-        self._code_op_history()               # ensure the History is bound to this editor
-        if self._code_burst_before is None:
-            self._code_burst_before = self.editor.text()
-
-    def _close_code_burst(self):
-        """Close the live code burst into ONE op = the net text diff since it began.
-        A no-op when nothing is pending or the burst net-cancelled back to its start
-        (typed then fully backspaced). Called on the burst edges: the autosave
-        debounce (commit_code), an Enter (code_layer), and an undo press (below)."""
-        before = self._code_burst_before
-        self._code_burst_before = None
-        hist = self._code_op_history()
-        ed = self.editor
-        if before is None or hist is None or ed is None:
-            return
-        after = ed.text()
-        if before == after:
-            return
-        op = text_diff_op(before, after)
-        if op is not None:
-            hist.record(op)
-
-    def _code_burst_pending(self):
-        """True iff a live code burst holds an un-recorded net change -- so can_undo()
-        reports it WITHOUT the side effect of closing the burst (the dim-state read)."""
-        return (self._code_burst_before is not None and self.editor is not None
-                and self.editor.text() != self._code_burst_before)
-
-    def _seal_active_local(self):
-        """Close any in-progress edit on the active tab BEFORE an undo/redo, so a
-        just-made, not-yet-recorded edit is undo's first target: a live code typing
-        burst, an un-sealed block edit. A no-op for tabs without one (paint/map seal
-        their own stroke/batch on release)."""
-        v = self.menu_view
-        if v == "code":
-            self._close_code_burst()
-        elif v == "blocks":
-            be = getattr(self.block_ui, "blocks_ed", None)
-            if be is not None:
-                be._seal_pending()
-
-    def _active_local_pending(self):
-        """True iff the active tab has an in-progress edit not yet on its History (a
-        live code burst / an un-sealed block edit), so can_undo() dims correctly
-        without sealing it."""
-        v = self.menu_view
-        if v == "code":
-            return self._code_burst_pending()
-        if v == "blocks":
-            be = getattr(self.block_ui, "blocks_ed", None)
-            return be is not None and be._pending_changed()
-        return False
-
-    def _bar_undo_bits(self):
-        """RAM-only dim-state bits for the bar cache key: the active tab's local
-        op-history depth + its live-burst/edit flag, so a stroke/typing burst
-        un-dims the bar UNDO icon on the very next frame (a stroke records into a
-        History without any journal commit, and the strip cache otherwise only
-        rebuilds on a clock tick or zone change). Deliberately EXCLUDES the
-        SD-backed journal check (_journal_check reads the journal log -- keying
-        the per-frame cache on it would cost a disk read per frame); journal-level
-        dim flips already invalidate the bar explicitly (Project._journal,
-        _journal_walk)."""
-        hist = self._active_history()
-        local_undo = (hist is not None and hist.can_undo()) or self._active_local_pending()
-        return (local_undo, hist is not None and hist.can_redo())
-
-    def _after_local_history(self):
-        """After a fine-grained (paint/map/code/blocks) undo/redo: the editor mutated
-        its LIVE doc in place (sheet/tilemap gen bumped for a running preview; the code
-        buffer rewritten), so there's no cart reload -- just repaint and re-check the
-        bar's dimmed state (#111). The code buffer's set_text() cleared its dirty flag,
-        so re-arm it: the reverted text must persist at the next commit (autosave/exit).
-        The one other exception is SCENE: its rows are a separate in-editor list that
-        only reaches the running cart's `scene()` via an explicit sync (the same one
-        every committed gesture calls, scene_editor_ui._sync_live), so a bar-driven
-        undo/redo must call it too."""
-        self._dirty = True
-        self.bar_layer.invalidate()
-        if self.menu_view == "code" and self.editor is not None:
-            self.editor.dirty = True
-            # An undo/redo rewrote the buffer: RE-CHECK the marked error (owner
-            # 2026-07-23) -- it retires only if the restored code actually
-            # parses again; a still-broken restore keeps a live marker.
-            self.code_layer._recheck_err()
-        elif self.menu_view == "scene":
-            self.scene_ui._sync_live()
-
-    def undo(self):
-        """Undo one step for the active Editor tab (#111). A tab with an in-RAM
-        op-history (paint/map strokes, code typing bursts, block edits) UNWINDS it
-        FIRST (one stroke/gesture/burst/edit/field tweak), and only once that's
-        exhausted falls through to the durable journal walk (one whole commit) -- so
-        the SAME bar icon crosses the local->commit boundary; every Editor tab keeps
-        an in-RAM op stack now (#111 phase 4). Returns True iff a step was taken. NOTE the
-        boundary is CLEAN: falling into the journal reloads the editor with a fresh
-        (empty) History, so continued presses walk whole commits until new
-        fine-grained edits are made (the seed-from-journal option was deferred)."""
-        self._seal_active_local()             # a live burst/edit is undo's first target
-        hist = self._active_history()
-        if hist is not None and hist.can_undo() and hist.undo() is not None:
-            self._after_local_history()
-            return True
-        return self._journal_walk(False)
-
-    def redo(self):
-        """Re-apply one step (the inverse of undo): local op-history redo first, then
-        the durable journal redo. Returns True iff a step was taken."""
-        self._seal_active_local()             # close a stray open edit before walking redo
-        hist = self._active_history()
-        if hist is not None and hist.can_redo() and hist.redo() is not None:
-            self._after_local_history()
-            return True
-        return self._journal_walk(True)
-
-    def can_undo(self):
-        """Read-only: True iff undo() would restore something (#88/#111, the bar icon's
-        dimmed state). Consults the active tab's op-history FIRST (a cheap in-RAM
-        check, no I/O) -- including a live-but-unrecorded code burst / block edit --
-        then the journal (a journal.jsonl parse -- an SD read, so only ask when about
-        to REPAINT, never on a per-frame hot path)."""
-        hist = self._active_history()
-        if hist is not None and (hist.can_undo() or self._active_local_pending()):
-            return True
-        return self._journal_check(False)
-
-    def can_redo(self):
-        """Read-only counterpart to can_undo() for redo()."""
-        hist = self._active_history()
-        if hist is not None and hist.can_redo():
-            return True
-        return self._journal_check(True)
-
-    def _active_tab_files(self):
-        """The journal file set the bar UNDO/REDO should walk for the ACTIVE Editor tab
-        (#111 owner decision): the fallback journal walk is scoped to the tab's own
-        file(s), so an undo on one tab never reverts another's newest commit and REDO
-        only lights on the tab that has something ahead. A tuple of journal file names,
-        or None (the legacy whole-project walk) for a tab with no defined set / outside
-        the Editor. `main` is the cart's actual main file (#67: main.lua for a lua cart),
-        matching how commits name it (_journal_code)."""
-        v = self.menu_view
-        cart = self.cart or {}
-        mainf = cart.get("main", "main.py")
-        if v == "code":
-            return (mainf,)
-        if v == "blocks":
-            # blocks.json is not itself journaled today (block saves write it straight to
-            # disk); main.py IS -- so the pair is walked together and can't desync, and a
-            # GRADUATED cart's read-only Blocks tab reaches the main.py graduating commit
-            # (its grad rider un-graduates on the same press).
-            return ("blocks.json", mainf)
-        if v == "cards":
-            return ("config.json",)
-        if v == "paint":
-            return ("sprites.moygfx",)
-        if v == "map":
-            return ("map.moymap",)
-        if v == "music":
-            return ("sounds.json",)
-        if v == "scene":
-            name = getattr(self.scene_ui, "scene_name", None)
-            store = self.carts_store
-            if name and store is not None:
-                sd = getattr(store, "SCENES_DIR", "scenes")
-                ext = getattr(store, "SCENE_EXT", ".moyscene")
-                return (sd + "/" + name + ext,)
-            return None
-        return None
-
-    def _journal_check(self, redo):
-        store = self.carts_store
-        if store is None or not self.cart:
-            return False
-        path = self.cart.get("path")
-        name = "journal_can_redo" if redo else "journal_can_undo"
-        if not (path and self.can_manage and hasattr(store, name)):
-            return False
-        fn = getattr(store, name)
-        files = self._active_tab_files()
-        try:
-            return bool(self._with_sd(lambda: fn(path, files)))
-        except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
-            print("Moybyte journal check failed:", _err_text(exc))
-            return False
-
-    def _journal_walk(self, redo):
-        store = self.carts_store
-        if store is None or not self.cart:
-            return False
-        path = self.cart.get("path")
-        if not (path and self.can_manage and hasattr(store, "journal_undo")):
-            return False
-        fn = store.journal_redo if redo else store.journal_undo
-        files = self._active_tab_files()
-        try:
-            changed = self._with_sd(lambda: fn(path, files))
-        except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
-            print("Moybyte journal walk failed:", _err_text(exc))
-            return False
-        if not changed:
-            return False           # at a floor/ceiling -- nothing to restore
-        self._reload_after_walk(changed)
-        self._dirty = True
-        # The walk just moved the journal cursor, flipping can_undo()/can_redo() --
-        # invalidate so the bar's UNDO/REDO icons re-check + repaint their dimmed
-        # state on the NEXT frame (#88) instead of showing a stale enabled/disabled
-        # look until some unrelated zone_gen bump happens to force a re-render.
-        self.bar_layer.invalidate()
-        return True
-
-    def _reload_after_walk(self, file):
-        """After the journal rewrote a live cart file on SD (undo/redo), re-adopt the
-        fresh data into the OPEN workspace and rebuild the affected editor so the kid
-        SEES the revert. Reloads the whole cart (uniform across file types) but keeps
-        the current tab; re-_start()s so a running preview reflects the restored code.
-        `file` is which live file the walk touched (informational -- the reload is
-        wholesale)."""
-        store = self.carts_store
-        path = self.cart["path"]
-        try:
-            fresh = self._with_sd(lambda: store.load(path))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte reload after undo failed:", _err_text(exc))
-            return
-        if not fresh:
-            return
-        self.cart = fresh
-        self.config = dict(fresh.get("cfg", {}))
-        self.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
-        self.sheet = self._build_sheet()
-        self.tilemap = self._build_tilemap()
-        self.images = fresh.get("images") or {}
-        self.tables = fresh.get("tables") or {}
-        self.texts = fresh.get("texts") or {}
-        self.scenes = self._build_scenes()   # a scene undo must reach the live rows (#85)
-        self.cart_error = None
-        self.crash_line = None
-        self.crash_popup = None        # the popup is transient -- any walk ends it
-        # Keep the kid's place in the code: the rebuild below resets the fresh
-        # CodeEditor's caret to the top, which read as "undo threw me to the
-        # start of the file" (owner report 2026-07-23). goto_row clamps, so a
-        # shrunken restore lands on the nearest surviving line.
-        caret = None
-        if self.menu_view == "code" and self.editor is not None:
-            caret = (self.editor.row, self.editor.col)
-        # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
-        # re-run so a running cart / a subsequent PLAY uses the restored source/art.
-        self.editor = None
-        self.paint = None
-        self.map_ui.reset()
-        self.scene_ui.reset()
-        self.music_ui.reset()
-        self.block_ui.reset()
-        view = self.menu_view
-        if self.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
-                                               "blocks", "music"):
-            self.set_menu_view(view)     # rebuild the active editor from fresh data
-            if caret is not None and self.editor is not None:
-                self.editor.goto_row(caret[0], caret[1])
-            if view == "code":
-                # Re-check the restored text (owner 2026-07-23): a marker only
-                # retires when the code actually parses again.
-                self.code_layer._recheck_err()
-        self._start()
+    # (The #111 bar UNDO/REDO pair, the code typing burst, the tab-scoped
+    # journal walk and the post-walk workspace reload all live on
+    # self.history now -- history_router.py, #209 landing E.)
 
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
         # tested ws. entry point PaintLayer's SAVE dispatches to.
         self.project.commit_sprites()
-
-    def save_icons(self):
-        """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
-        the exact mirror of save_sprites/save_shared_sheet: to_hex -> the SAME SD
-        wrapper the cart-sprite save uses (host: direct write; device: with_sd_live).
-        Then invalidate the bar caches so the NEXT bar draw shows the new pixels live:
-        look.set_icon_sheet drops the per-kind _SheetSprite cache (and with it the device's
-        per-Image RGB565 blit cache), and the sheet's gen already bumped on each pset
-        so any gen-keyed cache rebuilds too. Surfaces a save status like the cart
-        paint editor. A bad store/no SD root is a no-op (writes deferred)."""
-        sheet = self.look.icon_sheet
-        if not (sheet and self.carts_root and self.can_manage):
-            return
-        hexs = sheet.to_hex()
-        try:
-            self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION))
-            sheet.dirty = False
-            self.save_status = None           # clear stale failure text (see commit_code)
-            # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
-            # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
-            self.look.set_icon_sheet(sheet)
-            self.ach.note("paint_save")         # "Little Artist": a theme saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # Mirror save_sprites: a failed save must be VISIBLE on device (no serial in
-            # the run loop), not silent. _err_text-guarded so a weird __str__ can't escape.
-            txt = _err_text(exc)
-            self.save_status = "CAN'T SAVE"
-            self.cart_error = "Could not save icons -- " + txt
-            print("Moybyte save icons failed:", txt)
 
     def _leave_theme(self):
         # CLOSE/back from the theme editor -> the lifecycle lives on self.theme_layer;
@@ -3372,7 +3040,7 @@ class Workstation:
         if _editor_app is not None and _editor_app.project is self.project:
             _editor_app.save_current()
         if self._editing_icons:
-            self.save_icons()          # the theme editor has no bar of its own
+            self.look.save_icons()     # the theme editor has no bar of its own
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
@@ -3623,7 +3291,7 @@ class Workstation:
         if (self.editor is not None and self.wm.top_is("menu")
                 and self.menu_view == "code"
                 and (i.last_key or getattr(i, "_pressed", None))):
-            self._edit_ms = _ticks_ms()
+            self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
@@ -4077,47 +3745,6 @@ class Workstation:
     # system-domain now and always fully covered the backdrop anyway, so the tabs
     # just reset the game canvas's draw state and paint their own opaque body.)
 
-    def _autosave_code(self):
-        """The idle-debounce autosave-COMMIT (Stage 7): persist + journal the code
-        editor's buffer once the kid has stopped typing, WITHOUT the SAVE UI (save is
-        invisible, spec Section 7). Only commits parseable source -- a mid-edit syntax
-        error just waits (no nag) -- and only a real, writable edit. commit_code does
-        the persist + the durable journal append + clears editor.dirty."""
-        ed = self.editor
-        if ed is None or not getattr(ed, "dirty", False):
-            return
-        if (self.carts_store is None or not self.cart
-                or not self.cart.get("path") or not self.can_manage):
-            ed.dirty = False              # nothing persistable (embedded/non-SD) -> disarm
-            return
-        src = ed.text()
-        ok, _msg = self.carts_store.compile_check(src)
-        if not ok:
-            return                        # don't autosave/journal un-parseable source
-        # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
-        # the "Code Wizard" achievement toast, and commit_* no longer writes a
-        # "SAVED" status at all (save_status carries FAILURES only) -- so the old
-        # save/restore dance around this call is gone. A failed store write still
-        # surfaces via save_status/cart_error, as it must.
-        self.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
-
-    def _journal_idle_tick(self):
-        """Fire the idle-typing autosave-commit once the code editor has sat quiet for
-        _edit_debounce_ms (Stage 7 soft trigger). Called every frame BEFORE the redraw
-        gate so it runs even while a static editor screen is skipping its redraw -- the
-        exact idle moment the between-frames SD write should land. Cheap: one early-out
-        on the common no-pending-edit path."""
-        if self._edit_ms is None:
-            return
-        ed = self.editor
-        if ed is None or not getattr(ed, "dirty", False):
-            self._edit_ms = None          # the edit was saved/cleared elsewhere -> disarm
-            return
-        if _ticks_diff(_ticks_ms(), self._edit_ms) < self._edit_debounce_ms:
-            return                        # not idle long enough -- the kid is still typing
-        self._edit_ms = None
-        self._autosave_code()
-
     def frame(self, dt):
         # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
         # which is after the journal idle tick, the splash check, the frameskip
@@ -4151,8 +3778,12 @@ class Workstation:
                                       # a TIME slice, not a count
         self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
-        # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.
-        self._journal_idle_tick()
+        # redraw gate below, so it fires even on a static (redraw-skipped) editor
+        # frame. The router is called DIRECTLY here (#209 landing E, doc 3b: the
+        # frame loop never goes through a forward). Unlike `covers` above it is not
+        # bound to a local -- one call site, so a local would be one store more
+        # than the two attribute loads it saves nothing on.
+        self.history.idle_tick()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.

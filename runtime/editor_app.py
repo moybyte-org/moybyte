@@ -56,7 +56,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # it. Each entry is (tab_name_or_None_or_ACTION, icon_kind); `tab_name` is what
 # EditorApp.tab equals when that icon's destination is showing (so draw_zone can
 # highlight it). PROJECTS (_ZONE_PROJECTS -> open_picker, edit another project) and
-# UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.undo()/ws.redo(), #88) are ACTIONS, not
+# UNDO/REDO (_ZONE_UNDO/_ZONE_REDO -> ws.history.undo()/redo(), #88) are ACTIONS, not
 # destinations, so they're never highlighted; so is PLAY (None).
 #
 # SAVE is GONE (#111, owner decision 2026-07-21): autosave is the only model now --
@@ -70,8 +70,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # pushed the ladder to 11, well inside budget; _ZONE_STRIDE keeps the 0-gap stride
 # (icons flush) that #88 settled on for the (then 12-icon) ladder.
 _ZONE_PROJECTS = "\x00projects"  # sentinel: back to the project-picker (never a real tab)
-_ZONE_UNDO = "\x00undo"          # sentinel: UNDO action icon -> ws.undo() (#88)
-_ZONE_REDO = "\x00redo"          # sentinel: REDO action icon -> ws.redo() (#88)
+_ZONE_UNDO = "\x00undo"          # sentinel: UNDO icon -> ws.history.undo() (#88)
+_ZONE_REDO = "\x00redo"          # sentinel: REDO icon -> ws.history.redo() (#88)
 _ZONE_TABS = (
     (_ZONE_PROJECTS, "projects"),  # <- back to the PROJECT-PICKER (edit another project)
     ("cards", "edit"),
@@ -81,8 +81,8 @@ _ZONE_TABS = (
     ("map", "map"),
     ("scene", "scene"),     # placed-actor placement editor (#85 Stage 2)
     ("music", "music"),
-    (_ZONE_UNDO, "undo"),   # UNDO -> ws.undo() (#88), dimmed when there's nothing to undo
-    (_ZONE_REDO, "redo"),   # REDO -> ws.redo() (#88), dimmed when there's nothing to redo
+    (_ZONE_UNDO, "undo"),   # -> ws.history.undo() (#88), dimmed with nothing to undo
+    (_ZONE_REDO, "redo"),   # -> ws.history.redo() (#88), dimmed with nothing to redo
     (None, "run"),          # PLAY
 )
 _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
@@ -368,7 +368,7 @@ class EditorApp:
         bar hands over an icon-high rect), so the ladder scales with the system
         font (#39): at fs=1 this is byte-identical to the frozen 16px/0-gap
         constants, at fs=2+ the icons no longer overlap. UNDO/REDO (#88) each
-        query ws.can_undo()/ws.can_redo() -- an SD-backed journal read, but one
+        query ws.history.can_undo()/can_redo() -- an SD-backed journal read, but one
         that only runs HERE, inside a cache-miss re-render (never per-frame)."""
         ws = self.ws
         NAMES = self._NAMES
@@ -401,9 +401,9 @@ class EditorApp:
                         ws.theme_colors["hilite"]
                         if ws.theme_colors.get("bar_light") else NAMES["indigo"])
             if tab == _ZONE_UNDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.can_undo())
+                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_undo())
             elif tab == _ZONE_REDO:
-                self._draw_history_icon(cv, glyph, x, y0, ic, ws.can_redo())
+                self._draw_history_icon(cv, glyph, x, y0, ic, ws.history.can_redo())
             else:
                 ws._icon(glyph, x, y0, cv)
 
@@ -485,9 +485,9 @@ class EditorApp:
         elif tab == "music":
             ws._open_music()
         elif tab == _ZONE_UNDO:   # UNDO (#88): the shared journal walk, any tab
-            ws.undo()
+            ws.history.undo()
         elif tab == _ZONE_REDO:   # REDO (#88)
-            ws.redo()
+            ws.history.redo()
         else:                     # PLAY (tab is None)
             # #184: deferred -- the hard-commit (~850ms SD, #154) + compile +
             # exec + first-world build run behind the next painted frame
@@ -578,7 +578,8 @@ class EditorApp:
         to whichever tab is up. Config persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
         The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
-        own CLOSE/leave hard-commits via ws.save_icons() (paint_layer.ThemeLayer.leave)."""
+        own CLOSE/leave hard-commits via ws.look.save_icons()
+        (paint_layer.ThemeLayer.leave)."""
         ws = self.ws
         tab = self.tab
         if self._tab_is_clean(tab):

@@ -268,14 +268,14 @@ def test_undo_past_graduation_restores_source_and_flag(tmp_path):
 
     # undo the graduating commit: source falls back to the block-generated baseline
     # AND graduated flips false, in ONE step
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     restored = (Path(path) / "main.py").read_text()
     assert "score = 999" not in restored and "score = 7" in restored
     assert ws.cart["graduated"] is False
     assert moy_carts.load(path)["graduated"] is False
 
     # redo re-applies the divergence AND re-graduates
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert "score = 999" in (Path(path) / "main.py").read_text()
     assert ws.cart["graduated"] is True
     assert moy_carts.load(path)["graduated"] is True
@@ -401,13 +401,13 @@ def test_story_undo_past_graduation_restores_source_and_flag(tmp_path):
     assert ws.cart["graduated"] is True
     assert "SPEED = 99" in (Path(path) / "main.py").read_text()
 
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     restored = (Path(path) / "main.py").read_text()
     assert "SPEED = 99" not in restored
     assert ws.cart["graduated"] is False
     assert moy_carts.load(path)["graduated"] is False
 
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert "SPEED = 99" in (Path(path) / "main.py").read_text()
     assert ws.cart["graduated"] is True
     assert moy_carts.load(path)["graduated"] is True

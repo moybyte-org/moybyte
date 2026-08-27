@@ -2031,13 +2031,14 @@ def test_icon_theme_editor_wired_into_device_shell():
 
     # Save: the theme editor persists via save_system_icons through the SAME _with_sd
     # wrapper the cart sprite save (save_sprites) uses -- on device that's with_sd_live,
-    # the native single-bus path; anything else hangs the panel flush.
-    assert "def save_icons(self):" in console
-    assert "self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION)" in console
-    assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
+    # the native single-bus path; anything else hangs the panel flush. The verb sits
+    # with the sheet it writes (#209 landing E): ws.look, beside set_/load_icon_sheet.
+    assert "def save_icons(self):" in appearance
+    assert "hexs, ws.carts_root, _ICON_VERSION)" in appearance
+    assert "ws._with_sd(lambda: ws.carts_store.save_system_icons(" in appearance
     # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
     # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
-    assert "self.look.set_icon_sheet(sheet)" in console
+    assert "            self.set_icon_sheet(sheet)\n            ws.ach.note" in appearance
     assert "def set_icon_sheet(self, sheet):" in appearance
 
     # The same persistence wrapper + can_manage gate the device wires for cart saves
