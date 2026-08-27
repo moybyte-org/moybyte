@@ -797,6 +797,15 @@ class Player:
             try:
                 link.start()
                 link.announce(cart.get("title") or "", 1)
+                # A DEAD match never survives into the next run (#65). The
+                # link's own give-up paths clear it as they re-run the cart,
+                # but a re-run arriving from anywhere else -- Editor PLAY, the
+                # dev channel's `run`, a kid re-launching from the shelf --
+                # would otherwise adopt a session whose advance() can only
+                # ever stall, and the cart would never simulate again.
+                _np = ws.netplay
+                if _np is not None and getattr(_np, "dead", False):
+                    link.end_match(ws)
                 if ws.netplay is None:
                     link.offer(ws, cart.get("title") or "")
             except Exception as exc:  # noqa: BLE001 -- a radio must never block a cart
