@@ -393,3 +393,29 @@ def test_the_default_url_carries_the_board(device):
         assert m.default_manifest_url(channel).endswith("/latest-tdeck.json")
         assert m.default_manifest_url(channel, "p4").endswith("/latest-p4.json")
     assert m.default_manifest_url("nonesuch") is None
+
+
+# -- the on-glass extraction (tests/test_p4_on_glass.py) ---------------------
+
+def test_the_on_glass_extraction_still_carries_a_whole_verifier():
+    """The board suite does not retype this verifier, it ast-EXTRACTS it -- and
+    for a fortnight it extracted a `_verify_manifest` whose arithmetic had moved
+    out from under it. `607ba35` promoted the PKCS#1 block compare to a
+    module-level `verify_sig` so the C6 image's second signature could share it;
+    the extractor named its pieces by hand, so the snippet it uploaded called a
+    name it never sent. The board answered `NameError` to every probe, the
+    harness discarded the text, and three tests failed as `assert None is False`
+    -- misfiled as a flaky serial upload because nothing said otherwise.
+
+    The extraction runs HERE now, in CPython, with no board on the desk: the
+    same drift is a named failure on every `make test`."""
+    import test_p4_on_glass
+
+    snippet = test_p4_on_glass._extract_verifier()
+    assert test_p4_on_glass._free_names(snippet) == set(), \
+        "the extracted verifier reads names it does not upload"
+    env = {}
+    exec(compile(snippet, "<moy_ota extract>", "exec"), env)   # noqa: S102
+    assert env["_verify_manifest"](signed(), TEST_KEYS) is True
+    assert env["_verify_manifest"](dict(signed(), size=1), TEST_KEYS) is False
+    assert env["_verify_manifest"](dict(signed(), sig="zz"), TEST_KEYS) is False

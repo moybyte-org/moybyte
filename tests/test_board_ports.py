@@ -1,10 +1,19 @@
-"""Port resolution + board identity (tools/p4_autotest.find_port and friends).
+"""The host half of the on-glass harness (tools/p4_autotest): which board is on
+which port, and what its answers mean.
 
-Exists because of 2026-08-24: the ttyACM numbers shuffled between sessions and
-a measurement run drove the T-Deck believing it was the P4 -- caught only by
-the boot log growing an SD card and a trackball. The mitigation is two layers
-of DATA (the [serial] usb id narrows, the board's own `_ota_build.BOARD`
-settles), and these tests pin the resolution logic and the declarations.
+Port resolution exists because of 2026-08-24: the ttyACM numbers shuffled
+between sessions and a measurement run drove the T-Deck believing it was the
+P4 -- caught only by the boot log growing an SD card and a trackball. The
+mitigation is two layers of DATA (the [serial] usb id narrows, the board's own
+`_ota_build.BOARD` settles), and these tests pin the resolution logic and the
+declarations.
+
+Reply reading exists because of 2026-08-27: a device exception, a lost reply
+and an unparseable value all came back from `pyval` as the same None, so a
+board saying `NameError` in plain words once per command was read for a
+fortnight as a flaky serial upload. These run the reader against a fake board
+-- including one that interleaves the unsolicited output a real one prints --
+with no hardware on the desk.
 """
 
 import os
@@ -148,3 +157,102 @@ def test_a_lone_silent_twin_is_accepted_for_downstream_verify():
         usb_of=_usb_map({"/dev/ttyACM1": "303a:1001"}),
         prober=lambda p: None)
     assert got == "/dev/ttyACM1"
+
+
+# -- reading replies off a noisy wire ----------------------------------------
+
+
+class _FakeBoard:
+    """A board that answers one line per command it receives -- and prints the
+    unsolicited lines a real one does while it does (PERF at every diag tick,
+    the BLE keyboard's background scan retry). Implements the four members the
+    driver touches: read/write/flush/close."""
+
+    def __init__(self, answers, noise=()):
+        self.port = "/dev/fake"
+        self._answers = list(answers)
+        self._noise = list(noise)
+        self._out = b""
+        self._partial = b""
+        self.sent = []
+
+    def write(self, data):
+        self._partial += data          # the writer PACES, so a line arrives in
+        while b"\n" in self._partial:  # slices; only a newline is a command
+            cmd, self._partial = self._partial.split(b"\n", 1)
+            self.sent.append(cmd.decode())
+            for line in self._noise:
+                self._out += line.encode() + b"\r\n"
+            if self._answers:
+                self._out += self._answers.pop(0).encode() + b"\r\n"
+        return len(data)
+
+    def flush(self):
+        pass
+
+    def read(self, n):
+        out, self._out = self._out[:n], self._out[n:]
+        return out
+
+    def close(self):
+        pass
+
+
+def _driver(answers, noise=()):
+    fake = _FakeBoard(answers, noise)
+    return p4_autotest.P4Board(None, ser=fake), fake
+
+
+NOISE = ("Moybyte BLE keyboard: scanning",
+         "PERF fps=0/62 busy=3ms draw=33 flush=1 logic=0 render=0 cart=-")
+
+
+def test_unsolicited_lines_do_not_swallow_a_reply():
+    """Both of these really do land mid-exchange on a diag-enabled board (wire
+    capture, 2026-08-27). A reply is found by what it SAYS, not by arriving
+    alone."""
+    board, _ = _driver(["PY 256"], noise=NOISE)
+    assert board.pyval("len(x)") == 256
+    assert board.last_error is None
+
+
+def test_a_device_exception_arrives_in_the_devices_own_words():
+    """The wire carried `NameError: name 'verify_sig' isn't defined` once per
+    command for a fortnight and the harness threw the text away, so every
+    assertion downstream read `assert None is False` and named nothing."""
+    board, _ = _driver(["PY ERR NameError: name 'verify_sig' isn't defined"])
+    assert board.pyval("_verify_manifest(M, K)") is None
+    assert "verify_sig" in board.last_error
+
+    board, _ = _driver(["PY ERR NameError: name 'verify_sig' isn't defined"])
+    with pytest.raises(p4_autotest.DeviceError) as e:
+        board.pyval("_verify_manifest(M, K)", strict=True)
+    assert "verify_sig" in str(e.value)
+
+
+def test_a_silent_board_is_not_the_same_answer_as_a_raising_one():
+    """Three outcomes, three messages: the point of the error channel is that
+    'the board raised' and 'the board said nothing' stop being one None."""
+    board, _ = _driver([], noise=NOISE)          # answers nothing at all
+    assert board.pyval("ws.frames", timeout=0.05) is None
+    assert "no reply" in board.last_error
+    with pytest.raises(p4_autotest.DeviceError):
+        board.pyval("ws.frames", timeout=0.05, strict=True)
+
+
+def test_a_chunked_upload_survives_the_same_noise():
+    """The multi-line path is the one the OTA-verifier test drives, and the one
+    that was blamed. Four round trips: the two setup lines, one chunk, the
+    exec."""
+    board, fake = _driver(["PY 1", "PY ok", "PY 1", "PY None"], noise=NOISE)
+    assert board.pyexec("a = 1\nb = a + 1\n") is True
+    assert board.last_error is None
+    assert sum(1 for s in fake.sent if "ws._up.__setitem__" in s) == 1
+
+
+def test_a_rejected_chunk_names_the_chunk():
+    """A corrupted upload IS the failure this was misdiagnosed as, so when it
+    does happen it has to say which chunk and what the board said."""
+    board, _ = _driver(["PY 1", "PY ok", "PY ERR SyntaxError: invalid syntax"])
+    assert board.pyexec("a = 1\nb = a + 1\n") is False
+    assert "chunk 0" in board.last_error and "SyntaxError" in board.last_error

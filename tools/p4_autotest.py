@@ -202,18 +202,34 @@ def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
         % (want_id, ", ".join("%s=%s" % kv for kv in seen.items())))
 
 
+class DeviceError(RuntimeError):
+    """The board answered a `py` command with an exception (or with nothing).
+
+    Carries the device's OWN text, so a failure on the far side is reported by
+    the board's words rather than by the absence of a value."""
+
+
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
     def __init__(self, port, log=None, timeout=0.2, dtr=None, rts=None,
-                 chunk=None, board_dir=None):
+                 chunk=None, board_dir=None, ser=None):
         """`board_dir` supplies dtr/rts/chunk/attach_only from that board's
         [serial] block; explicit arguments still win. Without one the P4's
-        defaults apply -- it is the board this driver was written for."""
-        ser = declared_serial(board_dir or P4_BOARD_DIR)
+        defaults apply -- it is the board this driver was written for.
+
+        `ser` takes an already-open serial-like object instead of opening the
+        port -- how the host tests drive the reply reader (read/write/flush and
+        a `port` name are the whole contract) with no board on the desk."""
+        decl = declared_serial(board_dir or P4_BOARD_DIR)
         self.log = log if log is not None else (lambda s: None)
-        self.attach_only = bool(ser["attach_only"])
+        self.attach_only = bool(decl["attach_only"])
         self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)
+        self.last_error = None    # why the last `py` round trip yielded nothing
+        if ser is not None:
+            self.ser = ser
+            self._init_reader(chunk or decl["chunk"])
+            return
         if port in (None, "auto"):
             port = find_port(board_dir or P4_BOARD_DIR, log=self.log)
         if serial is None:
@@ -232,13 +248,15 @@ class P4Board:
         #     under the open handle and every read returns nothing forever.
         #     Opening with both HIGH (pyserial's default, what miniterm does)
         #     attaches to the running console cleanly.
-        self.ser.dtr = bool(ser["dtr"]) if dtr is None else dtr
-        self.ser.rts = bool(ser["rts"]) if rts is None else rts
+        self.ser.dtr = bool(decl["dtr"]) if dtr is None else dtr
+        self.ser.rts = bool(decl["rts"]) if rts is None else rts
         self.ser.open()
+        self._init_reader(chunk or decl["chunk"])
+
+    def _init_reader(self, chunk):
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)
         # Per instance, because the boards' rings differ (see declared_serial).
-        chunk = chunk or ser["chunk"]
         if chunk:
             self.CHUNK = int(chunk)
 
@@ -458,31 +476,66 @@ class P4Board:
     # fallback for a checkout where board.toml cannot be read.
     CHUNK = declared_chunk()          # the P4's; USB boards pass their own
 
-    def pyval(self, expr, timeout=30.0):
+    def _fail(self, why, strict):
+        """Record why a `py` round trip produced no value -- and, when the
+        caller asked, RAISE it.
+
+        The device answers an exception with its own text (`PY ERR NameError:
+        name 'verify_sig' isn't defined`), and until 2026-08-27 this driver
+        discarded it: a device exception, a lost reply and an unparseable value
+        were all the same None. So the far side asserted `None is False`, named
+        nothing, and three OTA tests were misfiled for a fortnight as a flaky
+        upload while the wire said NameError once per command. Three outcomes,
+        three messages."""
+        self.last_error = why
+        self.log("device: " + why)
+        if strict:
+            raise DeviceError(why)
+        return None
+
+    def pyval(self, expr, timeout=30.0, strict=False):
         """Evaluate a short expression on the device; returns the repr'd value
-        (parsed back with eval) or None if the device raised."""
-        line = self.cmd("py " + expr, wait_for="PY", timeout=timeout) or ""
+        (parsed back with eval), or None if the device raised / never answered.
+
+        `strict=True` raises DeviceError carrying the device's own text instead
+        -- use it wherever None is not a legal answer, which is every caller
+        that goes on to assert on the result. Default False because
+        `identify()` and the probe callers read None as "this board did not
+        answer", which is data."""
+        self.last_error = None
+        line = self.cmd("py " + expr, wait_for="PY", timeout=timeout)
+        if line is None:
+            return self._fail("no reply to `py %s` within %gs"
+                              % (expr[:120], timeout), strict)
         if "PY ERR" in line:
-            self.log("device: " + line.strip())
-            return None
+            return self._fail(line.strip(), strict)
         try:
             return eval(line.split("PY ", 1)[1])   # noqa: S307 (our own repr)
-        except Exception:  # noqa: BLE001
-            return None
+        except Exception as exc:  # noqa: BLE001
+            return self._fail("unparseable reply %r (%s)"
+                              % (line[:120], exc), strict)
 
-    def pyexec(self, code, timeout=30.0):
+    def pyexec(self, code, timeout=30.0, strict=False):
         """Run a multi-line snippet on the device (`ws`/`wm`/`pointer` in scope),
-        uploaded in RX-safe chunks. Returns True if it ran clean.
+        uploaded in RX-safe chunks. Returns True if it ran clean, and leaves the
+        reason on `self.last_error` otherwise (`strict=True` raises it).
 
         Snippets share ONE persistent namespace (`ws._g`), so a later upload can
         use names an earlier one defined. The device's `py` handler builds a
         FRESH env per command, which silently broke composed probes: a helper
         defined by upload A referencing a module imported by upload B raised
         NameError once per frame (measured 2026-07-26 -- an empty profile)."""
+        self.last_error = None
         code = code.strip("\n")
         if len(code) <= self.CHUNK and "\n" not in code:
-            line = self.cmd("py " + code, wait_for="PY", timeout=timeout) or ""
-            return "PY ERR" not in line
+            line = self.cmd("py " + code, wait_for="PY", timeout=timeout)
+            if line is None:
+                self._fail("no reply to `py %s`" % code[:120], strict)
+                return False
+            if "PY ERR" in line:
+                self._fail(line.strip(), strict)
+                return False
+            return True
         self.cmd("py setattr(ws, '_up', {}) or 1", wait_for="PY")
         # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
         # instance __dict__ is not a full dict (no setdefault; raises TypeError).
@@ -496,13 +549,13 @@ class P4Board:
             line = self.cmd("py ws._up.__setitem__(%d, %r) or 1" % (k, part),
                             wait_for="PY", timeout=timeout) or ""
             if "PY ERR" in line:
-                self.log("upload failed: " + line.strip())
+                self._fail("chunk %d rejected: %s" % (k, line.strip()), strict)
                 return False
         line = self.cmd(
             "py exec(''.join(ws._up[k] for k in sorted(ws._up)), ws._g)",
             wait_for="PY", timeout=timeout) or ""
         if "PY ERR" in line:
-            self.log("device: " + line.strip())
+            self._fail(line.strip(), strict)
             return False
         return True
 
