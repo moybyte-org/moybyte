@@ -582,7 +582,7 @@ F8 L8 cost/per-tier definition → L8; F9 compositor memory/"for free" →
 
 This doc is LOCKED, so its web half is retired by an explicit versioned
 amendment rather than by editing §5.4 and §6 into a shape the code never had.
-The tracker is #192; the reasoning is `docs/moycore_plan_2026-08.md` §3.2/§6.
+The tracker is #192; the reasoning is `docs/history/moycore_plan_2026-08.md` §3.2/§6.
 
 **What changed underneath.** §5.4 opened "the device webserver, the host web
 console, and the wasm runner serve the same page protocol". The first two were
