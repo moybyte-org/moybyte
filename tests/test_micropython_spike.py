@@ -2734,10 +2734,18 @@ def test_micropython_offline_diag_wiring():
 
     # Perf samples: a structured PERF line sampled every few seconds while a cart
     # runs (the per-cart frame-timing payload for the offline dump).
-    assert "def format_perf(cart, fps, flush_ms, draw_ms):" in diag
-    assert 'return "PERF cart=%s fps=%d flush=%d draw=%d" % (' in diag
+    assert "def format_perf(cart, fps, flush_ms, draw_ms, net):" in diag
+    assert 'return "PERF cart=%s fps=%d net=%s flush=%d draw=%d" % (' in diag
     assert "_diag_perf_sample(diag, ws)" in runtime
     assert "ws.perf_sample()" in device_diag
+    # net= is the #65 lockstep witness: the shared tick rate a LINKED game
+    # renders at (the console gates every frame the tick is not due for), and
+    # `-` when no session gates anything. It comes from perf_net(), NOT from
+    # perf_sample -- the meter consumes its window and perf_sample is also the
+    # `is a cart running?` probe every other diag helper here calls.
+    assert '"-" if net is None else _round_int(net)' in diag
+    assert "ws.perf_net()" in device_diag
+    assert "def perf_net(self):" in console
     # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
     assert "def perf_sample(self):" in console
     assert "self.perf_capture = False" in console         # default off -> host identical

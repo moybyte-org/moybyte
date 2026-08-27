@@ -4230,6 +4230,23 @@ class Workstation:
         name = cart.get("title") or cart.get("path") or "?"
         return (name, self._fps, self._flush_ms, self._draw_ms)
 
+    def perf_net(self):
+        """The PERF line's `net=` witness: the #65 lockstep tick rate in ticks/s,
+        or **None when no session is gating frames at all**.
+
+        None is not "zero ticks" and must never be printed as 0 -- a board with
+        no lever reports absence (the 2026-08-22 doctrine; `EspNowLink.status`
+        answers the same way for the same reason). A running match reports a
+        real rate: ~30 while it is healthy, lower under stall pressure, 0 while
+        it is matched but frozen.
+
+        This is the PERF emitters' ONE entry to the meter, because the meter
+        CONSUMES its sample window (netplay.LockstepSession.tps) -- perf_sample()
+        stays the `is a cart running?` probe half a dozen diag helpers call, and
+        must not carry a number that a second caller would spend."""
+        np = self.netplay
+        return None if np is None else np.tps(_ticks_ms())
+
     def perf_breakdown(self):
         """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --
         cart _update (game LOGIC), cart _draw (RENDERING), audio.tick (mixer feed), and

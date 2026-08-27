@@ -551,3 +551,47 @@ def test_the_PERF_line_formats_against_the_arguments_it_is_given():
     assert len(sample) == 1
     assert "ppa=%d/%d/%d/%d/%d" in sample[0]
     assert "fence_ms=" in sample[0] and "gfence_ms=" in sample[0]
+
+
+def _perf_sample_call():
+    """The P4's PERF print, as AST: (format string, argument nodes)."""
+    tree = ast.parse((P4_MODULES / "moy_runtime.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "print" and len(node.args) == 1):
+            continue
+        arg = node.args[0]
+        if not (isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod)):
+            continue
+        fmt = _const_str(arg.left)
+        if fmt is not None and fmt.startswith("PERF fps="):
+            return fmt, arg.right.elts
+    raise AssertionError("the P4 has no PERF sample line")
+
+
+def test_the_PERF_line_witnesses_a_lockstep_session_beside_the_fps_it_explains():
+    """#65/#66, 2026-08-27: a linked game draws on the shared 30Hz tick, so a
+    board looping at 62 renders 30 and the other 32 frames vanish into
+    `player.tick(render=False)`. That read as a regression for a night of
+    captures because no PERF field named it. net= sits directly after fps=
+    (the T-Deck's line places it identically) because it is what fps= MEANS."""
+    fmt, args = _perf_sample_call()
+    assert "PERF fps=%d/%d net=%s " in fmt
+    # ...and the value is the console's one entry to the meter, not a second
+    # hand-rolled read of ws.netplay (the meter consumes its window).
+    src = (P4_MODULES / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "_net = ws.perf_net()" in src
+
+
+def test_the_P4s_absent_marker_is_a_dash_and_never_a_zero():
+    """THE DOCTRINE (2026-08-22), executed rather than grepped: the real source
+    expression is compiled out of the emitter and run. No session prints `-`; a
+    matched-but-frozen session prints a real 0, and a mutant that folds the two
+    together (`if not _net`) dies here."""
+    _fmt, args = _perf_sample_call()
+    net = args[2]                      # third conversion: fps=%d/%d then net=%s
+    assert isinstance(net, ast.IfExp), ast.dump(net)
+    code = compile(ast.Expression(body=net), "<perf>", "eval")
+    assert eval(code, {}, {"_net": None}) == "-"
+    assert eval(code, {}, {"_net": 0}) == 0
+    assert eval(code, {}, {"_net": 30}) == 30

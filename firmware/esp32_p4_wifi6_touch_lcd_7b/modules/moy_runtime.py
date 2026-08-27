@@ -787,10 +787,26 @@ def run_desktop(fps_cap=60):
                 _ov = comp.overlap_stats()
                 _ovd = [a - b for a, b in zip(_ov, _pf["ov"])]
                 _pf["ov"] = _ov
-                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
+                # LOCKSTEP (#65), right after fps= because it is what fps=
+                # MEANS: a linked game's world advances on the shared 30Hz tick
+                # and the console gates every frame that tick is not due for, so
+                # a correct match reads fps=30/62 -- 32 frames into
+                # tick(render=False) -- and read as a regression for a whole
+                # night's captures (2026-08-27) because nothing named it. `-` is
+                # NO SESSION; a number is the rate that is eating them, 0
+                # included (matched but frozen). Absence never prints as 0.
+                #
+                # BARE, where every timing field beside it is a getattr: those
+                # degrade to one wrong-looking number, but `-` is a LEGITIMATE
+                # reading here, so a getattr default would let a renamed meter
+                # forge "no match" forever. A rename costs the whole line and
+                # says so ("PERF sample failed"), which is the loud failure.
+                _net = ws.perf_net()
+                print("PERF fps=%d/%d net=%s busy=%dms draw=%.0f flush=%.0f logic=%.0f "
                       "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d "
                       "ppa=%d/%d/%d/%d/%d fence_ms=%.1f gfence_ms=%.1f cart=%s%s"
                       % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
+                         "-" if _net is None else _net,
                          _pf["busy"] // (_pf["n"] or 1),
                          getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
                          getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),

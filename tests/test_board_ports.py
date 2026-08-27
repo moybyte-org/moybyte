@@ -204,7 +204,7 @@ def _driver(answers, noise=()):
 
 
 NOISE = ("Moybyte BLE keyboard: scanning",
-         "PERF fps=0/62 busy=3ms draw=33 flush=1 logic=0 render=0 cart=-")
+         "PERF fps=0/62 net=- busy=3ms draw=33 flush=1 logic=0 render=0 cart=-")
 
 
 def test_unsolicited_lines_do_not_swallow_a_reply():
