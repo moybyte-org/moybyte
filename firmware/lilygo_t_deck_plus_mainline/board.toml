@@ -411,7 +411,7 @@ so netplay's lockstep session and a cart's net.* inbox both read through here.
 Staged on all three console boards since 2026-08-24 -- and the same day this
 prose said "the two S3 boards and NOWHERE else, a hardware fact": the P4
 joined through the moy_c6 shim (stock modespnow.c over ESP-Hosted custom RPC
-to its C6; docs/espnow_p4_2026-08.md is that whole story, including the
+to its C6; docs/history/espnow_p4_2026-08.md is that whole story, including the
 morning the flag flip failed at link). The browser still has no radio at all.
 
 Measured on this pair of boards, 2026-08-20, and the numbers are why the module

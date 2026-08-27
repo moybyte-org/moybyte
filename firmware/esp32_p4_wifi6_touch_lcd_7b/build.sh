@@ -83,8 +83,8 @@ moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
 # 2c') ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
-#      docs/espnow_p4_2026-08.md). MicroPython pins the hosted component at
-#      exactly 2.7.0; 2.12.12 carries the custom-RPC seam
+#      docs/history/espnow_p4_2026-08.md). MicroPython pins the hosted
+#      component at exactly 2.7.0; 2.12.12 carries the custom-RPC seam
 #      (esp_hosted_send_custom_data / register_custom_callback) the P4's
 #      ESP-NOW shim rides, plus the streamed slave-OTA API that updates the C6
 #      from this board over SDIO. esp_wifi_remote 0.15.2 constrains only

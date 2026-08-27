@@ -135,7 +135,7 @@ slice is comfortable — and it keeps the radio off the core the panel flush nee
 ## Board scope, and why the P4 is out
 
 *(2026-08-20 record. Superseded 2026-08-24: the P4 joined through the moy_c6
-C6-shim — docs/espnow_p4_2026-08.md is that campaign. The section stands as
+C6-shim — docs/history/espnow_p4_2026-08.md is that campaign. The section stands as
 the reasoning of its day.)*
 
 The two S3 boards only. The P4 compiles ESP-NOW **out**
@@ -271,7 +271,7 @@ Re-measured with those in (60 s windows, distinct-stalled-ticks metric):
 T-Deck ↔ Guition at `DELAY = 1` stalls **1.8% / 2.3%** at **29.5 ticks/s** —
 better than 2026-08-22's `DELAY = 2`. The P4 ↔ T-Deck pair at `DELAY = 1`
 stays 25–30%: its two-tick budget is genuinely consumed by the C6-shim
-transport (docs/espnow_p4_2026-08.md Phase F), and no pacing can fund a buffer
+transport (docs/history/espnow_p4_2026-08.md Phase F), and no pacing can fund a buffer
 the transport eats. Hence:
 
 **Input delay is ADAPTIVE, starting at 1 (33 ms) and raise-only.** Delay is
@@ -344,7 +344,7 @@ logic at the full loop rate and here logic *is* 30 Hz.
 ## Open, and deliberately not built
 
 - **`DELAY = 1` on the P4 pair.** Its budget is the C6 shim's per-packet cost
-  (Phase F of docs/espnow_p4_2026-08.md): even with the send RPC off the VM
+  (Phase F of docs/history/espnow_p4_2026-08.md): even with the send RPC off the VM
   core, emit-to-air and event-to-drain each cost several ms plus a loop
   frame of tick quantisation, and the two margins at 33 ms sum to nearly
   nothing. The levers left are transport-level (a data-path ride instead of

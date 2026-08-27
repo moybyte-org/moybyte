@@ -707,10 +707,14 @@ of the cut parts again. What shipped, in ten commits on dev:
 
 ### Two consoles, one game: ESP-NOW multiplayer SHIPPED (2026-08-22, #65/#7)
 
-**`docs/espnow_multiplayer_2026-08.md` is the authority** -- the measurements,
-the protocol, the four bugs the desk found that every host test passed, and the
-on-glass verification. Read it before touching any of this. What belongs here is
-only what a coder must not undo:
+**`docs/netplay_v1.md` is the authority** -- the standing contract: the lockstep
+model, the give-up doctrine, the radio facts and the hardware terms, dated and
+sourced to whatever measurement decided them. Read it before touching any of
+this. The two campaigns behind it are the RECORD, archived 2026-08-27:
+`docs/history/espnow_multiplayer_2026-08.md` (the S3 transport ledger plus the
+four on-glass bugs no host test caught) and
+`docs/history/espnow_p4_2026-08.md` (the C6-shim track, phases A-G). What
+belongs here is only what a coder must not undo:
 
 - **`runtime/netplay.py`** is the deterministic core and an import-free leaf like
   `players.py` (the button order arrives as a constructor argument, so `cart_api`
@@ -729,7 +733,7 @@ only what a coder must not undo:
   loop-rate stall retries and the guest phase slew, the S3 pair measures
   1.8-2.3% at DELAY=1 while the P4 pair (whose C6-shim transport genuinely
   consumes the one-tick budget) escalates to 2 by ~6s and plays clean. The
-  multiplayer doc's "Input latency" section carries the whole measurement.
+  archived campaign's "Input latency" section carries the whole measurement.
 - **The BLE keyboard's background scan owned most of a radio board's packet
   loss** -- interval==window was 100% radio duty, 5s on/5s off, costing the P4
   ~40% of inbound espnow at an idle desk while hiding from every blocking
@@ -762,9 +766,9 @@ only what a coder must not undo:
   esp-hosted-mcu #19 open and unshipped) -- and the rest of it un-settled the
   verdict by BUILDING the path the verdict named: hosted 2.12.12 + the moy_c6
   shim (seventeen esp_now_* wrappers over custom RPC) + a shimmed C6 slave
-  flashed over its own SDIO link. **`docs/espnow_p4_2026-08.md` is that whole
-  campaign** -- the phases, every on-glass verdict, the BLE regression and its
-  fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
+  flashed over its own SDIO link. **`docs/history/espnow_p4_2026-08.md` is that
+  whole campaign** -- the phases, every on-glass verdict, the BLE regression
+  and its fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
   (2026-08-25) is the stall-rate hunt: the shim's blocking send RPC moved off
   the VM core onto a TX queue (10.2ms -> 20us per send), and the pair now
   plays 0.7-2.8% stalled ticks at 29.6 ticks/s. Phase G (same day): the C6

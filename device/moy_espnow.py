@@ -45,7 +45,7 @@ method, so this module imports on CPython and its protocol half is exercised by
 tests/test_espnow_link.py against a fake radio. Staged on all three console
 boards. The P4's `espnow` module is not the SoC's (it has no radio): it is
 stock modespnow.c over the moy_c6 shim -- seventeen esp_now_* wrappers riding
-ESP-Hosted's custom RPC to the C6 (docs/espnow_p4_2026-08.md, which also
+ESP-Hosted's custom RPC to the C6 (docs/history/espnow_p4_2026-08.md, which also
 records the morning this same header said that was impossible). One rule that
 is load-bearing there and mere hygiene on the S3s: wlan.active(True) BEFORE
 the radio, because the C6's radio starts with the host's WLAN.
