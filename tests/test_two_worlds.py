@@ -41,7 +41,7 @@ def test_desk_icon_labels_fit_their_pills(tmp_path):
     now sizes to the longest catalog label, so every label fits unclipped."""
     ws = _ws(tmp_path)
     _drv(ws)
-    fs = ws._effective_font_scale()
+    fs = ws.look.effective_font_scale()
     for _key, _box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
         assert len(label) * 8 * fs + 4 <= pill[2], label
 
@@ -250,7 +250,7 @@ def test_font_scale_flip_inside_desk_never_leaks_chrome(tmp_path):
     the world flip must rebuild them for the play world on the way out."""
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    ws.set_font_scale(1)                          # relayout INSIDE the desk
+    ws.look.set_font_scale(1)                          # relayout INSIDE the desk
     drv.frame(1 / 30)
     ws.open_library()
     drv.frame(1 / 30)                             # world flip relayouts again

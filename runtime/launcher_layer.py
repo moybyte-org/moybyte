@@ -147,7 +147,7 @@ class Launcher:
         self._taps = _ui.DragTap(self._region)
         self._NAMES = names
         self._blit_glyph = blit_glyph
-        self.theme = None             # chrome THEME tokens (ws.set_theme pushes them);
+        self.theme = None             # chrome THEME tokens (look.set_theme pushes them);
                                       # None -> the yellow default accent
         self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
                                       # wires ws._bar_image) -- the shelf's pseudo cards
@@ -780,7 +780,7 @@ def _cursor_stamp(ws):
     p = ws.pointer
     if p is None or not getattr(p, "visible", False):
         return None
-    fs = ws.font_scale
+    fs = ws.look.font_scale
     return (p.x, p.y, 8 * fs, 13 * fs)
 
 
@@ -838,7 +838,7 @@ class LauncherHomeLayer:
         ws = self.ws
         return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
                 ws.launcher.layout.lib_grid,
-                ws.wallpaper_id, len(ws.launcher.items),
+                ws.look.wallpaper_id, len(ws.launcher.items),
                 getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
 
     def _retained_key(self, cv):
@@ -1496,7 +1496,7 @@ class EditorPickerLayer:
         if top is not None and top() != "picker":
             return False
         bx, by, bw, bh = ws.picker.band_rect()
-        fs = ws.font_scale
+        fs = ws.look.font_scale
         p = ws.pointer
         if p is not None and getattr(p, "visible", False):
             if not (bx <= p.x and p.x + 8 * fs <= bx + bw

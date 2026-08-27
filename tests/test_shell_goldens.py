@@ -279,7 +279,7 @@ def _build(cfg, carts_dir):
         font_scale=cfg["font_scale"], windowed=cfg["windowed"])
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
-    ws.set_theme_variant(cfg["variant"], persist=False)
+    ws.look.set_theme_variant(cfg["variant"], persist=False)
     keep = [c for c in ws.carts.all if c.get("title") not in GOLDEN_EXCLUDE]
     if len(keep) != len(ws.carts.all):
         ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE

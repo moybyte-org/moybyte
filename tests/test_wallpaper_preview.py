@@ -26,7 +26,7 @@ PREVIEW_RECT = (10, 10, 152, 114)
 
 def _ws(tmp_path, **kw):
     ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     return ws
 
 
@@ -195,7 +195,7 @@ def test_the_rendered_frame_persists_as_a_valid_mct_sidecar(tmp_path):
 
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     cart = ws.wallpaper._wp_cart
@@ -218,12 +218,12 @@ def test_a_sidecar_written_by_one_tier_is_read_by_a_tier_that_cannot_render(
     makes the sidecar worth writing at all."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, PREVIEW_RECT, 1 / 30)
 
     ws2 = host_app.build_workstation(carts)
     ws2.make_game_canvas = None                    # cannot render anything
-    ws2.select_wallpaper("moy_night", persist=False)
+    ws2.look.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, PREVIEW_RECT, 1 / 30)
     assert probe.painted_pixels_rect(ws2.sys_canvas, *PREVIEW_RECT) > 1000

@@ -468,7 +468,7 @@ def test_a_responsive_app_cart_is_told_when_the_surface_changes(tmp_path):
     _frames(ws)
     seen = ws.player.ns["seen"]
     assert seen == [(800, 480, 2)]
-    ws.set_font_scale(3, persist=False)
+    ws.look.set_font_scale(3, persist=False)
     _frames(ws, 2)
     assert seen[-1] == (800, 480, 3)
     _frames(ws, 3)

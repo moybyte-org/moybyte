@@ -103,7 +103,7 @@ def test_reuse_actions_are_copies(tmp_path):
     # WALL: copy-on-set -- the wallpaper copy + My Art bg hold the pixels
     # (plus a #108 phase-2 provenance stamp, so compare decoded pixels).
     app._act("WALL", "dragon")
-    assert ws.wallpaper_id == "my_art"
+    assert ws.look.wallpaper_id == "my_art"
     px = moy_carts.decode_moyimg(moy_carts.load_file("drawings", "dragon", carts))
     assert moy_carts.decode_moyimg(moy_carts.load_artwork(carts)) == px
     wall = next(c for c in moy_carts.scan(carts) if c["title"] == "My Art")

@@ -141,7 +141,7 @@ class Surface:
     def font_scale(self):
         """The EFFECTIVE system font scale (1 on a shared 320x240 canvas whose
         framebuf text cannot scale, regardless of the setting)."""
-        return self.__ws._effective_font_scale()
+        return self.__ws.look.effective_font_scale()
 
     def windowed(self):
         """True while the app is a WINDOW on the desk (#105): the WM's title
@@ -180,13 +180,13 @@ class Theme:
     def light(self):
         """True when the live theme's tool surface is LIGHT -- THE gate every
         surface's light branch reads."""
-        return self.__ws.light_chrome()
+        return self.__ws.look.light_chrome()
 
     def name(self):
-        return self.__ws.theme_name
+        return self.__ws.look.theme_name
 
     def variant(self):
-        return self.__ws.theme_variant
+        return self.__ws.look.theme_variant
 
     def skin(self):
         """The installed WIDGET skin's name (`runtime/skin.py`) -- the third
@@ -194,7 +194,7 @@ class Theme:
 
         The active value is a role read, like `name()`; the CATALOG is not
         (see below)."""
-        return self.__ws.skin_name
+        return self.__ws.look.skin_name
 
     # A theme PICKER wants the OTHER themes' tokens too. That is not a role:
     # `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
@@ -202,16 +202,16 @@ class Theme:
     # `skin.names()` is the same shape of thing and travels the same way.
 
     def set(self, name, persist=True, variant=None):
-        self.__ws.set_theme(name, persist=persist, variant=variant)
+        self.__ws.look.set_theme(name, persist=persist, variant=variant)
 
     def set_variant(self, variant, persist=True):
-        self.__ws.set_theme_variant(variant, persist=persist)
+        self.__ws.look.set_theme_variant(variant, persist=persist)
 
     def set_skin(self, name, persist=True):
-        """Install a widget skin and remember it. The Workstation owns the
-        install because the skin is process-wide state in `ui` and its name is
-        a persisted setting -- exactly like the theme."""
-        self.__ws.set_skin(name, persist=persist)
+        """Install a widget skin and remember it. `ws.look` owns the install
+        because the skin is process-wide state in `ui` and its name is a
+        persisted setting -- exactly like the theme."""
+        self.__ws.look.set_skin(name, persist=persist)
 
 
 # -- the storage roles' shared machinery -------------------------------------
@@ -255,8 +255,8 @@ class _StoreRole:
 
     def _shell(self):
         """The Workstation. Module-internal, for the handful of verbs that
-        reach past the store itself (`wallpaper_id`, the wallpaper cart
-        lookups, ...)."""
+        reach past the store itself (`look.wallpaper_id`, the wallpaper
+        cart lookups, ...)."""
         return self.__ws
 
     # -- readiness -----------------------------------------------------------
@@ -715,25 +715,25 @@ class WallpaperRole(_StoreRole):
 
     def current(self):
         """The active wallpaper id (a cart slug or `fill:<color>`)."""
-        return self._shell().wallpaper_id
+        return self._shell().look.wallpaper_id
 
     def carts(self):
         """The wallpaper-type carts available as backdrops."""
-        return self._shell().wallpaper_carts()
+        return self._shell().look.wallpaper_carts()
 
     def fills(self):
         """The built-in solid fills -- always present, so there is always a
         valid pick even with zero wallpaper carts installed."""
-        return self._shell()._FILL_WALLPAPERS
+        return self._shell().look.FILL_WALLPAPERS
 
     def id_for(self, cart):
-        return self._shell()._wp_id_for(cart)
+        return self._shell().look.wp_id_for(cart)
 
     def cart_by_id(self, wp_id):
-        return self._shell()._wp_cart_by_id(wp_id)
+        return self._shell().look.wp_cart_by_id(wp_id)
 
     def select(self, wp_id, persist=True):
-        self._shell().select_wallpaper(wp_id, persist=persist)
+        self._shell().look.select_wallpaper(wp_id, persist=persist)
 
     def preview(self, cv, rect, dt):
         """Composite the live backdrop into `rect` -- the Appearance preview."""

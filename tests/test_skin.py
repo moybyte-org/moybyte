@@ -234,16 +234,22 @@ def test_the_quirks_that_stayed_code_are_documented():
 _SKIN_OWNERS = {
     # The SETTING's owner: imports the catalog, installs a skin, persists the
     # name, re-applies it at boot. The one place `skin.use` is called.
-    "console.py": "installs + persists the skin (Workstation.set_skin)",
+    # It was console.py until #209 landing D moved the whole look cluster --
+    # theme, variant, skin, font scale, wallpaper, icon sheet -- onto ws.look.
+    "appearance.py": "installs + persists the skin (Appearance.set_skin)",
     # The PICKER: imports the catalog for its NAME LIST (as it imports
     # chrome.THEMES), and asks the theme role to install one. Never calls
     # `skin.use` itself.
     "appearance_app.py": "lists the catalog; installs via ctx.theme.set_skin",
 }
 
-# May NAME the verb (it forwards it) but must not import the catalog: the
-# AppContext role an app reaches the setting through.
-_SKIN_FORWARDERS = {"app_context.py": "Theme.set_skin -> ws.set_skin"}
+# May NAME the verb (they call it) but must not import the catalog: the
+# AppContext role an app reaches the setting through, and the kernel's boot
+# cascade, which re-applies the stored name through the owner.
+_SKIN_FORWARDERS = {
+    "app_context.py": "Theme.set_skin -> ws.look.set_skin",
+    "console.py": "load_system's apply cascade -> ws.look.set_skin",
+}
 
 
 def test_no_surface_module_knows_about_skins():
@@ -317,7 +323,7 @@ def test_the_skin_wiring_is_exactly_two_modules():
         src = path.read_text(encoding="utf-8")
         if "_skin.use(" in src or "skin.use(" in src:
             users.add(path.name)
-    assert users == {"console.py"}, sorted(users)
+    assert users == {"appearance.py"}, sorted(users)
 
 
 def test_skin_is_a_leaf_and_ui_never_imports_it():
@@ -619,7 +625,7 @@ def test_the_second_skin_draws_a_real_frame_on_every_theme():
 # unreachable. These pin the three pieces that make it a setting.
 
 def test_the_workstation_owns_the_skin_and_re_installs_it_at_boot(tmp_path):
-    """`ws.set_skin` is the ONE install (`skin.use`) + the persistence, and
+    """`ws.look.set_skin` is the ONE install (`skin.use`) + the persistence, and
     `load_system` re-applies it -- the same two lines `set_theme_variant` has.
     Asserted through `ui` as well as through the store: storing the name and
     forgetting to install it would look identical from the settings dict."""
@@ -627,11 +633,11 @@ def test_the_workstation_owns_the_skin_and_re_installs_it_at_boot(tmp_path):
     th = theme_colors("night")
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    assert ws.skin_name == skin.DEFAULT
+    assert ws.look.skin_name == skin.DEFAULT
     plain = ui.state_colors(th, "row", ui.REST)
 
-    ws.set_skin("outline")
-    assert ws.skin_name == "outline" and skin.active() == "outline"
+    ws.look.set_skin("outline")
+    assert ws.look.skin_name == "outline" and skin.active() == "outline"
     assert ui.state_colors(th, "row", ui.REST) != plain, "ui was not restyled"
     assert moy_carts.load_system(carts)["skin"] == "outline"
 
@@ -639,13 +645,13 @@ def test_the_workstation_owns_the_skin_and_re_installs_it_at_boot(tmp_path):
     skin.use(skin.DEFAULT)
     assert ui.state_colors(th, "row", ui.REST) == plain
     ws2 = host_app.build_workstation(carts)
-    assert ws2.skin_name == "outline"
+    assert ws2.look.skin_name == "outline"
     assert ui.state_colors(th, "row", ui.REST) != plain, "boot did not apply"
 
     # An unknown name resolves to the default and STORES the resolved value,
     # so a store naming a skin this build dropped heals on the next pick.
-    ws2.set_skin("no-such-skin")
-    assert ws2.skin_name == skin.DEFAULT
+    ws2.look.set_skin("no-such-skin")
+    assert ws2.look.skin_name == skin.DEFAULT
     assert ui.state_colors(th, "row", ui.REST) == plain
     assert moy_carts.load_system(carts)["skin"] == skin.DEFAULT
 
@@ -660,7 +666,7 @@ def test_a_store_that_names_no_skin_installs_nothing(tmp_path):
     skin.use("outline")
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert skin.active() == "outline"
-    assert ws.skin_name == "outline"
+    assert ws.look.skin_name == "outline"
 
 
 def test_the_appearance_app_is_the_picker(tmp_path):
@@ -679,7 +685,7 @@ def test_the_appearance_app_is_the_picker(tmp_path):
     rect = dict(chips)["outline"]
     x, y, w, h = rect
     app.handle_pointer(x + w // 2, y + h // 2, True)
-    assert ws.skin_name == "outline"
+    assert ws.look.skin_name == "outline"
     assert skin.active() == "outline"
     assert moy_carts.load_system(carts)["skin"] == "outline"
     assert "OUTLINE" in app.status

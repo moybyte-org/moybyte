@@ -609,7 +609,7 @@ class SceneEditorUI:
         se = self.sceneedit
         sheet = ws.project.sheet
         th = ws.theme_colors
-        light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
+        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # Only the sliver of `panel` that `body_fill` did not already cover in
         # this exact colour -- the full re-fill rewrote ~94% of ~450K px for

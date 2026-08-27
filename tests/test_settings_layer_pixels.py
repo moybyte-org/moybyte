@@ -173,7 +173,7 @@ def _build(cfg, carts_dir):
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"], font_scale=cfg["font_scale"],
         windowed=cfg["windowed"])
-    ws.set_theme_variant(cfg["variant"], persist=False)
+    ws.look.set_theme_variant(cfg["variant"], persist=False)
     ws.wifi = _Wifi(True)
     ws.updater = _Updater()
     ws.webhost = _Webhost()

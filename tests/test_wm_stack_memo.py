@@ -86,7 +86,7 @@ def test_static_launcher_stack_is_memoized(tmp_path):
     memoized -- zero rebuilds across frames."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    ws.select_wallpaper("fill:dark_blue", persist=False)
+    ws.look.select_wallpaper("fill:dark_blue", persist=False)
     ws._splash_until = None
     ws._toast_until = 0
     for _ in range(3):

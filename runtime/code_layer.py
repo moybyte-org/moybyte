@@ -873,7 +873,7 @@ class CodeLayer:
         # variant themes the base tier too (owner ask 2026-07-23) -- the light
         # branch below carries the _HL_LIGHT syntax set, so code is exactly
         # "light and dark" on the small tier.
-        if self.ws.code_layout._base and not self.ws.light_chrome():
+        if self.ws.code_layout._base and not self.ws.look.light_chrome():
             return _as_theme({"bg": NAMES["black"], "caret": NAMES["yellow"],
                               "sym_bg": NAMES["dark_grey"],
                               "sym_edge": NAMES["indigo"],

@@ -9,9 +9,9 @@ settings-only constants (_SET_*).
 
 Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. Every
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
-system.json dict), ws.font_scale, ws.diag_live, the
+system.json dict), ws.look.font_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-cycle_font_scale / set_diag_live / _cycle_channel / _persist_system).
+ws.look.cycle_font_scale / set_diag_live / _cycle_channel / prefs.persist).
 Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
 appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
@@ -836,7 +836,7 @@ class SettingsLayer:
             ws._cycle_channel(d)
             return
         if key == "font_scale":                 # system-UI font size (#39): live + persisted
-            ws.cycle_font_scale(d)
+            ws.look.cycle_font_scale(d)
             return
         if key == "name":
             cur = ws.system.get("name", self._MOCK_NAMES[0])
@@ -1200,7 +1200,7 @@ class SettingsLayer:
         cv.print(">", x + w - 2 * fw + 2, y + 5, th["author"], 2)
         vx = x + w - 78 * lay.fs           # value column (baseline x+w-78)
         if kind == "font":                 # system-UI font size (#39): 1x / 2x / 3x
-            cv.print("%dx" % ws.font_scale, vx, y + 5, th["play"], 1)
+            cv.print("%dx" % ws.look.font_scale, vx, y + 5, th["play"], 1)
         elif kind == "mock-gauge":
             lvl = int(ws.system.get(key, 3))
             for s in range(5):

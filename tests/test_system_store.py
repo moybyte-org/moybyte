@@ -28,7 +28,7 @@ def _ws(tmp_path):
     """A console with every self-animating source stilled, so `_animating` is
     answering about the overlays and nothing else."""
     ws = build_ws(tmp_path)
-    ws.select_wallpaper("fill:dark_blue", persist=False)
+    ws.look.select_wallpaper("fill:dark_blue", persist=False)
     ws._toast_until = 0
     ws._egg_until = 0
     ws._confetti_until = 0

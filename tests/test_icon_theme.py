@@ -49,7 +49,7 @@ def test_settings_has_edit_icons_action_row(tmp_path):
 
 
 def test_edit_icons_opens_paint_on_the_icon_sheet(tmp_path):
-    """Tapping the EDIT ICONS row opens the PAINT editor targeting ws.icon_sheet
+    """Tapping the EDIT ICONS row opens the PAINT editor targeting ws.look.icon_sheet
     (not a cart sheet), with the editing-icons flag set."""
     from runtime import host_app
     ws = _ws(tmp_path)
@@ -60,7 +60,7 @@ def test_edit_icons_opens_paint_on_the_icon_sheet(tmp_path):
     assert ws.screen == "menu" and ws.menu_view == "theme"
     assert ws._editing_icons is True
     assert ws.paint is not None
-    assert ws.paint.sheet is ws.icon_sheet         # editing the SYSTEM theme, not a cart
+    assert ws.paint.sheet is ws.look.icon_sheet         # editing the SYSTEM theme, not a cart
 
 
 def test_edit_icons_reachable_by_keyboard_a(tmp_path):
@@ -85,8 +85,8 @@ def test_edit_icons_reachable_by_keyboard_a(tmp_path):
 
 def test_paint_and_save_persists_and_round_trips(tmp_path):
     """Paint a pixel in the theme editor, commit -> system_icons.moygfx exists,
-    loads back non-None, round-trips the edit, and ws.icon_sheet reflects it."""
-    from runtime import host_app, console as C, moy_carts
+    loads back non-None, round-trips the edit, and ws.look.icon_sheet reflects it."""
+    from runtime import editors as _editors, host_app, console as C, moy_carts
     ws = _ws(tmp_path)
     carts_dir = ws.carts_root
     assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved yet
@@ -96,20 +96,20 @@ def test_paint_and_save_persists_and_round_trips(tmp_path):
     pe = ws.paint
     pe.n = 0
     pe.color = 9                                              # a color that isn't index 0
-    before = ws.icon_sheet.pget(0, 0)
+    before = ws.look.icon_sheet.pget(0, 0)
     # Tap the top-left grid cell to paint pixel (0,0) of tile 0.
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
-    assert ws.icon_sheet.pget(0, 0) == 9 and before != 9      # painted in-RAM
+    assert ws.look.icon_sheet.pget(0, 0) == 9 and before != 9      # painted in-RAM
     ws.save_icons()
     assert ws.save_status is None      # invisible save: no failure, no "SAVED"
     # Persisted: the file now exists, loads non-None, and the edit round-trips.
     hexs = moy_carts.load_system_icons(carts_dir)
     assert hexs is not None
-    reloaded = C.IconSheet.from_hex(hexs)
+    reloaded = _editors.IconSheet.from_hex(hexs)
     assert reloaded.pget(0, 0) == 9
-    # ws.icon_sheet reflects the edit and serializes identically to what was saved.
-    assert ws.icon_sheet.to_hex() == hexs
+    # ws.look.icon_sheet reflects the edit and serializes identically to what was saved.
+    assert ws.look.icon_sheet.to_hex() == hexs
 
 
 def test_save_invalidates_bar_cache_and_bar_still_draws(tmp_path):
@@ -141,7 +141,7 @@ def test_close_auto_commits_the_icon_edit(tmp_path):
     """#111 regression: CLOSE hard-commits the icon sheet with NO explicit SAVE
     call -- ThemeLayer.leave() persists on the way out. Paint a pixel, tap CLOSE
     immediately (no save_icons() call), and the edit must already be on disk."""
-    from runtime import host_app, console as C, moy_carts
+    from runtime import editors as _editors, host_app, console as C, moy_carts
     ws = _ws(tmp_path)
     carts_dir = ws.carts_root
     drv = host_app.ConsoleDriver(ws)
@@ -151,13 +151,13 @@ def test_close_auto_commits_the_icon_edit(tmp_path):
     ws.paint.color = 13
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
-    assert ws.icon_sheet.pget(0, 0) == 13                      # painted in-RAM only
+    assert ws.look.icon_sheet.pget(0, 0) == 13                      # painted in-RAM only
     drv.click(*_center(C._PAINT_CLOSE))                        # CLOSE, no SAVE tap
     drv.frame(1 / 30)
     assert ws.screen == "settings"
     hexs = moy_carts.load_system_icons(carts_dir)
     assert hexs is not None, "CLOSE must hard-commit the icon edit (#111)"
-    assert C.IconSheet.from_hex(hexs).pget(0, 0) == 13
+    assert _editors.IconSheet.from_hex(hexs).pget(0, 0) == 13
 
 
 # -- BACK returns to Settings (not a cart) ----------------------------------
@@ -205,7 +205,7 @@ def test_home_key_from_theme_auto_commits_the_icon_edit(tmp_path):
     straight to Workstation.go_home -- see _leave_or_home), so go_home() itself
     must hard-commit a dirty icon sheet, or a HOME tap right after painting
     would silently lose the edit."""
-    from runtime import host_app, console as C, moy_carts
+    from runtime import editors as _editors, host_app, console as C, moy_carts
     ws = _ws(tmp_path)
     carts_dir = ws.carts_root
     drv = host_app.ConsoleDriver(ws)
@@ -215,13 +215,13 @@ def test_home_key_from_theme_auto_commits_the_icon_edit(tmp_path):
     ws.paint.color = 5
     drv.click(C._PG_X0 + 1, C._PG_Y0 + 1)
     drv.frame(1 / 30)
-    assert ws.icon_sheet.pget(0, 0) == 5                       # painted in-RAM only
+    assert ws.look.icon_sheet.pget(0, 0) == 5                       # painted in-RAM only
     drv.press("home")                                          # no CLOSE, no save_icons()
     drv.frame(1 / 30)
     assert ws.screen == "launcher"
     hexs = moy_carts.load_system_icons(carts_dir)
     assert hexs is not None, "HOME must hard-commit the icon edit (#111)"
-    assert C.IconSheet.from_hex(hexs).pget(0, 0) == 5
+    assert _editors.IconSheet.from_hex(hexs).pget(0, 0) == 5
 
 
 # -- the theme editor must NOT touch a cart's sheet --------------------------

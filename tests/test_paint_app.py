@@ -110,7 +110,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     assert app._save()
 
     assert ws.artwork.set_wallpaper()
-    assert ws.wallpaper_id == "my_art"
+    assert ws.look.wallpaper_id == "my_art"
     assert moy_carts.load_system(carts)["wallpaper"] == "my_art"
 
     titles = ws.artwork.targets()

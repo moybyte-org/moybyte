@@ -9,11 +9,11 @@ and both draw paths call ws.wallpaper.draw(dt).
 Boundary (single source of truth): this component owns only the RENDERING + the
 COMPILED cache -- a chosen wallpaper-type cart compiled into its OWN namespace and run
 (_draw, optionally _update) as the backdrop, or a solid MOY64 fill fallback. The CHOICE
-+ the picker/query API stay on Workstation as the single source: ws.wallpaper_id, plus
-ws.select_wallpaper / cycle_wallpaper / _persist_wallpaper / wallpaper_options /
-wallpaper_carts / _wp_id_for / _wp_cart_by_id (all device/test-pinned). select_wallpaper
-drives this component via clear() + compile(cart); draw() reads ws.wallpaper_id for the
-fill fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
++ the picker/query API are the LOOK's (appearance.py, #209 landing D):
+ws.look.wallpaper_id, plus select_wallpaper / cycle_wallpaper / wallpaper_options /
+wallpaper_carts / wp_id_for / wp_cart_by_id. select_wallpaper drives this component
+via clear() + compile(cart); draw() reads ws.look.wallpaper_id for the fill
+fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
 its self.ws back-ref; the audio/pmem building blocks for the wallpaper's own namespace
 are imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
-    wallpaper-cart cache; ws.wallpaper_id + the picker API stay on Workstation."""
+    wallpaper-cart cache; ws.look.wallpaper_id + the picker API are the look's."""
 
     def __init__(self, ws, names):
         self.ws = ws
@@ -78,7 +78,7 @@ class Wallpaper:
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
-        ws.select_wallpaper before it (re)compiles the new choice."""
+        ws.look.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
         self._wp_images = {}
@@ -183,7 +183,7 @@ class Wallpaper:
         # has a wallpaper cartridge identity for discovery/settings; only its pixels
         # take this direct, resolution-aware path.
         art = getattr(ws, "artwork", None)
-        if art is not None and art.owns_wallpaper(ws.wallpaper_id):
+        if art is not None and art.owns_wallpaper(ws.look.wallpaper_id):
             try:
                 if art.draw_wallpaper(ws.sys_canvas):
                     ws._reset_canvas_state()
@@ -249,7 +249,7 @@ class Wallpaper:
         # Solid fill fallback (also the "fill:<color>" built-ins). Fill the SYSTEM
         # canvas -- the surface the desktop actually shows (#39; the same object as
         # the game canvas on the 320x240 tiers, so byte-identical there).
-        wp = ws.wallpaper_id or "fill:dark_blue"
+        wp = ws.look.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
 
@@ -358,7 +358,7 @@ class Wallpaper:
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
-        wp = ws.wallpaper_id or ""
+        wp = ws.look.wallpaper_id or ""
         if isinstance(wp, str) and wp.startswith("fill:"):
             cv.rect(x, y, w, h, NAMES.get(wp[5:], NAMES["dark_blue"]))
             return
@@ -443,7 +443,7 @@ class Wallpaper:
                     rl("wallpaper_pv")
             # #66 live-set diet: the slimmed cart rehydrates for this compile
             # (src/sheet bake into the preview ns), then re-slims -- the same
-            # dance select_wallpaper does for the backdrop compile.
+            # dance look.select_wallpaper does for the backdrop compile.
             ws.carts.rehydrate(cart)
             try:
                 sheet = ws._build_sheet(cart)

@@ -31,9 +31,9 @@ from ws_helpers import build_desktop_ws, build_ws
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
 
-# The collaborator attributes on Workstation. Landings D-E add: look
-# (Appearance), history (HistoryRouter).
-COLLABORATORS = ("web", "prefs", "covers", "carts")
+# The collaborator attributes on Workstation. Landing E adds: history
+# (HistoryRouter).
+COLLABORATORS = ("web", "prefs", "covers", "carts", "look")
 
 # name on Workstation -> method on the collaborator. Every entry is a caller
 # that has not moved; the comment says who, so retiring one is a search with an
@@ -77,6 +77,19 @@ FORWARDS = {
     "carts": {
         "rescan_carts": "rescan",            # device/moy_webhost's on_sync lambda
     },
+    # Landing D. ZERO forwards, like the cover cache, and for the same reason:
+    # the look's callers are all IN this tree and all moved with it. The three
+    # 3d blind spots were swept first -- the dev channel speaks no appearance
+    # vocabulary at all (`state` reports no theme/wallpaper/font field), none of
+    # the three on-glass suites names one, and the two SERIAL tools that do
+    # (`tools/p4_chrome_freeze.py` drives `ws.set_theme`/`ws.theme_name` over
+    # pyexec, `tools/p4_scroll_ab.py` reads `ws.font_scale` over pyval) moved in
+    # the same commit -- against this tree they would have raised on the board
+    # and reported nothing about the console. `moy_webhost` captures no look
+    # verb. What is left on the kernel is not a forward but the tokens
+    # themselves: `ws.theme_colors` stays a flat attribute ~70 surface sites
+    # read per draw, with `look.set_theme` as its only author.
+    "look": {},
 }
 
 # `getattr(ws, "X")` names that are deliberately absent from a host console.

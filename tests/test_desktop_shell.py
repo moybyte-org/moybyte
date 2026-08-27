@@ -56,7 +56,7 @@ def test_tap_schedules_the_run_behind_a_loading_paint(tmp_path):
     assert ws.screen == "desktop"        # the frame tail ran it
     assert not ws._deferred
     # The canvas still shows the acknowledgment frame: the toast's border.
-    fs = ws._effective_font_scale()
+    fs = ws.look.effective_font_scale()
     tw = (len("LOADING...") * 8 + 16) * fs
     tx = (ws.sys_canvas.w - tw) // 2
     assert ws.sys_canvas.pix(tx, 24 * fs) == NAMES["light_grey"]
@@ -81,7 +81,7 @@ def test_wallpaper_backdrop_is_drawn_behind_icons(tmp_path):
     """With a wallpaper cart selected the backdrop animates; the home frame is not a
     single flat color (it has the wallpaper, the icon tiles, and the strip)."""
     ws = _ws(tmp_path)
-    assert ws.wallpaper_id is not None
+    assert ws.look.wallpaper_id is not None
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
@@ -106,8 +106,8 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
     ws.carts_root = carts_dir
     ws.pointer = console.Pointer(320, 240)
     ws.load_system()
-    assert ws.wallpaper_carts() == []                     # none installed
-    assert ws.wallpaper_id.startswith("fill:")            # fell back to a solid fill
+    assert ws.look.wallpaper_carts() == []                     # none installed
+    assert ws.look.wallpaper_id.startswith("fill:")            # fell back to a solid fill
     ws.frame(1 / 30)                                       # renders without error
 
 
@@ -115,25 +115,25 @@ def test_fill_fallback_when_no_wallpaper_carts(tmp_path):
 
 def test_wallpaper_switch_changes_backdrop(tmp_path):
     ws = _ws(tmp_path)
-    opts = ws.wallpaper_options()
+    opts = ws.look.wallpaper_options()
     assert len(opts) >= 2
-    before = ws.wallpaper_id
-    ws.cycle_wallpaper(1)
-    assert ws.wallpaper_id != before
-    assert ws.wallpaper_id in opts
+    before = ws.look.wallpaper_id
+    ws.look.cycle_wallpaper(1)
+    assert ws.look.wallpaper_id != before
+    assert ws.look.wallpaper_id in opts
 
 
 def test_wallpaper_choice_persists_across_reboot(tmp_path):
     from runtime import host_app, moy_carts
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)
-    ws.cycle_wallpaper(1)
-    chosen = ws.wallpaper_id
+    ws.look.cycle_wallpaper(1)
+    chosen = ws.look.wallpaper_id
     # It lands in system.json beside the carts dir.
     assert moy_carts.load_system(carts_dir).get("wallpaper") == chosen
     # A fresh boot restores it.
     ws2 = host_app.build_workstation(carts_dir)
-    assert ws2.wallpaper_id == chosen
+    assert ws2.look.wallpaper_id == chosen
 
 
 def test_settings_screen_opens_and_renders(tmp_path):
@@ -177,11 +177,11 @@ def test_settings_appearance_row_opens_the_one_picker(tmp_path):
     drv.press("right")                                    # any step activates an action row
     drv.frame(1 / 30)
     assert ws.wm.top_kind() == "appearance"
-    before = ws.wallpaper_id
+    before = ws.look.wallpaper_id
     drv.press("down")          # the catalog column: down applies the next item
     drv.frame(1 / 30)
-    assert ws.wallpaper_id != before
-    assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.wallpaper_id
+    assert ws.look.wallpaper_id != before
+    assert moy_carts.load_system(carts_dir).get("wallpaper") == ws.look.wallpaper_id
 
 
 def test_settings_back_returns_home(tmp_path):
@@ -382,13 +382,13 @@ def test_go_home_keeps_wallpaper(tmp_path):
     """Opening a cart and returning home must leave the wallpaper backdrop intact
     (it is system state, not per-cart)."""
     ws = _ws(tmp_path)
-    wp = ws.wallpaper_id
+    wp = ws.look.wallpaper_id
     ws.launcher.sel = 0
     ws.open()
     assert ws.screen == "desktop"
     ws.go_home()
     assert ws.screen == "launcher"
-    assert ws.wallpaper_id == wp
+    assert ws.look.wallpaper_id == wp
 
 
 def test_perf_breakdown_splits_draw_into_phases(tmp_path):
@@ -812,9 +812,9 @@ def test_status_strip_stays_legible_over_an_animated_wallpaper(tmp_path):
     ws = _ws(tmp_path)
     # Pick a real animated wallpaper cart (the shipped ones print a title at y=10,
     # which is inside the strip band -- the bug #46 fixes).
-    cart_wp = [o for o in ws.wallpaper_options() if not str(o).startswith("fill:")]
+    cart_wp = [o for o in ws.look.wallpaper_options() if not str(o).startswith("fill:")]
     assert cart_wp, "expected at least one wallpaper cart seeded"
-    ws.select_wallpaper(cart_wp[0], persist=False)
+    ws.look.select_wallpaper(cart_wp[0], persist=False)
     drv = host_app.ConsoleDriver(ws)
     drv.frame(1 / 30)
     sc = ws.sys_canvas
@@ -991,8 +991,8 @@ def test_splash_draws_without_a_workstation_and_takes_a_progress_bar():
 def test_moy_mascot_baked_into_default_icon_sheet():
     """The 'moy' slot is a real, non-blank 16x16 sprite in the baked theme, so the
     splash (and any icon-sheet consumer) can blit it."""
-    from runtime import console
-    sheet = console._default_icon_sheet()
+    from runtime import chrome, console
+    sheet = chrome._default_icon_sheet()
     img = sheet.tile_image(console._ICON["moy"])
     assert img is not None
     assert any(p > 0 for p in img.pix)              # mascot has painted pixels
@@ -1093,7 +1093,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
     wp = [c for c in ws.carts.all if c.get("type") == "wallpaper"]
     if wp:
         slug = wp[0]["path"].rsplit("/", 1)[-1][:-len(".moy")]
-        ws.select_wallpaper(slug, persist=False)
+        ws.look.select_wallpaper(slug, persist=False)
         assert ws.wallpaper._wp_draw is not None, "wallpaper must compile from a slim cart"
         assert wp[0] is ws._fat_cart or wp[0].get("lazy") is True
 

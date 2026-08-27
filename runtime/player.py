@@ -377,7 +377,7 @@ class Player:
         ws = self.ws
         cv = ws.canvas
         return (cv.w, cv.h,
-                ws._effective_font_scale() if ws.app_full_canvas else 1)
+                ws.look.effective_font_scale() if ws.app_full_canvas else 1)
 
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the

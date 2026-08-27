@@ -295,7 +295,7 @@ def test_font_scale_change_reflows_open_code_editor(tmp_path):
     _enter(ws, "code")
     ws.editor.set_text("hello world")
     cols1 = ws.editor.COLS
-    ws.set_font_scale(2, persist=False)
+    ws.look.set_font_scale(2, persist=False)
     assert ws.editor.COLS != cols1                    # the window reflowed
     assert ws.editor.text() == "hello world"          # buffer intact
 

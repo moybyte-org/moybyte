@@ -76,10 +76,10 @@ def test_wallpapers_leave_the_launcher_grid(tmp_path):
     assert "make" in grid_types and {"game", "tool", "app"} <= grid_types
     # PRESENT in the Editor picker (editable) and the Settings wallpaper picker (backdrop)
     assert any(c.get("type") == "wallpaper" for c in ws.picker.items if c.get("path"))
-    assert any(c.get("type") == "wallpaper" for c in ws.wallpaper_carts())
+    assert any(c.get("type") == "wallpaper" for c in ws.look.wallpaper_carts())
     # every wallpaper in the store is discoverable as a backdrop
     store_wp = {c["path"] for c in ws.carts.all if c.get("type") == "wallpaper"}
-    picker_wp = {c["path"] for c in ws.wallpaper_carts()}
+    picker_wp = {c["path"] for c in ws.look.wallpaper_carts()}
     assert store_wp and store_wp == picker_wp
 
 

@@ -1992,7 +1992,7 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "TILE = 16" in editors
     assert "_ICON = {" in chrome            # the bar's icon-slot map lives in chrome.py now
     assert "def _icon(self, kind, x, y, cv=None):" in console
-    assert "self.icon_sheet" in console
+    assert "self.look.icon_sheet" in console      # the sheet is the look's (#209 D)
 
     # Storage: load/save the editable theme beside the carts dir (absent = default).
     assert "system_icons" in carts
@@ -2003,7 +2003,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # (the boot loads run inside the shared console.wire_workstation_core).
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    assert "ws.load_icon_sheet()" in console_src
+    assert "ws.look.load_icon_sheet()" in console_src
 
 
 def test_icon_theme_editor_wired_into_device_shell():
@@ -2012,6 +2012,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    appearance = (Path("runtime") / "appearance.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2036,8 +2037,8 @@ def test_icon_theme_editor_wired_into_device_shell():
     assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
     # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
     # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
-    assert "self.set_icon_sheet(self.icon_sheet)" in console
-    assert "def set_icon_sheet(self, sheet):" in console
+    assert "self.look.set_icon_sheet(sheet)" in console
+    assert "def set_icon_sheet(self, sheet):" in appearance
 
     # The same persistence wrapper + can_manage gate the device wires for cart saves
     # already covers the theme save -- with_sd_live is the live SD write path.

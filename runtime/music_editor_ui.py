@@ -462,7 +462,7 @@ class MusicEditorUI:
         # Themed on EVERY responsive tier (owner ask 2026-07-23 -- the tokens
         # resolve per theme/variant); only the frozen 320x240 _base branch keeps
         # its byte-identical literals.
-        light = (not lay._base) or ws.light_chrome()
+        light = (not lay._base) or ws.look.light_chrome()
         self._light = light
         ink = th["ink"] if light else NAMES["white"]
         ink_dim = th["ink_dim"] if light else NAMES["light_grey"]
@@ -582,7 +582,7 @@ class MusicEditorUI:
                                       else NAMES["light_grey"]), 1)
             note = _mu_note_name(pitch)
             note_c = (sel_ink if light else NAMES["peach"]) if cur else (
-                NAMES["brown"] if self.ws.light_chrome() else NAMES["peach"])
+                NAMES["brown"] if self.ws.look.light_chrome() else NAMES["peach"])
             cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
                      base_dim, 1)
             cv.print(_MU_WAVE_LABELS[wave & 7], x + 64 * fs, y + 4 * fs, tc, 1)

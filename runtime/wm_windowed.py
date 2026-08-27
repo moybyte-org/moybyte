@@ -375,9 +375,9 @@ class _BackdropLayer(Layer):
         compute -- no per-frame scan of the cart list."""
         ws = self.ws
         cv = ws.sys_canvas
-        return (cv.w, cv.h, ws.theme_name, ws.theme_variant,
-                ws._effective_font_scale(), id(ws.icon_sheet),
-                getattr(ws, "wallpaper_id", None),
+        return (cv.w, cv.h, ws.look.theme_name, ws.look.theme_variant,
+                ws.look.effective_font_scale(), id(ws.look.icon_sheet),
+                ws.look.wallpaper_id,
                 len(getattr(ws, "_apps", ())), len(ws.carts.all))
 
     def _draw_desktop(self, dt):
@@ -415,7 +415,7 @@ class _BackdropLayer(Layer):
         """[(key, box_rect, label_rect, label, cart), ...] -- a left-edge column
         wrapping into further columns; recomputed per call from live geometry."""
         ws = self.ws
-        fs = ws._effective_font_scale()
+        fs = ws.look.effective_font_scale()
         bar_h = self.wm._bar_h()
         box = 40 * fs
         catalog = self._icon_catalog()
@@ -444,7 +444,7 @@ class _BackdropLayer(Layer):
         ws = self.ws
         cv = ws.sys_canvas
         th = ws.theme_colors
-        fs = ws._effective_font_scale()
+        fs = ws.look.effective_font_scale()
         for key, box, pill, label, cart in self._icon_rects():
             cv.rect(box[0], box[1], box[2], box[3], th.get("panel", 60))
             cv.rectb(box[0], box[1], box[2], box[3], th.get("edge", 13))
@@ -657,7 +657,7 @@ class WindowedWM(FullscreenStackWM):
     # -- window records --------------------------------------------------------
 
     def _fs(self):
-        return self.ws._effective_font_scale()
+        return self.ws.look.effective_font_scale()
 
     def _bar_h(self):
         """The desktop OS bar's height -- windows never overlap it (the taskbar
@@ -1554,7 +1554,8 @@ class WindowedWM(FullscreenStackWM):
         theme -- restarts it and all buffers are refreshed before skipping
         resumes."""
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
-               self._win_title(win), self.ws.theme_name, self.ws.theme_variant,
+               self._win_title(win), self.ws.look.theme_name,
+               self.ws.look.theme_variant,
                self._fs())
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig

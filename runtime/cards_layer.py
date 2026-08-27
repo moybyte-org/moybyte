@@ -524,7 +524,7 @@ class CardsLayer:
         NAMES = self._NAMES
         # The frozen 320x240 literals hold only in DARK chrome; a light theme
         # variant themes the base tier too (owner ask 2026-07-23).
-        if self.layout._base and not self.ws.light_chrome():
+        if self.layout._base and not self.ws.look.light_chrome():
             return {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
                     "head": NAMES["white"], "text": NAMES["light_grey"],
                     "sel_text": NAMES["white"], "row": NAMES["indigo"],

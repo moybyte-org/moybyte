@@ -37,7 +37,7 @@ def test_default_build_shares_one_canvas(tmp_path):
     ws = _ws(tmp_path)
     assert ws.sys_canvas is ws.canvas
     assert (ws.sys_canvas.w, ws.sys_canvas.h) == (320, 240)
-    assert ws.font_scale == 1
+    assert ws.look.font_scale == 1
     assert ws._viewport() == (0, 0, 1)            # no letterbox / scaling
 
 
@@ -153,13 +153,13 @@ def test_running_cart_is_a_centered_integer_viewport(tmp_path):
 
 def test_font_scale_cycles_through_1_2_3(tmp_path):
     ws = _ws(tmp_path, sys_size=(640, 480))
-    assert ws.font_scale == 1
-    ws.cycle_font_scale(1)
-    assert ws.font_scale == 2
-    ws.cycle_font_scale(1)
-    assert ws.font_scale == 3
-    ws.cycle_font_scale(1)
-    assert ws.font_scale == 1                       # wraps
+    assert ws.look.font_scale == 1
+    ws.look.cycle_font_scale(1)
+    assert ws.look.font_scale == 2
+    ws.look.cycle_font_scale(1)
+    assert ws.look.font_scale == 3
+    ws.look.cycle_font_scale(1)
+    assert ws.look.font_scale == 1                       # wraps
 
 
 def test_font_scale_resizes_text_live(tmp_path):
@@ -208,12 +208,12 @@ def test_font_scale_persists_across_reboot(tmp_path):
     rows = [r[0] for r in ws.settings_layer._SETTINGS_ROWS]
     ws.settings_layer.set_msel = rows.index("font_scale")
     ws.settings_layer.settings_adjust(1)                            # 1x -> 2x via the Settings stepper
-    assert ws.font_scale == 2
+    assert ws.look.font_scale == 2
     assert moy_carts.load_system(carts_dir).get("font_scale") == 2
     # A fresh boot restores the saved scale (even with the default 320x240 system
     # canvas: load_system applies the persisted value).
     ws2 = host_app.build_workstation(carts_dir, sys_size=(640, 480))
-    assert ws2.font_scale == 2
+    assert ws2.look.font_scale == 2
     # And the system canvas + layout reflect it.
     assert ws2.sys_canvas.font_scale == 2
     assert ws2.layout.fs == 2
@@ -240,9 +240,9 @@ def test_font_scale_is_inert_without_a_system_canvas(tmp_path):
     carts_dir = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts_dir)         # default 320x240, shared canvas
     assert ws._sys_canvas is None
-    ws.set_font_scale(3)
-    assert ws.font_scale == 3                            # remembered
-    assert ws._effective_font_scale() == 1              # but not applied (can't scale)
+    ws.look.set_font_scale(3)
+    assert ws.look.font_scale == 3                            # remembered
+    assert ws.look.effective_font_scale() == 1              # but not applied (can't scale)
     assert ws.layout.fs == 1                             # layout stays the baseline
     assert ws.layout._base                               # i.e. exactly today's geometry
     assert moy_carts.load_system(carts_dir).get("font_scale") == 3   # persisted
@@ -287,8 +287,8 @@ def test_font_scale_change_on_a_big_system_canvas_does_not_crash(tmp_path):
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(640, 480))
     ws.open_settings()
-    ws.cycle_font_scale(1)                                 # 1x -> 2x (was the crash)
-    assert ws.font_scale == 2
+    ws.look.cycle_font_scale(1)                                 # 1x -> 2x (was the crash)
+    assert ws.look.font_scale == 2
     assert ws.sys_canvas.font_scale == 2
     ws.frame(1 / 60.0)                                     # and it still draws
     assert probe.distinct_pixels(ws.sys_canvas) > 4

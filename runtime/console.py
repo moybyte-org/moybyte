@@ -11,8 +11,7 @@ free apart from the shared editor cores below.
 
 import time
 
-from editors import (CodeEditor, IconSheet,
-                     SpriteSheet, _SheetSprite)
+from editors import CodeEditor, SpriteSheet, _SheetSprite
 try:
     from op_history import History, TextEditCodec, text_diff_op   # #111 phase 4: code-tab undo
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -251,9 +250,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing move to SettingsLayer, which owns NO config -- it
-# reads ws state (system/wallpaper_id/font_scale/diag_live) and dispatches every
-# mutation to ws setters; the wallpaper cluster stays single-sourced on ws (the launcher
-# shares that backdrop). settings_layer.py is the single source of the _SET_* geometry
+# reads ws state (system/ws.look/diag_live) and dispatches every mutation to the ws
+# setters; the wallpaper cluster is single-sourced on ws.look (the launcher shares
+# that backdrop). settings_layer.py is the single source of the _SET_* geometry
 # constants (also used by console's Layout), imported back here for Layout + tests.
 try:
     from settings_layer import (
@@ -297,8 +296,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
-# the rendering + the compiled-cart cache; ws.wallpaper_id + the picker/query API stay
-# on Workstation as the single source (select_wallpaper drives the component).
+# the rendering + the compiled-cart cache; the CHOICE + the picker/query API are
+# ws.look's (appearance.py -- select_wallpaper drives the component).
 try:
     from wallpaper import Wallpaper
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -346,17 +345,16 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard
 
-# The widget SKIN catalog (ui_refactor_2026-08 Phase 4, runtime/skin.py). The
-# Workstation is the one module that installs one, for the same reason it is
-# the one that installs a theme: the choice is a persisted setting, and the
-# installed skin is process-wide state inside `ui`. Every surface just draws
-# through `ui` and never learns a skin exists -- pinned by
-# tests/test_skin.py::test_no_surface_module_knows_about_skins, whose exemption
-# list is exactly this module and the Appearance app that picks.
+# Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
+# -- theme + variant, the widget skin, the system font scale, the wallpaper
+# choice and the top-bar icon sheet. It is also the module that installs a skin
+# (`skin.use`), for the same reason it installs a theme: the choice is a
+# persisted setting and the installed skin is process-wide state inside `ui`.
+# Every surface just draws through `ui` and never learns a skin exists.
 try:
-    import skin as _skin
+    from appearance import Appearance
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import skin as _skin
+    from runtime.appearance import Appearance
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
@@ -421,7 +419,6 @@ try:
     import ui as _uimod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _uimod
-_ui_is_light = _uimod.is_light
 
 
 # Project (project.py): the open cart's DATA + commit_* verbs; its six data
@@ -481,7 +478,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The console's stateless base layer -- the MOY64 palette (NAMES/color), the responsive
 # Layout/CodeLayout geometry (#39), the icon-glyph vocabulary (_GLYPHS/_blit_glyph), the
-# themeable top-bar IconSheet defaults (_ICON/_ICON_ART/_default_icon_sheet + _ICON_VERSION),
+# themeable top-bar IconSheet slot map + art (_ICON/_ICON_ART/_ICON_VERSION),
 # the cursor sprite (CURSOR), and the small pure helpers (_in/_clamp_scroll/_cursor_delta/
 # _ticks_*/_err_text/_from_ascii) -- now live in chrome.py (extracted so the Workstation
 # kernel is alone in this file). Imported back + re-exported under the pre-extraction names
@@ -495,9 +492,8 @@ try:
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
+        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
@@ -506,9 +502,8 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
+        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
 
 
@@ -659,15 +654,18 @@ class Workstation:
         # every game, every fixed app cart, and every shipped system app, which
         # is what keeps the pixel goldens where they are.
         self.app_full_canvas = False
-        # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
-        # visible effect on a distinct SYSTEM canvas that can render scaled text; in
-        # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
-        # text can't scale) the effective scale is 1, so the chrome layout matches the
-        # 8px text actually drawn. The requested value is still kept + persisted, so a
-        # bigger panel later honours it.
-        self.font_scale = max(1, int(font_scale))
+        # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
+        # skin, the requested system font scale, the wallpaper choice and the
+        # top-bar icon sheet. Built FIRST of the collaborators because the two
+        # lines under it already need it -- the system canvas takes the font
+        # scale and the responsive Layout takes the EFFECTIVE one.
+        # `ws.theme_colors` is the one piece of that cluster's state that stays
+        # HERE: ~70 surface sites read the token dict per draw (doc 3e's "token
+        # reads stay flat"), and `look.set_theme` is its only author -- the
+        # constructor on the next line writes it for the first time.
+        self.look = Appearance(self, font_scale)
         if self._sys_canvas is not None:
-            self._sys_canvas.set_font_scale(self.font_scale)
+            self._sys_canvas.set_font_scale(self.look.font_scale)
         # The window manager (Stage 6, wm.py): owns the game<->system viewport composite
         # (#39) + -- from Stage 6b/6c -- the process back-stack `screen` projects onto and
         # the memoized layer stack. Built here (before anything reads/writes screen or
@@ -676,22 +674,8 @@ class Workstation:
         # windowed_chrome is a PROPERTY (world-aware, two-worlds #105): it is
         # True only while the windowed WM's DESK (the make world) is open --
         # see the property below the screen projection.
-        # Panel THEME (Settings -> THEME): the chrome token set the panels/window
-        # chrome/selection accents read each draw. Default = the moybyte "night"
-        # colorway (today's exact colors); load_system applies the persisted pick.
-        self.theme_name = DEFAULT_THEME
-        self.theme_variant = DEFAULT_VARIANT
-        self.theme_colors = theme_colors(DEFAULT_THEME)
-        # The widget SKIN (Appearance -> THEMES -> the skin chips) is the third
-        # axis, and unlike the two above it is not this object's state: it is
-        # installed INTO `ui`, process-wide. A fresh Workstation therefore
-        # ADOPTS what is installed rather than asserting the default over it --
-        # on a board the two readings are the same (one Workstation, and `ui`'s
-        # own tables are the default), and on a host that builds several in one
-        # process an unrelated boot must not silently restyle the others.
-        self.skin_name = _skin.active()
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
-                             self._effective_font_scale())
+                             self.look.effective_font_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
         # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
         # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
@@ -699,7 +683,7 @@ class Workstation:
         # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
         # step 3.)
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self._effective_font_scale())
+                                      self.look.effective_font_scale())
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
         # block_editor_ui.py): one instance, built once here and delegated to from
         # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
@@ -707,7 +691,7 @@ class Workstation:
         # _clamp_scroll are injected (see that module's docstring for why).
         self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
-                               self._effective_font_scale())
+                               self.look.effective_font_scale())
 
     def _init_components(self, input, carts):
         """Injected-service attach points + the shell processes (Project/Player/
@@ -928,10 +912,6 @@ class Workstation:
         # another. Console-side end-to-end -- works identically over the web
         # transport, never touches a host OS clipboard (parity trap).
         self.clipboard = Clipboard()
-        # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
-        # own namespace and run (its _draw, optionally _update) as the BACKDROP each
-        # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
-        # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
         # system.json (#209 landing B): the store owns the dict and every
         # persist funnel; `self.system` is a plain ALIAS of it and neither name
         # is ever rebound -- prefs.load() clears and updates in place, which is
@@ -942,33 +922,32 @@ class Workstation:
         # Crash isolation (#160 / Phase 8): the dict itself, because it stays
         # the same object across a load.
         self.app_guard = CrashGuard(self.system, self.prefs.persist)
-        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
-                                      # the single source; select_wallpaper drives it.
-        # The wallpaper RENDERING + compiled-cart cache is its own component (#28); both
-        # the launcher home + Settings draw it via self.wallpaper.draw(dt).
+        # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
+        # own namespace and run (its _draw, optionally _update) as the BACKDROP each
+        # home/settings frame -- the Picotron "wallpaper is a cart" model. The
+        # component owns the RENDERING + the compiled-cart cache; the CHOICE
+        # (`ws.look.wallpaper_id`) and the picker verbs are the look's.
         self.wallpaper = Wallpaper(self, NAMES)
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
-        # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
-        # chrome icons from. Injected by build_workstation / run_desktop (loaded from
-        # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
-        # _bar_img_cache memoises tile_image(slot) per kind so the SAME _SheetSprite is
-        # reused every frame -- on the device that keeps its per-Image RGB565 blit cache
-        # alive (one cached blit per icon), the whole point of moving the bar to sprites.
-        self.icon_sheet = None
-        self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None); backs
-                                      # ws._icon (the shared draw toolkit), so it stays here.
+        # Unified top bar (Stage 1): _bar_img_cache memoises tile_image(slot) per
+        # kind so the SAME _SheetSprite is reused every frame -- on the device that
+        # keeps its per-Image RGB565 blit cache alive (one cached blit per icon),
+        # the whole point of moving the bar to sprites. It backs ws._icon (the
+        # shared draw toolkit) and stays here; the SHEET itself is the look's
+        # (`ws.look.icon_sheet`), and `look.set_icon_sheet` clears this.
+        self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
         # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
-        # on self.bar_layer; set_icon_sheet bumps its cache gen via bar_layer.invalidate().
+        # on self.bar_layer; look.set_icon_sheet bumps its cache gen via bar_layer.invalidate().
         self.bar_layer = BarLayer(self, NAMES, _in)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
         # CLOSE/back returns (Settings, not the running cart). menu_view == "theme"
-        # reuses the cart PAINT renderer/input over self.icon_sheet (PaintEditor is
+        # reuses the cart PAINT renderer/input over ws.look.icon_sheet (PaintEditor is
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
         self._editing_icons = False
         # (The Settings selection/scroll window -- set_msel/set_top -- lives on
@@ -1398,50 +1377,6 @@ class Workstation:
             return False
         return self.app_guard.forgive(system_api.app_id_for(cart))
 
-    # -- desktop wallpaper (#28) ---------------------------------------------
-    #
-    # The home screen renders a chosen wallpaper-type cart as a live backdrop:
-    # exactly the Picotron model where a wallpaper is just a fullscreen cart. We
-    # reuse the cart-run machinery (compile + _init/_update/_draw) but in a SEPARATE
-    # namespace so it never collides with the foreground cart. Fallback options are
-    # plain solid MOY64 fills ("fill:<color>"), so there's always a valid choice
-    # even with zero wallpaper carts installed (and a cheap option for the device).
-
-    _FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
-
-    def wallpaper_carts(self):
-        """The wallpaper-type carts available as backdrops (discovery by type, Moybyte's
-        equivalent of Picotron's wallpapers folder). Reads the FULL scanned list, not the
-        launcher grid -- wallpapers are a backdrop category chosen in the Appearance app,
-        so they leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable
-        here."""
-        return [c for c in self.carts.all if c.get("type") == "wallpaper"]
-
-    def wallpaper_options(self):
-        """All selectable wallpaper ids: each wallpaper cart's slug, then the
-        built-in solid fills (always present so there's a valid pick)."""
-        out = []
-        for c in self.wallpaper_carts():
-            out.append(self._wp_id_for(c))
-        out.extend(self._FILL_WALLPAPERS)
-        return out
-
-    def _wp_id_for(self, cart):
-        # A stable id for a wallpaper cart: its folder name (slug) so the choice
-        # survives a reboot. Embedded/path-less carts fall back to the title slug.
-        path = cart.get("path")
-        if path:
-            name = path.rsplit("/", 1)[-1]
-            if name.endswith(".moy"):
-                name = name[:-4]
-            return name
-        return self.carts_store.slug(cart["title"]) if self.carts_store else cart["title"]
-
-    def _wp_cart_by_id(self, wp_id):
-        for c in self.wallpaper_carts():
-            if self._wp_id_for(c) == wp_id:
-                return c
-        return None
 
     def load_system(self):
         """Read the system settings (`self.prefs`) and APPLY them -- the saved
@@ -1453,23 +1388,25 @@ class Workstation:
         loading never re-writes what it just read."""
         self.prefs.load()
         # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
-        # boots at the saved text size. set_font_scale relays it into the system
+        # boots at the saved text size. look.set_font_scale relays it into the system
         # canvas + relayouts; persist=False so loading doesn't re-write the store.
-        self.set_font_scale(self.system.get("font_scale", self.font_scale),
-                            persist=False)
+        self.look.set_font_scale(self.system.get("font_scale", self.look.font_scale),
+                                 persist=False)
         # Paint's shared document lives outside the re-seeded built-in cart. Restore
         # My Art's bg asset before compiling a persisted My Art wallpaper.
         self.artwork.sync_wallpaper()
-        self.select_wallpaper(self.system.get("wallpaper"), persist=False)
-        self.set_theme(self.system.get("theme", self.theme_name), persist=False,
-                       variant=self.system.get("theme_variant", self.theme_variant))
+        self.look.select_wallpaper(self.system.get("wallpaper"), persist=False)
+        self.look.set_theme(self.system.get("theme", self.look.theme_name),
+                            persist=False,
+                            variant=self.system.get("theme_variant",
+                                                    self.look.theme_variant))
         # The widget skin, beside the colorway it belongs with. Applied ONLY
         # when the store names one: `ui`'s tables are already the default, so
         # "no key" means "nothing to install", not "install the default over
-        # whatever this process has" -- see the note at self.skin_name.
+        # whatever this process has" -- see the note at Appearance.skin_name.
         _sk = self.system.get("skin")
         if _sk is not None:
-            self.set_skin(_sk, persist=False)
+            self.look.set_skin(_sk, persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
@@ -1482,188 +1419,14 @@ class Workstation:
         self.set_crisp_pixels(self.system.get("crisp_pixels", False),
                               persist=False)
 
-    def set_icon_sheet(self, sheet):
-        """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
-        the next frame rebuilds its sprites (and, on the device, their RGB565 copies)
-        from the new theme. None reverts the bar to the _glyph fallback."""
-        self.icon_sheet = sheet
-        self._bar_img_cache = {}
-        self.bar_layer.invalidate()   # repaint the cached cart bar with the new theme (#43)
 
-    def load_icon_sheet(self):
-        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.moygfx theme
-        only if its stored version is >= the baked _ICON_VERSION; otherwise bake the
-        default theme. A saved theme older than _ICON_VERSION is STALE (the shipped
-        icons changed) -> re-seed it: bake the new default and overwrite the saved theme
-        + version, so an already-themed device/desktop picks up new icons automatically
-        (mirrors cart versioning, #47). A missing theme stays write-free (the common
-        "absent = default" case). Safe on an embedded/no-store boot (baked default)."""
-        hexs, saved_ver = None, 0
-        store = self.carts_store
-        load = getattr(store, "load_system_icons", None) if store is not None else None
-        if load is not None and self.carts_root is not None:
-            loadver = getattr(store, "load_system_icons_version", None)
 
-            def _read_theme():
-                return (load(self.carts_root),
-                        loadver(self.carts_root) if loadver is not None else _ICON_VERSION)
-            try:
-                hexs, saved_ver = self._with_sd(_read_theme)
-            except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
-                print("Moybyte icons load failed:", _err_text(exc))
-                hexs = None
-        sheet = None
-        if hexs and saved_ver >= _ICON_VERSION:        # current/newer saved theme -> keep it
-            try:
-                sheet = IconSheet.from_hex(hexs)
-            except Exception:  # noqa: BLE001
-                sheet = None
-        if sheet is None:
-            sheet = _default_icon_sheet()
-            # Re-seed a STALE (or corrupt) saved theme to the new default so the new
-            # icons land; skip when nothing was saved (no churn) or the store predates
-            # versioning (no loadver -> _read_theme reported current, never stale).
-            if hexs and self.carts_root is not None \
-                    and getattr(store, "save_system_icons", None) is not None:
-                try:
-                    self._with_sd(lambda: store.save_system_icons(
-                        sheet.to_hex(), self.carts_root, _ICON_VERSION))
-                except Exception as exc:  # noqa: BLE001
-                    print("Moybyte icons re-seed failed:", _err_text(exc))
-        self.set_icon_sheet(sheet)
-
-    # -- system font scale (#39) ---------------------------------------------
-    #
-    # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
-    # persisted in system.json (mirroring the #28 wallpaper setting) and applied live.
-    # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
-    # canvas + the responsive Layout, so a cart is never affected.
-
-    FONT_SCALES = (1, 2, 3)
-
-    def _effective_font_scale(self):
-        """The scale actually applied to the system canvas + layout. It is the
-        requested font_scale ONLY when a distinct system canvas exists (one that can
-        render scaled text); in the degradation case (the T-Deck / a shared 320x240
-        canvas, whose framebuf text can't scale) it is 1, so the chrome geometry
-        always matches the 8px text actually drawn -- no mis-laid-out desktop."""
-        return self.font_scale if self._sys_canvas is not None else 1
-
-    def set_font_scale(self, scale, persist=True):
-        """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective
-        scale into the system canvas + relayout the desktop, and (by default) persist
-        it. The game canvas text is always 8px; the effective scale is 1 without a
-        distinct system canvas (so the choice is remembered but only shows on a panel
-        that can render it)."""
-        try:
-            scale = int(scale)
-        except (TypeError, ValueError):
-            scale = 1
-        if scale not in self.FONT_SCALES:
-            scale = self.FONT_SCALES[0]
-        self.font_scale = scale
-        target = self._font_scale_canvas()
-        if target is not None:
-            target.set_font_scale(self._effective_font_scale())
-        self._relayout()
-        if persist:
-            self._persist_font_scale()
-
-    def _font_scale_canvas(self):
-        """The system canvas that OWNS the shell's font scale.
-
-        NOT simply `self._sys_canvas`: on the windowed tier that attribute is
-        whatever WINDOW BUFFER is installed while a window's content draws or
-        handles input -- and changing the font size from Settings is exactly
-        that. The new scale then landed on a buffer that on_relayout immediately
-        throws away, leaving the REAL canvas (and every future window buffer,
-        which clones its font_scale from the root in new_layer) at the OLD size:
-        layout reflowed to 1x with text still rendering at 2x, which is the
-        owner's "changing it while running messes it up, if I change and reboot
-        it looks great" (2026-07-26). The fullscreen tier has no _root_canvas and
-        falls through to the ambient canvas, which IS the root there."""
-        wm = getattr(self, "wm", None)
-        root = getattr(wm, "_root_canvas", None) if wm is not None else None
-        return root if root is not None else self._sys_canvas
-
-    def cycle_font_scale(self, d):
-        """Step the font scale by d through FONT_SCALES (Settings < / > stepper);
-        applies + persists immediately so the desktop text resizes live."""
-        scales = self.FONT_SCALES
-        cur = self.font_scale if self.font_scale in scales else scales[0]
-        nxt = scales[(scales.index(cur) + d) % len(scales)]
-        self.set_font_scale(nxt, persist=True)
-
-    def set_theme(self, name, persist=True, variant=None):
-        """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
-        (chrome.THEMES) the panels/window chrome/selection accents read each draw,
-        and persist the choice. An unknown name falls back to the default.
-        `variant` picks the theme's dark/light presentation (None keeps the
-        current variant, so existing name-only callers are untouched)."""
-        if not any(n == name for n, _t in THEMES):
-            name = DEFAULT_THEME
-        if variant is not None:
-            self.theme_variant = variant if variant in THEME_VARIANTS \
-                else DEFAULT_VARIANT
-        self.theme_name = name
-        self.theme_colors = theme_colors(name, self.theme_variant)
-        # The launcher grids read the accent for their selection ring/pill.
-        self.launcher.theme = self.theme_colors
-        if getattr(self, "picker", None) is not None:
-            self.picker.theme = self.theme_colors
-        # The cached bar strip now paints theme-colored pixels (the launcher zone's
-        # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
-        # the explicit generation so a theme switch repaints it.
-        if getattr(self, "bar_layer", None) is not None:
-            self.bar_layer.invalidate()
-        self._dirty = True
-        if persist:
-            self.system["theme"] = self.theme_name
-            self.system["theme_variant"] = self.theme_variant
-            self.prefs.persist()
-
-    def set_theme_variant(self, variant, persist=True):
-        """Flip the current theme between its dark and light presentation
-        (Appearance app -> THEMES -> DARK/LIGHT)."""
-        self.set_theme(self.theme_name, persist=persist, variant=variant)
-
-    def skin_names(self):
-        """The widget skins a picker may offer, in presentation order."""
-        return _skin.names()
-
-    def set_skin(self, name, persist=True):
-        """Install the widget SKIN (Appearance -> THEMES -> the skin chips) and
-        persist the choice, exactly as `set_theme` does for the colorway.
-
-        A skin is a delta over `ui`'s widget tables -- fields, edges, label
-        alignment -- so every surface changes at once and none of them knows:
-        this is the ONLY place the catalog is installed. An unknown name
-        resolves to the default (`skin.use`), and the RESOLVED name is what
-        gets stored, so a store that names a skin this build dropped heals
-        itself on the next pick instead of re-failing every boot."""
-        self.skin_name = _skin.use(name)
-        # Same two invalidations a theme change needs: the cached top-bar strip
-        # paints widget pixels and its key does not fold the skin, and every
-        # other surface repaints from the damage epoch.
-        if getattr(self, "bar_layer", None) is not None:
-            self.bar_layer.invalidate()
-        self._dirty = True
-        if persist:
-            self.system["skin"] = self.skin_name
-            self.prefs.persist()
-
-    def cycle_theme(self, d):
-        """Step the panel theme through chrome.THEMES (programmatic verb; the UI
-        pick is the Appearance app). Applies + persists."""
-        names = [n for n, _t in THEMES]
-        cur = self.theme_name if self.theme_name in names else names[0]
-        self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
 
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
-        w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self._effective_font_scale()
+        w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
         self.layout = Layout(w, h, fs)
         self.launcher.set_layout(self.layout)
         # Editor layouts reflow too (#39 step 2); an open code editor adopts the new
@@ -1688,9 +1451,6 @@ class Workstation:
         if _hook is not None:
             _hook()
 
-    def _persist_font_scale(self):
-        self.system["font_scale"] = self.font_scale
-        self.prefs.persist()
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
     #
@@ -1922,56 +1682,7 @@ class Workstation:
     # core above (load_achievements/_achievement_unlocked + self.ach) and the
     # overlay deadlines those objects arm (_init_overlays) stay here.
 
-    def select_wallpaper(self, wp_id, persist=True):
-        """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
-        "fill:<color>" built-in; an unknown/None id falls back to the first
-        available option. Compiles the chosen cart into its own namespace (or sets
-        a solid fill) and, when persist, writes the choice to system.json."""
-        opts = self.wallpaper_options()
-        if wp_id not in opts:
-            wp_id = opts[0] if opts else self._FILL_WALLPAPERS[0]
-        self.wallpaper_id = wp_id
-        self.wallpaper.clear()
-        if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
-            cart = self._wp_cart_by_id(wp_id)
-            if cart is not None:
-                # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
-                # compile (which bakes src/sheet into the wallpaper's own ns), then
-                # re-slims -- unless it IS the open project's cart (stays fat).
-                self.carts.rehydrate(cart)
-                self.wallpaper.compile(cart)   # compile into the backdrop component (#28)
-                if cart is not getattr(self, "_fat_cart", None):
-                    self.carts.reslim(cart)
-        if persist:
-            self._persist_wallpaper()
-            # "Home Decorator": any persisted pick counts -- the Appearance app,
-            # Paint's WALL, the cycle verb. Boot restore (persist=False) doesn't.
-            self.ach.note("wallpaper_change")   # (#21)
 
-    def _persist_wallpaper(self):
-        self.system["wallpaper"] = self.wallpaper_id
-        self.prefs.persist()
-
-    def cycle_wallpaper(self, d):
-        """Step the wallpaper choice by d (programmatic verb; the UI pick is the
-        Appearance app); applies + persists immediately."""
-        opts = self.wallpaper_options()
-        if not opts:
-            return
-        cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
-        nxt = opts[(opts.index(cur) + d) % len(opts)]
-        self.select_wallpaper(nxt, persist=True)
-
-    # (The wallpaper RENDERING -- _draw_wallpaper + _compile_wallpaper + the compiled-cart
-    # cache -- moved to the Wallpaper component (wallpaper.py); self.wallpaper.draw(dt) is
-    # called by the launcher home + Settings, and select_wallpaper drives it.)
-
-    def light_chrome(self):
-        """True when the live theme's tool surface is LIGHT (visual identity v1
-        Phase 3) -- THE gate every surface's light branch reads (ui.is_light over
-        the live tokens). A method on ws so the layers inside the chrome import
-        cycle need no ui import of their own."""
-        return _ui_is_light(self.theme_colors)
 
     def note_cost(self, what):
         """Count one EXPENSIVE event: a cache build, or a call into storage.
@@ -2082,7 +1793,7 @@ class Workstation:
         # sysmenu draws on the SYSTEM canvas, so anchor to the responsive Layout's
         # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
         bx, _by, bw, _bh = self.layout.sysmenu_btn
-        fs = self._effective_font_scale()
+        fs = self.look.effective_font_scale()
         self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled geometry
         pw = _POPUP_W * fs
         ax = bx + bw - pw
@@ -3471,20 +3182,21 @@ class Workstation:
         the exact mirror of save_sprites/save_shared_sheet: to_hex -> the SAME SD
         wrapper the cart-sprite save uses (host: direct write; device: with_sd_live).
         Then invalidate the bar caches so the NEXT bar draw shows the new pixels live:
-        set_icon_sheet drops the per-kind _SheetSprite cache (and with it the device's
+        look.set_icon_sheet drops the per-kind _SheetSprite cache (and with it the device's
         per-Image RGB565 blit cache), and the sheet's gen already bumped on each pset
         so any gen-keyed cache rebuilds too. Surfaces a save status like the cart
         paint editor. A bad store/no SD root is a no-op (writes deferred)."""
-        if not (self.icon_sheet and self.carts_root and self.can_manage):
+        sheet = self.look.icon_sheet
+        if not (sheet and self.carts_root and self.can_manage):
             return
-        hexs = self.icon_sheet.to_hex()
+        hexs = sheet.to_hex()
         try:
             self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION))
-            self.icon_sheet.dirty = False
+            sheet.dirty = False
             self.save_status = None           # clear stale failure text (see commit_code)
             # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
             # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
-            self.set_icon_sheet(self.icon_sheet)
+            self.look.set_icon_sheet(sheet)
             self.ach.note("paint_save")         # "Little Artist": a theme saved (#21)
         except Exception as exc:  # noqa: BLE001
             # Mirror save_sprites: a failed save must be VISIBLE on device (no serial in
@@ -4090,7 +3802,7 @@ class Workstation:
         Drawn on the system canvas above the whole stack; indexed API only
         (host == device == web)."""
         cv = self.sys_canvas
-        fs = self._effective_font_scale()
+        fs = self.look.effective_font_scale()
         label = "LOADING..."
         w = (len(label) * 8 + 16) * fs
         h = 16 * fs
@@ -5109,7 +4821,8 @@ class Workstation:
         if self._splash_until is not None:
             return                        # no cursor over the boot logo
         if self.pointer is not None and self.pointer.visible:
-            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y, self.font_scale)
+            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y,
+                            self.look.font_scale)
 
     def _glyph(self, kind, rect, c, cv=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
@@ -5158,13 +4871,14 @@ class Workstation:
         if key in self._bar_img_cache:
             return self._bar_img_cache[key]
         img = None
-        if self.icon_sheet is not None:
+        sheet = self.look.icon_sheet
+        if sheet is not None:
             slot = _ICON.get(kind)
             if slot is not None:
                 if not light:
-                    img = self.icon_sheet.tile_image(slot)   # transparent -1
+                    img = sheet.tile_image(slot)   # transparent -1
                 else:
-                    base = self.icon_sheet.tile_image(slot, transparent=0)
+                    base = sheet.tile_image(slot, transparent=0)
                     if base is not None:
                         if kind == "moy":
                             img = _SheetSprite(base.w, base.h, base.pix, 0)
@@ -5189,12 +4903,13 @@ class Workstation:
         sheet's untouched pixels are 0: invisible on the black bar, a black plate
         anywhere else. tile_image memoises per (slot, transparent), so this shares
         the sheet's own cache."""
-        if self.icon_sheet is None:
+        sheet = self.look.icon_sheet
+        if sheet is None:
             return None
         slot = _ICON.get(kind)
         if slot is None:
             return None
-        return self.icon_sheet.tile_image(slot, transparent=0)
+        return sheet.tile_image(slot, transparent=0)
 
     def _icon(self, kind, x, y, cv=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
@@ -5256,5 +4971,5 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
     ws.load_system()                # #28: system.json + the saved wallpaper
-    ws.load_icon_sheet()            # Stage 1: the 16x16 bar IconSheet (theme or baked)
+    ws.look.load_icon_sheet()       # Stage 1: the 16x16 bar IconSheet (theme or baked)
     ws.load_achievements()          # #21: unlocked badges survive reboots
