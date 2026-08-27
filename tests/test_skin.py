@@ -60,11 +60,11 @@ def _pin_cover_budget():
     budget is load-bearing on more than the shelf: measured, the Settings
     surface at fs=3 hashes differently at a 1ms slice than at an unbounded
     one, so an arm taken without it is not comparable to one taken with it."""
-    from runtime import console
-    was = console._COVER_SLICE_MS
-    console._COVER_SLICE_MS = 10 ** 9
+    from runtime import cover_cache
+    was = cover_cache._COVER_SLICE_MS
+    cover_cache._COVER_SLICE_MS = 10 ** 9
     yield
-    console._COVER_SLICE_MS = was
+    cover_cache._COVER_SLICE_MS = was
 
 
 def _ab_captures(config, tmp_path, arms):

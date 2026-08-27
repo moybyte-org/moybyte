@@ -467,9 +467,9 @@ def test_launcher_draws_the_declared_icon_tiles(tmp_path):
         Path(c["path"], "sprites.moygfx").write_text("\n".join(rows))
     ws = host_app.build_workstation(root)
     by_title = {c["title"]: c for c in ws.launcher.items if c.get("path")}
-    big = ws._icon_sheet_for(by_title["Big"])
+    big = ws.covers.icon_sheet_for(by_title["Big"])
     assert big is not None and (big.w, big.h) == (16, 16)
-    plain = ws._icon_sheet_for(by_title["Plain"])
+    plain = ws.covers.icon_sheet_for(by_title["Plain"])
     assert plain is not None and (plain.w, plain.h) == (8, 8)
 
 
@@ -485,7 +485,7 @@ def test_icon_past_the_sheet_falls_back(tmp_path):
     ws = host_app.build_workstation(root)
     cart = next(x for x in ws.launcher.items if x["title"] == "Missing")
     assert cart["icon"] == (500, 1, 1)          # carried verbatim...
-    assert ws._icon_sheet_for(cart) is not None  # ...but never a blank tile
+    assert ws.covers.icon_sheet_for(cart) is not None  # ...but never a blank tile
 
 
 # -- pmem slots are signed 32-bit (SPEC.md 9, matching 4.2) --------------------

@@ -298,7 +298,7 @@ class Wallpaper:
     def wire_assets(self):
         """{name: (w, h, index_bytes)} for the backdrop composite's ship-once
         wire image, or {} while the frame is churning / never composited --
-        merged into /assets beside the shelf covers (Workstation.cover_assets)."""
+        merged into /assets beside the shelf covers (CoverCache.assets)."""
         if self._wire_name is None or self._wire_pix is None:
             return {}
         w, h = self._wire_wh

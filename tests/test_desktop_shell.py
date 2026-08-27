@@ -1074,7 +1074,7 @@ def test_live_set_diet_slims_rehydrates_and_reslims(tmp_path):
         for k in _HEAVY_CART_KEYS:
             assert k not in c, "%s survived slimming on %s" % (k, c["title"])
     # icons were baked BEFORE slimming, so the grid never needs the sheet back
-    assert any(ws._icon_cache.values()), "icon cache should be populated"
+    assert any(ws.covers.icons.values()), "icon cache should be populated"
     # RUN rehydrates in place and the cart actually plays
     ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
                            if it.get("path"))

@@ -31,10 +31,9 @@ from ws_helpers import build_desktop_ws, build_ws
 ROOT = Path(__file__).resolve().parent.parent
 CONSOLE = ROOT / "runtime" / "console.py"
 
-# The collaborator attributes on Workstation. Landings C-E add: covers
-# (CoverCache), carts (CartManager), look (Appearance), history
-# (HistoryRouter).
-COLLABORATORS = ("web", "prefs")
+# The collaborator attributes on Workstation. Landings C-E add: carts
+# (CartManager), look (Appearance), history (HistoryRouter).
+COLLABORATORS = ("web", "prefs", "covers")
 
 # name on Workstation -> method on the collaborator. Every entry is a caller
 # that has not moved; the comment says who, so retiring one is a search with an
@@ -58,6 +57,17 @@ FORWARDS = {
     "prefs": {
         "_persist_system": "persist",        # app_context's Prefs, dev_channel's `vol`
     },
+    # Landing C. ZERO forwards, and that is the finding rather than an
+    # omission: every cover verb was kernel-INTERNAL. The three consumer
+    # classes 3d names were all swept before the move -- the dev channel and
+    # the three on-glass suites speak no cover vocabulary at all, `tools/`
+    # mentions the pipeline only in prose, and the two per-card hooks
+    # (`cover_for`, `icon_sheet_for`) are handed to the grids as BOUND METHODS
+    # rather than reached through the console. The rest migrated in this commit:
+    # launcher_layer's eight `ws.covers.gen` keys and its six
+    # `ws.covers.icon_sheet_for` draw arguments, wm_windowed's desk icon, and
+    # the direct suites.
+    "covers": {},
 }
 
 # `getattr(ws, "X")` names that are deliberately absent from a host console.

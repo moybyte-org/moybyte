@@ -852,7 +852,7 @@ class LauncherHomeLayer:
         extend this key."""
         ws = self.ws
         return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
-                ws._cover_gen, self._lhover,
+                ws.covers.gen, self._lhover,
                 tuple(it.get("title") for it in ws.launcher.items),
                 tuple(ws.system.get("favorites", ())),
                 ws.bar_layer._cart_bar_key("home"))
@@ -994,7 +994,7 @@ class LauncherHomeLayer:
         # cursor stamp -- a handful of draw calls instead of every visible
         # card. Any ineligibility falls back to the full band repaint below.
         region = ws.launcher._scroll_region()
-        key = (ws.launcher.sel, self._statics, ws._cover_gen)
+        key = (ws.launcher.sel, self._statics, ws.covers.gen)
         shift = region.blit_shift(cv, ws._frames_drawn, key)
         if shift is not None:
             delta, old_stamp = shift
@@ -1009,14 +1009,14 @@ class LauncherHomeLayer:
             def _fill(c, r):
                 c.rect(r[0], r[1], r[2], r[3], surface)
 
-            ws.launcher.draw_shift(cv, ws._icon_sheet_for, delta, damage, _fill)
+            ws.launcher.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage, _fill)
         else:
             cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
-            ws.launcher.draw(cv, ws._icon_sheet_for)
+            ws.launcher.draw(cv, ws.covers.icon_sheet_for)
         # Re-pin the cover gen POST-draw: a cover landing during the card draw
         # is in these pixels, so the recorded key must carry the new gen.
         region.note_painted(ws._frames_drawn,
-                            (ws.launcher.sel, self._statics, ws._cover_gen),
+                            (ws.launcher.sel, self._statics, ws.covers.gen),
                             _cursor_stamp(ws))
         _t1 = _ticks_ms() if _t0 is not None else None
         ws.bar_layer._draw_status_strip("home")
@@ -1054,7 +1054,7 @@ class LauncherHomeLayer:
         if self._try_stamp_retained(cv, dt):
             ws.launcher._scroll_region().note_painted(
                 ws._frames_drawn,
-                (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+                (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
                 _cursor_stamp(ws))
             _advance_streak(self, cv)
             return
@@ -1078,13 +1078,13 @@ class LauncherHomeLayer:
         # the "LIBRARY" header and the footer cartridge count. The scrolling
         # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
         self._draw_shelf_panel(cv)
-        ws.launcher.draw(cv, ws._icon_sheet_for)
+        ws.launcher.draw(cv, ws.covers.icon_sheet_for)
         # #113: record this full paint in the shelf's blit ring (offset + the
         # state the pixels depend on + the cursor stamp about to land on top),
         # so an eligible drag frame can shift instead of repainting every card.
         ws.launcher._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+            (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
@@ -1502,7 +1502,7 @@ class EditorPickerLayer:
                     and by <= p.y and p.y + 13 * fs <= by + bh):
                 return False
         region = ws.picker._scroll_region()
-        key = (ws.picker.sel, self._statics, ws._cover_gen)
+        key = (ws.picker.sel, self._statics, ws.covers.gen)
         shift = region.blit_shift(cv, ws._frames_drawn, key)
         if shift is not None:
             delta, old_stamp = shift
@@ -1512,13 +1512,13 @@ class EditorPickerLayer:
                 if delta:
                     damage.append((old_stamp[0] - delta, old_stamp[1],
                                    old_stamp[2], old_stamp[3]))
-            ws.picker.draw_shift(cv, ws._icon_sheet_for, delta, damage,
+            ws.picker.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage,
                                  self._backdrop_fill)
         else:
             self._backdrop_fill(cv, (bx, by, bw, bh))
-            ws.picker.draw(cv, ws._icon_sheet_for)
+            ws.picker.draw(cv, ws.covers.icon_sheet_for)
         region.note_painted(ws._frames_drawn,
-                            (ws.picker.sel, self._statics, ws._cover_gen),
+                            (ws.picker.sel, self._statics, ws.covers.gen),
                             _cursor_stamp(ws))
         ws.bar_layer._draw_status_strip("picker")
         return True
@@ -1559,11 +1559,11 @@ class EditorPickerLayer:
         self._dots(cv, (0, by, bx, bh), 0)
         self._dots(cv, (bx + bw, by, W - (bx + bw), bh), 0)
         self._dots(cv, (bx, by, bw, bh), self._dot_xoff())
-        ws.picker.draw(cv, ws._icon_sheet_for)
+        ws.picker.draw(cv, ws.covers.icon_sheet_for)
         # #113: record this full paint in the blit ring + advance the streak.
         ws.picker._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.picker.sel, self._statics_key(cv), ws._cover_gen),
+            (ws.picker.sel, self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _advance_streak(self, cv)
         ws.bar_layer._draw_status_strip("picker")

@@ -370,7 +370,7 @@ class _BackdropLayer(Layer):
         """Everything the desk's wallpaper + icon column depends on.
 
         Deliberately NOT the clock (repainted over the cache instead) and NOT
-        ws._cover_gen: a cover landing in the picker would otherwise invalidate
+        ws.covers.gen: a cover landing in the picker would otherwise invalidate
         the desk on the very frames a scroll is trying to stay cheap. Cheap to
         compute -- no per-frame scan of the cart list."""
         ws = self.ws
@@ -448,7 +448,7 @@ class _BackdropLayer(Layer):
         for key, box, pill, label, cart in self._icon_rects():
             cv.rect(box[0], box[1], box[2], box[3], th.get("panel", 60))
             cv.rectb(box[0], box[1], box[2], box[3], th.get("edge", 13))
-            img = ws._icon_sheet_for(cart) if cart is not None else None
+            img = ws.covers.icon_sheet_for(cart) if cart is not None else None
             if img is not None:
                 sc = max(1, (box[2] - 8 * fs) // 16)
                 cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,

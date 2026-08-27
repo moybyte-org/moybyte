@@ -1706,7 +1706,7 @@ def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
     _open_two_windows(ws, drv)
     before = ws.wm._desk_sig_value() if hasattr(ws.wm, "_desk_sig_value") \
         else ws.wm._backdrop_layer._desk_sig()
-    ws._cover_gen += 5
+    ws.covers.gen += 5
     after = ws.wm._backdrop_layer._desk_sig()
     assert before == after
 

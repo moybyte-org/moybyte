@@ -66,7 +66,7 @@ dt is INJECTED, never read from a clock -- `ScrollRegion` is the precedent):
   * every transient overlay is cleared each frame (`_quiesce`): the toast, the
     confetti/egg timers, the achievements list, the system menu, About, the
     notice banner, the FPS/perf HUDs, the cursor.
-  * `console._COVER_SLICE_MS` is raised so every launcher/picker cover builds
+  * `cover_cache._COVER_SLICE_MS` is raised so every launcher/picker cover builds
     within its frame. This is load-bearing, not belt-and-braces: the cover
     build is a per-frame TIME budget, and the launcher home hashes differently
     at a 1ms slice than at 5ms. Left alone, these goldens would be a function
@@ -410,8 +410,8 @@ def _pin_cover_budget(monkeypatch):
     differently -- measured: slice 1ms and slice 5ms give different launcher
     pixels. Raising the budget makes the captured frame the fully-built one on
     every machine."""
-    from runtime import console
-    monkeypatch.setattr(console, "_COVER_SLICE_MS", _COVER_SLICE_UNBOUNDED)
+    from runtime import cover_cache
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", _COVER_SLICE_UNBOUNDED)
 
 
 # ---------------------------------------------------------------------------
