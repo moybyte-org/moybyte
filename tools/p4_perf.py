@@ -17,6 +17,12 @@ not the shipping number. The fps= field stays valid either way -- it reads
 _frames_drawn, not the EMAs -- so the only thing lost with them off is the
 per-phase ms breakdown, which --diag turns back on when you want it.
 
+A row marked LINKED is NOT that cart's fps, and this tool asks so it can say so
+(2026-08-27). A second console left in the same two-player cart forms a real
+ESP-NOW match, and a linked game draws on the shared 30Hz tick by design (#65) --
+so Brick Siege reads 30 against the 62 it runs solo, with nothing in the PERF
+line naming the cause. Move the other console off the cart and re-measure.
+
 Numbers live in issue #66, not here. This tool produces them; it does not
 remember them.
 """
@@ -78,8 +84,22 @@ def measure(board, title, secs, log):
     samples = [p for p in (parse_perf(l) for l in board.lines[n0:]) if p]
     if not samples:
         return None
+    # Ask the RADIO what this run was, while it is still running: a peer on the
+    # desk makes a two-player cart a match, and #65's lockstep gate then draws
+    # on the shared 30Hz tick -- a correct 30 that reads exactly like a
+    # regression, because no PERF field names it (2026-08-27: a T-Deck parked
+    # in Brick Siege cost a night of paired carve-vs-dev captures).
+    #
+    # Bare bool, not repr(): the device reprs the result already, so a wrapped
+    # expression hands back the STRING 'True' -- truthy, not True, marks
+    # nothing. A board that cannot answer stays unmarked, which is the honest
+    # reading of "this board did not say".
+    linked = board.pyval(
+        "bool(getattr(ws, 'link', None) and ws.link.status()[2])",
+        timeout=15.0) is True
     return {
         "n": len(samples),
+        "linked": linked,
         "fps": statistics.median(s.get("fps", 0) for s in samples),
         "min": min(s.get("fps", 0) for s in samples),
         "cart": samples[-1].get("cart", title),
@@ -112,6 +132,7 @@ def main(argv=None):
               % ("cart", "fps", "worst", "n", "draw/flush/logic/render/chrome ms"
                  if a.diag else ""))
         rows = []
+        linked = False
         for title in roster:
             try:
                 r = measure(board, title, a.secs, log)
@@ -122,13 +143,21 @@ def main(argv=None):
                 print("%-18s  (not on this board)" % title)
                 continue
             p = r["phases"]
-            print("%-18s %6.1f %6.1f %5d   %s"
+            print("%-18s %6.1f %6.1f %5d   %s%s"
                   % (title, r["fps"], r["min"], r["n"],
                      ("%.0f/%.0f/%.0f/%.0f/%.0f"
                       % (p["draw"], p["flush"], p["logic"], p["render"],
-                         p["chrome"])) if a.diag else ""))
+                         p["chrome"])) if a.diag else "",
+                     "  LINKED" if r["linked"] else ""))
+            linked = linked or r["linked"]
             rows.append((title, r))
         board.pyexec("ws.exit()")
+        if linked:
+            print("\nLINKED: another console on this desk is in the same "
+                  "two-player cart, so that\nrun was a real ESP-NOW match and "
+                  "drew on the shared 30Hz tick (#65). That\nnumber is the "
+                  "match's, not the cart's -- move the peer off the cart and "
+                  "re-measure.")
         return 0 if rows else 1
     finally:
         board.close()
