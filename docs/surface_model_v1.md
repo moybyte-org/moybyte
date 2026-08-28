@@ -81,7 +81,7 @@ id `"launcher"` today (`launcher_layer.py` vs `wm_windowed.py`) — one sid,
 two contents across a world flip is exactly the aliasing §3 forbids.
 
 **Gen minting (no per-object counters, ever).** Both gens are stamped from
-**one monotonic per-WM counter** — the `atlas_gen` pattern (`web_view.py`:
+**one monotonic per-WM counter** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
 increments, never restarts), which §2's L3 cites as prior art and which this
 rule generalizes. Rationale: surfaces are destroyed wholesale in the real code
 (`on_relayout` does `_wins.clear()`; every world flip rebuilds all windows)
@@ -399,7 +399,7 @@ section and are preserved as reasoning about retained surfaces generally, not
 as a shipped wire.)*
 
 **Current shape (corrected):** `frame_payload.surfaces` entries are dicts —
-`{"id", "domain", "cmds"}` or `{"id", "domain", "same": 1}` (`web_view.py`
+`{"id", "domain", "cmds"}` or `{"id", "domain", "same": 1}` (the deleted `web_view.py`
 serve path; the `[sid, domain, cmds]` triple is the recorder-internal
 `frame_surfaces()` shape only).
 

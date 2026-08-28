@@ -56,7 +56,7 @@ and "every backend IS a Presenter" would re-encode it one level up.
 v1.0 published a table built by grepping each board's `moy_runtime.py`. That
 missed the shared `device_canvas.py` — the file §2 praises as already-shared —
 and so got the T-Deck column wrong in exactly the direction that flattered the
-thesis. Regenerated over `canvas.py` + `web_view.py` + both boards'
+thesis. Regenerated over the then-live `canvas.py` + `web_view.py` (both since deleted) + both boards'
 `moy_runtime.py` **and** `device_canvas.py`:
 
 | verb | host | tdeck | p4 | web | sites |
@@ -193,7 +193,8 @@ Selected by a **factory over the (game, system, world) pair** of §1.1, not by
 - **`RETAINED_FRAMES`** — it is per-**draw-target** and runtime-mutated
   (`canvas.py:123` = 1; `device_canvas.py:273` = 2 but `:1758` sets it to 1 per
   *layer*; the P4 sets it per *instance* from `len(comp._fbs)`; `web_view.py`
-  pins 0 on three classes specifically to shadow `__getattr__`). Hoisting it to
+  pinned 0 on three classes specifically to shadow `__getattr__` -- that file
+  and `canvas.py` were deleted in 2026-08, so those two are historical). Hoisting it to
   a backend class makes every layer report the root's value — which is the
   ghosting bug `moy_runtime.py:157-164` already records ("shifted by ~twice the
   real delta and ghosted a second copy of every card").
@@ -213,7 +214,7 @@ Selected by a **factory over the (game, system, world) pair** of §1.1, not by
 sites are *discrimination* (answered by `pixels`); ~6 are pixel **access**
 inside composite loops. Converting the access sites means moving
 `_composite_via_spr`, `_backdrop_blit` **and the bezel latch** into
-`present.py` — code `surface_model_v1` §7 schedules for **deletion** in its
+`+present.py` — code `surface_model_v1` §7 schedules for **deletion** in its
 Phase C. Those sequence after that phase, not into Phase 1.
 
 **Explicitly out of scope, by name:** `font_scale` (18 sites — a layout concern,
@@ -261,16 +262,16 @@ sequences **after** Phase 0 here — the conformance suite is what makes it safe
 ## 6. Risks, honestly
 
 - **L9 / the S3 budget — the correction that matters.** v1.0 claimed
-  `present.py` would be "a leaf module, staged per-target like `surface.py`".
+  `+present.py` would be "a leaf module, staged per-target like `surface.py`".
   **Inverted.** `surface.py` escapes the S3 only because its sole importer is
   `wm_windowed.py`, the one file the S3 build denylists. The probe sites are not
   leaf-shaped: `wm.py`, `wallpaper.py`, `console.py`, `launcher_layer.py`,
-  `canvas.py`, `player.py` and `ui.py` are **all staged to the S3** and hold the
-  large majority of the sites. `present.py` **is an S3 module** and the S3 gains
+  `player.py` and `ui.py` are **all staged to the S3** and hold the
+  large majority of the sites. `+present.py` **is an S3 module** and the S3 gains
   a class hierarchy, an instance and a per-frame indirection.
   **Gate on three published numbers, not a slogan:** frozen-image delta
   (reported, no arbitrary threshold — v1.0's "≤2KB" was undefended and probably
-  self-failing at ~2KB for `present.py` alone), boot `free-int` unchanged, and
+  self-failing at ~2KB for `+present.py` alone), boot `free-int` unchanged, and
   launcher live set unchanged via `micropython.mem_info()` — **not** bare
   `gc.mem_free()`, which reads ~28MB against ~1.4MB real on the P4 port.
   Flash is not the scarce resource here (S3 app slots 4MB, P4 45% headroom);
@@ -374,7 +375,7 @@ objects — listed so they are decisions rather than omissions): `ws.wifi`,
 | # | finding | disposition |
 |---|---|---|
 | B1 | capability is a (game, system, world) triple; 7 pairs, not 4 backends | §1.1 rewritten; factory in §4; Phase 0 gate is the pair matrix |
-| B2/F1 | `present.py` is not leaf-shaped; L7 falsified by §4 | L7 → **L9**; §6 rewritten with three measured numbers |
+| B2/F1 | `+present.py` is not leaf-shaped; L7 falsified by §4 | L7 → **L9**; §6 rewritten with three measured numbers |
 | B3 | `RETAINED_FRAMES` is per-draw-target; hoisting recreates a ghosting bug | removed from §4 |
 | M1/F4 | no portable default for `composite_game` (indexed vs RGB565) | L3 scoped; verb made abstract |
 | M2 | "T-Deck subclass returns early" repeats `b0c442a`'s category error | **L6** — wiring stays a runtime test |
