@@ -12,6 +12,7 @@ instead of guessing, and the two consoles' player slots agree about who is who.
 """
 
 from runtime import netplay, players as players_mod
+from ws_helpers import build_ws
 
 BUTTONS = ("left", "right", "up", "down", "a", "b", "run")
 
@@ -619,3 +620,117 @@ def test_a_resend_before_any_tick_is_harmless():
     a, _b = _match(wire)
     a[0].resend()
     assert a[0].packets_out == 0
+
+
+# -- the frame-loss witness (the PERF line's net=) ---------------------------
+
+def test_the_tick_rate_meter_measures_ticks_against_the_wall_clock():
+    """`net=` on the PERF line is this: the rate the linked world advances at,
+    which is also the rate a linked game RENDERS at (the console gates every
+    frame the tick is not due for). A healthy match reads ~30."""
+    wire = _Wire()
+    a, b = _match(wire)
+    s = a[0]
+    s.due(10_000)                    # the first tick opens the meter's window
+    _step(a, b, wire, frames=61)     # one stalled pass + 60 advances
+    assert s.frame == 60
+    assert s.tps(12_000) == 30       # 60 ticks in 2s
+
+
+def test_the_meter_reports_a_real_zero_for_a_matched_but_frozen_session():
+    """0 is a READING, not the absent marker: matched, not advancing (the peer
+    went away, the transport died). Absence is `-`, and the emitters print it
+    because there is no session object to ask at all -- never this method."""
+    wire = _Wire()
+    a, _b = _match(wire)
+    s = a[0]
+    s.due(10_000)
+    assert s.frame == 0
+    assert s.tps(12_000) == 0
+
+
+def test_the_meter_consumes_its_window_so_it_has_exactly_one_reader():
+    """Two readers per sample would halve both their answers, which is why the
+    console routes the PERF emitters through perf_net() and leaves perf_sample()
+    (the `is a cart running?` probe half the diag helpers call) alone."""
+    wire = _Wire()
+    a, b = _match(wire)
+    s = a[0]
+    s.due(10_000)
+    _step(a, b, wire, frames=31)
+    assert s.tps(11_000) == 30
+    assert s.tps(12_000) == 0, "the second read sees a window with no ticks in it"
+
+
+def test_the_window_opens_at_the_first_tick_not_at_the_first_sample():
+    """A match forms mid-sample-window. Measuring from the sampler's first call
+    would report the first rate as 0 -- a frozen match, in exactly the situation
+    the field exists to explain."""
+    wire = _Wire()
+    a, b = _match(wire)
+    s = a[0]
+    s.due(10_000)
+    assert s._tps_ms == 10_000
+    _step(a, b, wire, frames=16)
+    assert s.tps(10_500) == 30       # 15 ticks in the half second since the tick
+
+
+def test_a_stalling_match_reads_below_the_tick_rate():
+    """The number degrades with the transport instead of freezing at a constant
+    30 -- the whole reason it is a measured rate and not `TICK_HZ`."""
+    wire = _Wire()
+    a, b = _match(wire)
+    s = a[0]
+    s.due(10_000)
+    wire.drop = set(range(3, 40))    # the peer's input mostly never lands
+    _step(a, b, wire, frames=61)
+    rate = s.tps(12_000)
+    assert 0 < rate < 30, rate
+
+
+# -- the console's one entry to the meter ------------------------------------
+
+class _FakeSession:
+    """A session that only answers the meter, so the console side of the field
+    can be driven without a wall clock."""
+
+    def __init__(self, rate=29):
+        self.rate = rate
+        self.asked = []
+
+    def tps(self, now_ms):
+        self.asked.append(now_ms)
+        return self.rate
+
+
+def test_the_console_reports_no_session_as_None_never_as_a_rate(tmp_path):
+    """A board with no lever reports absence (2026-08-22). The emitters print
+    `-` from this None; a 0 here would be indistinguishable from a match that
+    has stopped advancing, which is a state the field has to be able to show."""
+    ws = build_ws(tmp_path)
+    assert ws.netplay is None
+    assert ws.perf_net() is None
+
+
+def test_the_console_asks_the_live_session_for_the_rate(tmp_path):
+    ws = build_ws(tmp_path)
+    ws.netplay = _FakeSession(29)
+    assert ws.perf_net() == 29
+    assert len(ws.netplay.asked) == 1, "one read per sample -- it spends a window"
+
+
+def test_perf_sample_does_not_spend_the_meters_window(tmp_path):
+    """perf_sample is also the `is a cart running?` probe that _diag_drawbrk,
+    _diag_draw2, _diag_chromebrk, _diag_i2cstat and _diag_gc all call. If the
+    rate rode along in that tuple, five probes would eat the PERF line's window
+    and it would report a fifth of the truth."""
+    ws = build_ws(tmp_path)
+    ws.netplay = _FakeSession()
+    ws.wm.top_is_player = lambda: True
+    ws.cart = {"title": "Brick Siege"}
+    ws.cart_error = None
+    sample = ws.perf_sample()
+    assert sample is not None and sample[0] == "Brick Siege"
+    for _ in range(4):
+        ws.perf_sample()
+    assert ws.netplay.asked == []

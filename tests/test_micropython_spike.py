@@ -1787,6 +1787,56 @@ def test_psram_temperature_retune_wired():
         assert "mspi_timing_by_mspi_delay.c" not in build.read_text(
             encoding="utf-8"), ("%s carries its own #169 patch again" % build)
 
+def _idf_candidates(build):
+    """The sibling ESP-IDF checkouts this build.sh offers moybyte_setup_idf."""
+    out = []
+    for line in build.read_text(encoding="utf-8").splitlines():
+        _, sep, rest = line.partition("${REPO_ROOT}/firmware/")
+        if sep and "/.build/esp-idf" in rest:
+            out.append(rest.partition("/.build/esp-idf")[0])
+    return out
+
+
+def test_exactly_one_board_owns_the_esp_idf_checkout():
+    """ESP-IDF v5.5.1 is ~600MB and identical for all three boards, so they
+    share ONE clone: `moybyte_setup_idf` takes a candidate list and falls back
+    to cloning into its own `.build/esp-idf`. That makes the ownership a
+    GRAPH, and the graph is what rots.
+
+    It rotted once. Each board used to clone its own; when the shared build lib
+    landed (2026-08-17) the T-Deck started naming the P4's, which left the
+    T-Deck's own clone an orphan its own build no longer resolved -- while the
+    P4 named it FIRST and the Guition named it first too. Two boards' CMake
+    caches ended up pinning CMAKE_TOOLCHAIN_FILE into a directory nobody
+    owned, and CMake will not re-point that entry after the first configure: the
+    day the orphan was deleted, both builds would have failed on a dead path
+    rather than reconfiguring. (2026-08-27: it was, and they were wiped.)
+
+    So the shape is pinned, not the paths. One owner, every other board names
+    it and nothing else, and the owner names nobody -- a cycle or a second
+    orphan cannot be spelled.
+    """
+    named = {b.parent.name: _idf_candidates(b) for b in _esp32_builds()}
+    for board, cands in named.items():
+        assert len(set(cands)) == len(cands), (
+            "%s lists the same ESP-IDF checkout twice" % board)
+    owners = {c for cands in named.values() for c in cands}
+    assert len(owners) == 1, (
+        "the boards reach for %d ESP-IDF checkouts (%s) -- one of them is "
+        "nobody's, and a CMake cache that pins it cannot be re-pointed"
+        % (len(owners), ", ".join(sorted(owners)) or "none"))
+    owner = owners.pop()
+    assert owner in named, (
+        "%s is named as the shared ESP-IDF owner but builds nothing here"
+        % owner)
+    assert not named[owner], (
+        "%s owns the shared ESP-IDF checkout and also borrows one" % owner)
+    for board, cands in named.items():
+        if board != owner:
+            assert cands == [owner], (
+                "%s reaches past the owner (%s): %s" % (board, owner, cands))
+
+
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
@@ -1992,7 +2042,7 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "TILE = 16" in editors
     assert "_ICON = {" in chrome            # the bar's icon-slot map lives in chrome.py now
     assert "def _icon(self, kind, x, y, cv=None):" in console
-    assert "self.icon_sheet" in console
+    assert "self.look.icon_sheet" in console      # the sheet is the look's (#209 D)
 
     # Storage: load/save the editable theme beside the carts dir (absent = default).
     assert "system_icons" in carts
@@ -2003,7 +2053,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # (the boot loads run inside the shared console.wire_workstation_core).
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    assert "ws.load_icon_sheet()" in console_src
+    assert "ws.look.load_icon_sheet()" in console_src
 
 
 def test_icon_theme_editor_wired_into_device_shell():
@@ -2012,6 +2062,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    appearance = (Path("runtime") / "appearance.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2030,14 +2081,15 @@ def test_icon_theme_editor_wired_into_device_shell():
 
     # Save: the theme editor persists via save_system_icons through the SAME _with_sd
     # wrapper the cart sprite save (save_sprites) uses -- on device that's with_sd_live,
-    # the native single-bus path; anything else hangs the panel flush.
-    assert "def save_icons(self):" in console
-    assert "self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION)" in console
-    assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
+    # the native single-bus path; anything else hangs the panel flush. The verb sits
+    # with the sheet it writes (#209 landing E): ws.look, beside set_/load_icon_sheet.
+    assert "def save_icons(self):" in appearance
+    assert "hexs, ws.carts_root, _ICON_VERSION)" in appearance
+    assert "ws._with_sd(lambda: ws.carts_store.save_system_icons(" in appearance
     # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
     # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
-    assert "self.set_icon_sheet(self.icon_sheet)" in console
-    assert "def set_icon_sheet(self, sheet):" in console
+    assert "            self.set_icon_sheet(sheet)\n            ws.ach.note" in appearance
+    assert "def set_icon_sheet(self, sheet):" in appearance
 
     # The same persistence wrapper + can_manage gate the device wires for cart saves
     # already covers the theme save -- with_sd_live is the live SD write path.
@@ -2732,10 +2784,18 @@ def test_micropython_offline_diag_wiring():
 
     # Perf samples: a structured PERF line sampled every few seconds while a cart
     # runs (the per-cart frame-timing payload for the offline dump).
-    assert "def format_perf(cart, fps, flush_ms, draw_ms):" in diag
-    assert 'return "PERF cart=%s fps=%d flush=%d draw=%d" % (' in diag
+    assert "def format_perf(cart, fps, flush_ms, draw_ms, net):" in diag
+    assert 'return "PERF cart=%s fps=%d net=%s flush=%d draw=%d" % (' in diag
     assert "_diag_perf_sample(diag, ws)" in runtime
     assert "ws.perf_sample()" in device_diag
+    # net= is the #65 lockstep witness: the shared tick rate a LINKED game
+    # renders at (the console gates every frame the tick is not due for), and
+    # `-` when no session gates anything. It comes from perf_net(), NOT from
+    # perf_sample -- the meter consumes its window and perf_sample is also the
+    # `is a cart running?` probe every other diag helper here calls.
+    assert '"-" if net is None else _round_int(net)' in diag
+    assert "ws.perf_net()" in device_diag
+    assert "def perf_net(self):" in console
     # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
     assert "def perf_sample(self):" in console
     assert "self.perf_capture = False" in console         # default off -> host identical

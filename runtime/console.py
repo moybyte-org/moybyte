@@ -11,12 +11,9 @@ free apart from the shared editor cores below.
 
 import time
 
-from editors import (CodeEditor, IconSheet,
-                     SpriteSheet, _SheetSprite)
-try:
-    from op_history import History, TextEditCodec, text_diff_op   # #111 phase 4: code-tab undo
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.op_history import History, TextEditCodec, text_diff_op
+from editors import CodeEditor, SpriteSheet, _SheetSprite
+# (the #111 op-history core is history_router.py's import now, not this file's --
+# #209 landing E took the code tab's History and its typing-burst codec with it)
 # The block editor's UI layer (issue #29 Part 2, extracted from this file): the
 # structured-outline screen + BlockLayout (its responsive geometry, #39 step 2) +
 # the module constants/sentinels its rows/menu render. Re-exported under their
@@ -129,13 +126,48 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.update_ui import UpdateUI
 
-# The WEB CONSOLE connection screen (#197): the surface the glass parks on while
-# wasm mode is on -- the QR of the paired url, the tap-to-reveal address, and
-# TURN OFF. Same shape and the same construction point as UpdateUI.
+# The WEB CONSOLE switch (#197, web_console.py): wasm mode's own object -- the
+# pin, the paired url, the park/unpark of the glass, and the connection screen
+# (web_console_ui.py) it holds. The first Workstation collaborator (#209).
 try:
-    from web_console_ui import WebConsoleUI
+    from web_console import WebConsole
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.web_console_ui import WebConsoleUI
+    from runtime.web_console import WebConsole
+
+# CoverCache (cover_cache.py): ws.covers -- the shelf's cover + icon caches,
+# their budgets, warmers and #186 frees, plus _CoverImage/_CoverJob.
+try:
+    from cover_cache import CoverCache
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.cover_cache import CoverCache
+
+# CartManager (cart_manager.py): ws.carts -- the scanned roster `carts.all`, the
+# store-writing verbs (new/dup/delete), the sync re-scan, the #66 live-set diet
+# and the #105 favorites/recents. What a shelf CARD looks like (the pseudo
+# tiles, the search filter, the app-claim hiding) stays kernel, below.
+try:
+    from cart_manager import CartManager
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.cart_manager import CartManager
+
+# system.json's owner (#209 landing B, system_store.py): the settings dict
+# `ws.system` aliases, the one persist funnel behind every Settings toggle, and
+# the achievements list's store halves -- over a StoreHandle that reads the
+# store/root/can_manage/_with_sd guard through `ws` per call. What APPLIES the
+# settings (load_system's cascade) stays kernel policy, below.
+try:
+    from system_store import StoreHandle, SystemStore
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.system_store import StoreHandle, SystemStore
+
+# The #111 undo ROUTER (#209 landing E, history_router.py): the bar UNDO/REDO
+# pair, the code tab's typing burst, the tab-scoped journal walk they fall
+# through to, and the idle-typing autosave the frame loop ticks. Takes the same
+# StoreHandle -- the walk re-derived that guard by hand until this landing.
+try:
+    from history_router import HistoryRouter
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.history_router import HistoryRouter
 
 # The ≡ dropdown / system menu's UI layer (#52, extracted from this file): the row
 # builder + per-item actions + drawing. The sysmenu Popup, _about flag, reboot_hook
@@ -149,8 +181,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from this
 # file): the 3 hidden eggs + their state + _draw_egg/_draw_confetti/
 # _draw_achievements. The achievement CORE (ach, show_achievements,
-# load_achievements/_save_achievements/_achievement_unlocked) stays on Workstation
-# (tested ws.ach.* + device ws.load_achievements()). Same bare-or-package fallback.
+# load_achievements/_achievement_unlocked) stays on Workstation (tested ws.ach.*
+# + device ws.load_achievements()), and so do the three overlay DEADLINES those
+# objects push into at event time (#209 landing B). Same bare-or-package fallback.
 try:
     from achievements_ui import AchievementsUI
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -224,9 +257,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The Settings app surface (#28/#39/#53, extracted -- see settings_layer.py). The
 # aggregator: rows + scroll + drawing move to SettingsLayer, which owns NO config -- it
-# reads ws state (system/wallpaper_id/font_scale/diag_live) and dispatches every
-# mutation to ws setters; the wallpaper cluster stays single-sourced on ws (the launcher
-# shares that backdrop). settings_layer.py is the single source of the _SET_* geometry
+# reads ws state (system/ws.look/diag_live) and dispatches every mutation to the ws
+# setters; the wallpaper cluster is single-sourced on ws.look (the launcher shares
+# that backdrop). settings_layer.py is the single source of the _SET_* geometry
 # constants (also used by console's Layout), imported back here for Layout + tests.
 try:
     from settings_layer import (
@@ -260,16 +293,18 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 try:
     from widgets import (
         _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
+        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
+        _POPUP_SEP_H)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import (
         _Blit, Pointer, Achievements, Pmem, Clipboard, _SilentAudio, Popup, ACHIEVEMENTS,
-        _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X, _POPUP_SEP_H)
+        TOAST_MS, _PLAY_GOAL, _POPUP_X, _POPUP_Y, _POPUP_W, _POPUP_ROW_H, _POPUP_PAD_X,
+        _POPUP_SEP_H)
 
 # The desktop wallpaper backdrop component (#28, extracted -- see wallpaper.py). The
 # SHARED backdrop the launcher home + Settings both draw (ws.wallpaper.draw). It owns
-# the rendering + the compiled-cart cache; ws.wallpaper_id + the picker/query API stay
-# on Workstation as the single source (select_wallpaper drives the component).
+# the rendering + the compiled-cart cache; the CHOICE + the picker/query API are
+# ws.look's (appearance.py -- select_wallpaper drives the component).
 try:
     from wallpaper import Wallpaper
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -317,17 +352,16 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.crash_guard import CrashGuard
 
-# The widget SKIN catalog (ui_refactor_2026-08 Phase 4, runtime/skin.py). The
-# Workstation is the one module that installs one, for the same reason it is
-# the one that installs a theme: the choice is a persisted setting, and the
-# installed skin is process-wide state inside `ui`. Every surface just draws
-# through `ui` and never learns a skin exists -- pinned by
-# tests/test_skin.py::test_no_surface_module_knows_about_skins, whose exemption
-# list is exactly this module and the Appearance app that picks.
+# Appearance (appearance.py): `ws.look`, the LOOK collaborator (#209 landing D)
+# -- theme + variant, the widget skin, the system font scale, the wallpaper
+# choice and the top-bar icon sheet. It is also the module that installs a skin
+# (`skin.use`), for the same reason it installs a theme: the choice is a
+# persisted setting and the installed skin is process-wide state inside `ui`.
+# Every surface just draws through `ui` and never learns a skin exists.
 try:
-    import skin as _skin
+    from appearance import Appearance
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime import skin as _skin
+    from runtime.appearance import Appearance
 
 # USER APPS (#181, ui_refactor_2026-08 Phase 7): the permission-keyed filter
 # over AppContext that a `type: "app"` CART is handed. The shell needs only its
@@ -392,223 +426,6 @@ try:
     import ui as _uimod
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _uimod
-_ui_is_light = _uimod.is_light
-
-
-# Derived Library covers are sizeable on the desktop tier and DeviceCanvas adds a
-# 2-byte RGB565 bake to each cached indexed image.  Keep the cache comfortably
-# bounded for the P4 heap while retaining enough variants for the root Library,
-# the Make window, and selected/unselected card heights at the same time.
-_COVER_CACHE_MAX_ENTRIES = 64
-_COVER_CACHE_MAX_PIXELS = 768 * 1024
-# Parsed cover RUNS, kept so a relayout neither re-reads nor re-parses.
-# Measured per cover on P4 glass: read the blob 46.9ms + parse it 17.1ms, against
-# a native decode 0.89ms + crop 0.76ms. So the expensive half is the I/O and the
-# interpreted base64/RLE parse, and THAT is what must be cached -- not the
-# decoded bitmap (a first attempt cached that instead: 77KB per cover, which at
-# this board's ~470KB/s flash cost 164ms to reload and made things worse).
-# Runs are ~15KB, so this holds far more covers in less RAM.
-_COVER_RUNS_MAX_BYTES = 512 * 1024
-# cover_diet: how many newest LRU entries (covers AND run blobs) SURVIVE the
-# release at cart start -- the visible shelf stays warm, the long tail leaves
-# the heap. ~6 covers x (8-24KB bake + ~15KB runs) ~= 150KB retained.
-_COVER_DIET_KEEP = 6
-
-
-class _CoverImage:
-    """Minimal blittable for a card's COVER art (visual identity v1 Section
-    11.4): both canvas backends' spr() read only .w/.h/.pix/.transparent, the
-    same contract as editors._SheetSprite."""
-
-    def __init__(self, w, h, pix):
-        self.w = w
-        self.h = h
-        self.pix = pix
-        self.transparent = -1
-        # Covers are opaque MOY64 bitmaps, just like Paint images.  This marker
-        # selects DeviceCanvas's native blit_indices bake and the web recorder's
-        # compact base64 image command instead of the generic per-pixel paths.
-        self._paint = True
-
-
-# How long one _CoverJob.step may run inside a frame, and the per-frame budget
-# for cover BUILDS (_cover_for). Sized for the warm case (2026-07-27): with the
-# runs prefetched a native build is ~2ms, and a transition frame arrives with
-# the whole visible set pending -- at 8ms the picker's ~9 covers spread over 2-3
-# painted frames (each a full ~190ms repaint via the _covers_deferred re-arm),
-# at 20ms they land on the FIRST frame (p4_clicks: open_picker 376 -> ~190ms).
-# The cold path is unshaped by this constant: the first build of a frame always
-# proceeds (one ~50ms blob load), and the budget only gates the SECOND onward,
-# which a 20ms ceiling still refuses after any load. Python-fallback jobs (host
-# without moy_gfx) just step in chunkier slices -- the host is fast.
-_COVER_SLICE_MS = 20
-# Per-palette-index run templates for the RLE fill (built lazily, 64 x 255B):
-# a run decodes as ONE C-level slice copy instead of a per-pixel loop.
-_COVER_RUNS = None
-
-# The native indexed crop, when this build has one (device only; the host keeps
-# the Python loop and both produce identical bytes).
-try:
-    import moy_gfx as _moy_gfx
-    _CROP_INDEX = getattr(_moy_gfx, "crop_index", None)
-    _DECODE_RUNS = getattr(_moy_gfx, "decode_runs", None)
-except ImportError:
-    _CROP_INDEX = None
-    _DECODE_RUNS = None
-
-# #186 moy_buf: cover payloads (parsed runs, cover bitmaps, the decode
-# scratch) live OUTSIDE the MP gc heap on device, so a warm shelf stops
-# taxing every GC collect. On the host this is a transparent no-op layer.
-try:
-    import moybuf as _moybuf
-except ImportError:
-    from runtime import moybuf as _moybuf
-
-
-class _CoverJob:
-    """A RESUMABLE cover build. Decoding a 320x240 RLE cover + cover-cropping
-    it to the card in one go measured 0.5-1.7s per cover on the T-Deck (#66)
-    -- one frozen frame per cover even under the one-build-per-frame budget.
-    So the build is a little state machine instead: step(t0) advances the
-    decode (RLE runs -> the full indexed bitmap, slice-assign fills) and then
-    the crop (nearest-sample rows via a precomputed column map) until
-    _COVER_SLICE_MS of the frame is spent, and _cover_for re-steps it on the
-    following frames until `done`. Any malformed input just finishes with
-    img=None -- a corrupt cover means no cover, never a crash."""
-
-    def __init__(self, runs, w, h, src=None, buf=None):
-        global _COVER_RUNS
-        self.done = False
-        self.img = None
-        self.w = int(w)
-        self.h = int(h)
-        self.sw, self.sh, self.packed = runs
-        # `src` is an already-decoded source bitmap, letting a caller skip
-        # straight to the crop. Unused by the console now that the decode itself
-        # is native (~0.9ms) and the expensive part turned out to be reading and
-        # PARSING the blob -- which Workstation caches as runs instead -- but
-        # kept because it is the natural seam and the crop tests drive it.
-        total = self.sw * self.sh
-        if src is not None and len(src) == total:
-            self.pix = src
-            self.pos = total                    # decode phase already complete
-            self.i = len(self.packed)
-        else:
-            # `buf` is a REUSED scratch buffer. A source bitmap is ~77KB, and
-            # allocating one per build cost 116ms on P4 glass -- a big
-            # MicroPython allocation whose gc collect dwarfed the 0.9ms decode it
-            # was for. Only safe with the native decode, which finishes in a
-            # single step: the interpreted fallback keeps partial state in `pix`
-            # across frames, so it must own its buffer.
-            if buf is not None and len(buf) >= total:
-                self.pix = buf
-            else:
-                self.pix = bytearray(total)
-            self.pos = 0              # decode write cursor (pixels)
-            self.i = 0                # decode read cursor (packed bytes)
-        self.out = None               # crop dest (created when decode ends)
-        self.dy = 0                   # crop row cursor
-        self.xmap = None
-        if _COVER_RUNS is None:
-            _COVER_RUNS = tuple(bytes((v,)) * 255 for v in range(64))
-
-    def step(self, t0):
-        """Advance until ~_COVER_SLICE_MS after t0. Sets self.done (and
-        self.img) when the build finishes or the input turns out corrupt."""
-        try:
-            self._step(t0)
-        except Exception:  # noqa: BLE001 -- corrupt cover -> no cover
-            self.img = None
-            self.done = True
-
-    def _step(self, t0):
-        packed = self.packed
-        n = len(packed)
-        pix = self.pix
-        total = self.sw * self.sh
-        # NATIVE decode (#155): the entire RLE stream in ONE C call. This is what
-        # the whole time-slicing machinery was for -- interpreted, a 320x240 cover
-        # cost 0.5-1.7s. The slow Python walk below stays as the host path and the
-        # fallback, and produces identical bytes.
-        if self.i < n and _DECODE_RUNS is not None:
-            got = _DECODE_RUNS(pix, total, packed)
-            if got != total:
-                self.img = None
-                self.done = True
-                return
-            self.i = n
-            self.pos = total
-        while self.i < n:
-            i = self.i
-            pos = self.pos
-            for _ in range(128):      # a batch of runs between clock checks
-                if i >= n:
-                    break
-                count = packed[i]
-                value = packed[i + 1]
-                if count < 1 or value > 63 or pos + count > total:
-                    self.img = None
-                    self.done = True
-                    return
-                if count == 1:
-                    pix[pos] = value
-                else:
-                    pix[pos:pos + count] = _COVER_RUNS[value][:count]
-                pos += count
-                i += 2
-            self.i = i
-            self.pos = pos
-            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
-                return
-        if self.pos != total:         # short stream: corrupt -> no cover
-            self.img = None
-            self.done = True
-            return
-        # -- crop phase: match the card's aspect with a centered source
-        # window, then nearest-sample it to exactly (w, h), a row per check.
-        w, h, sw, sh = self.w, self.h, self.sw, self.sh
-        if self.xmap is None:
-            cw_ = min(sw, sh * w // h) or 1
-            ch_ = min(sh, sw * h // w) or 1
-            ox = (sw - cw_) // 2
-            self._ox = ox
-            self._oy = (sh - ch_) // 2
-            self._cw = cw_
-            self._ch = ch_
-            self.xmap = [ox + dx * cw_ // w for dx in range(w)]
-            self.out = bytearray(w * h)
-            # NATIVE crop (#155): the whole window in ONE C call. With the decode
-            # now cached, the crop is what a relayout pays -- ~20k nearest
-            # samples per card, which is 20-40ms of interpreted loop but well
-            # under a millisecond in C. Byte-identical by construction (same
-            # integer floors, same source window); pinned by test_cover_pipeline.
-            if _CROP_INDEX is not None:
-                try:
-                    if _CROP_INDEX(self.out, w, h, pix, sw, sh,
-                                   ox, self._oy, cw_, ch_):
-                        self.dy = h
-                        # #186: the finished card bitmap moves off the gc heap
-                        # (take() copies into moy_buf storage on device; on the
-                        # host it adopts `out` unchanged, zero copies).
-                        self.img = _CoverImage(w, h, _moybuf.take(self.out))
-                        self.done = True
-                        return
-                except Exception:  # noqa: BLE001 -- any surprise -> Python loop
-                    pass
-        xmap = self.xmap
-        out = self.out
-        while self.dy < h:
-            dy = self.dy
-            base = (self._oy + dy * self._ch // h) * sw
-            di = dy * w
-            for dx in range(w):
-                out[di] = pix[base + xmap[dx]]
-                di += 1
-            self.dy = dy + 1
-            if _ticks_diff(_ticks_ms(), t0) >= _COVER_SLICE_MS:
-                return
-        self.img = _CoverImage(w, h, _moybuf.take(out))   # #186: off the gc heap
-        self.done = True
 
 
 # Project (project.py): the open cart's DATA + commit_* verbs; its six data
@@ -668,7 +485,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 # The console's stateless base layer -- the MOY64 palette (NAMES/color), the responsive
 # Layout/CodeLayout geometry (#39), the icon-glyph vocabulary (_GLYPHS/_blit_glyph), the
-# themeable top-bar IconSheet defaults (_ICON/_ICON_ART/_default_icon_sheet + _ICON_VERSION),
+# themeable top-bar IconSheet slot map + art (_ICON/_ICON_ART),
 # the cursor sprite (CURSOR), and the small pure helpers (_in/_clamp_scroll/_cursor_delta/
 # _ticks_*/_err_text/_from_ascii) -- now live in chrome.py (extracted so the Workstation
 # kernel is alone in this file). Imported back + re-exported under the pre-extraction names
@@ -682,9 +499,8 @@ try:
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
+        _blit_glyph, _ICON, _ICON_ART, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.chrome import (
@@ -693,18 +509,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _ICON_VERSION, _nibble, _default_icon_sheet,
+        _blit_glyph, _ICON, _ICON_ART, _nibble,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
-        THEMES, DEFAULT_THEME, theme_colors, THEME_VARIANTS, DEFAULT_VARIANT,
     )
-
-
-# The heavy per-cart payloads the launcher list does NOT need (#66 live-set diet):
-# kept resident they are ~300-500KB of permanently-live strings the GC MARK phase
-# pays for on every collect (~0.2ms/KB on device -- most of the 93-161ms pauses).
-# slim_carts() strips them after the icons are cached; opening a cart rehydrates
-# from the store, and switching carts re-slims the previous one.
-_HEAVY_CART_KEYS = ("src", "sprites", "sounds", "map", "images", "blocks", "scenes")
 
 
 _SPLASH_IMG = None
@@ -854,15 +661,18 @@ class Workstation:
         # every game, every fixed app cart, and every shipped system app, which
         # is what keeps the pixel goldens where they are.
         self.app_full_canvas = False
-        # `font_scale` is the REQUESTED system-UI scale (persisted). It only takes
-        # visible effect on a distinct SYSTEM canvas that can render scaled text; in
-        # the degradation case (no system canvas -- e.g. the T-Deck, whose framebuf
-        # text can't scale) the effective scale is 1, so the chrome layout matches the
-        # 8px text actually drawn. The requested value is still kept + persisted, so a
-        # bigger panel later honours it.
-        self.font_scale = max(1, int(font_scale))
+        # The LOOK (#209 landing D, appearance.py): theme + variant, the widget
+        # skin, the requested system font scale, the wallpaper choice and the
+        # top-bar icon sheet. Built FIRST of the collaborators because the two
+        # lines under it already need it -- the system canvas takes the font
+        # scale and the responsive Layout takes the EFFECTIVE one.
+        # `ws.theme_colors` is the one piece of that cluster's state that stays
+        # HERE: ~70 surface sites read the token dict per draw (doc 3e's "token
+        # reads stay flat"), and `look.set_theme` is its only author -- the
+        # constructor on the next line writes it for the first time.
+        self.look = Appearance(self, font_scale)
         if self._sys_canvas is not None:
-            self._sys_canvas.set_font_scale(self.font_scale)
+            self._sys_canvas.set_font_scale(self.look.font_scale)
         # The window manager (Stage 6, wm.py): owns the game<->system viewport composite
         # (#39) + -- from Stage 6b/6c -- the process back-stack `screen` projects onto and
         # the memoized layer stack. Built here (before anything reads/writes screen or
@@ -871,22 +681,8 @@ class Workstation:
         # windowed_chrome is a PROPERTY (world-aware, two-worlds #105): it is
         # True only while the windowed WM's DESK (the make world) is open --
         # see the property below the screen projection.
-        # Panel THEME (Settings -> THEME): the chrome token set the panels/window
-        # chrome/selection accents read each draw. Default = the moybyte "night"
-        # colorway (today's exact colors); load_system applies the persisted pick.
-        self.theme_name = DEFAULT_THEME
-        self.theme_variant = DEFAULT_VARIANT
-        self.theme_colors = theme_colors(DEFAULT_THEME)
-        # The widget SKIN (Appearance -> THEMES -> the skin chips) is the third
-        # axis, and unlike the two above it is not this object's state: it is
-        # installed INTO `ui`, process-wide. A fresh Workstation therefore
-        # ADOPTS what is installed rather than asserting the default over it --
-        # on a board the two readings are the same (one Workstation, and `ui`'s
-        # own tables are the default), and on a host that builds several in one
-        # process an unrelated boot must not silently restyle the others.
-        self.skin_name = _skin.active()
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
-                             self._effective_font_scale())
+                             self.look.effective_font_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
         # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
         # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
@@ -894,7 +690,7 @@ class Workstation:
         # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
         # step 3.)
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self._effective_font_scale())
+                                      self.look.effective_font_scale())
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
         # block_editor_ui.py): one instance, built once here and delegated to from
         # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
@@ -902,12 +698,19 @@ class Workstation:
         # _clamp_scroll are injected (see that module's docstring for why).
         self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
-                               self._effective_font_scale())
+                               self.look.effective_font_scale())
 
     def _init_components(self, input, carts):
         """Injected-service attach points + the shell processes (Project/Player/
         EditorApp) + the extracted editor/HUD UIs."""
         self.input = input
+        # The (store, root, can_manage, with_sd) guard 4-tuple as ONE object
+        # (#209 landing B, system_store.py). FIRST, because everything that
+        # touches storage takes it: both store-owning collaborators below AND
+        # app_context's storage roles -- and the ArtworkService a few lines down
+        # already builds an AppContext. It captures nothing; every field is read
+        # through `self` at the moment of use, because none of them is wired yet.
+        self.store = StoreHandle(self)
         self.make_api = None       # injected: make_api(canvas, input, cfg, sheet, audio, tilemap, pmem, wifi)->ns
         # A narrow capability for the shipped Paint app. It is not a Layer, so
         # it is not in app_decls -- but it is on the APP side of the seam, so it
@@ -969,20 +772,24 @@ class Workstation:
         # transient screen state (_upd_phase/_upd_msg/_upd_bin/...) lives on it;
         # the queries + channel config above/below stay here.
         self.update_ui = UpdateUI(self, NAMES, _in, _err_text)
-        # The WEB CONSOLE connection screen (#197, web_console_ui.py) + the flag
-        # that says the glass is parked on it. `_web_parked` is what makes wasm
-        # mode a MODE and not a screen: every return-to-the-launcher path
-        # (go_home) re-parks while it is set, so a cart launched from the browser
-        # comes back HERE rather than dropping a kid onto a shelf the browser is
-        # concurrently rewriting.
-        self.web_console_ui = WebConsoleUI(self, NAMES, _in)
-        self._web_parked = False
-        # The scanned cart list is the single source both grids derive from (#carts):
-        # the LAUNCHER grid is the pinned "Make" tile + the run-grid carts, and the
-        # Editor's PROJECT-PICKER grid is the pinned "+ New" tile + every editable cart.
-        # Kept here so wallpaper discovery + the wifi-tool lookup read the FULL list
-        # rather than either display grid (the Make/New pseudo tiles never leak out).
-        self._all_carts = list(carts) if carts else []
+        # WASM MODE (#197): the pin, the paired url, the connection screen and
+        # the parked flag, all on one object (web_console.py). The webhost above
+        # stays a flat Workstation attribute -- `poll_webhost` reads it at every
+        # frame tail on all three boards -- and this reads it through `self`.
+        self.web = WebConsole(self, NAMES, _in)
+        # The shelf's cover + icon pipeline (#209 landing C, cover_cache.py): the
+        # bounded caches, the per-frame build budget, the idle warmers and the
+        # #186 off-heap frees, all on one object. FRAME-HOT -- the grids below
+        # take `covers.cover_for` as a bound method, and `frame()` calls exactly
+        # `begin_frame` at its top and `take_deferred` at its tail. `covers.gen`
+        # is the shelf's repaint key and has no `ws` mirror.
+        self.covers = CoverCache(self)
+        # The shelf's ROSTER (#209 landing C, cart_manager.py): the scanned cart
+        # list plus everything that changes it -- new/duplicate/delete, the sync
+        # re-scan, the #66 slim/rehydrate diet and the #105 favorites/recents.
+        # `carts.all` is the single source both grids derive from and has no `ws`
+        # mirror: a re-scan REBINDS the list, so an alias could not stay honest.
+        self.carts = CartManager(self, self.store, carts)
         self._fat_cart = None         # #66 live-set diet: the one rehydrated cart
         # Launcher search (#105): plain-text substring filter over the run-grid,
         # entered via the sysmenu SEARCH item (mirrors the wifi-password typing
@@ -992,7 +799,7 @@ class Workstation:
         # capture sub-state. See _launcher_view_items/open_search/close_search.
         self.search_query = ""
         self.search_typing = False
-        self.launcher = Launcher(self._launcher_items(self._all_carts),
+        self.launcher = Launcher(self._launcher_items(self.carts.all),
                                  self.layout, NAMES, _blit_glyph)
         # The HOME grid exposes the selected card's PLAY/CHANGE row on the desktop-
         # density tiers (visual identity v1 Section 1.2); the picker below keeps the
@@ -1002,10 +809,10 @@ class Workstation:
         # IconSheet pencil/plus sprite big -- keyed so the sheet's 0-filled
         # backdrop doesn't plate the card.
         self.launcher.icon_for = self._icon_image_keyed
-        self.launcher.cover_for = self._cover_for
+        self.launcher.cover_for = self.covers.cover_for
         # The favorite-star corner badge (#105): only the RUN grid plays, so only
         # ws.launcher (not the Editor's project-picker) gets the toggle.
-        self.launcher.favorite_for = self.is_favorite
+        self.launcher.favorite_for = self.carts.is_favorite
         # Default the highlight to the first RUNNABLE cart (skip the pinned Make tile at
         # slot 0), so a bare RUN/A plays a game rather than opening the picker -- the
         # launcher is RUN-first (spec shell_ux_v1.md); Make is a tap/nav target.
@@ -1015,10 +822,10 @@ class Workstation:
         # instance so it keeps an independent selection/page, reusing the SAME tile
         # rendering. `ws.editor_picker` (the content Layer) draws it; ws.pick_selected
         # opens the chosen cart in the Editor.
-        self.picker = Launcher(self._picker_items(self._all_carts),
+        self.picker = Launcher(self._picker_items(self.carts.all),
                                self.layout, NAMES, _blit_glyph)
         self.picker.icon_for = self._icon_image_keyed
-        self.picker.cover_for = self._cover_for
+        self.picker.cover_for = self.covers.cover_for
         # Screen states (#28): "launcher" is now the DESKTOP home (wallpaper + cart
         # icon grid); "desktop" is a running cart; "menu" is the cards/code/
         # paint/map editors; "settings" is the Settings app.
@@ -1064,12 +871,16 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
-        # #111 phase 4: the code editor's in-RAM op-history (a typing-burst codec
-        # over the live CodeEditor) + the open burst's pre-image text. Created/
-        # rebound lazily by _code_op_history() over whatever editor is live, so a
-        # rebuilt editor (fresh cart / reopen) starts a fresh, empty History.
-        self._code_hist = None
-        self._code_burst_before = None
+        # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
+        # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
+        # stack, then the tab-scoped durable journal walk), the code tab's typing
+        # burst, and the idle-typing autosave `frame()` ticks. Built here, where
+        # its state used to sit -- it reaches the project, the editor and the
+        # store through `self` per call, so nothing it needs has to exist yet.
+        # `history.edit_ms` is the ONE piece the kernel writes: handle_input
+        # stores the keystroke tick straight onto it (doc 3e -- an attribute
+        # store per keypress, never a call).
+        self.history = HistoryRouter(self, self.store)
         # (cart/config/sheet/tilemap/images/pmem live on self.project now -- Stage 1;
         # ns/_update/_draw/cart_error/crash_line/_cart_start_ms/_cart_key_prev live on
         # self.player now -- Stage 2; both exposed as forwarding properties, so
@@ -1112,75 +923,42 @@ class Workstation:
         # another. Console-side end-to-end -- works identically over the web
         # transport, never touches a host OS clipboard (parity trap).
         self.clipboard = Clipboard()
+        # system.json (#209 landing B): the store owns the dict and every
+        # persist funnel; `self.system` is a plain ALIAS of it and neither name
+        # is ever rebound -- prefs.load() clears and updates in place, which is
+        # what keeps settings_layer's raw writes, the launcher's per-paint
+        # favorites read and app_context's Prefs role honest with no migration.
+        self.prefs = SystemStore(self, self.store)
+        self.system = self.prefs.settings
+        # Crash isolation (#160 / Phase 8): the dict itself, because it stays
+        # the same object across a load.
+        self.app_guard = CrashGuard(self.system, self.prefs.persist)
         # Desktop wallpaper (#28): a chosen wallpaper-type cart compiled into its
         # own namespace and run (its _draw, optionally _update) as the BACKDROP each
-        # home/settings frame -- the Picotron "wallpaper is a cart" model. None until
-        # _select_wallpaper picks one; a solid MOY64 fill is the zero-cart fallback.
-        self.system = {}              # system settings dict (moy_carts system.json)
-        # Crash isolation (#160 / Phase 8). The store is passed as a CALLABLE
-        # because load_system() rebinds self.system to what it read off the
-        # card -- a guard holding this boot-time dict would count strikes into
-        # an object nobody ever writes.
-        self.app_guard = CrashGuard(lambda: self.system, self._persist_system)
-        self.wallpaper_id = None      # chosen wallpaper: cart slug or "fill:<color>" --
-                                      # the single source; select_wallpaper drives it.
-        # The wallpaper RENDERING + compiled-cart cache is its own component (#28); both
-        # the launcher home + Settings draw it via self.wallpaper.draw(dt).
+        # home/settings frame -- the Picotron "wallpaper is a cart" model. The
+        # component owns the RENDERING + the compiled-cart cache; the CHOICE
+        # (`ws.look.wallpaper_id`) and the picker verbs are the look's.
         self.wallpaper = Wallpaper(self, NAMES)
-        self._icon_cache = {}         # cart path -> desktop-icon sprite Image (or None)
-        self._cover_cache = {}        # (path, w, h) -> shelf-card cover blittable (or None)
-        self._cover_cache_order = []  # LRU keys (oldest first); bounds resize variants
-        self._cover_cache_pixels = 0  # indexed pixels; device RGB bakes add 2B each
-        self._cover_gen = 0           # bumped on any cover-cache change (#113: the
-                                      # shelf blit path pins it so a cover landing
-                                      # mid-drag forces a full band repaint)
-        self._cover_serial = 0        # names each cover blittable ("cover:N") so the
-                                      # web recorder ships it ONCE via /assets imgref
-                                      # instead of ~40KB of inline b64 per redraw
-                                      # (#113: the measured shelf-drag payload eater)
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
-        self._cover_jobs = {}         # (path, w, h) -> in-flight _CoverJob (time-sliced)
-        self._cover_built = False     # per-frame cover-build budget (see _cover_for)
-        self._cover_ms = 0            # ms of it spent this frame
-        self._cover_none = {}         # paths known to carry no cover art
-        self._cover_buf = None        # reused decode scratch (see _CoverJob)
-        self._cover_runs = {}         # path -> (sig, runs) parsed RLE, LRU-bounded
-        self._cover_runs_order = []   # LRU keys (oldest first)
-        self._cover_runs_bytes = 0
-        self._covers_deferred = False # a build was pushed past the budget -> stay dirty
-        self.cover_diet = False       # RAM-tight board (T-Deck): drop the whole cover
-                                      # pipeline when a cart RUN starts (see
-                                      # _release_cover_caches) -- set by the S3 backend
-                                      # only; the P4/host keep covers warm (windows
-                                      # leave the desk visible, and RAM is not scarce).
-        self._cover_seen = True       # idle prefetch armed (see _cover_prefetch_tick);
-                                      # True from BOOT: covers must be warm BEFORE the
-                                      # first cover surface opens, not after (p4_clicks
-                                      # measured the cold pipeline as two ~1s clicks).
-                                      # Latched False once every cart is known; re-armed
-                                      # by a store re-scan (_apply_items).
-        self._cover_pf_i = 0          # round-robin cursor over _all_carts
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
-        # Unified top bar (Stage 1): the editable 16x16 IconSheet the bar draws its
-        # chrome icons from. Injected by build_workstation / run_desktop (loaded from
-        # system_icons.moygfx, else the baked default theme); None falls back to _glyph.
-        # _bar_img_cache memoises tile_image(slot) per kind so the SAME _SheetSprite is
-        # reused every frame -- on the device that keeps its per-Image RGB565 blit cache
-        # alive (one cached blit per icon), the whole point of moving the bar to sprites.
-        self.icon_sheet = None
-        self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None); backs
-                                      # ws._icon (the shared draw toolkit), so it stays here.
+        # Unified top bar (Stage 1): _bar_img_cache memoises tile_image(slot) per
+        # kind so the SAME _SheetSprite is reused every frame -- on the device that
+        # keeps its per-Image RGB565 blit cache alive (one cached blit per icon),
+        # the whole point of moving the bar to sprites. It backs ws._icon (the
+        # shared draw toolkit) and stays here; the SHEET itself is the look's
+        # (`ws.look.icon_sheet`), and `look.set_icon_sheet` clears this.
+        self._bar_img_cache = {}      # icon kind -> cached _SheetSprite (or None)
         # The unified top bar (#46) is its own surface now (BarLayer, Phase 2
         # of docs/history/shell_layers_refactor_v1.md): the running-cart strip cache (#43), the
         # per-second clock cache (#66) and the bar tap slices live
-        # on self.bar_layer; set_icon_sheet bumps its cache gen via bar_layer.invalidate().
+        # on self.bar_layer; look.set_icon_sheet bumps its cache gen via bar_layer.invalidate().
         self.bar_layer = BarLayer(self, NAMES, _in)
         # Themeable top bar (Stage 2): True while the PAINT editor is repainting the
         # SYSTEM icon sheet (Settings -> EDIT ICONS) rather than a cart's sprites.
         # It changes where SAVE writes (system_icons.moygfx, not the cart) and where
         # CLOSE/back returns (Settings, not the running cart). menu_view == "theme"
-        # reuses the cart PAINT renderer/input over self.icon_sheet (PaintEditor is
+        # reuses the cart PAINT renderer/input over ws.look.icon_sheet (PaintEditor is
         # tile-size-agnostic, so the 16x16 IconSheet edits natively).
         self._editing_icons = False
         # (The Settings selection/scroll window -- set_msel/set_top -- lives on
@@ -1195,15 +973,8 @@ class Workstation:
                                       # editor shows after a crash-to-code throw
                                       # (owner ask 2026-07-23); dismissed by a
                                       # tap or the first edit
-        # Undo-journal idle-typing debounce (Stage 7 of docs/history/shell_ux_technical_plan_v1.md):
-        # _edit_ms is the ticks of the last keystroke in the code editor (None = no
-        # pending edit); frame() fires a durable, INVISIBLE autosave-commit once
-        # _edit_debounce_ms of no keystroke elapse, so the SD write lands in a typing
-        # GAP (never mid-burst, where it would stall the keystroke echo) -- the soft
-        # trigger alongside the hard SAVE/PLAY/tab-leave commits. The ~1.5s default is
-        # v1.1's pinned starting point, TO BE CONFIRMED BY THE STAGE-7 HARDWARE MEASUREMENT.
-        self._edit_ms = None
-        self._edit_debounce_ms = 1500
+        # (The Stage-7 idle-typing debounce -- edit_ms + edit_debounce_ms -- lives
+        # on self.history now; #209 landing E.)
         self.paint_status = None      # last sprite-reuse (GET/PUT) result text (#18)
         self.can_manage = True        # writes enabled? run_desktop sets this from
                                       # whether SD is the cart source (carts_root)
@@ -1316,18 +1087,32 @@ class Workstation:
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
         #44 redraw gate."""
+        # THE OVERLAY DEADLINES (#209 landing B, rev 3). The achievement objects
+        # PUSH here at event time -- an unlock arms the toast, an egg arms the
+        # popup, the Konami code arms the confetti -- and the per-frame gates
+        # (`_animating`, the WM's `_overlay_sig`) read these plain ints and
+        # nothing else. Before this they POLLED `ach.toast_active()` /
+        # `ach_ui._egg_active()` / `ach_ui._confetti_until` every loop on every
+        # tier, to be told "no" on essentially every frame of the console's life.
+        # Same shape as `_notice_until` below; 0 means down, and the objects keep
+        # only the PAYLOAD they draw, which is read only while its deadline is up.
+        self._toast_until = 0          # _ticks_ms the achievement banner hides at
+        self._egg_until = 0            # _ticks_ms the Easter-egg popup hides at
+        self._confetti_until = 0       # _ticks_ms the Konami confetti ends at
         # Achievements (#21): a small set of fun milestones + the hidden Easter-egg
-        # rewards. Starts empty/volatile; load_achievements() wires the SD store +
-        # the unlock beep. The Workstation calls ach.note(event) at the flow points
-        # below (open/run/save_*/editor opens) and draws ach.toast each frame.
-        self.ach = Achievements()
+        # rewards. Starts empty/volatile; load_achievements() adds the SD store.
+        # The unlock hook is wired from the START, not at that load: persistence
+        # waits for a store, but arming the toast is kernel behavior a build with
+        # no card still owes the kid.
+        self.ach = Achievements(on_unlock=self._achievement_unlocked)
         # The Easter-egg subsystem + achievement/egg drawing (#21, extracted from
         # this class -- see achievements_ui.py): the 3 hidden eggs + their trigger/
-        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg/egg_until/
-        # _confetti_until) + _draw_egg/_draw_confetti/_draw_achievements. The
-        # achievement core (ach/show_achievements/load_achievements/...) stays here.
-        # Egg trigger state is reset on screen changes (go_home/settings/desktop tap)
-        # via self.ach_ui.* so a stray sequence never carries between contexts.
+        # popup state (_konami_pos/_clock_taps/_secret_taps/egg_msg) +
+        # _draw_egg/_draw_confetti/_draw_achievements. The achievement core
+        # (ach/show_achievements/load_achievements/...) and the deadlines above
+        # stay here. Egg trigger state is reset on screen changes
+        # (go_home/settings/desktop tap) via self.ach_ui.* so a stray sequence
+        # never carries between contexts.
         self.ach_ui = AchievementsUI(self, NAMES, ACHIEVEMENTS)
         self.show_achievements = False  # the locked/unlocked list overlay (Settings entry)
         # A transient SYSTEM banner (#53): something the machine did on its own and
@@ -1368,7 +1153,7 @@ class Workstation:
         self._stale_ptr_ms = 0.0      # _tick_pointer_dt), None while it's a repeat
         self._frame_requested = False # a draw asked for another frame (request_frame:
                                       # a coasting fling re-arms the gate the
-                                      # _covers_deferred way -- set DURING a draw,
+                                      # covers.take_deferred way -- set DURING a draw,
                                       # consumed after the gate cleared _dirty)
         # Per-frame perf scratch (#43/#66): the running-cart content Layer fills these
         # during its draw so the router's frame-end DRAWBRK/CHROMEBRK accounting can read
@@ -1567,7 +1352,7 @@ class Workstation:
         records the strike. This is the shell-vocabulary query (is_user_app +
         the title-slug id in one call): `tests/test_user_apps.py` asserts
         against it, and it is half of what the deferred picker BADGE needs
-        (docs/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
+        (docs/history/ui_refactor_2026-08.md, Phase 8's open tails). The cart stays in
         the Editor picker either way, because editing it is how it gets
         fixed."""
         if not self.is_user_app(cart):
@@ -1596,80 +1381,36 @@ class Workstation:
             return False
         return self.app_guard.forgive(system_api.app_id_for(cart))
 
-    # -- desktop wallpaper (#28) ---------------------------------------------
-    #
-    # The home screen renders a chosen wallpaper-type cart as a live backdrop:
-    # exactly the Picotron model where a wallpaper is just a fullscreen cart. We
-    # reuse the cart-run machinery (compile + _init/_update/_draw) but in a SEPARATE
-    # namespace so it never collides with the foreground cart. Fallback options are
-    # plain solid MOY64 fills ("fill:<color>"), so there's always a valid choice
-    # even with zero wallpaper carts installed (and a cheap option for the device).
-
-    _FILL_WALLPAPERS = ("fill:dark_blue", "fill:black", "fill:indigo", "fill:dark_purple")
-
-    def wallpaper_carts(self):
-        """The wallpaper-type carts available as backdrops (discovery by type, Moybyte's
-        equivalent of Picotron's wallpapers folder). Reads the FULL scanned list, not the
-        launcher grid -- wallpapers are a backdrop category chosen in the Appearance app,
-        so they leave the launcher RUN-grid (spec shell_ux_v1.md) but stay discoverable
-        here."""
-        return [c for c in self._all_carts if c.get("type") == "wallpaper"]
-
-    def wallpaper_options(self):
-        """All selectable wallpaper ids: each wallpaper cart's slug, then the
-        built-in solid fills (always present so there's a valid pick)."""
-        out = []
-        for c in self.wallpaper_carts():
-            out.append(self._wp_id_for(c))
-        out.extend(self._FILL_WALLPAPERS)
-        return out
-
-    def _wp_id_for(self, cart):
-        # A stable id for a wallpaper cart: its folder name (slug) so the choice
-        # survives a reboot. Embedded/path-less carts fall back to the title slug.
-        path = cart.get("path")
-        if path:
-            name = path.rsplit("/", 1)[-1]
-            if name.endswith(".moy"):
-                name = name[:-4]
-            return name
-        return self.carts_store.slug(cart["title"]) if self.carts_store else cart["title"]
-
-    def _wp_cart_by_id(self, wp_id):
-        for c in self.wallpaper_carts():
-            if self._wp_id_for(c) == wp_id:
-                return c
-        return None
 
     def load_system(self):
-        """Load the system settings (moy_carts system.json) and apply the saved
-        wallpaper + font scale (#39). Safe no-op if no store/root is wired (embedded
-        boot)."""
-        if self.carts_store is not None and self.carts_root is not None:
-            try:
-                self.system = self._with_sd(
-                    lambda: self.carts_store.load_system(self.carts_root)) or {}
-            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("Moybyte system load failed:", _err_text(exc))
-                self.system = {}
+        """Read the system settings (`self.prefs`) and APPLY them -- the saved
+        wallpaper, font scale, theme, skin and every persisted toggle (#39).
+
+        The read is the store's; this cascade is kernel policy and stays here.
+        What a setting MEANS is the shell's business -- each one relays through
+        the same `set_*` verb the Settings row calls, with persist=False so
+        loading never re-writes what it just read."""
+        self.prefs.load()
         # System font scale (#39): apply the persisted choice (1/2/3) so the desktop
-        # boots at the saved text size. set_font_scale relays it into the system
+        # boots at the saved text size. look.set_font_scale relays it into the system
         # canvas + relayouts; persist=False so loading doesn't re-write the store.
-        self.set_font_scale(self.system.get("font_scale", self.font_scale),
-                            persist=False)
+        self.look.set_font_scale(self.system.get("font_scale", self.look.font_scale),
+                                 persist=False)
         # Paint's shared document lives outside the re-seeded built-in cart. Restore
         # My Art's bg asset before compiling a persisted My Art wallpaper.
         self.artwork.sync_wallpaper()
-        self.select_wallpaper(self.system.get("wallpaper"), persist=False)
-        self.set_theme(self.system.get("theme", self.theme_name), persist=False,
-                       variant=self.system.get("theme_variant", self.theme_variant))
+        self.look.select_wallpaper(self.system.get("wallpaper"), persist=False)
+        self.look.set_theme(self.system.get("theme", self.look.theme_name),
+                            persist=False,
+                            variant=self.system.get("theme_variant",
+                                                    self.look.theme_variant))
         # The widget skin, beside the colorway it belongs with. Applied ONLY
         # when the store names one: `ui`'s tables are already the default, so
         # "no key" means "nothing to install", not "install the default over
-        # whatever this process has" -- see the note at self.skin_name.
+        # whatever this process has" -- see the note at Appearance.skin_name.
         _sk = self.system.get("skin")
         if _sk is not None:
-            self.set_skin(_sk, persist=False)
+            self.look.set_skin(_sk, persist=False)
         # #68: apply the persisted diagnostics gate (kid-mode default OFF).
         self.set_diag_live(self.system.get("diag_live", False), persist=False)
         self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
@@ -1682,188 +1423,14 @@ class Workstation:
         self.set_crisp_pixels(self.system.get("crisp_pixels", False),
                               persist=False)
 
-    def set_icon_sheet(self, sheet):
-        """Adopt the top-bar IconSheet (Stage 1) and drop the per-kind image cache so
-        the next frame rebuilds its sprites (and, on the device, their RGB565 copies)
-        from the new theme. None reverts the bar to the _glyph fallback."""
-        self.icon_sheet = sheet
-        self._bar_img_cache = {}
-        self.bar_layer.invalidate()   # repaint the cached cart bar with the new theme (#43)
 
-    def load_icon_sheet(self):
-        """Build the top-bar IconSheet (Stage 1): use the saved system_icons.moygfx theme
-        only if its stored version is >= the baked _ICON_VERSION; otherwise bake the
-        default theme. A saved theme older than _ICON_VERSION is STALE (the shipped
-        icons changed) -> re-seed it: bake the new default and overwrite the saved theme
-        + version, so an already-themed device/desktop picks up new icons automatically
-        (mirrors cart versioning, #47). A missing theme stays write-free (the common
-        "absent = default" case). Safe on an embedded/no-store boot (baked default)."""
-        hexs, saved_ver = None, 0
-        store = self.carts_store
-        load = getattr(store, "load_system_icons", None) if store is not None else None
-        if load is not None and self.carts_root is not None:
-            loadver = getattr(store, "load_system_icons_version", None)
 
-            def _read_theme():
-                return (load(self.carts_root),
-                        loadver(self.carts_root) if loadver is not None else _ICON_VERSION)
-            try:
-                hexs, saved_ver = self._with_sd(_read_theme)
-            except Exception as exc:  # noqa: BLE001 -- a bad theme falls back to default
-                print("Moybyte icons load failed:", _err_text(exc))
-                hexs = None
-        sheet = None
-        if hexs and saved_ver >= _ICON_VERSION:        # current/newer saved theme -> keep it
-            try:
-                sheet = IconSheet.from_hex(hexs)
-            except Exception:  # noqa: BLE001
-                sheet = None
-        if sheet is None:
-            sheet = _default_icon_sheet()
-            # Re-seed a STALE (or corrupt) saved theme to the new default so the new
-            # icons land; skip when nothing was saved (no churn) or the store predates
-            # versioning (no loadver -> _read_theme reported current, never stale).
-            if hexs and self.carts_root is not None \
-                    and getattr(store, "save_system_icons", None) is not None:
-                try:
-                    self._with_sd(lambda: store.save_system_icons(
-                        sheet.to_hex(), self.carts_root, _ICON_VERSION))
-                except Exception as exc:  # noqa: BLE001
-                    print("Moybyte icons re-seed failed:", _err_text(exc))
-        self.set_icon_sheet(sheet)
-
-    # -- system font scale (#39) ---------------------------------------------
-    #
-    # The system-UI font is settings-resizable (petme128 nearest-neighbor x1/x2/x3),
-    # persisted in system.json (mirroring the #28 wallpaper setting) and applied live.
-    # The GAME canvas keeps plain 8x8 text regardless -- scaling lives in the system
-    # canvas + the responsive Layout, so a cart is never affected.
-
-    FONT_SCALES = (1, 2, 3)
-
-    def _effective_font_scale(self):
-        """The scale actually applied to the system canvas + layout. It is the
-        requested font_scale ONLY when a distinct system canvas exists (one that can
-        render scaled text); in the degradation case (the T-Deck / a shared 320x240
-        canvas, whose framebuf text can't scale) it is 1, so the chrome geometry
-        always matches the 8px text actually drawn -- no mis-laid-out desktop."""
-        return self.font_scale if self._sys_canvas is not None else 1
-
-    def set_font_scale(self, scale, persist=True):
-        """Set the system-UI font scale (clamped to FONT_SCALES), relay the effective
-        scale into the system canvas + relayout the desktop, and (by default) persist
-        it. The game canvas text is always 8px; the effective scale is 1 without a
-        distinct system canvas (so the choice is remembered but only shows on a panel
-        that can render it)."""
-        try:
-            scale = int(scale)
-        except (TypeError, ValueError):
-            scale = 1
-        if scale not in self.FONT_SCALES:
-            scale = self.FONT_SCALES[0]
-        self.font_scale = scale
-        target = self._font_scale_canvas()
-        if target is not None:
-            target.set_font_scale(self._effective_font_scale())
-        self._relayout()
-        if persist:
-            self._persist_font_scale()
-
-    def _font_scale_canvas(self):
-        """The system canvas that OWNS the shell's font scale.
-
-        NOT simply `self._sys_canvas`: on the windowed tier that attribute is
-        whatever WINDOW BUFFER is installed while a window's content draws or
-        handles input -- and changing the font size from Settings is exactly
-        that. The new scale then landed on a buffer that on_relayout immediately
-        throws away, leaving the REAL canvas (and every future window buffer,
-        which clones its font_scale from the root in new_layer) at the OLD size:
-        layout reflowed to 1x with text still rendering at 2x, which is the
-        owner's "changing it while running messes it up, if I change and reboot
-        it looks great" (2026-07-26). The fullscreen tier has no _root_canvas and
-        falls through to the ambient canvas, which IS the root there."""
-        wm = getattr(self, "wm", None)
-        root = getattr(wm, "_root_canvas", None) if wm is not None else None
-        return root if root is not None else self._sys_canvas
-
-    def cycle_font_scale(self, d):
-        """Step the font scale by d through FONT_SCALES (Settings < / > stepper);
-        applies + persists immediately so the desktop text resizes live."""
-        scales = self.FONT_SCALES
-        cur = self.font_scale if self.font_scale in scales else scales[0]
-        nxt = scales[(scales.index(cur) + d) % len(scales)]
-        self.set_font_scale(nxt, persist=True)
-
-    def set_theme(self, name, persist=True, variant=None):
-        """Pick the panel THEME (Appearance app -> THEMES): swap the chrome token set
-        (chrome.THEMES) the panels/window chrome/selection accents read each draw,
-        and persist the choice. An unknown name falls back to the default.
-        `variant` picks the theme's dark/light presentation (None keeps the
-        current variant, so existing name-only callers are untouched)."""
-        if not any(n == name for n, _t in THEMES):
-            name = DEFAULT_THEME
-        if variant is not None:
-            self.theme_variant = variant if variant in THEME_VARIANTS \
-                else DEFAULT_VARIANT
-        self.theme_name = name
-        self.theme_colors = theme_colors(name, self.theme_variant)
-        # The launcher grids read the accent for their selection ring/pill.
-        self.launcher.theme = self.theme_colors
-        if getattr(self, "picker", None) is not None:
-            self.picker.theme = self.theme_colors
-        # The cached bar strip now paints theme-colored pixels (the launcher zone's
-        # PLAY/CHANGE chips), and its cache key doesn't fold the theme name -- bump
-        # the explicit generation so a theme switch repaints it.
-        if getattr(self, "bar_layer", None) is not None:
-            self.bar_layer.invalidate()
-        self._dirty = True
-        if persist:
-            self.system["theme"] = self.theme_name
-            self.system["theme_variant"] = self.theme_variant
-            self._persist_system()
-
-    def set_theme_variant(self, variant, persist=True):
-        """Flip the current theme between its dark and light presentation
-        (Appearance app -> THEMES -> DARK/LIGHT)."""
-        self.set_theme(self.theme_name, persist=persist, variant=variant)
-
-    def skin_names(self):
-        """The widget skins a picker may offer, in presentation order."""
-        return _skin.names()
-
-    def set_skin(self, name, persist=True):
-        """Install the widget SKIN (Appearance -> THEMES -> the skin chips) and
-        persist the choice, exactly as `set_theme` does for the colorway.
-
-        A skin is a delta over `ui`'s widget tables -- fields, edges, label
-        alignment -- so every surface changes at once and none of them knows:
-        this is the ONLY place the catalog is installed. An unknown name
-        resolves to the default (`skin.use`), and the RESOLVED name is what
-        gets stored, so a store that names a skin this build dropped heals
-        itself on the next pick instead of re-failing every boot."""
-        self.skin_name = _skin.use(name)
-        # Same two invalidations a theme change needs: the cached top-bar strip
-        # paints widget pixels and its key does not fold the skin, and every
-        # other surface repaints from the damage epoch.
-        if getattr(self, "bar_layer", None) is not None:
-            self.bar_layer.invalidate()
-        self._dirty = True
-        if persist:
-            self.system["skin"] = self.skin_name
-            self._persist_system()
-
-    def cycle_theme(self, d):
-        """Step the panel theme through chrome.THEMES (programmatic verb; the UI
-        pick is the Appearance app). Applies + persists."""
-        names = [n for n, _t in THEMES]
-        cur = self.theme_name if self.theme_name in names else names[0]
-        self.set_theme(names[(names.index(cur) + d) % len(names)], persist=True)
 
     def _relayout(self):
         """Rebuild the responsive layout from the live system-canvas size + the
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
-        w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self._effective_font_scale()
+        w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
         self.layout = Layout(w, h, fs)
         self.launcher.set_layout(self.layout)
         # Editor layouts reflow too (#39 step 2); an open code editor adopts the new
@@ -1888,193 +1455,49 @@ class Workstation:
         if _hook is not None:
             _hook()
 
-    def _persist_font_scale(self):
-        self.system["font_scale"] = self.font_scale
-        self._persist_system()
 
-    # -- WEB CONSOLE (moycore plan 3.4 pull half) ----------------------------
+    # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
     #
-    # Thin verbs over the injected `webhost`, so settings_layer never touches a
-    # socket and every tier without the service is untouched. The service
-    # contract is `.serving` / `.start()` / `.stop()` / `.url()`.
-    #
-    # Since #197 the toggle is also a MODE: turning it on parks the glass on the
-    # connection screen (web_console_ui.py) and turning it off returns the
-    # console. See park_web_console below for why that is a switch and not a
-    # session.
-
-    _WEB_PIN_DIGITS = 4
+    # The switch itself lives in web_console.py; these keep the names its
+    # callers already speak. Fixed signatures, one delegation each (#209).
 
     def web_pin(self):
-        """The pairing pin the browser must carry (`?pin=NNNN`), as a string.
-
-        MINTED ONCE, LAZILY, and then persisted in system.json beside every
-        other Settings choice. Lazily because a board that never serves the web
-        console should never have written a secret to its store; once because a
-        pin that changed per boot would mean re-scanning the QR after every
-        power cycle, and a kid's phone keeping the old url would look like the
-        board had broken.
-
-        Four digits is the strength a kid can read off a panel and a grown-up
-        can type. It is not a password: it stops the OTHER machine on the
-        network from writing to this store by accident, which is the threat an
-        open write endpoint on a classroom LAN actually poses (moy_webhost's
-        SECURITY note). The read half stays open, by the standing owner call."""
-        pin = self.system.get("web_pin")
-        if pin:
-            return str(pin)
-        pin = self._mint_web_pin()
-        self.system["web_pin"] = pin
-        self._persist_system()
-        return pin
-
-    def _mint_web_pin(self):
-        """A fresh 4-digit pin. `os.urandom` where there is one (both boards and
-        the host have it); the clock is the fallback, and is only ever reached
-        on a build with no urandom at all."""
-        n = None
-        try:
-            import os as _os
-            n = int.from_bytes(_os.urandom(3), "big")
-        except Exception:  # noqa: BLE001 -- no urandom: fall through to the clock
-            n = None
-        if n is None:
-            n = _ticks_us()
-        return "%04d" % (n % (10 ** self._WEB_PIN_DIGITS))
+        """`web.pin()` -- moy_webhost's start-time lambda + the tests."""
+        return self.web.pin()
 
     def web_console_url(self):
-        """The PAIRED url -- what the QR encodes and SHOW ADDRESS reveals.
-
-        `http://<ip>:8080/?pin=NNNN`: the page forwards its own `?pin=` into
-        every sync batch, so scanning this is the whole pairing gesture. Empty
-        when nothing is serving -- there is no address to show then, and a
-        placeholder would encode to a QR that sends a phone nowhere."""
-        wh = self.webhost
-        if wh is None or not getattr(wh, "serving", False):
-            return ""
-        try:
-            paired = getattr(wh, "paired_url", None)
-            return (paired() if paired is not None else wh.url()) or ""
-        except Exception:  # noqa: BLE001 -- a url is not worth a crash
-            return ""
+        """`web.url()` -- the dev channel's `web` and the tests."""
+        return self.web.url()
 
     def park_web_console(self):
-        """Take the glass over with the connection screen (#197).
-
-        WASM MODE IS A SWITCH, NOT A SESSION (owner call, 2026-08-25). While the
-        toggle is on, the browser owns this store and the glass shows how to
-        reach it -- so parking goes through `go_home`, which commits every open
-        editor and app before the browser starts writing underneath them, and
-        `go_home` then re-parks here (and on every later return: a cart launched
-        by PLAY ON DEVICE exits back to THIS screen, not to a shelf the browser
-        is concurrently rewriting).
-
-        On the windowed tier `go_home` also leaves the desk, which is what makes
-        this fullscreen there: windows exist only above the desk (#105), so the
-        play world presents every kind full-screen with no special case."""
-        self._web_parked = True
-        self.web_console_ui.on_enter()
-        self.go_home()
+        """`web.park()` -- the layers.py contract comment and the tests."""
+        return self.web.park()
 
     def stop_web_console(self):
-        """The connection screen's TURN OFF.
-
-        Not `toggle_webhost` directly, and the difference is the one state a
-        toggle gets wrong: if the host stopped UNDERNEATH the parked screen (a
-        socket error, a stop from somewhere else), toggling would read "not
-        serving" and START it again -- a button labelled TURN OFF that turns it
-        on. Ask what the user wants, which is out."""
-        if self.webhost_serving():
-            self.toggle_webhost()
-        else:
-            self.unpark_web_console()
+        """`web.stop()` -- the Guition on-glass suite's serial vocabulary."""
+        return self.web.stop()
 
     def unpark_web_console(self):
-        """Give the console back. The desk is home on the windowed tier; the
-        launcher root everywhere else."""
-        self._web_parked = False
-        self._dirty = True
-        if getattr(self.wm, "has_desk", False):
-            self.open_desk()
-        else:
-            self.wm.goto("launcher")
+        """`web.unpark()` -- the tests."""
+        return self.web.unpark()
 
     def webhost_serving(self):
-        wh = self.webhost
-        return bool(wh is not None and getattr(wh, "serving", False))
+        """`web.serving()` -- settings_layer, tools/p4_push_web.py."""
+        return self.web.serving()
 
     def webhost_label(self):
-        """What the Settings row shows: the ADDRESS while serving, else OFF.
-
-        The address IS the feature -- the kid has to type it into a browser --
-        so a row that said only "ON" would be telling them to go and find the
-        IP somewhere else. A failure shows its reason here too, for the same
-        reason: this row is the only surface this feature has.
-        """
-        wh = self.webhost
-        if wh is None:
-            return "OFF"
-        if getattr(wh, "error", None):
-            return str(wh.error)[:22]
-        if not getattr(wh, "serving", False):
-            return "OFF"
-        url = ""
-        try:
-            url = wh.url() or ""
-        except Exception:  # noqa: BLE001 -- a url is not worth a crash
-            url = ""
-        # Strip the scheme: the row is ~22 chars at 1x and "http://" spends 7 of
-        # them on something every browser assumes anyway.
-        return url.replace("http://", "").rstrip("/") or "ON"
+        """`web.label()` -- the Settings row, tools/p4_push_web.py."""
+        return self.web.label()
 
     def toggle_webhost(self):
-        """Start or stop serving, and park or unpark the glass with it (#197).
-
-        Starting touches WiFi, which can fail slowly and in ways nobody can act
-        on from a Settings screen (no AP, wrong password, DHCP). A raised
-        exception here would take the console down from a toggle, so the failure
-        becomes the row's own label instead.
-
-        The park is gated on `serving` AFTER the attempt, never on "we tried to
-        start": a failed start leaves the kid in Settings looking at the reason,
-        which is the only place that reason is readable. This is the ONE funnel
-        -- the Settings row, the dev channel's `web`, and the connection
-        screen's own TURN OFF all come through here -- so the mode and the
-        socket cannot disagree about which of them is on."""
-        wh = self.webhost
-        if wh is None:
-            return
-        try:
-            wh.error = None
-            if getattr(wh, "serving", False):
-                wh.stop()
-            else:
-                wh.start()
-        except Exception as exc:  # noqa: BLE001
-            wh.error = "%s" % exc
-        self._dirty = True
-        if getattr(wh, "serving", False):
-            if not self._web_parked:
-                self.park_web_console()
-        elif self._web_parked:
-            self.unpark_web_console()
+        """`web.toggle()` -- settings_layer, the dev channel, p4_push_web."""
+        return self.web.toggle()
 
     def rescan_carts(self):
-        """Re-read the store and rebuild both shelves -- the sync push's board
-        half (moy_webhost wires it as `on_sync`), fired when a browser batch
-        changed what the launcher shows: a manifest, a cover sheet, a cart
-        created or deleted. `_apply_items` does the whole refresh (re-slim,
-        cover caches dropped, generation bumped), the same body every
-        create/dup/delete already runs. Safe between frames: the webhost
-        polls at the frame tail, after present."""
-        if self.carts_store is None or not self.carts_root:
-            return
-        try:
-            self._apply_items(self._with_sd(
-                lambda: self.carts_store.scan(self.carts_root)))
-        except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
-            print("Moybyte rescan failed:", exc)
-        self._dirty = True
+        """`carts.rescan()` -- moy_webhost captures this name in its `on_sync`
+        lambda at construction, and the Guition on-glass suite's sync test
+        depends on the shelf following a browser batch with no reboot."""
+        return self.carts.rescan()
 
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
@@ -2084,7 +1507,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_live"] = self.diag_live
-            self._persist_system()
+            self.prefs.persist()
 
     def set_diag_sd(self, on, persist=True):
         """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
@@ -2096,7 +1519,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["diag_sd"] = self.diag_sd
-            self._persist_system()
+            self.prefs.persist()
 
     def set_frameskip(self, on, persist=True):
         """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
@@ -2107,7 +1530,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["frameskip"] = self.frameskip
-            self._persist_system()
+            self.prefs.persist()
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.
@@ -2151,7 +1574,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["two_player"] = self.two_player
-            self._persist_system()
+            self.prefs.persist()
 
     def set_crisp_pixels(self, on, persist=True):
         """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
@@ -2167,7 +1590,7 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["crisp_pixels"] = self.crisp_pixels
-            self._persist_system()
+            self.prefs.persist()
 
     def set_show_fps(self, on, persist=True):
         """Flip the in-game FPS chip (Settings -> SHOW FPS) and persist it.
@@ -2182,76 +1605,12 @@ class Workstation:
         self._dirty = True
         if persist:
             self.system["show_fps"] = self.show_fps
-            self._persist_system()
+            self.prefs.persist()
 
     def _persist_system(self):
-        """Write self.system to system.json when a writable store is wired. Shared by the
-        persisting Settings toggles (font, wallpaper, OTA channel)."""
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        try:
-            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("Moybyte system save failed:", _err_text(exc))
-
-    # -- favorites + recents (#105) -------------------------------------------
-    #
-    # Both ride the SAME system.json persistence Settings already uses for
-    # theme/wallpaper/font/OTA channel (self.system + _persist_system) -- no new
-    # store surface. `favorites` is a plain path list (order = the order a kid
-    # starred them, oldest first); `desk_mru` (issue #105's own naming note) is a
-    # capped most-recently-run path list, newest first. Cart identity is the
-    # store PATH (stable across a rename/rescan, unlike an in-memory dict).
-
-    _MRU_CAP = 8          # how many recents system.json remembers
-
-    def is_favorite(self, cart):
-        path = cart.get("path") if cart else None
-        if not path:
-            return False
-        return path in self.system.get("favorites", [])
-
-    def toggle_favorite(self, cart):
-        """Star/unstar `cart` (the launcher card's corner badge tap) and persist.
-        A no-op for a pseudo tile (no path)."""
-        path = cart.get("path") if cart else None
-        if not path:
-            return
-        favs = list(self.system.get("favorites", []))
-        if path in favs:
-            favs.remove(path)
-        else:
-            favs.append(path)
-        self.system["favorites"] = favs
-        self._dirty = True
-        self._persist_system()
-
-    def _note_recent(self, cart):
-        """Record `cart` as most-recently-run: move its path to the front of
-        system.json's `desk_mru` list (issue #105's naming), capped at
-        _MRU_CAP. Called from every launcher-driven run/open (open/open_app) --
-        a pseudo tile (no path) is never recorded."""
-        path = cart.get("path") if cart else None
-        if not path:
-            return
-        mru = [p for p in self.system.get("desk_mru", []) if p != path]
-        mru.insert(0, path)
-        self.system["desk_mru"] = mru[:self._MRU_CAP]
-        self._persist_system()
-
-    def recent_carts(self):
-        """The desk_mru path list resolved back to live cart dicts (newest first),
-        silently dropping any path that no longer scans (deleted/renamed since).
-        Read-only convenience for a future recents surface; #105 only settled the
-        system.json key, not where it renders."""
-        by_path = {c.get("path"): c for c in self._all_carts if c.get("path")}
-        out = []
-        for path in self.system.get("desk_mru", []):
-            c = by_path.get(path)
-            if c is not None:
-                out.append(c)
-        return out
+        """`prefs.persist()` -- app_context's Prefs role and the dev channel's
+        `vol`, which keep speaking this name."""
+        return self.prefs.persist()
 
     def _ota_channel(self):
         """The selected OTA update channel ("stable" / "unstable" beta). Drives which
@@ -2285,38 +1644,34 @@ class Workstation:
         rollback still guards a bad beta image)."""
         self.system["ota_channel"] = (
             "stable" if self._ota_channel() == "unstable" else "unstable")
-        self._persist_system()
+        self.prefs.persist()
 
     def load_achievements(self):
-        """Load the unlocked achievements (moy_carts achievements.json) and wire the
-        store + unlock-beep into a fresh Achievements (#21). Safe no-op on an
-        embedded/no-store boot -- then the achievements stay in volatile RAM (still
-        awarded + toasted this session, just not remembered). Call after the store +
-        carts_root are injected (host build_workstation / device run_desktop)."""
-        unlocked = []
-        if self.carts_store is not None and self.carts_root is not None:
-            try:
-                unlocked = self._with_sd(
-                    lambda: self.carts_store.load_achievements(self.carts_root)) or []
-            except Exception as exc:  # noqa: BLE001 -- a bad store must not crash boot
-                print("Moybyte achievements load failed:", _err_text(exc))
-                unlocked = []
-        self.ach = Achievements(unlocked, on_save=self._save_achievements,
+        """Wire a fresh Achievements over the badges the store remembers (#21).
+
+        The read is `prefs`'; the WIRING is kernel -- persistence goes back to
+        the store, the unlock effects (the toast deadline + the beep) are the
+        kernel's own. Call after the store + carts_root are injected (host
+        build_workstation / device run_desktop)."""
+        self.ach = Achievements(self.prefs.load_achievements(),
+                                on_save=self.prefs.save_achievements,
                                 on_unlock=self._achievement_unlocked)
 
-    def _save_achievements(self, ids):
-        """Persist the unlocked-id list through the SD wrapper, when writes are on.
-        A failed/disabled write just isn't remembered (the badge still shows this
-        session) -- never fatal."""
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        self._with_sd(lambda: self.carts_store.save_achievements(ids, self.carts_root))
-
     def _achievement_unlocked(self, ach_id):
-        """Celebrate a fresh unlock with a short rising beep, when audio is wired.
-        Best-effort -- a silent backend (or none) just skips it. The toast is the
-        primary, always-present feedback; the beep is the cherry on top."""
+        """A fresh unlock's EFFECTS: arm the toast overlay, then celebrate with a
+        short rising beep when audio is wired (#21, rev-3 event push).
+
+        `Achievements` generates the effect and the kernel executes it. The
+        deadline is written HERE, at the unlock, rather than polled per frame off
+        the object -- `_animating` and the WM's overlay signature read the flat
+        field and never call into `ach` on the frame path. There is no toast
+        QUEUE to preserve: `award()` overwrites its payload, so a second unlock
+        inside the window replaces the banner and extends the deadline, which is
+        exactly what a later write to this field does.
+
+        The deadline is armed BEFORE the beep so a silent (or broken) backend
+        cannot cost the kid the banner; the beep itself is best-effort."""
+        self._toast_until = _ticks_ms() + TOAST_MS
         au = self.audio
         if au is not None:
             try:
@@ -2326,208 +1681,12 @@ class Workstation:
                 pass
 
     # -- hidden Easter eggs (#21) now live on self.ach_ui (achievements_ui.py,
-    # AchievementsUI): the 3 eggs + their trigger/popup state + _show_egg/
-    # _egg_active + _draw_egg/_draw_confetti/_draw_achievements. The achievement
-    # core above (load_achievements/_save_achievements/_achievement_unlocked +
-    # self.ach) stays here.
+    # AchievementsUI): the 3 eggs + their trigger state + the popup payload +
+    # _show_egg + _draw_egg/_draw_confetti/_draw_achievements. The achievement
+    # core above (load_achievements/_achievement_unlocked + self.ach) and the
+    # overlay deadlines those objects arm (_init_overlays) stay here.
 
-    def select_wallpaper(self, wp_id, persist=True):
-        """Choose the desktop backdrop. `wp_id` is a wallpaper cart slug or a
-        "fill:<color>" built-in; an unknown/None id falls back to the first
-        available option. Compiles the chosen cart into its own namespace (or sets
-        a solid fill) and, when persist, writes the choice to system.json."""
-        opts = self.wallpaper_options()
-        if wp_id not in opts:
-            wp_id = opts[0] if opts else self._FILL_WALLPAPERS[0]
-        self.wallpaper_id = wp_id
-        self.wallpaper.clear()
-        if not (isinstance(wp_id, str) and wp_id.startswith("fill:")):
-            cart = self._wp_cart_by_id(wp_id)
-            if cart is not None:
-                # #66 live-set diet: a slimmed wallpaper cart rehydrates for the
-                # compile (which bakes src/sheet into the wallpaper's own ns), then
-                # re-slims -- unless it IS the open project's cart (stays fat).
-                self._rehydrate_cart(cart)
-                self.wallpaper.compile(cart)   # compile into the backdrop component (#28)
-                if cart is not getattr(self, "_fat_cart", None):
-                    self._reslim_cart(cart)
-        if persist:
-            self._persist_wallpaper()
-            # "Home Decorator": any persisted pick counts -- the Appearance app,
-            # Paint's WALL, the cycle verb. Boot restore (persist=False) doesn't.
-            self.ach.note("wallpaper_change")   # (#21)
 
-    def _persist_wallpaper(self):
-        self.system["wallpaper"] = self.wallpaper_id
-        if not (self.carts_store is not None and self.carts_root is not None
-                and self.can_manage):
-            return
-        try:
-            self._with_sd(lambda: self.carts_store.save_system(self.system, self.carts_root))
-        except Exception as exc:  # noqa: BLE001 -- a failed write just isn't remembered
-            print("Moybyte system save failed:", _err_text(exc))
-
-    def cycle_wallpaper(self, d):
-        """Step the wallpaper choice by d (programmatic verb; the UI pick is the
-        Appearance app); applies + persists immediately."""
-        opts = self.wallpaper_options()
-        if not opts:
-            return
-        cur = self.wallpaper_id if self.wallpaper_id in opts else opts[0]
-        nxt = opts[(opts.index(cur) + d) % len(opts)]
-        self.select_wallpaper(nxt, persist=True)
-
-    # (The wallpaper RENDERING -- _draw_wallpaper + _compile_wallpaper + the compiled-cart
-    # cache -- moved to the Wallpaper component (wallpaper.py); self.wallpaper.draw(dt) is
-    # called by the launcher home + Settings, and select_wallpaper drives it.)
-
-    def _icon_sheet_for(self, cart):
-        """A cached sprite Image for a cart's desktop icon, or None when the cart
-        has no art (then the type glyph is drawn). Cached per cart path so the
-        grid doesn't rebuild a sheet every frame.
-
-        The tiles come from the manifest's "icon" (SPEC.md 3.4) -- [tile, w, h],
-        or a bare tile id for 1x1 -- falling back to tile 0. The field has to be
-        explicit rather than a plain tile-0 rule because tile 0 is BLANK by
-        convention across the whole PICO-8 catalogue (it is why map cell 00 means
-        empty), so tile 0 alone draws nothing for every converted cart."""
-        if cart.get("path") is None:                # a pinned pseudo tile (Make/New):
-            return None                             # no cart art -> draw its type glyph
-        key = cart.get("path") or cart.get("title")
-        cache = self._icon_cache
-        if key in cache:
-            return cache[key]
-        n, tw, th = cart.get("icon") or (0, 1, 1)
-        # ONE TILE, not the whole sheet: icon_from_hex carries the blank-sheet
-        # test and the SPEC 3.4 out-of-range fallback, so the picture is
-        # unchanged -- the shell goldens pin it.
-        try:
-            img = SpriteSheet.icon_from_hex(cart.get("sprites"), n, tw, th,
-                                            cols=16, rows=32)
-        except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
-            img = None
-        cache[key] = img
-        return img
-
-    def light_chrome(self):
-        """True when the live theme's tool surface is LIGHT (visual identity v1
-        Phase 3) -- THE gate every surface's light branch reads (ui.is_light over
-        the live tokens). A method on ws so the layers inside the chrome import
-        cycle need no ui import of their own."""
-        return _ui_is_light(self.theme_colors)
-
-    def _cover_for(self, cart, w, h):
-        """The cart's COVER ART (visual identity v1 Section 11.4) as a blittable
-        sized exactly (w, h) -- images/cover.moyimg cover-cropped (fill + center
-        crop, nearest sample) -- or None when the cart carries none (the shelf
-        card falls back to sprite/glyph, the deterministic pre-cover look) OR
-        while its build is still in flight. Cached per (path, w, h); read
-        through the store so a slimmed cart (#66) never rehydrates, and cleared
-        with the icon cache on a store re-scan.
-
-        Builds are TIME-SLICED and BUDGETED (#66, hardware-measured): decoding
-        one 320x240 RLE cover in interpreted code costs 0.5-1.7s on the T-Deck,
-        so a miss starts a resumable _CoverJob and each frame advances at most
-        ONE job by ~_COVER_SLICE_MS. Cards draw their sprite/glyph fallback
-        until their cover lands (covers pop in over frames, no frozen frames);
-        frame() re-arms the redraw gate while any build is pending."""
-        path = cart.get("path")
-        if path is None or self.carts_store is None or w <= 0 or h <= 0:
-            return None
-        self._cover_seen = True            # re-arm the idle prefetch (it latches off
-                                           # once every cart is known; a surface asking
-                                           # again is the cheap signal to re-check)
-        if path in self._cover_none:       # known cover-less: never re-probe
-            return None
-        key = (path, w, h)
-        cache = self._cover_cache
-        if key in cache:
-            order = self._cover_cache_order
-            try:
-                order.remove(key)
-            except ValueError:
-                pass
-            order.append(key)
-            return cache[key]
-        # Per-frame build budget. This used to be ONE build per frame, because a
-        # build was a 0.5-1.7s interpreted decode and even one had to be sliced.
-        # With the decode and crop both native, a build off cached runs is ~2ms,
-        # so a count of one just spread N cheap covers over N frames -- which is
-        # exactly the stutter after a resize the owner reported. Spend a TIME
-        # slice instead: cheap builds all land on the same frame, an expensive
-        # one still yields.
-        if self._cover_built and self._cover_ms >= _COVER_SLICE_MS:
-            self._covers_deferred = True
-            return None
-        self._cover_built = True
-        t0 = _ticks_ms()
-        jobs = self._cover_jobs
-        job = jobs.get(key)
-        if job is None:
-            # Parsed runs still in RAM? Then this size costs a native decode +
-            # crop (~1.7ms) and touches no storage at all (#155). That is what
-            # makes a relayout cheap: reading the blob is 46.9ms and parsing it
-            # 17.1ms on P4 glass, against 0.89 + 0.76ms for the two native steps.
-            # Keyed by PATH alone, deliberately. Validating against the cover's
-            # content stamp would mean READING the blob to compute it, which is
-            # the 46.9ms this cache exists to avoid -- so it uses the same trust
-            # model as the crop cache beside it: good for the session, dropped
-            # wholesale on a store re-scan (which is what a create/edit/delete
-            # goes through). Keying it on a stamp stashed on the cart dict was
-            # measured to never hit at all: the picker's dicts do not survive a
-            # relayout, so every build re-read and re-parsed the blob (53ms) and
-            # the cache was dead code.
-            runs = self._cover_runs_get(path)
-            sig = None
-            if runs is None:
-                runs, sig = self._cover_runs_load(path)
-                if runs is None:
-                    self._cover_spend(t0)
-                    return self._cover_finish(key, None)
-            need = runs[0] * runs[1]
-            # The shared scratch is only safe when the build cannot span frames,
-            # i.e. BOTH steps are native. With a Python crop the job keeps
-            # partial state in pix across frames and another cart's decode would
-            # overwrite it.
-            if _DECODE_RUNS is not None and _CROP_INDEX is not None:
-                if self._cover_buf is None or len(self._cover_buf) < need:
-                    # #186: the scratch lives off the gc heap too. Growing it
-                    # frees the old one -- unless a job still decodes into it
-                    # (the native-crop exception fallback can span frames);
-                    # then the old scratch LEAKS, bounded, never freed live.
-                    old = self._cover_buf
-                    if old is not None:
-                        for _j in jobs.values():
-                            if _j.pix is old:
-                                old = None
-                                break
-                    if old is not None:
-                        _moybuf.free(old)
-                    self._cover_buf = _moybuf.alloc(need)
-                job = _CoverJob(runs, w, h, buf=self._cover_buf)
-            else:
-                job = _CoverJob(runs, w, h)
-            self.note_cost("cover.build")   # decode + crop for one (path, w, h)
-            job.sig = sig                   # stamps the sidecar when it lands
-            jobs[key] = job
-            # Bound the half-built set: a card scrolled out of view stops
-            # being stepped -- drop some OTHER job (it just rebuilds if it
-            # ever scrolls back into view).
-            while len(jobs) > 8:
-                for old in jobs:
-                    if old != key:
-                        jobs.pop(old)
-                        break
-                else:
-                    break
-        if not job.done:
-            job.step(t0)
-        self._cover_spend(t0)
-        if not job.done:
-            self._covers_deferred = True    # keep frames coming until it lands
-            return None
-        jobs.pop(key, None)
-        return self._cover_finish(key, job.img)
 
     def note_cost(self, what):
         """Count one EXPENSIVE event: a cache build, or a call into storage.
@@ -2555,350 +1714,6 @@ class Workstation:
         turns this whole bug class from a perf mystery into a test failure."""
         d = self.costs
         d[what] = d.get(what, 0) + 1
-
-    def _cover_runs_load(self, path):
-        """Read + parse this cart's cover blob into the runs cache; returns
-        (runs, sig), or (None, None) for a cart with no cover art.
-
-        This is the SIZE-INDEPENDENT half of a cover build, and the expensive one:
-        58ms to read the blob and 50ms to parse it on P4 glass, against ~2ms for
-        the decode+crop that turns runs into a card of a given size. Split out so
-        the idle prefetch can pay it while nothing is happening (see
-        _cover_prefetch_tick) instead of mid-drag, when a card scrolls into view.
-
-        A cover-less cart is remembered per PATH: probing for a file that is not
-        there costs 22ms on this board's flash (a listdir of images/ measured the
-        same 23.5ms, so there is no cheaper existence test), and 17 of 29 carts had
-        no cover -- 380ms of pure waste per session before this was cached."""
-        store = self.carts_store
-        loader = getattr(store, "load_image", None)
-        cover_name = getattr(store, "COVER_IMAGE", "cover")
-        sig_fn = getattr(store, "cover_sig", None)
-        self.note_cost("cover.blob.read")      # 58ms hit / 22ms miss on P4 flash
-        # Through the storage gate like every other store read here: this fires
-        # from the launcher's draw and the idle prefetch, i.e. around a repaint,
-        # where the T-Deck has a flush in flight over the SPI host its card
-        # shares -- an sdspi transaction there is the documented hang.
-        blob = self._with_sd(
-            lambda: loader(path, cover_name)) if loader is not None else None
-        runs = None
-        sig = None
-        if blob:
-            parse = getattr(store, "moyimg_runs", None)
-            runs = parse(blob) if parse is not None else None
-            sig = sig_fn(blob) if sig_fn is not None else None
-        if runs is None:
-            self._cover_none[path] = True
-            return None, None
-        # #186: the packed RLE blob (~15KB x every cart, 512KB cap) is the
-        # biggest slice of the warm shelf -- move it off the gc heap. Every
-        # consumer (len, int indexing, the native decode_runs) reads a
-        # memoryview identically; eviction frees it (_cover_free_runs).
-        runs = (runs[0], runs[1], _moybuf.take(runs[2]))
-        self._cover_runs_put(path, sig, runs)
-        return runs, sig
-
-    def _cover_prefetch_tick(self):
-        """Warm ONE not-yet-known cart's cover runs. Called only from the idle
-        branch of frame(), i.e. on a frame that would otherwise do nothing.
-
-        A cover's blob read + parse is ~108ms and is charged to whichever frame
-        first needs the card. On a shelf that scrolls, that is a DRAG frame: the
-        picker measured a 577ms worst frame and a 48ms median against a 31ms
-        warm one, which is the "it takes a while for all the covers to load and
-        for it to stop stuttering" the owner reported. The work cannot be made
-        much cheaper (it is flash-bound), so it moves instead -- same reasoning as
-        the bar strip: spend it where nobody is waiting.
-
-        ARMED FROM BOOT (2026-07-27), not from the first cover draw. The old
-        gate ("only while a surface is showing covers") kept the cache cold at
-        exactly the moment it was needed: tools/p4_clicks.py measured
-        back_to_desk at 1108ms and open_picker at 824ms, both of which were the
-        cover pipeline paying its ~49ms-per-cart loads ON the transition's
-        painted frames because nothing had armed the prefetch from the desk or
-        Settings. Warming from boot moves all of it into the first few idle
-        seconds of the session. The trade, accepted: an idle EDITOR now warms
-        the cache too, so the first input after a >2-quiet-frame pause can land
-        behind one in-flight flash read (~50-108ms extra latency, at most once
-        per cart per session, then never again -- the exhaustion latch below).
-        A RUNNING game is never affected: it animates, so the idle branch that
-        calls this never executes. Runs only after a couple of quiet frames so
-        the gap between two gestures is not spent on flash."""
-        carts = self._all_carts
-        if not self._cover_seen or self.carts_store is None or not carts:
-            return
-        n = len(carts)
-        i = self._cover_pf_i
-        for _ in range(n):
-            cart = carts[i % n]
-            i += 1
-            path = cart.get("path")
-            if (not path or path in self._cover_none
-                    or self._cover_runs_get(path) is not None):
-                continue
-            self._cover_pf_i = i
-            self._cover_runs_load(path)
-            return
-        self._cover_pf_i = i
-        # Every cart's RUNS are known. Phase 2 (2026-07-27): pre-BUILD the cover
-        # IMAGES the shelf/picker grids' next full draw will request, so the
-        # first click pays a cache hit instead of a build. Attributed on glass:
-        # with runs warm, the first draw at a new card size still cost ~10ms
-        # per card (native decode+crop at card size) x 12 cards = ~120ms of the
-        # remaining 2x~200ms transition -- charged to the exact frames a kid is
-        # watching. Same doctrine as phase 1: pay it where nobody waits.
-        if self._cover_prebuild_tick():
-            return
-        # Nothing left to warm: stop until something asks for covers again (a
-        # re-scan clears the caches and _cover_for re-arms the flag).
-        self._cover_seen = False
-
-    # The prebuild covers the first screenful per grid -- what a fresh session's
-    # click reveals. Scroll-ins beyond it build lazily as before (~10ms once per
-    # card, amortized over drag frames). Deliberately NOT every item: the cover
-    # cache is pixel-capped (_COVER_CACHE_MAX_PIXELS) and LRU -- prebuilding two
-    # full 29-cart grids would evict the head cards (the ones the click shows)
-    # to make room for the tail.
-    _COVER_PREBUILD_PER_GRID = 12
-
-    def _cover_prebuild_tick(self):
-        """Build ONE pending cover image from the grids' cover_specs (the exact
-        (cart, w, h) set their next full draw requests -- the same geometry
-        helper the web /assets prebuild uses). Returns True while there is (or
-        may be) work left, False when the visible set is fully built.
-
-        Runs on idle frames only (the caller), so it must not re-arm the paint
-        machinery: _cover_for sets _covers_deferred when a build defers, which
-        would turn the NEXT painted frame into two -- save/restore it."""
-        grids = (self.launcher, self.picker)
-        cap = self._COVER_PREBUILD_PER_GRID
-        for grid in grids:
-            specs = getattr(grid, "cover_specs", None)
-            if specs is None:
-                continue
-            n = 0
-            for cart, w, h in specs():
-                if n >= cap:
-                    break
-                n += 1
-                path = cart.get("path")
-                if (not path or path in self._cover_none
-                        or (path, w, h) in self._cover_cache):
-                    continue
-                deferred = self._covers_deferred
-                try:
-                    self._cover_for(cart, w, h)
-                finally:
-                    self._covers_deferred = deferred
-                return True
-        return False
-
-    def _cover_runs_get(self, path):
-        """The parsed (sw, sh, packed) runs for this cart's cover, or None."""
-        e = self._cover_runs.get(path)
-        if e is None:
-            return None
-        order = self._cover_runs_order
-        try:
-            order.remove(path)
-        except ValueError:
-            pass
-        order.append(path)
-        return e[1]
-
-    def _cover_free_runs(self, packed):
-        """#186: return an evicted runs blob to off-heap storage -- unless an
-        in-flight _CoverJob still decodes from it (the LRU knows nothing
-        about jobs; leaking one blob beats a use-after-free). No-op for
-        gc-heap payloads (host / fallback)."""
-        for job in self._cover_jobs.values():
-            if job.packed is packed:
-                return
-        _moybuf.free(packed)
-
-    def _free_cover_img(self, img):
-        """#186: release an evicted cover blittable's off-heap payloads --
-        the indexed pixels plus any RGB565 bake the device canvas stamped on
-        it (_rgb_i / _rgb / the variant dict). Alias-safe: the hot _rgb slot
-        SHARES a variant entry's buffer, so each distinct buffer frees once.
-        Fields are nulled afterwards, so if anything ever drew an evicted
-        cover it would raise loudly instead of blitting freed memory
-        (nothing does -- pinned by the #186 audit)."""
-        if img is None:
-            return
-        freed = []
-        for name in ("pix", "_rgb_i", "_rgb"):
-            b = getattr(img, name, None)
-            if isinstance(b, memoryview):
-                dup = False
-                for s in freed:
-                    if b is s:
-                        dup = True
-                        break
-                if not dup:
-                    freed.append(b)
-                    _moybuf.free(b)
-            setattr(img, name, None)
-        var = getattr(img, "_rgb_variants", None)
-        if var:
-            for v in var.values():
-                b = v[0]
-                if isinstance(b, memoryview):
-                    dup = False
-                    for s in freed:
-                        if b is s:
-                            dup = True
-                            break
-                    if not dup:
-                        freed.append(b)
-                        _moybuf.free(b)
-            var.clear()
-
-    def _release_cover_caches(self):
-        """Drop the whole cover pipeline before a cart runs (cover_diet tier).
-
-        The 2026-08-03 census: on the T-Deck the shelf redesign's caches are the
-        live-set staircase -- parsed runs (~15KB x every cart, 512KB cap), the
-        cover blittables (768KB-pixel cap + the device RGB565 bakes), the 76.8KB
-        decode scratch -- all sized for the P4 and none of it read while a game
-        owns the glass, yet every GC pause marks it (114ms at the old 638KB live
-        set vs 243ms at 1427KB, measured on glass). Covers are regenerable by
-        design, so the trade is: halve the mid-play GC pause, pay a shelf
-        pop-in on the way back home (_cover_seen re-arms the idle prefetch).
-        _cover_none stays: knowing a cart HAS no art is a probe saved, not RAM.
-
-        KEEPS the newest _COVER_DIET_KEEP entries of both LRUs (owner ask
-        2026-08-03, "I'd rather not have pop-in"): the covers on screen when
-        PLAY was tapped are the most recently touched, so the exact view the
-        kid returns to is still warm (~150KB retained vs ~800KB dropped) and
-        only cards scrolled into view later rebuild -- their normal cold path,
-        prefetch-warmed. The full fix (cover payloads in moy_alloc storage the
-        collector never scans, warm AND GC-invisible) is the standing follow-up."""
-        # #186: drop the in-flight jobs FIRST -- they alias runs blobs and the
-        # decode scratch, and the frees below must not race a half-built cover.
-        self._cover_jobs = {}
-        keep = _COVER_DIET_KEEP
-        order = self._cover_cache_order
-        cache = self._cover_cache
-        while len(order) > keep:
-            k = order.pop(0)
-            img = cache.pop(k, None)
-            if img is not None:
-                self._cover_cache_pixels -= len(img.pix)
-                self._free_cover_img(img)       # #186: pix + bakes off-heap
-        rorder = self._cover_runs_order
-        runs = self._cover_runs
-        while len(rorder) > keep:
-            k = rorder.pop(0)
-            gone = runs.pop(k, None)
-            if gone is not None:
-                self._cover_runs_bytes -= len(gone[1][2])
-                self._cover_free_runs(gone[1][2])
-        if self._cover_buf is not None:
-            _moybuf.free(self._cover_buf)       # the 76.8KB decode scratch
-        self._cover_buf = None                  # realloc'd on demand
-        self._cover_gen += 1          # any shelf band repaints from scratch
-        self._cover_seen = True       # re-arm the idle prefetch for the return home
-
-    def _cover_runs_put(self, path, sig, runs):
-        """Cache parsed runs, LRU-bounded by packed bytes."""
-        cache = self._cover_runs
-        order = self._cover_runs_order
-        old = cache.get(path)
-        if old is not None:
-            self._cover_runs_bytes -= len(old[1][2])
-            self._cover_free_runs(old[1][2])   # #186: replaced blob returns
-            try:
-                order.remove(path)
-            except ValueError:
-                pass
-        cache[path] = (sig, runs)
-        order.append(path)
-        self._cover_runs_bytes += len(runs[2])
-        while order and self._cover_runs_bytes > _COVER_RUNS_MAX_BYTES:
-            drop = order.pop(0)
-            if drop == path:              # never evict the one just stored
-                order.insert(0, drop)
-                break
-            gone = cache.pop(drop, None)
-            if gone is not None:
-                self._cover_runs_bytes -= len(gone[1][2])
-                self._cover_free_runs(gone[1][2])   # #186 (job-alias guarded)
-
-    def _cover_spend(self, t0):
-        """Charge this frame's cover budget (see _cover_for)."""
-        self._cover_ms += _ticks_diff(_ticks_ms(), t0)
-
-    def _cover_finish(self, key, img):
-        """Insert a finished cover (or a definitive miss) into the bounded
-        LRU cache and return it."""
-        cache = self._cover_cache
-        cache[key] = img
-        order = self._cover_cache_order
-        order.append(key)
-        self._cover_gen += 1
-        if img is not None:
-            # A serial name (never reused) routes the web recorder onto the
-            # ship-once ["imgref", ...] wire (#63 Fold 4): the pixels ride
-            # /assets once (cover_assets below), and an edited cover's REBUILD
-            # gets a fresh name, so a browser can never show a stale cache hit.
-            img._name = "cover:%d" % self._cover_serial
-            self._cover_serial += 1
-        if img is not None:
-            self._cover_cache_pixels += len(img.pix)
-        while (len(order) > _COVER_CACHE_MAX_ENTRIES
-               or self._cover_cache_pixels > _COVER_CACHE_MAX_PIXELS):
-            old_key = order.pop(0)
-            old_img = cache.pop(old_key, None)
-            if old_img is not None:
-                self._cover_cache_pixels -= len(old_img.pix)
-                self._free_cover_img(old_img)   # #186: pix + bakes off-heap
-        return img
-
-    def prebuild_covers(self):
-        """Build EVERY cover the shelf's next draw needs to COMPLETION, now --
-        bypassing the per-frame _COVER_SLICE_MS budget by re-arming it per step
-        (owner ask 2026-07-23 "ship them all once"). Wired into the HOST web
-        /assets handler (tools/web_console.assets), so cover_assets() below
-        returns the WHOLE shelf in one payload and the browser never hits the
-        per-thumbnail cache-miss -> /assets refetch loop. Cheap after the first
-        session (the #86 thumb sidecars make each build one small read); the
-        DEVICE deliberately keeps the budgeted pop-in + self-healing refetch
-        instead -- a first-boot prebuild without sidecars would stall its
-        single-threaded loop for seconds per shelf."""
-        specs = getattr(self.launcher, "cover_specs", None)
-        if specs is None:
-            return
-        for cart, w, h in specs():
-            path = cart.get("path")
-            if path is None:
-                continue
-            key = (path, w, h)
-            guard = 400                    # hard ceiling: ~400 x 8ms slices
-            while key not in self._cover_cache and guard:
-                guard -= 1
-                self._cover_built = False  # re-arm the one-slice-per-frame gate
-                self._cover_for(cart, w, h)
-
-    def cover_assets(self):
-        """{name: (w, h, index_bytes)} for every LIVE shelf-cover blittable --
-        merged into both web transports' /assets images (#113): a cover then
-        ships to the browser ONCE and every card redraw references it by name
-        (["imgref", ...]) instead of carrying ~40KB of inline b64 (the measured
-        payload eater of shelf drag/fling frames). A cover built after the
-        page's last /assets fetch simply misses client-side, which latches the
-        page's imgWant refetch -- the same self-healing loop paint images use."""
-        out = {}
-        for img in self._cover_cache.values():
-            if img is not None:
-                out[img._name] = (img.w, img.h, bytes(img.pix))
-        # The wallpaper backdrop composite rides the same lane (#113: a static
-        # wallpaper's frame is stable, so it ships once and every desk/drag
-        # frame references it instead of inlining ~100KB of b64).
-        wa = getattr(self.wallpaper, "wire_assets", None)
-        if wa is not None:
-            out.update(wa())
-        return out
 
     # -- Settings screen (#28) -----------------------------------------------
     #
@@ -2982,7 +1797,7 @@ class Workstation:
         # sysmenu draws on the SYSTEM canvas, so anchor to the responsive Layout's
         # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
         bx, _by, bw, _bh = self.layout.sysmenu_btn
-        fs = self._effective_font_scale()
+        fs = self.look.effective_font_scale()
         self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled geometry
         pw = _POPUP_W * fs
         ax = bx + bw - pw
@@ -3009,8 +1824,8 @@ class Workstation:
         # The cart-run body moved to Player.start (Stage 2, player.py); this stays as
         # the tested ws. entry point (tools + apply/run_code/_leave_menu/open call it)
         # -- run() is the caller-recording wrapper around it (see below).
-        if self.cover_diet:
-            self._release_cover_caches()   # RAM-tight tier: the shelf's caches are
+        if self.covers.diet:
+            self.covers.diet_release()     # RAM-tight tier: the shelf's caches are
                                            # dead weight (and GC-pause fuel) mid-play
         return self.player.start(self.project)
 
@@ -3291,7 +2106,7 @@ class Workstation:
         # the two-writer case the parked switch is designed to prevent. go_home
         # releases the dead run and re-parks (its own tail lists "a crash" as one
         # of the doors it funnels).
-        if self._web_parked:
+        if self.web.parked:
             self.cart_error = None
             self.crash_line = None
             self.go_home()
@@ -3419,58 +2234,6 @@ class Workstation:
         # (cards_layer sets ws.cart_error then calls ws._draw_error_panel()).
         self.player._draw_error_panel()
 
-    def slim_carts(self):
-        """The #66 live-set diet: after the backend wires the cart store, drop every
-        SD-backed cart's heavy payloads (source/sprites/sounds/map/images/blocks)
-        from the scanned list -- the launcher only needs metadata + the icon, which
-        is baked into the icon cache here first. Cuts the permanently-live heap by
-        ~300-500KB, which is most of a GC collect's mark cost (~0.2ms/KB on device).
-        Embedded carts (no path / no store) stay fat -- they cannot be reloaded."""
-        if self.carts_store is None:
-            return
-        for cart in self._all_carts:
-            if not cart.get("path") or cart.get("lazy"):
-                continue
-            try:
-                self._icon_sheet_for(cart)     # bake the grid icon while the art is here
-            except Exception:  # noqa: BLE001 -- a bad sheet just gets the type glyph
-                pass
-            for k in _HEAVY_CART_KEYS:
-                if k in cart:
-                    del cart[k]
-            cart["lazy"] = True
-        try:
-            import gc
-            gc.collect()                       # reclaim the dropped payloads NOW
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _rehydrate_cart(self, cart):
-        """Load a slimmed cart's full payloads back from the store IN PLACE (the
-        launcher/picker hold the same dict, so every reference fattens at once).
-        No-op for fat/embedded carts; a failed load leaves the cart slim and the
-        caller's error handling surfaces it (missing src -> the crash panel)."""
-        if not cart.get("lazy") or self.carts_store is None or not cart.get("path"):
-            return cart
-        try:
-            full = self._with_sd(lambda: self.carts_store.load(cart["path"]))
-        except Exception:  # noqa: BLE001 -- SD hiccup: stay slim, surface downstream
-            full = None
-        if full:
-            cart.update(full)
-            cart["lazy"] = False
-        return cart
-
-    def _reslim_cart(self, cart):
-        # Re-slim a previously-opened cart when the workspace moves on (keeps at
-        # most ~one fat cart live). Only SD-backed carts that slim_carts managed.
-        if cart is None or not cart.get("path") or cart.get("lazy") is not False:
-            return
-        for k in _HEAVY_CART_KEYS:
-            if k in cart:
-                del cart[k]
-        cart["lazy"] = True
-
     def _open_workspace(self, cart=None):
         # Build a fresh Project for `cart` (default: the launcher selection) + start it,
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
@@ -3510,8 +2273,8 @@ class Workstation:
             cart = next((c for c in self.launcher.items if c.get("path")), cart)
         prev = getattr(self, "_fat_cart", None)
         if prev is not None and prev is not cart:
-            self._reslim_cart(prev)            # at most ~one fat cart stays live (#66)
-        self._rehydrate_cart(cart)
+            self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
+        self.carts.rehydrate(cart)
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
@@ -3614,8 +2377,9 @@ class Workstation:
         # re-derive it here or the first-built grid keeps the app carts it was
         # built without knowing about. Cheap: a handful of app registrations at
         # boot, each a list rebuild over the already-scanned carts.
-        if getattr(self, "_all_carts", None) and getattr(self, "picker", None):
-            self.picker.set_items(self._picker_items(self._all_carts))
+        _carts = getattr(self, "carts", None)
+        if _carts is not None and _carts.all and getattr(self, "picker", None):
+            self.picker.set_items(self._picker_items(_carts.all))
 
     def app_min_size(self, kind):
         """The registered windowed resize minimum for app `kind`, or None."""
@@ -3676,7 +2440,7 @@ class Workstation:
         # be a dead end on the device). Authoring is a separate app (the Editor), reached
         # via the launcher's Make tile -> project-picker, not a tap-mode on the launcher.
         selected = self.launcher.selected()
-        self._note_recent(selected)    # #105 desk_mru: every launcher-tap run counts
+        self.carts.note_recent(selected)   # #105 desk_mru: every launcher-tap run counts
         self.search_typing = False     # a RUN always ends any in-progress query typing
         # SYSTEM APPS (docs/app_api_v1.md): a cartridge identity backed by a
         # responsive system process. Deliberately NOT the Player: the Player is
@@ -3697,7 +2461,7 @@ class Workstation:
         mode BOTH ways, so a jump out of a typing app restores the raw
         keyboard. Returns False when no cart carries the app's identity."""
         if cart is None:
-            for c in self._all_carts:
+            for c in self.carts.all:
                 if app.is_app(c):
                     cart = c
                     break
@@ -3877,19 +2641,13 @@ class Workstation:
             self.open_in_editor(sel)
 
     def new_cart_and_edit(self):
-        """The picker's "+ New": create a fresh GAME cart (NEW_TEMPLATE), re-sync both
-        grids, then open the new cart in the Editor. A no-op on a read-only store (a
-        device without SD writes), leaving the picker up rather than crashing."""
-        if not self.carts_root or not self.can_manage:
+        """The picker's "+ New": create a fresh GAME cart (`carts.new()` does the
+        create, the re-scan and both grids), then open it in the Editor. A no-op
+        on a read-only store (a device without SD writes) or a failed write --
+        `carts.new()` returns None and the picker simply stays up."""
+        new = self.carts.new()
+        if new is None:
             return
-        try:
-            new, items = self._with_sd(lambda: (
-                self.carts_store.new_from_template(self.carts_root),
-                self.carts_store.scan(self.carts_root)))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte new cart failed:", exc)
-            return
-        self._apply_items(items)
         # Select the new cart in the picker so returning to it (the Editor's "projects"
         # affordance) lands on the freshly-created project, then open it in the Editor.
         for i, it in enumerate(self.picker.items):
@@ -4107,349 +2865,14 @@ class Workstation:
             # (still reachable -> the kid can reopen the editor to fix it).
             self.run(self.project, self.editor_app)
 
-    # -- durable undo/redo (Stage 7 of docs/history/shell_ux_technical_plan_v1.md) ------
-    #
-    # The kid-facing verbs over the moy_carts journal walk. UI TRIGGER: resolved by
-    # owner decision (#88, 2026-07-18) -- shared UNDO/REDO icons in the Editor's lent
-    # top-bar zone (EditorApp.draw_zone/_ZONE_TABS), reachable from every tab
-    # (Code/Blocks/Sprites/Map/Scene/Music), on top of the code editor's existing
-    # Ctrl+Z / Ctrl+Y host shortcut (code_layer.py) -- both drive the SAME
-    # ws.undo()/ws.redo() mechanism, so neither affordance can drift from the other.
-
-    def _active_history(self):
-        """The FINE-GRAINED op-history (#111) of the active Editor tab -- paint/map
-        (phase 2) + code/blocks/scene/music/config (phase 4): every tab keeps an
-        in-RAM op stack now, or None with no live editor. Resolved through the
-        project's per-tab registry keyed on `menu_view` (Project.history_for), so a
-        stale editor from an earlier tab is never consulted; the caller (the bar
-        UNDO/REDO icons, only reachable inside the Editor) guarantees the Editor is
-        the focused surface, so no back-stack check is needed."""
-        return self.project.history_for(self.menu_view)
-
-    # -- code editor op-history + typing burst (#111 phase 4) -------------------
-    # The code tab's History + its open typing burst live HERE (where the keyboard
-    # input is handled), not on the pure CodeEditor core. A burst opens on the
-    # first edit and CLOSES (records one net-diff op) on the autosave debounce, an
-    # Enter, and an undo press -- the three edges the spec names.
-
-    def _code_op_history(self):
-        """The code editor's History, created lazily over the live CodeEditor and
-        rebound when a fresh editor is built (a new cart / reopen). None with no
-        editor open. Rebinding resets the open burst so a stale pre-image can't
-        leak across editors."""
-        ed = self.editor
-        if ed is None:
-            return None
-        h = self._code_hist
-        if h is None or h.doc is not ed:
-            self._code_hist = History(ed, TextEditCodec())
-            self._code_burst_before = None
-        return self._code_hist
-
-    def _code_burst_open(self):
-        """Mark a code typing/delete burst's start: snapshot the buffer text ONCE
-        (idempotent while a burst is open), so the net change since it began becomes
-        one undo op when it closes. No-op with no code editor."""
-        if self.editor is None:
-            return
-        self._code_op_history()               # ensure the History is bound to this editor
-        if self._code_burst_before is None:
-            self._code_burst_before = self.editor.text()
-
-    def _close_code_burst(self):
-        """Close the live code burst into ONE op = the net text diff since it began.
-        A no-op when nothing is pending or the burst net-cancelled back to its start
-        (typed then fully backspaced). Called on the burst edges: the autosave
-        debounce (commit_code), an Enter (code_layer), and an undo press (below)."""
-        before = self._code_burst_before
-        self._code_burst_before = None
-        hist = self._code_op_history()
-        ed = self.editor
-        if before is None or hist is None or ed is None:
-            return
-        after = ed.text()
-        if before == after:
-            return
-        op = text_diff_op(before, after)
-        if op is not None:
-            hist.record(op)
-
-    def _code_burst_pending(self):
-        """True iff a live code burst holds an un-recorded net change -- so can_undo()
-        reports it WITHOUT the side effect of closing the burst (the dim-state read)."""
-        return (self._code_burst_before is not None and self.editor is not None
-                and self.editor.text() != self._code_burst_before)
-
-    def _seal_active_local(self):
-        """Close any in-progress edit on the active tab BEFORE an undo/redo, so a
-        just-made, not-yet-recorded edit is undo's first target: a live code typing
-        burst, an un-sealed block edit. A no-op for tabs without one (paint/map seal
-        their own stroke/batch on release)."""
-        v = self.menu_view
-        if v == "code":
-            self._close_code_burst()
-        elif v == "blocks":
-            be = getattr(self.block_ui, "blocks_ed", None)
-            if be is not None:
-                be._seal_pending()
-
-    def _active_local_pending(self):
-        """True iff the active tab has an in-progress edit not yet on its History (a
-        live code burst / an un-sealed block edit), so can_undo() dims correctly
-        without sealing it."""
-        v = self.menu_view
-        if v == "code":
-            return self._code_burst_pending()
-        if v == "blocks":
-            be = getattr(self.block_ui, "blocks_ed", None)
-            return be is not None and be._pending_changed()
-        return False
-
-    def _bar_undo_bits(self):
-        """RAM-only dim-state bits for the bar cache key: the active tab's local
-        op-history depth + its live-burst/edit flag, so a stroke/typing burst
-        un-dims the bar UNDO icon on the very next frame (a stroke records into a
-        History without any journal commit, and the strip cache otherwise only
-        rebuilds on a clock tick or zone change). Deliberately EXCLUDES the
-        SD-backed journal check (_journal_check reads the journal log -- keying
-        the per-frame cache on it would cost a disk read per frame); journal-level
-        dim flips already invalidate the bar explicitly (Project._journal,
-        _journal_walk)."""
-        hist = self._active_history()
-        local_undo = (hist is not None and hist.can_undo()) or self._active_local_pending()
-        return (local_undo, hist is not None and hist.can_redo())
-
-    def _after_local_history(self):
-        """After a fine-grained (paint/map/code/blocks) undo/redo: the editor mutated
-        its LIVE doc in place (sheet/tilemap gen bumped for a running preview; the code
-        buffer rewritten), so there's no cart reload -- just repaint and re-check the
-        bar's dimmed state (#111). The code buffer's set_text() cleared its dirty flag,
-        so re-arm it: the reverted text must persist at the next commit (autosave/exit).
-        The one other exception is SCENE: its rows are a separate in-editor list that
-        only reaches the running cart's `scene()` via an explicit sync (the same one
-        every committed gesture calls, scene_editor_ui._sync_live), so a bar-driven
-        undo/redo must call it too."""
-        self._dirty = True
-        self.bar_layer.invalidate()
-        if self.menu_view == "code" and self.editor is not None:
-            self.editor.dirty = True
-            # An undo/redo rewrote the buffer: RE-CHECK the marked error (owner
-            # 2026-07-23) -- it retires only if the restored code actually
-            # parses again; a still-broken restore keeps a live marker.
-            self.code_layer._recheck_err()
-        elif self.menu_view == "scene":
-            self.scene_ui._sync_live()
-
-    def undo(self):
-        """Undo one step for the active Editor tab (#111). A tab with an in-RAM
-        op-history (paint/map strokes, code typing bursts, block edits) UNWINDS it
-        FIRST (one stroke/gesture/burst/edit/field tweak), and only once that's
-        exhausted falls through to the durable journal walk (one whole commit) -- so
-        the SAME bar icon crosses the local->commit boundary; every Editor tab keeps
-        an in-RAM op stack now (#111 phase 4). Returns True iff a step was taken. NOTE the
-        boundary is CLEAN: falling into the journal reloads the editor with a fresh
-        (empty) History, so continued presses walk whole commits until new
-        fine-grained edits are made (the seed-from-journal option was deferred)."""
-        self._seal_active_local()             # a live burst/edit is undo's first target
-        hist = self._active_history()
-        if hist is not None and hist.can_undo() and hist.undo() is not None:
-            self._after_local_history()
-            return True
-        return self._journal_walk(False)
-
-    def redo(self):
-        """Re-apply one step (the inverse of undo): local op-history redo first, then
-        the durable journal redo. Returns True iff a step was taken."""
-        self._seal_active_local()             # close a stray open edit before walking redo
-        hist = self._active_history()
-        if hist is not None and hist.can_redo() and hist.redo() is not None:
-            self._after_local_history()
-            return True
-        return self._journal_walk(True)
-
-    def can_undo(self):
-        """Read-only: True iff undo() would restore something (#88/#111, the bar icon's
-        dimmed state). Consults the active tab's op-history FIRST (a cheap in-RAM
-        check, no I/O) -- including a live-but-unrecorded code burst / block edit --
-        then the journal (a journal.jsonl parse -- an SD read, so only ask when about
-        to REPAINT, never on a per-frame hot path)."""
-        hist = self._active_history()
-        if hist is not None and (hist.can_undo() or self._active_local_pending()):
-            return True
-        return self._journal_check(False)
-
-    def can_redo(self):
-        """Read-only counterpart to can_undo() for redo()."""
-        hist = self._active_history()
-        if hist is not None and hist.can_redo():
-            return True
-        return self._journal_check(True)
-
-    def _active_tab_files(self):
-        """The journal file set the bar UNDO/REDO should walk for the ACTIVE Editor tab
-        (#111 owner decision): the fallback journal walk is scoped to the tab's own
-        file(s), so an undo on one tab never reverts another's newest commit and REDO
-        only lights on the tab that has something ahead. A tuple of journal file names,
-        or None (the legacy whole-project walk) for a tab with no defined set / outside
-        the Editor. `main` is the cart's actual main file (#67: main.lua for a lua cart),
-        matching how commits name it (_journal_code)."""
-        v = self.menu_view
-        cart = self.cart or {}
-        mainf = cart.get("main", "main.py")
-        if v == "code":
-            return (mainf,)
-        if v == "blocks":
-            # blocks.json is not itself journaled today (block saves write it straight to
-            # disk); main.py IS -- so the pair is walked together and can't desync, and a
-            # GRADUATED cart's read-only Blocks tab reaches the main.py graduating commit
-            # (its grad rider un-graduates on the same press).
-            return ("blocks.json", mainf)
-        if v == "cards":
-            return ("config.json",)
-        if v == "paint":
-            return ("sprites.moygfx",)
-        if v == "map":
-            return ("map.moymap",)
-        if v == "music":
-            return ("sounds.json",)
-        if v == "scene":
-            name = getattr(self.scene_ui, "scene_name", None)
-            store = self.carts_store
-            if name and store is not None:
-                sd = getattr(store, "SCENES_DIR", "scenes")
-                ext = getattr(store, "SCENE_EXT", ".moyscene")
-                return (sd + "/" + name + ext,)
-            return None
-        return None
-
-    def _journal_check(self, redo):
-        store = self.carts_store
-        if store is None or not self.cart:
-            return False
-        path = self.cart.get("path")
-        name = "journal_can_redo" if redo else "journal_can_undo"
-        if not (path and self.can_manage and hasattr(store, name)):
-            return False
-        fn = getattr(store, name)
-        files = self._active_tab_files()
-        try:
-            return bool(self._with_sd(lambda: fn(path, files)))
-        except Exception as exc:  # noqa: BLE001 -- a check failure must never crash the shell
-            print("Moybyte journal check failed:", _err_text(exc))
-            return False
-
-    def _journal_walk(self, redo):
-        store = self.carts_store
-        if store is None or not self.cart:
-            return False
-        path = self.cart.get("path")
-        if not (path and self.can_manage and hasattr(store, "journal_undo")):
-            return False
-        fn = store.journal_redo if redo else store.journal_undo
-        files = self._active_tab_files()
-        try:
-            changed = self._with_sd(lambda: fn(path, files))
-        except Exception as exc:  # noqa: BLE001 -- a walk failure must never crash the shell
-            print("Moybyte journal walk failed:", _err_text(exc))
-            return False
-        if not changed:
-            return False           # at a floor/ceiling -- nothing to restore
-        self._reload_after_walk(changed)
-        self._dirty = True
-        # The walk just moved the journal cursor, flipping can_undo()/can_redo() --
-        # invalidate so the bar's UNDO/REDO icons re-check + repaint their dimmed
-        # state on the NEXT frame (#88) instead of showing a stale enabled/disabled
-        # look until some unrelated zone_gen bump happens to force a re-render.
-        self.bar_layer.invalidate()
-        return True
-
-    def _reload_after_walk(self, file):
-        """After the journal rewrote a live cart file on SD (undo/redo), re-adopt the
-        fresh data into the OPEN workspace and rebuild the affected editor so the kid
-        SEES the revert. Reloads the whole cart (uniform across file types) but keeps
-        the current tab; re-_start()s so a running preview reflects the restored code.
-        `file` is which live file the walk touched (informational -- the reload is
-        wholesale)."""
-        store = self.carts_store
-        path = self.cart["path"]
-        try:
-            fresh = self._with_sd(lambda: store.load(path))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte reload after undo failed:", _err_text(exc))
-            return
-        if not fresh:
-            return
-        self.cart = fresh
-        self.config = dict(fresh.get("cfg", {}))
-        self.project.reset_config_history()  # #111 phase 4: fresh baseline post-walk
-        self.sheet = self._build_sheet()
-        self.tilemap = self._build_tilemap()
-        self.images = fresh.get("images") or {}
-        self.tables = fresh.get("tables") or {}
-        self.texts = fresh.get("texts") or {}
-        self.scenes = self._build_scenes()   # a scene undo must reach the live rows (#85)
-        self.cart_error = None
-        self.crash_line = None
-        self.crash_popup = None        # the popup is transient -- any walk ends it
-        # Keep the kid's place in the code: the rebuild below resets the fresh
-        # CodeEditor's caret to the top, which read as "undo threw me to the
-        # start of the file" (owner report 2026-07-23). goto_row clamps, so a
-        # shrunken restore lands on the nearest surviving line.
-        caret = None
-        if self.menu_view == "code" and self.editor is not None:
-            caret = (self.editor.row, self.editor.col)
-        # Drop the editor cores + rebuild the ACTIVE tab's over the fresh data, then
-        # re-run so a running cart / a subsequent PLAY uses the restored source/art.
-        self.editor = None
-        self.paint = None
-        self.map_ui.reset()
-        self.scene_ui.reset()
-        self.music_ui.reset()
-        self.block_ui.reset()
-        view = self.menu_view
-        if self.wm.top_is("menu") and view in ("code", "paint", "map", "scene",
-                                               "blocks", "music"):
-            self.set_menu_view(view)     # rebuild the active editor from fresh data
-            if caret is not None and self.editor is not None:
-                self.editor.goto_row(caret[0], caret[1])
-            if view == "code":
-                # Re-check the restored text (owner 2026-07-23): a marker only
-                # retires when the code actually parses again.
-                self.code_layer._recheck_err()
-        self._start()
+    # (The #111 bar UNDO/REDO pair, the code typing burst, the tab-scoped
+    # journal walk and the post-walk workspace reload all live on
+    # self.history now -- history_router.py, #209 landing E.)
 
     def save_sprites(self):
         # Store-write moved to Project.commit_sprites (Stage 1b); this stays as the
         # tested ws. entry point PaintLayer's SAVE dispatches to.
         self.project.commit_sprites()
-
-    def save_icons(self):
-        """Persist the edited system icon sheet to system_icons.moygfx (Stage 2 / #52),
-        the exact mirror of save_sprites/save_shared_sheet: to_hex -> the SAME SD
-        wrapper the cart-sprite save uses (host: direct write; device: with_sd_live).
-        Then invalidate the bar caches so the NEXT bar draw shows the new pixels live:
-        set_icon_sheet drops the per-kind _SheetSprite cache (and with it the device's
-        per-Image RGB565 blit cache), and the sheet's gen already bumped on each pset
-        so any gen-keyed cache rebuilds too. Surfaces a save status like the cart
-        paint editor. A bad store/no SD root is a no-op (writes deferred)."""
-        if not (self.icon_sheet and self.carts_root and self.can_manage):
-            return
-        hexs = self.icon_sheet.to_hex()
-        try:
-            self._with_sd(lambda: self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION))
-            self.icon_sheet.dirty = False
-            self.save_status = None           # clear stale failure text (see commit_code)
-            # Re-adopt the (same) sheet so the bar's per-kind image cache is dropped and
-            # the next _draw_status_strip rebuilds its sprites from the freshest pixels.
-            self.set_icon_sheet(self.icon_sheet)
-            self.ach.note("paint_save")         # "Little Artist": a theme saved (#21)
-        except Exception as exc:  # noqa: BLE001
-            # Mirror save_sprites: a failed save must be VISIBLE on device (no serial in
-            # the run loop), not silent. _err_text-guarded so a weird __str__ can't escape.
-            txt = _err_text(exc)
-            self.save_status = "CAN'T SAVE"
-            self.cart_error = "Could not save icons -- " + txt
-            print("Moybyte save icons failed:", txt)
 
     def _leave_theme(self):
         # CLOSE/back from the theme editor -> the lifecycle lives on self.theme_layer;
@@ -4617,7 +3040,7 @@ class Workstation:
         if _editor_app is not None and _editor_app.project is self.project:
             _editor_app.save_current()
         if self._editing_icons:
-            self.save_icons()          # the theme editor has no bar of its own
+            self.look.save_icons()     # the theme editor has no bar of its own
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
@@ -4640,7 +3063,7 @@ class Workstation:
         # editing state, not a corpse.
         _fat = getattr(self, "_fat_cart", None)
         if _fat is not None:
-            self._reslim_cart(_fat)
+            self.carts.reslim(_fat)
             self._fat_cart = None
         self.project = Project(self)
         self.cart_error = None
@@ -4654,7 +3077,7 @@ class Workstation:
         # close, a crash -- and every one of them funnels through this method. A
         # per-door re-park is the bug class that left the T-Deck without a web
         # console at all; this is the last line of the one door they share.
-        if self._web_parked:
+        if self.web.parked:
             self.wm.goto("webconsole")
 
     # -- cart management (SD) ------------------------------------------------
@@ -4691,9 +3114,9 @@ class Workstation:
         active search query (#105), if any -- a plain case-insensitive substring
         match on the title. The pinned Make tile always survives a filter (it's
         not a cart to search for, it's the way to keep making one). The single
-        place a rescan (_apply_items) and a query edit (set_search_query) both
+        place a rescan (carts.apply) and a query edit (set_search_query) both
         call, so the two can never desync on which list is "current"."""
-        base = self._launcher_items(self._all_carts)
+        base = self._launcher_items(self.carts.all)
         q = self.search_query.strip().lower()
         if not q:
             return base
@@ -4776,83 +3199,11 @@ class Workstation:
             carts = keep
         return [new_tile()] + list(carts)
 
-    def _apply_items(self, items):
-        # Re-sync BOTH display grids from a fresh scan (the single source `_all_carts`),
-        # re-deriving the pinned pseudo tiles so a create/dup/delete lands in both.
-        if items:
-            self._all_carts = list(items)
-            self.slim_carts()              # #66: a rescan reloads FULL carts -- re-slim
-            self._cover_jobs = {}          # in-flight builds may read stale blobs
-                                           # (#186: cleared BEFORE the frees below,
-                                           # so no job can alias a freed payload)
-            for _img in self._cover_cache.values():
-                self._free_cover_img(_img)     # #186: pix + bakes off-heap
-            self._cover_cache = {}         # a re-scan may carry new/changed cover art
-            self._cover_cache_order = []
-            self._cover_cache_pixels = 0
-            # Sources too: they are stamped against the blob, so an edited cover
-            # would be caught anyway -- but a rescan is also when a cart goes
-            # away, and holding its 77KB source would be a leak.
-            for _e in self._cover_runs.values():
-                self._cover_free_runs(_e[1][2])
-            self._cover_runs = {}
-            self._cover_runs_order = []
-            self._cover_runs_bytes = 0
-            self._cover_none = {}
-            self._cover_gen += 1
-            self._cover_seen = True        # re-arm the idle prefetch: new/changed
-                                           # carts should warm before their surface opens
-            self.launcher.set_items(self._launcher_view_items())   # #105: keep an active filter
-            self.picker.set_items(self._picker_items(items))
-
     def _real_selected(self, grid):
         """The selected cart on `grid`, or None if it's a pinned pseudo tile (Make/New)
         -- so cart management (dup/del) never acts on a non-cart."""
         sel = grid.selected()
         return sel if (sel and sel.get("path")) else None
-
-    def new_cart(self):
-        if not self.carts_root or not self.can_manage:
-            return
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.new_from_template(self.carts_root),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte new cart failed:", exc)
-
-    def dup_cart(self):
-        # DUP now fires from the Editor picker's zone (docs/shell_ux_v1.md: the picker
-        # manages projects, the launcher only plays) -- so it acts on the PICKER's
-        # selection, not the launcher's.
-        sel = self._real_selected(self.picker)
-        if not self.carts_root or not self.can_manage or sel is None:
-            return
-        self._rehydrate_cart(sel)   # #66: duplicate() copies src/cfg FROM the dict
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.duplicate(sel, self.carts_root),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte duplicate failed:", exc)
-
-    def del_cart(self):
-        # Delete the OPEN cart when one is open (the sysmenu DELETE CART -- a cart opened
-        # from the picker is NOT necessarily the picker's current selection), else the
-        # picker's selection (the picker-zone DEL, docs/shell_ux_v1.md -- moved off the
-        # launcher, which no longer has a management cluster at all). Keep at least one
-        # real cart on the device.
-        target = self.cart if (self.cart is not None and self.cart.get("path")) \
-            else self._real_selected(self.picker)
-        if not self.carts_root or not self.can_manage or target is None \
-                or len(self._all_carts) <= 1:
-            return
-        try:
-            self._apply_items(self._with_sd(lambda: (
-                self.carts_store.delete(target),
-                self.carts_store.scan(self.carts_root))[1]))
-        except Exception as exc:  # noqa: BLE001
-            print("Moybyte delete failed:", exc)
 
     def adjust(self, d):
         # Config mutation stays on Workstation (ws.config is the single source of cart
@@ -4940,7 +3291,7 @@ class Workstation:
         if (self.editor is not None and self.wm.top_is("menu")
                 and self.menu_view == "code"
                 and (i.last_key or getattr(i, "_pressed", None))):
-            self._edit_ms = _ticks_ms()
+            self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
         # reversed() iterator on a static top-of-stack.
@@ -5119,7 +3470,7 @@ class Workstation:
         Drawn on the system canvas above the whole stack; indexed API only
         (host == device == web)."""
         cv = self.sys_canvas
-        fs = self._effective_font_scale()
+        fs = self.look.effective_font_scale()
         label = "LOADING..."
         w = (len(label) * 8 + 16) * fs
         h = 16 * fs
@@ -5241,7 +3592,7 @@ class Workstation:
         `ws.canvas` into it: with the system canvas bound, the window blits the
         screen into a rectangle OF that screen and the desktop renders as a
         recursive smear of its own bar. Giving a cart its own window surface is a
-        `wm_windowed` change, which `docs/ui_refactor_2026-08.md` Section 6 puts
+        `wm_windowed` change, which `docs/history/ui_refactor_2026-08.md` Section 6 puts
         out of scope -- so in the desk world a responsive cart keeps the fixed
         raster and is told (320, 240) by `_layout`, which is the truth. From the
         fullscreen Library (the play world, where `windowed_chrome` is False
@@ -5283,7 +3634,7 @@ class Workstation:
         """Ask for one more frame from WITHIN a draw (#113: a coasting fling).
         mark_dirty() would be lost here -- the gate clears _dirty right after
         the draw -- so this sets a flag consumed AFTER that clear (the
-        _covers_deferred pattern)."""
+        covers.take_deferred pattern)."""
         self._frame_requested = True
 
     def mark_dirty(self):
@@ -5355,12 +3706,15 @@ class Workstation:
                 "install", "done", "checking", "downloading",
                 "c6_checking", "c6_downloading", "c6_flashing", "c6_done"):
             return True
-        # Transient overlays redraw while they're up.
-        if self.ach_ui._confetti_until and _ticks_diff(self.ach_ui._confetti_until, _ticks_ms()) > 0:
+        # Transient overlays redraw while they're up. Three plain int reads (#209
+        # landing B): the achievement objects wrote these at their event, so this
+        # gate never calls into them -- and one clock read serves all three.
+        now = _ticks_ms()
+        if self._confetti_until and _ticks_diff(self._confetti_until, now) > 0:
             return True
-        if self.ach_ui._egg_active():
+        if self._egg_until and _ticks_diff(self._egg_until, now) > 0:
             return True
-        if self.ach.toast_active():
+        if self._toast_until and _ticks_diff(self._toast_until, now) > 0:
             return True
         if self.notice_active():
             return True
@@ -5391,47 +3745,6 @@ class Workstation:
     # system-domain now and always fully covered the backdrop anyway, so the tabs
     # just reset the game canvas's draw state and paint their own opaque body.)
 
-    def _autosave_code(self):
-        """The idle-debounce autosave-COMMIT (Stage 7): persist + journal the code
-        editor's buffer once the kid has stopped typing, WITHOUT the SAVE UI (save is
-        invisible, spec Section 7). Only commits parseable source -- a mid-edit syntax
-        error just waits (no nag) -- and only a real, writable edit. commit_code does
-        the persist + the durable journal append + clears editor.dirty."""
-        ed = self.editor
-        if ed is None or not getattr(ed, "dirty", False):
-            return
-        if (self.carts_store is None or not self.cart
-                or not self.cart.get("path") or not self.can_manage):
-            ed.dirty = False              # nothing persistable (embedded/non-SD) -> disarm
-            return
-        src = ed.text()
-        ok, _msg = self.carts_store.compile_check(src)
-        if not ok:
-            return                        # don't autosave/journal un-parseable source
-        # quiet=True keeps the autosave invisible (spec Section 7): it suppresses
-        # the "Code Wizard" achievement toast, and commit_* no longer writes a
-        # "SAVED" status at all (save_status carries FAILURES only) -- so the old
-        # save/restore dance around this call is gone. A failed store write still
-        # surfaces via save_status/cart_error, as it must.
-        self.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
-
-    def _journal_idle_tick(self):
-        """Fire the idle-typing autosave-commit once the code editor has sat quiet for
-        _edit_debounce_ms (Stage 7 soft trigger). Called every frame BEFORE the redraw
-        gate so it runs even while a static editor screen is skipping its redraw -- the
-        exact idle moment the between-frames SD write should land. Cheap: one early-out
-        on the common no-pending-edit path."""
-        if self._edit_ms is None:
-            return
-        ed = self.editor
-        if ed is None or not getattr(ed, "dirty", False):
-            self._edit_ms = None          # the edit was saved/cleared elsewhere -> disarm
-            return
-        if _ticks_diff(_ticks_ms(), self._edit_ms) < self._edit_debounce_ms:
-            return                        # not idle long enough -- the kid is still typing
-        self._edit_ms = None
-        self._autosave_code()
-
     def frame(self, dt):
         # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
         # which is after the journal idle tick, the splash check, the frameskip
@@ -5456,12 +3769,21 @@ class Workstation:
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
             self._frame_dt_ms = min(dt * 1000.0, 100.0)
-        self._cover_built = False     # reset the per-frame cover-build budget
-        self._cover_ms = 0            # ...which is a TIME slice, not a count
+        # The cover collaborator's two per-frame touches: this budget reset and
+        # the deferred drain at the tail. Bound once, here, so both cost a call
+        # and no second lookup (#209 landing C -- nothing else in the loop
+        # reaches into covers, and neither goes through a forward).
+        covers = self.covers
+        covers.begin_frame()          # the per-frame cover-build budget, which is
+                                      # a TIME slice, not a count
         self._pf_home = None          # home-frame split (launcher_layer, perf_capture)
         # Undo journal (Stage 7): the idle-typing autosave debounce runs BEFORE the
-        # redraw gate below, so it fires even on a static (redraw-skipped) editor frame.
-        self._journal_idle_tick()
+        # redraw gate below, so it fires even on a static (redraw-skipped) editor
+        # frame. The router is called DIRECTLY here (#209 landing E, doc 3b: the
+        # frame loop never goes through a forward). Unlike `covers` above it is not
+        # bound to a local -- one call site, so a local would be one store more
+        # than the two attribute loads it saves nothing on.
+        self.history.idle_tick()
         # Boot logo: expire the splash before the redraw gate so THIS frame reveals the
         # launcher. While it's live it's an _animating source, so the loop keeps flushing
         # it; marking dirty on expiry guarantees the launcher paints on the next frame.
@@ -5522,7 +3844,7 @@ class Workstation:
             # built by the draw path, the prefetch is for the ones off-screen.
             self._quiet_frames += 1
             if self._quiet_frames > 2:
-                self._cover_prefetch_tick()
+                covers.prefetch_tick()
                 # Mint the home retained-frame buffer off the paint path too
                 # (idempotent after the first call; the device new_layer
                 # pre-collects, ~150ms nobody should wait for).
@@ -5751,11 +4073,10 @@ class Workstation:
         # We painted this frame: clear the dirty flag and snapshot the pointer state
         # we just drew, so the NEXT frame only repaints if something changes again.
         self._dirty = False
-        if self._covers_deferred:
+        if covers.take_deferred():
             # A shelf cover build was pushed past this frame's budget -- stay
             # dirty so the remaining covers land on the following frames (the
             # flag is set during the draw, AFTER the gate consumed _dirty).
-            self._covers_deferred = False
             self._dirty = True
         if self._frame_requested:
             # A draw asked for a follow-up frame (a coasting kinetic fling,
@@ -5908,6 +4229,23 @@ class Workstation:
         cart = self.cart
         name = cart.get("title") or cart.get("path") or "?"
         return (name, self._fps, self._flush_ms, self._draw_ms)
+
+    def perf_net(self):
+        """The PERF line's `net=` witness: the #65 lockstep tick rate in ticks/s,
+        or **None when no session is gating frames at all**.
+
+        None is not "zero ticks" and must never be printed as 0 -- a board with
+        no lever reports absence (the 2026-08-22 doctrine; `EspNowLink.status`
+        answers the same way for the same reason). A running match reports a
+        real rate: ~30 while it is healthy, lower under stall pressure, 0 while
+        it is matched but frozen.
+
+        This is the PERF emitters' ONE entry to the meter, because the meter
+        CONSUMES its sample window (netplay.LockstepSession.tps) -- perf_sample()
+        stays the `is a cart running?` probe half a dozen diag helpers call, and
+        must not carry a number that a second caller would spend."""
+        np = self.netplay
+        return None if np is None else np.tps(_ticks_ms())
 
     def perf_breakdown(self):
         """(_upd_ms, _cart_ms, _audio_ms, _chrome_ms): the EMA phase split of draw_ms --
@@ -6131,7 +4469,8 @@ class Workstation:
         if self._splash_until is not None:
             return                        # no cursor over the boot logo
         if self.pointer is not None and self.pointer.visible:
-            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y, self.font_scale)
+            self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y,
+                            self.look.font_scale)
 
     def _glyph(self, kind, rect, c, cv=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
@@ -6180,13 +4519,14 @@ class Workstation:
         if key in self._bar_img_cache:
             return self._bar_img_cache[key]
         img = None
-        if self.icon_sheet is not None:
+        sheet = self.look.icon_sheet
+        if sheet is not None:
             slot = _ICON.get(kind)
             if slot is not None:
                 if not light:
-                    img = self.icon_sheet.tile_image(slot)   # transparent -1
+                    img = sheet.tile_image(slot)   # transparent -1
                 else:
-                    base = self.icon_sheet.tile_image(slot, transparent=0)
+                    base = sheet.tile_image(slot, transparent=0)
                     if base is not None:
                         if kind == "moy":
                             img = _SheetSprite(base.w, base.h, base.pix, 0)
@@ -6211,12 +4551,13 @@ class Workstation:
         sheet's untouched pixels are 0: invisible on the black bar, a black plate
         anywhere else. tile_image memoises per (slot, transparent), so this shares
         the sheet's own cache."""
-        if self.icon_sheet is None:
+        sheet = self.look.icon_sheet
+        if sheet is None:
             return None
         slot = _ICON.get(kind)
         if slot is None:
             return None
-        return self.icon_sheet.tile_image(slot, transparent=0)
+        return sheet.tile_image(slot, transparent=0)
 
     def _icon(self, kind, x, y, cv=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
@@ -6247,7 +4588,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     run_desktop -- the P4 literally carried a "same order as host" comment).
     The caller builds its board-specific backends (api/audio/wifi/lua/SD/OTA)
     and hands them in; board glue that must land between the store hookup and
-    the #66 slim_carts diet (the T-Deck's _with_sd + OTA updater) goes through
+    the #66 cart diet (the T-Deck's _with_sd + OTA updater) goes through
     `before_slim(ws)`. can_manage defaults to "the store root is known"; the
     host passes True. Ends with the three boot loads (system.json settings /
     icon theme / achievements) -- install a WindowedWM AFTER this returns, so
@@ -6264,7 +4605,7 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     ws.wifi = wifi
     if before_slim is not None:
         before_slim(ws)
-    ws.slim_carts()   # #66 live-set diet: heavy payloads reload from the store
+    ws.carts.slim()   # #66 live-set diet: heavy payloads reload from the store
     if pointer is not None:
         ws.pointer = pointer
         if inp is not None:
@@ -6278,5 +4619,5 @@ def wire_workstation_core(ws, store, carts_root, make_api, wifi,
     if keyboard is not None:
         ws.keyboard = keyboard      # lets the code editor switch to text (ASCII) mode
     ws.load_system()                # #28: system.json + the saved wallpaper
-    ws.load_icon_sheet()            # Stage 1: the 16x16 bar IconSheet (theme or baked)
+    ws.look.load_icon_sheet()       # Stage 1: the 16x16 bar IconSheet (theme or baked)
     ws.load_achievements()          # #21: unlocked badges survive reboots

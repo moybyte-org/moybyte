@@ -32,7 +32,8 @@ taps SHOW ADDRESS has already decided not to scan.
 Dependency profile is UpdateUI's (the other parked fullscreen surface, and the
 model this follows): everything reaches the console through `self.ws`, and
 NAMES / in_rect are injected at construction rather than imported back from
-console.py -- console.py builds the one instance a Workstation holds.
+console.py -- `WebConsole` (web_console.py) builds the one instance a
+Workstation holds, as `ws.web.ui`.
 """
 
 try:
@@ -116,7 +117,7 @@ class WebConsoleUI:
             # what the mode forbids -- every other exit path re-parks here (see
             # Workstation.go_home) -- so a HOME that did nothing would read as a
             # frozen console.
-            self.ws.stop_web_console()
+            self.ws.web.stop()
         return True
 
     def handle_pointer(self, px, py, click):
@@ -127,7 +128,7 @@ class WebConsoleUI:
             self.show_address = not self.show_address
             self.ws._dirty = True
         elif self._in(px, py, off):
-            self.ws.stop_web_console()
+            self.ws.web.stop()
         return True
 
     # -- draw ----------------------------------------------------------------
@@ -157,7 +158,7 @@ class WebConsoleUI:
         cv.print("SCAN THIS WITH A PHONE", px + 10 * fs, py + 24 * fs,
                  th["ink_dim"], 1)
         qr_rect, addr, show, off = self.rects()
-        url = ws.web_console_url()
+        url = ws.web.url()
         self._draw_qr(cv, qr_rect, url, NAMES)
         if self.show_address:
             self._draw_address(cv, th, addr, url, fs)

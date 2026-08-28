@@ -65,10 +65,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
 
 # What the board serves, and nothing else -- moy_webhost.ASSETS is the allowlist
-# on the device side, so pushing a file that is not in it would just sit there.
-# carts.json is NOT here on purpose: the board GENERATES that from its own store,
-# which is the entire point of serving the console from the console.
-FILES = ("index.html", "worker.js", "micropython.mjs", "micropython.wasm")
+# on the device side, so pushing a file that is not in it would just sit there,
+# and pushing FEWER means the board keeps serving its baked copy (the pushed set
+# only wins when it is complete). Read from the one list, not restated: this
+# tuple was a hand copy of four names, and when moy_store.mjs joined ASSETS
+# (2026-08-25) the push kept quietly shipping an incomplete set that could never
+# take over. carts.json is NOT here on purpose: the board GENERATES that from
+# its own store, which is the entire point of serving the console from the
+# console.
+import gen_web_blob                                            # noqa: E402
+FILES = tuple(gen_web_blob.asset_names())
 
 
 def _lan_ip():

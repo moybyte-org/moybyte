@@ -33,12 +33,18 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
 # ---------------------------------------------------------------------------
 # 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
-#    boards' sed-patched esp32_common.cmake), ESP-IDF v5.5.1 reused from
-#    whichever sibling has one.
+#    boards' sed-patched esp32_common.cmake), and ESP-IDF v5.5.1 reused from
+#    the P4, which owns the shared checkout (see its build.sh) -- falling back
+#    to a clone of our own, which is what happens on every CI runner.
+#
+#    The T-Deck's checkout used to be the first candidate here and is DELETED:
+#    it was the fork era's own clone, orphaned when the shared build lib
+#    (2026-08-17) pointed the T-Deck's build at the P4's, and this board's
+#    CMake cache had pinned CMAKE_TOOLCHAIN_FILE into it -- an entry CMake will
+#    not re-point after the first configure. Name one owner, in one direction.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
 moybyte_setup_idf esp32s3 \
-  "${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf" \
   "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/esp-idf"
 
 # ---------------------------------------------------------------------------

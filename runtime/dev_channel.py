@@ -187,7 +187,7 @@ def _remote_state(ws):
         # assuming either name is what broke `is_app` on the P4's glass.
         app = getattr(ws, "appearance_app", None)
         cart = None
-        for c in ws._all_carts:
+        for c in ws.carts.all:
             if c.get("title") == "Appearance":
                 cart = c
                 break
@@ -202,7 +202,7 @@ def _remote_state(ws):
             }
         claims = {}
         for _app, _text in getattr(ws, "_apps", ()):
-            claims[_app.id] = sum(1 for c in ws._all_carts if _app.is_app(c))
+            claims[_app.id] = sum(1 for c in ws.carts.all if _app.is_app(c))
         st["app_claims"] = claims
     except Exception as exc:  # noqa: BLE001
         st["app_err"] = str(exc)

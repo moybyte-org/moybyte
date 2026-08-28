@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the default top-bar IconSheet to a labeled PNG so the baked icons can be
 eyeballed (Stage 1). Loads the SAME default theme the console bakes
-(console._default_icon_sheet()) and draws each 16x16 icon at 4x on a dark background
+(chrome._default_icon_sheet()) and draws each 16x16 icon at 4x on a dark background
 with its kind + slot label beside it, mirroring the dark bar they render on.
 
 Pure stdlib (zlib for the PNG) + the repo's runtime modules -- no PIL needed. If the
@@ -22,6 +22,7 @@ sys.path.insert(0, ROOT)
 # host_app registers those aliases, so import it first.
 from tools import pngwrite  # noqa: E402
 from runtime import host_app  # noqa: F401,E402
+from runtime import chrome as _chrome  # noqa: E402
 from runtime import console as C  # noqa: E402
 from runtime.palette import _BASE16  # noqa: E402
 
@@ -107,7 +108,7 @@ def _ascii_dump(sheet):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT
-    sheet = C._default_icon_sheet()
+    sheet = _chrome._default_icon_sheet()
     kinds = list(C._ICON.items())
     cell_w = 16 * SCALE + 2 * PAD
     cell_h = 16 * SCALE + 2 * PAD + LABEL_H

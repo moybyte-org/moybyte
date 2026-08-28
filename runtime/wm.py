@@ -168,19 +168,22 @@ class FullscreenStackWM:
         stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
         alloc), so computing it every access is free on the hot path."""
         ws = self.ws
-        au = ws.ach_ui
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
         if ws.show_fps and self._stack[-1] == "desktop":
             sig |= 2
-        if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
+        # The three achievement overlays are flat kernel deadlines the objects
+        # push at event time (#209 landing B) -- plain int reads, no call into
+        # ach/ach_ui from the hot path, one clock read for all three.
+        now = _ticks_ms()
+        if ws._confetti_until and _ticks_diff(ws._confetti_until, now) > 0:
             sig |= 4
         if ws.show_achievements:
             sig |= 8
-        if au._egg_active():
+        if ws._egg_until and _ticks_diff(ws._egg_until, now) > 0:
             sig |= 16
-        if ws.ach.toast_active():
+        if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
             sig |= 32
         if ws.sysmenu.open:
             sig |= 64

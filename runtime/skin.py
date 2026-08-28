@@ -30,7 +30,7 @@ glyph text, sprite icons. It may change every colour, every edge weight and
 every label alignment freely -- those are paint. It may ALSO change the
 sizing metrics (`TAB_GAP`, `CELL_PAD`, `PANEL_STRIP`, `SB_W`, ...), but doing
 so reflows the layouts around the widget and re-baselines the goldens: that is
-a deliberate versioned act, not a data tweak (`docs/ui_widgets_2026-08.md`
+a deliberate versioned act, not a data tweak (`docs/history/ui_widgets_2026-08.md`
 Section 3.3). **`"outline"` below deliberately changes NO sizing metric**, so
 "restyle without resize" is demonstrated rather than asserted.
 

@@ -134,7 +134,7 @@ def main():
         b.drain(4.0)
 
         print("\n=== picker drag-scroll (windowed)  font_scale=%s ==="
-              % b.pyval("ws.font_scale"))
+              % b.pyval("ws.look.font_scale"))
         buf = "ws.wm._wins['make'].buf"
         # Interleaved A/B/A/B: a single ordered pass drifts (cover cache warms,
         # heap fragments), and the first run of this A/B disagreed with itself
@@ -166,7 +166,7 @@ def main():
         b.drain(4.0)
 
         print("\n=== library drag-scroll (fullscreen)  font_scale=%s ==="
-              % b.pyval("ws.font_scale"))
+              % b.pyval("ws.look.font_scale"))
         blits, reps = [], []
         for i in range(2):
             blits.append(run(b, "A%d scroll-as-blit (RETAINED=2)" % (i + 1),

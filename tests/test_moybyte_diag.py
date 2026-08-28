@@ -89,22 +89,50 @@ def test_disabled_is_a_noop(diag):
 
 
 def test_format_perf_shape(diag):
-    s = diag.format_perf("star catcher", 29.6, 12.4, 18.9)
+    s = diag.format_perf("star catcher", 29.6, 12.4, 18.9, None)
     # Cart name spaces -> '_', numbers rounded to int.
-    assert s == "PERF cart=star_catcher fps=30 flush=12 draw=19"
+    assert s == "PERF cart=star_catcher fps=30 net=- flush=12 draw=19"
 
 
 def test_format_perf_handles_none_cart(diag):
-    s = diag.format_perf(None, 0, 0, 0)
-    assert s == "PERF cart=? fps=0 flush=0 draw=0"
+    s = diag.format_perf(None, 0, 0, 0, None)
+    assert s == "PERF cart=? fps=0 net=- flush=0 draw=0"
+
+
+def test_net_names_the_lockstep_tick_rate_a_linked_game_renders_at(diag):
+    """#65: a linked game's world moves on the shared tick and the console gates
+    every frame that tick is not due for -- so fps=30 on a board looping at 55
+    is a match, not a regression. net= is the field that says which."""
+    s = diag.format_perf("brick siege", 30, 8, 21, 30)
+    assert "fps=30 net=30 " in s
+
+
+def test_net_absent_is_a_dash_and_a_frozen_match_is_a_zero(diag):
+    """THE DOCTRINE (2026-08-22), and the one mutation this field must not
+    survive: no session reports `-`, never 0. A matched-but-not-advancing
+    session reports a real 0, and the two states have to be distinguishable --
+    a frozen 0 is also exactly what a broken meter looks like."""
+    absent = diag.format_perf("brick siege", 55, 8, 21, None)
+    frozen = diag.format_perf("brick siege", 55, 8, 21, 0)
+    assert "net=- " in absent
+    assert "net=0 " in frozen
+    assert absent != frozen
 
 
 def test_log_perf_appends_perf_line(diag):
-    diag.log_perf("game", 30, 10, 20)
+    diag.log_perf("game", 30, 10, 20, 29)
     lines = diag.lines()
     assert len(lines) == 1
-    # "<ts> PERF cart=game fps=30 flush=10 draw=20"
-    assert "PERF cart=game fps=30 flush=10 draw=20" in lines[0]
+    # "<ts> PERF cart=game fps=30 net=29 flush=10 draw=20"
+    assert "PERF cart=game fps=30 net=29 flush=10 draw=20" in lines[0]
+
+
+def test_log_perf_has_no_default_for_net(diag):
+    """A default would print the absent marker for a caller that forgot the
+    argument -- i.e. `no match` while a match ate half the frames, which is the
+    exact failure the field exists to end."""
+    with pytest.raises(TypeError):
+        diag.log_perf("game", 30, 10, 20)
 
 
 def test_log_persists_and_echoes_live(diag, capsys):

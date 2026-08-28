@@ -31,12 +31,23 @@ moybyte_resolve_build_python
 mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
 
 # ---------------------------------------------------------------------------
-# 1) Toolchain: MicroPython at the pinned tag, and ESP-IDF v5.5.1, reusing the
-#    T-Deck's checkout when it exists (same version, saves a 500MB clone).
+# 1) Toolchain: MicroPython at the pinned tag, and ESP-IDF v5.5.1 -- no
+#    candidates, so this board OWNS the shared checkout: `.build/esp-idf` here
+#    is what the T-Deck and the Guition name rather than clone 600MB again.
+#    (In CI every board is its own runner with no sibling to find, so each
+#    clones its own -- the ownership only means anything on a desk.)
+#
+#    It used to name the T-Deck's checkout first, left over from before the
+#    shared build lib (2026-08-17) pointed the T-Deck's own build here. Nothing
+#    owned that directory afterwards, and BOTH this board's and the Guition's
+#    CMake caches had pinned CMAKE_TOOLCHAIN_FILE into it -- an entry CMake
+#    will not re-point after the first configure. So its eventual removal was a
+#    build break waiting on the calendar, on two boards -- the same stale-cache
+#    class that forced a wipe of the T-Deck's build dir on 2026-08-27.
+#    Deleted 2026-08-27; one owner now, named in one direction only.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
-moybyte_setup_idf esp32p4 \
-  "${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf"
+moybyte_setup_idf esp32p4
 
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- THIS BOARD'S half of the build. All marker-guarded,
@@ -72,8 +83,8 @@ moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
 # 2c') ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
-#      docs/espnow_p4_2026-08.md). MicroPython pins the hosted component at
-#      exactly 2.7.0; 2.12.12 carries the custom-RPC seam
+#      docs/history/espnow_p4_2026-08.md). MicroPython pins the hosted
+#      component at exactly 2.7.0; 2.12.12 carries the custom-RPC seam
 #      (esp_hosted_send_custom_data / register_custom_callback) the P4's
 #      ESP-NOW shim rides, plus the streamed slave-OTA API that updates the C6
 #      from this board over SDIO. esp_wifi_remote 0.15.2 constrains only

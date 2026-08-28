@@ -66,7 +66,7 @@ dt is INJECTED, never read from a clock -- `ScrollRegion` is the precedent):
   * every transient overlay is cleared each frame (`_quiesce`): the toast, the
     confetti/egg timers, the achievements list, the system menu, About, the
     notice banner, the FPS/perf HUDs, the cursor.
-  * `console._COVER_SLICE_MS` is raised so every launcher/picker cover builds
+  * `cover_cache._COVER_SLICE_MS` is raised so every launcher/picker cover builds
     within its frame. This is load-bearing, not belt-and-braces: the cover
     build is a per-frame TIME budget, and the launcher home hashes differently
     at a 1ms slice than at 5ms. Left alone, these goldens would be a function
@@ -108,7 +108,7 @@ or  .venv/bin/python -m pytest tests/test_shell_goldens.py --update-goldens -p n
 
 Nothing re-baselines automatically. If a golden moves and you cannot say in
 one sentence which pixel moved and why, the change is a revert, not an update
-(`docs/ui_refactor_2026-08.md` Section 8).
+(`docs/history/ui_refactor_2026-08.md` Section 8).
 """
 
 import hashlib
@@ -230,12 +230,9 @@ def _quiesce(ws):
     notes achievements, which can re-arm the toast/confetti mid-sequence."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
-    au = ws.ach_ui
-    au.egg_msg = None
-    au.egg_until = 0
-    au._confetti_until = 0
+    ws._toast_until = 0
+    ws._egg_until = 0
+    ws._confetti_until = 0
     ws.show_achievements = False
     ws.show_fps = False
     ws.perf_hud = False
@@ -269,7 +266,7 @@ def _render(ws, surface, config_name):
 
 
 def _cart_by_title(ws, title):
-    for cart in ws._all_carts:
+    for cart in ws.carts.all:
         if cart.get("title") == title:
             return cart
     raise AssertionError("seed cart not found: " + title)
@@ -282,10 +279,10 @@ def _build(cfg, carts_dir):
         font_scale=cfg["font_scale"], windowed=cfg["windowed"])
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
-    ws.set_theme_variant(cfg["variant"], persist=False)
-    keep = [c for c in ws._all_carts if c.get("title") not in GOLDEN_EXCLUDE]
-    if len(keep) != len(ws._all_carts):
-        ws._apply_items(keep)            # pin the roster -- see GOLDEN_EXCLUDE
+    ws.look.set_theme_variant(cfg["variant"], persist=False)
+    keep = [c for c in ws.carts.all if c.get("title") not in GOLDEN_EXCLUDE]
+    if len(keep) != len(ws.carts.all):
+        ws.carts.apply(keep)            # pin the roster -- see GOLDEN_EXCLUDE
     return ws
 
 
@@ -320,11 +317,11 @@ def _surface_plan(ws, cfg):
             ws.webhost = _GoldenWebHost()
         if not ws.webhost_serving():
             ws.toggle_webhost()          # the real funnel: start, then park
-        ws.web_console_ui.show_address = False
+        ws.web.ui.show_address = False
 
     def park_revealed():
         park()
-        ws.web_console_ui.show_address = True
+        ws.web.ui.show_address = True
 
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
@@ -413,8 +410,8 @@ def _pin_cover_budget(monkeypatch):
     differently -- measured: slice 1ms and slice 5ms give different launcher
     pixels. Raising the budget makes the captured frame the fully-built one on
     every machine."""
-    from runtime import console
-    monkeypatch.setattr(console, "_COVER_SLICE_MS", _COVER_SLICE_UNBOUNDED)
+    from runtime import cover_cache
+    monkeypatch.setattr(cover_cache, "_COVER_SLICE_MS", _COVER_SLICE_UNBOUNDED)
 
 
 # ---------------------------------------------------------------------------

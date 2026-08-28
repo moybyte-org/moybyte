@@ -110,7 +110,7 @@ def test_publish_wallpaper_and_attach_as_game_bg(tmp_path):
     assert app._save()
 
     assert ws.artwork.set_wallpaper()
-    assert ws.wallpaper_id == "my_art"
+    assert ws.look.wallpaper_id == "my_art"
     assert moy_carts.load_system(carts)["wallpaper"] == "my_art"
 
     titles = ws.artwork.targets()
@@ -131,7 +131,7 @@ def test_artwork_capability_is_not_in_the_regular_cart_api(tmp_path):
     paint_app = _open_paint(ws)
     assert paint_app.ctx.artwork is ws.artwork      # the AppContext handle
 
-    other = next(c for c in ws._all_carts if c["title"] == "Star Catcher")
+    other = next(c for c in ws.carts.all if c["title"] == "Star Catcher")
     other.setdefault("permissions", []).append("artwork")
     ws._open_workspace(other)
     ws.run(ws.project, ws.launcher_layer)

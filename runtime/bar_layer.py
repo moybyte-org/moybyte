@@ -119,7 +119,7 @@ class BarLayer:
         stays on Workstation per the doc; the bar is a CONSUMER of it (via self.ws).
       * `_bar_img_cache` (per-kind icon Image cache backing ws._icon) stays on ws;
         `_bar_cache_gen` (the strip cache generation) lives here and
-        ws.set_icon_sheet bumps it via invalidate().
+        ws.look.set_icon_sheet bumps it via invalidate().
 
     The bar is CHROME the content composes, not a standalone stack layer: it's
     SYSTEM-domain on launcher/settings/the code+blocks editor tabs (drawn on
@@ -150,7 +150,7 @@ class BarLayer:
         # the state key it holds (None = stale) and the canvas it was built on (a
         # web-view swap, OR switching between the game canvas and the system canvas,
         # forces a rebuild); `_bar_cache_gen` is bumped by the explicit invalidators
-        # (invalidate(), from ws.set_icon_sheet) so a theme swap repaints. Keyed per
+        # (invalidate(), from ws.look.set_icon_sheet) so a theme swap repaints. Keyed per
         # `where` (was one shared slot) because the windowed WM (wm_windowed.py)
         # draws TWO bars per frame -- the desktop root's "home" bar and the focused
         # window's own -- and a shared slot would rebuild both every frame. On the
@@ -169,7 +169,7 @@ class BarLayer:
 
     def invalidate(self):
         """Repaint the cached running-cart bar on the next frame (a theme/IconSheet
-        swap changed its pixels). Called by ws.set_icon_sheet."""
+        swap changed its pixels). Called by ws.look.set_icon_sheet."""
         self._bar_cache_gen += 1
 
     # -- draw ----------------------------------------------------------------
@@ -240,7 +240,7 @@ class BarLayer:
         ink with this so lent-zone text stays readable on either band."""
         if self.ws.theme_colors.get("bar_light", False):
             return True
-        return self._in_window(where) and self.ws.light_chrome()
+        return self._in_window(where) and self.ws.look.light_chrome()
 
     def _in_window(self, where):
         """True when `where`'s bar is being drawn INSIDE a window of the windowed
@@ -351,18 +351,19 @@ class BarLayer:
         lent zone's content changes -- e.g. EditorApp.set_tab, Launcher.sel/
         set_items -- so a real zone-content change is the ONLY thing that forces a
         re-render beyond the shared dimensions here), and a generation counter the
-        explicit invalidators bump (set_icon_sheet, etc.)."""
+        explicit invalidators bump (look.set_icon_sheet, etc.)."""
         ws = self.ws
         owner = self._zone_owner(where)
         has_edit = bool(ws.cart.get("edit")) if ws.cart else False
-        return (where, self._clock_text(), has_edit, id(ws.icon_sheet),
+        return (where, self._clock_text(), has_edit, id(ws.look.icon_sheet),
                 getattr(self._bar_canvas(where), "font_scale", 1),
                 bool(ws.can_manage),
                 owner.zone_gen if owner is not None else 0,
                 ws._wifi_icon_kind(),      # Part 3: wifi status glyph (connect/disconnect repaints)
                 (ws.cart.get("title") if ws.cart else None),   # Part 4: the tool bar's left-zone title
-                ws._bar_undo_bits(),       # #111: local op-history dim state (RAM-only;
-                                           # journal flips invalidate explicitly)
+                ws.history.bar_undo_bits(),   # #111: local op-history dim state
+                                              # (RAM-only; journal flips
+                                              # invalidate explicitly)
                 self._bar_cache_gen)
 
     def _render_cart_bar(self, cv, key):

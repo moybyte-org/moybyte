@@ -1,6 +1,7 @@
 # The widget system 2026-08 — one vocabulary, swappable skins, hover as an overlay
 
-**SUPERSEDED 2026-08-19 by [`docs/ui_refactor_2026-08.md`](ui_refactor_2026-08.md)**,
+**SUPERSEDED 2026-08-19 by
+[`docs/history/ui_refactor_2026-08.md`](ui_refactor_2026-08.md)**,
 which folded this doc and cut about half of the combined program on evidence
 (its §1 is the ledger of what was cut and why). This one stays for what it IS —
 the measurements, the widget inventory and the review ledger the refactor cites.
@@ -20,7 +21,7 @@ across 32 files incl. tests) is the evidence corpus.
 compositor contract, dirty protocol, L7 AND L10 are untouched (v0 proposed an
 L7 amendment; v0.2 needs none — §6). `docs/visual_identity_v1.md` keeps
 governing how the console looks; this doc builds the vehicle that makes that
-look (and the next one) swappable data. `docs/ui_damage_model_v1.md`'s
+look (and the next one) swappable data. `docs/history/ui_damage_model_v1.md`'s
 verdicts and §0.2 blockers are treated as settled fact. Claims are labeled
 **MEASURED** / **ESTIMATED** (arithmetic shown) / **OWNER-REPORTED** /
 **PREDICTED** (with the gate that settles them).

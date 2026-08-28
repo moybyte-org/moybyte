@@ -2,7 +2,7 @@
 FROM the console, over the SDIO link it already shares.
 
 The P4's radio is a second processor with its own firmware -- the esp-hosted
-slave plus the moybyte ESP-NOW shim (docs/espnow_p4_2026-08.md). Until
+slave plus the moybyte ESP-NOW shim (docs/history/espnow_p4_2026-08.md). Until
 2026-08-25 installing it was a dev-desk operation; this module is the backend
 behind Settings -> UPGRADE C6 RADIO, driven a step per frame by UpdateUI
 exactly the way OtaUpdater is.

@@ -41,7 +41,12 @@ def _diag_perf_sample(diag, ws):
     try:
         sample = ws.perf_sample()      # (name, fps, flush_ms, draw_ms) or None
         if sample is not None:
-            diag.log_perf(sample[0], sample[1], sample[2], sample[3])
+            # net= comes from perf_net(), NOT from perf_sample: the meter
+            # consumes its window and this is its one reader per sample, while
+            # perf_sample is also the `is a cart running?` probe every other
+            # diag helper below calls (see Workstation.perf_net).
+            diag.log_perf(sample[0], sample[1], sample[2], sample[3],
+                          ws.perf_net())
     except Exception:
         pass
 

@@ -36,7 +36,7 @@ def open_cart(ws, title):
             ws.launcher.sel = i
             ws.open()
             return
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
+    cart = next((c for c in ws.carts.all if c["title"] == title), None)
     assert cart is not None, "seed cart not found: " + title
     ws._open_workspace(cart)
     ws.run(ws.project, ws.launcher_layer)
@@ -47,9 +47,12 @@ def make_drv(ws):
 
 
 def quiesce(ws):
-    """Hide the cursor + clear the achievement toast so a rendered frame is
+    """Hide the cursor + take down the achievement toast so a rendered frame is
     deterministic chrome. (Suites that also pin the OS bar's live clock keep
-    their own extended copy.)"""
+    their own extended copy.)
+
+    The DEADLINE is what takes an overlay down (#209 landing B) -- the shell's
+    own flat field, not the payload on `ws.ach`, which is read only while that
+    deadline is up."""
     ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0

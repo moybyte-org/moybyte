@@ -327,7 +327,7 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     # in-memory), which the page says out loud.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
-    ws.launcher.items = ws._launcher_items(ws._all_carts)
+    ws.launcher.items = ws._launcher_items(ws.carts.all)
     # The Moybyte shell's achievements are gamification for the kid console,
     # not part of a cart player (and doubly not of the brand-neutral spec
     # bundle). The REAL trigger is the Achievements core's note() (e.g.
@@ -465,9 +465,9 @@ def _rescan():
     so the launcher items, the slim covers and the dirty flag cannot drift
     apart depending on which one ran."""
     ws = _S["ws"]
-    ws._all_carts = moy_carts.scan(_S["root"])
-    ws.launcher.items = ws._launcher_items(ws._all_carts)
-    ws.slim_carts()
+    ws.carts.all = moy_carts.scan(_S["root"])
+    ws.launcher.items = ws._launcher_items(ws.carts.all)
+    ws.carts.slim()
     ws._dirty = True
 
 

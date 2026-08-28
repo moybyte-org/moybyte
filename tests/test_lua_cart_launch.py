@@ -44,7 +44,7 @@ def test_load_carries_runtime_and_main(tmp_path):
     ws = _ws(tmp_path)
     by_title = {c["title"]: c for c in ws.launcher.items}
     lua = by_title["Sakura Lua"]
-    # slim_carts (#66 live-set diet) keeps the light runtime/main fields...
+    # carts.slim (#66 live-set diet) keeps the light runtime/main fields...
     assert lua["runtime"] == "lua" and lua["main"] == "main.lua"
     # ...and the full store load reads src FROM main.lua.
     full = moy_carts.load(lua["path"])

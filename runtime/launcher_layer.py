@@ -147,14 +147,15 @@ class Launcher:
         self._taps = _ui.DragTap(self._region)
         self._NAMES = names
         self._blit_glyph = blit_glyph
-        self.theme = None             # chrome THEME tokens (ws.set_theme pushes them);
+        self.theme = None             # chrome THEME tokens (look.set_theme pushes them);
                                       # None -> the yellow default accent
         self.icon_for = None          # optional kind -> 16x16 IconSheet Image (console
                                       # wires ws._bar_image) -- the shelf's pseudo cards
                                       # draw the real themeable pencil/plus icon big
         self.cover_for = None         # optional (cart, w, h) -> full-bleed cover
                                       # blittable (visual identity v1 Section 11.4)
-        self.favorite_for = None      # optional cart -> bool (console wires ws.is_favorite,
+        self.favorite_for = None      # optional cart -> bool (console wires
+                                      # ws.carts.is_favorite as a bound method,
                                       # #105): when set, the SELECTED card's corner star
                                       # badge draws + is tappable (favorite_rect below)
         if layout is None:
@@ -754,6 +755,23 @@ def _retained_n(cv):
     return n if n > 2 else 2
 
 
+def _advance_streak(layer, cv):
+    """Advance (or restart) a grid layer's consecutive-full-paint streak --
+    the gate `_try_drag_partial` reads, so a partial only runs once every
+    retained framebuffer already holds this frame's statics. A full paint
+    under an unchanged `_statics_key` counts up to `_retained_n(cv)`; a
+    changed key restarts at one. ONE body for the home shelf and the Editor
+    picker (#209): repeated invalidation logic is the family
+    surface_model_v1.md §14.2 names as the silent-cache bug."""
+    key = layer._statics_key(cv)
+    if key == layer._statics:
+        if layer._full_streak < _retained_n(cv):
+            layer._full_streak += 1
+    else:
+        layer._statics = key
+        layer._full_streak = 1
+
+
 def _cursor_stamp(ws):
     """The cursor sprite's footprint on the system canvas this frame, or None
     when it isn't drawn -- recorded with each shelf paint (#113) so a blitted
@@ -762,7 +780,7 @@ def _cursor_stamp(ws):
     p = ws.pointer
     if p is None or not getattr(p, "visible", False):
         return None
-    fs = ws.font_scale
+    fs = ws.look.font_scale
     return (p.x, p.y, 8 * fs, 13 * fs)
 
 
@@ -820,7 +838,7 @@ class LauncherHomeLayer:
         ws = self.ws
         return (cv.w, cv.h, ws.layout.fs, id(ws.theme_colors),
                 ws.launcher.layout.lib_grid,
-                ws.wallpaper_id, len(ws.launcher.items),
+                ws.look.wallpaper_id, len(ws.launcher.items),
                 getattr(ws, "search_query", ""), getattr(ws, "search_typing", False))
 
     def _retained_key(self, cv):
@@ -831,11 +849,11 @@ class LauncherHomeLayer:
         icon theme; reusing it means the bar's cache discipline IS this cache's
         discipline). Anything that draws a pixel of the home frame and is NOT
         derivable from this tuple is a staleness bug -- the silent-cache family
-        ui_damage_model §2.1 documents -- so additions to the home draw must
-        extend this key."""
+        surface_model_v1.md §14.2 documents -- so additions to the home draw
+        must extend this key."""
         ws = self.ws
         return (self._statics_key(cv), ws.launcher.sel, ws.launcher.scroll,
-                ws._cover_gen, self._lhover,
+                ws.covers.gen, self._lhover,
                 tuple(it.get("title") for it in ws.launcher.items),
                 tuple(ws.system.get("favorites", ())),
                 ws.bar_layer._cart_bar_key("home"))
@@ -977,7 +995,7 @@ class LauncherHomeLayer:
         # cursor stamp -- a handful of draw calls instead of every visible
         # card. Any ineligibility falls back to the full band repaint below.
         region = ws.launcher._scroll_region()
-        key = (ws.launcher.sel, self._statics, ws._cover_gen)
+        key = (ws.launcher.sel, self._statics, ws.covers.gen)
         shift = region.blit_shift(cv, ws._frames_drawn, key)
         if shift is not None:
             delta, old_stamp = shift
@@ -992,14 +1010,14 @@ class LauncherHomeLayer:
             def _fill(c, r):
                 c.rect(r[0], r[1], r[2], r[3], surface)
 
-            ws.launcher.draw_shift(cv, ws._icon_sheet_for, delta, damage, _fill)
+            ws.launcher.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage, _fill)
         else:
             cv.rect(gx, gy - d, gw, gh + 2 * d, ws.theme_colors["surface"])
-            ws.launcher.draw(cv, ws._icon_sheet_for)
+            ws.launcher.draw(cv, ws.covers.icon_sheet_for)
         # Re-pin the cover gen POST-draw: a cover landing during the card draw
         # is in these pixels, so the recorded key must carry the new gen.
         region.note_painted(ws._frames_drawn,
-                            (ws.launcher.sel, self._statics, ws._cover_gen),
+                            (ws.launcher.sel, self._statics, ws.covers.gen),
                             _cursor_stamp(ws))
         _t1 = _ticks_ms() if _t0 is not None else None
         ws.bar_layer._draw_status_strip("home")
@@ -1037,15 +1055,9 @@ class LauncherHomeLayer:
         if self._try_stamp_retained(cv, dt):
             ws.launcher._scroll_region().note_painted(
                 ws._frames_drawn,
-                (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+                (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
                 _cursor_stamp(ws))
-            key = self._statics_key(cv)
-            if key == self._statics:
-                if self._full_streak < _retained_n(cv):
-                    self._full_streak += 1
-            else:
-                self._statics = key
-                self._full_streak = 1
+            _advance_streak(self, cv)
             return
         # #76 sub-surface marks: on a RECORDING canvas, partition the home into
         # wallpaper / grid / bar streams so the web delta can skip the static grid +
@@ -1067,13 +1079,13 @@ class LauncherHomeLayer:
         # the "LIBRARY" header and the footer cartridge count. The scrolling
         # card grid + its scroll arrows/bar draw inside it (Launcher._draw_shelf).
         self._draw_shelf_panel(cv)
-        ws.launcher.draw(cv, ws._icon_sheet_for)
+        ws.launcher.draw(cv, ws.covers.icon_sheet_for)
         # #113: record this full paint in the shelf's blit ring (offset + the
         # state the pixels depend on + the cursor stamp about to land on top),
         # so an eligible drag frame can shift instead of repainting every card.
         ws.launcher._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.launcher.sel, self._statics_key(cv), ws._cover_gen),
+            (ws.launcher.sel, self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
         _t2 = _ticks_ms() if _t0 is not None else None
         if _surf is not None:
@@ -1083,15 +1095,8 @@ class LauncherHomeLayer:
             _t3 = _ticks_ms()
             ws._pf_home = (_ticks_diff(_t1, _t0), _ticks_diff(_t2, _t1),
                            _ticks_diff(_t3, _t2))
-        # A FULL paint landed in the current framebuffer: advance (or restart)
-        # the partial path's statics streak.
-        key = self._statics_key(cv)
-        if key == self._statics:
-            if self._full_streak < _retained_n(cv):
-                self._full_streak += 1
-        else:
-            self._statics = key
-            self._full_streak = 1
+        # A FULL paint landed in the current framebuffer.
+        _advance_streak(self, cv)
         self._capture_retained(cv, dt)   # retain this frame for re-entry stamps
 
     def _draw_shelf_panel(self, cv):
@@ -1231,7 +1236,7 @@ class LauncherHomeLayer:
             # never fall through to the card's primary activation underneath it.
             frect = ws.launcher.favorite_rect(ws.launcher.sel)
             if frect is not None and self._in(px, py, frect):
-                ws.toggle_favorite(ws.launcher.selected())
+                ws.carts.toggle_favorite(ws.launcher.selected())
                 return True
             # The selected card's PLAY / CHANGE buttons (wide-card tiers).
             # Checked before the grid press so a button tap never falls through to
@@ -1385,7 +1390,7 @@ class EditorPickerLayer:
 
     Cart management lives HERE now (docs/shell_ux_v1.md: the launcher is for PLAYING,
     the picker is for MANAGING projects) -- DUP/DEL act on the picker's SELECTED cart
-    via the lent zone (ws.dup_cart/ws.del_cart, which read `ws.picker`'s selection
+    via the lent zone (ws.carts.dup/ws.carts.delete, which read `ws.picker`'s selection
     instead of the launcher's -- see console.py). "+ New" was already picker-only (the
     pinned grid tile). DEL is two-tap guarded (`_del_armed`): a project sits right next
     to its icon in this grid, so a single accidental tap must not delete it -- the
@@ -1491,14 +1496,14 @@ class EditorPickerLayer:
         if top is not None and top() != "picker":
             return False
         bx, by, bw, bh = ws.picker.band_rect()
-        fs = ws.font_scale
+        fs = ws.look.font_scale
         p = ws.pointer
         if p is not None and getattr(p, "visible", False):
             if not (bx <= p.x and p.x + 8 * fs <= bx + bw
                     and by <= p.y and p.y + 13 * fs <= by + bh):
                 return False
         region = ws.picker._scroll_region()
-        key = (ws.picker.sel, self._statics, ws._cover_gen)
+        key = (ws.picker.sel, self._statics, ws.covers.gen)
         shift = region.blit_shift(cv, ws._frames_drawn, key)
         if shift is not None:
             delta, old_stamp = shift
@@ -1508,13 +1513,13 @@ class EditorPickerLayer:
                 if delta:
                     damage.append((old_stamp[0] - delta, old_stamp[1],
                                    old_stamp[2], old_stamp[3]))
-            ws.picker.draw_shift(cv, ws._icon_sheet_for, delta, damage,
+            ws.picker.draw_shift(cv, ws.covers.icon_sheet_for, delta, damage,
                                  self._backdrop_fill)
         else:
             self._backdrop_fill(cv, (bx, by, bw, bh))
-            ws.picker.draw(cv, ws._icon_sheet_for)
+            ws.picker.draw(cv, ws.covers.icon_sheet_for)
         region.note_painted(ws._frames_drawn,
-                            (ws.picker.sel, self._statics, ws._cover_gen),
+                            (ws.picker.sel, self._statics, ws.covers.gen),
                             _cursor_stamp(ws))
         ws.bar_layer._draw_status_strip("picker")
         return True
@@ -1555,19 +1560,13 @@ class EditorPickerLayer:
         self._dots(cv, (0, by, bx, bh), 0)
         self._dots(cv, (bx + bw, by, W - (bx + bw), bh), 0)
         self._dots(cv, (bx, by, bw, bh), self._dot_xoff())
-        ws.picker.draw(cv, ws._icon_sheet_for)
+        ws.picker.draw(cv, ws.covers.icon_sheet_for)
         # #113: record this full paint in the blit ring + advance the streak.
         ws.picker._scroll_region().note_painted(
             ws._frames_drawn,
-            (ws.picker.sel, self._statics_key(cv), ws._cover_gen),
+            (ws.picker.sel, self._statics_key(cv), ws.covers.gen),
             _cursor_stamp(ws))
-        key = self._statics_key(cv)
-        if key == self._statics:
-            if self._full_streak < _retained_n(cv):
-                self._full_streak += 1
-        else:
-            self._statics = key
-            self._full_streak = 1
+        _advance_streak(self, cv)
         ws.bar_layer._draw_status_strip("picker")
 
     def handle_input(self, i):
@@ -1680,12 +1679,12 @@ class EditorPickerLayer:
         real = ws._real_selected(ws.picker)
         if ws.can_manage and real is not None and self._in(px, py, lay.dup_btn):
             self._disarm_delete()
-            ws.dup_cart()
+            ws.carts.dup()
             return True
         if ws.can_manage and real is not None and self._in(px, py, lay.del_btn):
             if self._del_armed:
                 self._disarm_delete()
-                ws.del_cart()
+                ws.carts.delete()
             else:
                 self._arm_delete()
             return True

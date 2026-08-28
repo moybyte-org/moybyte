@@ -69,7 +69,7 @@ def _fb_text(s):
 
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
-# taxing the GC mark phase. The owner (console._free_cover_img) frees pix and
+# taxing the GC mark phase. The owner (CoverCache._free_img) frees pix and
 # bakes together at eviction. Everything else (sheet tiles, paint images,
 # wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
 # (sheet gen bumps, cart ns teardown) and an explicit free there would leak.

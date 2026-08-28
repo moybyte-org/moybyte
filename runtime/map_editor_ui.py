@@ -43,6 +43,12 @@ try:
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
     from runtime.chrome import _gbtn as _chrome_gbtn
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 # Map (tilemap) editor (#32): a panned view of the map on the left where each cell
 # is the scaled sprite tile placed there, and a paged tile palette on the right to
 # pick the brush tile. Tap a map cell to stamp the brush (or erase, when the ERASE
@@ -163,11 +169,8 @@ _MAP_MIN_DIM = 1
 # navigate a map larger than the 320x240 view, so it wins over drag-to-stamp.
 _MAP_PAN_THRESH = 6
 
-_BASE_W = 320
-_BASE_H = 240
 
-
-class MapLayout:
+class MapLayout(LayoutBase):
     """Responsive map-editor geometry (#39 step 3): the panel, the panned map view,
     the paged tile palette + pan d-pad + zoom column, and the ERASE/CLOSE/SKY
     bottom row, derived from the SYSTEM canvas size (w, h) + font scale.
@@ -184,11 +187,8 @@ class MapLayout:
     rows to fill its column."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
             self.panel = (8, 16, 304, 204)
@@ -864,7 +864,7 @@ class MapEditorUI:
         # Phase 3 (visual identity v1): warm body on the shelf tiers, dark map
         # canvas kept on every tier. Baseline literals byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
+        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # Map cells + the tile-palette strip back themselves (dark map field),
         # so the panel joins the surface on the light tiers too.

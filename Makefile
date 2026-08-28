@@ -113,7 +113,30 @@ JOBS ?= auto
 PYTEST_ENV = env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 
+# The desktop MicroPython is REFRESHED here, not assumed. Six suites drive the
+# real native modules through that binary, and one of them -- test_web_blob's
+# `test_the_native_module_serves_the_bytes_it_baked` -- reads the LIVE tree: it
+# hashes whatever `firmware/web_runner/dist` last produced against what the
+# binary baked. So every web-runner build left the previously-built binary
+# stale and that check red until somebody remembered `make unix-micropython`
+# by hand, which cost four separate red gates in one night on #209.
+#
+# It is the same philosophy as the target's own "no cache -- a cache MISS that
+# skips the check is the bug", one level up: the cheapest honest answer is to
+# always run it. 0.4s warm (blob regen + a no-op sub-make), ~15s on a tree that
+# has never built one.
+#
+# BEST EFFORT, and that is deliberate: a machine with no C toolchain must still
+# be able to run `make test` exactly as before. The failure belongs to the
+# SUITES, which already know the difference -- tests/unix_mp.py warns locally
+# and FAILS under CI/MOYBYTE_REQUIRE_UNIX_MP -- and a hard failure here would
+# take the whole host suite away from a machine that only ever wanted it.
 test:
+	@$(MAKE) --no-print-directory unix-micropython || { \
+	  echo ""; \
+	  echo "  ^^ could not refresh the desktop MicroPython. Running the suite"; \
+	  echo "     anyway -- the checks that need it say so themselves."; \
+	  echo ""; }
 	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
 
 # ---------------------------------------------------------------------------

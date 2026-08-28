@@ -3,7 +3,7 @@
 
 ONE renderer/input serves BOTH sheets (so the theme chunk reuses it, no duplication):
   * menu_view == "paint"  -> edits the cart's SpriteSheet   (ws.project.sheet)
-  * menu_view == "theme"  -> edits the system IconSheet     (ws.icon_sheet, EDIT ICONS)
+  * menu_view == "theme"  -> edits the system IconSheet     (ws.look.icon_sheet, EDIT ICONS)
 The active editor is `ws.paint` (a PaintEditor over whichever sheet); `ws._editing_icons`
 selects the mode (which sheet, where CLOSE returns/commits, GET/PUT hidden). SAVE is GONE
 (#111, owner decision 2026-07-21): there is no SAVE button anywhere in the editor -- CLOSE
@@ -14,10 +14,10 @@ typing autosave-commit + every other tab-leaving exit path (a tab switch, PROJEC
 window/context-X, a workspace swap, going home) commit it too.
 
 Boundary (the anti-spaghetti line, per the doc): the SHEETS + the current-editor handle
-+ the persistence verbs stay on Workstation -- `ws.project.sheet` / `ws.icon_sheet` (single
++ the persistence verbs stay on Workstation -- `ws.project.sheet` / `ws.look.icon_sheet` (single
 source of the pixels), `ws.paint` (the PaintEditor handle, device/test-pinned like
 ws.editor), `ws._editing_icons` / `ws.paint_status` (lifecycle mode/status), and
-`ws.save_sprites` / `ws.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
+`ws.save_sprites` / `ws.look.save_icons` / `ws.share_tile_get` / `ws.share_tile_put` (cart/
 system state the device + tests pin). PaintLayer READS those and DISPATCHES to them; it
 owns only the paint-UI: the DRAW, the grid/palette/button hit-testing, and the drag-
 stroke continuity state (_paint_drag). The paint-only constants live here (single source;
@@ -58,6 +58,12 @@ try:
 except ImportError:  # pragma: no cover - direct host import (chrome not yet aliased)
     from runtime.chrome import _GLYPHS
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 # -- paint geometry (single source; console.py imports these back) ------------
 # The frozen 320x240 baseline PaintLayout reproduces VERBATIM (#39 graceful
@@ -94,9 +100,6 @@ _PAINT_PUT = (210, 154, 92, 20)
 # spare, matching the responsive branch's already-correct sequencing below).
 # Hidden in the theme editor, like GET/PUT.
 _PAINT_FILES = (210, 178, 92, 20)
-
-_BASE_W = 320
-_BASE_H = 240
 
 # -- tool palette (#90) -------------------------------------------------------
 # TWO compact rows of single-glyph tool buttons drawn just below the pixel grid.
@@ -153,7 +156,7 @@ def _tool_row(x0, y0, cw, h, n):
     return [(x0 + i * cw, y0, cw - 1, h) for i in range(n)]
 
 
-class PaintLayout:
+class PaintLayout(LayoutBase):
     """Responsive paint-editor geometry (#39 step 3): the panel, the zoomed pixel
     grid, the 16-color swatch column, the sprite-selector / SIZE / GET / PUT buttons
     and the SAVE/CLOSE row, derived from the SYSTEM canvas size (w, h) + font scale.
@@ -170,11 +173,8 @@ class PaintLayout:
     a hugely bigger drawing surface, not just scaled chrome."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
             self.panel = (8, 16, 304, 204)
@@ -662,7 +662,7 @@ class PaintLayer:
         # the shelf tiers; the PANEL stays the dark work canvas (the sprite art's
         # own field) on every tier. Baseline literals byte-identical.
         th = ws.theme_colors
-        light = (not lay._base) or ws.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
+        light = (not lay._base) or ws.look.light_chrome()  # tokens on every responsive tier; _base stays frozen only in DARK chrome
         cv.rect(*(lay.body_fill + ((th["surface"] if light else NAMES["black"]),)))
         # The panel joins the surface on the light tiers -- the pixel grid and
         # swatch/preview cells all back themselves, so only the frozen dark
@@ -761,8 +761,9 @@ class ThemeLayer:
 
     The lifecycle stays reachable on Workstation as thin forwarders (ws.open_theme is
     device/test-pinned; ws._leave_theme is called by PaintLayer's CLOSE tap); the mode
-    flag ws._editing_icons + the sheet/save methods (load_icon_sheet/set_icon_sheet/
-    save_icons) stay on ws (the device backend calls them) -- ThemeLayer dispatches."""
+    flag ws._editing_icons stays on ws (the device backend reads it) and the
+    sheet/save trio is ws.look's (load_icon_sheet/set_icon_sheet/save_icons) --
+    ThemeLayer dispatches."""
 
     id = "theme"
     domain = "system"
@@ -775,7 +776,7 @@ class ThemeLayer:
     def draw(self, dt):
         # EDIT ICONS (Stage 2): opened from Settings, NOT a running cart, so there's no
         # cart backdrop to draw -- clear to black and reuse the shared PAINT renderer
-        # (over ws.icon_sheet, selected by ws._editing_icons), on the system canvas.
+        # (over ws.look.icon_sheet, selected by ws._editing_icons), on the system canvas.
         ws = self.ws
         ws.sys_canvas.cls(self._NAMES["black"])
         ws._reset_canvas_state()
@@ -794,7 +795,7 @@ class ThemeLayer:
     def open(self):
         """Open the PAINT editor on the SYSTEM icon sheet (Settings -> EDIT ICONS,
         Stage 2 / #52). The same renderer/input as the cart PAINT flow, but pointed
-        at ws.icon_sheet: CLOSE persists system_icons.moygfx (not a cart, #111: no
+        at ws.look.icon_sheet: CLOSE persists system_icons.moygfx (not a cart, #111: no
         SAVE tap -- leave() hard-commits) and returns to Settings. Starts from the
         current theme (the baked default if no system_icons.moygfx exists yet); the
         first commit creates the file."""
@@ -808,8 +809,8 @@ class ThemeLayer:
         # Build a PaintEditor over the icon sheet (PaintEditor is tile-size-agnostic,
         # so the 16x16 IconSheet edits natively). A fresh editor each open so the
         # brush/tile state doesn't leak in from a cart paint session.
-        if ws.icon_sheet is not None:
-            ws.paint = PaintEditor(ws.icon_sheet)
+        if ws.look.icon_sheet is not None:
+            ws.paint = PaintEditor(ws.look.icon_sheet)
         self._paint.reset_drag()
         ws._set_text_mode(False)         # paint is pointer-driven, raw/game keyboard
         ws.ach.note("editor", "paint")   # repainting the chrome counts toward Toolbox
@@ -823,7 +824,7 @@ class ThemeLayer:
         next time."""
         ws = self.ws
         ws._dirty = True                 # screen change repaints (#44)
-        ws.save_icons()                  # hard-commit BEFORE the editor drops (#111)
+        ws.look.save_icons()             # hard-commit BEFORE the editor drops (#111)
         ws._editing_icons = False
         ws.paint = None
         self._paint.reset_drag()

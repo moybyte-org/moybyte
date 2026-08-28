@@ -1,5 +1,5 @@
 """#111 phase 2 wiring: the Paint + Map editors run their in-RAM undo on the shared
-op-history core, the #88 bar UNDO/REDO icons (ws.undo()/ws.redo()) route to the
+op-history core, the #88 bar UNDO/REDO icons (ws.history.undo()/ws.history.redo()) route to the
 ACTIVE tab's History before falling back to the durable journal walk, and a commit
 embeds the fine-grained op batch in its journal.jsonl line.
 
@@ -56,30 +56,30 @@ def test_paint_stroke_bar_undo_reverts_one_stroke(tmp_path):
     assert ws.sheet.pget(ox + 0, oy + 0) == 5
     assert ws.sheet.pget(ox + 1, oy + 1) == 7
 
-    assert ws.undo() is True             # the bar UNDO reverts exactly ONE stroke (B)
+    assert ws.history.undo() is True             # the bar UNDO reverts exactly ONE stroke (B)
     assert ws.sheet.pget(ox + 1, oy + 1) == 0
     assert ws.sheet.pget(ox + 0, oy + 0) == 5     # stroke A untouched
 
-    assert ws.redo() is True             # ...and REDO re-lays B
+    assert ws.history.redo() is True             # ...and REDO re-lays B
     assert ws.sheet.pget(ox + 1, oy + 1) == 7
 
 
 def test_paint_dimmed_state_is_truthful(tmp_path):
-    # ws.can_undo()/can_redo() (the bar icons' enabled state) must track the active
+    # ws.history.can_undo()/can_redo() (the bar icons' enabled state) must track the active
     # paint History exactly -- a fresh sheet is dim both ways.
     ws = _make_ws_with_cart(tmp_path)
     ws._open_paint()
     pe = ws.paint
     pe.n = 0
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     _stroke(pe, 2, 2, 9)
-    assert ws.can_undo() is True and ws.can_redo() is False
+    assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     # Only one local step existed and this cart has no earlier sprite commit, so undo
     # is now a floor; redo is armed.
-    assert ws.can_undo() is False and ws.can_redo() is True
+    assert ws.history.can_undo() is False and ws.history.can_redo() is True
 
 
 # -- ops land in the journal + round-trip -----------------------------------
@@ -136,11 +136,11 @@ def test_paint_repeated_undo_walks_into_the_previous_commit(tmp_path):
     ws.save_sprites()                    # commit V2: (1,1)=7
     _stroke(pe, 2, 2, 9)                 # uncommitted live stroke: (2,2)=9
 
-    assert ws.undo() is True             # local: revert the live stroke
+    assert ws.history.undo() is True             # local: revert the live stroke
     assert ws.sheet.pget(ox + 2, oy + 2) == 0
     assert ws.sheet.pget(ox + 1, oy + 1) == 7      # V2 content still present
 
-    assert ws.undo() is True             # boundary crossed -> journal walks V2 -> V1
+    assert ws.history.undo() is True             # boundary crossed -> journal walks V2 -> V1
     # The reload rebuilt the editor over the restored (V1) sprite art.
     ox, oy = ws.sheet.tile_origin(0)
     assert ws.sheet.pget(ox + 1, oy + 1) == 0      # V2's stroke is gone
@@ -171,10 +171,10 @@ def test_map_paste_bar_undo_reverts_the_paste(tmp_path):
     assert me.paste(5, 5) is True
     assert tm.mget(5, 5) == 4
 
-    assert ws.undo() is True             # the bar UNDO reverts the whole paste
+    assert ws.history.undo() is True             # the bar UNDO reverts the whole paste
     assert tm.mget(5, 5) == tm.EMPTY
     assert tm.mget(0, 0) == 4            # the original stamp survives
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert tm.mget(5, 5) == 4
 
 
@@ -219,7 +219,7 @@ def _type(ws, s, at_top=True):
     ed = ws.editor
     if at_top:
         ed.goto_row(0, 0)
-    ws._code_burst_open()
+    ws.history.code_burst_open()
     ed.insert_text(s)
 
 
@@ -233,26 +233,26 @@ def test_code_burst_bar_undo_reverts_one_burst(tmp_path):
     _type(ws, "# hello\n")                # one live burst
     assert "# hello" in ed.text()
 
-    assert ws.undo() is True             # the bar UNDO closes + reverts the whole burst
+    assert ws.history.undo() is True             # the bar UNDO closes + reverts the whole burst
     assert ed.text() == base
     assert "# hello" not in ed.text()
 
-    assert ws.redo() is True             # ...and REDO re-lays it
+    assert ws.history.redo() is True             # ...and REDO re-lays it
     assert "# hello" in ed.text()
 
 
 def test_code_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     ed = _open_code(ws)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     _type(ws, "# x\n")                    # a LIVE (unrecorded) burst still dims-in undo
-    assert ws.can_undo() is True and ws.can_redo() is False
+    assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     # Only one burst existed and this cart has no earlier code commit, so undo is a
     # floor now; redo is armed.
-    assert ws.can_undo() is False and ws.can_redo() is True
+    assert ws.history.can_undo() is False and ws.history.can_redo() is True
 
 
 def test_code_commit_embeds_ops_in_journal(tmp_path):
@@ -273,8 +273,8 @@ def test_code_commit_embeds_ops_in_journal(tmp_path):
     assert isinstance(op[1], int)
     assert "# note" in op[3]             # the inserted text rode the journal line
     # And the batch drained + re-baselined: the in-RAM stack is clear after commit.
-    assert ws._code_op_history().peek() == []
-    assert ws._code_op_history().can_undo() is False   # in-RAM stack re-baselined
+    assert ws.history.code_op_history().peek() == []
+    assert ws.history.code_op_history().can_undo() is False   # in-RAM stack re-baselined
 
 
 def test_code_undo_walks_into_previous_commit(tmp_path):
@@ -287,11 +287,11 @@ def test_code_undo_walks_into_previous_commit(tmp_path):
     ws.save_code()                       # commit V2
     _type(ws, "# three\n")               # a live, uncommitted burst
 
-    assert ws.undo() is True             # local: revert the live burst
+    assert ws.history.undo() is True             # local: revert the live burst
     assert "# three" not in ws.editor.text()
     assert "# two" in ws.editor.text()
 
-    assert ws.undo() is True             # boundary crossed -> journal walks V2 -> V1
+    assert ws.history.undo() is True             # boundary crossed -> journal walks V2 -> V1
     # The reload rebuilt the editor over the restored (V1) source.
     assert "# two" not in ws.editor.text()
     assert "# one" in ws.editor.text()
@@ -339,27 +339,27 @@ def test_blocks_add_delete_param_bar_undo(tmp_path):
     _go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})
     assert be.program != s0
-    assert ws.undo() is True and be.program == s0
-    assert ws.redo() is True and be.program != s0
+    assert ws.history.undo() is True and be.program == s0
+    assert ws.history.redo() is True and be.program != s0
 
     # PARAM edit -> bar UNDO reverts the slot.
     assert _select_type(be, "cls")
     s1 = blocks_snapshot(be)
     be.set_slot("color", "green")
     assert be.program != s1
-    assert ws.undo() is True and be.program == s1
+    assert ws.history.undo() is True and be.program == s1
 
     # DELETE -> bar UNDO brings the block back.
     assert _select_type(be, "cls")
     s2 = blocks_snapshot(be)
     assert be.delete() is True and be.program != s2
-    assert ws.undo() is True and be.program == s2
+    assert ws.history.undo() is True and be.program == s2
 
 
 def test_blocks_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     be = _open_blocks(ws)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     _go_to_insert(be, 1)
     be.insert_block("cls", {"color": "red"})   # an un-sealed edit still dims-in undo
@@ -380,13 +380,13 @@ def test_scene_place_bar_undo_removes_it_and_syncs_live(tmp_path):
     assert len(se.rows) == 1
     assert len(ws.scenes.scene(name)) == 1
 
-    assert ws.undo() is True             # the bar UNDO reverts the placement...
+    assert ws.history.undo() is True             # the bar UNDO reverts the placement...
     assert len(se.rows) == 0
     assert len(ws.scenes.scene(name)) == 0     # ...and the LIVE scene() sees it too
     # (undo() drives console._after_local_history -> scene_ui._sync_live(), the
     # scene-specific tail every other tab's generic "mutated in place" path doesn't need)
 
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert len(se.rows) == 1
     assert len(ws.scenes.scene(name)) == 1
 
@@ -394,13 +394,13 @@ def test_scene_place_bar_undo_removes_it_and_syncs_live(tmp_path):
 def test_scene_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     se = _open_scene(ws)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     se.place(8, 8)
-    assert ws.can_undo() is True and ws.can_redo() is False
+    assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
-    assert ws.undo() is True
-    assert ws.can_undo() is False and ws.can_redo() is True
+    assert ws.history.undo() is True
+    assert ws.history.can_undo() is False and ws.history.can_redo() is True
 
 
 def test_scene_commit_embeds_ops_in_journal(tmp_path):
@@ -439,23 +439,23 @@ def test_music_step_bar_undo_reverts_pitch(tmp_path):
     me.set_pitch(50)
     assert me.cur_step()[0] == 50
 
-    assert ws.undo() is True             # the bar UNDO reverts the pitch edit
+    assert ws.history.undo() is True             # the bar UNDO reverts the pitch edit
     assert me.cur_step()[0] == p0
 
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert me.cur_step()[0] == 50
 
 
 def test_music_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_cart(tmp_path)
     me = _open_music(ws)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     me.nudge_vol(1)
-    assert ws.can_undo() is True and ws.can_redo() is False
+    assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
-    assert ws.undo() is True
-    assert ws.can_undo() is False and ws.can_redo() is True
+    assert ws.history.undo() is True
+    assert ws.history.can_undo() is False and ws.history.can_redo() is True
 
 
 def test_graduated_blocks_tab_has_no_history(tmp_path):
@@ -468,9 +468,9 @@ def test_graduated_blocks_tab_has_no_history(tmp_path):
     # ABSENT -- the registry returns None and the bar never routes into it.
     ws.block_ui.blk_graduated = True
     assert ws.project.history_for("blocks") is None
-    assert ws._active_history() is None
+    assert ws.history.active_history() is None
     # can_undo now consults only the journal (no in-RAM block history to report).
-    assert ws.can_undo() is False
+    assert ws.history.can_undo() is False
 
 
 def blocks_snapshot(be):
@@ -532,23 +532,23 @@ def test_config_adjust_bar_undo_reverts_field(tmp_path):
     ws.adjust(1)
     assert ws.config["spd"] == 4
 
-    assert ws.undo() is True             # the bar UNDO reverts the field
+    assert ws.history.undo() is True             # the bar UNDO reverts the field
     assert ws.config["spd"] == 3
 
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert ws.config["spd"] == 4
 
 
 def test_config_dimmed_state_is_truthful(tmp_path):
     ws = _make_ws_with_config_cart(tmp_path)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
 
     ws.cards_layer.msel = 0
     ws.adjust(1)
-    assert ws.can_undo() is True and ws.can_redo() is False
+    assert ws.history.can_undo() is True and ws.history.can_redo() is False
 
-    assert ws.undo() is True
-    assert ws.can_undo() is False and ws.can_redo() is True
+    assert ws.history.undo() is True
+    assert ws.history.can_undo() is False and ws.history.can_redo() is True
 
 
 def test_config_commit_embeds_ops_in_journal(tmp_path):
@@ -586,8 +586,8 @@ def test_bar_cache_key_tracks_local_history(tmp_path):
     _stroke(pe, 3, 3, 6)
     after = ws.bar_layer._cart_bar_key()
     assert before != after                      # stroke -> key changes -> strip re-renders
-    assert ws.can_undo() is True
-    ws.undo()
+    assert ws.history.can_undo() is True
+    ws.history.undo()
     assert ws.bar_layer._cart_bar_key() != after   # redo now possible -> changes again
 
 
@@ -596,7 +596,7 @@ def test_bar_undo_bits_are_ram_only_off_editor(tmp_path):
     # and crucially computing them never touches the SD-backed journal check.
     ws = _make_ws_with_cart(tmp_path)
     ws.go_home()
-    assert ws._bar_undo_bits() == (False, False)
+    assert ws.history.bar_undo_bits() == (False, False)
 
 
 # ==================================================================#
@@ -609,16 +609,16 @@ def test_active_tab_files_maps_each_tab(tmp_path):
     # The tab -> journal-file-set table the scoped walk routes through.
     ws = _make_ws_with_cart(tmp_path)
     ws.set_menu_view("code")
-    assert ws._active_tab_files() == ("main.py",)
-    ws.set_menu_view("paint");  assert ws._active_tab_files() == ("sprites.moygfx",)
-    ws.set_menu_view("map");    assert ws._active_tab_files() == ("map.moymap",)
-    ws.set_menu_view("music");  assert ws._active_tab_files() == ("sounds.json",)
-    ws.set_menu_view("blocks"); assert ws._active_tab_files() == ("blocks.json", "main.py")
+    assert ws.history.active_tab_files() == ("main.py",)
+    ws.set_menu_view("paint");  assert ws.history.active_tab_files() == ("sprites.moygfx",)
+    ws.set_menu_view("map");    assert ws.history.active_tab_files() == ("map.moymap",)
+    ws.set_menu_view("music");  assert ws.history.active_tab_files() == ("sounds.json",)
+    ws.set_menu_view("blocks"); assert ws.history.active_tab_files() == ("blocks.json", "main.py")
     ws._open_scene()
-    assert ws._active_tab_files() == ("scenes/main.moyscene",)
+    assert ws.history.active_tab_files() == ("scenes/main.moyscene",)
     # off the Editor (launcher) there is no scoped set -> whole-project (None)
     ws.go_home()
-    assert ws._active_tab_files() is None
+    assert ws.history.active_tab_files() is None
 
 
 def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
@@ -639,16 +639,16 @@ def test_bar_undo_on_code_tab_never_reverts_the_map_commit(tmp_path):
 
     # Back on the code tab: the bar UNDO walks main.py (its own timeline), not the map.
     ws.set_menu_view("code")
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     assert "# c2" not in ws.editor.text()        # code stepped c2 -> c1
     assert "# c1" in ws.editor.text()
     assert ws.tilemap.mget(6, 6) == 5            # the MAP is untouched
 
     # Redo dim is per-tab: the code tab can redo (it was just rewound); after switching
     # to the map tab, REDO is dimmed (the map has nothing ahead).
-    assert ws.can_redo() is True                 # (still on code)
+    assert ws.history.can_redo() is True                 # (still on code)
     ws.set_menu_view("map")
-    assert ws.can_redo() is False                # the map tab's REDO stays dark
+    assert ws.history.can_redo() is False                # the map tab's REDO stays dark
 
 
 def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
@@ -683,7 +683,7 @@ def test_graduated_blocks_tab_undo_ungraduates_under_scoped_walk(tmp_path):
     ws._open_blocks()
     assert ws.menu_view == "blocks"
     assert ws.project.history_for("blocks") is None       # no in-RAM history: journal walk
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     assert "score = 999" not in (Path(path) / "main.py").read_text()
     assert ws.cart["graduated"] is False                  # un-graduated in ONE press
     assert moy_carts.load(path)["graduated"] is False

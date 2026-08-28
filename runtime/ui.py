@@ -237,10 +237,11 @@ def state_token(th, role, fallback=None):
 
 # --- the skin: the LOOK and the NUMBERS, as data ------------------------------
 #
-# Phase 4 (docs/ui_refactor_2026-08.md Section 3; docs/ui_widgets_2026-08.md
-# Section 3.3). Everything a widget draw used to hardcode -- per-state colours,
-# pads, edge weights, strip heights, icon boxes, label alignment -- is two
-# tables here, and a skin is a DELTA over them:
+# Phase 4 (docs/history/ui_refactor_2026-08.md Section 3;
+# docs/history/ui_widgets_2026-08.md Section 3.3). Everything a widget draw
+# used to hardcode -- per-state colours, pads, edge weights, strip heights,
+# icon boxes, label alignment -- is two tables here, and a skin is a DELTA
+# over them:
 #
 #   _SPECS[kind][state] -> a (field, ink, edge) triple of token SPECS, resolved
 #       against one theme ONCE into _FLAT[kind][state], a triple of concrete

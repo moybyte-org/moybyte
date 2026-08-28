@@ -361,7 +361,7 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 - `firmware/web_runner/` — the **MicroPython-WASM** build of the same console.
   **The browser is no longer the GPU (moycore stage 4, 2026-08-12): the wasm
-  RASTERIZES** — the narrative is `docs/moycore_plan_2026-08.md` §6; what a coder
+  RASTERIZES** — the narrative is `docs/history/moycore_plan_2026-08.md` §6; what a coder
   needs here is the shape. `build.sh` compiles `moy_gfx` + vendored libmoy in as a
   usermod; the shell draws on `DeviceCanvas` itself (staged from the T-Deck tree)
   wrapped by `web_canvas.py` — `WebCompositor` supplies a buffer and no flush,
@@ -629,9 +629,10 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 ### The UI refactor landed (2026-08-19) -- one widget vocabulary, apps as data, user apps
 
-`docs/ui_refactor_2026-08.md` is the plan and the authority; it folds
-`docs/ui_widgets_2026-08.md` and `docs/shell_decoupling_2026-08.md` (both of which
-stay as their evidence) after four parallel adversarial reviews, and **cuts about
+`docs/history/ui_refactor_2026-08.md` is the plan and the authority; it folds
+`docs/history/ui_widgets_2026-08.md` and
+`docs/history/shell_decoupling_2026-08.md` (both of which stay as their
+evidence) after four parallel adversarial reviews, and **cuts about
 half of the combined program on evidence**. Read its Section 1 before proposing any
 of the cut parts again. What shipped, in ten commits on dev:
 
@@ -706,10 +707,14 @@ of the cut parts again. What shipped, in ten commits on dev:
 
 ### Two consoles, one game: ESP-NOW multiplayer SHIPPED (2026-08-22, #65/#7)
 
-**`docs/espnow_multiplayer_2026-08.md` is the authority** -- the measurements,
-the protocol, the four bugs the desk found that every host test passed, and the
-on-glass verification. Read it before touching any of this. What belongs here is
-only what a coder must not undo:
+**`docs/netplay_v1.md` is the authority** -- the standing contract: the lockstep
+model, the give-up doctrine, the radio facts and the hardware terms, dated and
+sourced to whatever measurement decided them. Read it before touching any of
+this. The two campaigns behind it are the RECORD, archived 2026-08-27:
+`docs/history/espnow_multiplayer_2026-08.md` (the S3 transport ledger plus the
+four on-glass bugs no host test caught) and
+`docs/history/espnow_p4_2026-08.md` (the C6-shim track, phases A-G). What
+belongs here is only what a coder must not undo:
 
 - **`runtime/netplay.py`** is the deterministic core and an import-free leaf like
   `players.py` (the button order arrives as a constructor argument, so `cart_api`
@@ -728,7 +733,7 @@ only what a coder must not undo:
   loop-rate stall retries and the guest phase slew, the S3 pair measures
   1.8-2.3% at DELAY=1 while the P4 pair (whose C6-shim transport genuinely
   consumes the one-tick budget) escalates to 2 by ~6s and plays clean. The
-  multiplayer doc's "Input latency" section carries the whole measurement.
+  archived campaign's "Input latency" section carries the whole measurement.
 - **The BLE keyboard's background scan owned most of a radio board's packet
   loss** -- interval==window was 100% radio duty, 5s on/5s off, costing the P4
   ~40% of inbound espnow at an idle desk while hiding from every blocking
@@ -761,9 +766,9 @@ only what a coder must not undo:
   esp-hosted-mcu #19 open and unshipped) -- and the rest of it un-settled the
   verdict by BUILDING the path the verdict named: hosted 2.12.12 + the moy_c6
   shim (seventeen esp_now_* wrappers over custom RPC) + a shimmed C6 slave
-  flashed over its own SDIO link. **`docs/espnow_p4_2026-08.md` is that whole
-  campaign** -- the phases, every on-glass verdict, the BLE regression and its
-  fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
+  flashed over its own SDIO link. **`docs/history/espnow_p4_2026-08.md` is that
+  whole campaign** -- the phases, every on-glass verdict, the BLE regression
+  and its fix, and the P4<->T-Deck Brick Siege match at 28.6 ticks/s. Its Phase F
   (2026-08-25) is the stall-rate hunt: the shim's blocking send RPC moved off
   the VM core onto a TX queue (10.2ms -> 20us per send), and the pair now
   plays 0.7-2.8% stalled ticks at 29.6 ticks/s. Phase G (same day): the C6
@@ -880,6 +885,61 @@ was promoted into one body and nothing executable guarded it.**
 - **`slim_carts` no longer decodes a 32,768-pixel sheet to read one 8×8 icon.**
   That was 137ms of a 278ms browser page load, and the same wiring order runs on
   every tier, so all three boards get it. Per-cart numbers belong in #66.
+
+### The shell carve LANDED (2026-08-27) — six collaborators behind the Workstation façade
+
+`docs/history/console_architecture_2026-08.md` (rev 3, tracked #209) executed in five
+gated landings, one object per commit: **W1** `tools/vendor_common.py`
+(`c07a5b5`), **W2** `runtime/layout_base.py` — the eight layout heads' one
+`_base` body (`7a7f9d8`), **W3** the launcher's one streak-advance body
+(`05866c9`); then **WebConsole** `ws.web` (`e66bb27`, the pilot),
+**SystemStore + StoreHandle** `ws.prefs` (`ce4204a`), **CoverCache**
+`ws.covers` (`c3ceb1c`), **CartManager** `ws.carts` (`f4cf8c5`),
+**Appearance** `ws.look` (`f60523a`), **HistoryRouter** `ws.history`
+(`b58e944`). `Workstation` went 5,435 → 3,950 lines / 275 → 208 methods.
+Exactly TEN forwards remain on the façade and
+`tests/test_console_facade.py` pins every one with its caller (web 8, prefs 1,
+carts 1 — covers/look/history landed with ZERO), beside the getattr-name
+ratchet over every `getattr(ws, "…")` probe in runtime/device/tools. Facts a
+coder must not undo:
+
+- **`ws.system` is an ALIAS of the SystemStore dict and is never rebound** —
+  `SystemStore.load()` mutates it in place. That identity is why
+  settings_layer's and dev_channel's raw writes never migrated, and why
+  CrashGuard takes the dict itself (the takes-a-callable wart retired with the
+  rebind that justified it).
+- **The achievement overlays are EVENT-PUSH**: an unlock/egg/konami writes the
+  flat kernel deadlines (`_toast_until`/`_egg_until`/`_confetti_until`) from
+  the arm site; `_animating` and both WMs' overlay signatures read plain ints
+  and never call into `ach`/`ach_ui`. Proven on T-Deck glass: an award over
+  serial armed the deadline, the overlay painted, the desk went static again
+  after expiry.
+- **`theme_colors` stays a flat kernel rebind on purpose**: the launcher's
+  cache keys fold `id(ws.theme_colors)`, so the REBIND is the shelf
+  invalidation — an in-place alias there would be a live bug.
+- **The frame loop reaches collaborators directly, never through a forward**
+  (`covers.begin_frame`/`take_deferred`, `history.idle_tick`); per-card grid
+  paths use injected BOUND methods (`covers.cover_for`, `carts.is_favorite`).
+- **`_icon_cache` is CoverCache's and invalidates on a rescan** (the rev-2
+  item-10 bug, fixed in `c3ceb1c`) — and the invalidate runs BEFORE
+  `slim_carts` re-bakes, because slimming is the last moment a cart's sprite
+  art exists in RAM; the goldens catch a blanket clear.
+- **Serial vocabulary moved with the code** (§3d): `p4_conformance` speaks
+  `ws.carts.all`, `p4_hitch` wraps `ws.history.idle_tick`,
+  `p4_chrome_freeze`/`p4_scroll_ab` speak `ws.look`.
+- **Every landing was built and flashed on all three boards the same night**:
+  host suite 100% green at every step (3,364 tests at the end), `p4_bench`/
+  `p4_clicks` p50 AND p90/max inside noise at every gate, the cart roster
+  unchanged, idle-paints-zero on every arm, all three on-glass suites green
+  throughout (the OTA-verifier trio's chunked-`pyexec` flake reproduced
+  identically on dev-era images that night — chronic, not the carve). Whole-
+  program image delta ≈ +4.6 KB per board. The full gate record is #209's
+  landing comment; per-cart fps stays #66's.
+- **Fixed on the way** (`9ba6498`): `tools/p4_push_web.py` and the P4 on-glass
+  web test both hand-pinned the four-asset era, so the push could never take
+  over from the baked bundle after `moy_store.mjs` joined `ASSETS`
+  (2026-08-25) — and printed "all 4 files match" while doing it. Both now read
+  the one list (`gen_web_blob.asset_names()` over `moy_webhost.ASSETS`).
 
 ### Host == device: the shared console (important)
 
@@ -1109,7 +1169,9 @@ to whoever called it.
   PICO-8's) returns the PREVIOUS offset, so `local px, py = camera(x, y)` read
   nil. Fixed upstream in both the binding and SPEC.md §6's table. Run it before
   crossing anything further, and extend its trace vocabulary FIRST —
-  `docs/moycore_plan_2026-08.md` (tracker #192) is the direction doc.
+  `docs/moycore_direction.md` (tracker #192) is the direction doc, and its
+  gap list is the authority on what the pin does NOT yet cover; the walked
+  plan behind it is `docs/history/moycore_plan_2026-08.md`.
   Every non-spec verb still trampolines to the SAME Python `make_api` closures
   (tuple returns fan out to Lua multivalues, so `touch()` needs no wrapper).
   Related trap in the same family, fixed upstream: `moy_console` holds its sheet
@@ -1191,7 +1253,7 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
   #190 flush-bounce scale fold is deliberately NOT ported (`fold_supported` is
   absent, `PUMP` prints `fold=0`, nothing degrades) — see `tdeck_panel.py`'s header.
 - `device/moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
-- `device/moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC is the recorded open question). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only file of that lineage the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. Two pieces of that module were never about rasterizing and survive on their own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks) and `web_view_ws.py`. `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
+- `device/moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/history/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC was the recorded successor and was DROPPED, owner 2026-08-25 — the browser IS the console, so show-and-tell happens there). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only file of that lineage the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. Two pieces of that module were never about rasterizing and survive on their own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks) and `web_view_ws.py`. `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
 
 ### Hard device constraints (learned the painful way — respect these)
 
@@ -1246,7 +1308,7 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
 
 ## Conventions
 
-- The current design doc is **`moybyte_console_plan_2026-07.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too. The shipped v0.5 shell's UX reference is **`docs/shell_ux_v1.md`** (corrected to the as-built reality); `docs/shell_architecture_v1.md` (privileged system carts + layered compositor) is the standing direction doc; the three implemented shell plan docs (`shell_ux_technical_plan_v1` / `shell_os_architecture_v1` / `shell_layers_refactor_v1`) are archived under `docs/history/`. **`docs/ui_damage_model_v1.md`** is the standing proposal for UI frame cost (nothing built): the desktop tier redraws whole surfaces every frame, the Editor tabs cost 76-92ms of *content-independent* chrome, and the shell already carries six hand-rolled partial re-derivations of region invalidation — two of which produced the same silent cache bug. It also records the **why-not-LVGL** decision with numbers (LVGL shipped on the T-Deck for panel/bus bring-up only, the drawing path left it at 47→90fps, and it was deleted entirely with the fork on 2026-08-17), so that is not re-litigated. **`docs/surface_model_v1.md`** is its successor and the standing presentation CONTRACT for every backend (immediate widget logic + retained surfaces + explicit generation-counter dirty + per-backend compositing strategy): read it BEFORE touching any rendering/compositing/invalidation code on any tier, and treat its §8 graveyard as settled — a new backend implements its §4 compositor contract, it does not invent a new invalidation mechanism. **`docs/board_ports_2026-08.md`** is the standing direction doc for ADDING A BOARD (tracker **#202**: the Guition S3 JC3248W535 and a Guition P4 are the named next two): the per-board bill, **Phases A–D all landed 2026-08-17** (flash/CI plumbing as board.toml data; the shared `FrameLoop`; the GT911 core promoted; the six-stage port checklist), the declines (no driver registry/ABI, no codegen) — read its checklist before starting any port.
+- The current design doc is **`moybyte_console_plan_2026-07.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too. The shipped v0.5 shell's UX reference is **`docs/shell_ux_v1.md`** (corrected to the as-built reality); `docs/shell_architecture_v1.md` (privileged system carts + layered compositor) is the standing direction doc; the three implemented shell plan docs (`shell_ux_technical_plan_v1` / `shell_os_architecture_v1` / `shell_layers_refactor_v1`) are archived under `docs/history/`. **`docs/surface_model_v1.md`** is the standing presentation CONTRACT for every backend (immediate widget logic + retained surfaces + explicit generation-counter dirty + per-backend compositing strategy): read it BEFORE touching any rendering/compositing/invalidation code on any tier, and treat its §8 graveyard as settled — a new backend implements its §4 compositor contract, it does not invent a new invalidation mechanism. It absorbed its predecessor on **2026-08-27** and is the whole living record on UI frame cost now: `ui_damage_model_v1.md`'s own §0 review killed the fine-grained damage architecture (its "content-independent chrome" finding had no power — every one of those draw loops iterates the VIEWPORT, not the content, so identical numbers were structurally guaranteed), and what survived is **§14** — the shipped focused-window content freeze, which `wm_windowed._content_static` and its test now cite as their design source, and the evidence for one invalidation mechanism instead of six (2026-07-26: two of the six carried the same wrong key, cost 72ms of an 86ms frame twice per gesture, and produced no signal whatsoever). §8 carries the **why-not-LVGL** decision with its numbers (used on the T-Deck for panel/bus bring-up only, never to draw; our own blitter took that path 47→90fps; deleted entirely with the fork on 2026-08-17), so that is not re-litigated. The full record, including the phases the review walked, is `docs/history/ui_damage_model_v1.md`. **`docs/board_ports_2026-08.md`** is the standing direction doc for ADDING A BOARD (tracker **#202**: the Guition S3 JC3248W535 and a Guition P4 are the named next two): the per-board bill, **Phases A–D all landed 2026-08-17** (flash/CI plumbing as board.toml data; the shared `FrameLoop`; the GT911 core promoted; the six-stage port checklist), the declines (no driver registry/ABI, no codegen) — read its checklist before starting any port.
 - **Issue mirror (`docs/issues/`, gitignored):** a **local, un-committed** snapshot of every GitHub issue, split into `open/` and `closed/` (files named `NNNN-slug.md`) plus `INDEX.md`, so an issue number referenced in a commit, doc, or chat resolves without network access. GitHub is the source of truth — this is a generated read-only mirror (not in git, to avoid churn), so a fresh checkout won't have it: **build it with `make sync-issues`** (wrapper over `tools/sync_issues.py`; needs the `gh` CLI, authed). The script wipes and rewrites both folders from `gh`, so state changes and edits never leave a stale copy. **Run `make sync-issues` at the start of any session that reads or reasons about issues, and again after EVERY issue you open/close/comment/edit** — the mirror is only trustworthy if syncing is a reflex, and living-body issues (like the #66 performance ledger) go stale locally the moment the body is edited on GitHub. Don't hand-edit the files.
 - Tests run against the host packages only; firmware tests (`tests/test_micropython_spike.py`) grep the frozen device modules' source rather than executing them.
 - **On-glass P4 testing (#156):** the P4's REPL-alive serial is a real test channel — `tools/p4_autotest.py` (`P4Board`: RTS-pulse reset, boot wait, command plumbing) drives the console over it, and `tests/test_p4_on_glass.py` is a pytest suite gated on `MOYBYTE_P4_PORT` (`MOYBYTE_P4_PORT=/dev/ttyACM0 .venv/bin/python -m pytest tests/test_p4_on_glass.py`, ~44s, one board reset per module, tests share the session in file order and leave the board on the desk). The device half lives in `moy_runtime.run_desktop`'s serial commands: **`swipe x0 y0 x1 y1 [frames]`** (a gesture through the real pointer feed — press edge, held interpolation, real release), **`state`** (one-line JSON: world/windows/focus/Settings scroll model/wifi/app claims — assertions read console STATE, not pixels), **`py <code>`** (eval/exec against the live console between frames: the profiling hook — wrap a draw verb, time a commit, count `rect` calls), plus `open appearance|wifi` plus the older `tap`/`run`/`drag`/`diag`/`skip`/`gov`/`union`/`cache`. Gotchas: **wait for `REMOTE drag done`/`swipe done`** before the next command (a mid-gesture command measures with the script still feeding the pointer); PERF's `wmr/wmw/wms` are last-sample values that go STALE when their pass stops running (a repeated constant means "not running"); allow ~10s after a first `open picker` at a new size (cover pop-in, #155); and **never put a call that blocks on FLASH inside a `pyexec` snippet** — `pyexec` uploads multi-line code in chunks while `cmd` sends one line, so a real `os.mkdir`/file write stalls the frame loop long enough for a streaming `diag 1` PERF line to interleave into the chunk exchange, after which the reader parses the fragment as a serial COMMAND and int()s its argument (surfacing as `PY ERR SyntaxError: invalid syntax for integer with base 10`, which names nothing that is wrong); issue those as their own short `cmd`. **Look system-app carts up by TITLE, never folder name** — the device seeds from the title slug (`appearance.moy`), the host copies the source folder (`theme_picker.moy`), and that mismatch is exactly what broke `AppearanceAppLayer.is_app` on device (pinned now by `tests/test_device_seed_parity.py`'s app-identity parity test). **The dev channel is ONE class since 2026-08-17**: both boards construct `dev_channel.DevChannel` (`runtime/dev_channel.py` — until then it had ZERO importers while the T-Deck ran a verbatim copy and the P4 an older inline loop with a diverged vocabulary). One vocabulary everywhere (`state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/`mem`/`bl`/`vol`/`power`/`web`/`py`/`quit` — a command a board can't serve DECLINES, e.g. `drag` with no windows), board extras injected as a handler dict (P4: `bt`/`union`/`cache`/`crisp`), `py` scope extras via `env` (comp/game/boot/pump), the idle blank driven through the shared `device_boot.IdleBlank` on BOTH boards (the P4's inline copy is gone), and the merged `state` snapshot carries both tiers' shapes (`stack` on fullscreen, `desk`/`order`/`wins` on windowed, `psave` on both). Two hard-won sizings live in its constants: `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines (~768 chars %r-escaped — at the T-Deck's original 96 every P4 upload was silently dropped as noise, presenting as the RSA test hanging), and host tests pin the class (`tests/test_dev_channel.py`). **The T-Deck pytest suite EXISTS** (`tests/test_tdeck_on_glass.py`, gated on `MOYBYTE_TDECK_PORT`, 8 checks green on glass 2026-08-17): it ATTACHES to the running desktop and never resets — the T-Deck's USB-Serial/JTAG is ON the SoC, so a reset re-enumerates USB under the open handle and reads-forever-empty; and the port must be OPENED WITH DTR/RTS ASSERTED (pyserial default, what miniterm does) — opening with both LOW chip-resets the board (`rst:0x15`), the exact opposite of the P4's CH343. `P4Board` takes `board_dir=` and reads all four serial facts (`dtr`/`rts`/`attach_only`/`chunk`) from that board's `[serial]` block; the explicit kwargs remain as overrides. `attach_only` REFUSES a reset rather than merely recording one — until 2026-08-22 it was data with no consumer. When a T-Deck sits wedged for esptool, `--before usb_reset` connects where `default_reset` write-times-out. **The Guition has one too** (`tests/test_guition_on_glass.py`, gated on `MOYBYTE_GUITION_PORT`, 10/10 on glass 2026-08-18, both cart runtimes included) — the same attach-never-reset shape, for the same reason (its USB-Serial/JTAG is on the SoC), and both facts are now `[serial]` data in its board.toml rather than encoded by hand in the suite. Two more serial gotchas, both measured 2026-08-17: **merely OPENING the P4's CH343 port reboots the board** (`rst:0x1` on open — the Linux CH34x driver glitches the reset circuit despite pre-set DTR/RTS; the suite's explicit reset masks it, but a bare probe right after open is measuring a board mid-boot, ~17s to the desk), and **a UART board's stdin has a ~256-byte ring with NO flow control** — a long line written in one burst overflows it mid-line now that the dev channel drains per frame instead of blocking in readline (768-byte `py` lines failed 3/3 unpaced, passed 3/3 at 128B/20ms), so `P4Board._write_line` paces bursts and any OTHER writer of long lines to a UART board must too (USB boards backpressure and never need it).

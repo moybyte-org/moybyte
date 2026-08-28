@@ -648,6 +648,121 @@ def test_a_host_whose_peer_never_answers_goes_back_to_playing_solo():
         a.poll(wsa)
     assert a.session is None, "the host gave up rather than stalling forever"
     assert launched[-1] == "Brick Siege", "and re-ran the cart as a solo game"
+    assert wsa.netplay is None, \
+        "SOLO means the console holds no session either -- the next run adopts it"
+
+
+def _adopting(seen):
+    """A launch that models the ONE thing Player.start does with a session: it
+    adopts whatever `ws.netplay` holds at the moment the cart starts. A give-up
+    that re-runs the cart is only a solo game if that read comes back None."""
+    def launch(ws, title):
+        seen.append((ws, ws.netplay, title))
+        return True
+    return launch
+
+
+def _matched(seen=None):
+    air, clock, a, b = _pair(_adopting(seen if seen is not None else []))
+    _see_each_other(a, b, clock)
+    wsa, wsb = _Ws(), _Ws()
+    a.offer(wsa, "Brick Siege")
+    b.poll(wsb)
+    assert wsa.netplay is not None and wsb.netplay is not None
+    return air, clock, a, b, wsa, wsb
+
+
+def test_a_match_that_dies_is_never_handed_to_the_run_that_replaces_it():
+    """THE ON-GLASS FREEZE (T-Deck, 2026-08-27). The peer vanished mid-match, the
+    survivor declared the match dead and re-ran the cart solo -- and the re-run
+    picked the DEAD session straight back up, because giving up cleared the
+    link's reference and not the console's. advance() returned False every frame
+    with nobody left to answer it, so _update never ran again: frozen at frame
+    2874, stalls past 6856, `net=0`, and the link insisting there was no match."""
+    seen = []
+    air, clock, a, b, wsa, wsb = _matched(seen)
+    dead = wsa.netplay
+    seen[:] = []
+
+    air.deaf = True                        # the peer walked away / rebooted
+    for _ in range(netplay.GIVE_UP + 2):
+        dead.advance(0)
+    assert dead.dead, "the premise: the match declared itself unhealable"
+
+    clock.advance(moy_espnow.BEACON_MS + 1)
+    a.poll(wsa)
+    assert a.session is None, "the link gave up"
+    assert wsa.netplay is None, "...and so did the console"
+    assert [e[1] for e in seen] == [None], \
+        "the cart was re-run with NO session -- a one-player game, not a corpse"
+    assert a.active, "the radio stays up: a peer may come back (#65 doctrine)"
+
+
+def test_a_peer_that_says_goodbye_leaves_the_survivor_playing_solo():
+    """T_BYE is a match death like any other and was the one that did not say so:
+    it dropped the session under a Player that keeps its own reference and never
+    re-ran the cart, which is the same forever-stall by a politer route."""
+    seen = []
+    air, clock, a, b, wsa, wsb = _matched(seen)
+    seen[:] = []
+
+    a._dispatch(wsa, b.mac, bytes(bytearray([netplay.PROTO, netplay.T_BYE])))
+    assert a.session is None and wsa.netplay is None
+    assert [e[1] for e in seen] == [None], "the survivor re-ran the cart solo"
+    assert b.mac not in a.peers, "and forgot the console that left"
+    assert a.active
+
+
+def test_a_run_never_adopts_a_dead_session(tmp_path):
+    """The invariant at the OTHER end of the seam, where the freeze was actually
+    paid for: Player.start adopts ws.netplay, and a re-run can arrive from
+    somewhere the link never hears about (Editor PLAY, the dev channel's `run`,
+    a tap on the shelf). A session that has declared itself dead is ended here
+    rather than inherited -- which also frees the run to form a NEW match."""
+    from ws_helpers import build_ws, open_cart
+
+    class _Link:
+        net = None
+
+        def __init__(self):
+            self.calls = []
+
+        def start(self):
+            self.calls.append("start")
+            return True
+
+        def announce(self, cart="", state=0):
+            self.calls.append(("announce", cart, state))
+
+        def offer(self, ws, cart, router=None, seed=None):
+            self.calls.append(("offer", cart))
+            return False
+
+        def end_match(self, ws=None):
+            self.calls.append("end_match")
+            if ws is not None:
+                ws.netplay = None
+
+        def stop(self):
+            self.calls.append("stop")
+
+    class _Dead:
+        dead = True
+        config = None
+
+    ws = build_ws(tmp_path)
+    link = _Link()
+    ws.link = link
+    open_cart(ws, "Brick Siege")           # a "multiplayer" cart: the link runs
+    link.calls[:] = []
+    ws.netplay = _Dead()
+
+    assert ws._start() is True
+    assert ws.netplay is None, "the dead session did not survive the run boundary"
+    assert ws.player._netplay is None, "...so the run is solo"
+    assert "end_match" in link.calls
+    assert ("offer", "Brick Siege") in link.calls, \
+        "and the fresh run is free to form a new match"
 
 
 def test_the_chase_stops_the_moment_the_guest_is_heard():

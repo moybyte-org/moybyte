@@ -141,7 +141,7 @@ class Surface:
     def font_scale(self):
         """The EFFECTIVE system font scale (1 on a shared 320x240 canvas whose
         framebuf text cannot scale, regardless of the setting)."""
-        return self.__ws._effective_font_scale()
+        return self.__ws.look.effective_font_scale()
 
     def windowed(self):
         """True while the app is a WINDOW on the desk (#105): the WM's title
@@ -180,13 +180,13 @@ class Theme:
     def light(self):
         """True when the live theme's tool surface is LIGHT -- THE gate every
         surface's light branch reads."""
-        return self.__ws.light_chrome()
+        return self.__ws.look.light_chrome()
 
     def name(self):
-        return self.__ws.theme_name
+        return self.__ws.look.theme_name
 
     def variant(self):
-        return self.__ws.theme_variant
+        return self.__ws.look.theme_variant
 
     def skin(self):
         """The installed WIDGET skin's name (`runtime/skin.py`) -- the third
@@ -194,7 +194,7 @@ class Theme:
 
         The active value is a role read, like `name()`; the CATALOG is not
         (see below)."""
-        return self.__ws.skin_name
+        return self.__ws.look.skin_name
 
     # A theme PICKER wants the OTHER themes' tokens too. That is not a role:
     # `chrome.THEMES` / `THEME_VARIANTS` / `theme_colors()` are a pure leaf
@@ -202,16 +202,16 @@ class Theme:
     # `skin.names()` is the same shape of thing and travels the same way.
 
     def set(self, name, persist=True, variant=None):
-        self.__ws.set_theme(name, persist=persist, variant=variant)
+        self.__ws.look.set_theme(name, persist=persist, variant=variant)
 
     def set_variant(self, variant, persist=True):
-        self.__ws.set_theme_variant(variant, persist=persist)
+        self.__ws.look.set_theme_variant(variant, persist=persist)
 
     def set_skin(self, name, persist=True):
-        """Install a widget skin and remember it. The Workstation owns the
-        install because the skin is process-wide state in `ui` and its name is
-        a persisted setting -- exactly like the theme."""
-        self.__ws.set_skin(name, persist=persist)
+        """Install a widget skin and remember it. `ws.look` owns the install
+        because the skin is process-wide state in `ui` and its name is a
+        persisted setting -- exactly like the theme."""
+        self.__ws.look.set_skin(name, persist=persist)
 
 
 # -- the storage roles' shared machinery -------------------------------------
@@ -232,10 +232,19 @@ class _StoreRole:
     Subclasses call `_StoreRole.__init__(self, ws)`, set `self.raw` to their
     in-session view, and reach the shell through `_store()` / `_shell()` -- the
     Workstation is held HERE, once, so there is a single mangled reference
-    rather than one per subclass."""
+    rather than one per subclass.
+
+    The (store, root, can_manage, with_sd) guard is NOT re-derived here (#209
+    landing C, architecture doc 2a): the shell's ONE `StoreHandle` is taken off
+    it at construction, and `readable`/`ready`/`_session` are that object's
+    `ready`/`writable`/`call`. It arrives as an object rather than an import, so
+    this module stays the leaf it is -- it imports nothing of the shell -- and
+    it still reads the store THROUGH `ws` per call, so the late service
+    injection cannot become a wiring-order trap here either."""
 
     def __init__(self, ws):
         self.__ws = ws
+        self.__store = ws.store
 
     # -- the shell, for subclasses ------------------------------------------
 
@@ -246,21 +255,20 @@ class _StoreRole:
 
     def _shell(self):
         """The Workstation. Module-internal, for the handful of verbs that
-        reach past the store itself (`_all_carts`, `_rehydrate_cart`,
-        `wallpaper_id`, ...)."""
+        reach past the store itself (`look.wallpaper_id`, the wallpaper
+        cart lookups, ...)."""
         return self.__ws
 
     # -- readiness -----------------------------------------------------------
 
     def readable(self):
         """A store exists to READ from."""
-        ws = self.__ws
-        return ws.carts_store is not None and ws.carts_root is not None
+        return self.__store.ready()
 
     def ready(self):
         """A store exists AND writes are enabled (the `_store_ready` predicate
         every Desk-Lab app used to spell out)."""
-        return self.readable() and bool(self.__ws.can_manage)
+        return self.__store.writable()
 
     # -- the session ---------------------------------------------------------
 
@@ -268,7 +276,7 @@ class _StoreRole:
         """`fn()` inside ONE storage session, as `(value, err)`. The single
         try/except in this module's storage path."""
         try:
-            return (self.__ws._with_sd(fn), None)
+            return (self.__store.call(fn), None)
         except Exception as exc:  # noqa: BLE001 -- surface, never crash the shell
             return (None, str(exc))
 
@@ -546,7 +554,7 @@ class Carts(_StoreRole):
 
     def all(self):
         """Every scanned cart (the FULL list, not the launcher run-grid)."""
-        return self._shell()._all_carts
+        return self._shell().carts.all
 
     def can_journal(self):
         """True when the store carries the #111 journal verbs (an older store
@@ -560,11 +568,11 @@ class Carts(_StoreRole):
 
     def hydrate(self, cart):
         """Load a slimmed cart's full payloads back IN PLACE (#66)."""
-        return self._shell()._rehydrate_cart(cart)
+        return self._shell().carts.rehydrate(cart)
 
     def apply(self, items):
         """Adopt a fresh scan as the live cart list (re-derives both grids)."""
-        self._shell()._apply_items(items)
+        self._shell().carts.apply(items)
 
     def load_deck(self, cart):
         return self._read(self.raw.load_deck, cart)
@@ -707,25 +715,25 @@ class WallpaperRole(_StoreRole):
 
     def current(self):
         """The active wallpaper id (a cart slug or `fill:<color>`)."""
-        return self._shell().wallpaper_id
+        return self._shell().look.wallpaper_id
 
     def carts(self):
         """The wallpaper-type carts available as backdrops."""
-        return self._shell().wallpaper_carts()
+        return self._shell().look.wallpaper_carts()
 
     def fills(self):
         """The built-in solid fills -- always present, so there is always a
         valid pick even with zero wallpaper carts installed."""
-        return self._shell()._FILL_WALLPAPERS
+        return self._shell().look.FILL_WALLPAPERS
 
     def id_for(self, cart):
-        return self._shell()._wp_id_for(cart)
+        return self._shell().look.wp_id_for(cart)
 
     def cart_by_id(self, wp_id):
-        return self._shell()._wp_cart_by_id(wp_id)
+        return self._shell().look.wp_cart_by_id(wp_id)
 
     def select(self, wp_id, persist=True):
-        self._shell().select_wallpaper(wp_id, persist=persist)
+        self._shell().look.select_wallpaper(wp_id, persist=persist)
 
     def preview(self, cv, rect, dt):
         """Composite the live backdrop into `rect` -- the Appearance preview."""

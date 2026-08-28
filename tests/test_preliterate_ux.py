@@ -180,7 +180,7 @@ def _open(ws, title):
             return
     # Not in the launcher run-grid (a WALLPAPER leaves it, spec shell_ux_v1.md): still a
     # real editable cart in the store, so open it by reference (as ws.open() does).
-    cart = next((c for c in ws._all_carts if c["title"] == title), None)
+    cart = next((c for c in ws.carts.all if c["title"] == title), None)
     if cart is None:
         raise AssertionError("cart not found: " + title)
     ws._open_workspace(cart)

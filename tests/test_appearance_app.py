@@ -45,7 +45,7 @@ def test_picker_separates_image_and_cart_wallpapers(tmp_path):
     # My Art first, then the built-in solid fills (kept selectable here now that
     # the Settings WALLPAPER stepper is gone -- the app is the ONE surface).
     assert items[0]["title"] == "My Art"
-    assert items[1:] == list(ws._FILL_WALLPAPERS)
+    assert items[1:] == list(ws.look.FILL_WALLPAPERS)
     cart_titles = [c["title"] for c in app._cart_items()]
     assert "My Art" not in cart_titles
     assert {"Moy Night", "Sakura", "Ocean Desktop"}.issubset(set(cart_titles))
@@ -59,7 +59,7 @@ def test_solid_fill_selectable_from_images_tab(tmp_path):
     items = app._items()
     fill_i = items.index("fill:black")
     app._apply(fill_i)
-    assert ws.wallpaper_id == "fill:black"
+    assert ws.look.wallpaper_id == "fill:black"
     assert moy_carts.load_system(carts)["wallpaper"] == "fill:black"
     assert app.status == "BLACK"
     # Reopening lands back on the IMAGES tab with the fill selected.
@@ -76,19 +76,18 @@ def test_wallpaper_and_theme_choices_apply_and_persist(tmp_path):
     app._set_mode("carts")
     ocean_i = [c["title"] for c in app._cart_items()].index("Ocean Desktop")
     app._apply(ocean_i)
-    assert ws.wallpaper_id == "ocean"
+    assert ws.look.wallpaper_id == "ocean"
     assert moy_carts.load_system(carts)["wallpaper"] == "ocean"
     # The monitor shows a COMPUTED still on every tier (no live/static drift),
     # so the appearance screen closes the redraw gate even for a live cart
     # (once the "Home Decorator" unlock toast this pick raised has cleared).
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
     assert ws._animating(1 / 30) is False
 
     app._set_mode("themes")
     berry_i = [item[0] for item in app._items()].index("berry")
     app._apply(berry_i)
-    assert ws.theme_name == "berry"
+    assert ws.look.theme_name == "berry"
     assert ws.theme_colors["title"] == 14
     assert moy_carts.load_system(carts)["theme"] == "berry"
 
@@ -139,7 +138,7 @@ def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
     assert lay.wide and lay.screen is not None
     sx, sy, sw, sh = lay.screen
     assert sw * 3 == sh * 4                      # the game canvas aspect
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     app._set_mode("carts")
     ws.wallpaper.draw_preview(ws.sys_canvas, (10, 20, 500, 380), 1 / 30)
     sc = ws.sys_canvas
@@ -151,7 +150,7 @@ def test_wide_monitor_shows_full_wallpaper_letterboxed(tmp_path):
 
 def test_fill_and_image_previews_fill_or_fit_the_screen(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.select_wallpaper("fill:indigo", persist=False)
+    ws.look.select_wallpaper("fill:indigo", persist=False)
     ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 100, 80), 0)
     sc = ws.sys_canvas
     from runtime import console as C
@@ -192,8 +191,7 @@ def test_small_tier_monitor_shows_whole_my_art_image(tmp_path):
     assert ws.artwork.set_wallpaper()
     app = _open_appearance(ws)
     assert app.mode == "images"
-    ws.ach.toast = None                        # the unlock toast would overlap
-    ws.ach.toast_until = 0                     # the monitor's top rows
+    ws._toast_until = 0        # the unlock toast would overlap the top rows
     ws.mark_dirty()
     ws.input.begin_frame()
     ws.frame(1 / 30)
@@ -226,7 +224,7 @@ def test_preview_runner_leaves_the_game_canvas_alone(tmp_path):
     """The preview compiles the cart onto an OFFSCREEN canvas -- a running
     game's frame on ws.canvas must survive a monitor redraw untouched."""
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600))
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     ws.canvas.cls(9)                              # stand-in for a game's frame
     before = bytes(ws.canvas._buf)
     ws.wallpaper.draw_preview(ws.sys_canvas, (0, 0, 480, 360), 1 / 30)
@@ -240,7 +238,7 @@ def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
     session draws from the sidecar WITHOUT the runner."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
     assert ws.sys_canvas.pix(86, 67) != 0      # the rendered still landed
@@ -251,7 +249,7 @@ def test_static_preview_computes_once_and_caches_like_thumbnails(tmp_path):
     # factory) still shows the frame -- straight from the sidecar.
     ws2 = host_app.build_workstation(carts)
     ws2.wallpaper._ensure_preview = lambda: False
-    ws2.select_wallpaper("moy_night", persist=False)
+    ws2.look.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
     assert ws2.sys_canvas.pix(86, 67) != 0
@@ -263,7 +261,7 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
     old frame)."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    ws.select_wallpaper("moy_night", persist=False)
+    ws.look.select_wallpaper("moy_night", persist=False)
     rect = (10, 10, 152, 114)
     ws.wallpaper.draw_preview(ws.sys_canvas, rect, 1 / 30)
     main = Path(carts) / "moy_night.moy" / "main.py"
@@ -271,7 +269,7 @@ def test_static_preview_recomputes_when_the_source_changes(tmp_path):
                     encoding="utf-8")
     ws2 = host_app.build_workstation(carts)
     ws2.wallpaper._ensure_preview = lambda: False   # no runner: stale = nothing
-    ws2.select_wallpaper("moy_night", persist=False)
+    ws2.look.select_wallpaper("moy_night", persist=False)
     ws2.sys_canvas.cls(0)
     ws2.wallpaper.draw_preview(ws2.sys_canvas, rect, 1 / 30)
     scr = ws2.sys_canvas

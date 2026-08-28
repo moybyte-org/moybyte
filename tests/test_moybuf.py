@@ -50,18 +50,18 @@ def _mk_cart(tmp_path, name="Covered", value=5):
 
 
 def _tracked_ws(tmp_path, monkeypatch):
-    from runtime import console, host_app
+    from runtime import cover_cache, host_app
     tr = _Tracker()
-    monkeypatch.setattr(console, "_moybuf", tr)
+    monkeypatch.setattr(cover_cache, "_moybuf", tr)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     return ws, tr
 
 
 def _land(ws, cart, w, h, frames=300):
     for _ in range(frames):
-        ws._cover_built = False          # frame() resets these once per frame
-        ws._cover_ms = 0
-        img = ws._cover_for(cart, w, h)
+        ws.covers._built = False          # frame() resets these once per frame
+        ws.covers._ms = 0
+        img = ws.covers.cover_for(cart, w, h)
         if img is not None:
             return img
     raise AssertionError("cover never landed")
@@ -72,7 +72,7 @@ def test_cover_payloads_live_off_heap(tmp_path, monkeypatch):
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
     img = _land(ws, cart, 40, 30)
     assert isinstance(img.pix, memoryview)               # the card bitmap
-    runs = ws._cover_runs_get(cart["path"])
+    runs = ws.covers._runs_get(cart["path"])
     assert runs is not None and isinstance(runs[2], memoryview)  # the blob
     assert id(img.pix) in tr.live and id(runs[2]) in tr.live
 
@@ -84,15 +84,15 @@ def test_rescan_frees_every_payload(tmp_path, monkeypatch):
     _land(ws, a, 40, 30)
     _land(ws, b, 40, 30)
     assert tr.live                                       # payloads are warm
-    ws._apply_items(list(ws._all_carts))                 # the store re-scan
+    ws.carts.apply(list(ws.carts.all))                 # the store re-scan
     assert tr.live == {}                                 # ...frees ALL of it
 
 
 def test_cover_lru_eviction_frees_the_old_card(tmp_path, monkeypatch):
-    from runtime import console
+    from runtime import cover_cache
     cart = _mk_cart(tmp_path)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
-    monkeypatch.setattr(console, "_COVER_CACHE_MAX_ENTRIES", 1)
+    monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_ENTRIES", 1)
     img1 = _land(ws, cart, 40, 30)
     freed_before = tr.freed
     _land(ws, cart, 20, 15)              # second size evicts the first card
@@ -101,38 +101,38 @@ def test_cover_lru_eviction_frees_the_old_card(tmp_path, monkeypatch):
 
 
 def test_runs_eviction_frees_unless_a_job_reads_it(tmp_path, monkeypatch):
-    from runtime import console
+    from runtime import cover_cache
     a = _mk_cart(tmp_path, "CoverA", 5)
     b = _mk_cart(tmp_path, "CoverB", 9)
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
     _land(ws, a, 40, 30)
-    blob_a = ws._cover_runs_get(a["path"])[2]
+    blob_a = ws.covers._runs_get(a["path"])[2]
     # Shrink the byte cap so the next put evicts cart A's runs entry.
-    monkeypatch.setattr(console, "_COVER_RUNS_MAX_BYTES", 1)
+    monkeypatch.setattr(cover_cache, "_COVER_RUNS_MAX_BYTES", 1)
 
     class _Job:                          # an in-flight decode holding the blob
         packed = blob_a
         pix = None
 
-    ws._cover_jobs[("fake", 1, 1)] = _Job()
+    ws.covers._jobs[("fake", 1, 1)] = _Job()
     _land(ws, b, 40, 30)                 # loads + puts B -> evicts A
-    assert ws._cover_runs_get(a["path"]) is None         # evicted from the LRU
+    assert ws.covers._runs_get(a["path"]) is None         # evicted from the LRU
     assert id(blob_a) in tr.live         # ...but NOT freed: the job reads it
     # With the job gone, the same eviction path frees.
-    ws._cover_jobs = {}
-    ws._cover_free_runs(blob_a)
+    ws.covers._jobs = {}
+    ws.covers._free_runs(blob_a)
     assert id(blob_a) not in tr.live
 
 
 def test_free_cover_img_is_alias_safe(tmp_path, monkeypatch):
-    from runtime.console import _CoverImage
+    from runtime.cover_cache import _CoverImage
     ws, tr = _tracked_ws(tmp_path, monkeypatch)
     img = _CoverImage(4, 3, tr.take(b"\x01" * 12))
     img._rgb_i = tr.alloc(24)
     rgb = tr.alloc(24)
     img._rgb = rgb
     img._rgb_variants = {(1, 0, 0): (rgb, 4, 3)}   # ALIASES the hot slot
-    ws._free_cover_img(img)              # a double free would raise (tracker)
+    ws.covers._free_img(img)              # a double free would raise (tracker)
     assert tr.live == {}
     assert img.pix is None and img._rgb is None and img._rgb_i is None
 

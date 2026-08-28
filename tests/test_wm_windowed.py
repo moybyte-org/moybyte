@@ -42,8 +42,7 @@ def _drv(ws):
 
 def _quiesce(ws):
     ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +577,7 @@ def test_drag_backdrop_cache_engages(tmp_path):
     assert ws.wm._backdrop_valid
     assert calls[0] == 0
     # ...and it does re-render as soon as the desk really changes.
-    ws.set_theme("berry" if ws.theme_name != "berry" else "forest", persist=False)
+    ws.look.set_theme("berry" if ws.look.theme_name != "berry" else "forest", persist=False)
     ws._dirty = True
     drv.frame(0.0)
     assert calls[0] == 1
@@ -881,7 +880,7 @@ def test_font_scale_change_rebuilds_windows(tmp_path):
     ws.open_settings()
     drv.frame(1 / 30)
     assert "settings" in ws.wm._wins
-    ws.set_font_scale(1, persist=False)
+    ws.look.set_font_scale(1, persist=False)
     assert ws.wm._wins == {}               # dropped for rebuild
     assert ws._sys_canvas is ws.wm._root_canvas
     drv.frame(1 / 30)
@@ -1025,19 +1024,19 @@ def test_theme_setting_cycles_and_persists(tmp_path):
     ws = _ws(tmp_path)                             # aliases the bare-name modules
     from runtime.chrome import THEMES, theme_colors
     drv = _drv(ws)
-    assert ws.theme_name == "night"
+    assert ws.look.theme_name == "night"
     assert ws.theme_colors == theme_colors("night")
-    ws.cycle_theme(1)
-    assert ws.theme_name == THEMES[1][0]           # "indigo"
+    ws.look.cycle_theme(1)
+    assert ws.look.theme_name == THEMES[1][0]           # "indigo"
     assert ws.theme_colors is not theme_colors("night")
     assert ws.launcher.theme is ws.theme_colors    # accents follow
-    assert ws.system.get("theme") == ws.theme_name  # persisted
+    assert ws.system.get("theme") == ws.look.theme_name  # persisted
     # A themed frame renders (window strip uses the new title token).
     ws.open_settings()
     drv.frame(1 / 30)
     # And an unknown persisted name falls back to the default.
-    ws.set_theme("nonsense", persist=False)
-    assert ws.theme_name == "night"
+    ws.look.set_theme("nonsense", persist=False)
+    assert ws.look.theme_name == "night"
 
 
 def _engage_resize(ws, drv, dx=60, dy=-40):
@@ -1424,7 +1423,7 @@ def test_chrome_freeze_refreshes_when_the_title_changes(tmp_path):
     ws.wm._win_chrome(win, True, quiet=True)      # unchanged -> still frozen
     assert win._chrome_streak >= 2
 
-    ws.set_theme("berry" if ws.theme_name != "berry" else "forest",
+    ws.look.set_theme("berry" if ws.look.theme_name != "berry" else "forest",
                  persist=False)
     ws.wm._win_chrome(win, True, quiet=True)
     assert win._chrome_sig != before
@@ -1512,11 +1511,11 @@ def test_font_scale_change_from_a_window_reaches_the_root_canvas(tmp_path):
 
     ws.wm._install(win.ctx)               # what input dispatch does
     try:
-        ws.set_font_scale(1, persist=False)
+        ws.look.set_font_scale(1, persist=False)
     finally:
         ws.wm._install(ws.wm._root_ctx)
 
-    assert ws.font_scale == 1
+    assert ws.look.font_scale == 1
     assert ws.layout.fs == 1
     assert ws.wm._root_canvas.font_scale == 1, \
         "the scale landed on a throwaway window buffer, not the root canvas"
@@ -1553,7 +1552,7 @@ def test_font_scale_change_matches_booting_at_that_scale(tmp_path):
     win = ws.wm._wins["settings"]
     ws.wm._install(win.ctx)
     try:
-        ws.set_font_scale(1, persist=False)
+        ws.look.set_font_scale(1, persist=False)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     for _ in range(30):
@@ -1573,7 +1572,7 @@ def test_new_window_buffers_adopt_the_changed_font_scale(tmp_path):
     drv.frame(1 / 30)
     ws.wm._install(ws.wm._wins["settings"].ctx)
     try:
-        ws.set_font_scale(1, persist=False)
+        ws.look.set_font_scale(1, persist=False)
     finally:
         ws.wm._install(ws.wm._root_ctx)
     ws.open_picker()
@@ -1707,7 +1706,7 @@ def test_the_desk_sig_excludes_the_cover_generation(tmp_path):
     _open_two_windows(ws, drv)
     before = ws.wm._desk_sig_value() if hasattr(ws.wm, "_desk_sig_value") \
         else ws.wm._backdrop_layer._desk_sig()
-    ws._cover_gen += 5
+    ws.covers.gen += 5
     after = ws.wm._backdrop_layer._desk_sig()
     assert before == after
 
@@ -1719,7 +1718,7 @@ def test_the_desk_sig_moves_with_the_theme_and_size(tmp_path):
     _open_two_windows(ws, drv)
     layer = ws.wm._backdrop_layer
     a = layer._desk_sig()
-    ws.set_theme("berry" if ws.theme_name != "berry" else "forest", persist=False)
+    ws.look.set_theme("berry" if ws.look.theme_name != "berry" else "forest", persist=False)
     assert layer._desk_sig() != a
 
 

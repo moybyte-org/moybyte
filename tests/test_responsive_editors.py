@@ -45,8 +45,7 @@ def _quiesce(ws):
     """
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
+    ws._toast_until = 0
     ws.bar_layer._clock_text = lambda: "00:00"
 
 
@@ -296,7 +295,7 @@ def test_font_scale_change_reflows_open_code_editor(tmp_path):
     _enter(ws, "code")
     ws.editor.set_text("hello world")
     cols1 = ws.editor.COLS
-    ws.set_font_scale(2, persist=False)
+    ws.look.set_font_scale(2, persist=False)
     assert ws.editor.COLS != cols1                    # the window reflowed
     assert ws.editor.text() == "hello world"          # buffer intact
 

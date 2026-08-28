@@ -295,7 +295,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ws.screen = "menu"
     ed = ws.editor
     # -- local tier: a typing burst breaks line 2, PLAY crashes, undo fixes.
-    ws._code_burst_open()
+    ws.history.code_burst_open()
     ed.set_text("def _draw():\n    boom_undefined()\n")
     ws.cart["src"] = ed.text()
     ws._start()
@@ -303,7 +303,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ws.frame(1 / 30)                            # crash -> thrown back to code
     assert ws.screen == "menu" and ws.code_err_row == 1
     assert ws.crash_popup is not None
-    assert ws.undo() is True                    # unwinds the burst
+    assert ws.history.undo() is True                    # unwinds the burst
     assert "boom_undefined" not in ws.editor.text()
     assert ws.code_err_row is None and ws.code_err is None
     assert ws.crash_popup is None               # popup retired with the marker
@@ -316,7 +316,7 @@ def test_undo_of_breaking_change_clears_marker_and_keeps_place(tmp_path):
     ed.goto_row(2, 4)
     ws.code_err = "stale"                       # a stale marker must not survive
     ws.code_err_row = 1
-    assert ws.undo() is True                    # no local ops -> journal walk
+    assert ws.history.undo() is True                    # no local ops -> journal walk
     assert "cls(2)" in ws.editor.text()         # commit 2 reverted
     assert ws.code_err is None and ws.code_err_row is None
     assert (ws.editor.row, ws.editor.col) == (2, 4)   # place kept, not (0, 0)

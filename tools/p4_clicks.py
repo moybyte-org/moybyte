@@ -53,7 +53,7 @@ Attributed with tools/p4_attrib.py's wrap hook over the same driver (cold):
 A cover's blob read + parse is ~49ms and there are ~29 carts; each pop-in
 re-armed the redraw gate, so the desk repainted SIX times (~104ms each) with
 the loads landing on painted frames. THE FIX (2026-07-27, two halves):
-  1. The idle prefetch is ARMED FROM BOOT (console._cover_seen starts True,
+  1. The idle prefetch is ARMED FROM BOOT (CoverCache._seen starts True,
      re-armed on a store re-scan). The old arming -- only after a surface drew
      a cover -- kept the cache cold at exactly the moment of the click: neither
      Settings nor the desk icon column (tile-0 art) ever armed it.
@@ -62,7 +62,7 @@ the loads landing on painted frames. THE FIX (2026-07-27, two halves):
      of spreading over 2-3 full ~190ms repaints. The cold path is unshaped by
      this: the first build of a frame always proceeded regardless of budget,
      and after any ~50ms load the 20ms ceiling still refuses a second.
-  3. Image PREBUILD (phase 2, console._cover_prebuild_tick): the wrap-hook
+  3. Image PREBUILD (phase 2, CoverCache._prebuild_tick): the wrap-hook
      attribution of the remaining 2x~200ms found ~10ms PER CARD still paid on
      the transition -- the first build at each grid's card size (native
      decode+crop at ~150x150) plus the device spr's first-blit RGB bake. Idle

@@ -45,7 +45,7 @@ method, so this module imports on CPython and its protocol half is exercised by
 tests/test_espnow_link.py against a fake radio. Staged on all three console
 boards. The P4's `espnow` module is not the SoC's (it has no radio): it is
 stock modespnow.c over the moy_c6 shim -- seventeen esp_now_* wrappers riding
-ESP-Hosted's custom RPC to the C6 (docs/espnow_p4_2026-08.md, which also
+ESP-Hosted's custom RPC to the C6 (docs/history/espnow_p4_2026-08.md, which also
 records the morning this same header said that was impossible). One rule that
 is load-bearing there and mere hygiene on the S3s: wlan.active(True) BEFORE
 the radio, because the C6's radio starts with the host's WLAN.
@@ -340,17 +340,10 @@ class EspNowLink:
         """
         if self.session is not None:
             if self.session.dead:
-                # The two clocks fell too far apart to heal. Ending it puts the
+                # The two clocks fell too far apart to heal. Giving up puts the
                 # kid back in a one-player game instead of holding a frozen
                 # screen, which is the worst outcome available here.
-                print("Moybyte link: match lost, playing solo")
-                self.end_match()
-                self._start_frame = None
-                if self._launch is not None and ws is not None and self.cart:
-                    try:
-                        self._launch(ws, self.cart)
-                    except Exception:  # noqa: BLE001
-                        pass
+                self._lost_match(ws, "match lost")
                 return
             self._chase_start(ws)
             return
@@ -423,7 +416,12 @@ class EspNowLink:
         if kind == T_BYE:
             self.peers.pop(mac, None)
             if self.session is not None:
-                self.end_match()
+                # A peer that says goodbye kills the match exactly as surely as
+                # one that walks out of range, and this was the ONE death that
+                # did not re-run the cart: the session went away under a Player
+                # that keeps its own reference to it, so the game stalled on a
+                # console that had already left, forever and with nothing said.
+                self._lost_match(ws, "peer left")
             return
         if kind == T_JOIN:
             if self._for_us(msg, 2):
@@ -565,16 +563,9 @@ class EspNowLink:
             return
         self._start_tries += 1
         if self._start_tries > START_TRIES:
-            print("Moybyte link: peer never answered, playing solo")
-            self.end_match()
-            self._start_frame = None
             # Back to a ONE-player game: the cart is sitting there with a second
             # tank nobody drives, so re-run it rather than leave a ghost.
-            if self._launch is not None and ws is not None and self.cart:
-                try:
-                    self._launch(ws, self.cart)
-                except Exception:  # noqa: BLE001
-                    pass
+            self._lost_match(ws, "peer never answered")
             return
         self.broadcast(self._start_frame)
 
@@ -601,7 +592,7 @@ class EspNowLink:
                 self._launch(ws, cart)
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte link relaunch failed:", exc)
-                self.end_match()
+                self.end_match(ws)
         return self.session is not None
 
     def _config_of(self, ws):
@@ -653,10 +644,10 @@ class EspNowLink:
             try:
                 if not self._launch(ws, cart):
                     print("Moybyte link: no cart named %r here" % cart)
-                    self.end_match()
+                    self.end_match(ws)
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte link launch failed:", exc)
-                self.end_match()
+                self.end_match(ws)
 
     def _begin(self, ws, index, seed, session, router=None, config=None):
         if router is None and ws is not None:
@@ -671,13 +662,45 @@ class EspNowLink:
             ws.netplay = self.session
         return True
 
-    def end_match(self):
+    def _lost_match(self, ws, why):
+        """EVERY way a match can die ends here, and it ends on BOTH sides of the
+        console: the link's session and the one the console is holding.
+
+        Clearing only the link's used to leave `ws.netplay` pointing at the dead
+        session, and the re-run below re-enters Player.start, which ADOPTS
+        ws.netplay -- so the solo game picked the corpse straight back up,
+        advance() returned False every frame with nobody left to answer it, and
+        the cart never simulated again. On glass that was a survivor frozen at
+        frame 2874 with stalls past 6856 while the link reported no match at all
+        (2026-08-27). Re-running the cart is what puts the kid back in a
+        one-player game instead of a frozen screen -- #65's "nothing waits
+        forever", which the T_BYE path did not implement at all.
+        """
+        print("Moybyte link: %s, playing solo" % why)
+        self.end_match(ws)
+        self._start_frame = None
+        if self._launch is not None and ws is not None and self.cart:
+            try:
+                self._launch(ws, self.cart)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def end_match(self, ws=None):
+        """Drop the match -- and the CONSOLE's reference to it, not just ours.
+
+        `ws` is optional for the one caller that has no console to hand (stop(),
+        at shutdown, which runs only once the Player has already cleared it).
+        Everybody else has one and passes it: ws.netplay is what the next
+        Player.start adopts, so a session left there outlives the match it
+        belonged to and stalls the run that inherits it."""
         if self.session is not None:
             try:
                 self.session.close()
             except Exception:  # noqa: BLE001
                 pass
             self.session = None
+        if ws is not None:
+            ws.netplay = None
         if self.state == 2:
             self.state = 1 if self.cart else 0
 

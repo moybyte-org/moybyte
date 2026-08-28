@@ -17,6 +17,18 @@ not the shipping number. The fps= field stays valid either way -- it reads
 _frames_drawn, not the EMAs -- so the only thing lost with them off is the
 per-phase ms breakdown, which --diag turns back on when you want it.
 
+A row marked LINKED is NOT that cart's fps. A second console left in the same
+two-player cart forms a real ESP-NOW match, and a linked game draws on the
+shared 30Hz tick by design (#65) -- so Brick Siege reads 30 against the 62 it
+runs solo. Move the other console off the cart and re-measure.
+
+THE BOARD SAYS THAT ITSELF NOW (2026-08-27): every PERF line carries `net=`,
+the lockstep tick rate, or `-` when no session is gating frames -- so this reads
+the samples it already has instead of asking the radio afterwards, which is both
+per-sample and free. A board whose firmware predates the field prints no `net=`
+at all and its rows stay unmarked, which is the honest reading of "this board
+did not say".
+
 Numbers live in issue #66, not here. This tool produces them; it does not
 remember them.
 """
@@ -78,8 +90,17 @@ def measure(board, title, secs, log):
     samples = [p for p in (parse_perf(l) for l in board.lines[n0:]) if p]
     if not samples:
         return None
+    # What this run WAS, from the samples themselves: `net=` is a number only
+    # while a lockstep session is gating frames (#65), and `-` when nothing is.
+    # A peer left on the desk in the same two-player cart makes a correct 30
+    # that reads exactly like a regression -- 2026-08-27, a T-Deck parked in
+    # Brick Siege cost a night of paired carve-vs-dev captures. parse_perf
+    # float()s what it can, so a rate arrives as a float and the absent marker
+    # stays the string "-"; a missing key means the firmware predates the field.
+    ticks = [s["net"] for s in samples if isinstance(s.get("net"), float)]
     return {
         "n": len(samples),
+        "linked": statistics.median(ticks) if ticks else None,
         "fps": statistics.median(s.get("fps", 0) for s in samples),
         "min": min(s.get("fps", 0) for s in samples),
         "cart": samples[-1].get("cart", title),
@@ -112,6 +133,7 @@ def main(argv=None):
               % ("cart", "fps", "worst", "n", "draw/flush/logic/render/chrome ms"
                  if a.diag else ""))
         rows = []
+        linked = False
         for title in roster:
             try:
                 r = measure(board, title, a.secs, log)
@@ -122,13 +144,22 @@ def main(argv=None):
                 print("%-18s  (not on this board)" % title)
                 continue
             p = r["phases"]
-            print("%-18s %6.1f %6.1f %5d   %s"
+            print("%-18s %6.1f %6.1f %5d   %s%s"
                   % (title, r["fps"], r["min"], r["n"],
                      ("%.0f/%.0f/%.0f/%.0f/%.0f"
                       % (p["draw"], p["flush"], p["logic"], p["render"],
-                         p["chrome"])) if a.diag else ""))
+                         p["chrome"])) if a.diag else "",
+                     ("  LINKED (net=%.0f ticks/s)" % r["linked"])
+                     if r["linked"] is not None else ""))
+            linked = linked or r["linked"] is not None
             rows.append((title, r))
         board.pyexec("ws.exit()")
+        if linked:
+            print("\nLINKED: the board's own PERF line reported a lockstep tick "
+                  "rate (net=), so another\nconsole on this desk is in the same "
+                  "two-player cart and that run was a real\nESP-NOW match "
+                  "drawing on the shared tick (#65). That number is the match's,"
+                  "\nnot the cart's -- move the peer off the cart and re-measure.")
         return 0 if rows else 1
     finally:
         board.close()

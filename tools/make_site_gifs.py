@@ -85,10 +85,10 @@ class Recorder:
         # (the first wallpaper cart in the store). persist=False: a recording must
         # not depend on -- or leave -- a system.json, and the store is a temp dir.
         if wallpaper:
-            self.ws.select_wallpaper(wallpaper, persist=False)
-            if self.ws.wallpaper_id != wallpaper:
+            self.ws.look.select_wallpaper(wallpaper, persist=False)
+            if self.ws.look.wallpaper_id != wallpaper:
                 raise SystemExit("no such wallpaper: %s (have: %s)"
-                                 % (wallpaper, ", ".join(self.ws.wallpaper_options())))
+                                 % (wallpaper, ", ".join(self.ws.look.wallpaper_options())))
         # The WINDOWED desktop tier (wm_windowed.WindowedWM): every geometry
         # helper below then resolves inside the active window's layout context
         # and translates to desktop coordinates -- see `local()`.
@@ -191,8 +191,8 @@ class Recorder:
             with open(os.path.join(dst, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(base, f)
         items = host_app.moy_carts.scan(self.ws.carts_root)
-        self.ws._apply_items(items)
-        cart = next(c for c in self.ws._all_carts
+        self.ws.carts.apply(items)
+        cart = next(c for c in self.ws.carts.all
                     if os.path.basename(c["path"]) == name)
         for i, it in enumerate(self.ws.launcher.items):
             if it.get("path") == cart.get("path"):

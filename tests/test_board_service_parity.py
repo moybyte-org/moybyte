@@ -365,7 +365,7 @@ def _boot_assignments(fn):
 
     Nested functions are NOT skipped: the T-Deck's `_with_sd` injection lives in
     `_before_slim`, a closure handed to wire_workstation_core precisely because
-    it must run between the store hookup and slim_carts. That is boot wiring in
+    it must run between the store hookup and the cart diet. That is boot wiring in
     every sense that matters.
     """
     out = {}

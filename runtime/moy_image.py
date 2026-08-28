@@ -167,7 +167,7 @@ def decode_moyimg(text):
 # --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------
 #
 # Decoding a 320x240 RLE cover costs 0.5-1.7s interpreted on the T-Deck, so the
-# console (console._cover_for) builds each card-sized crop ONCE and persists it
+# console (CoverCache.cover_for) builds each card-sized crop ONCE and persists it
 # Sidecars hold raw indexed pixels: <cart>/thumbs/<prefix><w>x<h>.mct = b"MCT1" + a 4-byte LE
 # stamp of the cover blob it was built from (cover_sig) + the w*h pix bytes.
 # An edited cover changes the stamp -> the stale thumb is ignored and rebuilt;

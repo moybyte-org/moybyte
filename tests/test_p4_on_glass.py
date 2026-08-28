@@ -262,6 +262,56 @@ def test_idle_screen_blank_and_wake(board):
 # The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
 # so a change there is picked up here instead of drifting; the only edits are
 # mechanical (dedent the methods, drop `self`).
+#
+# NAMING THE PIECES BY HAND WAS THE DRIFT (2026-08-27). `607ba35` promoted the
+# PKCS#1 block compare out of the class into a module-level `verify_sig` so the
+# C6 image's second signature could share it, and this extractor -- which knew
+# about class methods and module-level ASSIGNMENTS -- kept uploading a
+# `_verify_manifest` whose body had left the building. The board said
+# `NameError: name 'verify_sig' isn't defined` once per command; the harness
+# discarded the text and every assertion downstream read `assert None is False`.
+# So the closure is now DERIVED: whatever the extracted code still references,
+# the extractor goes and fetches, and what it cannot fetch it names, here, in
+# milliseconds, instead of on the wire as an absence.
+
+def _free_names(snippet):
+    """Names `snippet` READS that nothing in it (or in builtins) defines."""
+    import ast
+    import builtins
+
+    def params(args):
+        got = {a.arg for a in list(args.posonlyargs) + list(args.args)
+               + list(args.kwonlyargs)}
+        return got | {a.arg for a in (args.vararg, args.kwarg) if a}
+
+    tree = ast.parse(snippet)
+    top = set(dir(builtins))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            top.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            top.add(node.name)
+
+    free = set()
+    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
+        # Bindings first, reads second: ast.walk does not visit a store before
+        # the load it feeds, so a one-pass check would flag ordinary locals.
+        local = params(fn.args)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+                local.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                local.update((a.asname or a.name).split(".")[0]
+                             for a in node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                local.add(node.name)
+            elif isinstance(node, (ast.FunctionDef, ast.Lambda)):
+                local |= params(node.args)
+        free.update(n.id for n in ast.walk(fn)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                    and n.id not in local and n.id not in top)
+    return free
+
 
 def _extract_verifier():
     import ast
@@ -287,9 +337,38 @@ def _extract_verifier():
                         return out.replace("self._", "_")
         raise AssertionError("method vanished from moy_ota: " + name)
 
-    return "\n".join([const("OTA_SCHEME"), const("_SHA256_DER"),
-                      const("OTA_PUBLIC_KEYS"), method("_canonical"),
-                      method("_verify_manifest")])
+    def top_level(name):
+        """A module-level def or assignment the extracted code needs, or None
+        (a stdlib name, or something genuinely missing -- the caller says so)."""
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return ast.get_source_segment(src, node)
+            if isinstance(node, ast.Assign) and any(
+                    getattr(t, "id", "") == name for t in node.targets):
+                return ast.get_source_segment(src, node)
+        return None
+
+    parts = [const("OTA_SCHEME"), const("_SHA256_DER"), const("OTA_PUBLIC_KEYS"),
+             method("_canonical"), method("_verify_manifest")]
+    have = {"OTA_SCHEME", "_SHA256_DER", "OTA_PUBLIC_KEYS",
+            "_canonical", "_verify_manifest"}
+    for _ in range(8):                      # a chain, not a single hop
+        missing = sorted(_free_names("\n".join(parts)) - have)
+        if not missing:
+            break
+        for name in missing:
+            got = top_level(name)
+            assert got is not None, (
+                "the extracted verifier calls %r, which moy_ota does not define "
+                "at module level -- the device would answer NameError and the "
+                "test would read it as a missing value" % name)
+            parts.append(got)
+            have.add(name)
+    snippet = "\n".join(parts)
+    assert not _free_names(snippet), (
+        "the extracted verifier does not close over its own names: %s"
+        % sorted(_free_names(snippet)))
+    return snippet
 
 
 def _val(board, expr, timeout=30):
@@ -298,8 +377,10 @@ def _val(board, expr, timeout=30):
     The device's `py` handler builds a FRESH env per command, so anything
     pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
     defined up there comes back None (a device NameError), which reads exactly
-    like a failed assertion and is not one."""
-    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout)
+    like a failed assertion and is not one. strict=True is what makes that
+    distinction: a device exception arrives as DeviceError carrying the board's
+    own words, never as a value the caller then asserts against."""
+    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout, strict=True)
 
 
 SIGNED_MANIFEST = {
@@ -321,9 +402,10 @@ def test_the_shipped_verifier_runs_on_micropython(board):
     manifest = dict(SIGNED_MANIFEST)
     manifest["sig"] = sign_with_test_key(manifest)
 
-    assert board.pyexec(_extract_verifier(), timeout=90), "verifier upload failed"
+    assert board.pyexec(_extract_verifier(), timeout=90), board.last_error
     assert board.pyexec(
-        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest), timeout=90)
+        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest),
+        timeout=90), board.last_error
 
     # The MicroPython API questions, asked one at a time so a failure names itself.
     assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
@@ -344,8 +426,9 @@ def test_verification_is_fast_enough_to_not_think_about(board):
         "t0 = time.ticks_us()\n"
         "for _ in range(5):\n"
         "    _verify_manifest(MANIFEST, KEYS)\n"
-        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n", timeout=60)
-    us = board.pyval("ws._g['VERIFY_US']")
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n",
+        timeout=60), board.last_error
+    us = board.pyval("ws._g['VERIFY_US']", strict=True)
     print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
     assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
 
@@ -486,11 +569,14 @@ def test_the_web_console_is_baked_into_this_image(board):
         "this image has NO baked web console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
     count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    assert count == 4, stamp
+    # Self-consistent like the rest of this test: the baked set must be the
+    # image's OWN serve allowlist (moy_webhost.ASSETS), not a count restated
+    # here -- a hand-pinned 4 went stale the day moy_store.mjs joined the set.
+    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    assert count == len(declared), (stamp, declared)
     assert total > 400000, "a bundle this small is not the wasm console"
     names = board.pyval("__import__('moy_web').assets()")
-    assert set(names) == {"index.html.gz", "worker.js.gz",
-                          "micropython.mjs.gz", "micropython.wasm.gz"}, names
+    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
     # Each blob read back at its recorded length, starting with the gzip magic.
     # A misplaced symbol still gives plausible lengths -- it is the first bytes
     # that say the pointer landed on the right thing.

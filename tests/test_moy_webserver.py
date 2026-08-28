@@ -1,7 +1,7 @@
 """The device socket/HTTP/WebSocket TRANSPORT CORE (moy_webserver.py).
 
 The streaming web view this module used to serve died in the 2026-08 sunset
-(docs/moycore_plan_2026-08.md 3.2); what ships now -- and what this file tests
+(docs/history/moycore_plan_2026-08.md 3.2); what ships now -- and what this file tests
 -- is the bare transport the plan's 3.4 sync RPC rides: the HTTP request
 parser/response builder, the RFC 6455 handshake + framing (runtime/
 web_view_ws.py, re-exported), the cross-iteration _WSConn buffering, and the

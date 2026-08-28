@@ -27,17 +27,19 @@ recorded in native/libmoy_vendor.json, so the two can never quietly diverge to
 different upstream versions.
 """
 
-import argparse
-import hashlib
-import json
 import os
-import shutil
-import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from tools.vendor_common import (copy_if_changed, open_spec, parse_args,  # noqa: E402
+                                 report_changes, sha256, stamp)
+
 NATIVE = os.path.join(ROOT, "native")
 MANIFEST = os.path.join(NATIVE, "libmoy_vendor.json")
+SPEC_PROBE = os.path.join("libmoy", "include", "moy.h")
 
 # What each consumer takes, as {destination: {vendored name: path in moy-spec}}.
 # Deliberately explicit rather than a glob: a glob would silently start vendoring
@@ -81,40 +83,6 @@ VENDOR = {
 }
 
 
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def git(spec, *args):
-    try:
-        return subprocess.check_output(("git", "-C", spec) + args,
-                                       stderr=subprocess.DEVNULL).decode().strip()
-    except Exception:
-        return None
-
-
-def find_spec(explicit=None):
-    """A moy-spec checkout: --spec, $MOYBYTE_MOY_SPEC, or a sibling."""
-    for cand in (explicit, os.environ.get("MOYBYTE_MOY_SPEC"),
-                 os.path.join(os.path.dirname(ROOT), "moy-spec"),
-                 os.path.join(ROOT, ".moy-spec")):
-        if cand and os.path.isfile(os.path.join(cand, "libmoy", "include", "moy.h")):
-            return os.path.abspath(cand)
-    return None
-
-
-def load_manifest():
-    try:
-        with open(MANIFEST, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
-
-
 def vendored_files():
     """Every vendored path, repo-relative, in a stable order."""
     out = []
@@ -126,24 +94,12 @@ def vendored_files():
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--spec", help="a moy-spec checkout (default: ../moy-spec)")
-    ap.add_argument("--check", action="store_true",
-                    help="report what would change; write nothing")
-    args = ap.parse_args(argv)
+    args = parse_args(__doc__, argv)
 
-    spec = find_spec(args.spec)
-    if not spec:
-        print("vendor-libmoy: no moy-spec checkout found.\n"
-              "  Looked for ../moy-spec, $MOYBYTE_MOY_SPEC and .moy-spec/.\n"
-              "  Clone it: git clone https://github.com/moybyte-org/moy-spec",
-              file=sys.stderr)
+    found = open_spec("vendor-libmoy", SPEC_PROBE, args.spec)
+    if not found:
         return 2
-
-    commit = git(spec, "rev-parse", "HEAD") or "?"
-    dirty = bool(git(spec, "status", "--porcelain", "--untracked-files=no"))
-    date = git(spec, "log", "-1", "--format=%cs") or "?"
-    print("vendor-libmoy: %s @ %s%s" % (spec, commit[:12], "  (DIRTY)" if dirty else ""))
+    spec, commit, date, dirty = found
 
     changed, missing = [], []
     for dest, files in sorted(VENDOR.items()):
@@ -153,45 +109,15 @@ def main(argv):
             if not os.path.isfile(src):
                 missing.append(rel)
                 continue
-            same = os.path.isfile(dst) and sha256(src) == sha256(dst)
-            if same:
-                continue
-            changed.append(os.path.relpath(dst, ROOT))
-            if not args.check:
-                os.makedirs(dest, exist_ok=True)
-                shutil.copyfile(src, dst)
+            if copy_if_changed(src, dst, args.check):
+                changed.append(os.path.relpath(dst, ROOT))
 
-    if missing:
-        print("  !! not in that checkout: %s" % ", ".join(missing), file=sys.stderr)
-        return 2
+    code = report_changes(changed, missing, args.check)
+    if code is not None:
+        return code
 
-    for path in changed:
-        print("  %s %s" % ("would update" if args.check else "updated", path))
-    if not changed:
-        print("  already up to date")
-
-    if args.check:
-        return 1 if changed else 0
-
-    # The stamp. `dirty` is recorded rather than refused: vendoring from a
-    # work-in-progress moy-spec is exactly how a change gets tested on a board
-    # before it lands upstream. It just must not be invisible afterwards.
-    manifest = {
-        "upstream": {
-            "repo": "moybyte-org/moy-spec",
-            "commit": commit,
-            "date": date,
-            "dirty": dirty,
-        },
-        "files": {p: sha256(os.path.join(ROOT, p)) for p in vendored_files()},
-    }
-    with open(MANIFEST, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(manifest, f, indent=2, sort_keys=True)
-        f.write("\n")
-    print("  stamped %s" % os.path.relpath(MANIFEST, ROOT))
-    if dirty:
-        print("  NOTE: that checkout had uncommitted changes -- this copy "
-              "corresponds to no commit.")
+    stamp(MANIFEST, commit, date, dirty,
+          {p: sha256(os.path.join(ROOT, p)) for p in vendored_files()})
     return 0
 
 

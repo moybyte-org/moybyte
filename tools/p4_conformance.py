@@ -128,12 +128,15 @@ def push_cart(board, cart_dir, name, log=print):
         if not board.pyexec("ws._pf.close()"):
             raise RuntimeError("write of %s failed" % fn)
         log("    %-16s %d bytes" % (fn, len(blob)))
-    # Rebuild the cart list in place. _all_carts is what the launcher's items
-    # are derived from, so re-scanning and re-deriving is the no-reboot path.
+    # Rebuild the cart list in place. `ws.carts.all` is the roster the
+    # launcher's items are derived from (#209 landing C moved it off the console
+    # -- assigning the old `ws._all_carts` here would now create a stray console
+    # attribute nothing reads, and the shelf would silently keep the old carts),
+    # so re-scanning and re-deriving is the no-reboot path.
     ok = board.pyexec(
         "import moy_carts\n"
-        "ws._all_carts = moy_carts.scan(%r)\n"
-        "ws.launcher.items = ws._launcher_items(ws._all_carts)\n" % root)
+        "ws.carts.all = moy_carts.scan(%r)\n"
+        "ws.launcher.items = ws._launcher_items(ws.carts.all)\n" % root)
     if not ok:
         raise RuntimeError("could not refresh the cart list")
 

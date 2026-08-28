@@ -2,7 +2,7 @@
 #
 # This file used to be the device web view (#41/#22) -- the streaming browser
 # mirror that pushed the console's draw commands over a WebSocket. That whole
-# feature DIED in the 2026-08 streaming sunset (docs/moycore_plan_2026-08.md
+# feature DIED in the 2026-08 streaming sunset (docs/history/moycore_plan_2026-08.md
 # 3.2, owner decision): the frame push, the DrawRecorder wiring, the TeeCanvas
 # lane, stream mode and the Settings WEB VIEW row are deleted; the browser's
 # job moved to the wasm head (firmware/web_runner), synced per plan 3.4.

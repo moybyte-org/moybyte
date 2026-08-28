@@ -69,12 +69,20 @@ class WindowedWM:
         return True
 
 
+class _FakeCarts:
+    """`ws.carts` narrowed to the roster the `state` snapshot walks (#209
+    landing C)."""
+
+    def __init__(self):
+        self.all = []
+
+
 class FakeWS:
     def __init__(self, wm=None):
         self.wm = wm or FullscreenWM()
         self.screen = "home"
         self.wifi = None
-        self._all_carts = []
+        self.carts = _FakeCarts()
         self._apps = ()
         self._dirty = False
         self._psave_ms = 300000

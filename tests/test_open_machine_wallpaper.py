@@ -12,8 +12,8 @@ def test_open_machine_wallpaper_is_static_moy64_cart(tmp_path):
     ws = build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                            font_scale=2, windowed=True)
 
-    assert "open_machine" in ws.wallpaper_options()
-    ws.select_wallpaper("open_machine", persist=False)
+    assert "open_machine" in ws.look.wallpaper_options()
+    ws.look.select_wallpaper("open_machine", persist=False)
     assert ws.wallpaper._wp_draw is not None
     assert ws.wallpaper._wp_update is None
     assert not ws.wallpaper.is_animating(1 / 60)

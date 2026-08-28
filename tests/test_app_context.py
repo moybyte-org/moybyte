@@ -233,12 +233,9 @@ def _quiesce_frame(ws):
     and every redraw-gate assertion reads as a failure of whatever changed last."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
-    au = ws.ach_ui
-    au.egg_msg = None
-    au.egg_until = 0
-    au._confetti_until = 0
+    ws._toast_until = 0
+    ws._egg_until = 0
+    ws._confetti_until = 0
     ws.show_achievements = False
     ws.show_fps = False
     ws.perf_hud = False
@@ -468,7 +465,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
 
     demo = Demo()
     ws.register_app(demo)
-    ws.open_app(demo, cart=ws._all_carts[0])
+    ws.open_app(demo, cart=ws.carts.all[0])
     assert ws.screen == "leaver"
     ws.go_home()
     assert ws.screen == "launcher"

@@ -4,18 +4,24 @@ from Workstation (runtime/console.py).
 The split keeps the achievement *core* on Workstation and moves the egg
 *subsystem* + all the celebration drawing here:
   * STAYS on Workstation: the `ach` Achievements object, the `show_achievements`
-    overlay flag, and load_achievements / _save_achievements /
+    overlay flag, the three overlay deadlines, and load_achievements /
     _achievement_unlocked (the store wiring + on_save/on_unlock callbacks). Tests
     drive ws.ach.* and ws.show_achievements, and the device calls
     ws.load_achievements(); the core has NO back-dependency on the egg subsystem
-    (_achievement_unlocked only beeps).
+    (_achievement_unlocked arms the toast deadline and beeps).
   * AchievementsUI (here): the three hidden eggs (Konami on the desktop, 7 clock
     taps, 5 SETTINGS-title "secret door" taps) -- their trigger state
-    (_konami_pos / _clock_taps / _secret_taps), the egg popup + confetti state
-    (egg_msg / egg_until / _confetti_until), the trigger steppers
-    (_konami_step / _tap_clock / _tap_secret_door / _show_egg / _egg_active), and
-    the drawing (_draw_egg / _draw_confetti / _draw_achievements). Each egg awards
-    a hidden achievement via ws.ach.award(...).
+    (_konami_pos / _clock_taps / _secret_taps), the egg popup's PAYLOAD
+    (egg_msg), the trigger steppers (_konami_step / _tap_clock /
+    _tap_secret_door / _show_egg), and the drawing (_draw_egg / _draw_confetti /
+    _draw_achievements). Each egg awards a hidden achievement via
+    ws.ach.award(...).
+
+The egg popup's and the confetti's DEADLINES are not here: they are flat kernel
+fields (ws._egg_until / ws._confetti_until) the arm sites write at event time
+(#209 landing B, rev 3), so the per-frame gates read plain ints instead of
+calling `_egg_active()` on every loop of the console's life. This object is
+touched only while an overlay is actually drawing.
 
 Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through
 `self.ws`, all shared / non-privileged:
@@ -24,9 +30,9 @@ Dependency profile (the facade lens, shell_architecture_v1.md §2) -- through
 `NAMES` + the `ACHIEVEMENTS` catalogue are injected at construction (circular-import
 reason as the other UIs: console.py builds the one AchievementsUI a Workstation
 holds). `_ticks_ms` / `_ticks_diff` are duplicated (time-only). The `_KONAMI` /
-tap-goal constants and every method body are kept byte-for-byte identical to the
-pre-extraction versions (each aliases NAMES / ACHIEVEMENTS from the injected
-values), so the eggs + drawing are unchanged (host == device).
+tap-goal constants and every drawing body are still the pre-extraction versions
+verbatim (each aliases NAMES / ACHIEVEMENTS from the injected values), so what
+appears on the glass is unchanged (host == device).
 """
 
 
@@ -55,15 +61,19 @@ class AchievementsUI:
         self._konami_pos = 0          # how far into the Konami sequence we are (desktop)
         self._clock_taps = 0          # clock taps on the status strip (Time Traveler)
         self._secret_taps = 0         # SETTINGS-title taps (Secret Finder door)
-        self.egg_msg = None           # (line, glyph) of the live Easter-egg popup, or None
-        self.egg_until = 0            # _ticks_ms the egg popup hides at
-        self._confetti_until = 0      # _ticks_ms the Konami confetti effect ends
+        # The PAYLOAD only: (line, glyph) of the live Easter-egg popup, or None.
+        # Both this popup's deadline and the confetti's are flat kernel fields
+        # the arm sites below PUSH into (ws._egg_until / ws._confetti_until,
+        # #209 landing B) -- the frame loop's redraw gate and the WM's overlay
+        # signature read those ints and never call in here.
+        self.egg_msg = None
 
     def _show_egg(self, line, glyph="smile", ms=2600):
         """Pop a non-blocking Easter-egg banner (drawn over the current screen for
-        `ms`). Purely cosmetic + self-expiring."""
+        `ms`). Purely cosmetic + self-expiring. The ONE arm site all three eggs
+        come through, so the kernel deadline is written once."""
         self.egg_msg = (line, glyph)
-        self.egg_until = _ticks_ms() + ms
+        self.ws._egg_until = _ticks_ms() + ms
 
     def _konami_step(self, name):
         """Advance the desktop Konami sequence on a button press; the full code in
@@ -77,7 +87,7 @@ class AchievementsUI:
             self._konami_pos = 1 if name == seq[0] else 0
         if self._konami_pos >= len(seq):
             self._konami_pos = 0
-            self._confetti_until = _ticks_ms() + 3000
+            self.ws._confetti_until = _ticks_ms() + 3000
             self._show_egg("OH! YOU FOUND ME!", "smile", ms=3000)
             self.ws.ach.award("konami")
 
@@ -99,20 +109,10 @@ class AchievementsUI:
             self._show_egg("KNOCK KNOCK... OH! YOU FOUND ME!", "key", ms=3000)
             self.ws.ach.award("secret_door")
 
-    def _egg_active(self, now=None):
-        if self.egg_msg is None:
-            return False
-        if now is None:
-            now = _ticks_ms()
-        if _ticks_diff(self.egg_until, now) <= 0:
-            self.egg_msg = None
-            return False
-        return True
-
     def _draw_egg(self):
         """A non-blocking Easter-egg popup: a friendly character glyph + the secret
         message, centered low so it reads as a surprise without covering the action.
-        Self-expiring (egg_until); cosmetic only -- touches no cart data."""
+        Self-expiring (ws._egg_until); cosmetic only -- touches no cart data."""
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         line, glyph = self.egg_msg
@@ -134,7 +134,7 @@ class AchievementsUI:
     def _draw_confetti(self):
         """The Konami egg's celebration: a scatter of colored spark glyphs that
         drift down with the elapsed time. Cheap + deterministic (no RNG state),
-        purely cosmetic, gone when _confetti_until passes."""
+        purely cosmetic, gone when ws._confetti_until passes."""
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         t = (_ticks_diff(_ticks_ms(), 0) // 80) % 240

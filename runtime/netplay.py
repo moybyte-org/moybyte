@@ -216,6 +216,11 @@ class LockstepSession:
         self._m_ema = None
         self._win_mark = 0           # frame at the escalation window's start
         self._win_stalls = 0         # distinct stalled ticks inside the window
+        # The PERF `net=` window (see tps): the frame and the clock the last
+        # sample read. Timing-side state exactly like the phase controller's --
+        # a diag never touches simulation state, so it cannot desync a match.
+        self._tps_f = 0
+        self._tps_ms = None
         # Both slots are transport-driven and NOT auto-advanced: this session
         # advances their press edges itself, inside advance(), so held and
         # pressed are always the same frame's truth. The router's own
@@ -264,6 +269,12 @@ class LockstepSession:
         nx = self._next_ms
         if nx is None:
             self._next_ms = now_ms + self.tick_ms
+            if self._tps_ms is None:
+                # The PERF window opens at the FIRST tick, not at whenever the
+                # sampler first asks: a match that forms mid-window would
+                # otherwise report its first rate as 0, which reads as a frozen
+                # match in exactly the situation the field exists to explain.
+                self._tps_ms = now_ms
             return True
         if now_ms - nx < 0:
             return False
@@ -482,6 +493,38 @@ class LockstepSession:
         elif base - f > 32768:
             f += 65536
         return f
+
+    # -- the frame-loss witness ----------------------------------------------
+
+    def tps(self, now_ms):
+        """Ticks per second since the last call -- the PERF line's `net=` field.
+
+        A linked game's world only moves on this clock, and the console gates
+        every frame the clock is not due for (console.frame -> tick(render=False)),
+        so a board looping at 62fps renders 30 and the other 32 vanish. Nothing
+        in the PERF line said so until 2026-08-27, and a night of paired captures
+        was spent reading a perfectly correct 30 as a regression. This is the
+        number that names it: ~30 is a healthy match eating the difference, a
+        lower one is stall pressure, 0 is matched but not advancing at all.
+
+        The ABSENT case is not this method's to report -- no session means no
+        object to ask, and the emitters print `-` there, never 0 (a frozen 0 is
+        also what a broken meter looks like: the fold= lesson, 2026-08-21).
+
+        ONE READER. It consumes its window, so a second caller per sample would
+        halve both their answers -- which is why the console exposes it through
+        `Workstation.perf_net()` (the PERF emitters' single entry) and the
+        `is a cart running?` probes keep using perf_sample(). Off the frame path
+        and allocation-free: two stores and an integer divide."""
+        f0, t0 = self._tps_f, self._tps_ms
+        self._tps_f = self.frame
+        self._tps_ms = now_ms
+        if t0 is None:
+            return 0            # no tick has run yet: matched, not advancing
+        ms = now_ms - t0
+        if ms <= 0:
+            return 0
+        return ((self.frame - f0) * 1000 + ms // 2) // ms
 
     # -- teardown ------------------------------------------------------------
 

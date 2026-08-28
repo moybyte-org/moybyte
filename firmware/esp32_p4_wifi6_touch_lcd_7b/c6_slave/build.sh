@@ -12,7 +12,7 @@
 # marker-guarded, same style as every build.sh patch in this repo.
 #
 # Output: dist/p4/c6_network_adapter.bin (+ the flasher args beside it).
-# FLASHING IT IS PHASE D of docs/espnow_p4_2026-08.md -- the one hardware
+# FLASHING IT IS PHASE D of docs/history/espnow_p4_2026-08.md -- the one hardware
 # gate. Nothing in this script touches a board.
 set -euo pipefail
 
@@ -94,4 +94,4 @@ printf '{"version": %s, "hosted": "%s"}\n' "${SHIM_VER}" "${HOSTED_VER}" \
   > "${DIST}/c6_build.json"
 SIZE=$(stat -c%s "${DIST}/c6_network_adapter.bin")
 echo "OK -> ${DIST}/c6_network_adapter.bin (${SIZE} B, hosted ${HOSTED_VER}, shim v${SHIM_VER})"
-echo "     flashing it is Phase D of docs/espnow_p4_2026-08.md -- the C6 gate"
+echo "     flashing it is Phase D of docs/history/espnow_p4_2026-08.md -- the C6 gate"

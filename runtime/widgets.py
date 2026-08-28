@@ -205,9 +205,11 @@ class Achievements:
 
     Backend-agnostic + MicroPython-safe. The Workstation owns one of these, calls
     note(event[, key]) at the existing flow points (open/run/paint-save/...), and
-    reads `toast`/`toast_until` to draw the banner. Persistence + audio are injected
-    callbacks so this class stays free of the SD wrapper and the audio backend (the
-    Workstation wires those), which also makes it trivially unit-testable."""
+    draws `toast` while the deadline its own `on_unlock` hook armed is up (#209
+    landing B). Persistence and the unlock EFFECTS are injected callbacks so this
+    class stays free of the SD wrapper, the audio backend and the overlay stack
+    (the Workstation wires all three), which also makes it trivially
+    unit-testable."""
 
     def __init__(self, unlocked=None, on_save=None, on_unlock=None):
         # `unlocked` is the list loaded from achievements.json (ids already valid).
@@ -218,8 +220,13 @@ class Achievements:
         self._on_unlock = on_unlock        # called(id) on a FRESH unlock (e.g. a beep)
         self._seen_views = {}              # editor views visited this session+history
         self._played = {}                  # distinct cart keys opened (for play_five)
-        self.toast = None                  # (id, title, glyph) of the live toast, or None
-        self.toast_until = 0               # _ticks_ms deadline the toast hides at
+        # The toast PAYLOAD only: (id, title, glyph) of the live banner, or None.
+        # Its deadline is the shell's (`ws._toast_until`, written by the
+        # `on_unlock` hook at the unlock -- #209 landing B): the console's redraw
+        # gate and the WM's overlay signature run every loop and must not have to
+        # ask an object whether a banner is still up. This payload is read only
+        # while that deadline is live, and a later award simply replaces it.
+        self.toast = None
 
     # -- queries -------------------------------------------------------------
     def has(self, ach_id):
@@ -242,11 +249,12 @@ class Achievements:
             except Exception as exc:  # noqa: BLE001 -- a failed save must not crash the UI
                 print("Moybyte achievements save failed:", _err_text(exc))
         self.toast = (ach_id, ACH_TITLE[ach_id], ACH_GLYPH.get(ach_id, "trophy"))
-        self.toast_until = _ticks_ms() + TOAST_MS
+        # The payload is set BEFORE the hook, which is what arms the banner: a
+        # live deadline must never point at a stale (or absent) payload.
         if self._on_unlock is not None:
             try:
                 self._on_unlock(ach_id)
-            except Exception:  # noqa: BLE001 -- audio is best-effort celebration
+            except Exception:  # noqa: BLE001 -- the celebration is best-effort
                 pass
         return True
 
@@ -270,16 +278,6 @@ class Achievements:
                     self.award("toolbox")
         elif event in _EVENT_ACHIEVEMENT:
             self.award(_EVENT_ACHIEVEMENT[event])
-
-    def toast_active(self, now=None):
-        if self.toast is None:
-            return False
-        if now is None:
-            now = _ticks_ms()
-        if _ticks_diff(self.toast_until, now) <= 0:
-            self.toast = None
-            return False
-        return True
 
 
 class Clipboard:

@@ -36,6 +36,17 @@ class _FakeBle:
     _sync_player = _ble.BleHidKeyboard._sync_player
 
 
+class _Prefs:
+    """The slice of `SystemStore` the setting touches: the dict `ws.system`
+    aliases, and a write that goes nowhere."""
+
+    def __init__(self):
+        self.settings = {}
+
+    def persist(self):
+        pass
+
+
 class _Ws:
     """The slice of the Workstation the setting touches."""
 
@@ -45,10 +56,8 @@ class _Ws:
     def __init__(self, keyboard=None, ble=None):
         self.keyboard = keyboard
         self.ble_keyboard = ble
-        self.system = {}
-
-    def _persist_system(self):
-        pass
+        self.prefs = _Prefs()
+        self.system = self.prefs.settings
 
     second_keyboard = None      # bound below from the real Workstation
 

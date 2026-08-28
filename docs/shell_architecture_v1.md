@@ -199,7 +199,7 @@ mutated `DeviceCanvas`.
 
 *(Superseded 2026-08-12: the device mirror described here was deleted in the
 2026-08 streaming sunset, and the browser now runs the whole console itself as
-the wasm head — see `docs/moycore_plan_2026-08.md` §3.2. The motivation below is
+the wasm head — see `docs/history/moycore_plan_2026-08.md` §3.2. The motivation below is
 kept because the windowing argument it makes is what `wm_windowed` went on to
 implement.)*
 

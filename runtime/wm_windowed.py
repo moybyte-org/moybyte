@@ -57,14 +57,15 @@ try:
     from wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from layers import Layer
     from chrome import NAMES          # not palette: chrome is the device-safe home
-    from widgets import _Blit, _in    # (runtime/palette.py needs colorsys -- host-only)
+    # (from widgets, not palette: runtime/palette.py needs colorsys -- host-only)
+    from widgets import _Blit, _in, _ticks_ms, _ticks_diff
     import ui as _ui                  # desk icon label pills (ui.chip)
     from surface import SurfaceSet    # surface model v1 (docs/surface_model_v1.md)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.wm import FullscreenStackWM, _VIEWPORT_BEZEL
     from runtime.layers import Layer
     from runtime.chrome import NAMES
-    from runtime.widgets import _Blit, _in
+    from runtime.widgets import _Blit, _in, _ticks_ms, _ticks_diff
     from runtime import ui as _ui
     from runtime.surface import SurfaceSet
 
@@ -369,15 +370,15 @@ class _BackdropLayer(Layer):
         """Everything the desk's wallpaper + icon column depends on.
 
         Deliberately NOT the clock (repainted over the cache instead) and NOT
-        ws._cover_gen: a cover landing in the picker would otherwise invalidate
+        ws.covers.gen: a cover landing in the picker would otherwise invalidate
         the desk on the very frames a scroll is trying to stay cheap. Cheap to
         compute -- no per-frame scan of the cart list."""
         ws = self.ws
         cv = ws.sys_canvas
-        return (cv.w, cv.h, ws.theme_name, ws.theme_variant,
-                ws._effective_font_scale(), id(ws.icon_sheet),
-                getattr(ws, "wallpaper_id", None),
-                len(getattr(ws, "_apps", ())), len(ws._all_carts))
+        return (cv.w, cv.h, ws.look.theme_name, ws.look.theme_variant,
+                ws.look.effective_font_scale(), id(ws.look.icon_sheet),
+                ws.look.wallpaper_id,
+                len(getattr(ws, "_apps", ())), len(ws.carts.all))
 
     def _draw_desktop(self, dt):
         self.ws.wallpaper.draw(dt)
@@ -402,7 +403,7 @@ class _BackdropLayer(Layer):
             if app.id in self.HIDDEN_APPS:
                 continue
             cart = None
-            for c in ws._all_carts:
+            for c in ws.carts.all:
                 if app.is_app(c):
                     cart = c
                     break
@@ -414,7 +415,7 @@ class _BackdropLayer(Layer):
         """[(key, box_rect, label_rect, label, cart), ...] -- a left-edge column
         wrapping into further columns; recomputed per call from live geometry."""
         ws = self.ws
-        fs = ws._effective_font_scale()
+        fs = ws.look.effective_font_scale()
         bar_h = self.wm._bar_h()
         box = 40 * fs
         catalog = self._icon_catalog()
@@ -443,11 +444,11 @@ class _BackdropLayer(Layer):
         ws = self.ws
         cv = ws.sys_canvas
         th = ws.theme_colors
-        fs = ws._effective_font_scale()
+        fs = ws.look.effective_font_scale()
         for key, box, pill, label, cart in self._icon_rects():
             cv.rect(box[0], box[1], box[2], box[3], th.get("panel", 60))
             cv.rectb(box[0], box[1], box[2], box[3], th.get("edge", 13))
-            img = ws._icon_sheet_for(cart) if cart is not None else None
+            img = ws.covers.icon_sheet_for(cart) if cart is not None else None
             if img is not None:
                 sc = max(1, (box[2] - 8 * fs) // 16)
                 cv.spr(img, box[0] + (box[2] - 16 * sc) // 2,
@@ -656,7 +657,7 @@ class WindowedWM(FullscreenStackWM):
     # -- window records --------------------------------------------------------
 
     def _fs(self):
-        return self.ws._effective_font_scale()
+        return self.ws.look.effective_font_scale()
 
     def _bar_h(self):
         """The desktop OS bar's height -- windows never overlap it (the taskbar
@@ -1338,10 +1339,12 @@ class WindowedWM(FullscreenStackWM):
         last = ws._last_ptr
         ptr = ((cur is not None and (cur[3] or cur[4]))
                or (last is not None and (last[3] or last[4])))
+        now = _ticks_ms()
         overlay = (ws._splash_until is not None
-                   or (ws.ach_ui._confetti_until
-                       and ws.ach_ui._confetti_until is not None)
-                   or ws.ach_ui._egg_active() or ws.ach.toast_active())
+                   or (ws._confetti_until
+                       and _ticks_diff(ws._confetti_until, now) > 0)
+                   or (ws._egg_until and _ticks_diff(ws._egg_until, now) > 0)
+                   or (ws._toast_until and _ticks_diff(ws._toast_until, now) > 0))
         gesture = self._drag if self._drag is not None else self._resize
         if ws._dirty or overlay:
             ss.epoch()
@@ -1551,7 +1554,8 @@ class WindowedWM(FullscreenStackWM):
         theme -- restarts it and all buffers are refreshed before skipping
         resumes."""
         sig = (win.x, win.y, win.w, win.h, win.title_h, focused,
-               self._win_title(win), self.ws.theme_name, self.ws.theme_variant,
+               self._win_title(win), self.ws.look.theme_name,
+               self.ws.look.theme_variant,
                self._fs())
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
@@ -1724,7 +1728,7 @@ class WindowedWM(FullscreenStackWM):
         """True when this PAINTED frame provably did not change WIN's content,
         so the focused window's draw may be skipped and the stamp reuse the
         retained win.buf (the surface-granularity damage model,
-        docs/ui_damage_model_v1.md §5.0 -- this is its first slice).
+        docs/surface_model_v1.md §14.1 -- this is its first slice).
 
         "Provably" is three facts together:
 
@@ -1818,7 +1822,7 @@ class WindowedWM(FullscreenStackWM):
                     and self._direct_render(win, dt)):
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 return
-            # CONTENT FREEZE (docs/ui_damage_model_v1.md §5.0 first slice): on a
+            # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
             # painted frame that provably did not change this window's content
             # (see _content_static), skip the re-render and let the retained-
             # buffer stamp below present it -- the map tab's draw is ~70ms on P4
@@ -2297,7 +2301,7 @@ class WindowedWM(FullscreenStackWM):
             # (Settings -> EDIT ICONS, paint_layer.ThemeLayer -- it spawns on the
             # same back-stack slot); each has its own commit verb.
             if ws._editing_icons:
-                ws.save_icons()
+                ws.look.save_icons()
             else:
                 ws.editor_app.save_current()      # the Editor's active tab
         if kind == "desktop":

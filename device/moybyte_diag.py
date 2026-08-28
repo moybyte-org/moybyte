@@ -345,11 +345,19 @@ def dump_previous_to_serial():
 
 # --- perf sampling helper ---------------------------------------------------
 
-def format_perf(cart, fps, flush_ms, draw_ms):
+def format_perf(cart, fps, flush_ms, draw_ms, net):
     """Format a structured perf sample line:
-        PERF cart=<name> fps=<n> flush=<ms> draw=<ms>
+        PERF cart=<name> fps=<n> net=<ticks/s|-> flush=<ms> draw=<ms>
     Numbers are rounded to ints. Pure (host-testable). The cart name is sanitised
-    to a single token (spaces -> '_') so the line stays cleanly parseable."""
+    to a single token (spaces -> '_') so the line stays cleanly parseable.
+
+    `net` is the #65 lockstep witness (ws.perf_net()): the shared tick rate a
+    LINKED game's world advances at, which is also the rate it renders at -- the
+    console gates every frame the tick is not due for, so a linked fps=30 on a
+    board looping at 55 is a correct match and not a regression. **None prints
+    `-`, never 0**: absence and a frozen meter must not look alike (the
+    2026-08-22 doctrine), and 0 here is a real reading -- matched, not
+    advancing. It sits right after fps= because it is what fps= means."""
     try:
         name = str(cart) if cart is not None else "?"
     except Exception:
@@ -357,8 +365,9 @@ def format_perf(cart, fps, flush_ms, draw_ms):
     name = name.replace(" ", "_").replace("\n", "_").replace("\r", "_")
     if not name:
         name = "?"
-    return "PERF cart=%s fps=%d flush=%d draw=%d" % (
-        name, _round_int(fps), _round_int(flush_ms), _round_int(draw_ms))
+    return "PERF cart=%s fps=%d net=%s flush=%d draw=%d" % (
+        name, _round_int(fps), "-" if net is None else _round_int(net),
+        _round_int(flush_ms), _round_int(draw_ms))
 
 
 def _round_int(v):
@@ -371,6 +380,10 @@ def _round_int(v):
             return 0
 
 
-def log_perf(cart, fps, flush_ms, draw_ms):
-    """Append a PERF sample to the ring (the offline-readable per-cart timing)."""
-    log("PERF", format_perf(cart, fps, flush_ms, draw_ms)[5:])
+def log_perf(cart, fps, flush_ms, draw_ms, net):
+    """Append a PERF sample to the ring (the offline-readable per-cart timing).
+
+    `net` has no default on purpose: a caller that forgets it would print the
+    absent marker while a match was quietly eating half the frames, which is
+    the exact failure this field exists to end."""
+    log("PERF", format_perf(cart, fps, flush_ms, draw_ms, net)[5:])
