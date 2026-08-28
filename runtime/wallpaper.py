@@ -47,7 +47,6 @@ class Wallpaper:
         self._wp_update = None
         self._wp_draw = None
         self._wp_cart = None
-        self._wp_images = {}   # captured at compile (the cart re-slims after)
         self._wp_live = True
         # The Appearance monitor's PREVIEW runner: the same cart compiled a
         # second time over an OFFSCREEN host canvas, so the little screen can
@@ -63,25 +62,12 @@ class Wallpaper:
         # Keyed by source stamp, so it survives selection changes and drops
         # stale entries on its own; bounded below.
         self._static_cache = {}
-        # #113 web wire diet: the backdrop composite's ship-once identity. A
-        # STATIC wallpaper repeats the same 320x240 frame every draw, so once
-        # two consecutive frames match it gets a serial name ("wall:N") and
-        # rides /assets ONCE (wire_assets below) -- every later draw is a tiny
-        # ["imgref", ...] instead of ~100KB of inline b64 (the measured
-        # window-drag payload eater). A LIVE wallpaper's frame changes every
-        # draw, so it keeps the inline form (status quo) and never churns the
-        # client's asset cache.
-        self._wire_pix = None          # last composite frame's raw indices
-        self._wire_wh = (0, 0)
-        self._wire_name = None         # set only while the frame is stable
-        self._wire_serial = 0
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
         ws.look.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
-        self._wp_images = {}
         self._wp_restore_bg = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
@@ -134,13 +120,6 @@ class Wallpaper:
                 ns["_init"]()
             self._wp_ns = ns
             self._wp_cart = cart
-            # Hold the images HERE, not via _wp_cart later: the #66 live-set diet
-            # re-slims a wallpaper cart after this compile, so cart["images"] is
-            # gone by the time a transport asks (sakura's backdrop shipped as an
-            # imgref for a picture /assets never carried -- owner, 2026-07-31).
-            # The namespace already references the same blobs, so this adds a
-            # dict of references, not a copy of the pixels.
-            self._wp_images = dict(cart.get("images") or {})
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
             self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
@@ -284,25 +263,6 @@ class Wallpaper:
             return gp
         ws.input.game_pointer = (gx, gy, False, bool(getattr(p, "down", False)))
         return gp
-
-    def cart_images(self):
-        """The WALLPAPER cart's own raw images ({name: blob}) -- what its
-        `image("bg")` draws reference. The transports merge these into /assets
-        beside the open cart's `ws.images`, which they are NOT part of: the
-        wallpaper runs in its own namespace, so a recording tier that ships the
-        wallpaper's DRAW COMMANDS (rather than a composited framebuffer) would
-        otherwise emit an imgref for a picture the page never received --
-        sakura's backdrop went missing exactly that way (owner, 2026-07-31)."""
-        return dict(getattr(self, "_wp_images", None) or {})
-
-    def wire_assets(self):
-        """{name: (w, h, index_bytes)} for the backdrop composite's ship-once
-        wire image, or {} while the frame is churning / never composited --
-        merged into /assets beside the shelf covers (CoverCache.assets)."""
-        if self._wire_name is None or self._wire_pix is None:
-            return {}
-        w, h = self._wire_wh
-        return {self._wire_name: (w, h, self._wire_pix)}
 
     def draw_preview(self, cv, rect, dt):
         """The Appearance monitor's screen: the chosen wallpaper FIT inside
@@ -687,9 +647,9 @@ class Wallpaper:
         upscale that covers the whole desktop, centered and cropped -- a real
         full-bleed backdrop, never a letterboxed rectangle floating in black.
         (Always full-desktop -- never routed through the WM, whose viewport may be
-        a player WINDOW in windowed mode.) On a RECORDING system canvas (the web
-        console) there is no framebuffer to copy into: ship the frame as ONE scaled
-        self-contained b64 img instead (the replayers clip the crop)."""
+        a player WINDOW in windowed mode.) A system canvas with no readable
+        framebuffer has nothing to copy into: draw the frame as ONE scaled spr
+        instead, and let the canvas clip the crop."""
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
@@ -710,25 +670,8 @@ class Wallpaper:
         ox = (sw - gw * scale) // 2                                # <= 0 (crop)
         oy = (sh - gh * scale) // 2
         if sbuf is None:
-            pix = bytes(gbuf)
-            if pix == self._wire_pix:
-                # Stable frame (a static wallpaper): mint/keep the serial name
-                # so the pixels ride /assets once (wire_assets) and this draw
-                # records as one small imgref (#113).
-                if self._wire_name is None:
-                    self._wire_serial += 1
-                    self._wire_name = "wall:%d" % self._wire_serial
-                    self._wire_wh = (gw, gh)
-            else:
-                # Changed frame (first draw / a live wallpaper): inline it and
-                # remember the pixels -- naming a churning frame would refetch
-                # the whole asset set every frame.
-                self._wire_pix = pix
-                self._wire_name = None
-            img = _Blit(gw, gh, pix, -1)
-            img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
-            if self._wire_name is not None:
-                img._name = self._wire_name
+            img = _Blit(gw, gh, bytes(gbuf), -1)
+            img._paint = True              # -> the native blit_indices bake
             sc.spr(img, ox, oy, scale)
             return
         # Raster: expand each source row ONCE, then slice the visible crop into every

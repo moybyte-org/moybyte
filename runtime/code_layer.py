@@ -68,18 +68,19 @@ def _glyph_known(kind):
 
 # The code editor draws its chrome in its OWN palette (`_tones`), not in the
 # theme's -- the frozen 320x240 branch is a set of literals with no token behind
-# it. `ui.row`/`ui.cell` take that palette through their `colors=` escape hatch;
-# `ui.chip` has none, so the tone map doubles as the `th` dict chip reads, by
-# carrying the four token names chip looks up. Nothing is invented here: every
-# alias points at a role this surface already had.
+# it. The tone map therefore doubles as the `th` dict the toolkit reads, by
+# carrying the token names it looks up. Nothing is invented here: every alias
+# points at a role this surface already had, which is what lets the chips, the
+# find field, the symbol keys and the popup rows all draw as ordinary widget
+# kinds -- reachable by a skin -- instead of through `colors=` (#207).
 def _as_theme(t):
     """Add the ui-toolkit token aliases to a tone map, in place."""
     edge = t["sym_edge"]
-    t["panel"] = t["sym_bg"]        # chip REST field
-    t["dim"] = edge                 # chip REST edge
+    t["panel"] = t["sym_bg"]        # chip/row/cell REST field
+    t["dim"] = edge                 # chip/row/cell REST edge
     t["accent"] = edge              # chip ON field  (the `active` look)
     t["edge"] = edge                # chip ON edge
-    t["title_ink"] = t["sym_ink"]   # chip REST ink
+    t["title_ink"] = t["sym_ink"]   # chip/row/cell REST ink
     return t
 
 
@@ -1119,8 +1120,11 @@ class CodeLayer:
         chrome palette, an optional accent title row, and the selected row tinted with
         the selection color. Labels are pre-clipped by the caller's width."""
         fs = lay.fs
-        # The shell IS a row too (field + edge + the optional accent title), and
-        # each entry is a plain list row: no field unless it is the selected one.
+        # Both rows keep `colors=`, for two different reasons. The SHELL's ink is
+        # the FIND colour -- not a widget state, so no kind expresses it. The
+        # ENTRIES must paint no field when unselected: their rects tile the
+        # panel edge to edge, so a rest field (every kind has one) would erase
+        # the shell's own border a row at a time. Frozen by geometry, not taste.
         _ui.row(cv, t, _chip_rect(panel), title,
                 colors=(t["sym_bg"], t["find"], t["sym_edge"]),
                 pad=fs, text_dy=fs, fs=fs)
@@ -1155,8 +1159,7 @@ class CodeLayer:
         # The FIELD is a row; the query text + caret stay the caller's, because
         # they are the field's live CONTENT (a tail slice plus a caret block) and
         # `row` would re-clip the already-fitted string by its own symmetric pad.
-        _ui.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None,
-                colors=(t["sym_bg"], t["sym_ink"], t["sym_edge"]), fs=fs)
+        _ui.row(cv, t, (r[0], r[1], qright - r[0] - 1, r[3] - 1), None, fs=fs)
         # As much of the tail of the query as fits, then a caret block.
         avail = max(1, (qright - r[0]) // lay.cell - 2)
         shown = self._find_q[-avail:] if len(self._find_q) > avail else self._find_q
@@ -1183,12 +1186,11 @@ class CodeLayer:
         sh = lay.sym_h
         t = self._t if self._t is not None else self._tones()
         syms = self._symbols()
-        colors = (t["sym_bg"], t["sym_ink"], t["sym_edge"])
         for i in range(len(syms)):
             x = lay.sym_area[0] + i * sc
             # A key is a grid CELL whose picture is the symbol itself: `cell`
             # draws the frame and hands back where the picture goes (the frozen
             # +6px offset is measured from that rect, not from the cell).
-            art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1), colors=colors,
+            art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1),
                            pad=0, caption_h=0, fs=fs)
             cv.print(syms[i], art[0] + 6 * fs, art[1] + 6 * fs, t["sym_ink"], 1)

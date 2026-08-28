@@ -1,8 +1,8 @@
 """Serial diagnostics for the device desktop loop (extracted from moy_runtime.py).
 
 A set of pure logging functions (#43/#63/#66/#68/#69) the run_desktop loop calls
-between frames when perf capture is on: _diag_flush (ring -> SD), _diag_perf_sample
-(PERF), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
+between frames when perf capture is on: _diag_flush (ring -> SD),
+_diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
 draw-cost splits), _diag_pump (bounce-feed pacing), _diag_i2cstat (#69 kbd/touch
 I2C latency), _diag_calib (interpreter cost model), _diag_gc (the forced-collect
 sample). Every one takes its inputs explicitly (diag / ws / comp / keyboard /
@@ -33,22 +33,10 @@ def _diag_flush(diag, ws):
     return _ticks_diff(_ticks_ms(), t0)
 
 
-def _diag_perf_sample(diag, ws):
-    """Log a PERF sample line from the workstation's current frame numbers, if a
-    cart is actively running. Guarded -> a no-op on any failure."""
-    if diag is None:
-        return
-    try:
-        sample = ws.perf_sample()      # (name, fps, flush_ms, draw_ms) or None
-        if sample is not None:
-            # net= comes from perf_net(), NOT from perf_sample: the meter
-            # consumes its window and this is its one reader per sample, while
-            # perf_sample is also the `is a cart running?` probe every other
-            # diag helper below calls (see Workstation.perf_net).
-            diag.log_perf(sample[0], sample[1], sample[2], sample[3],
-                          ws.perf_net())
-    except Exception:
-        pass
+# The PERF sample is not a diag helper (#206 item 2): it rides
+# device_boot.PerfSampler on the shared FrameLoop.account hook, in the one
+# format every board emits. This board still PERSISTS it -- run_desktop's emit
+# rings the finished line -- but it no longer composes a second one.
 
 
 HITCH_MS = 80

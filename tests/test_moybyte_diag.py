@@ -88,51 +88,41 @@ def test_disabled_is_a_noop(diag):
     assert called == []
 
 
-def test_format_perf_shape(diag):
-    s = diag.format_perf("star catcher", 29.6, 12.4, 18.9, None)
-    # Cart name spaces -> '_', numbers rounded to int.
-    assert s == "PERF cart=star_catcher fps=30 net=- flush=12 draw=19"
+def test_ring_persists_without_echoing(diag, capsys):
+    """The offline sink for a line composed ELSEWHERE (#206 item 2).
 
+    `format_perf`/`log_perf` are gone: they wrote a fourth PERF field order
+    under the same name, and stamped it with this ring's `Moybyte <uptime> `
+    prefix -- which is exactly what made `tools/p4_perf.py` (filtering on
+    `startswith("PERF ")`) silently discard every T-Deck sample it ever saw.
+    The shared formatter (runtime/perf_line.py) writes the line now and the
+    board PRINTS it; this only persists it, because that board's serial RX was
+    dead for months and the ring is what survives a hang.
 
-def test_format_perf_handles_none_cart(diag):
-    s = diag.format_perf(None, 0, 0, 0, None)
-    assert s == "PERF cart=? fps=0 net=- flush=0 draw=0"
-
-
-def test_net_names_the_lockstep_tick_rate_a_linked_game_renders_at(diag):
-    """#65: a linked game's world moves on the shared tick and the console gates
-    every frame that tick is not due for -- so fps=30 on a board looping at 55
-    is a match, not a regression. net= is the field that says which."""
-    s = diag.format_perf("brick siege", 30, 8, 21, 30)
-    assert "fps=30 net=30 " in s
-
-
-def test_net_absent_is_a_dash_and_a_frozen_match_is_a_zero(diag):
-    """THE DOCTRINE (2026-08-22), and the one mutation this field must not
-    survive: no session reports `-`, never 0. A matched-but-not-advancing
-    session reports a real 0, and the two states have to be distinguishable --
-    a frozen 0 is also exactly what a broken meter looks like."""
-    absent = diag.format_perf("brick siege", 55, 8, 21, None)
-    frozen = diag.format_perf("brick siege", 55, 8, 21, 0)
-    assert "net=- " in absent
-    assert "net=0 " in frozen
-    assert absent != frozen
-
-
-def test_log_perf_appends_perf_line(diag):
-    diag.log_perf("game", 30, 10, 20, 29)
+    WITHOUT the live echo, which is the whole reason it is not `log`: routing
+    an already-printed line through `log` puts the sample on the wire twice."""
+    diag.ring("PERF", "cart=game fps=30/60 net=-")
+    out = capsys.readouterr().out
+    assert out == ""                                             # no live echo
     lines = diag.lines()
     assert len(lines) == 1
-    # "<ts> PERF cart=game fps=30 net=29 flush=10 draw=20"
-    assert "PERF cart=game fps=30 net=29 flush=10 draw=20" in lines[0]
+    assert "PERF cart=game fps=30/60 net=-" in lines[0]
+    # ...and it carries the ring's uptime stamp, which the reader strips.
+    from runtime.perf_line import parse_perf
+    assert parse_perf("Moybyte " + lines[0])["fps"] == (30.0, 60.0)
 
 
-def test_log_perf_has_no_default_for_net(diag):
-    """A default would print the absent marker for a caller that forgot the
-    argument -- i.e. `no match` while a match ate half the frames, which is the
-    exact failure the field exists to end."""
-    with pytest.raises(TypeError):
-        diag.log_perf("game", 30, 10, 20)
+def test_ring_is_a_noop_when_disabled(diag):
+    diag.ENABLED = False
+    diag.ring("PERF", "cart=game")
+    assert diag.lines() == []
+
+
+def test_the_old_perf_formatter_is_gone(diag):
+    """One format, one body. A second formatter here is how three of them
+    happened."""
+    assert not hasattr(diag, "format_perf")
+    assert not hasattr(diag, "log_perf")
 
 
 def test_log_persists_and_echoes_live(diag, capsys):

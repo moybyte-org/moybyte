@@ -20,9 +20,8 @@ the panel is this board's own (`guition_panel.GuitionCompositor` over
 
 from console import Pointer, Workstation, wire_workstation_core
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
 from carts_data import CARTS   # build-time generated from system_carts/
-from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
@@ -247,10 +246,14 @@ def run_desktop(fps_cap=60):
     pump = FramePump(boot, _ota, fps_cap)
     if serial is not None:
         serial.env["pump"] = pump
-    # Perf sampler -- the P4's PERF line, verbatim shape (tools/p4_perf.py
-    # parses it); the meters follow Settings -> PERF DIAG live.
+    # Perf sampler -- device_boot.PerfSampler over runtime/perf_line.py, the ONE
+    # body and ONE format every board emits (#206 item 2; this was a hand copy
+    # of the P4's, and said so, until 2026-08-28). The meters follow Settings ->
+    # PERF DIAG live. Nothing per-board is passed: this is a fullscreen tier
+    # with no windowed WM and a panel with no PPA, so those columns print `-`
+    # rather than a zero indistinguishable from a broken lever.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
+    _perf = PerfSampler(ws)
 
     def _poll_inputs(now):
         """This board's input sources: the BLE keyboard's async notifications
@@ -302,36 +305,10 @@ def run_desktop(fps_cap=60):
         if _lk is not None and _lk.active:
             _lk.poll(ws)
 
-    def _account(now, elapsed, sleep_ms):
-        _pf["n"] += 1
-        _pf["busy"] += elapsed
-        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
-            _drawn = getattr(ws, "_frames_drawn", 0)
-            # Guarded like the P4's: a diag never kills the loop it measures.
-            try:
-                _live = bool(getattr(ws, "diag_live", False))
-                if ws.perf_capture != _live:
-                    ws.perf_capture = _live
-                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                      "render=%.0f chrome=%.0f cart=%s"
-                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
-                         _pf["busy"] // (_pf["n"] or 1),
-                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
-                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
-                         getattr(ws, "_chrome_ms", 0),
-                         (getattr(ws, "cart", None) or {}).get("title", "-")))
-            except Exception as _pf_exc:  # noqa: BLE001
-                print("PERF sample failed: %s: %s"
-                      % (type(_pf_exc).__name__, _pf_exc))
-            _pf["at"] = _ticks_ms() + 2000
-            _pf["n"] = 0
-            _pf["busy"] = 0
-            _pf["drawn"] = _drawn
-
     # The shared frame loop (#202 Phase B): the invariant order lives ONCE in
     # device_boot.FrameLoop; every hook above is this board's hardware.
     loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
-                     present=_present, tail=_tail, account=_account,
+                     present=_present, tail=_tail, account=_perf.account,
                      frame_error=_frame_error,
                      set_backlight=set_backlight, lit=boot.lit)
     if loop.run() == "quit":

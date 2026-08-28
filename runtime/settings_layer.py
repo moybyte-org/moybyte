@@ -11,7 +11,12 @@ Boundary (the anti-spaghetti line, per the doc): SettingsLayer owns NO config. E
 value it steps or shows is CART/SYSTEM state on Workstation -- ws.system (the
 system.json dict), ws.look.font_scale, ws.diag_live, the
 updater queries -- and every mutation goes through the ws setters (
-ws.look.cycle_font_scale / set_diag_live / _cycle_channel / prefs.persist).
+ws.look.cycle_font_scale / _cycle_channel / prefs.persist / the SETTINGS_TOGGLES
+verbs). The module-level SETTINGS_TOGGLES registry is the one exception, and only
+in the sense the _SET_* geometry already is: it DECLARES the ON/OFF settings --
+name, label, default, verb, capability gate, serial word -- and console.py and
+dev_channel.py import it back rather than each keeping a hand copy (#209 section
+7). It still holds no value: every one of them lives on ws as a flat attribute.
 Wallpaper + panel-theme picking is NOT here: the Appearance app is the ONE
 appearance surface, and Settings just deep-links to it (the APPEARANCE action row).
 The actions Settings hosts delegate OUT to other layers (ws.open_theme / ws.update_ui.
@@ -41,6 +46,108 @@ _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #
 
 # (The panel colors moved to the selectable THEME tokens -- chrome.THEMES,
 # picked in the Appearance app; the "night" default is the moybyte site colorway.)
+
+
+# -- the settings-toggle registry (#209, console_architecture_2026-08.md 7) ---
+#
+# ONE declaration per persisted ON/OFF setting. Adding a toggle used to walk
+# FIVE hand-kept sites -- the `ws.set_*` verb, the boot apply in load_system,
+# the row list below plus its capability splice, the tap dispatch, and the dev
+# channel's serial word -- and crisp_pixels walked every one of them in
+# 2026-08. Four of the five are this table now, read by console.py (the flat
+# defaults, the boot apply and the persistence tail) and dev_channel.py (the
+# serial words). What is deliberately NOT here is what each toggle uniquely
+# DOES: the phase reset, the canvas hook, the keyboard hand-over stay written
+# out in the `set_*` method the entry NAMES. The registry declares; it does not
+# absorb.
+#
+# Per entry:
+#   key      the ONE name -- the system.json key, the flat `ws.<key>` mirror,
+#            and the Settings row's dispatch key. All six were already the same
+#            string in three places; the registry is what pins that.
+#   label    the row text. THIS ORDER IS THE ON-SCREEN ORDER (the block sits
+#            below EDIT ICONS, above the injected web/OTA rows).
+#   default  the value before system.json is read, and the fallback when the
+#            store says nothing about this key.
+#   setter   the `ws` verb every path goes through. Never a raw attribute
+#            write -- a toggle that only set its mirror would skip its apply.
+#   gate     None, or a predicate answering "can this BOARD serve it". The
+#            gates are per-board / per-service and are EXPRESSED, not
+#            flattened: a falsey gate hides the row (which is what keeps the
+#            other tiers' frozen Settings pixels) and declines the serial word.
+#            It never quietly turns the toggle into a no-op that still reports
+#            ON -- `set_two_player` is the honest end of the same rule, and
+#            reports OFF whatever it is told when no second keyboard exists.
+#   dev      the dev-channel word, or None. `diag_live` has none ON PURPOSE:
+#            `diag` is not a plain toggle over there (it drives perf_capture
+#            and the FPS chip along with the gate), so it stays written out.
+#
+# Every entry renders as the "diag" row kind: a generic ON/OFF that reads the
+# flat mirror by name. Which is the other half of the contract -- the mirrors
+# stay FLAT ATTRIBUTES and this table never becomes a read path. `frame` reads
+# `self.frameskip` on the pace check every loop iteration on all three boards,
+# and a dict lookup there would buy a boot-time convenience at a per-frame
+# price.
+
+
+def _gate_second_keyboard(ws):
+    """LOCAL 2P needs a SECOND keyboard -- see Workstation.second_keyboard: on
+    the touch-only boards the paired Bluetooth keyboard IS ws.keyboard, so
+    handing it to player two leaves player one with nothing to press."""
+    return ws.second_keyboard() is not None
+
+
+def _gate_crisp_scale(ws):
+    """CRISP PIXELS exists only where the hardware scaler is fixed bilinear
+    (the P4's PPA, the one such tier); every other composite is nearest
+    already, and the canvas hook is how a board says so."""
+    return getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
+
+
+SETTINGS_TOGGLES = (
+    # 2 PLAYERS (#65 Phase 1): hand a PAIRED BLUETOOTH KEYBOARD to player two,
+    # so two kids play one console on two real keyboards with no radio between
+    # consoles. Gated to a board that has a SECOND keyboard (the T-Deck, whose
+    # BLE one sits alongside its physical C3). Default OFF: somebody playing
+    # alone with a Bluetooth keyboard wants to be player one, not player two.
+    ("two_player", "2 PLAYERS", False, "set_two_player",
+     _gate_second_keyboard, None),
+    # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
+    # loop rate but render every SECOND frame -- halves the whole render-side
+    # cost (per-draw-call dispatch, the measured tax). It is a PHASE TOGGLE, so
+    # what it gives you is half of whatever the loop is doing, NOT a 30Hz lock
+    # (measured 2026-08-22: ~40fps on the Guition, ~55 on the T-Deck, so
+    # frameskip means ~20 and ~27 there). Default OFF -- the on-glass feel pass
+    # kept it opt-in (2026-07-10, both boards). _fs_phase is the alternation
+    # bit the setter resets, so the first frame after a flip always renders.
+    ("frameskip", "FRAMESKIP", False, "set_frameskip", None, "skip"),
+    # CRISP PIXELS (#204): nearest-neighbour game composite instead of the
+    # PPA's fixed-bilinear scaler. Sits by FRAMESKIP -- both are play-time
+    # quality/perf trades. Default OFF: smooth is the shipped behaviour, and
+    # the trade is sharp pixel art against a real per-frame CPU cost the async
+    # PPA path does not pay.
+    ("crisp_pixels", "CRISP PIXELS", False, "set_crisp_pixels",
+     _gate_crisp_scale, "crisp"),
+    # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME canvas and
+    # its composite scale, so on a small-canvas cart (celeste) it draws 2x big
+    # -- which is what prompted the off switch. Purely cosmetic: the perf
+    # fields keep updating and PERF DIAG is untouched.
+    ("show_fps", "SHOW FPS", True, "set_show_fps", None, None),
+    # PERF DIAG (#68 "kid mode" gate): OFF (the kid default) skips the diag
+    # costs a player can FEEL on device -- the 30s forced GC sample
+    # (~130-230ms) and the periodic diag->SD write (~115ms) -- and hushes the
+    # live serial echo. The RAM ring still collects (us-cheap) and still
+    # flushes on crash / cart exit, so "play -> crash -> read diag.log" works
+    # either way. run_desktop reads ws.diag_live each cycle, so a flip lands
+    # within a frame. Host: measurement-only, nothing to gate.
+    ("diag_live", "PERF DIAG", False, "set_diag_live", None, None),
+    # DIAG SD LOG (#68 follow-up, owner call 2026-07-08): the periodic
+    # diag->SD write is its OWN gate -- PERF DIAG ON + this OFF = serial-only
+    # measurement with no 20s sdflush stutter. ON restores the offline
+    # play-then-read-diag.log workflow. Crash/cart-exit flushes stay
+    # unconditional either way (the safety net).
+    ("diag_sd", "DIAG SD LOG", False, "set_diag_sd", None, None),
+)
 
 
 class SettingsLayer:
@@ -77,30 +184,10 @@ class SettingsLayer:
         # deferred to #52, so it lives in Settings for now. "action" rows aren't
         # +/- steppers: any tap / left / right activates them (open_theme).
         ("icons", "EDIT ICONS", "action"),
-        # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
-        # loop rate but render every SECOND frame -- halves the whole render-side
-        # cost (per-draw-call dispatch, the measured tax). It is a PHASE TOGGLE,
-        # so what it gives you is half of whatever the loop is doing, NOT a 30Hz
-        # lock: this comment used to say "for 30Hz motion", which was true when
-        # the loop ran at 60 and is not now (measured 2026-08-22: ~40fps on the
-        # Guition, ~55 on the T-Deck, so frameskip means ~20 and ~27). Default
-        # OFF -- the on-glass feel pass kept it opt-in (2026-07-10, both boards).
-        # Reads ws.frameskip (the "diag" kind's generic getattr ON/OFF rendering).
-        ("frameskip", "FRAMESKIP", "diag"),
-        # SHOW FPS: the in-game FPS chip (default ON). It rides the GAME
-        # canvas, so on a small-canvas cart (celeste) it scales up with the
-        # composite -- 2x size -- which is what prompted the off switch.
-        ("show_fps", "SHOW FPS", "diag"),
-        # PERF DIAG (#68 "kid mode" gate): OFF (default) skips the diag costs a
-        # player can FEEL on device -- the 30s forced GC sample and the periodic
-        # diag->SD write -- and hushes the live serial echo. Crash/cart-exit
-        # flushes keep working, so OFF still yields a diag.log. Owners flip it ON
-        # for a measurement session.
-        ("diag_live", "PERF DIAG", "diag"),
-        # The periodic diag->SD write is its own gate (owner call 2026-07-08):
-        # PERF DIAG ON + this OFF = serial-only measurement, no 20s sdflush
-        # stutter. ON restores the offline play-then-read-diag.log workflow.
-        ("diag_sd", "DIAG SD LOG", "diag"),
+        # The ON/OFF gate rows (FRAMESKIP, SHOW FPS, PERF DIAG, DIAG SD LOG and
+        # the two capability-gated ones) are NOT here: they are declared once in
+        # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
+        # registry order, directly after this row.
     )
     _MOCK_NAMES = ("ALEX", "SAM", "KIT", "RAE")
 
@@ -142,9 +229,14 @@ class SettingsLayer:
         self._rows_upd = False
         self._rows_onl = False
         self._rows_web = False
-        self._rows_crisp = False
         self._rows_c6 = False
-        self._rows_split = False
+        self._rows_tog = None
+        # _toggle_rows' own memo: the registry block, plus the gate answer it
+        # was built from held in a PREALLOCATED list compared element-wise --
+        # so re-asking the gates every call allocates nothing, and a new toggle
+        # needs no new attribute here (which is what the two it replaced were).
+        self._toggle_cache = None
+        self._toggle_gates = [False] * len(SETTINGS_TOGGLES)
 
     def reset(self):
         """Reset the selection + scroll window (called by ws.open_settings each visit)."""
@@ -531,18 +623,21 @@ class SettingsLayer:
         # rest of the slot; the IP keeps its own fixed column.
         ws._icon("wifi" if connected else "wifi_off", x, y, cv)
         if connected:
+            # The ONE ink here that is not a widget state: `play` says CONNECTED,
+            # which is a status the theme owns and no skin should overrule.
             _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
                     colors=(None, th["play"], None), edge=False,
                     pad=20 * fs, text_dy=5, fs=fs)
             if ip:
                 cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
         else:
-            _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED",
-                    colors=(None, th["ink_dim"], None), edge=False,
-                    pad=20 * fs, text_dy=5, fs=fs)
+            _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED", kind="row_list",
+                    edge=False, pad=20 * fs, text_dy=5, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
+            # `ink`, not the chrome family: this is the panel's own body text,
+            # and the two families are different indices on machine/dark.
             _ui.row(cv, th, (x, y, w, h),
                     ("PASSWORD FOR " + str(self.wifi_pick))[:30],
                     colors=(None, th["ink"], None), edge=False, pad=4,
@@ -555,8 +650,7 @@ class SettingsLayer:
             cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
             _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
-                    colors=(None, th["ink_dim"], None), edge=False, pad=4,
-                    text_dy=5, fs=fs)
+                    kind="row_list", edge=False, pad=4, text_dy=5, fs=fs)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -565,12 +659,11 @@ class SettingsLayer:
                 if y + h > py + ph - 30 * fs:
                     break                          # keep clear of the button row
                 sel = (k == self.wifi_sel)
-                fg = th["selection_ink"] if sel else th["ink_dim"]
                 # Same split as the Settings rows: ui.row draws the selection
                 # fill + the name, the signal bars / lock / SAVED markers are
                 # this list's own per-row content at their fixed columns.
-                _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16], on=sel,
-                        colors=(th["hilite"] if sel else None, fg, None),
+                _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
+                        kind="row_list", on=sel,
                         edge=False, pad=4, text_dy=5, fs=fs)
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
@@ -618,8 +711,8 @@ class SettingsLayer:
         _ui.status_row(cv, th, status_r,
                        (("ON" if enabled else "OFF"), state.upper(), name or "NO DEVICE"))
         _ui.row(cv, th, msg_r, self.bt_msg[:max(1, msg_r[2] // fw - 1)],
-                colors=(None, th["ink_dim"], None), edge=False, pad=3 * fs,
-                text_dy=(msg_r[3] - 8 * fs) // 2, fs=fs)
+                kind="row_list", edge=False,
+                pad=3 * fs, text_dy=(msg_r[3] - 8 * fs) // 2, fs=fs)
 
         self._bt_hits.clear()
         row_h = 24 * fs
@@ -631,7 +724,7 @@ class SettingsLayer:
         if not self.bt_devices:
             label = "SCANNING..." if state == "scanning" else "NO KEYBOARDS FOUND"
             _ui.row(cv, th, (list_r[0], list_r[1], list_r[2], row_h), label,
-                    colors=(None, th["ink_dim"], None), edge=False,
+                    kind="row_list", edge=False,
                     pad=3 * fs, text_dy=6 * fs, fs=fs)
         for i in range(top, end):
             address, dev_name, rssi, preferred, connected = self.bt_devices[i]
@@ -689,15 +782,45 @@ class SettingsLayer:
 
     # -- rows / actions ------------------------------------------------------
 
+    def _toggle_rows(self):
+        """The SETTINGS_TOGGLES block for this board, in registry order, minus
+        the entries whose capability gate says no.
+
+        Memoized like _settings_rows below and for the same reason -- it runs
+        INSIDE it, i.e. ~15x per frame. The gate answers live in a
+        preallocated list compared element-wise, so re-asking every call
+        allocates nothing and a seventh toggle needs no seventh attribute.
+        `_settings_rows` then compares the RESULT by identity, which is why
+        adding a toggle touches neither memo."""
+        ws = self.ws
+        seen = self._toggle_gates
+        stale = self._toggle_cache is None
+        for i in range(len(SETTINGS_TOGGLES)):
+            gate = SETTINGS_TOGGLES[i][4]
+            on = True if gate is None else bool(gate(ws))
+            if on != seen[i]:
+                seen[i] = on
+                stale = True
+        if stale:
+            rows = ()
+            for i in range(len(SETTINGS_TOGGLES)):
+                if seen[i]:
+                    t = SETTINGS_TOGGLES[i]
+                    rows = rows + ((t[0], t[1], "diag"),)
+            self._toggle_cache = rows
+        return self._toggle_cache
+
     def _settings_rows(self):
-        """The Settings rows for this session: the static set, plus "UPDATE FW" (install
+        """The Settings rows for this session: the static set, the registry's
+        ON/OFF gate block, plus "UPDATE FW" (install
         from SD) and "UPDATE ONLINE" (WiFi download, #53 Phase 3) action rows when the
         injected updater supports them. Built on demand so the rows appear/disappear with
         the updater without re-statting per draw.
 
-        MEMOIZED on the four capability flags, because "on demand" turned out to mean
-        ~15 times per FRAME -- the draw loop asks once per ROW, and the pointer/scroll
-        paths ask again -- and each call rebuilt the tuple through up to four
+        MEMOIZED on the service capability flags plus the toggle block, because "on
+        demand" turned out to mean ~15 times per FRAME -- the draw loop asks once per
+        ROW, and the pointer/scroll paths ask again -- and each call rebuilt the tuple
+        through up to four
         concatenations. On P4 glass that was ~2.3KB of the ~4.5KB a Settings frame
         allocated, and since ~70KB of churn buys one 55ms mark-sweep there, it was the
         largest single contributor to the scroll hitches (measured with
@@ -705,46 +828,29 @@ class SettingsLayer:
         re-checking them per call stays free; only the rebuild is skipped. The flags
         are compared as separate attributes rather than a signature tuple, because
         building a tuple to test the cache would reintroduce ~40B of the churn the
-        cache exists to remove."""
+        cache exists to remove -- and the toggle block by IDENTITY, for the same
+        reason."""
         ws = self.ws
         bt = self._bt_service() is not None
         upd = ws._update_available()
         onl = ws._online_update_available()
         web = getattr(ws, "webhost", None) is not None
-        crisp = getattr(ws.sys_canvas, "set_crisp_scale", None) is not None
-        split = ws.second_keyboard() is not None
         c6u = getattr(ws, "c6_updater", None) is not None
+        tog = self._toggle_rows()
         if (self._rows_cache is not None and bt == self._rows_bt
                 and upd == self._rows_upd and onl == self._rows_onl
-                and web == self._rows_web and crisp == self._rows_crisp
-                and split == self._rows_split and c6u == self._rows_c6):
+                and web == self._rows_web and c6u == self._rows_c6
+                and tog is self._rows_tog):
             return self._rows_cache
-        rows = self._SETTINGS_ROWS
+        # The registry block sits directly after EDIT ICONS, which is where the
+        # hand-spliced FRAMESKIP/PERF DIAG rows were: same order, same indices,
+        # same frozen 320x240 pixels.
+        rows = self._SETTINGS_ROWS + tog
         if bt:
             # Keep network/input together. Dynamic capability gating preserves
             # the non-P4 Settings row indices and frozen 320x240 pixels.
             rows = rows[:1] + (("bluetooth", "BLUETOOTH KEYBOARD", "bluetooth"),) \
                 + rows[1:]
-        if crisp:
-            # CRISP PIXELS (#204): nearest-neighbour game composite, only on boards
-            # whose hardware scaler is fixed bilinear (the P4's PPA). Sits by
-            # FRAMESKIP -- both are play-time quality/perf trades. Capability-
-            # gated like BLUETOOTH so the other tiers keep frozen pixels; the
-            # index lookup (rebuild-only, memoized) survives row reordering.
-            i = rows.index(("frameskip", "FRAMESKIP", "diag")) + 1
-            rows = rows[:i] + (("crisp_pixels", "CRISP PIXELS", "diag"),) \
-                + rows[i:]
-        if split:
-            # 2 PLAYERS (#65 Phase 1): hand a PAIRED BLUETOOTH KEYBOARD to player
-            # two, so two kids play one console on two real keyboards with no
-            # radio between consoles. Capability-gated to a board that has a
-            # SECOND keyboard (the T-Deck, whose BLE one sits alongside its
-            # physical C3), which is why it is not in the frozen row list --
-            # on the touch-only boards the Bluetooth keyboard is the only one
-            # there is. Default OFF: somebody playing alone with a Bluetooth
-            # keyboard wants to be player one, not player two.
-            i = rows.index(("frameskip", "FRAMESKIP", "diag"))
-            rows = rows[:i] + (("two_player", "2 PLAYERS", "diag"),) + rows[i:]
         if web:
             # WEB CONSOLE (moycore plan 3.4): serve the wasm console from this
             # board, so a browser on the same network opens YOUR carts. Its own
@@ -770,9 +876,8 @@ class SettingsLayer:
         self._rows_upd = upd
         self._rows_onl = onl
         self._rows_web = web
-        self._rows_crisp = crisp
-        self._rows_split = split
         self._rows_c6 = c6u
+        self._rows_tog = tog
         self._rows_cache = rows
         return rows
 
@@ -793,22 +898,16 @@ class SettingsLayer:
             ws.open_theme()       # EDIT ICONS (#52)
 
     def _toggle_diag_row(self, key):
-        """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles):
-        PERF DIAG + DIAG SD LOG (#68) and FRAMESKIP (#77). One dispatch shared by
-        the step/key/tap paths so a new gate row is wired in exactly one place."""
+        """Flip one of the "diag"-kind ON/OFF gate rows (any tap/step/A toggles).
+        One dispatch shared by the step/key/tap paths, and it is now the
+        REGISTRY's: read the flat mirror by name, call the verb the entry names.
+        The six-branch `if key ==` chain this replaces was the fourth of the
+        five sites a new toggle had to walk (#209 section 7)."""
         ws = self.ws
-        if key == "diag_sd":
-            ws.set_diag_sd(not ws.diag_sd)
-        elif key == "frameskip":
-            ws.set_frameskip(not ws.frameskip)
-        elif key == "crisp_pixels":
-            ws.set_crisp_pixels(not ws.crisp_pixels)
-        elif key == "two_player":
-            ws.set_two_player(not ws.two_player)
-        elif key == "show_fps":
-            ws.set_show_fps(not ws.show_fps)
-        else:
-            ws.set_diag_live(not ws.diag_live)
+        for t in SETTINGS_TOGGLES:
+            if t[0] == key:
+                getattr(ws, t[3])(not getattr(ws, key, False))
+                return
 
     def settings_adjust(self, d):
         """Step the selected Settings row by d. Font applies + persists; the
@@ -1138,19 +1237,16 @@ class SettingsLayer:
         key, label, kind = self._settings_rows()[i]
         x, y, w, h = self._settings_row_rect(i)
         sel = (i == self.set_msel)
-        fg = th["selection_ink"] if sel else th["chrome_ink_dim"]
         # ui.row owns the ROW CHROME -- the selection fill, the label ink and its
         # frozen (4, 5) placement, and the clip that keeps a long label inside the
         # rect (#174). Everything below is this row's per-KIND content, drawn by
         # the caller into the space `row` left: a value at the fixed value COLUMN
         # (x + w - 78fs, not right-aligned, so `row`'s `value=` slot is the wrong
         # shape), an icon, an OPEN affordance or a stepper.
-        # The palette rides `colors` because a Settings row is panel-CHROME
-        # coloured (hilite / selection_ink / chrome_ink_dim), not the row kind's
-        # token palette -- the documented escape hatch, and the one argument
-        # Phase 4 replaces with a skin entry.
-        _ui.row(cv, th, (x, y, w, h), label, on=sel,
-                colors=(th["hilite"] if sel else None, fg, None),
+        # The palette is the skin's "row_menu" kind (#207): a Settings row is
+        # panel-CHROME coloured, which the row kind cannot express, so it is its
+        # own catalog entry rather than a hand-built triple no skin could reach.
+        _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", on=sel,
                 edge=False, pad=4, text_dy=5, fs=lay.fs)
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
@@ -1243,7 +1339,9 @@ class SettingsLayer:
         if kind not in ("wifi-net", "bluetooth", "font", "action", "channel",
                         "diag", "webhost"):
             # A second label line inside the SAME row rect (one font row below
-            # the title), so it is the row kind again with its own text_dy.
+            # the title), so it is the row kind again with its own text_dy. Its
+            # grey is a frozen literal, not `ink_dim` -- off-token on every
+            # theme, which is what the `colors` hatch is for.
             _ui.row(cv, th, (x, y, w, h), "soon",
                     colors=(None, NAMES["dark_grey"], None), edge=False,
                     pad=4, text_dy=6 + fw, fs=lay.fs)

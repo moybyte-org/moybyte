@@ -126,7 +126,9 @@ class AchievementsUI:
         # leading slot, so the caller draws it and hands `row` the rect that is
         # LEFT -- the same "caller keeps its picture" split the grid cells use.
         # fs=1 deliberately: this popup is sized in 8px glyph units (`w` above),
-        # so its clip budget is the frozen one, not the canvas font scale.
+        # so its clip budget is the frozen one, not the canvas font scale. The
+        # ink is a literal white on a literal black dialog -- an off-token
+        # surprise banner that no theme and no skin colours.
         _ui.row(cv, self.ws.theme_colors, (x + 24, y, w - 24, h), line,
                 colors=(None, NAMES["white"], None), edge=False, pad=0,
                 text_dy=11, fs=1)
@@ -176,22 +178,22 @@ class AchievementsUI:
             y = y0 + row * row_h
             got = self.ws.ach.has(ach_id)
             if got:
-                g_col, label, row_ink = th["accent"], title[:16], ink
+                g_col, label = th["accent"], title[:16]
             else:
                 # A hidden (Easter-egg) achievement stays "???"; a normal locked one
                 # shows its name greyed so a kid knows what's there to earn.
                 glyph = "lock"
                 g_col = th["ink_dim"] if light else NAMES["dark_grey"]
                 label = "???" if hidden else title[:16]
-                row_ink = dim
             # The glyph and the label carry DIFFERENT inks here (a bright badge
             # beside quiet text), which `row`'s single-ink leading slot cannot
             # express -- so the caller draws the badge and `row` takes the rect
-            # after it. `disabled` states the locked semantics for the Phase 4
-            # skin; the frozen chrome_ink palette rides `colors` until there is
-            # a skin entry for it. fs=1: this view is frozen 320x240 geometry.
+            # after it. `disabled` IS the locked semantics, and since #207 it is
+            # also where the colour comes from: the skin's "row_chrome" kind
+            # reads bright at rest and dims when unusable, which is exactly this
+            # list. fs=1: this view is frozen 320x240 geometry.
             self.ws._glyph(glyph, (x, y, 14, 14), g_col, cv)
             _ui.row(cv, th, (x + 16, y, col_w - 16, 14), label,
-                    disabled=not got, colors=(None, row_ink, None),
+                    kind="row_chrome", disabled=not got,
                     edge=False, pad=0, text_dy=3, fs=1)
         cv.print("TAP TO CLOSE", 110, 210, dim, 1)

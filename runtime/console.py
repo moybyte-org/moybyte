@@ -261,14 +261,17 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # setters; the wallpaper cluster is single-sourced on ws.look (the launcher shares
 # that backdrop). settings_layer.py is the single source of the _SET_* geometry
 # constants (also used by console's Layout), imported back here for Layout + tests.
+# SETTINGS_TOGGLES rides the same import: it is the ONE declaration of the
+# persisted ON/OFF settings (#209 section 7), and this file is what reads it for
+# the flat defaults, the boot apply and the shared persistence tail.
 try:
     from settings_layer import (
-        SettingsLayer, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H, _SET_BACK, _SET_ACH,
-        _SET_TITLE_HIT)
+        SettingsLayer, SETTINGS_TOGGLES, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H,
+        _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.settings_layer import (
-        SettingsLayer, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H, _SET_BACK, _SET_ACH,
-        _SET_TITLE_HIT)
+        SettingsLayer, SETTINGS_TOGGLES, _SET_X, _SET_W, _SET_ROW_Y0, _SET_ROW_H,
+        _SET_BACK, _SET_ACH, _SET_TITLE_HIT)
 
 # The Python code editor surface (#24/#39, extracted -- see code_layer.py). CodeLayer
 # owns the full-screen text view + drawing + code-UI state; the shared ws.editor handle
@@ -986,7 +989,14 @@ class Workstation:
 
     def _init_perf(self):
         """The perf/diag/frameskip measurement fields (#43/#44/#66/#68/#77)."""
-        self.show_fps = True          # bottom-right FPS readout while a cart runs
+        # The persisted ON/OFF settings, at the registry's declared defaults
+        # (#209 section 7 -- SETTINGS_TOGGLES in settings_layer.py carries each
+        # one's prose). FLAT ATTRIBUTES on purpose and forever: `frame_cap_fps`
+        # reads self.frameskip and device_boot's `pace` calls it every loop
+        # iteration on all three boards; both WMs read show_fps per painted game
+        # frame. load_system replaces these with the store's values at boot.
+        for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
+            setattr(self, _key, _default)
         self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
         # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
@@ -1052,37 +1062,7 @@ class Workstation:
         self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
         self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
-        # Live diagnostics gate (#68 "kid mode"): False (the kid default) means the
-        # device backend SKIPS the diag costs a player can feel -- the 30s forced GC
-        # sample (~130-230ms) and the periodic diag->SD write (~115ms) -- and hushes
-        # the live serial echo. The RAM ring still collects (us-cheap) and still
-        # flushes on crash / cart exit, so "play -> crash -> read diag.log" works
-        # either way. Settings -> PERF DIAG toggles + persists it (system.json);
-        # run_desktop reads it each cycle. Host: measurement-only, nothing to gate.
-        self.diag_live = False
-        # #68 follow-up (owner call 2026-07-08): the periodic diag->SD write is its
-        # OWN gate -- PERF DIAG ON + DIAG SD OFF = serial-only measurement with no
-        # 20s sdflush stutter. Crash/cart-exit flushes stay unconditional.
-        self.diag_sd = False
-        # Frameskip (#77): while a GAME plays, run the cart's _update + audio every
-        # frame but its _draw + the composite + the flush only every SECOND frame --
-        # logic/input stay at the full loop rate, pixels present at half. This
-        # halves the whole render-side cost (which the #77 A/B measured to be
-        # MicroPython per-draw-call dispatch -- the one tax left) at the price of
-        # 30Hz motion. Settings -> FRAMESKIP toggles + persists it; default OFF
-        # until the on-glass feel verdict. _fs_phase is the alternation bit.
-        self.frameskip = False
-        # LOCAL 2P (#65 Phase 1): one keyboard split into two controllers.
-        self.two_player = False
-        self._fs_phase = False
-        # CRISP PIXELS: nearest-neighbour game composite on canvases whose
-        # hardware scaler is fixed bilinear (the P4's PPA -- the only such
-        # tier; every other composite is already nearest). Capability-gated:
-        # the Settings row shows only where sys_canvas exposes set_crisp_scale,
-        # so the other tiers keep their frozen Settings pixels. Default OFF --
-        # smooth is the shipped behavior; the trade is sharp pixel art vs a
-        # real per-frame CPU cost the async PPA path doesn't pay.
-        self.crisp_pixels = False
+        self._fs_phase = False        # frameskip's alternation bit (#77)
 
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
@@ -1411,17 +1391,13 @@ class Workstation:
         _sk = self.system.get("skin")
         if _sk is not None:
             self.look.set_skin(_sk, persist=False)
-        # #68: apply the persisted diagnostics gate (kid-mode default OFF).
-        self.set_diag_live(self.system.get("diag_live", False), persist=False)
-        self.set_diag_sd(self.system.get("diag_sd", False), persist=False)
-        self.set_show_fps(self.system.get("show_fps", True), persist=False)
-        # #77: apply the persisted frameskip gate (default OFF).
-        self.set_frameskip(self.system.get("frameskip", False), persist=False)
-        # #65 Phase 1: re-apply the persisted local 2P split (default OFF).
-        self.set_two_player(self.system.get("two_player", False), persist=False)
-        # Apply the persisted crisp-composite gate (default OFF = smooth).
-        self.set_crisp_pixels(self.system.get("crisp_pixels", False),
-                              persist=False)
+        # Every persisted ON/OFF setting, through the verb its registry entry
+        # names (#209 section 7): the key is the system.json key, the default is
+        # declared beside it, and a board that cannot serve one gets the honest
+        # answer from the setter rather than a silent flag. Six hand-kept lines
+        # used to sit here, and a seventh toggle is now none.
+        for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
+            getattr(self, setter)(self.system.get(key, default), persist=False)
 
 
 
@@ -1499,15 +1475,28 @@ class Workstation:
         depends on the shelf following a browser batch with no reboot."""
         return self.carts.rescan()
 
+    def _set_toggle(self, key, on, persist):
+        """The tail every SETTINGS_TOGGLES verb shares: the flat mirror, the
+        repaint mark, and the persisted copy under the SAME name (#209 section
+        7). What differs per toggle -- the phase reset, the canvas hook, the
+        keyboard hand-over -- stays written out in the verb that calls this.
+
+        The mirror is set with setattr, which is fine because this runs on a
+        FLIP and at boot, never per frame; the READ side stays a plain
+        attribute everywhere, and must -- `frame_cap_fps` reads self.frameskip
+        and device_boot's `pace` calls it every loop iteration on all three
+        boards."""
+        setattr(self, key, on)
+        self._dirty = True
+        if persist:
+            self.system[key] = on
+            self.prefs.persist()
+
     def set_diag_live(self, on, persist=True):
         """Flip the #68 diagnostics gate (Settings -> PERF DIAG) and persist it.
         The device loop (moy_runtime.run_desktop) reads self.diag_live each cycle,
         so the change takes effect within a frame -- no reboot."""
-        self.diag_live = bool(on)
-        self._dirty = True
-        if persist:
-            self.system["diag_live"] = self.diag_live
-            self.prefs.persist()
+        self._set_toggle("diag_live", bool(on), persist)
 
     def set_diag_sd(self, on, persist=True):
         """Flip the periodic diag->SD write gate (Settings -> DIAG SD LOG) and
@@ -1515,22 +1504,14 @@ class Workstation:
         serial samples WITHOUT the ~115ms 20s sdflush stutter; the offline
         play-then-read-diag.log workflow flips this ON too. Crash/cart-exit
         flushes are unconditional either way (the safety net)."""
-        self.diag_sd = bool(on)
-        self._dirty = True
-        if persist:
-            self.system["diag_sd"] = self.diag_sd
-            self.prefs.persist()
+        self._set_toggle("diag_sd", bool(on), persist)
 
     def set_frameskip(self, on, persist=True):
         """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
         Takes effect on the next frame; the phase bit resets so the first frame
         after a toggle always renders (no one-frame blank on enable)."""
-        self.frameskip = bool(on)
         self._fs_phase = False
-        self._dirty = True
-        if persist:
-            self.system["frameskip"] = self.frameskip
-            self.prefs.persist()
+        self._set_toggle("frameskip", bool(on), persist)
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.
@@ -1570,11 +1551,7 @@ class Workstation:
             except Exception as exc:  # noqa: BLE001 -- a keyboard hiccup is not a crash
                 print("Moybyte 2 players failed:", exc)
                 on = False
-        self.two_player = on
-        self._dirty = True
-        if persist:
-            self.system["two_player"] = self.two_player
-            self.prefs.persist()
+        self._set_toggle("two_player", on, persist)
 
     def set_crisp_pixels(self, on, persist=True):
         """Flip the CRISP PIXELS composite (Settings row, capability-gated) and
@@ -1583,14 +1560,11 @@ class Workstation:
         instead of the PPA's fixed-bilinear scaler); a canvas without the hook
         never shows the row, so this setter is then only ever the boot apply
         of a stale system.json key."""
-        self.crisp_pixels = bool(on)
+        on = bool(on)
+        self._set_toggle("crisp_pixels", on, persist)
         hook = getattr(self.sys_canvas, "set_crisp_scale", None)
         if hook is not None:
-            hook(self.crisp_pixels)
-        self._dirty = True
-        if persist:
-            self.system["crisp_pixels"] = self.crisp_pixels
-            self.prefs.persist()
+            hook(on)
 
     def set_show_fps(self, on, persist=True):
         """Flip the in-game FPS chip (Settings -> SHOW FPS) and persist it.
@@ -1599,13 +1573,10 @@ class Workstation:
         so hiding it is purely cosmetic: the perf fields keep updating and
         PERF DIAG is untouched. Hiding also disables the chip's tap-to-toggle
         breakdown HUD, so clear that too rather than strand it on-screen."""
-        self.show_fps = bool(on)
-        if not self.show_fps:
+        on = bool(on)
+        if not on:
             self.perf_hud = False
-        self._dirty = True
-        if persist:
-            self.system["show_fps"] = self.show_fps
-            self.prefs.persist()
+        self._set_toggle("show_fps", on, persist)
 
     def _persist_system(self):
         """`prefs.persist()` -- app_context's Prefs role and the dev channel's

@@ -113,11 +113,16 @@ The few Lua-specific notes:
 - **Numbers on the device are 32-bit** (`LUA_32BITS`, #67): floats carry ~7
   digits and integers wrap at ±2.1 billion — plenty for scores, timers and
   positions, and float math runs on the hardware FPU (part of why Lua is the
-  fast tier). The PC simulator uses 64-bit doubles, so a float-heavy cart can
-  drift slightly between sim and device.
+  fast tier). **The simulator is the same**: since 2026-08-14 the host builds the
+  boards' own vendored Lua 5.4 with the same `LUA_32BITS`, so float semantics and
+  integer wrap are identical on every tier and a float-heavy cart does not drift
+  between sim and device. (That used to be false — the host ran a second Lua with
+  64-bit doubles, and closing it is what made golden-frame parity meaningful for
+  float-heavy carts.)
 
-*(Host note: the PC simulator runs Lua carts through `lupa` — an optional dev
-dependency; without it a Lua cart opens the "needs the Lua runtime" panel.)*
+*(Host note: a Lua cart on the PC simulator needs a **C compiler**, not a Python
+dependency — the host compiles that same vendored VM on demand and caches it.
+Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 
 ## Frame pacing
 

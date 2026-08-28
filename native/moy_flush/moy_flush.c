@@ -118,8 +118,24 @@ static void moy_flush_run_frame(void) {
     }
     // Whatever was QUEUED must finish before this frame may be handed back as
     // done -- this is the promise the T-Deck's SD fence relies on.
-    while (ok && moy_flush.tx_err == ESP_OK
-            && moy_flush.done < moy_flush.target) {
+    //
+    // IT HOLDS ON A LATCHED ERROR TOO, and did not until 2026-08-28: this
+    // condition carried `tx_err == ESP_OK`, so the ONE path the comment above
+    // singles out as leaving bands on the wire was the one path that did not
+    // wait for them. A failed queue refuses ONE band; every band already
+    // handed to the transport is still shipping out of a bounce slot, and
+    // returning here told the VM the bus was quiet. What the VM does next with
+    // a quiet-looking bus is the hazard: moy_lcd_sd_guard(on) drains and then
+    // opens an sdspi session on the shared host (the documented hang -- gray
+    // screen, dead USB, no panic), and moy_axs's frame_end reaps exactly
+    // `done` results before releasing the bus, so a band the count never
+    // reached leaks its transaction queue slot and skews s_retrieved for good.
+    //
+    // The wait costs nothing it could not already cost: the deadline is the
+    // frame's ONE absolute fence (flush_t0 + MOY_FLUSH_TIMEOUT_US), shared
+    // with the feed loop above, so a transport that has stopped completing
+    // gives up here exactly where a timeout does -- and is counted as one.
+    while (ok && moy_flush.done < moy_flush.target) {
         if (esp_timer_get_time() > deadline) {
             ok = false;
             break;

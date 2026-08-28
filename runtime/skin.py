@@ -23,6 +23,12 @@ exactly one module -- `ui`, a peer leaf whose only import is `widgets`. `ui`
 never imports this, which is what lets the console boot and look right with
 this module absent: the default skin is simply `ui`'s own tables.
 
+That is why the shell's own row kinds ("row_menu" and friends, #207) live in
+`ui.DEFAULT_SPECS` and not here. A DEFAULT that only exists once someone has
+imported the catalog is not a default -- a kind the built-in table does not name
+falls back to the row palette, silently and with the wrong pixels. This module
+restyles those kinds like any other; it does not supply them.
+
 Colours vs SIZES -- the scope of a restyle
 ------------------------------------------
 A skin restyles within the indexed canvas's primitive vocabulary: fills, edges,
@@ -132,6 +138,41 @@ _OUTLINE_SPECS = {
     # keep the chrome ink they had.
     "tab":           {_ui.ON: (_HILITE, _TITLE_INK, None),
                       _ui.REST: (None, 7, None)},
+    # The shell's chrome rows (#207). They draw with `edge=False`, so a skin
+    # reaches them through the FIELD and the INK -- which is why the restyle
+    # here is a loud accent selection rather than the frame trick above.
+    "row_menu":      {
+        _ui.REST:     (None, _INK_DIM, _DIM),
+        _ui.HOVER:    (None, _INK_DIM, _FOCUS),
+        _ui.ON:       (_ACCENT, 0, _ACCENT),
+        _ui.HOT:      (("danger", 8), 7, ("danger", 8)),
+        _ui.PRESSED:  (_ACCENT, 0, _ACCENT),
+        _ui.DISABLED: (None, _INK_DIM, _INK_DIM),
+    },
+    "row_list":      {
+        _ui.REST:     (None, _INK_DIM, _DIM),
+        _ui.HOVER:    (None, _INK_DIM, _FOCUS),
+        _ui.ON:       (_ACCENT, 0, _ACCENT),
+        _ui.HOT:      (("danger", 8), 7, ("danger", 8)),
+        _ui.PRESSED:  (_ACCENT, 0, _ACCENT),
+        _ui.DISABLED: (None, _INK_DIM, _INK_DIM),
+    },
+    "row_chrome":    {
+        _ui.REST:     (None, _TITLE_INK, _DIM),
+        _ui.HOVER:    (None, _TITLE_INK, _FOCUS),
+        _ui.ON:       (_ACCENT, 0, _ACCENT),
+        _ui.HOT:      (("danger", 8), 7, ("danger", 8)),
+        _ui.PRESSED:  (_ACCENT, 0, _ACCENT),
+        _ui.DISABLED: (None, _INK_DIM, _INK_DIM),
+    },
+    "row_cta":       {
+        _ui.REST:     (None, _TITLE_INK, _ACCENT),
+        _ui.HOVER:    (None, _TITLE_INK, _FOCUS),
+        _ui.ON:       (_ACCENT, 0, _ACCENT),
+        _ui.HOT:      (("danger", 8), 7, ("danger", 8)),
+        _ui.PRESSED:  (_ACCENT, 0, _ACCENT),
+        _ui.DISABLED: (None, _INK_DIM, _INK_DIM),
+    },
     "status":        {_ui.REST: (_PANEL, _INK_DIM, _ACCENT)},
     "panel":         {_ui.REST: (("surface", "panel", 60), None, _ACCENT)},
     "panel_title":   {_ui.REST: (_HILITE, _TITLE_INK, None)},

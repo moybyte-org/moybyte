@@ -471,8 +471,16 @@ class Files(_StoreRole):
         return store.content_sig(blob) if store is not None else None
 
     def stamp(self, blob, kind, name, sig):
-        """Stamp `blob` with where it was copied FROM and that source's sig."""
-        return self._store().stamp_provenance(blob, kind, name, sig)
+        """Stamp `blob` with where it was copied FROM and that source's sig.
+
+        No store means no provenance to add, so the blob passes through -- the
+        same degradation `stamp_provenance` already applies to a blob it cannot
+        parse. Returning None here would hand Paint's copy-on-use path a None to
+        save, which is the drawing lost."""
+        store = self._store()
+        if store is None:
+            return blob
+        return store.stamp_provenance(blob, kind, name, sig)
 
     # -- the moytext codec (#181) --------------------------------------------
     #

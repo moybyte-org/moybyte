@@ -84,8 +84,8 @@ class _CoverImage:
         self.pix = pix
         self.transparent = -1
         # Covers are opaque MOY64 bitmaps, just like Paint images.  This marker
-        # selects DeviceCanvas's native blit_indices bake and the web recorder's
-        # compact base64 image command instead of the generic per-pixel paths.
+        # selects DeviceCanvas's native blit_indices bake instead of the generic
+        # per-pixel path.
         self._paint = True
 
 
@@ -297,10 +297,6 @@ class CoverCache:
         self._cache = {}         # (path, w, h) -> shelf-card cover blittable (or None)
         self._order = []         # LRU keys (oldest first); bounds resize variants
         self._pixels = 0         # indexed pixels; device RGB bakes add 2B each
-        self._serial = 0         # names each cover blittable ("cover:N") so the
-                                 # web recorder ships it ONCE via /assets imgref
-                                 # instead of ~40KB of inline b64 per redraw
-                                 # (#113: the measured shelf-drag payload eater)
         self._jobs = {}          # (path, w, h) -> in-flight _CoverJob (time-sliced)
         self._built = False      # per-frame cover-build budget (see cover_for)
         self._ms = 0             # ms of it spent this frame
@@ -659,9 +655,9 @@ class CoverCache:
 
     def _prebuild_tick(self):
         """Build ONE pending cover image from the grids' cover_specs (the exact
-        (cart, w, h) set their next full draw requests -- the same geometry
-        helper the web /assets prebuild uses). Returns True while there is (or
-        may be) work left, False when the visible set is fully built.
+        (cart, w, h) set their next full draw requests). Returns True while
+        there is (or may be) work left, False when the visible set is fully
+        built.
 
         Runs on idle frames only (the caller), so it must not re-arm the paint
         machinery: cover_for sets _deferred when a build defers, which would
@@ -788,13 +784,6 @@ class CoverCache:
         order.append(key)
         self.gen += 1
         if img is not None:
-            # A serial name (never reused) routes the web recorder onto the
-            # ship-once ["imgref", ...] wire (#63 Fold 4): the pixels ride
-            # /assets once (assets below), and an edited cover's REBUILD
-            # gets a fresh name, so a browser can never show a stale cache hit.
-            img._name = "cover:%d" % self._serial
-            self._serial += 1
-        if img is not None:
             self._pixels += len(img.pix)
         while (len(order) > _COVER_CACHE_MAX_ENTRIES
                or self._pixels > _COVER_CACHE_MAX_PIXELS):
@@ -854,52 +843,3 @@ class CoverCache:
                         freed.append(b)
                         _moybuf.free(b)
             var.clear()
-
-    # -- the web /assets lane ------------------------------------------------
-
-    def prebuild_all(self):
-        """Build EVERY cover the shelf's next draw needs to COMPLETION, now --
-        bypassing the per-frame _COVER_SLICE_MS budget by re-arming it per step
-        (owner ask 2026-07-23 "ship them all once"). Wired into the HOST web
-        /assets handler (tools/web_console.assets), so assets() below returns
-        the WHOLE shelf in one payload and the browser never hits the
-        per-thumbnail cache-miss -> /assets refetch loop. Cheap after the first
-        session (the #86 thumb sidecars make each build one small read); the
-        DEVICE deliberately keeps the budgeted pop-in + self-healing refetch
-        instead -- a first-boot prebuild without sidecars would stall its
-        single-threaded loop for seconds per shelf."""
-        ws = self.ws
-        specs = getattr(ws.launcher, "cover_specs", None)
-        if specs is None:
-            return
-        for cart, w, h in specs():
-            path = cart.get("path")
-            if path is None:
-                continue
-            key = (path, w, h)
-            guard = 400                    # hard ceiling: ~400 x 8ms slices
-            while key not in self._cache and guard:
-                guard -= 1
-                self._built = False        # re-arm the one-slice-per-frame gate
-                self.cover_for(cart, w, h)
-
-    def assets(self):
-        """{name: (w, h, index_bytes)} for every LIVE shelf-cover blittable --
-        merged into both web transports' /assets images (#113): a cover then
-        ships to the browser ONCE and every card redraw references it by name
-        (["imgref", ...]) instead of carrying ~40KB of inline b64 (the measured
-        payload eater of shelf drag/fling frames). A cover built after the
-        page's last /assets fetch simply misses client-side, which latches the
-        page's imgWant refetch -- the same self-healing loop paint images use."""
-        ws = self.ws
-        out = {}
-        for img in self._cache.values():
-            if img is not None:
-                out[img._name] = (img.w, img.h, bytes(img.pix))
-        # The wallpaper backdrop composite rides the same lane (#113: a static
-        # wallpaper's frame is stable, so it ships once and every desk/drag
-        # frame references it instead of inlining ~100KB of b64).
-        wa = getattr(ws.wallpaper, "wire_assets", None)
-        if wa is not None:
-            out.update(wa())
-        return out

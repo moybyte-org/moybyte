@@ -40,7 +40,7 @@ from console import Pointer, Workstation, wire_workstation_core
 # board -- this file adds only the P4-only extras: bt/union/cache). What stays
 # here is hardware: the DPI scan-out, the PPA composite, BLE HID.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
 from carts_data import CARTS   # build-time generated from system_carts/
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
@@ -622,7 +622,11 @@ def run_desktop(fps_cap=60):
     #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
     #   union 0|1   A/B the dirty-union gesture restore (pairs with `drag`)
     #   cache 0|1   A/B the drag backdrop cache
-    #   crisp 0|1   A/B the CRISP PIXELS composite (non-persisting)
+    # `crisp 0|1` is NOT here: it is a SETTINGS_TOGGLES word, served by the
+    # shared dev channel wherever its capability gate says yes. This board's
+    # identically-behaved extra was shadowed dead the day that landed, and a
+    # dead handler that looks like the live one is how the next reader edits
+    # the wrong body.
     idle = IdleBlank(set_backlight, POWER_SAVE_MS)
     ws._psave_ms = POWER_SAVE_MS   # `state` reports the LIVE timeout
 
@@ -658,13 +662,6 @@ def run_desktop(fps_cap=60):
         ws.wm._backdrop_disabled = not on
         print("REMOTE cache %s" % ("on" if on else "off"))
 
-    def _crisp_cmd(ws, parts, line):
-        # A/B the CRISP PIXELS composite from serial without persisting, so a
-        # measurement session never leaves the board on a non-default mode.
-        on = not (len(parts) == 2 and parts[1] == "0")
-        ws.set_crisp_pixels(on, persist=False)
-        print("REMOTE crisp %s" % ("on" if on else "off"))
-
     try:
         from dev_channel import DevChannel
         # env: what the `py` probe hook can reach beyond ws/wm/pointer --
@@ -672,7 +669,7 @@ def run_desktop(fps_cap=60):
         # on-glass witnesses (pump joins the env right after it is created).
         serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
                             extra={"bt": _bt_cmd, "union": _union_cmd,
-                                   "cache": _cache_cmd, "crisp": _crisp_cmd},
+                                   "cache": _cache_cmd},
                             env={"comp": comp, "game": game, "boot": boot})
     except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
         print("Moybyte P4 serial channel unavailable:", exc)
@@ -700,21 +697,27 @@ def run_desktop(fps_cap=60):
     if serial is not None:
         serial.env["pump"] = pump   # created just above; see the env note
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
-    # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
-    # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
-    # per frame; the LINE is unconditional (its fps= field reads _frames_drawn,
-    # so it is valid with the meters off, and tools/p4_perf.py parses it).
+    # a PERF line every ~2s -- drawn-fps, average busy loop ms, the console's
+    # draw/flush/logic/render/chrome EMAs and this board's own WM/PPA columns.
+    # Costs two tick reads per frame; the LINE is unconditional (its fps= field
+    # reads _frames_drawn, so it is valid with the meters off).
     #
-    # The METERS follow Settings -> PERF DIAG, exactly as on the T-Deck
-    # (#68 kid mode: perf_capture arms per-layer walk timing, per-op canvas
-    # timers and the EMA tail -- ~1-1.5ms of every frame there). This line read
-    # an unconditional True until 2026-08-15, so the toggle gated nothing at
-    # boot on this board and the shipping fps could not be measured without
-    # first issuing `diag 0` -- which tools/p4_perf.py already did, its
-    # docstring already claiming "DIAG IS OFF BY DEFAULT".
+    # ONE BODY, ONE FORMAT, THREE BOARDS since #206 item 2: device_boot's
+    # PerfSampler measures and runtime/perf_line.py formats, so nothing about
+    # the shape is decided here. The only per-board argument is the compositor's
+    # cumulative overlap counters, because this is the only board with a PPA;
+    # the windowed-WM columns need no argument at all (wm_windowed stamps them
+    # on the Workstation, and a board that does not stage it prints `-`).
+    #
+    # The METERS follow Settings -> PERF DIAG (#68 kid mode: perf_capture arms
+    # per-layer walk timing, per-op canvas timers and the EMA tail -- ~1-1.5ms
+    # of every frame there). This read an unconditional True until 2026-08-15,
+    # so the toggle gated nothing at boot and the shipping fps could not be
+    # measured without first issuing `diag 0` -- which tools/p4_perf.py already
+    # did, its docstring already claiming "DIAG IS OFF BY DEFAULT". The sampler
+    # re-syncs it live, so flipping the toggle needs no reboot.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0,
-           "ov": comp.overlap_stats()}
+    _perf = PerfSampler(ws, overlap=comp.overlap_stats)
 
     def _poll_inputs(now):
         """This board's input sources: the BLE keyboard's async notifications
@@ -754,85 +757,13 @@ def run_desktop(fps_cap=60):
         if _lk is not None and _lk.active:
             _lk.poll(ws)
 
-    def _account(now, elapsed, sleep_ms):
-        _pf["n"] += 1
-        _pf["busy"] += elapsed
-        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
-            _drawn = getattr(ws, "_frames_drawn", 0)
-            # GUARDED, like every diag helper on the T-Deck. This block reads a
-            # dozen Workstation internals owned by the SHARED runtime/console.py
-            # and sits OUTSIDE the frame try, so while the reads were bare,
-            # renaming one of them there dropped this board to the REPL about
-            # two seconds after boot -- a measurement killing the loop it
-            # measures. PRINTED rather than swallowed (2s cadence, live serial)
-            # so a stale sampler says so; the timer resets either way, so a
-            # broken sample cannot become a per-frame retry.
-            try:
-                # The meters follow Settings -> PERF DIAG live, so flipping it
-                # needs no reboot (T-Deck twin: the 3s diag tick in its tail).
-                _live = bool(getattr(ws, "diag_live", False))
-                if ws.perf_capture != _live:
-                    ws.perf_capture = _live
-                # home(wp/grid/bar): the LAUNCHER frame's section split (stashed
-                # by the shared launcher_layer under perf_capture) -- names
-                # where a slow desktop repaint goes; empty when the last frame
-                # wasn't the home screen.
-                _home = getattr(ws, "_pf_home", None)
-                # The overlap meters as DELTAS over this sample
-                # (comp.overlap_stats is cumulative): ppa= is deferred /
-                # obsolete / reuse-fences / game-fences / PPA timeouts, that
-                # last one must stay 0. gfence_ms otherwise hides -- the game
-                # fence runs inside FrameLoop's UNTIMED present() hook, so it
-                # lands in busy= and in no phase meter.
-                _ov = comp.overlap_stats()
-                _ovd = [a - b for a, b in zip(_ov, _pf["ov"])]
-                _pf["ov"] = _ov
-                # LOCKSTEP (#65), right after fps= because it is what fps=
-                # MEANS: a linked game's world advances on the shared 30Hz tick
-                # and the console gates every frame that tick is not due for, so
-                # a correct match reads fps=30/62 -- 32 frames into
-                # tick(render=False) -- and read as a regression for a whole
-                # night's captures (2026-08-27) because nothing named it. `-` is
-                # NO SESSION; a number is the rate that is eating them, 0
-                # included (matched but frozen). Absence never prints as 0.
-                #
-                # BARE, where every timing field beside it is a getattr: those
-                # degrade to one wrong-looking number, but `-` is a LEGITIMATE
-                # reading here, so a getattr default would let a renamed meter
-                # forge "no match" forever. A rename costs the whole line and
-                # says so ("PERF sample failed"), which is the loud failure.
-                _net = ws.perf_net()
-                print("PERF fps=%d/%d net=%s busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d "
-                      "ppa=%d/%d/%d/%d/%d fence_ms=%.1f gfence_ms=%.1f cart=%s%s"
-                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
-                         "-" if _net is None else _net,
-                         _pf["busy"] // (_pf["n"] or 1),
-                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
-                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
-                         getattr(ws, "_chrome_ms", 0),
-                         getattr(ws, "_pf_wm_restore", 0),  # drag backdrop restore ms
-                         getattr(ws, "_pf_wm_windows", 0),  # window-stack pass ms
-                         getattr(ws, "_pf_wm_stamp", 0),    # window content stamp ms
-                         _ovd[0], _ovd[1], _ovd[2], _ovd[4], _ovd[6],
-                         _ovd[3] / 1000.0, _ovd[5] / 1000.0,
-                         (getattr(ws, "cart", None) or {}).get("title", "-"),
-                         (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
-            except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop
-                print("PERF sample failed: %s: %s"
-                      % (type(_pf_exc).__name__, _pf_exc))
-            _pf["at"] = _ticks_ms() + 2000
-            _pf["n"] = 0
-            _pf["busy"] = 0
-            _pf["drawn"] = _drawn
-
     # The shared frame loop (#202 Phase B): the invariant order lives ONCE, in
     # device_boot.FrameLoop -- including the #77/#161 pacing debt via
     # pump.pace and the first-frame backlight gate (dark until the first
     # composed frame, #45, unless the splash already lit it). Every hook above
     # is this board's own hardware.
     loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
-                     present=_present, tail=_tail, account=_account,
+                     present=_present, tail=_tail, account=_perf.account,
                      frame_error=_frame_error,
                      set_backlight=set_backlight, lit=boot.lit)
     loop.run()

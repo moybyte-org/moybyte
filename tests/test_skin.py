@@ -25,6 +25,11 @@ Four claims, in the order they matter:
    the one place this phase could lose board performance. Both budgets assert a
    FLOOR before a cap, so deleting the probe FAILS rather than passes -- the
    shape `tests/test_top_bar.py::test_bar_strip_rebuild_budget` established.
+
+5. **The `colors=` escape hatch carries frozen pixels and nothing else** (#207).
+   Section 6 pins every surviving site by module, by count and by reason, in
+   both directions -- and pins the other half too, the kinds a surface asks the
+   catalog for, so a typo'd kind cannot silently fall back to the row palette.
 """
 
 import ast
@@ -162,7 +167,9 @@ def test_the_default_tables_cover_every_kind_the_toolkit_asks_for():
     style as a row. Enumerated from the draw functions themselves."""
     asked = ("row", "cell", "cell_band", "chip", "button", "button_play",
              "button_author", "button_danger", "tab", "status", "panel",
-             "panel_title", "toolbar", "scrollbar", "focus")
+             "panel_title", "toolbar", "scrollbar", "focus",
+             # the shell's own row kinds, asked for through `row(kind=...)`
+             "row_menu", "row_list", "row_chrome", "row_cta")
     for kind in asked:
         assert kind in ui.DEFAULT_SPECS, kind
         assert ui.REST in ui.DEFAULT_SPECS[kind], kind
@@ -732,3 +739,298 @@ def test_the_skin_chips_fit_every_tier(tmp_path):
             assert y >= below and y + h <= fy + fh, (config, name)
             if fs <= 2:
                 assert w >= (longest + 1) * 8 * fs, (config, name, w)
+
+
+# =============================================================================
+# 6. the `colors=` escape hatch, and the kinds a surface asks for (#207)
+# =============================================================================
+#
+# `ui.row` / `ui.cell` / `ui.chip` / `ui.text_field` all take an explicit
+# (field, ink, edge) triple that bypasses this catalog entirely. It exists for a
+# real case -- `ui.row`'s own docstring: "a site whose pixels are frozen
+# off-token" -- and #207 is the triage that separated those from the sites that
+# were merely hand-resolving a role the catalog could own. Phase 4 shipped with
+# 27 uses of it and no way to tell the two apart; the ones that were a widget
+# STATE PALETTE now resolve through `ui.state_colors` against a kind, and what
+# is left is pinned below.
+#
+# The classifier reads what reaches the `colors=` argument of a call. A
+# hand-built triple is a bypass and is counted; an explicit `None` is not (it is
+# the default, and it is how a branched site spells "use the kind"). A site that
+# computes in branches has each BRANCH classified, which is why two modules
+# appear both here and in the kind-naming floor below.
+
+# The shell's own row kinds -- `ui.DEFAULT_SPECS`'s entries beyond the toolkit's
+# own vocabulary, added by #207. Named here rather than derived, so that adding
+# one to `ui.py` without a consumer, a transcription row and an "outline" delta
+# is a red test in three places.
+_SHELL_KINDS = ("row_menu", "row_list", "row_chrome", "row_cta")
+
+_FROZEN_HATCH = {
+    "settings_layer.py": (3,
+        "the CONNECTED line's `play` and the password prompt's `ink` are status "
+        "and body roles the theme owns, not widget states; the 'soon' second "
+        "line's grey is a literal that matches no token on any theme"),
+    "cards_layer.py": (3,
+        "the bad-card warning frame, and the two choice-cell palettes: a chosen "
+        "swatch is literal black + literal yellow (which is NOT `accent` on "
+        "slate), and the bg-thumb cell must paint NO field because its picture "
+        "is drawn BEFORE the frame"),
+    "code_layer.py": (2,
+        "the popup shell's ink is the FIND colour -- no widget state; the popup "
+        "ENTRIES must paint no field when unselected, because their rects tile "
+        "the panel edge to edge and any kind's rest field would erase the "
+        "shell's own border a row at a time"),
+    "achievements_ui.py": (1,
+        "the Easter-egg banner: literal white on a literal black dialog, a "
+        "surprise no theme and no skin colours"),
+    "update_ui.py": (1,
+        "one line per update PHASE, inked by what is happening (downloading / "
+        "done / failed) -- a status colour, not a state of the widget"),
+    "system_menu_ui.py": (1,
+        "the popup's section HEADER: its dark-chrome grey is a literal, and "
+        "only the light branch reads a role"),
+    "storybook_app.py": (1,
+        "a deck row is cream paper with black ink -- frozen off-token, the "
+        "case the hatch is documented for"),
+    "sheets_app.py": (1,
+        "the attach list's rows, same cream paper; only the edge is themed"),
+    "music_editor_ui.py": (1,
+        "the title-strip nudge ticks: a frozen blue/black/white trio with no "
+        "token behind any of the three"),
+}
+
+
+def _is_catalog_call(node):
+    return (isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "state_colors")
+
+
+def _bindings(target, value):
+    """(name, expression) pairs one assignment binds -- tuple unpacking
+    included, because `kind, colors = "row", (7, 0, edge)` is how a branched
+    site is written and missing it under-counts the hatch by one."""
+    if isinstance(target, ast.Name):
+        return [(target.id, value)]
+    if isinstance(target, ast.Tuple) and isinstance(value, ast.Tuple) and \
+            len(target.elts) == len(value.elts):
+        out = []
+        for t, v in zip(target.elts, value.elts):
+            out += _bindings(t, v)
+        return out
+    return []
+
+
+def _reaching(tree, argname):
+    """Every expression that can reach the keyword `argname` of some call in
+    this module, resolving a Name through the assignments that bind it. Deduped
+    by source position, so a helper walked twice is one site."""
+    via_name = set()
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg != argname:
+                    continue
+                if isinstance(kw.value, ast.Name):
+                    via_name.add(kw.value.id)      # branched, resolved below
+                else:
+                    found[(kw.value.lineno, kw.value.col_offset)] = kw.value
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                for name, val in _bindings(t, node.value):
+                    if name in via_name:
+                        found[(val.lineno, val.col_offset)] = val
+    return [found[k] for k in sorted(found)]
+
+
+def _is_none(node):
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def _hatch_sites(path):
+    """The hand-built triples reaching a `colors=` argument, as line numbers.
+
+    An explicit `None` is not a hatch use -- it IS the default, and a branched
+    site that names a kind on one arm spells "use the kind" that way."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return sorted(n.lineno for n in _reaching(tree, "colors")
+                  if not _is_none(n) and not _is_catalog_call(n))
+
+
+def _named_kinds(path):
+    """The SHELL kinds this module asks a widget for by name. `ui.button`'s own
+    `kind=` vocabulary ("play", "normal", ...) is not in the set, so it does not
+    count here."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return sorted(n.value for n in _reaching(tree, "kind")
+                  if isinstance(n, ast.Constant) and n.value in _SHELL_KINDS)
+
+
+def test_the_colors_hatch_is_pinned_site_by_site():
+    """The ratchet, in BOTH directions: a module may not grow a hand-built
+    triple, and a module that stops needing one must be taken off the list.
+
+    Pinned by count rather than by line, because line numbers churn on every
+    edit above them and a ratchet nobody can keep green stops being run. The
+    REASON is the load-bearing half: a new entry here is a claim that some
+    pixels are frozen off-token, and it has to be written down to be argued
+    with."""
+    total = 0
+    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        if path.name == "ui.py":            # where the parameter is DEFINED
+            continue
+        frozen = _hatch_sites(path)
+        want, why = _FROZEN_HATCH.get(path.name, (0, ""))
+        assert len(frozen) == want, (
+            "%s: %d hand-built `colors=` triple(s) at lines %s, expected %d.\n"
+            "Adding one means claiming those pixels are frozen off-token -- say "
+            "so in _FROZEN_HATCH. Removing one means it now resolves through "
+            "the skin: drop the count.\nrecorded reason: %s"
+            % (path.name, len(frozen), frozen, want, why or "(none)"))
+        total += len(frozen)
+    assert total == sum(n for n, _why in _FROZEN_HATCH.values())
+    for name, (_n, why) in _FROZEN_HATCH.items():
+        assert len(why) > 40, name
+
+
+def test_the_hatch_that_moved_now_names_a_kind_instead():
+    """The other half of the count, and the reason it cannot pass vacuously: the
+    ten sites #207 moved did not merely lose a literal, they NAME a catalog
+    kind. Deleting the moves shrinks the hatch count above and fails here.
+
+    This floor counts the shape the sites have TODAY (`row(kind="row_menu")`).
+    They spent one landing passing `state_colors(...)` through `colors=` instead,
+    because `row`/`cell` had no `kind=`; giving them one is what turned each of
+    these call sites into one word."""
+    named = {}
+    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        if path.name == "ui.py":
+            continue
+        k = _named_kinds(path)
+        if k:
+            named[path.name] = len(k)
+    assert named == {
+        "achievements_ui.py": 1,        # the achievements list
+        "cards_layer.py": 1,            # the Config tab's cards
+        "settings_layer.py": 6,         # the rows, the wifi list, the notes
+        "storybook_app.py": 1,          # the + NEW row
+        "system_menu_ui.py": 1,         # the popup's rows
+    }, named
+    assert sum(named.values()) == 10
+
+
+def test_every_kind_a_surface_asks_the_catalog_for_exists():
+    """A kind the table does not name resolves through `_state_colors_slow`'s
+    ROW fallback -- silently, and with the wrong pixels. So the kind names in
+    the tree are checked against the table, which is the whole reason a surface
+    may name a kind but never import this module.
+
+    A widget's `kind=` argument and a direct `state_colors` call are the same
+    question asked two ways, so both shapes are collected. `ui.py` is skipped
+    because it is the toolkit ASKING, not a surface: its own draw functions map
+    a caller's `kind=` through `_BUTTON_KIND_KEY`, computed by construction."""
+    asked = {}
+    for path in sorted(ROOT.joinpath("runtime").glob("*.py")):
+        if path.name == "ui.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in _reaching(tree, "kind"):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                asked.setdefault(node.value, []).append(path.name)
+        for node in ast.walk(tree):
+            if _is_catalog_call(node) and len(node.args) >= 2:
+                kind = node.args[1]
+                assert isinstance(kind, ast.Constant) and \
+                    isinstance(kind.value, str), (
+                        "%s:%d asks for a computed kind -- a typo in it is a "
+                        "silent fallback to the row palette"
+                        % (path.name, node.lineno))
+                asked.setdefault(kind.value, []).append(path.name)
+    assert asked, "no surface names a kind -- is the probe still wired?"
+    for kind in asked:
+        # `button`'s own vocabulary is a NAME MAP, not a catalog key; every
+        # other kind a surface names must be in the table itself.
+        if kind in ui._BUTTON_KIND_KEY:
+            continue
+        assert kind in ui.DEFAULT_SPECS, (kind, asked[kind])
+    # And every shell kind has a consumer: a table entry nothing asks for is a
+    # decision pretending to be one.
+    for kind in _SHELL_KINDS:
+        assert kind in ui.DEFAULT_SPECS, kind
+        assert kind in asked, "%r is in the table but nothing asks for it" % kind
+
+
+def test_the_second_skin_reaches_the_kinds_that_moved():
+    """The point of the move, stated as the property it restores: every shell
+    kind repaints under a different skin, on all 12 theme x variant sets. A kind
+    the outline skin forgot would resolve identically and this fails."""
+    for kind in sorted(_SHELL_KINDS):
+        moved = 0
+        for name, _tokens in THEMES:
+            for variant in THEME_VARIANTS:
+                th = theme_colors(name, variant)
+                for state in (ui.REST, ui.ON, ui.DISABLED):
+                    skin.use(skin.DEFAULT)
+                    a = ui.state_colors(th, kind, state)
+                    skin.use("outline")
+                    b = ui.state_colors(th, kind, state)
+                    moved += (tuple(a) != tuple(b))
+        assert moved >= 12, (kind, moved)
+
+
+# The expression each moved site built by hand at HEAD (`3b22d5a`), as a lambda
+# over one theme dict. This is the transcription pin: `_quiet_row(...)` and its
+# siblings must resolve to EXACTLY these triples on all 12 theme x variant sets,
+# which is what makes the move a no-op rather than a re-baseline.
+#
+# It is not redundant with the goldens, and the gap is measured rather than
+# assumed: mutating `row_cta`'s REST triple leaves BOTH golden suites green,
+# because Storybook's shelf always opens with the "+ NEW" row selected, so that
+# row is never rendered at rest. Every other state below IS netted by a golden
+# (verified by mutation: `row_menu` REST turns all ten golden rows red).
+_PRE_207_TRIPLES = {
+    ("row_menu", ui.REST):  # settings_layer._draw_settings_row, system_menu_ui
+        lambda th: (None, th["chrome_ink_dim"], None),
+    ("row_menu", ui.ON):
+        lambda th: (th["hilite"], th["selection_ink"], None),
+    ("row_list", ui.REST):  # the wifi list + the wifi/bluetooth note lines
+        lambda th: (None, th["ink_dim"], None),
+    ("row_list", ui.ON):
+        lambda th: (th["hilite"], th["selection_ink"], None),
+    ("row_chrome", ui.REST):  # achievements_ui (earned), cards_layer (a card)
+        lambda th: (None, th["ink"] if th.get("bar_light", False)
+                    else th["chrome_ink"], None),
+    ("row_chrome", ui.ON):
+        lambda th: (th["hilite"], th["selection_ink"], None),
+    ("row_chrome", ui.DISABLED):  # achievements_ui (locked)
+        lambda th: (None, th["chrome_ink_dim"], None),
+    ("row_cta", ui.REST):   # storybook_app._draw_rows, the "+ NEW" row
+        lambda th: (th["hilite"], 0, th["dim"]),
+    ("row_cta", ui.ON):
+        lambda th: (th["accent"], 0, th["accent"]),
+}
+
+
+def test_the_shell_kinds_resolve_to_the_pixels_they_replaced():
+    """The #207 transcription, theme set by theme set.
+
+    Two roles that agree on eleven of the twelve sets are not the same role:
+    `ink_dim` and `chrome_ink_dim` differ only on machine/dark, which is exactly
+    why "row_list" and "row_menu" are two entries and not one. Collapsing them
+    would pass every golden and move a pixel on one theme."""
+    skin.use(skin.DEFAULT)
+    checked = 0
+    for name, _tokens in THEMES:
+        for variant in THEME_VARIANTS:
+            th = theme_colors(name, variant)
+            for (kind, state), before in _PRE_207_TRIPLES.items():
+                assert tuple(ui.state_colors(th, kind, state)) == \
+                    tuple(before(th)), (name, variant, kind, state)
+                checked += 1
+    assert checked == 12 * len(_PRE_207_TRIPLES)
+    # Every kind this catalog registered is transcribed above -- a kind added
+    # without its "what it replaced" row is a colour nobody checked.
+    assert {k for k, _s in _PRE_207_TRIPLES} == set(_SHELL_KINDS)

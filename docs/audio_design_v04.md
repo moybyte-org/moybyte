@@ -10,10 +10,8 @@
 > (`row_secs`). The current model is documented in `docs/moy_cart_api.md`
 > (Audio) and the moy-spec §8.
 >
-> **The `.moyproj` SDK it names is gone (2026-07-31).** Where the text below
-> reaches for `moybyte/audio.py`, `moybyte_sim`'s fake audio or the portable
-> subset, none of that exists any more — the host twin is `runtime/audio.py` and
-> the sim is `tools/simulate_desktop.py`. Git history has the rest.
+> **The `.moyproj` SDK this text reaches for is gone (2026-07-31)** — the host
+> twin is `runtime/audio.py` and the sim is `tools/simulate_desktop.py`.
 >
 > **#97 (2026-08-06) — the SYNTH is no longer ours.** SPEC.md §8.3 pins
 > synthesis to PICO-8's measured output (zepto8/fake-08), and moy-spec's own C
@@ -147,13 +145,16 @@ editor are never empty.
 
 ### 2.5 The mixer (`AudioEngine`)
 
-> **Superseded by #97 for playback** — the boards and the browser render through
-> vendored libmoy, not through this. `AudioEngine` is now the HOST's twin of that
-> C source (and the fallback for a build without the native module); its API
-> below is unchanged, but `set_volume` takes **0–7**, not a 0–1 fraction, and
-> `beep` no longer consumes a channel. See `runtime/audio.py`'s docstring.
+> **Superseded by #97 for playback, and the Python twin is GONE** (moycore stage
+> 0, 2026-08-11). Every tier — boards, browser and host — renders through
+> vendored libmoy; `AudioEngine` keeps the name and the control surface below,
+> but it is now the BANK/MODEL holder plus (on the host) a libmoy engine handle,
+> and **there is no fallback synth: no binding means SILENCE**, by owner call.
+> Two API corrections to the list below: `set_volume` takes **0–7**, not a 0–1
+> fraction, and `beep` no longer consumes a channel. `runtime/audio.py`'s
+> docstring is the authority.
 
-Pure Python, no backend:
+The control surface (the shape libmoy is driven through, NOT a Python synth):
 
 - `AudioEngine(bank, rate=11025)` — low sample rate keeps the device CPU/RAM sane.
 - `play_sfx(n, chan=...)`, `play_beep(freq, dur)`, `play_music(track, loop=True)`,
@@ -206,8 +207,7 @@ audio is not yet gated on it — see §1 (the whole permission model is future w
 
 - **`FakeAudio`** (default for tests/headless): records every call
   (`("sfx", n, chan)`, `("beep", f, d)`, `("music", t, loop)`, ...) and still
-  drives the `AudioEngine` so `render()` is exercised. Mirrors the existing sim
-  fakes (`moybyte_sim` fake audio, `moybyte/audio.py` `AudioService.calls`).
+  drives the `AudioEngine` so `render()` is exercised.
   **No sound hardware required** — this is what the headless tests use.
 - **`SdlAudio`** (optional, only when real playback is wanted): opens a pygame/SDL
   audio stream and pushes `engine.render()` from a callback. Gated behind

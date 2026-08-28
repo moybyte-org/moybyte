@@ -204,7 +204,22 @@ def _driver(answers, noise=()):
 
 
 NOISE = ("Moybyte BLE keyboard: scanning",
-         "PERF fps=0/62 net=- busy=3ms draw=33 flush=1 logic=0 render=0 cart=-")
+         "PERF cart=- fps=0/62 net=- busy=3ms draw=33 flush=1 logic=0 "
+         "render=0 chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 fence_ms=0.0 "
+         "gfence_ms=0.0 home=-")
+
+
+def test_perf_lines_sees_a_sample_that_came_through_the_diag_ring():
+    """#206 item 2. This filter was `startswith("PERF ")`, and the T-Deck rings
+    every sample -- so that board's stamped lines were dropped by the harness
+    AND by tools/p4_perf.py, which is why the board whose fps most needed
+    measuring was invisible to the tool that measures it. Everything else the
+    ring prints must still be noise."""
+    board, _ = _driver([])
+    ringed = "Moybyte 2698583 " + NOISE[1]          # how the T-Deck says it
+    board.lines.extend([NOISE[0], NOISE[1], ringed,
+                        "Moybyte 123 LOOP skip=0 n=188 frame=3.5"])
+    assert board.perf_lines() == [NOISE[1], ringed]
 
 
 def test_unsolicited_lines_do_not_swallow_a_reply():

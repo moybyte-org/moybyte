@@ -96,9 +96,6 @@ NOT_OURS = (
     "modules/_ota_build.py", "native/.staged/",  # generated at build time
     "dist/", ".build/",
     "ports/celeste.moy",     # gitignored: CC BY-NC-SA, never committed
-    # The .moyproj SDK, deleted 2026-07-31. Several documents name its files on
-    # purpose, to say they are gone; git history has them.
-    "moybyte/", "moybyte_cli/", "moybyte_sim/", "moybyte_blocks/",
     # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
     # the recording stack that outlived it by a day (stage 4: the wasm head
     # rasterizes, so the recorder + the page's JS replayer went too). The plan,

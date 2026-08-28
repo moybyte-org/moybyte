@@ -10,39 +10,35 @@ state the next one expects -- an on-glass tour, not isolated units.
 The device half is the serial dev-command set in
 firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py (`swipe` feeds
 the real pointer path, `state` answers with a JSON snapshot); the driver is
-tools/p4_autotest.P4Board.
+tools/p4_autotest.P4Board. This is the only one of the three suites whose
+board may be RESET -- its `[serial]` block does not declare `attach_only`,
+because the CH343 is an external USB-UART that survives a chip reset. The
+handful of checks it shares with the two fullscreen-tier boards live in
+tests/on_glass.py; everything below that is windowed-desk or OTA is this
+board's alone.
 """
-
-import os
-import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
+import on_glass
+from on_glass import ROOT
 
-PORT = os.environ.get("MOYBYTE_P4_PORT")
-
-pytestmark = pytest.mark.skipif(
-    not PORT, reason="MOYBYTE_P4_PORT not set (needs the P4 on serial)")
+PORT, pytestmark = on_glass.gate("MOYBYTE_P4_PORT", "the P4")
 
 
 @pytest.fixture(scope="module")
 def board():
-    from p4_autotest import P4Board
-    b = P4Board(PORT)
-    b.reset()
-    b.cmd("diag 1")
-    yield b
-    # Leave the board freshly booted on the desk for a human.
-    try:
+    with on_glass.session(
+            PORT,
+            board_dir=ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b") as b:
+        b.cmd("diag 1")            # this suite asserts PERF lines flow
+        yield b
+        # Leave the board freshly booted on the desk for a human -- the one
+        # board this may be done to (see the module docstring).
         b.ser.write(b"\r\x03")
         b.drain(0.5)
         b.ser.write(b"\x04")
         b.drain(1.0)
-    finally:
-        b.close()
 
 
 def test_boots_to_the_desk(board):
@@ -52,9 +48,7 @@ def test_boots_to_the_desk(board):
 
 
 def test_wifi_status_is_readable(board):
-    st = board.state()
-    assert "wifi_err" not in st, st.get("wifi_err")
-    assert st.get("wifi") is None or isinstance(st["wifi"], list)
+    on_glass.wifi_status_is_readable(board)
 
 
 def test_appearance_cart_is_claimed(board):
@@ -71,9 +65,7 @@ def test_appearance_cart_is_claimed(board):
 
 def test_every_system_app_claims_exactly_one_cart(board):
     """The same identity check for every registered app, not just Appearance."""
-    claims = board.state().get("app_claims") or {}
-    assert claims, "no system apps registered on device"
-    assert all(n == 1 for n in claims.values()), claims
+    on_glass.every_app_claims_one_cart(board)
 
 
 def test_open_settings_window(board):
@@ -169,9 +161,15 @@ def test_window_chrome_freezes_during_a_content_scroll(board):
 
 
 def test_perf_lines_flow(board):
-    n0 = len(board.lines)
-    board.drain(4.0)
-    assert board.perf_lines(n0), "no PERF lines while idle"
+    """One format on every board (#206 item 2), plus the columns only this one
+    can fill: the windowed WM's pass split and the async-PPA overlap counters.
+    The module fixture sends `diag 1`, so the wm columns are measured here --
+    with the meters off they read `-`, which is a different answer from 0."""
+    got = on_glass.perf_line_is_the_one_format(board)
+    for name in ("wmr", "wmw", "wms"):
+        assert got[name] is not None, (name, got)
+    assert isinstance(got["ppa"], tuple) and len(got["ppa"]) == 5, got
+    assert got["ppa"][4] == 0, "PPA timeouts must stay 0: %r" % (got["ppa"],)
 
 
 def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
@@ -221,25 +219,10 @@ def test_idle_screen_blank_and_wake(board):
     """The #58 power save: the panel blanks after an idle timeout and any input
     wakes it, while the loop, the cart and this very serial channel stay live.
 
-    Retuned to a few seconds for the test, then restored -- the shipped default
-    is 5 minutes. Silence is the actual stimulus here: the assertion is that
-    NOT talking to the board blanks it, so the wait must send nothing.
-    """
-    board.cmd("power 3", wait_for="REMOTE power")
-    board.drain(0.3)
-    board.drain(6.0)                       # say nothing; let the timer expire
-    assert board.state()["psave"][0] is True, "the panel never blanked"
-    # ...and that state query was serial traffic, which counts as activity, so
-    # the panel is already awake again by the following frame.
-    board.drain(0.5)
-    assert board.state()["psave"][0] is False, "input did not wake the panel"
-
-    # `power off` blanks immediately. It arrives ON the serial channel, which is
-    # itself activity -- the explicit blank has to outrank that or it wakes in
-    # the same iteration (it did, before _ps_force).
-    board.cmd("power off", wait_for="REMOTE power")
-    board.drain(1.0)
-    assert board.state()["psave"][0] is True, "`power off` did not blank"
+    The shared body is the blank/wake/`power off` trio every board runs; what
+    is this board's is the tail -- 0 disables the timer outright, which the S3
+    suites do not pin."""
+    on_glass.idle_blank_and_wake(board)
 
     # 0 disables it outright: no blank, however long the silence.
     board.cmd("power 0", wait_for="REMOTE power")
@@ -610,16 +593,17 @@ def test_the_console_serves_the_image_when_storage_has_none(board):
 
 
 def test_a_cart_runs_and_exits(board):
-    """The 2026-08-17 blind-spot closer, same as the T-Deck suite's: a staged
-    regression once broke every cart start while this suite stayed green,
-    because nothing here ran one. Launch, assert it started clean, exit.
+    """The 2026-08-17 blind-spot closer, same as on_glass.cart_runs_and_exits:
+    a staged regression once broke every cart start while this suite stayed
+    green, because nothing here ran one. Launch, assert it started clean, exit.
 
-    tools/p4_perf.py's idiom, exactly: ws.exit() first to clear whatever the
-    tour above left open (Settings + the picker windows -- a `run` from that
-    state opens the cart under the picker's project arrangement, where the
-    first draft's cart-quit exit did not pop), then run, then ws.exit() out.
-    The T-Deck suite's twin keeps the cart-quit path, so the kid-facing quit()
-    flag stays pinned on one board while this one pins the launch itself."""
+    NOT the shared body, deliberately. tools/p4_perf.py's idiom, exactly:
+    ws.exit() first to clear whatever the tour above left open (Settings + the
+    picker windows -- a `run` from that state opens the cart under the picker's
+    project arrangement, where the first draft's cart-quit exit did not pop),
+    then run, then ws.exit() out. The shared body keeps the cart-quit path, so
+    the kid-facing quit() flag stays pinned on the two boards that reach the
+    launcher from a bare stack while this one pins the launch itself."""
     for _ in range(3):                       # close settings/picker leftovers
         board.cmd("py ws.exit()", wait_for="PY")
         board.drain(0.5)

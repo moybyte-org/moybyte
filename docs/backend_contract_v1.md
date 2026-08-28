@@ -29,18 +29,21 @@ if getattr(gc, "buf", None) is None:      # "must be command-only"
 
 The first review's blocking finding, and it is right: capability is a property
 of the **(game canvas, system canvas, world)** triple that an entry point
-actually constructs — not of a target board. Seven pairs ship from four
-"backends":
+actually constructs — not of a target board. Seven pairs ship from five
+"backends" (**table refreshed 2026-08-28**: the 2026-08 streaming sunset deleted
+`TeeCanvas`/`CommandCanvas`/`ViewCanvas` and the host's pure-Python `Canvas` went
+on 2026-08-15, so the rows below are today's; the finding got STRONGER, since two
+of the three boards now disagree with each other):
 
 | entry point | game canvas | system canvas |
 |---|---|---|
 | P4 `run_desktop` | `DeviceCanvas` | `P4SystemCanvas` — **distinct objects** |
-| T-Deck `run_desktop` | `DeviceCanvas` | *the same object* (`console.py:685`) |
-| T-Deck + web view | `TeeCanvas(DeviceCanvas)` | the same Tee |
-| host sim 320×240 | `Canvas` | the same object |
-| host sim windowed | `Canvas` | `SystemCanvas` |
-| host web console | real `Canvas` | `CommandCanvas` (only `_sys_canvas` swapped) |
-| wasm | `ViewCanvas` | `CommandCanvas` |
+| T-Deck `run_desktop` | `DeviceCanvas` | *the same object* |
+| Guition `run_desktop` | `DeviceCanvas` 320×240 | `SystemCanvas` 480×320 — **distinct** |
+| host sim 320×240 | `DeviceCanvas` (via `host_canvas`) | *the same object* |
+| host sim windowed | `DeviceCanvas` | `HostSystemCanvas` |
+| wasm handheld tier | `WebSystemCanvas` | *the same object* |
+| wasm desktop tier | `WebSystemCanvas` 320×240 | `WebSystemCanvas` — **distinct** |
 
 `b0c442a`'s own commit message states the discriminator as a pair-plus-world
 fact: *"the P4's play world is the only place a raster tier has two distinct
@@ -148,11 +151,14 @@ removing a capability probe is out of scope.
   `console.py:685` decides at runtime — and the web console transport (deleted
   2026-08, streaming sunset) used to flip that wiring live. It is `b0c442a`'s
   category error rewritten.)*
-- **L7. Composed backends declare, never inherit.** `TeeCanvas.__getattr__`
-  forwards unknown names to the wrapped canvas, so a Tee's capability set is the
-  **union** of what it shadows and what it wraps — on a P4 with the web view on,
-  `blit_game` would forward to the native RGB565 blit and the recorder would
-  never see the frame. A wrapper names its Presenter explicitly.
+- **L7. Composed backends declare, never inherit.** The law stands; its example
+  is now HISTORICAL — `TeeCanvas` went in the 2026-08 streaming sunset, and this
+  is what it did: `__getattr__` forwarded unknown names to the wrapped canvas, so
+  a Tee's capability set was the **union** of what it shadowed and what it
+  wrapped — on a P4 with the web view on, `blit_game` would forward to the native
+  RGB565 blit and the recorder would never see the frame. A wrapper names its
+  Presenter explicitly; nothing in the tree composes a canvas this way today, and
+  the law is what keeps it that way.
 - **L8. Strategy stays the backend's.** This doc moves *dispatch* only.
 - **L9. The S3 budget is measured, not assumed.** *(Replaces v1.0's "the S3 pays
   nothing", which was falsified by its own §4 — see §6.)*

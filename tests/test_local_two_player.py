@@ -67,6 +67,10 @@ def _ws(**kw):
     w = _Ws(**kw)
     w.second_keyboard = Workstation.second_keyboard.__get__(w)
     w.set_two_player = Workstation.set_two_player.__get__(w)
+    # The setter's tail (mirror + repaint mark + persisted copy) is the one
+    # body every SETTINGS_TOGGLES verb shares since #209 section 7; what stays
+    # this setter's own is the keyboard hand-over above it.
+    w._set_toggle = Workstation._set_toggle.__get__(w)
     return w
 
 

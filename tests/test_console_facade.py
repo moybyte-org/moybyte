@@ -117,6 +117,16 @@ GETATTR_ABSENT = {
                     "one; settings_layer gates its whole panel on the probe",
     "_psave_asleep": "device_boot's idle-blank state, written only on glass",
     "_psave_ms": "the idle-blank timeout the dev channel's `psave` reports",
+    # The PERF line's wm columns (#206 item 2). ABSENCE IS THE ANSWER here, not
+    # a defaulted probe: wm_windowed stamps these under perf_capture, so a board
+    # that does not stage it never has them and a board with the deep meters off
+    # has not measured them -- either way the line prints `-`, which is a
+    # different reading from a 0. Giving them a value on the console would turn
+    # "no windowed WM" into "the WM cost nothing", the fold=0 bug over again.
+    "_pf_wm_restore": "windowed-WM drag restore ms; only wm_windowed under "
+                      "perf_capture writes it, and `-` is the honest reading",
+    "_pf_wm_windows": "windowed-WM window-stack pass ms, same condition",
+    "_pf_wm_stamp": "windowed-WM content stamp ms, same condition",
 }
 
 GETATTR_RE = re.compile(
@@ -209,6 +219,46 @@ def test_no_property_forwards_to_a_collaborator():
                    and node.value.id == "self"
                    and node.attr in COLLABORATORS)
             assert not hit, "%s is a property over self.%s" % (fn.name, node.attr)
+
+
+# The pre-carve property forwards, over the objects the 2026-07 shell split off
+# (project/player/editor_app/wm) rather than the six carve collaborators. They
+# are exempt from the rule above BY MEASUREMENT, not by oversight: `ns` alone is
+# read at 257 sites and `cart` at 168, so retiring the set is a ~920-site
+# mechanical rename -- the big-bang the architecture doc's Section 9 rules out.
+# Their own docstrings say the projections stay "as tested surface" until the
+# OS-arch capability track removes them. Pinned here so the ban's SCOPE is
+# honest and this set can only ever shrink.
+LEGACY_PROPERTY_FORWARDS = {
+    "project": {"cart", "config", "images", "pmem", "scenes",
+                "sheet", "tables", "texts", "tilemap"},
+    "player": {"_cart_key_prev", "_draw", "_update",
+               "cart_error", "crash_line", "ns"},
+    "editor_app": {"menu_view"},
+    "wm": {"screen"},
+}
+
+
+def test_the_legacy_property_forwards_are_exactly_the_pinned_set():
+    """A NEW property forward -- to any of these four -- is caught here, and a
+    retired one is a deliberate edit down. Without this the rule above reads as
+    "banned repo-wide" while seventeen of them stand."""
+    found = {owner: set() for owner in LEGACY_PROPERTY_FORWARDS}
+    for fn in _workstation().body:
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not any((isinstance(d, ast.Name) and d.id == "property")
+                   or (isinstance(d, ast.Attribute)
+                       and d.attr in ("setter", "getter"))
+                   for d in fn.decorator_list):
+            continue
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Attribute)
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "self"
+                    and node.attr in found):
+                found[node.attr].add(fn.name)
+    assert found == LEGACY_PROPERTY_FORWARDS
 
 
 def _getattr_sites():

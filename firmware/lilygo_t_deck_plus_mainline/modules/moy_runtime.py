@@ -29,7 +29,7 @@ from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
 # OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
 # there. Everything below that is not one of those is hardware.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
 from carts_data import CARTS          # generated from system_carts/ at build time
 from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
                          sram_census)
@@ -38,7 +38,7 @@ from device_input import TrackBall, Touch
 from device_audio import make_audio
 from device_canvas import DeviceCanvas, _LayerComp
 from device_api import make_api
-from device_diag import (_diag_flush, _diag_perf_sample, _diag_hitch,
+from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
 
@@ -378,6 +378,30 @@ def run_desktop(fps_cap=60):
     _ble = getattr(ws, "ble_keyboard", None)   # optional second keyboard (#26)
     boot.start_frames(ws)
 
+    def _perf_emit(line):
+        """TWO SINKS, ONE LINE (#206 item 2).
+
+        PRINTED like every other board -- until 2026-08-28 this board's samples
+        went only through the diag ring, whose `Moybyte <uptime> ` stamp made
+        `tools/p4_perf.py` (which filters on `PERF `) drop every one of them, so
+        the board whose fps needed measuring was invisible to the tool that
+        measures it. And through the ring as well, uptime-stamped, because this
+        board's serial RX was dead for months and the SD log is why anything was
+        known about it at all -- the ring is what survives a hang.
+
+        Ringed WITHOUT the live echo: `diag.log` would print it a second time.
+        """
+        print(line)
+        if diag is not None:
+            try:
+                diag.ring("PERF", line[5:])
+            except Exception:  # noqa: BLE001 -- a diag never breaks a frame
+                pass
+
+    # No overlap counters and no windowed WM on this board, so those columns
+    # print `-`: absence, never a zero that a broken lever would also print.
+    _perf = PerfSampler(ws, emit=_perf_emit)
+
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
         fallback), the keyboard, the BLE keyboard, the trackball (caret in the
@@ -490,7 +514,9 @@ def run_desktop(fps_cap=60):
                 diag.ECHO_LIVE = _live
             except Exception:  # noqa: BLE001
                 pass
-            _diag_perf_sample(diag, ws)
+            # The PERF sample is NOT here any more (#206 item 2): it rides the
+            # shared FrameLoop.account hook with the other two boards, on the
+            # 2s cadence they use, so all three emit one format from one body.
             _diag_drawbrk(diag, ws)
             # DRAWBRK says how much of the frame is `render`; this says WHICH
             # native op render is: `layer=` is the draw_layer window copy (what
@@ -543,6 +569,7 @@ def run_desktop(fps_cap=60):
             _lk.poll(ws)
 
     def _account(now, elapsed, sleep_ms):
+        _perf.account(now, elapsed, sleep_ms)
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],
                         loop.t_ws, _t["diag"], _t["sd"], _t["web"],

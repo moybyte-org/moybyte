@@ -206,11 +206,32 @@ constructor carrying the board's pins).
 → `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
 the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
 `device_boot.FrameLoop`. Exit criteria, all three: the desktop on glass;
-`make test` green; **the board's on-glass suite exists and passes** (copy
-`tests/test_tdeck_on_glass.py`'s shape — attach or reset per the board's USB
-anatomy, assert against `state`, leave the console where you found it). OTA
+`make test` green; **the board's on-glass suite exists and passes**. OTA
 needs no extra step: the board id is in board.toml and the manifest publisher
 follows the CI matrix row.
+
+**TAKE THESE, DO NOT COPY THEM** (2026-08-28, #206 — the third port paid for
+each of these by copying, and a fourth would pay again):
+
+- **The panel compositor** is `device/banded_panel.BandedCompositor`; a board
+  subclasses it and adds only its own native module and levers. A lever the
+  board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
+  by a zero.
+- **The PERF line** is `runtime/perf_line.py` (the field table, formatter and
+  parser in one module) measured by `device_boot.PerfSampler` on the
+  `FrameLoop.account` hook. A board emits the SAME field set as every other
+  board and prints `-` for what it cannot measure. Do not add a board-shaped
+  variant: three of them existed under one name, and the odd one out was
+  silently unreadable by `tools/p4_perf.py` for as long as it existed.
+- **The on-glass suite** is `tests/on_glass.py`'s `gate()` + `session()` + its
+  checks; the suite supplies coordinates and the board's own tests. Reset vs
+  attach comes from `board.toml`'s `[serial]`, never from a choice written into
+  the suite — opening a SoC-USB board with both lines low chip-resets it, and
+  every read afterwards returns nothing forever, which reads exactly like a
+  dead board.
+- **The flush engine** is `native/moy_flush`; its header is the authority, and
+  `tests/moy_flush_harness/` compiles it on a host with no board attached, so a
+  change to it is testable before it reaches glass.
 
 ## What the Guition S3 specifically stresses (and the P4 doesn't)
 

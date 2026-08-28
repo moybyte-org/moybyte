@@ -35,6 +35,36 @@ BOOT_BANNER = "desktop running"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 P4_BOARD_DIR = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
 
+sys.path.insert(0, ROOT)
+from runtime.perf_line import parse_perf                          # noqa: E402
+
+
+def board_dirs(root=ROOT):
+    """Short board name -> its directory, DISCOVERED by globbing board.toml.
+
+    The short name is the board file's own `[board] ota` id -- already inside a
+    signed OTA manifest, so a published identifier rather than a nickname. A
+    board file with no `ota` id is not a flashable board (`firmware/web_runner`
+    is the browser build) and drops out by itself.
+
+    Here rather than in a tool, because every tool that DRIVES a board over
+    serial needs it and a hand-kept dict per tool is the shape this repo keeps
+    paying for: nothing fails when a board is missing from one -- it simply
+    cannot be driven by that tool, and no test notices. (`tools/push_cart.py`
+    still carries its own older copy; folding it into this one is a one-line
+    follow-up.)"""
+    import glob
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import board_config
+    out = {}
+    for path in sorted(glob.glob(os.path.join(root, "firmware", "*",
+                                              "board.toml"))):
+        d = os.path.dirname(path)
+        name = board_config.load(d).get("board", {}).get("ota")
+        if name:
+            out[name] = d
+    return out
+
 
 def declared_serial(board_dir=P4_BOARD_DIR):
     """A board's [serial] block: the line state at open, whether it may be
@@ -560,7 +590,13 @@ class P4Board:
         return True
 
     def perf_lines(self, since=0):
-        return [ln for ln in self.lines[since:] if ln.startswith("PERF ")]
+        """Every PERF sample seen since `since`.
+
+        Through `perf_line.parse_perf`, which strips the diag ring's
+        `Moybyte <uptime> ` stamp: this used to be `startswith("PERF ")`, and
+        the T-Deck rings every sample, so that board's samples were silently
+        dropped by both readers from the day it had any (#206 item 2)."""
+        return [ln for ln in self.lines[since:] if parse_perf(ln) is not None]
 
     # -- geometry helpers -------------------------------------------------
 

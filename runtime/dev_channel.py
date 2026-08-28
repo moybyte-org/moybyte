@@ -40,6 +40,15 @@ except ImportError:        # host / test -- no diag ring; print is it
     def _diag_log(tag, msg, diag):
         print("Moybyte", tag, msg)
 
+# The ONE declaration of the persisted ON/OFF settings (#209 section 7). The
+# serial words below are derived from it -- an entry with a `dev` name IS the
+# command, gate and all, so a new toggle reaches the channel without a branch
+# being written here.
+try:
+    from settings_layer import SETTINGS_TOGGLES
+except ImportError:        # host / test -- the runtime package
+    from runtime.settings_layer import SETTINGS_TOGGLES
+
 # A partial line longer than this is noise; drop it. NOT sized for a human:
 # the on-glass harness's `pyexec` uploads code in 768-char chunks wrapped in a
 # `py ws._up.__setitem__(...)` line whose %r escaping can nearly double it --
@@ -59,6 +68,14 @@ SERIAL_BYTES_PER_FRAME = 512
 # says so once -- turning a permanent drag on the desktop into one serial line
 # naming the condition. Re-arm by re-entering run_desktop.
 SERIAL_NOISE_LIMIT = 16384
+
+
+def _toggle_cmd(cmd):
+    """The SETTINGS_TOGGLES entry this word drives, or None."""
+    for t in SETTINGS_TOGGLES:
+        if t[5] == cmd:
+            return t
+    return None
 
 
 def _remote_state(ws):
@@ -235,6 +252,11 @@ class DevChannel:
                       oscillate it (windowed tier; declines with no window)
       diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
       skip 0|1        the #77 frameskip gate
+      crisp 0|1       the #204 nearest-neighbour game composite -- these two
+                      are SETTINGS_TOGGLES entries that declared a serial word,
+                      not branches written here; a board whose capability gate
+                      says no declines the word. Neither persists, so a
+                      measurement session cannot leave the board off-default.
       gov 0|1         the #63 frame governor
       mem             a forced collect + the live/free split
       bl 0|1          panel backlight. The board keeps RENDERING either way, so
@@ -255,6 +277,11 @@ class DevChannel:
     {name: handler(ws, parts, line)} dict of board-only commands (the P4's
     `bt`/`union`/`cache`). Extras dispatch AFTER the built-ins and cannot
     shadow them -- one vocabulary is the point.
+
+    A SETTINGS TOGGLE is not board-only even when only one board can serve it:
+    it declares its word in SETTINGS_TOGGLES and its capability gate declines
+    everywhere else, which is why `crisp` is a built-in here and the P4's
+    identically-behaved `crisp` extra is now shadowed dead.
     """
 
     def __init__(self, ws, pointer, set_backlight=None, idle=None,
@@ -481,10 +508,22 @@ class DevChannel:
             ws._dirty = True
             print("REMOTE diag %s" % ("on" if on else "off"))
             return
-        if cmd == "skip":
+        tog = _toggle_cmd(cmd)
+        if tog is not None:
+            # A settings toggle by its registry word (`skip`, `crisp`). The
+            # capability gate is EXPRESSED here too: a board that cannot serve
+            # the setting declines the word instead of flipping a flag nothing
+            # reads. persist=False -- a serial A/B must never rewrite the kid's
+            # system.json -- and the reported state is the one the console
+            # actually reached, not the one that was asked for.
+            key, _label, _default, setter, gate, _dev = tog
+            if gate is not None and not gate(ws):
+                print("REMOTE %s: not available on this board" % cmd)
+                return
             on = not (len(parts) == 2 and parts[1] == "0")
-            ws.set_frameskip(on, persist=False)
-            print("REMOTE skip %s" % ("on" if on else "off"))
+            getattr(ws, setter)(on, persist=False)
+            print("REMOTE %s %s"
+                  % (cmd, "on" if getattr(ws, key, on) else "off"))
             return
         if cmd == "gov":
             on = not (len(parts) == 2 and parts[1] == "0")

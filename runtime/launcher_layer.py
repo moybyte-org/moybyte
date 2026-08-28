@@ -535,12 +535,10 @@ class Launcher:
         self._draw_scroll_ui(cv)
 
     def cover_specs(self):
-        """Every (cart, w, h) cover this grid's NEXT full draw would request
-        (#113 follow-up, owner ask 2026-07-23 "ship them all once": the web
-        /assets prebuild builds these to completion so the whole shelf ships in
-        ONE payload, retiring the per-thumbnail refetch loop) -- the unselected
-        cover size for every cart card, plus the selected card's (its PLAY/
-        CHANGE row shrinks the crop). Mirrors _draw_cart_card's geometry."""
+        """Every (cart, w, h) cover this grid's NEXT full draw would request --
+        the unselected cover size for every cart card, plus the selected card's
+        (its PLAY/CHANGE row shrinks the crop). Mirrors _draw_cart_card's
+        geometry; the idle prefetch (CoverCache._prebuild_tick) walks it."""
         lay = self.layout
         fs = lay.fs
         band_h = max(14 * fs, 20)

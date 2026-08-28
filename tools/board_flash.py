@@ -70,6 +70,12 @@ def _verify_identity(board_dir, port):
     try:
         b.drain(0.6)
         got = b.identify(timeout=4.0)
+    except Exception as exc:  # noqa: BLE001 -- an S3 re-enumerating mid-probe
+        # The same wedged board the silent-answer path below already tolerates,
+        # arriving as an exception instead of a silence: the probe failing must
+        # not be the thing that stops the reflash.
+        print("!! identity check failed (%s) -- proceeding as %r" % (exc, want))
+        return
     finally:
         b.close()
     if got is None:

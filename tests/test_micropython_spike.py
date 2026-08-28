@@ -626,9 +626,14 @@ def test_kid_mode_gates_diag_frame_eaters():
     # and hushes the live echo; the ring still flushes on cart exit + crash.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
-    assert '("diag_live", "PERF DIAG", "diag")' in settings_layer
+    # The row + its default + its verb are ONE declaration since #209 section 7
+    # (SETTINGS_TOGGLES); the boot apply loops over it, so what used to be a
+    # literal `self.system.get("diag_live", False)` here is now the registry's
+    # key and default. tests/test_settings_toggles.py is the ratchet on that.
+    assert '("diag_live", "PERF DIAG", False, "set_diag_live", None, None)' \
+        in settings_layer
     assert "def set_diag_live(self, on, persist=True):" in console
-    assert 'self.system.get("diag_live", False)' in console     # persisted + applied
+    assert "self.system.get(key, default)" in console            # persisted + applied
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
@@ -2782,28 +2787,31 @@ def test_micropython_offline_diag_wiring():
     assert 'with_sd = getattr(ws, "_with_sd", None)' in device_diag   # = with_sd_live (in _diag_flush)
     assert "diag.flush_to_sd(with_sd)" in device_diag
 
-    # Perf samples: a structured PERF line sampled every few seconds while a cart
-    # runs (the per-cart frame-timing payload for the offline dump).
-    assert "def format_perf(cart, fps, flush_ms, draw_ms, net):" in diag
-    assert 'return "PERF cart=%s fps=%d net=%s flush=%d draw=%d" % (' in diag
-    assert "_diag_perf_sample(diag, ws)" in runtime
-    assert "ws.perf_sample()" in device_diag
-    # net= is the #65 lockstep witness: the shared tick rate a LINKED game
-    # renders at (the console gates every frame the tick is not due for), and
+    # Perf samples: this board persists them for the offline dump, but the LINE
+    # is not composed here any more (#206 item 2). One format for all three
+    # boards (runtime/perf_line.py), measured by one body on the shared
+    # FrameLoop.account hook, printed like every other board AND ringed here --
+    # through `ring`, not `log`, which would put it on the wire twice.
+    assert "def ring(tag, msg):" in diag
+    assert "def format_perf(" not in diag and "def log_perf(" not in diag
+    assert "_diag_perf_sample(" not in runtime
+    assert "def _diag_perf_sample(" not in device_diag
+    assert 'diag.ring("PERF", line[5:])' in runtime
+    # The shared console EXPOSES the numbers host-safely; the sampler READS them.
+    # net= is the #65 lockstep witness -- the shared tick rate a LINKED game
+    # renders at (the console gates every frame the tick is not due for) -- and
     # `-` when no session gates anything. It comes from perf_net(), NOT from
-    # perf_sample -- the meter consumes its window and perf_sample is also the
+    # perf_sample: the meter consumes its window and perf_sample is also the
     # `is a cart running?` probe every other diag helper here calls.
-    assert '"-" if net is None else _round_int(net)' in diag
-    assert "ws.perf_net()" in device_diag
     assert "def perf_net(self):" in console
-    # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
     assert "def perf_sample(self):" in console
+    assert "ws.perf_sample()" in device_diag               # the other helpers' probe
     assert "self.perf_capture = False" in console         # default off -> host identical
     # 2026-08-03: capture is no longer unconditional -- it follows the persisted
     # PERF DIAG toggle (the deep meters cost ~1-1.5ms/frame, a kid-mode tax),
-    # and the 3s diag tick re-syncs it live when the toggle flips.
+    # and the sampler re-syncs it live when the toggle flips.
     assert 'ws.perf_capture = bool(getattr(ws, "diag_live", False))' in runtime
-    assert "ws.perf_capture = _live" in runtime           # the 3s re-sync
+    assert "ws.perf_capture = _live" in runtime           # the 3s diag re-sync
     assert "_perf = self.perf_hud or self.perf_capture" in console
 
     # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update (logic) /
@@ -3150,48 +3158,6 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     # still be caught here.
     assert "NOT_REGISTRABLE" in glue
     assert '"table",' in ext[ext.index("NOT_REGISTRABLE = frozenset(("):]
-
-
-def test_the_p4_perf_sampler_cannot_kill_the_frame_loop():
-    """A diagnostic must never be able to drop the board to the REPL.
-
-    The P4's 2-second PERF line reads a dozen Workstation internals -- draw /
-    flush / logic / render / chrome timings, the cart title -- and it lives
-    OUTSIDE the frame `try` that catches everything `ws.frame()` can raise. So
-    while those reads were bare attribute access, renaming any one of them in
-    the SHARED runtime/console.py ended the loop about two seconds after boot,
-    with a traceback naming the sampler instead of the rename. The T-Deck's
-    diag helpers (device_diag.py) have always been `try: ... except Exception`
-    for exactly this reason; this is that shape, on the other board.
-    """
-    from pathlib import Path
-
-    src = Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/"
-               "moy_runtime.py").read_text(encoding="utf-8")
-    i = src.index('print("PERF fps=')
-    block = src[src.rindex("if _ticks_diff", 0, i):i]
-    # CODE lines only. The first draft of this pin matched the word `try:`
-    # inside the comment that explains the guard, so deleting the guard left it
-    # green -- a pin that reads the prose about itself is not a pin.
-    code = [l.strip() for l in block.splitlines()
-            if l.strip() and not l.strip().startswith("#")]
-    assert "try:" in code, "the P4 PERF sample must be guarded"
-    tail = src[i:i + 2000]
-    assert "except Exception as _pf_exc:" in tail, \
-        "the P4 PERF sample must catch, so a renamed console attribute is a " \
-        "stale diag line and not a dead console"
-    # The timer state has to be reset OUTSIDE the guard, or a sampler that
-    # raises retries every frame and floods the serial it is measured over.
-    # (#202 Phase B: the sampler is the _account hook now; the reset must
-    # still follow the except, inside the hook.)
-    reset = tail[tail.index("except Exception"):]
-    assert '_pf["at"] = ' in reset
-    # ...and no bare `ws._<timing>` left in the line itself: the guard keeps the
-    # loop alive, getattr keeps the LINE alive (one renamed meter should cost
-    # one field, not the whole sample).
-    for name in ("_draw_ms", "_flush_ms", "_upd_ms", "_cart_ms", "_chrome_ms"):
-        assert "ws." + name not in tail, \
-            "PERF still reads ws.%s bare -- use getattr" % name
 
 
 def test_both_boards_service_the_web_console_every_frame():

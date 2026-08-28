@@ -343,47 +343,29 @@ def dump_previous_to_serial():
         pass
 
 
-# --- perf sampling helper ---------------------------------------------------
+# --- the offline sink ---------------------------------------------------------
 
-def format_perf(cart, fps, flush_ms, draw_ms, net):
-    """Format a structured perf sample line:
-        PERF cart=<name> fps=<n> net=<ticks/s|-> flush=<ms> draw=<ms>
-    Numbers are rounded to ints. Pure (host-testable). The cart name is sanitised
-    to a single token (spaces -> '_') so the line stays cleanly parseable.
+def ring(tag, msg):
+    """Append one line to the RAM ring WITHOUT the live echo.
 
-    `net` is the #65 lockstep witness (ws.perf_net()): the shared tick rate a
-    LINKED game's world advances at, which is also the rate it renders at -- the
-    console gates every frame the tick is not due for, so a linked fps=30 on a
-    board looping at 55 is a correct match and not a regression. **None prints
-    `-`, never 0**: absence and a frozen meter must not look alike (the
-    2026-08-22 doctrine), and 0 here is a real reading -- matched, not
-    advancing. It sits right after fps= because it is what fps= means."""
+    `log` does both, which is right for a line this module composes. It is
+    wrong for one composed elsewhere and already printed by its own emitter --
+    the PERF sample since #206 item 2, which every board now prints in one
+    shared format (runtime/perf_line.py) and which this board additionally
+    persists, because its serial RX was dead for months and the SD log is why
+    anything was known about it. Routing that through `log` would put the same
+    sample on the wire twice.
+
+    THE FORMATTING THAT USED TO LIVE HERE IS GONE. `format_perf`/`log_perf`
+    wrote a fourth field order under the same `PERF ` name -- and stamped it
+    with this ring's `Moybyte <uptime> ` prefix, which is exactly what made
+    `tools/p4_perf.py` (filtering on `startswith("PERF ")`) silently discard
+    every T-Deck sample it ever saw. The stamp stays for the offline log and
+    the readers strip it (`perf_line.parse_perf`); the format does not come
+    back."""
+    if not ENABLED:
+        return
     try:
-        name = str(cart) if cart is not None else "?"
+        _ring.append(format_line(tag, msg))
     except Exception:
-        name = "?"
-    name = name.replace(" ", "_").replace("\n", "_").replace("\r", "_")
-    if not name:
-        name = "?"
-    return "PERF cart=%s fps=%d net=%s flush=%d draw=%d" % (
-        name, _round_int(fps), "-" if net is None else _round_int(net),
-        _round_int(flush_ms), _round_int(draw_ms))
-
-
-def _round_int(v):
-    try:
-        return int(v + 0.5)
-    except Exception:
-        try:
-            return int(v)
-        except Exception:
-            return 0
-
-
-def log_perf(cart, fps, flush_ms, draw_ms, net):
-    """Append a PERF sample to the ring (the offline-readable per-cart timing).
-
-    `net` has no default on purpose: a caller that forgets it would print the
-    absent marker while a match was quietly eating half the frames, which is
-    the exact failure this field exists to end."""
-    log("PERF", format_perf(cart, fps, flush_ms, draw_ms, net)[5:])
+        pass
