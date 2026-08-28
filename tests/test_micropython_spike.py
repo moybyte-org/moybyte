@@ -326,10 +326,10 @@ def test_micropython_touch_and_idle_cursor():
     assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
     # The poll->pointer application is device_boot.apply_touch (2026-08-18).
+    # Only the ROUTING is greppable; the verb's BODY is executed in
+    # test_device_boot.py (#208 rank 5), which is what can tell a placed point
+    # from a transposed one.
     assert "apply_touch(touch, pointer)" in runtime
-    _boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
-    assert "tp = touch.poll()" in _boot
-    assert "pointer.place(tp[0], tp[1])" in _boot
 
     # Cursor auto-hide + the Pointer are a shared support widget now (widgets.py).
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -1349,10 +1349,10 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     assert "return self._hp.hold()" in inp
     # The sample->pointer application is device_boot.apply_touch since
     # 2026-08-18 (both boards' poll_inputs hooks carried it verbatim); the
-    # board must route through it and the ONE copy must carry the fresh mark.
+    # board must route through it. That the ONE copy carries the fresh mark --
+    # and carries it BEFORE the no-sample bail -- is executed in
+    # test_device_boot.py (#208 rank 5); a substring could not see the order.
     assert "apply_touch(touch, pointer)" in runtime
-    boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
-    assert "pointer.fresh = getattr(touch, \"fresh\", True)" in boot
 
 
 def test_native_blit_map_wired_for_tilemaps():
@@ -3179,11 +3179,10 @@ def test_both_boards_service_the_web_console_every_frame():
     not for whichever one someone remembers.
     """
     # The drain is ONE helper since 2026-08-18 (device_boot.poll_webhost);
-    # each board's frame tail must still CALL it, and the helper must still
-    # actually poll -- the failure this pins was exactly a tail that stopped
-    # calling.
-    boot = (_REPO / "runtime" / "device_boot.py").read_text(encoding="utf-8")
-    assert "wh.poll()" in boot.partition("def poll_webhost(")[2]
+    # each board's frame tail must still CALL it -- the failure this pins was
+    # exactly a tail that stopped calling. That the helper actually polls, only
+    # while the host is SERVING, and never breaks the frame when the transfer
+    # dies, is executed in test_device_boot.py (#208 rank 5).
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = (_REPO / rel).read_text(encoding="utf-8")

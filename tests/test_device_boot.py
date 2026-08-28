@@ -1304,3 +1304,184 @@ def test_the_T_Deck_still_rings_its_samples_for_the_offline_log():
     diag = (ROOT / "device" / "moybyte_diag.py").read_text(encoding="utf-8")
     assert "def ring(tag, msg):" in diag
     assert "def format_perf(" not in diag and "def log_perf(" not in diag
+
+
+# -- the two shared frame-loop verbs, EXECUTED (#208 rank 5) --------------------
+#
+# `apply_touch` and `poll_webhost` are shared by all three boards and were
+# asserted only as source STRINGS in test_micropython_spike.py -- the shape #208
+# exists to stop. The routing greps there stay (a board must still CALL them);
+# what runs here is the body.
+
+
+class _Touch:
+    """A `device_input.Touch`-shaped source: `poll()` returns (x, y, tap), False
+    is never returned to this verb (the driver folds it into None), and `fresh`
+    marks a repeat of a sample the hardware never re-took."""
+
+    def __init__(self, samples, fresh=None):
+        self._samples = list(samples)
+        self._fresh = list(fresh) if fresh is not None else None
+        self.fresh = True
+        self.polls = 0
+
+    def poll(self):
+        if self._fresh is not None:
+            self.fresh = self._fresh[self.polls]
+        self.polls += 1
+        return self._samples[self.polls - 1]
+
+
+def _pointer(w=320, h=240):
+    from runtime.widgets import Pointer
+
+    return Pointer(w, h)
+
+
+def test_a_touch_sample_places_the_pointer_and_reports_the_tap():
+    p = _pointer()
+    touched, clicked = device_boot.apply_touch(_Touch([(40, 90, True)]), p)
+    assert (touched, clicked) == (True, True)
+    assert (p.x, p.y) == (40, 90)
+    assert p.down is True
+
+
+def test_the_tap_flag_is_the_press_EDGE_not_the_level():
+    """A held finger reports down every pass and taps once. Returning the level
+    as the click would re-fire the launcher's open on every frame of a drag."""
+    t = _Touch([(10, 10, True), (12, 10, False), (14, 10, False)])
+    p = _pointer()
+    passes = [device_boot.apply_touch(t, p) for _ in range(3)]
+    assert passes == [(True, True), (True, False), (True, False)]
+    assert p.down is True
+
+
+def test_a_pass_with_no_sample_lifts_the_pointer():
+    p = _pointer()
+    device_boot.apply_touch(_Touch([(5, 5, True)]), p)
+    assert device_boot.apply_touch(_Touch([None]), p) == (False, False)
+    assert p.down is False
+    assert (p.x, p.y) == (5, 5)      # the position is not reset by a lift
+
+
+def test_pointer_down_is_a_LEVEL_so_a_held_finger_survives_a_stale_pass():
+    """#74: the GT911 hands over ~20-30 samples/s against a 30-60fps loop, so
+    MOST frames of a real drag are repeats. The driver holds the point and this
+    verb must read it as still-down, or the gesture ends mid-swipe."""
+    t = _Touch([(100, 50, True), (100, 50, False), (108, 50, False)],
+               fresh=[True, False, True])
+    p = _pointer()
+    downs = []
+    for _ in range(3):
+        device_boot.apply_touch(t, p)
+        downs.append((p.down, p.fresh, p.x))
+    assert downs == [(True, True, 100), (True, False, 100), (True, True, 108)]
+
+
+def test_the_stale_mark_is_carried_even_on_the_lift_pass():
+    """The mark is set BEFORE the None bail: kinetic scrolling reads `fresh` on
+    the release frame too, and a lift that left it stale-cleared would charge
+    the fling a delta the hardware never measured (#113)."""
+    t = _Touch([None], fresh=[False])
+    p = _pointer()
+    p.fresh = True
+    device_boot.apply_touch(t, p)
+    assert p.fresh is False
+
+
+def test_a_backend_with_no_stale_mark_reads_as_always_fresh():
+    """The host mouse and the P4's own feed report a level every frame; absence
+    of the attribute must mean fresh, not stale, or every host frame would bank
+    its time instead of measuring."""
+    class _NoFresh:
+        def poll(self):
+            return (1, 2, False)
+
+    p = _pointer()
+    p.fresh = False
+    device_boot.apply_touch(_NoFresh(), p)
+    assert p.fresh is True
+
+
+def test_the_placed_point_is_clamped_to_the_canvas():
+    p = _pointer(320, 240)
+    device_boot.apply_touch(_Touch([(999, -4, False)]), p)
+    assert (p.x, p.y) == (319, 0)
+
+
+# -- poll_webhost --------------------------------------------------------------
+
+
+class _Host:
+    def __init__(self, serving=True, error=None):
+        self.serving = serving
+        self.error = error
+        self.polls = 0
+
+    def poll(self):
+        self.polls += 1
+        if self.error is not None:
+            raise self.error
+
+
+class _WSWeb:
+    def __init__(self, webhost=None):
+        self.webhost = webhost
+
+
+def test_the_webhost_is_polled_once_a_frame_while_it_serves():
+    ws = _WSWeb(_Host())
+    device_boot.poll_webhost(ws)
+    device_boot.poll_webhost(ws)
+    assert ws.webhost.polls == 2
+
+
+def test_a_bound_listener_that_is_not_serving_is_left_alone():
+    """`serving` is the gate, not `is not None`: a webhost object exists from
+    boot on every board, and polling one that never started would spend a
+    syscall per frame on all three."""
+    ws = _WSWeb(_Host(serving=False))
+    assert device_boot.poll_webhost(ws) == 0
+    assert ws.webhost.polls == 0
+
+
+def test_a_board_with_no_webhost_at_all_costs_nothing():
+    assert device_boot.poll_webhost(_WSWeb(None)) == 0
+    assert device_boot.poll_webhost(object()) == 0
+
+
+def test_a_failing_poll_never_breaks_the_frame(capsys):
+    """It runs at the frame TAIL of a single-threaded loop; an escaped exception
+    there is the desktop dropping to the REPL. It reports and carries on."""
+    ws = _WSWeb(_Host(error=RuntimeError("socket gone")))
+    assert device_boot.poll_webhost(ws) >= 0
+    assert "WEB ERR RuntimeError: socket gone" in capsys.readouterr().out
+    device_boot.poll_webhost(ws)
+    assert ws.webhost.polls == 2      # and the next frame still polls
+
+
+def test_the_elapsed_ms_is_measured_around_the_poll(monkeypatch):
+    """The T-Deck's HITCH line carries this as `web=`; a serve that stalls the
+    desktop must be visible as the cost it is."""
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+
+    class _Slow(_Host):
+        def poll(self):
+            _Host.poll(self)
+            clock[0] += 47
+
+    assert device_boot.poll_webhost(_WSWeb(_Slow())) == 47
+
+
+def test_a_failing_poll_still_reports_the_time_it_burned(monkeypatch):
+    """The stall is the interesting number precisely when the transfer died."""
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+
+    class _SlowBoom(_Host):
+        def poll(self):
+            clock[0] += 12
+            raise OSError(104)
+
+    assert device_boot.poll_webhost(_WSWeb(_SlowBoom())) == 12

@@ -6,8 +6,8 @@ MOST frames carry no new sample even though the finger never left the glass.
 Two things follow, and both are tested here:
 
 * the device backend HOLDS the last point (device_input.Touch.poll), so the
-  console keeps seeing a held finger -- pinned by the firmware grep test in
-  test_micropython_spike.py;
+  console keeps seeing a held finger -- EXECUTED in test_device_input.py, which
+  drives that poll() against a stubbed GT911 (#208);
 * the repeat frames are marked `pointer.fresh = False`, and the console banks
   their time instead of charging the kinetic velocity a delta the hardware
   never measured (Workstation._tick_pointer_dt). Charging it -- what a naive
