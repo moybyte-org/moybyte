@@ -222,11 +222,9 @@ SHINGLE = 10
 DUP_BUDGET = {
     ("CLAUDE.md", "docs/shell_ux_v1.md"): 31,
     ("CLAUDE.md", "runtime/README.md"): 27,
-    ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 18,
+    ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 13,
     ("CLAUDE.md",
      "native/moy_audio/libmoy/UPSTREAM.md"): 16,
-    ("CLAUDE.md", "firmware/esp32_p4_wifi6_touch_lcd_7b/README.md"): 11,
-    ("CLAUDE.md", "firmware/lilygo_t_deck_plus_mainline/README.md"): 10,
     ("CLAUDE.md", "docs/perf_native_gap_v1.md"): 5,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
     ("CONTRIBUTING.md", "README.md"): 12,

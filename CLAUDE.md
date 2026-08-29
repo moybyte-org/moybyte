@@ -2,6 +2,33 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## START HERE — what are you about to touch?
+
+This file is a MAP. Find your row, read the authority it names, then come back
+for the rules. Reading it top to bottom is the slow path.
+
+| you are about to… | read FIRST | the thing that bites |
+|---|---|---|
+| change a draw verb / the raster | `docs/surface_model_v1.md` §4, then `device/device_canvas.py` | ONE canvas class runs on every tier. `tools/p4_conformance.py` is the only check that reaches the real C on real glass. |
+| add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | four shared bodies are taken, not copied; a lever a board lacks is expressed by ABSENCE, never by 0 |
+| touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once". `tests/moy_flush_harness/` compiles it with no board attached |
+| touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
+| change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
+| add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in the moy-spec repo | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
+| touch audio | `native/moy_audio/libmoy/UPSTREAM.md` | it is VENDORED — fix it upstream in moy-spec and re-vendor, never here |
+| touch multiplayer | `docs/netplay_v1.md` | the payload is INPUTS, never state; a missing input STALLS, it never extrapolates |
+| touch the browser build | `firmware/web_runner/`, `docs/moycore_direction.md` | two web modes, no crossover; where a page is SERVED from decides where its carts live |
+| chase a performance number | **#66** (per-cart fps), **#58** (P4), `docs/perf_native_gap_v1.md` (#77) | numbers live in issues, never in this file — see the rule below |
+| drive a board over serial | `tools/p4_autotest.py`, the three `tests/test_*_on_glass.py` | the boards' line-state rules are OPPOSITE; `[serial]` in board.toml is the authority |
+| edit any document | — | run `tools/check_docs.py`; it resolves every path AND pins duplication downward |
+
+**Four rules that outrank anything below.** Host and device are ONE codebase, not
+a port — a drawing change lands in the one canvas class or the "one cart, every
+tier" contract breaks. A number that MEASURES the system belongs in its issue,
+not here. A board that lacks a lever reports `None`, never `0`. And a mechanism
+promoted into one body needs an executable guard, or it rots silently — that is
+the failure most of the entries below were written to prevent.
+
 ## What belongs in this file (read before adding to it)
 
 **Decisions, not status.** A decision keeps its value forever — "the indexed
@@ -51,7 +78,44 @@ Git history has the rest — do not reintroduce the format.)
 - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
 - `firmware/lilygo_t_deck_plus_mainline/` — the **device port** of that same console (MicroPython).
 - `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the **second device target** (#58): the 7″ 1024×600 MIPI-DSI "desktop workstation" board. Panel/touch/SD/WiFi hardware-confirmed; the **console runs on glass** (the two-worlds desktop under `WindowedWM` — boots to the desk, #105; carts on internal flash; the two-worlds split is on-glass verified — `tests/test_p4_on_glass.py` boots to the desk, opens app windows and scrolls/flings them against the real pointer feed) — colors/flicker/touch/popup/wallpaper all fixed on-glass, the game composite runs on the hardware **PPA** (`moy_ppa`) with an **async-overlap** frame path, and #159's L2 cache 128→256KB closed the game chapter; app-window drags ride a triple framebuffer + a retained backdrop cache. **Where this board stands is #58; per-cart fps is #66** — do not restate either here.
-- `firmware/guition_jc3248w535/` — the **third board** (#202): the ~$15 Guition 3.5″ 320×480 S3 smart display, the port-kit's first walk of the six-stage checklist (provisioned + console-on-glass in one session, 2026-08-18 — its on-glass suite `tests/test_guition_on_glass.py` passed 10/10 that night, both cart runtimes included). New panel class: QSPI AXS15231B via `native/moy_axs` (raw spi_master — the whole frame ships under ONE CS assertion, which is why its TRANSPORT does not share `moy_lcd`'s C body; and since 2026-08-19 the whole band feed runs on a **core-0 FreeRTOS feeder task** — the first board whose flush never costs the VM core; numbers in #202). The band/bounce/kick-drain design used to be described here as "transferred verbatim", i.e. COPIED; **since 2026-08-21 it is ONE BODY** — `native/moy_flush`, whose header is the authority on all of it and the first thing to read before touching a flush. It registers no MicroPython module; it is linked by both panel modules, each of which keeps only its transport, as three hooks. The trigger was the T-Deck moving onto THIS board's feeder (`d9aa73e`), which turned the two concurrency halves into literal copies of one another — a promotion on the SECOND consumer, where the second consumer arrived by CONVERGENCE, not by a new board. The P4 denies it in board.toml: that panel scans, it does not push. Still per-board and meant to stay: each transport, each panel's constants, this board's rotate/fold band synthesis, the T-Deck's `sd_guard`. **The PYTHON compositors followed the same day** (2026-08-21, #206 item 1): `device/banded_panel.py`'s `BandedCompositor` is the one body — the backend contract (`size`/`framebuffer`/`back_buffer`/`gfx`/`flush`/`sync`), the drain-swap-kick overlap, the ping-pong and the PUMP meters — and `tdeck_panel.TDeckCompositor`/`guition_panel.GuitionCompositor` are thin subclasses that import their native module, pass it to the base, and add only what is theirs: WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag, the module-level `set_backlight()` (it exists for callers with no instance, so it must name its C module), the T-Deck's `LAYER_COPY_ASYNC` + `sd_bracket`, the Guition's `fold_supported` + the three `*_fold` verbs. The T-Deck must keep NO `fold_supported` attribute at all — absence is how a board says it lacks a lever. It could not have been written before `d9aa73e`: the T-Deck's soft pump timer and draw-op pokes are what #206 named as the genuine difference, and retiring them is what left twelve identical methods. Verified unchanged on both boards' glass, fps and full on-glass suite; the measurements are in `docs/board_ports_2026-08.md`'s Phase C, with the ones that did NOT move and why. Touch-only, LANDSCAPE 480×320 (owner call 2026-08-18: the panel is portrait-native, its MADCTL MV is dead on this glass, so `moy_axs` rotates in its band copy — sequential PSRAM reads + scattered writes into the uncached SRAM bounce, ~same cost as the memcpy it replaced), and the first fullscreen-tier board where system canvas ≠ game canvas (320×240; **font_scale 2 was built and REVERTED same-day on owner verdict, 2026-08-19** — 1× text reads fine, 2× "looks bad", and the real fix — a PPI floor on chrome geometry, bar icons + menu rows, independent of font scale — is recorded in #202 and deferred until after the UI refactor) — carried entirely by the existing `SystemCanvas` + `wm.composite_game`, zero new shared code. Three hardware rules live in that dir's README: the panel DISCARDS writes until CASET/RASET are armed, MV scrambles, and the touch controller STREAMS ~55-60Hz while touched but returns a constant-byte IDLE FILLER once lifted — the filler IS the lift signal (`axs_touch`'s 90ms bound + hold-window extrapolation ride it; a day of "wedge" theories built on idle-time probes is recorded in #202 as a diagnostic cautionary tale). **#202 CLOSED 2026-08-20** (kit mission complete, board owner-called ported): a TF card, when present, IS the cart store (`/sd/carts`, seeds on first boot; no card = internal VFS) — the port's `machine.SDCard` SPI slot numbers map INVERTED to host numbers (slot=2 → SPI3, slot=3 → SPI2 = the panel's bus, which fails ESP_ERR_INVALID_STATE and leaks the sdspi singleton until reboot); the touch-only game-exit gesture is **DECLINED** (owner call: a paired BLE keyboard's hold-BACKSPACE is the exit path); audio is untracked (a JST1.25 I2S speaker header exists, pins unverified); the PPI chrome-tap floor moved to its own UI issue.
+- `firmware/guition_jc3248w535/` — the **third board** (#202): the ~$15 Guition
+  3.5″ S3 smart display, touch-only, LANDSCAPE 480×320. The port kit's first walk
+  of the six-stage checklist — provisioned and on glass in one session
+  (2026-08-18). **#202 CLOSED 2026-08-20**; that dir's README holds its hardware
+  rules.
+  - **New panel class: QSPI AXS15231B via `native/moy_axs`** (raw `spi_master` —
+    the whole frame ships under ONE CS assertion, which is why its TRANSPORT
+    cannot share `moy_lcd`'s C body). Its band feed runs on a **core-0 FreeRTOS
+    feeder task**: the first board whose flush never costs the VM core.
+  - **The concurrency half IS shared** — `native/moy_flush`, one body linked by
+    both panel modules, each keeping only its transport as three hooks. Its header
+    is the authority on all of it. Per-board and meant to stay: each transport,
+    each panel's constants, this board's rotate/fold band synthesis, the T-Deck's
+    `sd_guard`.
+  - **The Python compositors are one body too** (`device/banded_panel.py`'s
+    `BandedCompositor`); `TDeckCompositor`/`GuitionCompositor` are thin subclasses
+    adding only what is theirs. **The T-Deck must keep NO `fold_supported`
+    attribute at all** — absence is how a board says it lacks a lever.
+  - **The panel is portrait-native and its MADCTL MV is dead on this glass**, so
+    `moy_axs` rotates in its band copy (sequential PSRAM reads + scattered writes
+    into the uncached SRAM bounce, ~the same cost as the memcpy it replaced).
+  - **First fullscreen-tier board where system canvas ≠ game canvas** (320×240
+    game on a 480×320 system surface), carried entirely by the existing
+    `SystemCanvas` + `wm.composite_game` with zero new shared code.
+    **font_scale 2 was built and REVERTED same-day on owner verdict** — 1× text
+    reads fine; the real problem is tap-target size, and the fix is a PPI floor on
+    chrome geometry (#203), not magnification.
+  - **Three hardware rules from its README**: the panel DISCARDS writes until
+    CASET/RASET are armed; MV scrambles; and the touch controller STREAMS while
+    touched but returns a constant-byte IDLE FILLER once lifted — **the filler IS
+    the lift signal** (a day of "wedge" theories built on idle-time probes is
+    recorded in #202 as a cautionary tale).
+  - **A TF card, when present, IS the cart store** (`/sd/carts`, seeded on first
+    boot; no card = internal VFS). The port's `machine.SDCard` SPI slot numbers map
+    INVERTED to host numbers — slot=3 is the panel's bus, which fails
+    `ESP_ERR_INVALID_STATE` and leaks the sdspi singleton until reboot.
+  - Declined: a touch-only game-exit gesture (a paired BLE keyboard's
+    hold-BACKSPACE is the exit path). Untracked: audio.
 - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).
 
 The shipped shell is the **2026-07 shell** (everything-is-a-process: launcher / Player / Editor apps
@@ -336,7 +400,45 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 ### Second device target: ESP32-P4 (Waveshare 7B) — bring-up (#58)
 
-- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the desktop-tier board (7″ 1024×600 MIPI-DSI, GT911 touch, C6 WiFi over SDIO, 32MB PSRAM/flash). mainline MicroPython v1.28 (as both boards are now — the fork it once contrasted with is deleted; it had no P4/DSI support, which is why this board went mainline first and became the template for the T-Deck's port) with an out-of-tree board def (`boards/MOYBYTE_P4`) + `native/moy_dsi` (vendored EK79007 driver; DPI mode — the DSI peripheral scans a PSRAM framebuffer continuously, so there is **no per-frame flush** and the T-Deck's tx_color ceiling doesn't exist). Build/flash/monitor via `make firmware-build-p4` / `make firmware-flash-p4 PORT=/dev/ttyACM0` / `make firmware-monitor-p4 PORT=...` (→ `dist/p4/moybyte_p4.bin`, flashed at offset **0x2000**); serial = CH343 on `/dev/ttyACM0`, REPL stays alive (no native-takeover USB starvation). **Read that dir's README before touching the P4** — it records the hardware-learned constraints (SD power comes from the P4's internal LDO4 which stock MicroPython never enables; SDMMC slot 1 belongs to the C6 and claiming it panics the board; PSRAM must run at 200MHz or the DSI scan-out underruns; WiFi needs no C6 flash; a root-level VFS dir named like a frozen module SHADOWS it — hence the store root is `/moy/carts`, never `/moybyte/...`). The **console is staged** (2026-07-08): `build.sh` freezes the shared `runtime/` console **plus `wm_windowed.py`** (P4-only tier) and stages `device_canvas`/`device_api`/`device_wifi`/`moybyte.input` from the T-Deck modules tree; `moy_gfx`+`moy_alloc`+`moy_lua` (#67) ride `USER_C_MODULES` via `native/.staged/` (moy_gfx grew `blit565_scale`, the windowed composite kernel); the partition table is OTA-shaped 2×4MB + auto-vfs tail. The launcher boots under `WindowedWM` with carts on the internal-flash VFS. On-glass (2026-07-09): colors (canonical vs T-Deck byte-swapped RGB565 → `PAL565_WIRE`), flicker (DPI `num_fbs=2` ping-pong), touch (180° mount → `p4_input.FLIP_X/Y`) all fixed. Play perf comes from three levers: the quiet-frame partial repaint (`WindowedWM.draw_stack`), the hardware **PPA** game composite, and the **async-composite overlap** — a quiet game frame runs the composite via `moy_ppa.blit_async` and DEFERS the scan-out switch to the next loop's `P4Compositor.present_pending()` (fenced by `moy_ppa.sync`, a done-ISR counter), so the PPA DMA overlaps the loop tail + input poll (`blit_game(defer=not full)`; full paints stay blocking so chrome never races the DMA). Each lever was measured on glass and the gains are in #58. App-window **drags/resizes use the dirty-union restore** (2026-07-10, "smooth like a real OS"): the `_BackdropLayer` retained cache is re-stamped only over the moving window's recent footprint (`blit_strip_rect`, dest-clipped `blit565` — the full-screen 1.2MB restore was the drag path's dominant cost and no accelerator helps a 1:1 copy), and **resize is live-body** (frame+title+grip track the grip, retained content crops/reveals, real reflow on release; grip TOUCH target 2× the visual; the game window keeps the outline preview; web RecordingLayer falls back to full restore + outline — probe on `blit_strip_rect`). On-glass, owner-verified (numbers in #58): the union alone bought ~nothing — default windows are ~60% of the desktop, so the wins were **body-subtract** restore-only-the-trail + the **stamp-defer**, where the content stamp runs async-PPA, registered by the WM and kicked by `P4Compositor.flush` AFTER bar/chips/cursor — an async PPA op must be the frame's LAST write, and `moy_ppa` must C2M-writeback dst before submit because **the IDF PPA driver invalidates the whole out buffer at submit**, discarding unflushed CPU writes — see the P4 README constraints). The render-overlap lever is RESOLVED: the **triple framebuffer** shipped (`efcf5d1`) but its second half — the double game canvas — was built, measured and **REVERTED** the same day (`26e1f9f`, which leaves the verdict as a NOTE at the defer site: it measured SLOWER — the game fence was already ~free, and the retention memcpy + drain stalls cost more than they saved), and then **#159's L2 cache 128→256KB** closed the game chapter outright (the win is in #58; 512KB does not boot — internal/DMA pool 0x101). **The PPA only helps UPSCALE composites** — the game→window scale is 2.6× (tiny source read, hardware scale), but a full-screen 1:1 copy (the backdrop restore) is ~identical CPU vs PPA (PSRAM-bandwidth-bound against the DSI scan-out), and **sprite BATCHING is a dead end** (measured ~10× worse than `spr_batch` — per-op submit dwarfs a tiny blit), so both stay on the CPU. **The PPA scaler is fixed BILINEAR in silicon** (no nearest mode, no flag — 2026-08-20), so pixel-art carts composite smeared; Settings → **CRISP PIXELS** (default OFF, capability-gated to this board, serial `crisp 0|1`) reroutes the game composite through `moy_ppa.blit_crisp` — a banded internal-SRAM bounce + 1:1 DMA ship, byte-exact vs the CPU kernel, and it costs fps (#204) — after the pure-CPU crisp family was refuted with a control; the full ledger (probe decomposition, refuted avenues, open levers, the pending default call) is **#204**. `run_desktop` has serial dev commands (REPL-alive board): `run <name>`/`open settings|picker`/`drag [frames]`/`cache 0|1`/`diag 0|1`/`skip 0|1`; `moy_runtime.run_ppa_smoke()` A/Bs the composite. #58 is the living port status; open perf follow-ups: the **editor-tab/transition draw cost** (dispatch-bound — the native span-batch verb #163 is the ranked lever, the scene renderer second) and the #113 Phase 5 Settings partial repaint. Also open: USB-HID keyboard, audio (ES8311), OTA/web-view wiring.
+- `firmware/esp32_p4_wifi6_touch_lcd_7b/` — the desktop-tier board (7″ 1024×600
+  MIPI-DSI, GT911 touch, C6 WiFi over SDIO, 32MB PSRAM/flash), mainline
+  MicroPython v1.28 with an out-of-tree board def (`boards/MOYBYTE_P4`).
+  **Read that dir's README before touching this board** — it holds the
+  hardware-learned constraints. Build/flash/monitor: `make firmware-build-p4` /
+  `make firmware-flash-p4 PORT=…` / `make firmware-monitor-p4 PORT=…`; serial is
+  a CH343 and the REPL stays alive.
+  - **`native/moy_dsi` scans, it does not push.** DPI mode: the DSI peripheral
+    scans a PSRAM framebuffer continuously, so there is **no per-frame flush** and
+    the T-Deck's tx_color ceiling does not exist here. This board denies
+    `moy_flush` in board.toml for that reason.
+  - **The hardware rules that cost sessions** (the README is the authority): SD
+    power comes from the internal LDO4 that stock MicroPython never enables;
+    SDMMC slot 1 belongs to the C6 and claiming it panics the board; PSRAM must
+    run at 200MHz or the DSI scan-out underruns; WiFi needs no C6 flash; and a
+    root-level VFS dir named like a frozen module SHADOWS it — which is why the
+    store root is `/moy/carts`, never `/moybyte/...`.
+  - **The game composite runs on the hardware PPA with an async overlap**: a quiet
+    frame composites via `moy_ppa.blit_async` and DEFERS the scan-out switch to the
+    next loop's `present_pending()`, so the DMA overlaps the loop tail and the
+    input poll. Full paints stay blocking so chrome never races the DMA. **An async
+    PPA op must be the frame's LAST write**, and `moy_ppa` must C2M-writeback dst
+    before submit, because the IDF PPA driver invalidates the whole out buffer at
+    submit and would discard unflushed CPU writes.
+  - **The PPA only helps UPSCALE composites.** A full-screen 1:1 copy (the backdrop
+    restore) is ~identical CPU vs PPA, PSRAM-bandwidth-bound against the scan-out;
+    and **sprite BATCHING is a dead end** (~10× worse than `spr_batch` — per-op
+    submit dwarfs a tiny blit). Both stay on the CPU.
+  - **The PPA scaler is fixed BILINEAR in silicon**, so pixel art composites
+    smeared. Settings → CRISP PIXELS (default OFF, capability-gated, serial
+    `crisp 0|1`) reroutes through `moy_ppa.blit_crisp` — a banded internal-SRAM
+    bounce, byte-exact against the CPU kernel. Ledger: #204.
+  - App-window drags use the **dirty-union restore** with a body-subtract trail and
+    a deferred content stamp; resize is live-body. The **triple framebuffer**
+    shipped; the **double game canvas was built, measured and REVERTED** (`26e1f9f`
+    — the game fence was already ~free and the retention memcpy cost more than it
+    saved), and #159's L2 cache 128→256KB closed the game chapter (512KB does not
+    boot — internal/DMA pool 0x101).
+  - Status and numbers: **#58**. Open: USB-HID keyboard, audio (ES8311).
 
 ### Third target: the web runner + the moy-spec repo (#151/#170)
 
@@ -609,83 +711,44 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   square at 1× instead of compositing the centered 128×120 at 2× — a
   regeneration on 2026-08-11 lost it and shipped a tiny celeste to the glass.
 
-### The UI refactor landed (2026-08-19) -- one widget vocabulary, apps as data, user apps
+### The UI refactor landed (2026-08-19) — one widget vocabulary, apps as data, user apps
 
-`docs/history/ui_refactor_2026-08.md` is the plan and the authority; it folds
-`docs/history/ui_widgets_2026-08.md` and
-`docs/history/shell_decoupling_2026-08.md` (both of which stay as their
-evidence) after four parallel adversarial reviews, and **cuts about
-half of the combined program on evidence**. Read its Section 1 before proposing any
-of the cut parts again. What shipped, in ten commits on dev:
+Record: `docs/history/ui_refactor_2026-08.md` (it folds `ui_widgets_2026-08.md`
+and `shell_decoupling_2026-08.md`, and CUT about half the combined program on
+evidence — read its Section 1 before proposing any cut part again). The rules it
+left:
 
-- **The shell has pixel goldens now, and it had NONE before.** 87 stored hashes x
-  5 configs (`tests/test_shell_goldens.py`) plus **300 sub-surface hashes**
-  (`tests/test_settings_layer_pixels.py`) for the states whole-screen rendering
-  cannot reach -- the WiFi/Bluetooth panels, the system menu, About, achievements,
-  the egg and all 11 update phases. Before this, every "byte-identical" claim in
-  the tree rested on live-vs-live A/Bs that a refactor moving both arms passes
-  green. Two axes rendered NOWHERE previously: `variant="light"` (it appeared five
-  times and was never followed by a draw) and 480x320.
-  **The 320x240/1x baseline does NOT exercise the toolkit** -- `editor_app._draw_zone`
-  and siblings are guarded `if not ws.layout._base`, so perturbing `ui.button`'s pad
-  turns the Guition/fs3/windowed configs red and leaves BOTH T-Deck rows green. A
-  widget change is verified on the non-`_base` configs; a green T-Deck row proves
-  nothing.
-- **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist). An
-  `"app"` block in the identity cart's manifest is the declaration; `runtime/app_decls.py`
-  is its generated frozen copy (like `carts_data.py`) and `console.py` loops over it.
-  Five hand-maintained lists are gone -- `CART_ORDER`, the title->folder map, the web
-  roster, and console's import/construct/register block -- and **four of the five
-  failed silently and on device only**. Ratchet: `tests/test_app_registry.py`.
-- **The bar contract is a HOST guarantee**, not a ritual: the router draws the
-  strip and routes the context-X, so an app can no longer forget to be exitable.
-  Scoped to `"tool"` for registered apps -- there are SEVEN strip kinds and
-  collapsing them breaks the others. Apps get an optional `commit()` / `close()`.
-- **Apps declare what they need.** `runtime/app_context.py` (a pure leaf) with
-  roles damage/surface/theme/files/carts/nav/prefs/notify/wallpaper/clipboard/
-  artwork/shell; every app carries `NEEDS` and there is **zero `ws.` in the app
-  tier**. `ctx.files` and `ctx.carts` are SPLIT deliberately -- carts authors
-  executable content, so granting it to a cart is self-escalation. **No `property`
-  forwards anywhere** (measured: a plain hop is +0.5us, a property forward +5.1us);
-  live state reads through a method. `prefs_ns` exists because `paint_doc` is the
-  key in real cards' `system.json` since #108 -- namespacing by app id would have
-  silently lost every kid's open drawing.
-- **Style is data.** `runtime/skin.py` -- NOT in `chrome.py`, which would close
-  `ui -> chrome -> settings_layer -> ui`. Nested pre-flattened tables, and the
-  per-widget path is CHEAPER than what it replaced (two subscripts returning a
-  shared tuple, vs 2-3 dict `.get`s plus a per-call allocation). A second skin
-  ("outline") restyles every surface of all five configs and **the only files that
-  mention it are `skin.py` and its test**, pinned by a ratchet. That was the
-  owner's "easily change the UI look" ask, proven rather than asserted. Since
-  2026-08-20 the skin is PICKED, not just proven: `console.py` owns
-  `set_skin`/persistence, the Appearance THEMES tab has the chips, and the
-  ratchet now names exactly those two owner modules (`test_skin.py` asserts the
-  set in both directions).
+- **The 320×240/1× baseline does NOT exercise the toolkit.** `editor_app._draw_zone`
+  and siblings are guarded `if not ws.layout._base`, so perturbing a widget turns
+  the Guition/fs3/windowed configs red and leaves BOTH T-Deck rows green.
+  **Verify a widget change on the non-`_base` configs; a green T-Deck row proves
+  nothing.** The net is `tests/test_shell_goldens.py` + `test_settings_layer_pixels.py`.
+- **Adding a system app is TWO files** (`docs/app_api_v1.md` has the checklist):
+  an `"app"` block in the identity cart's manifest, and `runtime/app_decls.py`, its
+  generated frozen copy. The five hand-lists it replaced failed silently and on
+  device only. Ratchet: `tests/test_app_registry.py`.
+- **The bar contract is a HOST guarantee**, scoped to `"tool"` — there are SEVEN
+  strip kinds and collapsing them breaks the others.
+- **Apps declare what they need** (`runtime/app_context.py`, a pure leaf) and there
+  is **zero `ws.` in the app tier**. `ctx.files` and `ctx.carts` are split
+  deliberately: carts authors executable content, so granting it to a cart is
+  self-escalation. **No `property` forwards** (a plain hop is +0.5µs, a property
+  +5.1µs) — live state reads through a method. `prefs_ns` exists because
+  `paint_doc` is the real key in kids' `system.json` since #108.
+- **Style is data** — `runtime/skin.py`, NOT `chrome.py`, which would close
+  `ui → chrome → settings_layer → ui`. `tests/test_skin.py` pins skin knowledge to
+  its two owner modules in both directions.
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
-  roles as an ALLOWLIST (`files`/`files:<kind>`, `prefs`, `appearance`, `launch`);
-  never grantable: `shell`, `carts`, `wallpaper`, `artwork`, `damage`, `surface`,
-  `clipboard`, `notify`. An ungranted verb is **ABSENT**, not stubbed.
-  `system_carts/notes.moy` is the proof -- 200 lines of cart, no shell module, no
-  registration, no reflash. Fixed 320x240 is the default (unchanged code, which is
-  why the goldens could not move); responsive is opt-in via a top-level
-  `_layout(w, h, fs)`. **The windowed DESK world must NOT bind the system canvas** --
-  a cart there lives in a window whose blit source IS `ws.canvas`, so binding makes
-  the desktop blit itself (a recursive smear, found only by rendering it).
-  `runtime/crash_guard.py` disables a type:"app" cart after three crashed opens;
-  committing fixed CODE forgives the strikes (2026-08-20 — the panel's "EDIT it"
-  was a dead end for a day: nothing cleared the count until `Project.commit_code`
-  grew the `forgive_app` call).
-  Storybook/Sheets/Files/Paint must STAY shell code; Calc is portable today.
-- **Perf: steady-state frames unmoved, two one-shot transitions cost a few ms.**
-  Both arms were built, flashed and measured on the same board: every `p4_bench`
-  median is inside the noise floor and idle still paints zero frames, while
-  `p4_clicks` shows two editor transitions repeating slightly dearer on both arms.
-  That is the symbol palette's extra Python-level calls per code-tab draw on a
-  dispatch-bound surface (#163) -- the recorded price of the unification. The
-  numbers, and the image cost, are #58's.
-  Also learned: the OTA-verifier on-glass failures (`test_the_shipped_verifier_runs_on_micropython`
-  plus the two that cascade) **reproduce on the pre-refactor build** -- an
-  intermittent chunked-`pyexec` upload, not a regression.
+  roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
+  `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
+  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Sheets/Files/Paint
+  STAY shell code; Calc is portable today.
+- **The windowed DESK world must NOT bind the system canvas** — a cart there lives
+  in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit
+  itself. Found only by rendering it.
+- **`crash_guard` disables a type:"app" cart after three crashed opens**, and
+  committing fixed CODE forgives the strikes (`Project.commit_code` →
+  `forgive_app` is the only thing that clears the count).
 
 ### Two consoles, one game: ESP-NOW multiplayer SHIPPED (2026-08-22, #65/#7)
 
@@ -799,195 +862,87 @@ belongs here is only what a coder must not undo:
   at the launcher used to print "no audio backend" and change nothing -- a mute
   that looked like it worked until the next game played at full volume.
 
-### The 2026-08-22 hardening pass — every lever gets a meter, every derived value ONE author
+### The 2026-08-22 hardening pass — the rules it left
 
-A sweep over the six commits that ended the board-port run. The recurring
-shape, and the thing to check first when adding anything below: **a mechanism
-was promoted into one body and nothing executable guarded it.**
+Record: `docs/history/sweeps_2026-08.md`. The recurring shape, and the first
+thing to check when adding anything here: **a mechanism was promoted into one
+body and nothing executable guarded it.**
 
-- **`PUMP … fold=N` was never the on-glass proof of the #190 scale fold.** It read
-  `getattr(comp, "fold_count", 0)` against a name NO compositor defined, so it
-  printed 0 on every board from the day it shipped — and this file said it was the
-  proof the whole time. It could not have been one even wired: the T-Deck has no
-  fold, and the Guition, the only board that has one, denies `device_diag` and so
-  has no PUMP line. The proof is the dev channel's `state` → `fold`, from
-  `moy_axs.fold_stats()`. **A board with no lever reports `None`, never `0`** — a
-  frozen 0 is also what a broken lever looks like, and that ambiguity is what hid
-  this. Apply the same rule to any new meter.
-- **A counter that reaches no consumer is not instrumentation.** `moy_flush`'s
-  `blocked_us`/`timeouts`/`errs` existed in C and were dropped on the way out;
-  `moy_flush_stop`'s failure had no counter at all, and it freed the bounce slots
-  after giving up on the feeder — memory the done-ISR could still reach. The
-  Guition's route is `state`, not PUMP, because it stages no `device_diag` (its own
-  board.toml says why; the **P4's** absence of `device_diag` is an unwritten
-  omission, not a decision — do not cite it as one).
-- **`sdkconfig.board` is the only copy of a board's sdkconfig facts.** Each
-  `build.sh` used to restate a subset for the guard, and a setting left out
-  silently did nothing on a warm tree. The guard derives the list now, and splits
-  "is the tree stale" (a fingerprint) from "did Kconfig honour it" (a grep that is
-  only meaningful once the fingerprint matches, so a miss means REFUSED). It caught
-  `CONFIG_BT_CTRL_BLE_ADV_REPORT_FLOW_CTRL_NUM=20` sitting below IDF's `range 50
-  1000` on both S3 boards. **The two S3 fragments are 35-of-36 identical and must
-  NOT be merged** — each value carries its own per-board argument, including a
-  knowingly divergent cache-line size kept so the other setting stays a legitimate
-  future A/B.
-- **A wired service now has to be STARTED and POLLED, not merely built.**
-  `test_board_service_parity` asserted a wiring line existed and said so in its own
-  docstring; that is how the T-Deck shipped `ble_keyboard: INJECTED` while nothing
-  called `start()` and `_poll_inputs` never called `poll()`. `poll` must be
-  per-frame — on the boot path it runs once and reads statically identical.
-- **Derived values get one author.** The input union's mid-frame mirror is gone
-  (`begin_frame`'s merge is the authority; read after it), and deleting it made the
-  hot path cheaper, not dearer. Two Bresenham walkers rasterising into the same
-  sprite, four block-tree walkers already recursing in different orders, and a
-  second copy of the host button table are all one body now. **The two InputStates
-  stay separate** at 94% identical — `BUTTONS` is 8 names vs 15, in different
-  orders, and a test says asserting them equal would be wrong.
-- **Storage reads must take the SD gate, not just writes.** `poll_webhost` runs at
-  the frame tail, after `kick()`, and the tail's drain is conditional on *not*
-  having drawn — so a frame that painted leaves the feeder shipping bands, and an
-  sdspi transaction there is the documented panic. An idle desk paints nothing,
-  which is why this only bit while a cart ran or exited. A cover-blob read and the
-  webhost's asset probe were the only ungated reads in the shell; a sweep across a
-  cart open/run/quit is now a test. **A missing asset costs the same directory read
-  as a hit**, so serving the baked bundle was never exempt.
-- **The browser gets carts, not their history.** The undo journal never crosses
-  the wire in EITHER direction: a shipped log could only ever undo board-era
-  commits on a copy that never returns (40% of the payload, inert), and — since
-  the push half landed 2026-08-25 — a pushed one could only replay browser-era
-  ops onto a board that keeps its own. `pmem` crosses (the kid's saves, 0.3%).
-  The `_skip` predicate is ONE body in `runtime/moy_sync.py` now, shared by the
-  pull walkers, the push sweep and the receiving apply — the store stream's
-  "GET-only with no write-back" era ended with `POST /sync` (see the sync
-  paragraph in the web-runner section). **That is still true, and it is not the
-  same claim as "nobody has a history":** since the store-of-record decision
-  (same section, 2026-08-25) the RECEIVING side writes its own journal from the
-  files a batch lands, so the kid gets undo on both ends without a byte of
-  history on the wire.
-- **`slim_carts` no longer decodes a 32,768-pixel sheet to read one 8×8 icon.**
-  That was roughly half a browser page load, and the same wiring order runs on
-  every tier, so all three boards get it. Per-cart numbers belong in #66.
+- **A board with no lever reports `None`, never `0`.** A frozen 0 is also what a
+  BROKEN lever looks like, and that ambiguity is what hid `PUMP fold=` printing 0
+  on every board for weeks. Apply it to every new meter.
+- **A counter that reaches no consumer is not instrumentation.** The Guition's
+  route is `state`, not PUMP — it stages no `device_diag` (its board.toml says
+  why; the P4's absence is an unwritten omission, not a decision).
+- **`sdkconfig.board` is the only copy of a board's sdkconfig facts.** The guard
+  derives its list and splits "is the tree stale" (a fingerprint) from "did Kconfig
+  honour it" (a grep that only means anything once the fingerprint matches).
+  **The two S3 fragments are 35-of-36 identical and must NOT be merged** — each
+  value carries its own per-board argument.
+- **A wired service must be STARTED and POLLED, not merely built**, and `poll` must
+  be per-frame: on the boot path it runs once and reads statically identical.
+- **Derived values get one author.** The two InputStates stay separate at 94%
+  identical — `BUTTONS` is 8 names vs 15, in different orders, and a test says
+  asserting them equal would be wrong.
+- **Storage READS take the SD gate too, not just writes.** `poll_webhost` runs at
+  the frame tail after `kick()`, so a frame that painted leaves the feeder shipping
+  bands, and an sdspi transaction there is the documented panic.
+- **The browser gets carts, not their history** — the undo journal crosses the wire
+  in neither direction; the receiving side writes its own (`pmem` does cross).
 
 ### The shell carve LANDED (2026-08-27) — six collaborators behind the Workstation façade
 
-`docs/history/console_architecture_2026-08.md` (rev 3, tracked #209) executed in five
-gated landings, one object per commit: **W1** `tools/vendor_common.py`
-(`c07a5b5`), **W2** `runtime/layout_base.py` — the eight layout heads' one
-`_base` body (`7a7f9d8`), **W3** the launcher's one streak-advance body
-(`05866c9`); then **WebConsole** `ws.web` (`e66bb27`, the pilot),
-**SystemStore + StoreHandle** `ws.prefs` (`ce4204a`), **CoverCache**
-`ws.covers` (`c3ceb1c`), **CartManager** `ws.carts` (`f4cf8c5`),
-**Appearance** `ws.look` (`f60523a`), **HistoryRouter** `ws.history`
-(`b58e944`). `Workstation` went 5,435 → 3,950 lines / 275 → 208 methods.
-Exactly TEN forwards remain on the façade and
-`tests/test_console_facade.py` pins every one with its caller (web 8, prefs 1,
-carts 1 — covers/look/history landed with ZERO), beside the getattr-name
-ratchet over every `getattr(ws, "…")` probe in runtime/device/tools. Facts a
-coder must not undo:
+Record: `docs/history/console_architecture_2026-08.md` (rev 3, #209). Six
+collaborators — `ws.web`/`prefs`/`covers`/`carts`/`look`/`history` — came out
+from behind the façade in five gated landings. `tests/test_console_facade.py`
+pins every surviving forward with its caller, the 17 legacy property forwards,
+and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 
 - **`ws.system` is an ALIAS of the SystemStore dict and is never rebound** —
-  `SystemStore.load()` mutates it in place. That identity is why
-  settings_layer's and dev_channel's raw writes never migrated, and why
-  CrashGuard takes the dict itself (the takes-a-callable wart retired with the
-  rebind that justified it).
-- **The achievement overlays are EVENT-PUSH**: an unlock/egg/konami writes the
-  flat kernel deadlines (`_toast_until`/`_egg_until`/`_confetti_until`) from
-  the arm site; `_animating` and both WMs' overlay signatures read plain ints
-  and never call into `ach`/`ach_ui`. Proven on T-Deck glass: an award over
-  serial armed the deadline, the overlay painted, the desk went static again
-  after expiry.
-- **`theme_colors` stays a flat kernel rebind on purpose**: the launcher's
-  cache keys fold `id(ws.theme_colors)`, so the REBIND is the shelf
-  invalidation — an in-place alias there would be a live bug.
-- **The frame loop reaches collaborators directly, never through a forward**
-  (`covers.begin_frame`/`take_deferred`, `history.idle_tick`); per-card grid
-  paths use injected BOUND methods (`covers.cover_for`, `carts.is_favorite`).
-- **`_icon_cache` is CoverCache's and invalidates on a rescan** (the rev-2
-  item-10 bug, fixed in `c3ceb1c`) — and the invalidate runs BEFORE
-  `slim_carts` re-bakes, because slimming is the last moment a cart's sprite
-  art exists in RAM; the goldens catch a blanket clear.
-- **Serial vocabulary moved with the code** (§3d): `p4_conformance` speaks
-  `ws.carts.all`, `p4_hitch` wraps `ws.history.idle_tick`,
-  `p4_chrome_freeze`/`p4_scroll_ab` speak `ws.look`.
-- **Every landing was built and flashed on all three boards the same night**:
-  host suite 100% green at every step, `p4_bench`/`p4_clicks` p50 AND p90/max
-  inside noise at every gate, the cart roster unchanged, idle-paints-zero on every
-  arm, all three on-glass suites green throughout (the OTA-verifier trio's
-  chunked-`pyexec` flake reproduced identically on dev-era images that night —
-  chronic, not the carve). The full gate record, the image delta and the test
-  count are #209's landing comment; per-cart fps stays #66's.
-- **Fixed on the way** (`9ba6498`): `tools/p4_push_web.py` and the P4 on-glass
-  web test both hand-pinned the four-asset era, so the push could never take
-  over from the baked bundle after `moy_store.mjs` joined `ASSETS`
-  (2026-08-25) — and printed "all 4 files match" while doing it. Both now read
-  the one list (`gen_web_blob.asset_names()` over `moy_webhost.ASSETS`).
+  `SystemStore.load()` mutates it in place. That identity is why settings_layer's
+  and dev_channel's raw writes never had to migrate.
+- **The achievement overlays are EVENT-PUSH**: an unlock writes the flat kernel
+  deadlines from the arm site; `_animating` and both WMs read plain ints and never
+  call into `ach`/`ach_ui`.
+- **`theme_colors` stays a flat kernel REBIND on purpose** — the launcher's cache
+  keys fold `id(ws.theme_colors)`, so the rebind IS the shelf invalidation. An
+  in-place alias there would be a live bug.
+- **The frame loop reaches collaborators directly, never through a forward**;
+  per-card grid paths use injected BOUND methods.
+- **`_icon_cache` is CoverCache's and invalidates on a rescan**, BEFORE
+  `slim_carts` re-bakes — slimming is the last moment a cart's sprite art exists
+  in RAM.
+- **Serial vocabulary moved with the code**: `p4_conformance` speaks `ws.carts.all`,
+  `p4_hitch` wraps `ws.history.idle_tick`, `p4_chrome_freeze`/`p4_scroll_ab` speak
+  `ws.look`.
 
-### The 2026-08-28 quality sweep — the carve's tail, and four bugs the coverage found
+### The 2026-08-28 quality sweep — the rules it left
 
-The forward-looking half of #209 plus the tails it deferred (#206 items 2–3,
-#207, #208 ranks 1–4), gated on all three boards the same day — the gate record
-is in those issues. What must not be undone:
+Record: `docs/history/sweeps_2026-08.md`; the gates are in #206, #207, #208.
 
-- **ONE `PERF` line, one producer, three boards** (#206 item 2). There were
-  THREE producers sharing the name and no shape — the T-Deck's from
-  `moybyte_diag`, prefixed `Moybyte <ms> ` and emitted only while a cart ran;
-  the P4's; and the Guition's copy of the P4's. Both readers filtered on
-  `startswith("PERF ")`, so the T-Deck's line was silently dropped by the tool
-  that produces #66's numbers and that board was **invisible to it**.
-  `runtime/perf_line.py` now holds the field table that IS the field order,
-  the formatter AND the parser — one module so the halves cannot drift — and
-  `device_boot.PerfSampler` measures it on the existing `FrameLoop.account`
-  hook. **A field a board cannot measure prints `-`, never `0`**: the P4 under
-  `diag 0` prints `wmr=-` where it printed `wmr=0`, and that IS the fix. Cart
-  titles are slugged and compounds join with `/` (the old ` home(wp=3 grid=4
-  bar=1)` is `home=3/4/1`) because both readers split on whitespace and an
-  inner `=` reads as a field. **`tools/p4_perf.py` requires `--board`**: it
-  defaulted to the P4's `dtr/rts` LOW, which on either S3 board is a chip
-  reset that strands the handle, so two of three boards could not be measured.
-- **`moy_flush`'s tail wait runs even after a queue error**, and the harness
-  that proved it is `tests/moy_flush_harness/` — it compiles the REAL
-  `moy_flush.c` unmodified against stub IDF/FreeRTOS headers under a
-  cooperative ucontext scheduler (NOT threads: the subject is races, and a
-  non-deterministic reproduction is a flaky test that reads as protection).
-  The condition carried `tx_err == ESP_OK`, so a latched error skipped the
-  wait that two boards depend on — the T-Deck's `sd_guard` opens an sdspi
-  session on the panel's SPI host (a band still on the wire is the documented
-  gray-screen hang), and the Guition's `moy_axs_frame_end` reaps
-  `while (s_retrieved < done)`, so a band `done` never reached leaks its queue
-  slot and skews `s_retrieved` PERMANENTLY. With `errs 0` the fix is a no-op,
-  so **green on-glass suites prove no regression, not that it works** — the
-  proof is the mutation plus the harness's board double.
-- **Adding a settings toggle is one table entry** (#209 §7): `SETTINGS_TOGGLES`
-  in `settings_layer`. The gates stay expressed as predicates and a falsey gate
-  BOTH hides the row and declines the serial word; the flat mirrors stay flat
-  attributes, because `frame_cap_fps` reads `ws.frameskip` every loop iteration
-  on all three boards.
-- **The `colors=` hatch is 14 sites and each one has a written reason** (#207,
-  down from 27; the other 10 name a `kind`, and `ui.row`/`ui.cell` grew the
-  `kind=` argument `ui.button` already had). The root finding: the `row` kind
-  always paints a field, while the shell's commonest row paints none until
-  selected and inks from the chrome family — that gap explains most of the 27.
-  `row_menu` and `row_list` are deliberately two entries, not one: `ink_dim`
-  and `chrome_ink_dim` resolve differently on machine/dark, so collapsing them
-  passes every golden and moves a pixel on one theme.
-- **The on-glass suites share one fixture** (`tests/on_glass.py`, #206 item 3)
-  and reset-vs-attach is read from `board.toml`, never chosen in a suite.
-- **Property forwards are banned WITH A NAMED EXEMPTION LIST.** The façade
-  docstring claimed "banned repo-wide" while seventeen stood unchecked (the
-  pre-carve projections over project/player/editor_app/wm). They stay by
-  MEASUREMENT — `ns` is read at 257 sites, `cart` at 168, so retiring them is
-  a ~920-site rename — and `test_console_facade` now pins the set so it can
-  shrink but never grow.
-- **The dead web `/assets` lane is deleted.** Its consumers went in the
-  2026-08-12 streaming sunset; the carve then moved the code to a new file
-  with a docstring still naming `tools/web_console.py`, which does not exist.
-- **Four bugs the coverage found**, each mutation-checked: `board_flash`'s
-  identity probe aborted the flash when it RAISED (its docstring says a wedged
-  board is the ordinary customer); `Files.stamp` was the one codec verb with no
-  store guard, raising inside Paint's copy-on-use path where returning `None`
-  would have been saved and lost the drawing; `system_api._themes()` returned
-  pairs while `set_theme` takes a name and falls back silently, so a granted
-  cart's documented `set_theme(themes()[0])` always chose "night".
+- **ONE `PERF` line, one producer, three boards.** `runtime/perf_line.py` holds
+  the field table, the formatter AND the parser, measured by
+  `device_boot.PerfSampler` on `FrameLoop.account`. **A field a board cannot
+  measure prints `-`, never `0`.** Cart titles are slugged and compounds join with
+  `/`, because both readers split on whitespace and an inner `=` reads as a field.
+  `tools/p4_perf.py` requires `--board`: it used to default to the P4's dtr/rts
+  LOW, which on an S3 is a chip reset that strands the handle.
+- **`moy_flush`'s tail wait runs even after a queue error** — the T-Deck's SD fence
+  and the Guition's `s_retrieved` reconciliation both depend on it, and skipping it
+  leaves band DMA live on a bus an sdspi session is about to take.
+  `tests/moy_flush_harness/` compiles the REAL C on a host with no board.
+- **Adding a settings toggle is one entry in `SETTINGS_TOGGLES`**, not six sites.
+  The capability gates stay expressed, and the flat mirrors stay flat attributes —
+  `frame_cap_fps` reads `ws.frameskip` every loop iteration on all three boards.
+- **The `colors=` hatch is 14 sites and each has a written reason** (`ui.row`/
+  `ui.cell` take `kind=`, like `ui.button`). `row_menu` and `row_list` are
+  deliberately two skin entries: `ink_dim` and `chrome_ink_dim` resolve differently
+  on machine/dark, so collapsing them passes every golden and moves a pixel.
+- **The on-glass suites share one fixture** (`tests/on_glass.py`), and
+  reset-vs-attach is read from `board.toml`, never chosen in a suite.
+- **A doc names a file only if it exists** — `tools/check_docs.py` resolves
+  backticked paths AND bare `.py` names, and pins cross-document duplication so it
+  can only shrink. Run it after any docs edit.
 
 ### Host == device: the shared console (important)
 
@@ -1359,7 +1314,55 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
 - The current design doc is **`moybyte_console_plan_2026-07.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too. The shipped v0.5 shell's UX reference is **`docs/shell_ux_v1.md`** (corrected to the as-built reality); `docs/shell_architecture_v1.md` (privileged system carts + layered compositor) is the standing direction doc; the three implemented shell plan docs (`shell_ux_technical_plan_v1` / `shell_os_architecture_v1` / `shell_layers_refactor_v1`) are archived under `docs/history/`. **`docs/surface_model_v1.md`** is the standing presentation CONTRACT for every backend (immediate widget logic + retained surfaces + explicit generation-counter dirty + per-backend compositing strategy): read it BEFORE touching any rendering/compositing/invalidation code on any tier, and treat its §8 graveyard as settled — a new backend implements its §4 compositor contract, it does not invent a new invalidation mechanism. It absorbed its predecessor on **2026-08-27** and is the whole living record on UI frame cost now: `ui_damage_model_v1.md`'s own §0 review killed the fine-grained damage architecture (its "content-independent chrome" finding had no power — every one of those draw loops iterates the VIEWPORT, not the content, so identical numbers were structurally guaranteed), and what survived is **§14** — the shipped focused-window content freeze, which `wm_windowed._content_static` and its test now cite as their design source, and the evidence for one invalidation mechanism instead of six (2026-07-26: two of the six carried the same wrong key, cost 72ms of an 86ms frame twice per gesture, and produced no signal whatsoever). §8 carries the **why-not-LVGL** decision with its numbers (used on the T-Deck for panel/bus bring-up only, never to draw; our own blitter took that path 47→90fps; deleted entirely with the fork on 2026-08-17), so that is not re-litigated. The full record, including the phases the review walked, is `docs/history/ui_damage_model_v1.md`. **`docs/board_ports_2026-08.md`** is the standing direction doc for ADDING A BOARD (tracker **#202**: the Guition S3 JC3248W535 and a Guition P4 are the named next two): the per-board bill, **Phases A–D all landed 2026-08-17** (flash/CI plumbing as board.toml data; the shared `FrameLoop`; the GT911 core promoted; the six-stage port checklist), the declines (no driver registry/ABI, no codegen) — read its checklist before starting any port.
 - **Issue mirror (`docs/issues/`, gitignored):** a **local, un-committed** snapshot of every GitHub issue, split into `open/` and `closed/` (files named `NNNN-slug.md`) plus `INDEX.md`, so an issue number referenced in a commit, doc, or chat resolves without network access. GitHub is the source of truth — this is a generated read-only mirror (not in git, to avoid churn), so a fresh checkout won't have it: **build it with `make sync-issues`** (wrapper over `tools/sync_issues.py`; needs the `gh` CLI, authed). The script wipes and rewrites both folders from `gh`, so state changes and edits never leave a stale copy. **Run `make sync-issues` at the start of any session that reads or reasons about issues, and again after EVERY issue you open/close/comment/edit** — the mirror is only trustworthy if syncing is a reflex, and living-body issues (like the #66 performance ledger) go stale locally the moment the body is edited on GitHub. Don't hand-edit the files.
 - Tests run against the host packages only; firmware tests (`tests/test_micropython_spike.py`) grep the frozen device modules' source rather than executing them.
-- **On-glass P4 testing (#156):** the P4's REPL-alive serial is a real test channel — `tools/p4_autotest.py` (`P4Board`: RTS-pulse reset, boot wait, command plumbing) drives the console over it, and `tests/test_p4_on_glass.py` is a pytest suite gated on `MOYBYTE_P4_PORT` (`MOYBYTE_P4_PORT=/dev/ttyACM0 .venv/bin/python -m pytest tests/test_p4_on_glass.py`, ~44s, one board reset per module, tests share the session in file order and leave the board on the desk). The device half lives in `moy_runtime.run_desktop`'s serial commands: **`swipe x0 y0 x1 y1 [frames]`** (a gesture through the real pointer feed — press edge, held interpolation, real release), **`state`** (one-line JSON: world/windows/focus/Settings scroll model/wifi/app claims — assertions read console STATE, not pixels), **`py <code>`** (eval/exec against the live console between frames: the profiling hook — wrap a draw verb, time a commit, count `rect` calls), plus `open appearance|wifi` plus the older `tap`/`run`/`drag`/`diag`/`skip`/`gov`/`union`/`cache`. Gotchas: **wait for `REMOTE drag done`/`swipe done`** before the next command (a mid-gesture command measures with the script still feeding the pointer); PERF's `wmr/wmw/wms` are last-sample values that go STALE when their pass stops running (a repeated constant means "not running"); allow ~10s after a first `open picker` at a new size (cover pop-in, #155); and **never put a call that blocks on FLASH inside a `pyexec` snippet** — `pyexec` uploads multi-line code in chunks while `cmd` sends one line, so a real `os.mkdir`/file write stalls the frame loop long enough for a streaming `diag 1` PERF line to interleave into the chunk exchange, after which the reader parses the fragment as a serial COMMAND and int()s its argument (surfacing as `PY ERR SyntaxError: invalid syntax for integer with base 10`, which names nothing that is wrong); issue those as their own short `cmd`. **The dev channel's `quit` exits the DESKTOP to the REPL, not the running cart** (`REMOTE quit -> REPL`) — using it to end a cart leaves the board sitting at `>>>`, after which every suite errors in its fixture with "did not answer `state`" and reads exactly like a dead board (2026-08-28; the shared fixture's message named the real cause on the first read). Recover with a **Ctrl-D soft reset**, which re-runs `main.py` and does NOT re-enumerate USB — the safe recovery on an attach-only board, where a line-pulse reset would strand the handle. **Look system-app carts up by TITLE, never folder name** — the device seeds from the title slug (`appearance.moy`), the host copies the source folder (`theme_picker.moy`), and that mismatch is exactly what broke `AppearanceAppLayer.is_app` on device (pinned now by `tests/test_device_seed_parity.py`'s app-identity parity test). **The dev channel is ONE class since 2026-08-17**: both boards construct `dev_channel.DevChannel` (`runtime/dev_channel.py` — until then it had ZERO importers while the T-Deck ran a verbatim copy and the P4 an older inline loop with a diverged vocabulary). One vocabulary everywhere (`state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/`mem`/`bl`/`vol`/`power`/`web`/`py`/`quit` — a command a board can't serve DECLINES, e.g. `drag` with no windows), board extras injected as a handler dict (P4: `bt`/`union`/`cache`/`crisp`), `py` scope extras via `env` (comp/game/boot/pump), the idle blank driven through the shared `device_boot.IdleBlank` on BOTH boards (the P4's inline copy is gone), and the merged `state` snapshot carries both tiers' shapes (`stack` on fullscreen, `desk`/`order`/`wins` on windowed, `psave` on both). Two hard-won sizings live in its constants: `SERIAL_LINE_MAX` must fit the harness's `pyexec` chunk lines (~768 chars %r-escaped — at the T-Deck's original 96 every P4 upload was silently dropped as noise, presenting as the RSA test hanging), and host tests pin the class (`tests/test_dev_channel.py`). **The T-Deck pytest suite EXISTS** (`tests/test_tdeck_on_glass.py`, gated on `MOYBYTE_TDECK_PORT`, 8 checks green on glass 2026-08-17): it ATTACHES to the running desktop and never resets — the T-Deck's USB-Serial/JTAG is ON the SoC, so a reset re-enumerates USB under the open handle and reads-forever-empty; and the port must be OPENED WITH DTR/RTS ASSERTED (pyserial default, what miniterm does) — opening with both LOW chip-resets the board (`rst:0x15`), the exact opposite of the P4's CH343. `P4Board` takes `board_dir=` and reads all four serial facts (`dtr`/`rts`/`attach_only`/`chunk`) from that board's `[serial]` block; the explicit kwargs remain as overrides. `attach_only` REFUSES a reset rather than merely recording one — until 2026-08-22 it was data with no consumer. When a T-Deck sits wedged for esptool, `--before usb_reset` connects where `default_reset` write-times-out. **The Guition has one too** (`tests/test_guition_on_glass.py`, gated on `MOYBYTE_GUITION_PORT`, 10/10 on glass 2026-08-18, both cart runtimes included) — the same attach-never-reset shape, for the same reason (its USB-Serial/JTAG is on the SoC), and both facts are now `[serial]` data in its board.toml rather than encoded by hand in the suite. Two more serial gotchas, both measured 2026-08-17: **merely OPENING the P4's CH343 port reboots the board** (`rst:0x1` on open — the Linux CH34x driver glitches the reset circuit despite pre-set DTR/RTS; the suite's explicit reset masks it, but a bare probe right after open is measuring a board mid-boot, ~17s to the desk), and **a UART board's stdin has a ~256-byte ring with NO flow control** — a long line written in one burst overflows it mid-line now that the dev channel drains per frame instead of blocking in readline (768-byte `py` lines failed 3/3 unpaced, passed 3/3 at 128B/20ms), so `P4Board._write_line` paces bursts and any OTHER writer of long lines to a UART board must too (USB boards backpressure and never need it).
+- **On-glass testing — all three boards have a suite** (#156). Each is gated on
+  its own env var and shares one session in file order, leaving the board where
+  it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
+  `tests/test_tdeck_on_glass.py` (`MOYBYTE_TDECK_PORT`),
+  `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`), over
+  `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
+  - **The line state at open is per-board and OPPOSITE, and it is DATA.**
+    `P4Board(board_dir=…)` reads `dtr`/`rts`/`attach_only`/`chunk` from that
+    board's `[serial]` block. The P4's CH343 opens with both LOW; the two S3
+    boards' USB-Serial/JTAG is ON the SoC, so opening them low is a CHIP RESET
+    (`rst:0x15`) after which the device re-enumerates under the open handle and
+    every read returns nothing, forever — indistinguishable from a dead board.
+    `attach_only` REFUSES a reset rather than recording one.
+  - **Merely OPENING the P4's CH343 reboots it** (`rst:0x1`; the Linux CH34x
+    driver glitches the reset circuit). A bare probe right after open is
+    measuring a board mid-boot, ~17s to the desk.
+  - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
+    vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/
+    `mem`/`bl`/`vol`/`power`/`web`/`py`/`quit`. A command a board cannot serve
+    DECLINES. Board extras arrive as a handler dict, `py` scope extras via `env`.
+    `state` is one-line JSON and assertions read console STATE, not pixels;
+    `swipe` goes through the real pointer feed; `py` evals against the live
+    console between frames.
+  - **`quit` exits the DESKTOP to the REPL, not the running cart**
+    (`REMOTE quit -> REPL`). Using it to end a cart leaves the board at `>>>`,
+    after which every suite errors with "did not answer `state`" and reads like a
+    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py` and
+    does NOT re-enumerate USB, which is what makes it safe on an attach-only board.
+  - **Never put a call that blocks on FLASH inside a `pyexec` snippet.** `pyexec`
+    uploads in chunks while `cmd` sends one line, so a real file write stalls the
+    loop long enough for a streaming PERF line to interleave into the exchange;
+    the reader then parses the fragment as a COMMAND and `int()`s its argument,
+    surfacing as a `PY ERR` that names nothing that is wrong. Issue those as their
+    own short `cmd`.
+  - **A UART board's stdin ring is ~256 bytes with NO flow control**, so
+    `_write_line` paces bursts and any other writer of long lines must too (USB
+    boards backpressure and never need it). `SERIAL_LINE_MAX` must fit the
+    harness's `pyexec` chunk lines — at the T-Deck's original 96 every P4 upload
+    was silently dropped as noise.
+  - Waits and staleness: **wait for `REMOTE drag done`/`swipe done`** before the
+    next command; PERF's `wmr/wmw/wms` are last-sample values that go STALE when
+    their pass stops running (a repeated constant means "not running"); allow ~10s
+    after a first `open picker` at a new size (cover pop-in, #155).
+  - **Look system-app carts up by TITLE, never folder name** — the device seeds
+    from the title slug, the host copies the source folder, and that mismatch is
+    what broke `AppearanceAppLayer.is_app` on device (pinned by
+    `tests/test_device_seed_parity.py`).
+  - When a T-Deck sits wedged for esptool, `--before usb_reset` connects where
+    `default_reset` write-times-out.
 - **Cart versioning (#47):** every `system_carts/*/manifest.json` carries an integer `"version"`. `seed_builtins` re-seeds an on-SD built-in only when the baked version is **newer**, and preserves the kid's data (`pmem.json` saves + `config.json` tuning) across the re-seed. **Bump a built-in's manifest `version` whenever you change its content**, or an already-seeded device keeps the stale copy.
 - **Device performance — the single source of truth is issue #66** (the living "performance ledger": current per-cart fps, the frame-budget model, shipped/reverted/open levers, how to measure). **Edit #66's body when new hardware numbers land** (comments = changelog), then `make sync-issues`; do NOT scatter numbers into this file, the plan, or new docs — they go stale. The **cross-board strategic analysis** (why we trail native emulators, the frame-budget taxes, the PPA scale-only verdict, and the ranked lever roadmap — frameskip / `-Ofast` / SRAM working set / `moy_gfx` IRAM / dual-core / Lua / render-overlap) lives in **`docs/perf_native_gap_v1.md`**, tracked by **#77**; P4 numbers are in **#58**. **No per-cart fps snapshot lives here** — one did, and it went stale exactly as this paragraph warns: it still quoted "Brick Siege 25-33" long after the board reached the 60 cap, inside the sentence forbidding scattered numbers. Read #66 for where the roster stands and #58 for the P4; the shipped-lever facts below are dated and stay. **The engine-side lever chain is exhausted** — every feed/dispatch/GC-cost lever tried and either shipped (auto-native carts #67, live-set diet, pal-state variant cache #72, layer pool, `background()`) or reverted with a recorded verdict (Fold-2 auto map cache, third bounce slot — the latter also retired the core-1 feeder unbuilt); remaining fps levers are per-cart render diets (Brick Siege field layer), the #67 Lua tier (strategic), and the P4 (#58). **Frameskip (#77) SHIPPED 2026-07-10, both boards** (Settings → FRAMESKIP, default OFF, persisted; P4 serial `skip 0|1`): a GAME's logic+input+audio tick every loop frame, render+composite+flush every second — logic at the full rate, motion at 30Hz; the trade is ~2× alloc churn (GC collects come ~2× as often). The same build's `-O3` moy_gfx pragma is **A/B-confirmed on the S3** (one pragma line: Brick Siege 33-36 → 51-54fps, render −40%; compute-bound there, unlike the dispatch-bound P4 where the same pragma measured null — per-board verdicts don't transfer), see #66/#77. Every draw verb is native (#43/#32/#62/#63) and the "draw LESS" idioms are both modeled by the seed carts and taught in docs/moy_cart_api.md → "Make it fast" — kids copy the carts, the carts model the doc. Remaining play defects: the #74 touch stalls (fingerprinted: boot-wake one-shot + rare steady-state; INT-pin gating is next) and the launcher live-wallpaper cost (~10fps launcher; the Make picker went static-black). Kid mode (#68): Settings → PERF DIAG (default OFF) gates the diag frame-eaters — **measurement sessions need it ON** — and DIAG SD LOG separately gates the periodic diag→SD write (keep OFF for stutter-free serial measurement). Three interpreter-vs-kid-idiom taxes were found and fixed ENGINE-SIDE, kid API untouched: per-draw-call dispatch (#43 batch + #63 native `spr_gate`), call-frame heap-spill (#63), and **float boxing** (#66: REPR_A allocated 16B per float result — 73KB/frame in sakura — whose heap-wrap gc collect was the long-standing ~150ms micro-stutter; fixed by the REPR_C build patch, unboxed 30-bit floats). Banding is structurally gone (#66 SRAM-bounce flush: the panel DMA only reads internal SRAM; the esp_lcd no-acquire patch makes banded tx_color queue-only). Remaining known frame spikes are tracked: #68 (diag-caused, kid-mode gate) and #69 (keyboard+touch I2C stalls, sized via I2CSTAT). Diagnostics: `PERF`/`DRAWBRK`/`DRAW2`(now with per-verb map/text/fill)/`BATCH`/`FLUSHBRK`/`CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH` serial lines, gated behind `perf_capture`.
 - **OTA / on-device firmware update (#53):** the build is now **dual-OTA** (`build.sh --ota` → `otadata + ota_0 + ota_1 + vfs`; the slot sizes are NOT the same on the two boards and are not repeated here — read `firmware/lilygo_t_deck_plus_mainline/build.sh`'s generated table and `firmware/esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4/partitions-moybyte-p4.csv`, which are the only things that decide whether an image fits), so the device can flash a new `.bin` from `/sd/update` into the **inactive** slot and ping-pong (`moy_ota.OtaUpdater` + Settings → UPDATE FW). The running slot is never touched and rollback is on (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`), so a bad image self-heals — `moy_runtime.run_desktop` calls `updater.mark_valid()` once the desktop is up to confirm the new image. **The app (ota_0) moved off 0x10000 → 0x20000**, so `build.sh` merges the full image at the derived offset and the Makefile uses `MPY_APP_OFFSET`. **BOTH BOARDS ARE ALREADY ON THE DUAL-OTA LAYOUT** (owner-confirmed 2026-08-15) and have taken OTA updates on glass — see the channel entry below. So the one-time migration is HISTORY, not a step anybody has to plan: `make firmware-flash-lilygo-micropython-full-erase` (rewrite the partition table + clear `otadata` so the bootloader boots ota_0) is what a board that has NEVER carried the OTA table needs — a fresh unit, or one recovered to a legacy single-app image. The ordinary targets assume the table is there, which on these two it is. **Phase 3** adds Settings → UPDATE ONLINE: it reads `/sd/update/ota.json` (`{"manifest_url": ...}`), fetches a manifest (`version`/`url`/`sha256`/`size`), and if newer than `moy_ota.FIRMWARE_VERSION` streams the `.bin` to SD then installs it. **Bump `moy_ota.FIRMWARE_VERSION` on every release** (like cart versioning) or the online check won't offer the update. **This is VERIFIED on hardware, on both boards** — flash, reboot-into-new-slot, rollback and the WiFi download all ran on glass on 2026-08-02 (the numbers are in the channel entry below), which also settled the WLAN-vs-LCD-DMA coexistence that #38 had flagged as the open risk. This paragraph carried "still NEEDS ON-HARDWARE VERIFICATION" for two weeks after the entry directly beneath it recorded the whole chain passing; if you are about to re-verify OTA because a doc told you to, read that entry first.
