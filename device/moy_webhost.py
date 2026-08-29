@@ -14,6 +14,8 @@ thing that crosses the wire afterwards is cart data.
     GET  /files.json     -> its #108 user files (drawings/docs/...)     [pin]
     POST /sync           -> apply a commit-shaped batch INTO either store [pin]
     POST /run            -> play a cart on the BOARD's own glass (#197)   [pin]
+    GET  /update         -> this board's FIRMWARE state (#41/#53)         [pin]
+    POST /update         -> ask it to update                              [pin]
 
 [pin] = refused 403 without the host's pairing pin (SECURITY, below). The two
 lines above it are open on purpose, and each for its own reason.
@@ -67,7 +69,8 @@ reveal or change what is on the board:
                       board lives here" and nothing else, and the page's mode
                       decision is made before it has a pin to offer
     PIN               GET /carts.json, GET /files.json    the kid's work
-    PIN               POST /sync, POST /run              (and /gpio on the Zero)
+    PIN               POST /sync, POST /run, GET+POST /update
+                                                        (and /gpio on the Zero)
 
 The old split gave any device on the same WiFi the whole cart store for the
 asking, on the reasoning that reading changes nothing. It reads a child's
@@ -87,6 +90,29 @@ the pin is resolved in `start()`, not in `__init__`, because a board CONSTRUCTS
 this before system.json is loaded and a pin captured then would be a pin minted
 from an empty store. A host built with `pin=None` (a test, the dev server) is
 open end to end, which is what keeps the LAN dev loop free of a password.
+
+FIRMWARE UPDATES ARE TWO ROUTES AND TWO BACKENDS (2026-08-29). The ROUTES are
+here, shared, because every board runs this host and every board runs the same
+`moy_ota.OtaUpdater`; they lived on the Zero alone until now, which made "the
+browser can update the board that serves it" true on exactly one board. What is
+NOT shared is what a trigger MEANS, and it must not be:
+
+  * a board WITH GLASS (`ConsoleUpdate`, below) HANDS THE GLASS BACK. Its own
+    update screen (runtime/update_ui.py) already installs a chunk per PAINTED
+    FRAME of that screen and takes its two confirms there. So the POST turns
+    WASM MODE OFF -- which unparks the glass -- and opens that screen. It
+    starts no install here, moves no chunk work into `poll()`, and therefore
+    never puts an SD read at the frame tail, where the T-Deck's shared bus
+    makes one the documented panic.
+  * a HEADLESS board (`zero_host.ZeroUpdate`) DRIVES the install in its own
+    poll loop, because it has no glass to hand back to -- and no card either,
+    so its slices share nothing with a panel.
+
+Same doctrine as moy_ota's two rollback-confirm gates: do NOT merge them behind
+a flag. The backend is where the claim about the hardware lives, and `screen`
+in the status document is that claim said out loud to the page, which needs it
+to know whether it is about to become the progress display or to stop being the
+console.
 
 THE JOURNAL: this board is the STORE OF RECORD for a page it serves, so the
 apply path journals (`moy_sync.apply_ops(..., journal=True)`) -- a browser-made
@@ -136,6 +162,11 @@ INTERNAL_WEB_DIR = "/moy/web"
 # spelled five times: the page tests for it, and a page and a board disagreeing
 # about the shape of "you need a pin" is a prompt that never appears.
 PIN_REFUSED = '{"error":"pin"}'
+# ...and the one a board with no updatable firmware answers /update with. A
+# board that simply has no such route 404s, and the page reads the two
+# differently: 404 means "not a board, or one flashed before this" and hides
+# the surface for good; 503 means "a board, but nothing to update" and says so.
+NO_UPDATER = '{"error":"no updater"}'
 
 
 def pin_ok(pin, sent):
@@ -345,12 +376,205 @@ def baked_stamp():
         return None
 
 
+def _ota_board():
+    """Which board this image is for. `moy_ota.BOARD` and nothing derived: an
+    OTA payload is an app-partition image, so another board's is a valid image
+    that cannot boot, and the page shows the name for the same reason the
+    manifest signs it."""
+    try:
+        import moy_ota
+
+        return moy_ota.BOARD
+    except Exception:                    # noqa: BLE001 -- a host/no-OTA build
+        return "?"
+
+
+def update_status(ota, state, screen, error=None, offer=None, progress=None,
+                  absent=False):
+    """The ONE /update document, whichever backend answered.
+
+    Both backends build it here, so the page has one shape to read and a board
+    that grows a third arrangement cannot invent a fourth. The fields:
+
+      state      the backend's own state word. Deliberately NOT normalised
+                 across the two: they are different machines, and flattening
+                 "the glass took over" into "downloading" would be a page
+                 drawing a progress bar for bytes nobody is moving.
+      screen     does this board have glass of its own. A HARDWARE FACT, and
+                 the one field the page must have before it offers anything:
+                 True means triggering an update ENDS this page's job as the
+                 console, False means this document is the only progress
+                 report that exists. Present in both states on purpose -- the
+                 "absence means no lever" rule is about MEASUREMENTS, and here
+                 an omitted key would make a headless board and a board too
+                 old to have this route read the same.
+      running    the firmware now running -- what the update screens show.
+      last       the PREVIOUS install's verdict, when the boot found a marker.
+                 The headless replacement for the console's notice banner, and
+                 why the marker is cleared at the CONFIRM rather than the read.
+      available  what the last check found, when it found anything.
+      progress   {done, total} while bytes are actually moving, and ABSENT
+                 otherwise: a frozen 0/0 is what a broken transfer looks like
+                 too, which is the ambiguity `fold=0` cost this repo weeks.
+      absent     the channel has published nothing for this board yet -- the
+                 normal state of a channel before its first release, and not
+                 the same sentence as "up to date".
+      error      the last failure, in words a person can act on.
+    """
+    out = {
+        "state": state,
+        "screen": bool(screen),
+        "running": {"version": ota.version(), "label": ota.version_label(),
+                    "channel": ota.channel(), "slot": ota.slot(),
+                    "board": _ota_board()},
+    }
+    if error:
+        out["error"] = error
+    verdict = getattr(ota, "boot_verdict", None)
+    if verdict:
+        out["last"] = {"result": verdict[0], "detail": verdict[1]}
+    if offer:
+        out["available"] = offer
+    if progress:
+        out["progress"] = progress
+    if absent:
+        out["absent"] = True
+    return out
+
+
+class ConsoleUpdate:
+    """The /update backend on a board WITH GLASS: a HAND-OFF, not a driver.
+
+    The browser does not install anything here, and deliberately cannot. This
+    board already owns the update flow -- `runtime/update_ui.py` advances the
+    flash ONE CHUNK PER PAINTED FRAME of its update screen, and takes two
+    deliberate confirms on the glass to get there. A browser-driven install
+    would need a SECOND driver for the same `OtaUpdater`, running while the
+    glass is parked on the WEB CONSOLE connection screen and the update screen
+    is not up at all: on the T-Deck that driver's chunks would be SD reads at
+    the frame tail, concurrent with a flush the feeder is still shipping, which
+    is the documented Cache/MMU panic. So the browser's part is the TRIGGER.
+
+    What a request does: turn WASM MODE OFF -- which unparks the glass -- and
+    open the update screen there. Both halves go through the console's own one
+    funnel (`ws.web.stop()`), because the mode and the socket must not be able
+    to disagree about which of them is on.
+
+    THE POST ANSWERS FIRST; THE HAND-OFF HAPPENS ON THE NEXT POLL. Turning wasm
+    mode off closes the socket the request arrived on, so doing it inside the
+    handler would race the one answer the page needs in order to say what just
+    happened to it. Same queue, same reason, as ZeroUpdate's.
+
+    NOTHING HERE IS UNATTENDED, and this is the load-bearing sentence. A
+    request OPENS A SCREEN. The confirm that starts the download and the
+    confirm that starts the flash are still taps on the board's own glass, by
+    somebody holding the board. There is no setting that changes that (the
+    `ota_auto` flag the Zero briefly had was deleted on the owner's call, and
+    this is not a way to reintroduce it one board over).
+    """
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.state = "idle"
+        self.error = None
+        self._want = False       # a queued hand-off, applied by the next step()
+
+    # -- the request side ----------------------------------------------------
+
+    def request(self, action):
+        """Queue the hand-off. Returns (ok, message) -- the message is what the
+        page shows, so it says what happened to the page and not to the board.
+
+        `check` and `install` are the SAME request here and both are accepted:
+        what this board can be asked for is "start the update flow", and the
+        flow itself decides what to check and what to install, on the glass. A
+        caller that wanted finer control is asking the wrong machine -- the
+        board in front of the person is the one with the buttons.
+        """
+        if action not in ("check", "install", "cancel"):
+            return False, "action must be check, install or cancel"
+        if action == "cancel":
+            # Nothing here to cancel: what a request starts lives on the glass,
+            # and its cancel is the X on that screen, in front of whoever is
+            # looking at it.
+            return False, "the console's own screen owns this update"
+        if self._updater() is None:
+            return False, "this console cannot update itself"
+        if self.state == "glass" or self._want:
+            return False, "the console already has this on its screen"
+        # A retry after a failed hand-off starts clean: leaving the old error
+        # standing would have the page report the LAST attempt's failure while
+        # this one is in flight.
+        self.state = "idle"
+        self.error = None
+        self._want = True
+        return True, "the console took this onto its own screen"
+
+    # -- the pumped side -----------------------------------------------------
+
+    def step(self):
+        """One slice, from `WebHost.poll()`. True if it did work."""
+        if not self._want:
+            return False
+        self._want = False
+        ws = self.ws
+        try:
+            web = getattr(ws, "web", None)
+            if web is not None:
+                # THE ONE FUNNEL (web_console.WebConsole.stop): it stops the
+                # host AND unparks the glass, and it asks what the user wants
+                # rather than toggling -- a host that had already fallen over
+                # under the parked screen would otherwise be STARTED here.
+                web.stop()
+            # ...and only now the screen, because unparking routes home and
+            # would pop an update screen pushed before it.
+            ws.update_ui.open_update_online()
+            self.state = "glass"
+        except Exception as exc:         # noqa: BLE001 -- never break a frame
+            self.state = "error"
+            self.error = "%s" % exc
+            print("UPDATE hand-off failed:", exc)
+        return True
+
+    # -- what the page reads -------------------------------------------------
+
+    def status(self):
+        """The status document, or None when this board cannot update itself.
+
+        None is turned into the same 503 a board with no updater at all gives,
+        so the page's probe has exactly two meanings: 404 = not a board that
+        speaks this, 503 = a board with nothing to offer.
+        """
+        ota = self._updater()
+        if ota is None:
+            return None
+        return update_status(ota, self.state, True, error=self.error)
+
+    def _updater(self):
+        """The board's OtaUpdater when this build can take an OTA, else None.
+
+        Read off `ws` at every call and never captured: a board constructs the
+        webhost before `wire_workstation_core` has attached anything, which is
+        the same ordering that keeps `make_webhost`'s pin lazy. The capability
+        question goes through the console's own cached query rather than
+        `available()` -- it is asked once per poll and the answer is fixed for
+        a boot.
+        """
+        ota = getattr(self.ws, "updater", None)
+        if ota is None:
+            return None
+        try:
+            return ota if self.ws._update_available() else None
+        except Exception:                # noqa: BLE001 -- a ws without the query
+            return None
+
+
 class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
     def __init__(self, carts_root, web_dir, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
-                 on_run=None):
+                 on_run=None, update=None):
         if port is None:
             WebServer.__init__(self)
         else:
@@ -370,6 +594,12 @@ class WebHost(WebServer):
         self._pin_source = pin_source
         self.on_sync = on_sync
         self.on_run = on_run
+        # The /update backend (ConsoleUpdate here, zero_host.ZeroUpdate on the
+        # headless board). None = this host serves carts and no firmware route,
+        # which is what the dev twin and every test that does not care about
+        # OTA want -- and what an updater that would not CONSTRUCT leaves
+        # behind, because a board that cannot update must still serve carts.
+        self.update = update
         # Settings contract (console.Workstation.toggle_webhost): `.serving`,
         # `.start()`, `.stop()`, `.url()`, and `.error` for a failure the row can
         # show. Constructed but NOT started -- __init__ binds no socket, so
@@ -456,6 +686,31 @@ class WebHost(WebServer):
                "image (%s) -- push them all or delete them" % (
                    len(pushed), len(ASSETS), self.web_dir, stamp or "none")
 
+    def poll(self):
+        """One transport poll, then ONE slice of the update backend.
+
+        The slice runs AFTER the transport's and never inside a handler, and
+        both backends need that: the console board's turns wasm mode off, which
+        closes the socket the request arrived on, and the Zero's advances an
+        install. Each is something the request must already have been ANSWERED
+        before. Guarded, because on a console board this is the frame tail and
+        a firmware endpoint must not be able to break a frame.
+        """
+        did = WebServer.poll(self)
+        u = self.update
+        if u is not None:
+            try:
+                if u.step():
+                    did = True
+            except Exception as exc:     # noqa: BLE001 -- never break a frame
+                print("UPDATE ERR %s: %s" % (type(exc).__name__, exc))
+        return did
+
+    # WebServer aliases `service = poll` at class scope, which binds the BASE
+    # body -- so a caller reaching for that name would get the transport
+    # without the pump. Re-aliased here rather than left as a trap.
+    service = poll
+
     def stop(self):
         WebServer.stop(self)
         self.serving = False
@@ -493,9 +748,14 @@ class WebHost(WebServer):
                 return self._sync(body)
             if path == "/run":
                 return self._run(body)
+            if path == "/update":
+                return self._update(target, body)
         if method != "GET":
+            # The refusal NAMES the write paths. A page that guessed a verb
+            # gets a sentence it can act on, where a bare 405 reads exactly
+            # like a wrong url.
             return http_response(
-                405, '{"error":"GET only (writes ride POST /sync and /run)"}')
+                405, '{"error":"GET, or POST /sync /run /update"}')
         if path == "/sync":
             # The CAPABILITY MARKER, and the one GET that stays OPEN on a
             # pinned board. It reveals that a board lives here and nothing
@@ -506,6 +766,8 @@ class WebHost(WebServer):
             # learns not to offer PLAY ON DEVICE and not to build a sync loop
             # against a wall.
             return http_response(200, '{"sync":1}')
+        if path == "/update":
+            return self._update(target, None)
         if path == "/" or path == "/index.html":
             return self._asset("index.html")
         name = path[1:]
@@ -668,6 +930,64 @@ class WebHost(WebServer):
             return http_response(404, '{"error":"no cart"}')
         return http_response(200, _json.dumps({"run": title}))
 
+    def _update(self, target, body):
+        """The firmware endpoint (#41/#53). `body` is None on the GET.
+
+        BOTH METHODS ARE GATED, with no read-half exemption -- the same call
+        `/gpio`'s GET was brought under on 2026-08-25. What a GET here reveals
+        is which firmware a specific board on somebody's home network is
+        running, which is a shopping list for whoever wants to hand it an
+        image; and the write half is the strongest verb a board has, since it
+        replaces the board.
+
+        BOTH READ THE PIN OFF `?pin=`, and that is deliberate even though
+        /sync and /run take theirs from the body. A GET has nowhere else to
+        carry a credential, and ONE endpoint whose two methods spend the
+        credential in two different places is a rule nobody holds -- so the
+        query is the rule here and the page puts it on both. (This is the
+        shape the Zero's endpoints already shipped with, and the board's
+        README documents it for the cable-and-curl path.)
+
+        No storage is touched on either method: `status()` reads a partition
+        label and some constants, and a request only QUEUES. That matters on
+        the T-Deck, where this runs at the frame tail with the panel feeder
+        possibly still shipping bands -- the one place an sdspi transaction is
+        the documented panic.
+        """
+        refused = self.gate(target)
+        if refused is not None:
+            return refused
+        if self.update is None:
+            return http_response(503, NO_UPDATER)
+        if body is None:
+            doc = self.update.status()
+            if doc is None:
+                return http_response(503, NO_UPDATER)
+            return http_response(200, _json.dumps(doc))
+        try:
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            sent = _json.loads(body or "{}")
+            # DEFAULTS TO LOOKING, NEVER TO INSTALLING. A body that named no
+            # action is a caller that did not say, and the harmless reading is
+            # the only honest one to pick for a verb that replaces the board.
+            action = sent.get("action") or "check"
+        except (ValueError, AttributeError):
+            return http_response(400, '{"error":"bad json"}')
+        doc = self.update.status()
+        if doc is None:
+            return http_response(503, NO_UPDATER)
+        ok, msg = self.update.request(action)
+        # ANSWERED IMMEDIATELY, with the state the request left behind. The
+        # work happens in step(): holding the socket across a 2MB download (or
+        # across a hand-off that closes this very socket) makes every outcome
+        # look like a browser timeout, which on a board with no screen is the
+        # same as no report at all.
+        doc = self.update.status() or doc
+        doc["ok"] = ok
+        doc["message"] = msg
+        return http_response(200 if ok else 409, _json.dumps(doc))
+
     def _pack(self, root):
         """One sync root, STREAMED as JSON -- the pull half for any registered
         `root` (moy_sync.SYNC_ROOTS), never assembled into a dict.
@@ -773,6 +1093,13 @@ def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
     test, a host with its own policy); otherwise the pin is read off the live
     `ws` at START, never now: a board builds this before system.json is loaded,
     and a pin captured at construction would be minted against an empty store.
+
+    And the /update backend for the same reason a third time. `ConsoleUpdate`
+    is UNCONDITIONAL here -- it asks `ws` whether this build can take an OTA at
+    every request rather than being gated at construction, so a board never
+    ends up with the routes and no answer, or an answer and no routes. This is
+    the injection that was written once instead of three times, which is the
+    whole lesson of `ensure_online`'s docstring above.
     """
     return WebHost(carts_root, web_dir, port=port, with_sd=with_sd,
                    ensure_online=lambda: ensure_online(
@@ -780,4 +1107,5 @@ def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
                    pin=pin,
                    pin_source=None if pin else lambda: ws.web_pin(),
                    on_sync=lambda: ws.rescan_carts(),
-                   on_run=lambda name: ws.launch_named(name))
+                   on_run=lambda name: ws.launch_named(name),
+                   update=ConsoleUpdate(ws))

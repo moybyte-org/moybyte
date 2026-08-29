@@ -32,9 +32,13 @@ the two it is about to serve, for the same reason.
 browser calls `pin_write`, the page batches it here, and this board -- which
 has the pins -- does the driving.
 
-`GET/POST /update` is the third (ZeroUpdate, below): the OTA flow every other
-board runs off its own Settings screen, exposed as two pin-gated JSON endpoints
-because this board has no screen to put it on.
+`GET/POST /update` is the third (ZeroUpdate, below). The ROUTES are
+`moy_webhost`'s now, on every board (2026-08-29); what is this board's own is
+the BACKEND behind them -- the OTA flow every other board runs off its own
+Settings screen, driven here by a state machine in the poll loop because this
+board has no screen to put it on. The browser console this board serves is
+where a person triggers it and watches it, which is the whole point of the
+endpoints being pin-gated JSON rather than a UI.
 
 Runs on the board's own frozen image (`build.sh` -> MOYBYTE_ZERO). STA is the
 SERVING mode: the SoftAP lane measured too weak for the old streaming view and
@@ -150,10 +154,13 @@ def connect(wait_ms=15000, hostname=None):
 # down a path that had never run on hardware. Nothing wrote the flag either:
 # reaching it meant hand-editing a JSON file over the cable.
 #
-# WHERE THE REQUEST WILL COME FROM instead: the browser console this board
-# serves. The browser IS this board's screen, so its Settings menu is where
-# "update this board" belongs, and it will POST the same /update this file
-# already gates. That is a follow-up, not something this file does today.
+# WHERE THE REQUEST COMES FROM instead (landed 2026-08-29): the browser
+# console this board serves. The browser IS this board's screen, so it is
+# where "update this board" belongs, and it POSTs the same /update this file
+# already gated -- now through moy_webhost, which serves the route on every
+# board. On a board WITH glass that POST hands the glass back instead
+# (moy_webhost.ConsoleUpdate); this board is the one that genuinely needs the
+# browser to display the progress, because it has no other display.
 #
 # HOW A HUMAN LEARNS IT HAPPENED, all three ways, none of them a UI:
 #   * serial -- every transition prints a `ZERO ota:` line, and the boot line
@@ -210,6 +217,11 @@ class ZeroUpdate:
         self.state = "idle"
         self.error = None
         self.manifest = None
+        # "nothing is published on this channel for this board yet" -- the
+        # normal state of a channel before its first release. Carried
+        # separately from `state` because "none" covers it AND "up to date",
+        # and those are two different sentences to say to a person.
+        self.nothing_published = False
         self._want = None          # queued action, applied by the next step()
         self._checked = False      # has the once-per-boot check run?
         self._reboot_in = 0        # poll iterations left before machine.reset()
@@ -298,10 +310,12 @@ class ZeroUpdate:
         self.state = "checking"
         self.error = None
         self.manifest = None
+        self.nothing_published = False
         m = self.ota.check_online()
         if m is None:
             if self.ota.absent:
                 self.state = "none"
+                self.nothing_published = True
                 print("ZERO ota: no build published on this channel yet")
             else:
                 self.state = "error"
@@ -390,49 +404,45 @@ class ZeroUpdate:
         self.state = "idle"
         self.manifest = None
         self.error = None
+        self.nothing_published = False
         self._reboot_in = 0
 
     # -- what a human reads ---------------------------------------------------
 
     def status(self):
+        """This board's half of the shared /update document.
+
+        Built through `moy_webhost.update_status`, which both backends call:
+        the page reads ONE shape, and the fields that mean the same thing on
+        every board (the running firmware, the previous install's verdict)
+        cannot drift between them. What is this board's own is the state word,
+        the progress numbers -- which come from a DIFFERENT pair of counters in
+        each phase -- and `screen=False`, the hardware fact that makes this
+        document the only progress report that exists here.
+
+        The import is local because importing this module must stay free of
+        everything that only works on a board (moy_webhost pulls in the socket
+        transport); this runs at most once per poll answering a request.
+        """
+        from moy_webhost import update_status
+
         ota = self.ota
-        out = {
-            "state": self.state,
-            "running": {"version": ota.version(), "label": ota.version_label(),
-                        "channel": ota.channel(), "slot": ota.slot(),
-                        "board": _ota_board()},
-        }
-        if self.error:
-            out["error"] = self.error
-        if ota.boot_verdict:
-            # The PREVIOUS install's outcome: "ok" (the slot we pointed at is
-            # the one running) or "rolled_back" (the bootloader gave up on it).
-            # This is the headless replacement for the notice banner the
-            # console boards show, and it is why the marker is cleared at the
-            # CONFIRM rather than at the read.
-            out["last"] = {"result": ota.boot_verdict[0],
-                           "detail": ota.boot_verdict[1]}
+        offer = None
         if self.manifest:
-            out["available"] = {
+            offer = {
                 "version": self.manifest.get("version"),
                 "label": self.manifest.get("label"),
                 "channel": self.manifest.get("channel"),
                 "size": self.manifest.get("size"),
             }
+        progress = None
         if self.state == "downloading":
-            out["progress"] = {"done": ota.dl_done, "total": ota.dl_total}
+            progress = {"done": ota.dl_done, "total": ota.dl_total}
         elif self.state == "installing":
-            out["progress"] = {"done": ota.done, "total": ota.total}
-        return out
-
-
-def _ota_board():
-    try:
-        import moy_ota
-
-        return moy_ota.BOARD
-    except Exception:                    # noqa: BLE001
-        return "?"
+            progress = {"done": ota.done, "total": ota.total}
+        return update_status(ota, self.state, False, error=self.error,
+                             offer=offer, progress=progress,
+                             absent=self.nothing_published)
 
 
 def _frozen_or_pushed(names=("zero_host", "zero_gpio", "zero_setup",
@@ -479,7 +489,6 @@ def zero_host_class():
             self._pins = None       # built on the first /gpio, not at boot: a
                                     # board nobody wires anything to should not
                                     # import machine.Pin to find that out
-            self.update = None      # a ZeroUpdate, injected by serve()
 
         def handle_http(self, method, path, body):
             # `path` is the request TARGET; /gpio's GET reads its pin off the
@@ -490,41 +499,10 @@ def zero_host_class():
                     self._pins = zero_gpio.pin_factory()
                 return zero_gpio.handle(method, body, pin=self.pin,
                                         get_pin=self._pins, query=path)
-            if bare == "/update":
-                return self._update(method, path, body)
+            # /update is the BASE class's since 2026-08-29 -- every board
+            # answers it, and the only thing that differed was the backend
+            # behind it, which is what `self.update` already is.
             return WebHost.handle_http(self, method, path, body)
-
-        def _update(self, method, target, body):
-            """The firmware endpoint. BOTH METHODS ARE GATED, with no read-half
-            exemption -- the same call `/gpio`'s GET was brought under on
-            2026-08-25. What a GET here reveals is which firmware a specific
-            board on somebody's home network is running, which is a shopping
-            list for whoever wants to hand it an image; and the write half is
-            the strongest verb this board has, since it replaces the board.
-            """
-            from moy_webserver import http_response
-
-            refused = self.gate(target)
-            if refused is not None:
-                return refused
-            if self.update is None:
-                return http_response(503, '{"error":"no updater"}')
-            if method == "GET":
-                return http_response(200, json.dumps(self.update.status()))
-            if method != "POST":
-                return http_response(405, '{"error":"GET or POST"}')
-            try:
-                doc = json.loads(body or "{}")
-                action = doc.get("action") or "check"
-            except (ValueError, AttributeError):
-                return http_response(400, '{"error":"bad json"}')
-            ok, msg = self.update.request(action)
-            # The POST ANSWERS IMMEDIATELY and the work happens in step(): see
-            # ZeroUpdate's docstring for why holding the socket across a 2MB
-            # download is the one shape that cannot report anything useful.
-            return http_response(200 if ok else 409,
-                                 json.dumps({"ok": ok, "message": msg,
-                                             "state": self.update.state}))
 
     return ZeroHost
 
@@ -623,5 +601,8 @@ def serve():
                     # for firmware before certifying its own can chase a bad
                     # image round a rollback loop forever.
                     task.boot_check_once()
-            task.step()
+        # ...and `task.step()` is NOT called here: `WebHost.poll()` pumps the
+        # injected update backend, which is the one place every board's does
+        # its slice. A second call here would double this board's install rate
+        # for no reason and put the two boards' pumps in different files again.
         time.sleep_ms(10)

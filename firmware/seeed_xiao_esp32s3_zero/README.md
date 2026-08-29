@@ -150,6 +150,16 @@ UPDATE ONLINE, a progress bar, and a banner naming what the last install did.
 This one has no glass, so the same `moy_ota.OtaUpdater` is driven by
 `zero_host.ZeroUpdate` and reported as JSON.
 
+**The two routes are `device/moy_webhost.py`'s, on every board** (2026-08-29).
+They lived here alone until then, which made "the browser can update the board
+that serves it" true on exactly one board of four. What stays this board's own
+is the BACKEND behind them: `ZeroUpdate` drives the install slice by slice in
+the poll loop, where a board with a screen instead hands its glass back
+(`moy_webhost.ConsoleUpdate`) and lets its own update screen do the work. The
+two are not one class behind a flag, for the reason `confirm_when_serving` is
+not one with `confirm_when_healthy`: the backend is where the claim about this
+hardware lives.
+
 **The trigger is a request, not a timer.**
 
 ```
@@ -179,11 +189,13 @@ deliberate human acts, opening the update screen in Settings and confirming —
 and nothing ever wrote the flag, so reaching it meant hand-editing a JSON file
 over the cable. Unattended firmware replacement, on the board holding the only
 local copy of a kid's carts, down a path that had never run on hardware, is not
-a thing to carry even switched off. **Where the request will come from instead:
-the Settings menu of the browser console this board serves.** The browser is
-this board's screen; `POST /update` is already the right transport and keeps its
-job. That console-side button is a follow-up, not something this board is
-waiting on — the endpoint works today.
+a thing to carry even switched off. **Where the request comes from instead: the
+browser console this board serves** (landed 2026-08-29). The browser is this
+board's screen, so the page carries a firmware strip that shows the running
+version and the previous install's verdict, asks the board to look, offers what
+it found, and then displays the download and the flash as they happen. Two
+taps, which are this board's spelling of the two the other boards take on
+glass.
 
 **How a human learns it happened**, three ways, none of them a UI:
 

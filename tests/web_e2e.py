@@ -57,6 +57,11 @@ FEATURES = {
                     and b"p8_writer" in (DIST / "micropython.wasm").read_bytes()),
            "dist/ predates the PICO-8 drop (no report card, or the frozen "
            "console has no p8 converter in it)"),
+    # #41/#53: the firmware strip and the one link surface it hands off to.
+    # Page-side only -- nothing about updating the board that serves this page
+    # lives in the wasm, so the .wasm is not part of this probe.
+    "update": (lambda: "__moyLinkLost" in (DIST / "index.html").read_text(),
+               "dist/index.html predates the firmware strip (#41/#53)"),
 }
 
 

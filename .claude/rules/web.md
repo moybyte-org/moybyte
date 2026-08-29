@@ -59,6 +59,20 @@ nor those docs will warn you about:
   REFUSE the batch instead of writing `drawings/…` into its carts store. A files
   path must start with a `FILE_KINDS` kind, which is the one rule keeping
   `.history/` and `trash/` home in both directions.
+- **THE PAGE IS THE SERVING BOARD'S UPDATE SURFACE** (#41/#53, 2026-08-29), and
+  what it does depends on whether that board has glass. Headless: the strip IS
+  the update screen — two taps, then a polled progress read, because the board
+  installs in its own loop. With glass: ONE tap hands the glass back and the
+  board's own update screen takes over, so the page installs nothing anywhere.
+  Both go through `GET`/`POST /update` on the shared webhost, never the idle
+  WebSocket core: the megabytes never cross this link (the board downloads its
+  own firmware), and `WS_IDLE_MS` would reap a client through a flash write —
+  which is exactly what the old streaming port hit. **ONE disconnect surface,
+  and the REASON is its point**: an update or a hand-back is "expected" and
+  nothing is at risk; a board that vanished is "lost", and only that one carries
+  the unsynced-work warning, because board mode keeps no local store. First
+  reason wins, so an update nobody needs warning about cannot later be
+  re-reported as a loss.
 - **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
   detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
   screen — which is how the two-writer collision is **designed out rather than

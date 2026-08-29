@@ -1,0 +1,22 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "a HEADLESS board served this page, so the strip IS its update screen"},
+  {"js": "JSON.stringify({at:'idle',shown:getComputedStyle(document.getElementById('upd')).display,say:document.getElementById('upds').textContent,act:document.getElementById('updb').textContent,st:window.__moyUpdate})"},
+  {"shot": "idle"},
+
+  {"note": "act one: ask it to look. The POST is answered before the board does it, so the strip polls."},
+  {"js": "JSON.stringify({at:'asked',ok:(document.getElementById('updb').click(),true)})"},
+  {"wait": 4000},
+  {"js": "JSON.stringify({at:'offered',say:document.getElementById('upds').textContent,act:document.getElementById('updb').textContent,st:window.__moyUpdate})"},
+  {"shot": "offered"},
+
+  {"note": "act two: install it. From here the board works and this page only reads a number."},
+  {"js": "JSON.stringify({at:'confirmed',ok:(document.getElementById('updb').click(),true)})"},
+  {"wait": 4000},
+  {"js": "JSON.stringify({at:'moving',say:document.getElementById('upds').textContent,st:window.__moyUpdate,link:window.__moyLink||''})"},
+  {"shot": "moving"},
+
+  {"note": "and it ends in a reset, which is the board going away for a reason somebody chose"},
+  {"wait": 9000},
+  {"js": "JSON.stringify({at:'gone',link:window.__moyLink||'',head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,panel:getComputedStyle(document.getElementById('lnk')).display,strip:getComputedStyle(document.getElementById('upd')).display})"},
+  {"shot": "gone"}
+]}

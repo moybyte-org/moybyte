@@ -48,10 +48,18 @@ paths:
     rather than pausing it. Both gates end in one `_confirm()`, so the marker's
     lifetime below is not re-implemented. **Do NOT merge them behind a flag** —
     the argument list is where the claim about the hardware lives.
-  - **With no screen the update UI is two pin-gated JSON endpoints**
-    (`zero_host.ZeroUpdate`): the POST queues and answers, the work runs in the
-    poll loop, and the last verdict is a field rather than a banner. The board's
-    README states the trigger decision and its reasoning.
+  - **THE UPDATE ROUTES ARE SHARED; THE BACKEND BEHIND THEM IS NOT**
+    (`device/moy_webhost.py`, 2026-08-29). `GET`/`POST /update` are pin-gated on
+    BOTH methods and both read the pin off `?pin=` — one endpoint may not spend
+    its credential in two places. The POST queues and answers; the work runs in
+    `WebHost.poll()`. Two backends, deliberately not one behind a flag (the same
+    argument as the two confirm gates above): a HEADLESS board drives the
+    install slice by slice (`zero_host.ZeroUpdate`), and a board WITH GLASS
+    HANDS THE GLASS BACK (`moy_webhost.ConsoleUpdate` — wasm mode off, then
+    `update_ui.open_update_online()`), so no browser-driven install exists, no
+    chunk work reaches `poll_webhost`, and the T-Deck's frame-tail SD gate is
+    never in the picture. `screen` in the status document is that hardware
+    claim, said to the page. The Zero's README states the trigger decision.
   - **`finish()` writes `pending.json` naming the slot it pointed the bootloader
     at**; `boot_check()` compares it against the running slot next boot. **The
     marker is cleared at the CONFIRM, not at the read**, so an image that boots,

@@ -16,6 +16,16 @@ refuse for ES modules) and .wasm as application/wasm (streaming compile).
                                             # directory. The no-hardware way to
                                             # watch a browser edit land as files
                                             # on disk.
+    python serve.py ... --carts D --update glass|headless
+                                            # ...and a board's FIRMWARE routes
+                                            # (GET/POST /update) on top, faked.
+                                            # `headless` is a Zero -- the page
+                                            # IS its update screen, so the
+                                            # whole check/offer/download/
+                                            # install/reboot arc plays out
+                                            # there. `glass` is a console: the
+                                            # trigger hands its own screen back
+                                            # and this page stops being it.
     python serve.py ... --carts D --pin NNNN  # ...with a board's PIN GATE on
                                             # top. The dev loop stays PINLESS by
                                             # default and is meant to: a
@@ -47,6 +57,18 @@ if "--carts" in args:
     i = args.index("--carts")
     carts_dir = os.path.abspath(args[i + 1])
     del args[i:i + 2]
+update_mode = None
+if "--update" in args:
+    i = args.index("--update")
+    update_mode = args[i + 1]
+    del args[i:i + 2]
+    if update_mode not in ("glass", "headless"):
+        raise SystemExit("--update takes glass or headless")
+    if "--carts" not in sys.argv:
+        # The firmware routes ride the BOARD-TWIN handler; without --carts this
+        # is a plain static server and the flag would be accepted and ignored,
+        # which is how a scenario ends up testing nothing.
+        raise SystemExit("--update needs --carts (it is part of the board twin)")
 if "--pin" in args:
     i = args.index("--pin")
     pin = args[i + 1]
@@ -68,6 +90,113 @@ else:
     import moy_webhost                                  # noqa: E402
     from moy_webserver import query_param as _query      # noqa: E402
     from runtime import moy_sync                        # noqa: E402
+
+    class _TwinOta:
+        """The handful of things `moy_webhost.update_status` asks an updater."""
+
+        def __init__(self):
+            self.boot_verdict = None
+
+        def version(self):
+            return 5
+
+        def version_label(self):
+            return "0.8"
+
+        def channel(self):
+            return "stable"
+
+        def slot(self):
+            return "ota_0"
+
+    class TwinUpdate:
+        """A SCRIPTED /update backend -- the wire SHAPE, not a state machine.
+
+        The document goes through `moy_webhost.update_status`, the one body
+        both real backends call, so a twin cannot drift from a board about what
+        the page reads. What is faked is the behaviour behind it, and it is
+        faked DETERMINISTICALLY: a request is answered without doing it (as a
+        board's is -- the work happens in its poll loop), and the next STATUS
+        READ is what advances things. That is what lets a browser walk the
+        whole check -> offer -> download -> install -> reboot arc in a bounded
+        number of polls with no board, no network and no clock.
+
+        `screen` is the whole difference between the two modes, and it is the
+        difference between the two real backends too: with glass, a trigger
+        hands the glass back and this page stops being the console; without,
+        this page is the only place the update can be watched.
+        """
+
+        DL_TOTAL = 2100000
+        SLICES = 3
+
+        def __init__(self, screen):
+            self.screen = screen
+            self.ota = _TwinOta()
+            self.state = "idle"
+            self.error = None
+            self._want = None
+            self._n = 0
+
+        def request(self, action):
+            if action not in ("check", "install", "cancel"):
+                return False, "action must be check, install or cancel"
+            if action == "cancel":
+                self.state = "idle"
+                self._want = None
+                return True, "cancelled"
+            if self.screen:
+                if self.state == "glass":
+                    return False, "the console already has this on its screen"
+                self._want = "glass"
+                return True, "the console took this onto its own screen"
+            if self.state in ("downloading", "installing", "reboot"):
+                return False, "busy: " + self.state
+            self._want = "install" if action == "install" else "check"
+            return True, "queued"
+
+        def _advance(self):
+            """One slice, taken on a status READ (a board takes it in its own
+            poll loop; this twin has none)."""
+            want, self._want = self._want, None
+            if want == "glass":
+                self.state = "glass"
+                return
+            if want == "check":
+                self.state = "offer"
+                return
+            if want == "install":
+                self.state = "downloading"
+                self._n = 0
+                return
+            if self.state == "downloading":
+                self._n += 1
+                if self._n >= self.SLICES:
+                    self.state = "installing"
+                    self._n = 0
+            elif self.state == "installing":
+                self._n += 1
+                if self._n >= self.SLICES:
+                    self.state = "reboot"
+
+        def status(self, advance=True):
+            if advance:
+                self._advance()
+            offer = progress = None
+            if self.state in ("offer", "downloading", "installing"):
+                offer = {"version": 6, "label": "0.9", "channel": "stable",
+                         "size": self.DL_TOTAL}
+            if self.state == "downloading":
+                progress = {"done": self._n * self.DL_TOTAL // self.SLICES,
+                            "total": self.DL_TOTAL}
+            elif self.state == "installing":
+                progress = {"done": self._n * self.DL_TOTAL // self.SLICES,
+                            "total": self.DL_TOTAL}
+            return moy_webhost.update_status(
+                self.ota, self.state, self.screen, error=self.error,
+                offer=offer, progress=progress)
+
+    update = TwinUpdate(update_mode == "glass") if update_mode else None
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
@@ -125,10 +254,43 @@ else:
                     tops=moy_sync.file_kinds())).encode()
                 self._send(200, body)
                 return
+            if path == "/update":
+                # Both methods gate on the QUERY here, exactly as a board's do
+                # -- see moy_webhost._update for why one endpoint may not read
+                # its credential from two places.
+                if update is None:
+                    self._send(404, b'{"error":"not found"}')
+                    return
+                if self._refused(_query(self.path, "pin")):
+                    return
+                self._send(200, json.dumps(update.status()).encode())
+                return
             super().do_GET()          # the boot assets: never gated
 
         def do_POST(self):
-            if self.path.split("?", 1)[0] != "/sync":
+            path = self.path.split("?", 1)[0]
+            if path == "/update":
+                if update is None:
+                    self._send(404, b'{"error":"not found"}')
+                    return
+                if self._refused(_query(self.path, "pin")):
+                    return
+                n = int(self.headers.get("Content-Length") or 0)
+                try:
+                    doc = json.loads(self.rfile.read(n) or b"{}")
+                    action = doc.get("action") or "check"
+                except ValueError:
+                    self._send(400, b'{"error":"bad json"}')
+                    return
+                ok, msg = update.request(action)
+                # ANSWERED WITHOUT ADVANCING, like a board: the request is
+                # queued and the reader is what sees it happen.
+                out = update.status(advance=False)
+                out["ok"] = ok
+                out["message"] = msg
+                self._send(200 if ok else 409, json.dumps(out).encode())
+                return
+            if path != "/sync":
                 self._send(404, b'{"error":"not found"}')
                 return
             n = int(self.headers.get("Content-Length") or 0)
@@ -157,6 +319,8 @@ else:
 
 with http.server.ThreadingHTTPServer(("0.0.0.0", port), handler) as srv:
     note = (" + carts/sync over %s" % carts_dir) if carts_dir else ""
+    if update_mode:
+        note += " + a faked /update (%s)" % update_mode
     print("serving %s at http://127.0.0.1:%d/%s%s"
           % (root, port, "?pin=%s" % pin if pin else "", note))
     srv.serve_forever()
