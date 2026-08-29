@@ -59,10 +59,18 @@ const ORIGIN = BASE || `http://127.0.0.1:${PORT}`;
 // in the profile, so proving persistence needs two runs to share one.
 const profile = process.env.MOY_PROFILE
     || join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
+// MOY_CHROME_FLAGS appends launch flags, for environments the defaults do not
+// fit. CI sets `--no-sandbox`: Ubuntu 24.04 restricts unprivileged user
+// namespaces under AppArmor, and where that bites, Chrome's zygote dies before
+// it ever prints a debug port -- which reads here as "chrome did not report a
+// debug port" and would be a red run about the runner, not about the console.
+// The page under test is served from 127.0.0.1 out of our own dist/, so the
+// sandbox is not what is keeping anything out.
+const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
 const chrome = spawn(CHROME, [
     "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-gpu",
-    "--window-size=1280,800", "--hide-scrollbars", "about:blank",
+    "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
 ], { stdio: ["ignore", "ignore", "pipe"] });
 
 const wsUrl = await new Promise((ok, err) => {

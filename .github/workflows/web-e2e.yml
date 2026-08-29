@@ -1,0 +1,180 @@
+name: Web console E2E
+
+# The HOSTED CONSOLE, in a real browser, on every push that can break it.
+#
+# Two suites in this repo drive the wasm head the way a visitor to moybyte.com
+# does -- real headless Chrome, the shipped page, the real launcher UI:
+#
+#   tests/test_web_sync_e2e.py     Make -> +New through the page, and the cart
+#                                  must land as FILES on the board twin's disk
+#                                  (the page, the worker's sync pump, the wire
+#                                  and the receiving apply, in one pass), plus
+#                                  the pin-pairing gesture.
+#   tests/test_web_persist_e2e.py  mode-1 OPFS persistence across two page loads
+#                                  in one pinned Chrome profile, the .moy zip
+#                                  round trip, and the negative case -- a
+#                                  BOARD-served page must keep nothing locally.
+#
+# Both are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
+# it: the whole browser tier -- the thing a visitor actually touches -- had no
+# automated net, and a regression in it was silent. `make test` still does not
+# pay for them; this job does, and only when something that feeds them moved.
+#
+# THE SKIPS HAVE TEETH HERE (tests/web_e2e.py). On a bench a missing toolchain
+# SKIPS with a reason, which is right -- a laptop with no emsdk build is a bench
+# fact, not a regression. In CI that same skip inverts into the hazard: a job
+# that asks for these suites and then skips every one of them is a green tick
+# over an untested console. `CI` (and MOYBYTE_REQUIRE_WEB_E2E, set below so the
+# intent is legible) turns every prerequisite into a hard failure, the same
+# doctrine as MOYBYTE_REQUIRE_UNIX_MP and MOYBYTE_REQUIRE_WEB_BUNDLE.
+#
+# Its own workflow rather than a job in ci.yml, because GitHub's `paths:` filter
+# is workflow-scoped: ci.yml deliberately carries NO path filter (it is the
+# always-on gate and must run on everything), so a filtered job could not live
+# there without either dropping the filter -- a wasm build on every docs push --
+# or re-deriving the changed paths by hand. pages.yml already expresses exactly
+# this shape, and this workflow shares its wasm cache key on purpose: one cache,
+# two consumers, and a warm hit either way.
+on:
+  push:
+    branches: [master, dev]
+    paths:
+      - "firmware/web_runner/**"   # the page, the worker, the build, serve.py
+      - "runtime/**"               # the console the wasm head IS
+      - "device/**"                # serve.py --carts runs the REAL moy_webhost
+      - "system_carts/**"          # the twin's seeded shelf
+      - "tests/test_web_*"
+      - "tests/web_e2e.py"
+      - ".github/workflows/web-e2e.yml"
+  pull_request:
+    branches: [master, dev]
+    paths:
+      - "firmware/web_runner/**"
+      - "runtime/**"
+      - "device/**"
+      - "system_carts/**"
+      - "tests/test_web_*"
+      - "tests/web_e2e.py"
+      - ".github/workflows/web-e2e.yml"
+  workflow_dispatch:
+
+# A burst of pushes collapses into one run of the last commit -- the wasm build
+# is the expensive half and re-proving an overwritten tree buys nothing.
+concurrency:
+  group: web-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: The console in real Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The suites' own gate: without this they skip at collection.
+      MOYBYTE_WEB_E2E: "1"
+      # ...and the teeth. `CI` alone already arms them (GitHub sets it), but
+      # firmware-build.yml states MOYBYTE_REQUIRE_WEB_BUNDLE the same way: an
+      # explicit line is what makes the choice readable at the top of the job.
+      MOYBYTE_REQUIRE_WEB_E2E: "1"
+      # Ubuntu 24.04 restricts unprivileged user namespaces under AppArmor;
+      # where that bites, Chrome's zygote dies before it prints a debug port and
+      # the run goes red about the runner rather than about the console. The
+      # page under test is our own dist/ over 127.0.0.1.
+      MOY_CHROME_FLAGS: "--no-sandbox"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # browsershot.mjs drives Chrome over the DevTools Protocol with node's own
+      # global WebSocket and no puppeteer -- which is a node 22 feature. The
+      # runner image's default node is not something to inherit silently.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ubuntu-latest has shipped Google Chrome for a long time, but "has
+      # shipped" is not a guarantee and the image's browser list has changed
+      # before. Verify, and install Google's own package if it ever stops being
+      # there -- a runner without a browser would otherwise fail this job for a
+      # reason that has nothing to do with the code under test.
+      - name: Ensure Google Chrome
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          else
+            echo "::warning::no google-chrome on this runner image -- installing it"
+            curl -fsSL -o /tmp/google-chrome.deb \
+              https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get update
+            sudo apt-get install -y /tmp/google-chrome.deb
+            google-chrome --version
+          fi
+
+      - name: Install package
+        run: make setup
+
+      # Same path, same key shape as pages.yml -- deliberately THE SAME cache.
+      # emsdk + the micropython clone are ~1.8 GB and keyed on the build script
+      # that pins them, so a run here warms the site build and vice versa.
+      - name: Cache the wasm toolchain
+        uses: actions/cache@v4
+        with:
+          path: firmware/web_runner/.build
+          key: web-runner-${{ runner.os }}-${{ hashFiles('firmware/web_runner/build.sh') }}
+          restore-keys: web-runner-${{ runner.os }}-
+
+      # NOT continue-on-error, unlike pages.yml. There a failed player still
+      # leaves a publishable page; here it leaves nothing to test, and the
+      # suites would fail on the missing dist/ with a worse message than the
+      # build's own.
+      - name: Build the browser console
+        run: firmware/web_runner/build.sh
+
+      - name: Drive the hosted console in real Chrome
+        run: |
+          .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
+            tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py
+
+      # pytest was green -- but was it green over anything? The prerequisite
+      # skips fail hard above, so this catches the other way of proving nothing:
+      # a lost MOYBYTE_WEB_E2E (the module gate skips at COLLECTION, before any
+      # teeth can bite) or a bare pytest.skip added inside a test body later.
+      # No expected count: "nothing skipped, something ran" is the invariant, and
+      # a number here would rot the next time a test is added.
+      - name: A skipped browser suite proves nothing
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("web-e2e.xml").getroot()
+          suites = list(root.iter("testsuite"))
+          tests = sum(int(s.get("tests", 0)) for s in suites)
+          skipped = sum(int(s.get("skipped", 0)) for s in suites)
+          if skipped or not tests:
+              print("::error::the browser suites did not run: %d collected, "
+                    "%d skipped -- this job is a green tick over an untested "
+                    "hosted console" % (tests, skipped))
+              raise SystemExit(1)
+          print("%d browser checks ran, none skipped" % tests)
+          PY
+
+      # The PNGs browsershot writes live under pytest's tmp_path, which is where
+      # a failure is actually diagnosable from: "it doesn't show up" reports are
+      # a screenshot question (.claude/rules/web.md), and a CI-only failure has
+      # no other evidence.
+      - name: Upload the browser screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-e2e-shots
+          path: /tmp/pytest-of-runner/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7

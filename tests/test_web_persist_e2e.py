@@ -14,7 +14,10 @@ nobody reads.
 
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_persist_e2e.py
 
-Env-gated like its sync sibling: ~4 Chrome boots, ~90s.
+Env-gated like its sync sibling, and it shares that sibling's prerequisite
+ladder (`tests/web_e2e.py`): a missing toolchain SKIPS on a bench and FAILS
+under CI, where a suite that asks to run and then skips proves nothing.
+~4 Chrome boots, ~90s.
 """
 
 import os
@@ -25,29 +28,15 @@ import subprocess
 import sys
 import time
 import urllib.request
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-RUNNER = ROOT / "firmware" / "web_runner"
-DIST = RUNNER / "dist"
-CHROME = os.environ.get("MOY_CHROME", "google-chrome")
+import web_e2e
+from web_e2e import RUNNER, ROOT
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~90s)")
-
-
-def _skip_unless_ready():
-    if shutil.which(CHROME) is None:
-        pytest.skip("no %s on PATH (MOY_CHROME overrides)" % CHROME)
-    if shutil.which("node") is None:
-        pytest.skip("no node on PATH")
-    if not (DIST / "index.html").exists():
-        pytest.skip("no built dist/ -- run firmware/web_runner/build.sh")
-    if not (DIST / "moy_store.mjs").exists():
-        pytest.skip("dist/ predates the browser store -- rebuild web_runner")
 
 
 def _free_port():
@@ -91,7 +80,7 @@ def _run(scenario, base, profile, outdir):
 def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
     """#193's done-when, in one run: make a cart on a STATIC host, close the
     page, open it again in the same browser, and it is still on the shelf."""
-    _skip_unless_ready()
+    web_e2e.require("store")
     port = _free_port()                    # fixed: OPFS is scoped to the ORIGIN
     profile = tmp_path / "chrome"          # fixed: OPFS lives in the profile
     server, base = _serve(port)
@@ -124,7 +113,7 @@ def test_a_cart_made_in_the_browser_survives_a_reload(tmp_path):
 def test_a_cart_exports_and_imports_as_a_zip(tmp_path):
     """The no-account escape hatch: zip a cart out of the live VFS, feed the
     same bytes back, and it lands under the store's own duplicate name."""
-    _skip_unless_ready()
+    web_e2e.require("store")
     port = _free_port()
     profile = tmp_path / "chrome"
     server, base = _serve(port)
@@ -154,7 +143,7 @@ def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     """The other half of a total split: serve.py --carts answers GET /sync, so
     the page must stay in BOARD mode -- no local store, and no export row that
     would invite one."""
-    _skip_unless_ready()
+    web_e2e.require("store")
     store = tmp_path / "store"
     store.mkdir()
     for cart in ("star_catcher.moy", "sakura.moy"):

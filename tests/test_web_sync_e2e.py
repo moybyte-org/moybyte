@@ -19,9 +19,11 @@ is a password people route around -- so the flag exists for exactly this.
 Env-gated like the on-glass suites, not tool-gated: it costs ~40s and a
 Chrome window, which does not belong in every `make test`. Prerequisites
 (google-chrome or $MOY_CHROME, node, a built dist/ that carries the sync
-client) SKIP with a reason rather than fail -- a missing toolchain is a bench
-fact, not a regression. The same scenario runs against a real board by
-pointing MOY_BASE at its webhost url (see browsershot.mjs).
+client) SKIP with a reason on a bench -- a missing toolchain is a bench fact,
+not a regression -- and FAIL under CI, where a suite that asks to run and then
+skips is a green tick over nothing. `tests/web_e2e.py` owns that decision for
+both browser suites. The same scenario runs against a real board by pointing
+MOY_BASE at its webhost url (see browsershot.mjs).
 """
 
 import contextlib
@@ -35,30 +37,15 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-RUNNER = ROOT / "firmware" / "web_runner"
-DIST = RUNNER / "dist"
-CHROME = os.environ.get("MOY_CHROME", "google-chrome")
+import web_e2e
+from web_e2e import RUNNER, ROOT
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MOYBYTE_WEB_E2E"),
     reason="MOYBYTE_WEB_E2E not set (spawns headless Chrome for ~40s)")
-
-
-def _skip_unless_ready():
-    if shutil.which(CHROME) is None:
-        pytest.skip("no %s on PATH (MOY_CHROME overrides)" % CHROME)
-    if shutil.which("node") is None:
-        pytest.skip("no node on PATH")
-    if not (DIST / "index.html").exists():
-        pytest.skip("no built dist/ -- run firmware/web_runner/build.sh")
-    worker = (DIST / "worker.js").read_text()
-    if "syncPump" not in worker:
-        pytest.skip("dist/ predates the sync client -- rebuild web_runner")
 
 
 def _free_port():
@@ -121,7 +108,7 @@ def _browsershot(scenario, base, outdir):
 
 
 def test_a_cart_made_in_chrome_lands_on_disk(tmp_path):
-    _skip_unless_ready()
+    web_e2e.require("sync")
     store = _seeded_store(tmp_path)
     with _twin(store) as base:
         run_out = _browsershot("sync_create.json", base, tmp_path / "shots")
@@ -165,9 +152,7 @@ def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
     The prompt is deliberately not `window.prompt`, and this test is half the
     reason: a native dialog cannot be filled by CDP, screenshotted, or styled.
     """
-    _skip_unless_ready()
-    if "__moyPinRestore" not in (DIST / "index.html").read_text():
-        pytest.skip("dist/ predates the pin prompt -- rebuild web_runner")
+    web_e2e.require("sync", "pin")
     store = _seeded_store(tmp_path)
     with _twin(store, pin="4321") as base:
         # The gate itself, before any browser is involved.

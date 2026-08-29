@@ -13,6 +13,17 @@ paths:
   is ROUTING — that a board still calls a shared helper — and
   `tests/test_micropython_spike.py` keeps only those.
 
+- **The hosted console has a CI net, and its skips have TEETH.**
+  `tests/test_web_sync_e2e.py` and `tests/test_web_persist_e2e.py` are the only
+  checks that drive the wasm head in real headless Chrome; both are gated on
+  `MOYBYTE_WEB_E2E` and are run by `.github/workflows/web-e2e.yml` (path-filtered,
+  sharing pages.yml's wasm cache key). Prerequisites resolve through
+  `tests/web_e2e.py`, which warns and skips on a bench but FAILS under
+  `CI`/`MOYBYTE_REQUIRE_WEB_E2E` — same doctrine as `MOYBYTE_REQUIRE_UNIX_MP`.
+  A skip is the right answer to a missing emsdk build on a laptop and the wrong
+  one in a job that asked for the suite, so the workflow also refuses a run in
+  which nothing ran.
+
 - **On-glass testing — all three boards have a suite** (#156). Each is gated on
   its own env var and shares one session in file order, leaving the board where
   it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
