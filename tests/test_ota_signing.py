@@ -223,6 +223,24 @@ def test_an_unsigned_manifest_is_not_a_valid_one(device):
     assert u.verify_manifest(MANIFEST, TEST_KEYS) is False
 
 
+@pytest.mark.parametrize("junk", [
+    ("not a modulus", 65537),        # a mistyped constant
+    (None, 65537),                   # a half-edited tuple
+    ("%x" % 3, 65537),               # too small for the PKCS#1 block
+])
+def test_one_unusable_key_does_not_disable_the_others(device, junk):
+    """OTA_PUBLIC_KEYS is a TUPLE so a compromised key can be ROTATED: an image
+    trusted by the old key ships signed by the new one, and for that window an
+    image carries two. A bad entry among them must be skipped, not fatal --
+    losing the loop to one typo would refuse every update on every board
+    carrying that image, with a cable flash as the only way back."""
+    _m, u = device
+    signed_m = signed()
+    assert u.verify_manifest(signed_m, (junk,) + TEST_KEYS) is True
+    assert u.verify_manifest(signed_m, TEST_KEYS + (junk,)) is True
+    assert u.verify_manifest(signed_m, (junk,)) is False
+
+
 # -- when a signature is REQUIRED --------------------------------------------
 
 def test_a_baked_url_requires_a_signature_and_a_card_one_does_not(device):

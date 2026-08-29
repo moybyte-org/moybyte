@@ -3149,7 +3149,10 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     assert 'reg("moy_table_verb", tv)' in host
     assert 'g["moy_table_verb"] = v' not in host
     glue = (DEVICE / "moycore_glue.py").read_text(encoding="utf-8")
-    assert '_moycore.register("moy_table_verb", tv)' in glue
+    # The glue's half is EXECUTED since #208's residue pass --
+    # tests/test_moycore_glue.py::test_the_table_verb_goes_in_under_its_own_name
+    # runs the register loop and asserts the alias goes in and the bare name
+    # does not, which a substring cannot tell apart.
     # ...and the register loop must SKIP the bare name, or it sets the global
     # `table` and clobbers the library before the prelude can graft anything.
     # NOT_REGISTRABLE moved into the shared lua_ext with the prelude it pairs

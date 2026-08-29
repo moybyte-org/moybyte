@@ -864,8 +864,8 @@ belongs here is only what a coder must not undo:
 
 ### The 2026-08-22 hardening pass — the rules it left
 
-Record: `docs/history/sweeps_2026-08.md`. The recurring shape, and the first
-thing to check when adding anything here: **a mechanism was promoted into one
+Record: #206/#207/#208's comments. The recurring shape, and the first thing to
+check when adding anything here: **a mechanism was promoted into one
 body and nothing executable guarded it.**
 
 - **A board with no lever reports `None`, never `0`.** A frozen 0 is also what a
@@ -918,7 +918,7 @@ and every `getattr(ws, "…")` name in runtime/device/tools. Facts not to undo:
 
 ### The 2026-08-28 quality sweep — the rules it left
 
-Record: `docs/history/sweeps_2026-08.md`; the gates are in #206, #207, #208.
+Record and gates: #206, #207, #208.
 
 - **ONE `PERF` line, one producer, three boards.** `runtime/perf_line.py` holds
   the field table, the formatter AND the parser, measured by
@@ -961,83 +961,29 @@ to whoever called it.
   (`carts_store`/`wifi`/`updater`) and the spawn/exit verbs; everything
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
-- `runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` — the 2026-07 shell
-  split (build-staged like the rest): **`Project`** = the open cart's live workspace and its
-  `commit_*` verbs (`runtime/README.md` lists what it holds; the rule here is that
-  a commit also appends the undo journal and runs graduation detection). **`Player`** = the
-  `run(cart) → plays → returns` black box: starts the cart under the frozen
-  `make_api`, ticks it, turns any crash into the **crash-to-code throw**
-  (2026-07-23: the run exits straight into the Editor's Code tab with the caret
-  on the crashing line + a tap/type-dismissible error popup — `ws._crash_to_code`,
-  armed from both the failed-start path in `run()` and the mid-frame capture; the
-  old parked OOPS panel survives only as the no-open-cart fallback), owns the transient
-  hold-to-exit toast — zero knowledge of who launched it; exit pops to the run
-  CALLER (launcher→launcher; Editor-PLAY→the same tab). **`EditorApp`** = ONE
-  authoring app opened on a `Project`: the tab ladder Config→Blocks→Code→Sprites→
-  Map→Scene→Music (+ PROJECTS/UNDO/REDO/PLAY in its lent bar zone — there is NO
-  SAVE, see #111 below), whose tabs ARE the
-  extracted `*_layer.py` surfaces — all seven tabs are **system-domain responsive**
-  (#39 step 3: `PaintLayout`/`MapLayout`/`SceneLayout`/`MusicLayout`/`CardsLayout`
-  join `CodeLayout`/`BlockLayout`, each `_base`-verbatim byte-identical at 320×240/1×),
-  so the whole Editor reflows to any panel/window size and only a RUNNING CART still
-  draws on the fixed 320×240 game canvas. **`FullscreenStackWM`** = the small-screen
-  tier's WM: the process back-stack (`screen` is a read-only projection of its top),
-  the **memoized** visible/draw stack (zero per-frame list churn, #66), and the
-  game↔system viewport composite. **`runtime/wm_windowed.py`** (`WindowedWM` —
-  host/P4 only, deliberately NOT staged to the S3 build) is the second presentation
-  tier (#73/#58 "Desktop look"): the Picotron-style windowed desktop, now split
-  into **TWO WORLDS (#105, 2026-07-20)** — boot lands on the **DESK** (stack kind
-  `"desk"`, the make world's floor: wallpaper + a system-app icon column
-  (PLAY/PROJECTS/Files/Paint/Writer/Sheets/Storybook/Calc, tile-0 cart art) +
-  the one OS bar with taskbar chips and NO context-X), where every process above
-  the desk is a window with a WM title strip (minimize/maximize/close),
-  draggable by the strip and resizable by the bottom-right grip
-  (apply-on-release rubber band). The **PLAY icon drops to the fullscreen
-  Library** (the play world) — `docs/shell_ux_v1.md` is the UX authority for both
-  worlds; the rule a coder needs is that windows exist ONLY above `"desk"`, so
-  every `not _order` deferral presents fullscreen ( `composite_game` routes the play
-  world through the polymorphic `_blit_game` — native P4 blit / web b64-spr),
-  and the Make tile / a card's CHANGE drop back to the desk (CHANGE with that
-  project's Editor open). `ws.windowed_chrome` is a world-aware PROPERTY
-  (`wm.desk_open()`), and a world flip triggers a relayout so app-layout chrome
-  never leaks across worlds. The **picker + Editor share ONE
-  "Make" window** (`_GROUP`): picking a project swaps its content to the Editor,
-  PROJECTS/its X swap back (the back-stack keeps both kinds — presentation-only
-  merge). **Input focus is decoupled from the back-stack**: clicking a window or
-  its chip moves keyboard+highlight WITHOUT popping — a playtest keeps ticking
-  (it stays the stack top) while the Editor beside it is typed in, its pointer
-  feed click-stripped so the background cart never eats editor taps; only an
-  explicit exit ends a run (strip X / hold-BACKSPACE while focused / app verb).
-  True multi-cart (N games ticking) stays out of scope per #73.
-  In the desk world the zoned bar suppresses its OS right zone + the dock
-  inside windows, so a window's bar row is purely the app's toolbar — the desktop
-  bar is the ONE taskbar. A running desk-world cart composites integer-scaled + centered in
-  its window (no minimize — hiding a game would silently pause it); per-window
-  **layout contexts** re-run the #39 responsive layouts at each window's size,
-  and `Wallpaper.draw` composites/fills the SYSTEM canvas (cover-crop backdrop)
-  so the big desktop backdrop is real. **Panel THEMES** (`chrome.THEMES`,
-  picked in the Appearance app, persisted): named token sets (`panel`/`edge`/`title`/
-  `title_ink`/`accent`/`hilite`/`dim` + the §4.3 semantic roles) that every panel
-  surface reads per draw — Settings panel, picker backdrop, window strips/chips,
-  launcher selection accents, the OS bar/dock, the ≡ menu, achievements, the OTA
-  screens, and (on non-`_base` tiers) the editor tab surfaces; the default "night"
-  is the moybyte site colorway and keeps the frozen colors byte-identical. Every
-  family ships a **dark AND a light variant** (2026-07-23: Appearance → THEMES →
-  DARK/LIGHT chips, `theme_colors(name, variant)`, persisted `theme_variant`;
-  light = paper/pastel fields + dark ink via the `bar`/`chrome_ink`/
-  `selection_ink`/`bar_light` roles, whose statics ARE the frozen dark literals —
-  see docs/visual_identity_v1.md §4.3 status). **WiFi setup lives in Settings** (#38, spec §10): a
-  WIFI row + panel (scan/password/connect/forget over the injected `ws.wifi`),
-  so it works while a game runs — the bar's wifi icon deep-links there in
-  windowed mode (fullscreen tiers keep launching the wifi.moy tool). The default
-  wallpaper is **`moy_night.moy`** (static brand-colorway scene — a static
-  wallpaper keeps the idle desktop free under the redraw gate). The wasm head
-  runs this WM as an ordinary raster tier since moycore stage 4 — window buffers
-  are real layers, the game and wallpaper composite through `blit_game`/
-  `blit_cover`, and the recording transport that used to need special cases here
-  (RecordingLayer window buffers, composites shipped as one self-contained spr,
-  scaled text recorded as rect blocks, the bar drawn uncached) is deleted. Try it:
-  `python tools/simulate_desktop.py --size 1024x600 --windowed`.
+- **The 2026-07 shell split** — `project.py` / `player.py` / `editor_app.py` /
+  `wm.py` / `wm_windowed.py`. `runtime/README.md` says what each file holds and
+  `docs/shell_ux_v1.md` is the UX authority; what neither can tell you:
+  - **`Player` has zero knowledge of who launched it.** `run(cart)` plays until
+    exit and returns to the CALLER — launcher→launcher, Editor-PLAY→the same tab.
+    A crash becomes the **crash-to-code throw**: the run exits into the Editor's
+    Code tab with the caret on the crashing line. The parked OOPS panel survives
+    only as the no-open-cart fallback.
+  - **There is NO SAVE and no dirty star** (#111). Commits ride a typing-idle
+    debounce plus every exit path; a commit also appends the undo journal and runs
+    graduation detection.
+  - **All seven Editor tabs are `_base`-verbatim byte-identical at 320×240/1×**, so
+    the Editor reflows to any panel or window size — **only a RUNNING CART is
+    fixed at 320×240**.
+  - **`ws.screen` is a read-only PROJECTION of the WM back-stack top**, not state.
+    The visible/draw stack is memoized (zero per-frame list churn, #66).
+  - **`WindowedWM` is host/P4 only and deliberately NOT staged to the S3.**
+    Windows exist ONLY above the `"desk"` stack kind, so every `not _order`
+    deferral presents fullscreen.
+  - **Input focus is decoupled from the back-stack**: clicking a window or its chip
+    moves keyboard focus WITHOUT popping, so a playtest keeps ticking while the
+    Editor beside it is typed in — its pointer feed click-stripped so the
+    background cart never eats editor taps. Only an explicit exit ends a run.
 - **Editor-as-an-app UX (this replaced the maker/player tap-mode):** a launcher tap
   **always RUNS the cart** — no mode, no type dispatch. The pinned **"Make ✏️"
   tile** opens the Editor **project-picker** (the same grid over every editable cart
@@ -1067,51 +1013,25 @@ to whoever called it.
   on-device testing.)
 - `runtime/editors.py` — `CodeEditor` / `SpriteSheet` / `PaintEditor` cores, plus
   `IconSheet` (16×16 themeable system-bar icon tiles; Settings → EDIT ICONS repaints it). (frozen as `editors`)
-- `runtime/moy_carts.py` — the `.moy` store (scan/load/save_*/create/duplicate/delete;
-  versioned `seed_builtins` re-seed; `system_icons.moygfx` bar theme; only `json`+`os`)
-  plus the **per-project undo/redo journal** (`journal.jsonl` append-only + full-file
-  snapshots + an atomic **per-file cursor map** (#111: tolerant migration from the old
-  single seq), torn-snapshot-safe; commits fire on a typing-idle autosave debounce +
-  hard commits on EVERY exit path — tab-leave/PLAY/workspace-swap/HOME/window-X; there
-  is NO SAVE button or concept, and no dirty-star UI. **Undo is unified (#111,
-  `runtime/op_history.py`)**: every Editor tab + Writer/Sheets keep fine-grained in-RAM
-  ops (`History`/`OpCodec`, keyframe+ops; commits embed the op batch in their journal
-  line, Desk-Lab apps persist theirs in `files/.history/` sidecars), and the ONE bar
-  UNDO/REDO pair walks local ops first, then whole commits **scoped to the active
-  tab's file(s)** — never another tab's) and **blocks↔code graduation** (MakeCode model: a diverging code commit —
-  conservative recompile-and-normalize compare — stores `"graduated": true` in the
-  manifest with a journal rider; the Blocks tab goes read-only + celebrates; undoing
-  past the graduating commit un-graduates). Also owns the **wallpaper-preview sidecars**
-  (`<cart>/thumbs/wp<w>x<h>.mct`, stamped via `cover_sig`; a regenerable cache
-  whose readers validate magic+size+stamp — a computed preview FRAME is far
-  dearer to rebuild than to read). Cover thumbs used the same machinery (#66/#86)
-  and were **removed** in #155: with `moy_gfx.decode_runs` + `crop_index` the
-  RLE decode fell by ~three orders of magnitude, so reading a per-size crop
-  sidecar cost the SAME as rebuilding from the blob while also charging a write
-  per cover per size. Covers now cache their PARSED RUNS in RAM instead
-  (`Workstation._cover_runs`), which is what makes a window resize cheap.
-  Numbers in #155/#66. Also passes the **#67 dual-runtime fields** (`runtime`/`main`) through
-  load/save_code/create/duplicate/seed_builtins, so a lua cart's source stays in
-  `main.lua` end-to-end (save_code only Python-syntax-gates python carts). Newer
-  asset kinds ride the same load/save/create/duplicate/seed flow: **scenes**
-  (#85: `scenes/*.moyscene` placed-actor tables, manifest `assets.scenes`
-  ordered with element 0 the default; consumed via the `scene()`/`load_scene()`
-  cart verbs over `widgets.Scenes`; authored WYSIWYG in the Editor's **Scene
-  tab** — `scene_editor_ui.py` over the `editors_scene.SceneEditor` core, which
-  live-syncs each gesture into `ws.scenes` so PLAY re-starts on the freshest
-  placement) and the **Desk Lab interop docs** (#78:
-  `tables/*.moysheet` from the Sheets app + `docs/*.moytext` from Writer, read
-  back via the `table()`/`text()` cart verbs — all in `docs/moy_cart_api.md`).
-  Also owns the **#108 user-files layer**: `files/<kind>/` BESIDE the carts dir
-  (drawings/docs/tables/sprites/music + folder-valued recordings — the
-  `FILE_KINDS` registry), with list/load/save/rename/duplicate verbs, a
-  restorable `files/trash/` (count-pruned, no confirm dialogs), auto-naming
-  (`new_file_name`), and the one-shot `artwork.moyimg → files/drawings/`
-  migration. Browsed by the **Files system app** (`files_app.py` over the
-  shared `file_widgets.FileGridView` thumbnail grid — the same widget Paint's
-  OPEN mode embeds); Paint autosaves NAMED drawings on an idle debounce and
-  WALL/GAME/wallpaper are **copy-on-use** (the design discussion + decisions
-  live in #108's comments). (frozen as `moy_carts`)
+- **`runtime/moy_carts.py` is the `.moy` store** (and the #108 user-files layer
+  beside it, and the per-project undo journal). The file lists its verbs; the
+  decisions behind it:
+  - **No SAVE button, no dirty star, ever** (#111). Commits fire on a typing-idle
+    debounce and on EVERY exit path.
+  - **Undo is scoped to the active tab's file(s), never another tab's.** The one
+    bar UNDO/REDO pair walks fine-grained in-RAM ops first, then whole commits.
+  - **Blocks↔code graduation is one-way and reversible only by undo**: a diverging
+    code commit stores `"graduated": true`, the Blocks tab goes read-only, and
+    undoing past that commit un-graduates.
+  - **Wallpaper previews keep a sidecar; cover thumbs DO NOT** (#155) — and the
+    contrast is the point. A computed preview FRAME is far dearer to rebuild than
+    to read, so it caches to disk; a cover's RLE decode got ~three orders of
+    magnitude cheaper, so a per-size sidecar cost the same as rebuilding while
+    also charging a write per cover per size. Covers cache PARSED RUNS in RAM
+    instead. **Do not re-add cover thumbs.**
+  - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
+    are **copy-on-use** — a kid's drawing is never mutated by being used
+    (#108's comments hold that design discussion).
 - **Dual cart runtimes (#67, on-glass both boards 2026-07-14):** a manifest
   `"runtime": "lua"` (+ `"main": "main.lua"`) routes `Player.start` through the
   injected `ws.lua_runtime` factory instead of the Python compile/exec path — a
