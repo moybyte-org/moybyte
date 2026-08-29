@@ -442,274 +442,93 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 ### Third target: the web runner + the moy-spec repo (#151/#170)
 
-- `firmware/web_runner/` — the **MicroPython-WASM** build of the same console.
-  **The browser is no longer the GPU (moycore stage 4, 2026-08-12): the wasm
-  RASTERIZES** — the narrative is `docs/history/moycore_plan_2026-08.md` §6; what a coder
-  needs here is the shape. `build.sh` compiles `moy_gfx` + vendored libmoy in as a
-  usermod; the shell draws on `DeviceCanvas` itself (staged from the T-Deck tree)
-  wrapped by `web_canvas.py` — `WebCompositor` supplies a buffer and no flush,
-  `WebSystemCanvas` adds font-scale text, font-scale layers and `blit_cover`. The
-  page's only pixel work is a 64K-entry 565→RGBA table plus `putImageData`. No
-  board lever is reimplemented: bounce pump, DPI ping-pong, GDMA, PPA and PSRAM
-  pooling are all probe-guarded and simply absent here.
-  The handheld tier is the T-Deck's arrangement (one canvas, system IS game), the
-  desktop tier is the P4's (big system canvas + a real 320×240 game canvas +
-  `blit_game`). **`blit_cover` is not optional on a 565 system canvas** —
-  `wallpaper._backdrop_blit` probes for it and otherwise expands a palette-INDEX
-  buffer that does not exist there, drawing nothing: a black desk with correct
-  chrome on top, which is exactly what the first build did.
-  Numbers live in the plan; the operational summary is that the console half of a
-  frame is now a small fraction of the budget and the PRESENT (heap copy + RGBA
-  expansion) is the expensive half, so optimize there first. Numbers, including
-  what real headless Chrome holds, are in the plan and #66.
-  **This bundle RIDES BOTH BOARD IMAGES (2026-08-15).** A board serves the wasm
-  console over its own WiFi (`moy_webhost`), and it used to serve only a copy a
-  human had put on its storage — which drifts with nothing to detect it (a board
-  served a bundle old enough to carry a desktop-blackout bug fixed hours earlier),
-  and the T-Deck cannot be pushed to at all because the push hands the board a url
-  over serial and, when that was written, that board's RX was dead under the desktop. So
-  `tools/gen_web_blob.py` `.incbin`s the four PRE-GZIPPED assets (572,693 B; raw
-  is 1,155,953 B and does not fit the S3's slot) into the `moy_web` usermod, which
-  hands them out as READ-ONLY memoryviews at flash — never a `bytes` per request,
-  on a board with very little internal SRAM free in play. **Storage still WINS**, so
-  `make p4-web-push` stays the sub-minute dev loop and the image is the guarantee,
-  not the ceiling; `start()` prints which of the two it is serving, because a
-  stale pushed copy shadowing a good baked one is the same bug one level down. The
-  cost is a fixed slice of every app image and of every OTA payload — so an
-  oversized image is now a BUILD FAILURE on both boards (each build prints its own
-  slot headroom, which is the only number worth trusting; a figure pasted here was
-  stale by 8x within two weeks) (it was a warning that still emitted artifacts esptool would
-  refuse), and the next growth spurt is a partition-table decision, not a
-  surprise. Building the bundle needs emsdk, so a missing one only WARNS locally
-  and FAILS under `CI`/`MOYBYTE_REQUIRE_WEB_BUNDLE` — the firmware workflow builds
-  the web runner before each board, so a published image always carries one.
-  **TWO WEB MODES, TOTAL, NO CROSSOVER (2026-08-25, #193/#197).** Where a page is
-  SERVED from decides where its carts live. A board-served page edits the BOARD's
-  store (the pull + `POST /sync` half); a page on a static host — moybyte.com, an
-  export, `file://` — keeps them in the BROWSER. The mode is decided ONCE at boot,
-  BEFORE the VFS is seeded, because it decides what the VFS is seeded FROM
-  (`moy_store.probeMode`): `GET /sync` is the marker a board serves, and a GET miss
-  falls through to an EMPTY-batch POST, because a board running firmware older than
-  that marker still ACCEPTS the batch and reading it as "static host" would quietly
-  strand a kid's edits in a browser. Mode 1 is not a second persistence design — it
-  is a second DELIVERY TARGET for the batch `moy_sync`'s `StoreWatcher` already
-  builds, so writes, deletes and cart-deletes arrive in the one op vocabulary and
-  the two sides cannot disagree about what a batch means. **The substrate is OPFS,
-  not IndexedDB** (the moycore plan §9 open question, closed here): the ops ARE file
-  writes at paths, so OPFS applies them 1:1 and a cart folder stays a cart folder —
-  the shape `moy_carts` already speaks on every tier — where IndexedDB would mean
-  inventing a path keyspace and a blob schema to keep a filesystem inside a
-  database, then keeping that schema honest as the store grows file kinds. Measured
-  in Chrome and recorded in the moycore plan: seeding, reload and commit all land
-  nowhere near the budget, which is what makes the file-shaped substrate free to
-  prefer. **The
-  journal comes along in mode 1 (2026-08-25)** — see the doctrine below; the
-  mechanism is one argument, `web_boot` handing its site-mode carts watcher
-  `moy_sync.skip_keep_journal` instead of the wire's `_skip`, so the #111 history
-  rides the ordinary sweep into the ordinary store. This line used to record the
-  absence as a gap against #193's "with its undo history"; the gap is closed, and
-  the JS half (`moy_store.skipLocal` vs `skipName`) is pinned against the Python
-  one by `tests/test_web_store.py`. **No OPFS means the
-  page says so**: a private window, blocked site data or a `file://` origin runs in
-  memory exactly as before, with the row reading "carts will NOT survive a reload";
-  a quota failure mid-apply requeues, and after three gives up ONCE and says that
-  too. `.moy` export/import is the no-account escape hatch (a dependency-free
-  STORED zip out, stored-or-deflated in) and is offered only in mode 1 — on a board
-  the console owns the store. worker.js STATICALLY imports `moy_store.mjs`, so it is
-  in `moy_webhost.ASSETS` too: a board that does not serve it serves a console that
-  cannot boot. Proof is `tests/test_web_persist_e2e.py` (env-gated `MOYBYTE_WEB_E2E`),
-  which needs **two Chrome runs sharing one profile AND one port** — OPFS is scoped
-  to the origin and lives in the profile, hence browsershot's `MOY_PROFILE`.
-  **The 3.4 sync RPC SHIPPED (2026-08-25): a page served from a board writes
-  BACK.** `runtime/moy_sync.py` is the one body — the browser's `StoreWatcher`
-  (a ~1/s stat-sweep of the wasm VFS; no store hooks, because the store writes
-  through several funnels and watching the filesystem catches every writer by
-  construction), the wire shape (`POST /sync`, commit-shaped batches under the
-  transport's 64KB request cap; big files chunk through a `.tmp` and publish
-  atomically), and `apply_ops`, which the board (`moy_webhost`), the dev twin
-  (`serve.py --carts DIR`) and the CI convergence harness
-  (`tests/test_sync_convergence.py` — the pin the moycore plan §3.4 demands:
-  two real stores, drop-and-reattach, a two-sided collision, both journals
-  still replayable) all share. Per-file last-writer-wins, and
-  a batch that changes the SHELF fires `ws.rescan_carts()` so the launcher
-  follows with no reboot (on-glass: `test_guition_on_glass.py`'s sync test).
-  **THE JOURNAL LIVES WITH THE STORE OF RECORD (owner call 2026-08-25),** which
-  replaces "both sides keep their own journal" — true, and useless: the
-  browser's VFS is a scratch copy that dies with the tab, so the kid's undo
-  history lived in the one place it could not survive, and a board that took a
-  browser's edits kept no record of them at all. There is ONE durable journal
-  per cart and it sits where the cart durably lives. Board-served page: the
-  RECEIVER journals (`apply_ops(..., journal=True)` appends a #111 commit for
-  every carts-root file a batch publishes, in the shape `Project.commit_*`
-  writes, so on-glass UNDO walks back through work done in a browser; the
-  browser's VFS journal is still written, still never crosses, and is now
-  correctly READ as session-local undo). Static host: the browser's OPFS is of
-  record, so the journal persists there. **The wire predicate itself never
-  moves** — `_skip` refuses journal paths, a board-mode batch is byte-identical
-  to what it always was, and the site relaxation is a watcher argument rather
-  than a change of what the wire means. The cost is stated where it is paid
-  (`journal_append` writes a full snapshot + a log line + an atomic cursor
-  rewrite per file — fine at cart sizes, which is what the console's own
-  commits have always paid), and the #108 files root is deliberately NOT part
-  of it: its undo is `files/.history/` op sidecars, a different mechanism, and
-  a pushed drawing lands as a file and nothing else.
-  **THE PIN GATES EVERYTHING (owner call 2026-08-25),** reversing the standing
-  "the read half stays open". A pinned host serves a stranger exactly the boot
-  assets (`index.html`/`worker.js`/`moy_store.mjs`/`micropython.mjs`/`.wasm` —
-  open BY NECESSITY, because the page is what shows the pin prompt) plus
-  `GET /sync` (the capability marker, which reveals that a board lives here and
-  nothing else, and the page has to make its mode decision before it has a pin
-  to offer). `GET /carts.json`, `GET /files.json`, `POST /sync`, `POST /run`
-  and the Zero's `/gpio` all take the pin. The old split handed any device on
-  the WiFi the whole cart store for the asking, on the reasoning that a read
-  changes nothing — what it reads is a child's work off their console. A GET
-  carries its pin the only place a GET can, so **`moy_webserver.parse_request`
-  stopped stripping query strings** (it was spending the credential before any
-  handler saw it) and hands `handle_http` the request TARGET; handlers route on
-  the bare path and read `query_param(target, "pin")`. A refusal is
-  `403 {"error":"pin"}`, distinguishable from the transport's plain-text 404
-  because the page branches on it: worker.js stops the boot and the page
-  prompts IN-PAGE (never `window.prompt` — a native dialog cannot be styled,
-  screenshotted or driven by the browser harness), remembering the pin in
-  localStorage per ORIGIN so a kid types four digits once per browser and a QR
-  arrival never sees it at all. Dev twins stay pinless and are meant to
-  (`serve.py --pin NNNN` exists only so the gate and the prompt can be driven
-  in real Chrome with no board on the desk — `tests/test_web_sync_e2e.py`).
-  **The #108 user files ride the same protocol as a SECOND root (2026-08-25,
-  owner call "they should get synced")** — `GET /files.json` pulls them and a
-  batch stamped `{"v": 2, "root": "files"}` pushes them back, the bump being
-  what makes a board flashed before this REFUSE the batch instead of writing
-  `drawings/…` into its carts store; a files path must start with a
-  `moy_carts.FILE_KINDS` kind, which is the one rule that keeps `.history/`
-  (each side's own undo) and `trash/` (a local recovery bin — syncing a
-  still-undoable delete is how LWW becomes data loss) home in both directions,
-  and the browser builds its files watcher only when the pull answered, so an
-  older board's 404 cannot disable the carts push with it.
-  **WASM MODE IS A SWITCH, NOT A SESSION (owner call, #197, 2026-08-25), and
-  the boards carry a PIN now.** No heartbeat, no presence detection, no
-  timeout, no session object: while Settings → WEB CONSOLE is ON the glass
-  PARKS on a connection screen (`runtime/web_console_ui.py`, back-stack kind
-  `webconsole`) and turning it off returns the console — which is how the
-  two-writer collision is designed out rather than detected. The screen is a QR
-  of the paired url plus tap-to-reveal text plus TURN OFF; the encoder is ours
-  (`runtime/moy_qr.py` — byte mode, EC L, versions 1–4, one fixed mask whose
-  format bits say so; there is no library on a board and the pin is not a
-  constant anything could be baked with). The pin is minted ONCE, lazily, into
-  `system.json` (`ws.web_pin()`), and `make_webhost` reads it at **`start()`,
-  never at construction** — boards build the webhost before system.json is
-  loaded, so a pin captured then is one minted against an empty store. **PLAY ON
-  DEVICE** is `POST /run` (`{"cart": …, "pin": …}`, pin-gated like `/sync`,
-  launched inside the storage gate because it runs at the frame tail) over
-  `ws.launch_named`, the ONE lookup the serial `run` also uses — title *and*
-  folder, because on device those differ by construction. Its exit returns to
-  the connection screen, and it does so from `go_home`'s tail rather than at
-  each exit site: "return to the launcher" has many doors and they all funnel
-  there. `GET /sync` → `{"sync":1}` is the capability marker the page probes
-  once at boot (a static host 404s it) before offering the button.
-  The **Zero is re-provisioned as the sync RPC's first host**
-  (`firmware/seeed_xiao_esp32s3_zero/` — stock MicroPython + `provision.sh`
-  pushed files, no build; the browser console served FROM the XIAO's flash
-  round-trips authored carts onto it, verified with real headless Chrome
-  2026-08-25). **It carries the whole stack, not the minimum that boots**
-  (owner call, same day): the sync stack's full import closure — `moy_carts` +
-  `moy_image` for the #108 files half, `moy_journal` for the history it now
-  keeps — and `provision.sh` mints a pairing pin for a board that never went
-  through the setup form. That directory's README is the authority on both, and
-  `tests/test_zero_provision.py` ratchets its cp list, which is the whole build
-  system on that board.
-  **The browser runs moycore too since 2026-08-13** — the
-  usermod is staged beside `moy_gfx`/`moy_lua`/`moy_audio` and `web_boot` wires
-  the boards' chooser verbatim, so a Lua cart's whole frame runs inside libmoy
-  on all three tiers rather than two. It needs no wasm variant of the module:
-  its `micropython.mk` compiles only `modmoycore.c` + libmoy's Lua binding and
-  reaches the raster and the VM through its staged SIBLINGS, and its board
-  allocator is `__has_include`-guarded down to `realloc`. `build.sh` also clones + patches the webassembly port (custom
-  `moybyte` variant: GC_SPLIT_HEAP_AUTO, no asyncify) and compiles `moy_lua` +
-  `moy_audio`; two of its Makefile patches are load-bearing and non-obvious.
-  (1) `-Wno-unknown-pragmas` has to be appended to the PORT's CFLAGS, not to
-  `CFLAGS_USERMOD`: py.mk folds the usermod flags in at its include and the port
-  adds `-Wall` afterwards, which re-enables the warning that `-Werror` then makes
-  fatal. (2) `HEAPU8` is patched INTO the port's own
-  `EXPORTED_RUNTIME_METHODS_EXTRA` list; that variable is set with `+=`, so a
-  command-line assignment REPLACES it — which drops `getValue`/`setValue` and the
-  VM's JS wrapper dies at boot with "Module.getValue is not a function". Dev loop:
-  `serve.py` over `dist/` (`--carts DIR` makes it the board twin: live carts.json
-  + POST /sync against a plain directory); `node harness.mjs` drives it headless.
-  **`moy.py` was DELETED 2026-08-25** (owner call): it was moy-spec's CLI shape
-  left behind — its `run`/`export` served a `runner/` dir this repo never had
-  (worker.js missing from its file list), `new` duplicates the console's own
-  +New, and the real `moy` CLI (new/run/export/port/demo) lives in the spec repo.
-  Hot reload went with it, unmissed. **To see what the BROWSER shows, use
-  `node pageshot.mjs <scenario.json> [outdir]`**: it boots the real wasm console
-  from `dist/` and decodes the same framebuffer the browser blits, into PNGs.
-  (It used to have to slice the page's replayer out of the page source and replay
-  commands into a matching index buffer; there is no replayer now, so the harness
-  is a decoder.) Scenario steps are
-  `frames`/`shot`/`tap`/`hover`/`drag`/`key`/`py`/`note`/`stain`/`unpainted`.
-  Reach for it FIRST on any "it looks wrong / it doesn't show up" report — a
-  screenshot is the right evidence for a placement or retention bug, and the
-  misplaced FPS chip (#178 tail) was invisible in a frame dump and obvious in a
-  PNG. When a bug survives that (browser-only plumbing: the worker pump, the
-  transferable framebuffer ping-pong, rAF), **`node browsershot.mjs
-  <scenario.json>` drives the shipped page in real headless Chrome over CDP** (no
-  puppeteer — it serves `dist/` and screenshots the canvas itself); its `js` step
-  evaluates in the page. Note the page waits behind a play-button splash unless
-  the scenario passes `"query": "?dev=1"`, so a scenario that forgets it
-  screenshots a blank canvas and looks like a raster bug. **This build
-  is Moybyte's own browser console and nothing else's** — the `--spec` slim
-  player (24 shell modules AST-stubbed to absorbing `_Stub`s, de-branded,
-  vendored into the spec's `runner/` and published by a `web-player` workflow)
-  was **deleted 2026-08-06**, along with that workflow, the `MANIFEST.json`
-  stamp and the MIT carve-out in `LICENSE.md` that existed to let it be
-  redistributed. The public spec repo (`~/Documents/Work/moy-spec`,
-  github.com/moybyte-org/moy-spec, MIT) now **builds its own player from
-  libmoy** (`libmoy/port/wasm`, emscripten): 297KB against the MicroPython
-  build's 1,001KB, because SPEC.md pins Lua as the cart language so the Python
-  VM was only ever there for the shell `--spec` stubbed out — and because a C
-  raster in wasm can fill 76,800 px/frame, so the page's whole JS
-  draw-command replayer stopped being necessary. That repo is still SPEC.md
-  ("moy core 0.2") + runner + the `moy` CLI (new/run/export/port/demo) + the
-  **p8 converter, which is UPSTREAM of us** (2026-08-15). This line used to say
-  "re-vendor `p8_import.py` whenever `tools/import_p8.py` changes", i.e.
-  moybyte → spec, and it had the arrow backwards: SPEC.md is what says what a
-  converted cart MEANS (§8.1 fixes `57 = A4 = 440 Hz`, hence PICO-8's pitch
-  offset of 24; §8.1's keyed rest is what makes a ported slide glide from the
-  right note), so corrections are worked out there and travel HERE. They did
-  not: upstream fixed the offset `0 → 24`, our hand-copy never heard, and
+`firmware/web_runner/` is the MicroPython-WASM build of the same console. Its
+build script and `docs/moycore_direction.md` say how it works;
+`docs/history/moycore_plan_2026-08.md` is the walked plan. What neither the code
+nor those docs will warn you about:
+
+- **The wasm RASTERIZES — the browser is not the GPU** (moycore stage 4). No board
+  lever is reimplemented here: bounce pump, DPI ping-pong, GDMA, PPA and PSRAM
+  pooling are probe-guarded and simply absent. **`blit_cover` is NOT optional on a
+  565 system canvas** — `wallpaper._backdrop_blit` probes for it and otherwise
+  expands a palette-INDEX buffer that does not exist, drawing nothing: a black
+  desk with correct chrome on top, which is exactly what the first build did.
+- **The bundle rides BOTH board images**, because a copy a human put on storage
+  drifts with nothing to detect it. **Storage still WINS**, so a push stays the
+  sub-minute dev loop and the image is the guarantee, not the ceiling — and
+  `start()` prints which of the two it is serving, because a stale pushed copy
+  shadowing a good baked one is the same bug one level down. An oversized image is
+  a BUILD FAILURE on every board.
+- **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
+  `moy_webhost.ASSETS`: a board that does not serve it serves a console that
+  cannot boot.
+- **TWO WEB MODES, TOTAL, NO CROSSOVER.** Where a page is SERVED from decides
+  where its carts live — a board-served page edits the BOARD's store, a page on
+  a static host keeps them in the browser. **The mode is decided ONCE at boot,
+  BEFORE the VFS is seeded, because it decides what the VFS is seeded FROM.**
+  `GET /sync` is the marker a board serves, and a GET miss falls through to an
+  EMPTY-batch POST — because a board running firmware older than that marker
+  still ACCEPTS the batch, and reading it as "static host" would quietly strand a
+  kid's edits in a browser.
+- **The substrate is OPFS, not IndexedDB**: the ops ARE file writes at paths, so a
+  cart folder stays a cart folder. No OPFS (private window, blocked site data,
+  `file://`) runs in memory and **the page says so**; a quota failure requeues, and
+  after three gives up ONCE and says that too.
+- **The journal lives with the STORE OF RECORD** (owner call) — there is one
+  durable journal per cart, where the cart durably lives, so a kid gets undo on
+  both ends without a byte of history on the wire. **The wire predicate itself
+  never moves**: `_skip` refuses journal paths and a board-mode batch is
+  byte-identical to what it always was.
+- **THE PIN GATES EVERYTHING** (owner call), reversing the earlier read-half-open
+  design: handing any device on the WiFi a child's whole cart store for the asking
+  was the thing being fixed. Only the boot assets and `GET /sync` are open, by
+  necessity. **A GET carries its pin the only place a GET can**, so
+  `moy_webserver.parse_request` stopped stripping query strings — it was spending
+  the credential before any handler saw it.
+- **The #108 user files ride the same protocol as a SECOND root**, stamped
+  `{"v": 2, "root": "files"}` — the bump is what makes a board flashed before it
+  REFUSE the batch instead of writing `drawings/…` into its carts store. A files
+  path must start with a `FILE_KINDS` kind, which is the one rule keeping
+  `.history/` and `trash/` home in both directions.
+- **WASM MODE IS A SWITCH, NOT A SESSION** (owner call): no heartbeat, no presence
+  detection, no timeout. While WEB CONSOLE is ON the glass PARKS on a connection
+  screen — which is how the two-writer collision is **designed out rather than
+  detected**. The QR encoder is ours because there is no library on a board and
+  the pin is not a constant anything could be baked with. **The pin is read at
+  `start()`, never at construction** — boards build the webhost before
+  system.json is loaded, so a pin captured then is one minted against an empty
+  store.
+- **Two Makefile patches are load-bearing and non-obvious.** `-Wno-unknown-pragmas`
+  must be appended to the PORT's CFLAGS, not `CFLAGS_USERMOD`: py.mk folds usermod
+  flags in at its include and the port adds `-Wall` afterwards, which re-enables
+  the warning `-Werror` then makes fatal. And `HEAPU8` is patched INTO the port's
+  `EXPORTED_RUNTIME_METHODS_EXTRA`, which is set with `+=` — a command-line
+  assignment REPLACES it, dropping `getValue`/`setValue`, and the VM's JS wrapper
+  dies at boot.
+- **Reach for `node pageshot.mjs` FIRST on any "it looks wrong / it doesn't show
+  up" report** — a screenshot is the right evidence for a placement or retention
+  bug, and the misplaced FPS chip was invisible in a frame dump and obvious in a
+  PNG. When a bug survives that (worker pump, transferable ping-pong, rAF),
+  `browsershot.mjs` drives the shipped page in real headless Chrome. **The page
+  waits behind a play-button splash unless the scenario passes `?dev=1`**, so a
+  scenario that forgets it screenshots a blank canvas and looks like a raster bug.
+- **The p8 converter is UPSTREAM of us.** SPEC.md says what a converted cart
+  MEANS, so corrections are worked out in moy-spec and travel HERE — and once
+  they did not: upstream fixed a pitch offset, our hand-copy never heard, and
   **every cart imported through this repo came out two octaves flat while
-  `make test` stayed green** — the tests had pinned the wrong model too, so
-  re-syncing meant deliberately breaking a passing test and nobody did.
-  So it is vendored now, like libmoy: `tools/p8_import.py` is moy-spec's file
-  byte-for-byte, refreshed with **`make vendor-p8-import`**
-  (`tools/vendor_p8_import.py`, stamping `tools/p8_import_vendor.json`), and
-  **editing it here is a red test** — `tests/test_p8_import_vendor.py` hashes
-  it against the manifest, diffs it against a sibling checkout at the pinned
-  commit, refuses to let `tools/import_p8.py` re-grow a converter verb, and
-  checks the thing that actually broke: that the converter and the vendored
-  synth (`moy_audio.c`'s `pitch - 24.0f`) still put A4 in the same place. What
-  stays ours in `tools/import_p8.py` is only the CLI, the `.moy` folder
-  writer, and the guided PICO-8 → Python port notes (#36); a Lua port is `moy
-  port`, over there. One thing the swap COST, recorded in the spec's
-  `conformance/README.md`: that JS replayer was the project's only *independent*
-  raster, and moycore/libmoy/moy_gfx all share one lineage — the ESP32-P4 run is
-  now the only cross-check that cannot have inherited a bug. AUDIO on the web
-  (#170): the console ships per-frame FINISHED PCM
-  (base64) and the page plays it through ONE AudioWorklet ring (continuous
-  resample, seam-free; starvation decays instead of hard-cutting); the runner
-  tops a ~120ms cushion via the page-reported queue depth
-  (`step_frame_json(dt, audio_ahead)`) — the browser twin of the device ring
-  top-up. p8 IMPORTS are full-fidelity since #170: 8 waves 1:1, effect column
-  verbatim, 4-channel music rows, SFX loop ranges, per-row pattern lengths
-  (`row_secs`) by the **zepto8-verified** length rule (first non-looping
-  channel; all-looping → slowest channel — the p8 wiki's "all-looping loops
-  forever" is WRONG, trust zepto8 for p8 semantics). `ports/celeste.moy` is
-  gitignored on BOTH repos (CC BY-NC-SA — never commit or ship it); regenerate
-  with the moy-spec CLI: `moy port <cart.p8.png> ports/celeste.moy --title
-  "Celeste Classic" --zoom` (the port tool lives ONLY there now — one
-  converter, no drift). **Do not drop `--zoom`**: it is what bakes the
-  `view(128, 120)` hint, and without it the T-Deck letterboxes the 128px
-  square at 1× instead of compositing the centered 128×120 at 2× — a
-  regeneration on 2026-08-11 lost it and shipped a tiny celeste to the glass.
+  `make test` stayed green**, because the tests had pinned the wrong model too.
+  It is vendored now (`make vendor-p8-import`) and **editing it here is a red
+  test**. What stays ours is the CLI, the `.moy` folder writer and the guided
+  port notes. **Do not drop `--zoom`** when regenerating a port: it bakes the
+  `view(128, 120)` hint, and without it the T-Deck letterboxes a 128px square at
+  1× instead of compositing it centered at 2×. `ports/celeste.moy` is gitignored
+  on BOTH repos (CC BY-NC-SA) — never commit or ship it.
+- **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
+  first non-looping channel, and all-looping means the SLOWEST channel — the
+  wiki's "all-looping loops forever" is WRONG.
+- Web audio ships per-frame FINISHED PCM through ONE AudioWorklet ring
+  (continuous resample, seam-free; starvation decays instead of hard-cutting),
+  with the runner topping a cushion via the page-reported queue depth.
 
 ### The UI refactor landed (2026-08-19) — one widget vocabulary, apps as data, user apps
 
@@ -1032,114 +851,48 @@ to whoever called it.
   - **`files/trash/` is restorable and never confirms**, and WALL/GAME/wallpaper
     are **copy-on-use** — a kid's drawing is never mutated by being used
     (#108's comments hold that design discussion).
-- **Dual cart runtimes (#67, on-glass both boards 2026-07-14):** a manifest
-  `"runtime": "lua"` (+ `"main": "main.lua"`) routes `Player.start` through the
-  injected `ws.lua_runtime` factory instead of the Python compile/exec path — a
-  build without the runtime opens the normal cart-error panel. Host runner:
-  `runtime/lua_host.py` over `runtime/lua_binding.py` — ctypes over the SAME
-  vendored Lua 5.4 + libmoy binding the boards build, `LUA_32BITS` included,
-  compiled on demand into a hash-cached `.so` (lupa and its `lua` extra were
-  DELETED 2026-08-14: no compiler means the runtime-missing panel, not a
-  second engine — same rule as host audio). Device +
-  browser runtime: **`moycore`** (`native/moycore/`, staged to all three boards
-  and the wasm head), which binds the vendored Lua 5.4 through **libmoy's own
-  binding** (`libmoy/moy_lua.c`, vendored from moy-spec): all 38 SPEC verbs are
-  C functions and `moycore.tick(dt)` runs `_update` and `_draw` back to back
-  without re-entering Python — ONE upcall per frame instead of hundreds. One VM
-  per run, the cart's whole Lua heap OUTSIDE the MP gc heap (freed wholesale at
-  close), input arriving as an `array("i")` snapshot refreshed before the tick,
-  audio leaving as a queue drained through the same `make_api` closures a
-  Python cart uses, pmem C-side with a dirty flag persisted at the #66
-  boundaries.
-  **There is exactly one Lua runtime and no chooser** (2026-08-13). The old one
-  — `LuaCartRun`, ~40 registered Python trampolines, the `bind_draw` direct-draw
-  family, the `spr_gate` batch protocol (token `0x7A11`), `moy_lua_glue.py` and
-  `modmoy_lua.c` entire — is DELETED; `native/moy_lua/` is now the vendored VM
-  and nothing else, and `import moy_lua` is meant to fail. Read the deletion
-  commit before proposing to bring any of it back: it was kept as a fallback
-  long after it should have been, and while it was there it silently ran every
-  layer cart.
-  What moycore registers ON TOP of libmoy's table is a **deny list, not an allow
-  list** (`LIBMOY_VERBS` + `NOT_REGISTRABLE` — ONE definition in
-  `runtime/lua_ext.py`, imported by both `moycore_glue` and `lua_host`; they
-  were twinned copies once, and are not now): what is stable and enumerable is what libmoy OWNS, and
-  an allow list silently drops any moybyte verb nobody remembered to add — which
-  it did. Object-valued verbs (`make_layer`/`draw_layer`/`image`) are never
-  registry entries at all: a trampoline marshals scalars and a Layer comes back
-  nil, so they ride int handles plus a Lua prelude, and **that glue is
-  `runtime/lua_ext.py`** — ONE definition every runtime imports, including the
-  host's ctypes binding. It is one file because it was two: the copy the host
-  did not have is why layer carts crashed there and merely fell back on device.
-  **If you add a runtime, import that module; if you add an object-valued verb,
-  it goes there, not in a verb list.**
-  Three things moycore was missing when it shipped, each of which would have read
-  as "moycore made the cart slower" with nothing pointing at a cause, all fixed
-  2026-08-13 and pinned in `tests/test_moycore_loop.py`: the **p8 shim's masked
-  map walk** (`__moy_map_masked`/`__moy_map_flags`, #66 M0 — a large slice of celeste's
-  S3 render, and the shim nil-guards the names so losing them is silent), the
-  **SRAM-floor knob** (`run_desktop` drops the Lua allocator's internal headroom
-  48→24KB at boot and moycore had no such name, leaving a cart at ~97% PSRAM —
-  the measured-2× regime), and a **seeded `rnd`** (libmoy's xorshift32 treats
-  `con->rng == 0` as a fixed constant, so every run of every cart drew the same
-  sequence; the old prelude had shadowed `rnd` with Lua's per-state
-  `math.random`, which is why nobody saw it).
-  **The semantic PIN is `tests/test_semantic_traces.py`** — twin Python/Lua
-  carts fed scripted input, replayed through the real glue on the unix
-  dual-usermod build, hash- and log- and audio-order- and pmem-compared. It
-  drives moycore now, and the first time it did it caught a real divergence:
-  libmoy's `camera` returned nothing where moybyte's (and TIC-80's, and
-  PICO-8's) returns the PREVIOUS offset, so `local px, py = camera(x, y)` read
-  nil. Fixed upstream in both the binding and SPEC.md §6's table. Run it before
-  crossing anything further, and extend its trace vocabulary FIRST —
-  `docs/moycore_direction.md` (tracker #192) is the direction doc, and its
-  gap list is the authority on what the pin does NOT yet cover; the walked
-  plan behind it is `docs/history/moycore_plan_2026-08.md`.
-  Every non-spec verb still trampolines to the SAME Python `make_api` closures
-  (tuple returns fan out to Lua multivalues, so `touch()` needs no wrapper).
-  Related trap in the same family, fixed upstream: `moy_console` holds its sheet
-  and map by POINTER and a brand-new project has neither, so `spr(0,0,0)` in an
-  empty cart used to segfault libmoy's binding — a board reset with no message. Related S3 lever, same date: the **#190 flush-bounce scale fold** —
-  a small-canvas game frame's composite is synthesized inside the bounce bands
-  (root fb untouched on quiet frames; overlays disarm and pay the old cost;
-  the dev channel's `state` → `fold` is the on-glass proof, backed by
-  `moy_axs.fold_stats()`. **NOT the `PUMP` diag line** — that line's `fold=`
-  read a `fold_count` attribute NO compositor defined, so it printed 0 on every
-  board from the day it was written until 2026-08-21, and this file called it
-  "the on-glass proof" the whole time. It could not have been one even wired:
-  the T-Deck has no fold, and the Guition — the only board that has one —
-  denies `device_diag` and so has no PUMP line at all. `state["fold"]` is
-  `None` on a board with no fold lever, never 0, because a frozen 0 is exactly
-  what a BROKEN fold looks like and that ambiguity is what hid this). Three hardware-learned constraints
-  live in the module: the vendored
-  lua sources carry **in-source `-O2` pragmas** (historically a guard against
-  `-Os` halving the VM; today's builds resolve usermods to `-O2` globally, so
-  the pragmas PIN that — and `-O3` on the VM is a measured ~2–5% REGRESSION on
-  the P4 (#159) and a measured NULL on the S3 (#190 A/B, 2026-08-11), so O2 is
-  the affirmed setting on BOTH boards, not a leftover),
-  the `lua_Alloc` is
-  **internal-SRAM-first with a 48KB headroom floor + PSRAM fallback** (the
-  all-PSRAM version measured ~2× slower on the S3's 120MHz-OCT bus), and
-  `lua_to_mp` **small-ints integer args + returns interned names as qstrs**
-  (#107: `mp_obj_new_int_from_ll` per coordinate allocated per upcall arg — enough
-  marshalling garbage to force a visible periodic auto-collect during play (#66);
-  from_ll survives only as the >31-bit fallback).
-  `system_carts/sakura_lua.moy` is the A/B twin of sakura (line-faithful,
-  bit-identical over 600 host frames — `tests/test_lua_sakura_parity.py` +
-  `experiments/lua_bridge/host_parity.py`); the measured cross-board verdict
-  lives in #67 (S3: parity with auto-native Python; P4: flat logic against
-  Python's GC spikes). A canvas without a `_batch_arr`
-  (the wasm head's recording CommandCanvas) declines the C fast path — the
-  Tee-specific decline guards died with the 2026-08 streaming sunset. The
-  Phase 4 protocol tests + Phase 5 UX tail
-  (crash-line mapping via `player._lua_cart_line`, the per-language symbol
-  palette in `code_layer`, the docs Lua section) shipped 2026-07-15 (`21c1278`).
-  **`LUA_32BITS` is DECIDED AND ON** (`6ddaf7c`, `luaconf.h`): both boards' FPUs
-  are single-precision, so doubles would be soft-float — 32-bit floats use the
-  hardware FPU and halve TValue. Since the lupa deletion the host binding builds
-  the same `LUA_32BITS`, so all tiers share float semantics and integers wrap at
-  2^31 everywhere. Recorded because this line said "remaining: only the LUA_32BITS
-  decision" for weeks after it was made, and a 2026-08-09 perf hunt spent its
-  last lead re-proposing a lever that was already shipped.
+- **Dual cart runtimes (#67): a manifest `"runtime": "lua"` routes `Player.start`
+  through `ws.lua_runtime`.** `docs/moycore_direction.md` is the direction doc and
+  `native/moycore/` the implementation; the decisions and traps:
+  - **There is exactly ONE Lua runtime and no chooser.** The old trampoline engine
+    (`LuaCartRun`, `bind_draw`, the `spr_gate` batch protocol, `moy_lua_glue`) is
+    DELETED and `import moy_lua` is meant to fail. Read the deletion commit before
+    proposing to bring any of it back: it was kept as a fallback long after it
+    should have been, and while it was there it silently ran every layer cart.
+  - **What moycore registers on top of libmoy is a DENY list, not an allow list**
+    (`runtime/lua_ext.py`, ONE definition every runtime imports). An allow list
+    silently drops any moybyte verb nobody remembered to add — and it did.
+    Object-valued verbs (`make_layer`/`draw_layer`/`image`) can never be registry
+    entries: a trampoline marshals scalars and a Layer comes back nil, so they ride
+    int handles plus a Lua prelude. **If you add a runtime, import that module; if
+    you add an object-valued verb, it goes there, not in a verb list.** It was two
+    copies once, which is why layer carts crashed on the host and merely fell back
+    on device.
+  - **`LUA_32BITS` is DECIDED AND ON, on every tier including the host.** Both
+    boards' FPUs are single-precision, so doubles would be soft-float; since the
+    host binding builds it too, float semantics and integer wrap are identical
+    everywhere. (This line claimed the decision was still open for weeks after it
+    was made, and a perf hunt spent its last lead re-proposing it.)
+  - **The Lua allocator is internal-SRAM-first with a headroom floor and a PSRAM
+    fallback** — the all-PSRAM version measured ~2× slower on the S3's OCT bus.
+    `-O2` is the AFFIRMED setting on both boards: `-O3` on the VM measured a
+    regression on the P4 and null on the S3, so the in-source pragmas PIN it
+    rather than merely inheriting it.
+  - **Three things were missing when moycore shipped**, each of which would have
+    read as "moycore made the cart slower" with nothing pointing at a cause: the
+    p8 shim's masked map walk (**the shim nil-guards those names, so losing them
+    is SILENT**), the SRAM-floor knob, and a **seeded `rnd`** — libmoy's xorshift
+    treats a zero seed as a fixed constant, so every run of every cart drew the
+    same sequence.
+  - **`tests/test_semantic_traces.py` is the semantic PIN** — twin Python/Lua
+    carts, scripted input, hash/log/audio-order/pmem compared through the real
+    glue. Run it before crossing anything further, and extend its trace vocabulary
+    FIRST. The first time it drove moycore it caught a real divergence: libmoy's
+    `camera` returned nothing where every other implementation returns the PREVIOUS
+    offset, so `local px, py = camera(x, y)` read nil.
+  - **A brand-new project has no sheet and no map, and `moy_console` holds both by
+    POINTER** — `spr(0,0,0)` in an empty cart used to segfault libmoy's binding: a
+    board reset with no message.
 - **pmem persistence is DEFERRED (#66, on-glass 2026-07-14):** `pmem(i, v)` is
   RAM + a dirty mark; `Pmem.flush()` persists at cart exit (`release_world`),
   the crash capture, the workspace swap, and a periodic frame-boundary save
@@ -1251,9 +1004,33 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
 
 ## Conventions
 
-- The current design doc is **`moybyte_console_plan_2026-07.md`** (repo root); superseded v0.1/v0.3/v0.4 docs are archived under `docs/history/`. The **current `.moy` cart API** is documented in **`docs/moy_cart_api.md`**; the legacy `.moyproj` SDK specs (api / project-format / runtime-contract) are archived under `docs/history/` too. The shipped v0.5 shell's UX reference is **`docs/shell_ux_v1.md`** (corrected to the as-built reality); `docs/shell_architecture_v1.md` (privileged system carts + layered compositor) is the standing direction doc; the three implemented shell plan docs (`shell_ux_technical_plan_v1` / `shell_os_architecture_v1` / `shell_layers_refactor_v1`) are archived under `docs/history/`. **`docs/surface_model_v1.md`** is the standing presentation CONTRACT for every backend (immediate widget logic + retained surfaces + explicit generation-counter dirty + per-backend compositing strategy): read it BEFORE touching any rendering/compositing/invalidation code on any tier, and treat its §8 graveyard as settled — a new backend implements its §4 compositor contract, it does not invent a new invalidation mechanism. It absorbed its predecessor on **2026-08-27** and is the whole living record on UI frame cost now: `ui_damage_model_v1.md`'s own §0 review killed the fine-grained damage architecture (its "content-independent chrome" finding had no power — every one of those draw loops iterates the VIEWPORT, not the content, so identical numbers were structurally guaranteed), and what survived is **§14** — the shipped focused-window content freeze, which `wm_windowed._content_static` and its test now cite as their design source, and the evidence for one invalidation mechanism instead of six (2026-07-26: two of the six carried the same wrong key, cost 72ms of an 86ms frame twice per gesture, and produced no signal whatsoever). §8 carries the **why-not-LVGL** decision with its numbers (used on the T-Deck for panel/bus bring-up only, never to draw; our own blitter took that path 47→90fps; deleted entirely with the fork on 2026-08-17), so that is not re-litigated. The full record, including the phases the review walked, is `docs/history/ui_damage_model_v1.md`. **`docs/board_ports_2026-08.md`** is the standing direction doc for ADDING A BOARD (tracker **#202**: the Guition S3 JC3248W535 and a Guition P4 are the named next two): the per-board bill, **Phases A–D all landed 2026-08-17** (flash/CI plumbing as board.toml data; the shared `FrameLoop`; the GT911 core promoted; the six-stage port checklist), the declines (no driver registry/ABI, no codegen) — read its checklist before starting any port.
-- **Issue mirror (`docs/issues/`, gitignored):** a **local, un-committed** snapshot of every GitHub issue, split into `open/` and `closed/` (files named `NNNN-slug.md`) plus `INDEX.md`, so an issue number referenced in a commit, doc, or chat resolves without network access. GitHub is the source of truth — this is a generated read-only mirror (not in git, to avoid churn), so a fresh checkout won't have it: **build it with `make sync-issues`** (wrapper over `tools/sync_issues.py`; needs the `gh` CLI, authed). The script wipes and rewrites both folders from `gh`, so state changes and edits never leave a stale copy. **Run `make sync-issues` at the start of any session that reads or reasons about issues, and again after EVERY issue you open/close/comment/edit** — the mirror is only trustworthy if syncing is a reflex, and living-body issues (like the #66 performance ledger) go stale locally the moment the body is edited on GitHub. Don't hand-edit the files.
-- Tests run against the host packages only; firmware tests (`tests/test_micropython_spike.py`) grep the frozen device modules' source rather than executing them.
+- **The standing docs, and what each one settles.** `ls docs/` lists them and the
+  router above routes to them; these are the ones that CLOSE a question, so
+  reopening one means arguing with the doc, not with this file:
+  - **`docs/surface_model_v1.md`** — the presentation CONTRACT for every backend.
+    Read it before touching any rendering, compositing or invalidation code on any
+    tier. **Its §8 graveyard is settled**: a new backend implements the §4
+    compositor contract, it does not invent a new invalidation mechanism. §8 also
+    carries the why-not-LVGL decision, so that is not re-litigated.
+  - **The fine-grained damage architecture was KILLED by its own review**, and the
+    reason generalises: its "content-independent chrome" finding had no power,
+    because every one of those draw loops iterates the VIEWPORT, not the content,
+    so identical numbers were structurally guaranteed. What survived is §14, the
+    focused-window content freeze. One invalidation mechanism, not six — when
+    there were six, two carried the same wrong key, cost most of a frame twice per
+    gesture, and produced no signal at all.
+  - **`docs/board_ports_2026-08.md`** — the standing doc for ADDING A BOARD; read
+    its checklist and its stage-6 "TAKE THESE" list before starting a port. Its
+    declines (no driver registry/ABI, no codegen) are recorded so they are not
+    re-proposed.
+  - `moybyte_console_plan_2026-07.md` is the current design doc;
+    `docs/shell_ux_v1.md` is the shell's UX reference, corrected to as-built.
+    Superseded plans live under `docs/history/` and are history, not direction.
+- **Host tests execute the device tier now, they do not grep it.** The firmware
+  suites once asserted device bodies as source STRINGS, which is how a meter
+  printed a constant for weeks behind a green test. What legitimately stays a grep
+  is ROUTING — that a board still calls a shared helper — and
+  `tests/test_micropython_spike.py` keeps only those.
 - **On-glass testing — all three boards have a suite** (#156). Each is gated on
   its own env var and shares one session in file order, leaving the board where
   it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
