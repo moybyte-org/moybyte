@@ -156,9 +156,9 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 
 `firmware/seeed_xiao_esp32s3_zero/` became a build target on **2026-08-29**
 (owner call, reversing its own "DELIBERATELY NOT A BUILD TARGET"; its board.toml
-records the reversal). No panel, no touch, no frame loop, no carts — the browser
-is the console and this board is the store behind it. **That dir's README is the
-authority**; what belongs here is only what bites:
+records the reversal). No panel, no touch, no frame loop, and no cart RUNTIME —
+the browser is the console and this board is the store behind it. **That dir's
+README is the authority**; what belongs here is only what bites:
 
 - **It is the shape a port takes when the checklist's stages 1-6 are all
   absent** — no panel, touch, input, storage or audio to bring up, and nothing
@@ -167,6 +167,16 @@ authority**; what belongs here is only what bites:
 - **8MB of flash: the console table does not fit, and the bootloader rejects an
   oversized one into a silent boot loop** — on a board with no screen that is
   indistinguishable from dead. Its CSV is authored, not inherited.
+- **It carries the seed roster COMPRESSED, and it is the only board that does**
+  (2026-08-30). `tools/gen_device_carts.py --packed` emits `CARTS_Z` — the same
+  carts as one raw-deflate stream each, 202 KB against the plain form's 732 KB
+  of source — and `moy_carts.seed_packed()` inflates them ONE CART AT A TIME
+  into an **empty** store on first boot. The gate is emptiness and not #47's
+  version compare, because this board's store is the RECORD (the only copy of a
+  browser-made cart, with a journal behind it) where a console board's is a
+  cache. Until that day the board shipped with no carts and the roster arrived
+  over a USB cable, or never — which the website's flasher made a real product
+  gap.
 - **Its patch ladder is empty and says so** (`# DECLINED <fn>` per patch, which
   is the mechanism `moybyte_patch_repr_c`'s header already specified). Do not
   give it the #169 retune without the 120MHz profile; the spike suite refuses

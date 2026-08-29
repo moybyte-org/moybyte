@@ -1,16 +1,40 @@
 #!/usr/bin/env bash
-# Provision a Moybyte Zero's STORE: the cart roster, the WiFi credentials and
-# the pairing pin. Idempotent -- run it again whenever the seed roster changes.
+# Provision a Moybyte Zero's STORE: the WiFi credentials, the pairing pin, and
+# a cart roster when the board has none. Idempotent -- run it again whenever
+# the credentials or the roster change.
 #
-#   ./provision.sh [--modules] [--web] [--clean] [/dev/ttyACM0] [path/to/wifi.json]
+#   ./provision.sh [--modules] [--web] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
 #
 # WHAT THIS SCRIPT IS, SINCE 2026-08-29. It used to be the whole port: this
 # board ran stock MicroPython, and the nine shared modules it needs were PUSHED
 # here as plain files, so the `cp` list below WAS the module set and
 # `tests/test_zero_provision.py` existed to keep that list honest. The board
 # has a frozen image now (`build.sh`), so the module set is `board.toml` and
-# this script provisions what an image cannot carry: a kid's carts, somebody's
-# WiFi password, and a pin minted per board.
+# this script provisions what a PERSON has to supply: somebody's WiFi password
+# and a pin minted per board.
+#
+# AND NOT THE CARTS, since 2026-08-30 -- this header said "what an image cannot
+# carry: a kid's carts" and that stopped being true. The image carries the seed
+# roster COMPRESSED (`carts_data.CARTS_Z`: the same 35 carts as one raw-deflate
+# stream each, 202 KB where the plain form the console boards freeze is 732 KB
+# and leaves 51 KB of this board's OTA slot), and `zero_host.seed_carts()`
+# inflates it into an EMPTY store on first boot. That is what closed the real
+# gap: the website's flasher can write a Zero, and a person who used it got an
+# empty console with no hint that a second, cabled step existed.
+#
+# So the cart push became the SAME trade as `--modules` and `--web`: a dev loop
+# for a roster that changed since the image was built, not the way carts
+# arrive. Default is "push only if the board has no carts at all", which is the
+# image's own rule so the two paths cannot fight; `--carts` forces the push.
+#
+# TWO THINGS FORCING IT MEANS, both of them real. It OVERWRITES the repo's copy
+# of a cart over whatever is on the board, which on the one board that is the
+# store OF RECORD is a thing to mean rather than to do idly. And the two paths
+# NAME A FOLDER DIFFERENTLY -- `seed_builtins` names it from the cart's TITLE
+# slug (hop_quest.moy) while this pushes the SOURCE folder (platformer.moy),
+# which is the same split `gen_device_carts.title_to_folder` exists for -- so
+# forcing a push onto an image-seeded store leaves the launcher showing both.
+# Delete the store (or reflash) if that is what you have done.
 #
 # The push did not go away, it became OPT-IN (`--modules`). Same doctrine as
 # the web bundle, one level up: STORAGE WINS, so a push stays the sub-minute
@@ -32,13 +56,15 @@ set -euo pipefail
 
 PUSH_MODULES=0
 PUSH_WEB=0
+PUSH_CARTS=0
 CLEAN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --modules) PUSH_MODULES=1; shift ;;
     --web)     PUSH_WEB=1; shift ;;
+    --carts)   PUSH_CARTS=1; shift ;;
     --clean)   CLEAN=1; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,54p' "$0"; exit 0 ;;
     *) break ;;
   esac
 done
@@ -145,10 +171,26 @@ PYEOF
   fi
 fi
 
-echo "== seed carts (the whole roster -- 763KB measured, against a 2.4MB vfs)"
-for cart in "${REPO}"/system_carts/*.moy; do
-  run cp -r "${cart}" :/moy/carts/ >/dev/null
-done
+# THE CARTS, and the question of whether they are already there. The image
+# seeds an EMPTY store itself now, so the default job here is to notice a board
+# that has none -- an old image, a wiped vfs, an interrupted first boot -- and
+# fill it; `--carts` forces the push for a roster that moved since the image
+# was built. The emptiness question is asked ON THE BOARD, the same read
+# `zero_host.store_is_empty()` does, so the cable and the image cannot disagree
+# about what "already there" means.
+HAS_CARTS="$(run exec "import os
+try:
+    print('CARTS %d' % len([n for n in os.listdir('/moy/carts') if n.endswith('.moy')]))
+except OSError:
+    print('CARTS 0')" | tr -d '\r' | grep '^CARTS ' | cut -d' ' -f2 || echo 0)"
+if [ "${PUSH_CARTS}" = "1" ] || [ "${HAS_CARTS:-0}" = "0" ]; then
+  echo "== seed carts (the whole roster -- 763KB measured, against a 2.4MB vfs)"
+  for cart in "${REPO}"/system_carts/*.moy; do
+    run cp -r "${cart}" :/moy/carts/ >/dev/null
+  done
+else
+  echo "== carts: ${HAS_CARTS} already on the board -- left alone (--carts to re-push)"
+fi
 
 if [ -n "${WIFI}" ]; then
   echo "== wifi creds"

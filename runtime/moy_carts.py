@@ -756,6 +756,103 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
                 _write(d + "/" + name, data)
 
 
+# -- the PACKED seed roster (2026-08-30) -------------------------------------
+#
+# `seed_builtins` above takes cart DICTS, and on the console boards those come
+# straight out of a frozen `carts_data.CARTS` -- 732 KB of literal source whose
+# strings live in ROM and cost no heap. That representation is free on a board
+# with the flash for it, and the Zero is the board without. Both forms were
+# BUILT: the plain roster makes a 2,830,672 B image of a 2,883,584 B OTA slot,
+# 51 KB left -- it fits, by less than 2%, under the #168 warning floor and one
+# cart from a build failure, in a slot the board pays for TWICE.
+#
+# So the Zero freezes `carts_data.CARTS_Z` instead: the SAME carts, one raw
+# deflate stream each (tools/gen_device_carts.py --packed), which builds to
+# 2,399,232 B and leaves 473 KB. The unit of work is ONE CART -- inflate it,
+# hand it to `seed_builtins`, drop it -- because the roster inflates to 732 KB
+# and no board should ever hold that at once.
+#
+# Nothing about the seed CONTRACT changes: the #47 version rules, the manifest
+# regeneration, the preserved pmem/config all stay in `seed_builtins`, which is
+# the one body that writes a cart to a store. This is a decoder in front of it.
+
+# The deflate window the roster was compressed with. `tools/gen_device_carts.py`
+# holds the writer's copy (SEED_WBITS) and tests/test_seed_pack.py pins the two
+# equal -- a mismatch is not a crash, it is a wrong-looking inflate.
+_SEED_WBITS = 15
+
+
+def _packed_stream(blob):
+    """A readable stream over one cart's raw-deflate blob.
+
+    `deflate` is MicroPython's built-in inflater and the reason there is no
+    `zlib` on a board at all (it replaced it in v1.21). CPython has no
+    `deflate`, so the host reaches the same bytes through zlib's raw mode --
+    which is what lets every host suite exercise THIS body rather than a twin.
+    """
+    import io as _io
+
+    try:
+        import deflate
+    except ImportError:                  # CPython (host suites, the simulator)
+        import zlib
+        return _io.BytesIO(zlib.decompress(blob, -_SEED_WBITS))
+    return deflate.DeflateIO(_io.BytesIO(blob), deflate.RAW, _SEED_WBITS)
+
+
+def unpack_seed(blob):
+    """One packed blob -> the cart dict `seed_builtins` takes.
+
+    `json.load` over the inflating stream, NOT `json.loads(stream.read())`:
+    read() materializes the whole inflated document beside the objects parsed
+    out of it, and the parse allocates those anyway. MEASURED under the desktop
+    MicroPython, as the smallest heap the whole roster seeds in -- 680 KB
+    streaming against 896 KB for the read-all version, which is also ~40%
+    slower. tests/test_seed_pack.py asserts at 768 KB, between the two.
+    """
+    return json.load(_packed_stream(blob))
+
+
+def seed_packed(packed, root=CARTS_DIR, progress=None):
+    """`seed_builtins` over a PACKED roster, one cart inflated at a time.
+
+    `packed` is `[(title, version, blob)]`. The title and the version ride
+    outside the blob so the #47 already-there check can be answered WITHOUT
+    inflating: a board that is already seeded walks the whole roster doing 35
+    directory stats and no decompression at all, which is what keeps this off
+    the warm-boot path rather than merely cheap on it.
+
+    Returns the number of carts actually written.
+    """
+    total = len(packed)
+    written = 0
+    for index, entry in enumerate(packed):
+        title, version, blob = entry
+        if progress is not None:
+            try:
+                progress(index, total, title)
+            except Exception:             # noqa: BLE001 -- as in seed_builtins
+                progress = None
+        d = root + "/" + slug(title) + ".moy"
+        if _exists(d) and int(version) <= _cart_version(d):
+            continue
+        # One cart in flight. seed_builtins gets a ONE-element list so every
+        # rule it owns still applies -- and no progress hook, because the
+        # counting is this loop's (it would report 1-of-1, 35 times).
+        #
+        # NO `gc.collect()` here, and that is MEASURED rather than assumed. The
+        # obvious version collects after each cart to "make peak heap be one
+        # cart"; under the desktop MicroPython the smallest heap the whole
+        # roster seeds in is 680 KB either way, and the collecting version is
+        # ~10% slower for it. The allocator already collects at the moment
+        # peak matters -- when an allocation cannot be served -- and on a board
+        # whose heap is megabytes of PSRAM a full scan per cart is a real cost
+        # paid 35 times for a bound it does not move.
+        seed_builtins([unpack_seed(blob)], root)
+        written += 1
+    return written
+
+
 def load(path):
     """Load one .moy folder into a cart dict, or None on error.
 

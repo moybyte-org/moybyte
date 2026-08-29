@@ -48,9 +48,11 @@ cannot have started to matter:
   asserts every import of every staged module resolves on this target — the same
   net all three console boards ride.
 
-`provision.sh` survives and **changed jobs**: it provisions the STORE (carts,
-credentials, the pairing pin) and keeps the module push as an opt-in dev loop.
-See "Provisioning" below.
+`provision.sh` survives and **changed jobs**: it provisions the credentials and
+the pairing pin, and keeps the module push as an opt-in dev loop. The CARTS
+stopped being its job on 2026-08-30 — the image carries a compressed seed
+roster and inflates it on first boot — so what is left there is a safety net and
+a re-push flag. See "Provisioning" below.
 
 ## Build, flash, look
 
@@ -76,10 +78,10 @@ BOOT button held while plugging in, and a replug afterwards.
 **The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
 `0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
 filesystem is not where the new image looks and comes up freshly formatted. Run
-`./provision.sh` afterwards to put the seed roster, the credentials and the pin
-back. A kid's browser-made carts are not lost by this — the browser keeps its
-own copy in OPFS and syncs them back on the next visit — but anything that
-existed *only* here is.
+`./provision.sh` afterwards to put the credentials and the pin back; the seed
+roster the image carries seeds itself on the next boot. A kid's browser-made
+carts are not lost by this — the browser keeps its own copy in OPFS and syncs
+them back on the next visit — but anything that existed *only* here is.
 
 ### The image
 
@@ -89,11 +91,22 @@ existed *only* here is.
   all. That was learned here — see the hardware facts below — so this table is
   authored, not inherited.
 - **What makes two slots fit** is that the image is headless: no console, no
-  canvas, no seed carts, and only one shared native module. Measured on the first
-  build, 2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**,
-  against the Guition's 3,668,096 B the day before. The CSV carries the full
-  arithmetic and what would falsify it; the build prints the headroom on every
-  run and fails on an overflow (#168).
+  canvas, and only one shared native module. Measured on the first build,
+  2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**, against
+  the Guition's 3,668,096 B the day before. The CSV carries the full arithmetic
+  and what would falsify it; the build prints the headroom on every run and
+  fails on an overflow (#168).
+- **The seed roster is in the image, COMPRESSED** (2026-08-30). This board
+  carried no carts at all until then, and both forms were **built** to find out
+  why. With the plain `carts_data.py` the console boards freeze, this image is
+  **2,830,672 B of the 2,883,584 B slot — 51 KB left**: it fits, under the #168
+  warning floor, one cart from a build failure, in a slot paid for twice. With
+  the same 35 carts as one raw-deflate stream each it is **2,399,232 B — 473 KB
+  left**, against **2,194,112 B / 673 KB** for the image that carried no roster
+  at all. `tools/gen_device_carts.py --packed` emits it (201,716 B of blobs
+  against 731,592 B of plain source); `zero_host.seed_carts()` inflates it into
+  an **empty** store on first boot, one cart at a time, through MicroPython's
+  built-in `deflate`.
 - **The frozen set is `board.toml`.** This is the one board whose
   `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
   argues the case at length: a denylist is right when the source tree's default
@@ -104,12 +117,18 @@ existed *only* here is.
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--web] [--clean] [/dev/ttyACM0] [path/to/wifi.json]
+./provision.sh [--modules] [--web] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
 ```
 
-Default: make the directories, copy the whole seed roster into `/moy/carts`,
-optionally write the credentials, mint or keep the pairing pin, reboot, and
-print the paired url.
+Default: make the directories, optionally write the credentials, mint or keep
+the pairing pin, reboot, and print the paired url. It copies the seed roster
+**only onto a board that has no carts at all** — the image seeds itself now, so
+this is the safety net for an old image or a wiped filesystem, and the
+emptiness question is asked on the board with the same read `store_is_empty()`
+does. `--carts` forces the push, for a roster that moved since the image was
+built; forcing it writes the repo's copy of a cart over whatever is on the
+board, which on the one board that is the store *of record* is a real thing to
+mean.
 
 `wifi.json` is the console's own store shape
 (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
@@ -127,10 +146,11 @@ never rotates a pin somebody has already scanned.
 
 ### The flags, and the one hazard they exist for
 
-`--modules` pushes the image's own module set as plain files, and `--web` pushes
-the wasm bundle. Both are **dev loops**, and both are the same trade the bundle
-already makes on every board: **storage WINS, so the image is the guarantee and
-not the ceiling.** A push is a second, a reflash is minutes.
+`--modules` pushes the image's own module set as plain files, `--web` pushes the
+wasm bundle, and `--carts` re-pushes the seed roster. All three are **dev
+loops**, and all three are the same trade the bundle already makes on every
+board: **storage WINS, so the image is the guarantee and not the ceiling.** A
+push is a second, a reflash is minutes.
 
 The hazard is that MicroPython searches `/` before `.frozen`, so a pushed `.py`
 outranks the image's own copy **on every boot after it**, silently and forever,

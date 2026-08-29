@@ -132,11 +132,12 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
     shutil.copy(src / "board.toml", work / "board.toml")
     dest = work / "modules"
     dest.mkdir()
-    # The `keep` names are the board's OWN (`carts_data.py` is a console board's
-    # baked seed roster and the headless Zero generates none), so this reads the
-    # declaration rather than assuming one -- a hard-coded name here would have
-    # asserted "the prune ate a generated file" about a file that board never
-    # produces.
+    # The `keep` names are the board's OWN, so this reads the declaration
+    # rather than assuming one -- a hard-coded name here would assert "the
+    # prune ate a generated file" about a file some board never produces.
+    # (Every board generates a `carts_data.py` since 2026-08-30, but they are
+    # not the same file: the console boards' is the plain roster and the
+    # Zero's is the packed one -- tests/test_seed_pack.py owns that half.)
     keep = board_config.load(src).get("modules", {}).get("keep", [])
     assert keep, "%s declares no generated files to keep" % board
     generated = keep[0]

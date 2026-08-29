@@ -106,6 +106,101 @@ def identity():
     return doc if isinstance(doc, dict) else {}
 
 
+# -- the seed roster, carried by the image (2026-08-30) ----------------------
+#
+# WHAT THIS REPLACED. Until this landed, a Zero got its carts from
+# `provision.sh` over a USB cable and from nowhere else -- the script's own
+# header called it "what an image cannot carry: a kid's carts". The plain roster
+# the console boards freeze very nearly could not be carried here, and both
+# forms were BUILT to find out: with it this image is 2,830,672 B of a
+# 2,883,584 B OTA slot and leaves 51 KB -- under the #168 warning floor, one
+# cart from a build failure, in a slot paid for twice. Compressed the image is
+# 2,399,232 B and leaves 473 KB. `carts_data.CARTS_Z` is the same 35 carts as
+# one raw-deflate stream each, and this function inflates them.
+#
+# It matters beyond the cable, because the website's flasher can write this
+# board (site/build.py's BOARDS): a person who flashed a Zero from a web page
+# got an empty console and no hint that a second, cabled step existed. There is
+# no second step now.
+#
+# ONLY WHEN THE STORE IS EMPTY, and this board is where that rule differs from
+# the console boards'. On a console board the store is a CACHE of the image's
+# built-ins, so #47 re-seeds a cart whose baked version is newer and accepts
+# that on-device edits to a built-in's code are discarded. Here the store is the
+# RECORD -- it is the only copy of a cart a kid made in the browser, it has a
+# `moy_journal` history behind it, and `seed_builtins` names a folder by the
+# TITLE slug, so a kid's edited "Hop Quest" is exactly what a version bump would
+# overwrite. So the gate is emptiness, not version: this board seeds a fresh
+# store and never touches one that has anything in it.
+
+
+def store_is_empty(root=CARTS_DIR):
+    """Is there no cart at all under `root`?
+
+    `.moy` folders only. A store holding just the sidecars a sync leaves behind
+    (`.history/`, a stray `journal/`) has no carts in it and should still be
+    seeded; a store holding one cart should not.
+    """
+    try:
+        names = os.listdir(root)
+    except OSError:                      # no store yet -> nothing to protect
+        return True
+    for name in names:
+        if name.endswith(".moy"):
+            return False
+    return True
+
+
+def seed_carts(root=CARTS_DIR):
+    """Write the image's baked roster into an EMPTY store. Returns the count.
+
+    Best-effort in every direction, because none of the ways this can fail may
+    cost the board its job -- which is serving whatever carts it DOES have. An
+    image built without a roster (the module is generated, so a hand-assembled
+    tree may have none), a full filesystem, a corrupt blob: each prints one
+    `ZERO seed:` line and returns, because serial is this board's only display.
+
+    THE ONE CONSEQUENCE OF GATING ON EMPTINESS, said out loud: a seed
+    interrupted halfway -- a power cut on a first boot -- leaves carts in the
+    store, so the next boot sees a store that is not empty and does not finish
+    the job. That is the price of never overwriting a kid's cart, and it is the
+    right way round on the board that holds the only copy. `./provision.sh
+    --carts` is the recovery, or a reflash.
+    """
+    if not store_is_empty(root):
+        return 0
+    try:
+        from carts_data import CARTS_Z
+    except ImportError:
+        print("ZERO seed: no roster baked into this image")
+        return 0
+    try:
+        import moy_carts
+        # `ticks` and not `time.ticks_ms` directly: this module is import-only
+        # on the host and the host suites drive this function, where
+        # MicroPython's clock does not exist. One shim, the tree's own
+        # (runtime/ticks.py), which this board already freezes for the
+        # transport's blocking budgets.
+        import ticks
+
+        moy_carts.ensure_dirs(root)
+        # SAID BEFORE it starts, not only after. This runs before the radio and
+        # writes ~763 KB across 155 files to the internal VFS, so on a first
+        # boot it is the longest silence in the log -- and on a board with no
+        # screen a silence is what a hang looks like.
+        print("ZERO seed: empty store -- inflating %d carts from the image"
+              % len(CARTS_Z))
+        started = ticks._ticks_ms()
+        written = moy_carts.seed_packed(CARTS_Z, root)
+        elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
+    except Exception as exc:             # noqa: BLE001 -- a partial store beats none
+        print("ZERO seed: FAILED (the store may be partly seeded):", exc)
+        return 0
+    print("ZERO seed: %d carts inflated from the image in %d ms"
+          % (written, elapsed))
+    return written
+
+
 def connect(wait_ms=15000, hostname=None):
     """Join the first known network that answers. Returns the STA IP or None.
     The wait is per-network and generous for the same reason moy_ota's
@@ -607,6 +702,11 @@ def serve():
     _mkdir(ROOT)
     _mkdir(CARTS_DIR)
     _mkdir(WEB_DIR)
+    # BEFORE the radio, on purpose: seeding is local, and a board that cannot
+    # find a network still ends up with a store -- it goes on to host the setup
+    # AP, and the first page served after that form is answered has carts behind
+    # it rather than an empty shelf.
+    seed_carts(CARTS_DIR)
     me = identity()
     name = me.get("name") or HOSTNAME
     ip = connect(hostname=name)

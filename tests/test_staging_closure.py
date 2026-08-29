@@ -159,11 +159,15 @@ GENERATED = {
     "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
     "guition-s3": {"carts_data", "_ota_build"},
-    # No `carts_data`: the console boards freeze the seed roster as the
-    # fallback for a missing card, and this board's whole product is a real
-    # cart store on real flash. Baking a second copy of 36 carts into BOTH OTA
-    # slots would cost more flash than the store it is meant to back up.
-    "zero": {"_ota_build"},
+    # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
+    # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
+    # fallback for a missing card), and this board freezes the PACKED form
+    # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
+    # inflates into an empty store on first boot. It did not carry one at all
+    # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
+    # #168 warning floor -- so a flashed Zero came up an empty console and its
+    # carts arrived over a USB cable, or never.
+    "zero": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
     "web": {"palette"},

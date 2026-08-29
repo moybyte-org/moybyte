@@ -60,6 +60,7 @@ dest = "modules"
 # copy hides.
 prune = true
 keep  = [
+  "carts_data.py",   # the PACKED seed roster (tools/gen_device_carts.py --packed)
   "_ota_build.py",   # the OTA channel/version/label/board stamp (#53)
 ]
 
@@ -105,7 +106,13 @@ that call bought. `moy_sync.file_kinds()` asks the store module for FILE_KINDS
 and files_root before it will serve GET /files.json or apply a v2 files batch;
 with no store module it answers None, which every caller reads as REFUSE -- so
 without these the kid's drawings simply do not travel, silently. `moy_image` is
-`moy_carts`' own import (thumbnails / the .moyimg codec)."""
+`moy_carts`' own import (thumbnails / the .moyimg codec).
+
+`moy_carts` earned a second job here on 2026-08-30: `seed_packed()`, which
+inflates the PACKED roster this board's build bakes into `carts_data.py` (see
+`[modules] keep`). It is the same `seed_builtins` every console board seeds
+with, one cart at a time behind a decoder, so this board gained a first-boot
+store without gaining a second copy of the seed rules."""
 
 [[modules.shared.group]]
 files = ["moy_journal.py"]

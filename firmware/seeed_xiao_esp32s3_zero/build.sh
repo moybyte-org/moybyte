@@ -99,14 +99,23 @@ moybyte_setup_idf esp32s3 \
 #    and nothing else) with the web blob generated INTO the staged copy, then
 #    the shared Python modules (board.toml [modules.*]).
 #
-#    No tools/gen_device_carts.py step, unlike the console boards: they freeze
-#    the seed roster as a fallback for a missing card, and this board's whole
-#    product is a real cart store on real flash. Baking a second copy of 36
-#    carts into both OTA slots would cost more flash than the store it is meant
-#    to back up.
+#    ...then the seed roster, PACKED (2026-08-30). This board shipped with NO
+#    carts at all until then -- a flashed Zero came up an empty console and its
+#    roster arrived over a USB cable, or never -- and the arithmetic is why.
+#    BOTH FORMS WERE BUILT: with the plain `CARTS = [...]` the console boards
+#    freeze, this image is 2,830,672 B of the 2,883,584 B slot and leaves
+#    51 KB -- under the #168 warning floor, one cart from a build failure, in a
+#    slot this board pays for twice. With the same 35 carts as one raw deflate
+#    stream each it is 2,399,232 B and leaves 473 KB, and
+#    `zero_host.seed_carts()` inflates them into an EMPTY store on first boot.
+#    `--packed` is the only difference from the
+#    console boards' invocation: same generator, same manifests, same
+#    declarations.
 # ---------------------------------------------------------------------------
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed \
+  "${MODULES_DIR}/carts_data.py"
 
 #    The OTA identity stamp (#53). `xiao_zero` is the board id inside the signed
 #    manifest -- reserved in board.toml since this board's rebuild and wired for
