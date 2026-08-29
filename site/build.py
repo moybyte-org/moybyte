@@ -233,7 +233,10 @@ FEATURES = [
      "back to it, behind the pairing pin the device puts on screen. Opened "
      "from an ordinary web host &mdash; this page &mdash; the cartridges and "
      "drawings are kept in your browser and are still there on your next "
-     "visit, and a <code>.moy</code> file carries one in or out."),
+     "visit, and a <code>.moy</code> file carries one in or out. There is "
+     "nothing to sign into and nothing leaves the machine it was made on; the "
+     "trade is that a browser is not a filing cabinet, so export the ones you "
+     "would mind losing."),
 ]
 
 TARGETS = [
@@ -268,14 +271,6 @@ ROUGH = [
     "not claimed here.",
     "Open holes are filed rather than hidden: the system apps are not editable "
     "yet, and USB-HID keyboard and audio on the P4 are unbuilt.",
-    "There are no accounts, and nothing syncs between your own devices: "
-    "cartridges made in a browser stay in that browser, and cartridges made on "
-    "a board stay on that board. A <code>.moy</code> file moves one across, and "
-    "a page served by a board edits that board&rsquo;s cartridges directly &mdash; "
-    "but a browser&rsquo;s storage is not a backup, so export the ones you "
-    "would mind losing.",
-    "There is no community gallery: publishing a cartridge for other people to "
-    "browse, download and play is filed, not built.",
 ]
 
 
