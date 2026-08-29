@@ -6,6 +6,15 @@ that -- `tests/test_import_p8.py` proves the conversion on CPython, and the
 whole point of this feature is that the SAME conversion happens inside the wasm
 VM, driven by the page.
 
+"RUNS" IS CHECKED ON THE CANVAS (2026-08-29). It used to be checked by asking
+the console which cart was playing, which a cart that loads and then does
+nothing satisfies perfectly -- and for a while that was the honest ceiling,
+because the drop emitted a Python stub whose whole job was to look like
+something. It emits the cart's own code now, so the check counts PIXELS: the
+fixture paints an 80x80 block in p8 colour 14 from its own `_draw`, and the
+scenario counts that colour before the drop as well as after, so the assertion
+rests on a measured baseline instead of a belief about what the shell paints.
+
     MOYBYTE_WEB_E2E=1 .venv/bin/python -m pytest tests/test_web_p8_e2e.py
 
 Env-gated like its sync and persistence siblings, and it shares their
@@ -86,11 +95,18 @@ def _fixtures(tmp_path):
     return p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
 
 
+def _pink(step):
+    """The pink-pixel count out of one scenario probe (`pink N`)."""
+    assert step.startswith("pink "), "the pixel probe did not run: %r" % step
+    assert step != "pink ?", step
+    return int(step.split(None, 1)[1])
+
+
 def _check(out, js, form):
     """The same assertions for both cart forms -- they are one feature."""
-    assert len(js) >= 9, "not enough js steps:\n%s" % out[-3000:]
-    (mode, sent, imported, report, panel, playing,
-     edit_btn, _clicked, edited) = js[:9]
+    assert len(js) >= 11, "not enough js steps:\n%s" % out[-3000:]
+    (mode, pink_before, sent, imported, report, panel, playing, pink_after,
+     edit_btn, _clicked, edited) = js[:11]
     assert "saved in this browser" in mode, \
         "%s: a static host must land in site mode, said %r" % (form, mode)
     assert sent.endswith(form), sent
@@ -102,18 +118,30 @@ def _check(out, js, form):
     # 2. the compatibility report is REAL prose about THIS cart (#194: report,
     #    don't crash) -- the same lines the CLI prints, written once.
     assert "tiny dash" in report, report
-    assert "CODE did NOT" in report, \
-        "%s: the report must say the Lua was not ported: %r" % (form, report)
+    assert "imported, and it runs." in report, \
+        "%s: the report must say the code came across: %r" % (form, report)
+    assert "CODE did NOT" not in report, \
+        "%s: that headline was inverted on 2026-08-29: %r" % (form, report)
     assert "sspr" in report, \
-        "%s: the report must name what is not supported: %r" % (form, report)
+        "%s: the report must name the verbs that differ: %r" % (form, report)
     assert panel.startswith("block|"), \
         "%s: the report card never showed: %r" % (form, panel)
     assert panel.endswith("|"), "a successful import must not paint as an error"
 
-    # 3. IT RUNS -- the console's own assets payload names the cart playing.
+    # 3. IT RUNS -- the console's own assets payload names the cart playing...
     assert playing.startswith("tiny dash "), \
         "%s: the imported cart is not the one running: %r\n%s" % (
             form, playing, out[-3000:])
+    # ...and, the check that a stub cart could not pass, the cart's OWN _draw
+    # is painting. 80x80 p8 pixels composited at whatever integer scale this
+    # viewport gives is thousands either way; the baseline says what the page
+    # painted in that colour without the cart.
+    before, after = _pink(pink_before), _pink(pink_after)
+    assert after - before > 2000, (
+        "%s: the imported cart's own _draw is not painting -- pink pixels went "
+        "%d -> %d. It loaded (the console names it above) and then drew "
+        "nothing, which is what a stub, a dead shim or an unwired lifecycle "
+        "all look like.\n%s" % (form, before, after, out[-3000:]))
 
     # 4. ...and OPEN IN EDITOR lands in the editor, on the imported cart.
     assert edit_btn.endswith("|open in editor"), edit_btn
@@ -125,7 +153,7 @@ def _check(out, js, form):
     # 5. ...on the imported cart's OWN assets, in the asset tabs -- #194's
     #    done-when names Sprites / Map / Music by name, and an editor that
     #    opened on the code alone would satisfy every check above.
-    sprites, music = js[10], js[12]
+    sprites, music = js[12], js[14]
     assert sprites == "editing tiny dash (menu/paint)", sprites
     assert music == "editing tiny dash (menu/music)", music
 
@@ -145,7 +173,7 @@ def test_a_dropped_pico8_cart_converts_runs_and_opens_in_the_editor(
         shelf = js[-1]
         assert "tiny_dash.moy" in shelf, \
             "the imported cart is not on the shelf: %r\n%s" % (shelf, out[-2000:])
-        print("\n%s -> %s" % (form, js[2]))
+        print("\n%s -> %s" % (form, js[3]))
     finally:
         server.terminate()
         server.wait(timeout=10)
@@ -161,8 +189,8 @@ def test_a_file_that_is_not_a_cart_is_reported_not_crashed(tmp_path):
     server, base = _serve(port)
     try:
         out, js = _run(base, tmp_path / "chrome", tmp_path / "s", junk)
-        assert len(js) >= 9, out[-3000:]
-        imported, report, panel = js[2], js[3], js[4]
+        assert len(js) >= 11, out[-3000:]
+        imported, report, panel = js[3], js[4], js[5]
         assert "could not import" in imported, imported
         assert "no PICO-8 sections" in report, report
         assert panel == "block|bad", \

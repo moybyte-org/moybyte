@@ -1,223 +1,202 @@
-"""The `.moy` folder WRITER for an imported PICO-8 cart -- ONE body, every tier.
+"""What stays OURS around the vendored PICO-8 import -- ONE body, every tier.
 
-`tools/p8_import.py` beside this file is moy-spec's CONVERTER, vendored
-byte-for-byte and hash-pinned. This is the other half, the one moy-spec has no
-opinion about: what a `.moy` FOLDER built out of a converted cart looks like,
-and the guided PICO-8 -> Python porting scaffold (#36).
+TWO VENDORED FILES DO THE WORK, and both are moy-spec's, byte-for-byte and
+hash-pinned (`make vendor-p8-import`, `tests/test_p8_import_vendor.py`):
 
-WHY IT IS NOT INSIDE `tools/import_p8.py`. The BROWSER writes carts too (#194):
-`firmware/web_runner/build.sh` stages this file and the vendored converter into
-the wasm console's frozen set, so a `.p8` dropped on the page and a `.p8` handed
-to the CLI are written by the SAME code. The alternative -- a second writer in
-the runner -- is the shape that already cost this repo ten days of carts
-imported two octaves flat (see `tools/import_p8.py`'s header), one level down.
+  p8_import.py     the ASSET converter -- sheet, SFX bank, music tracks.
+  p8_lua_port.py   the CODE, and the `.moy` FOLDER: the cart's own Lua
+                   mechanically converted p8-Lua -> Lua 5.4 under a generated
+                   PICO-8 compat shim, plus map.moymap, sprites.moygfx,
+                   sounds.json and a `"format": "moy-1"` manifest.
 
-MICROPYTHON-CLEAN, and that is a CONSTRAINT rather than an accident, because
-that is what lets the browser (and later a board, #194's 2026-08-28 decision)
-run it: no `os.path`, no `os.makedirs`, no f-strings, no `pathlib` -- `json` and
-the vendored converter, nothing else. `_mkdirs` and `_write` exist because
-MicroPython's `os` has `mkdir` and nothing above it.
+So an imported cart RUNS (owner call, 2026-08-29). It used to arrive as a
+commented Lua reference block with a Python stub on top and a `# PORT NOTE:`
+scaffold -- the hand-port-to-Python exercise (#36), which was the only p8 route
+this repo had. That scaffold is DELETED, because transcribing Lua into Python
+when the two are almost the same text teaches syntax rather than game-making,
+and #194's own spec says a drop "converts, RUNS, and opens in the editor". The
+languages still differ, and `docs/two_languages.md` is where that lives now --
+for the kid staring at an imported cart's Lua, which is the real reader.
 
-WHAT A RUN WRITES INTO THE `.moy` FOLDER:
+WHAT IS LEFT HERE is the third thing, the part moy-spec has no opinion about:
 
-  __gfx__   -> sprites.moygfx   near-verbatim nibble copy (vendored converter).
-  __sfx__   -> sounds.json      full fidelity (vendored converter): 8 waveforms,
-   __music__                    the effect nibble in PICO-8's own numbering,
-                                4-channel music rows, SFX loop ranges, per-row
-                                pattern lengths, and SPEC.md 8.1's pitch mapping
-                                (p8 pitch 33 = A4 = moy 57, offset 24). Only the
-                                8 CUSTOM instruments stay unmodelled.
-  __lua__   -> main.py          NOT transpiled / NOT executed. The Lua is kept
-                                as a commented-out reference block with a working
-                                Python stub on top and inline `# PORT NOTE:`
-                                guidance for the verbs THIS cart uses.
-  header/   -> manifest.json    title, canvas 128x128 + the view hint (below),
-   filename                     the sheet's first art tile as the launcher icon.
+  * the INPUT GUARDS. `p8_import` validates a PNG with `assert`, and the wasm
+    build freezes at opt=3, which compiles asserts OUT -- so a dropped holiday
+    photo would fail somewhere deep in a struct unpack with nothing naming the
+    file. `png_problem`/`sections_problem` are the same checks as returned
+    prose, and they run on EVERY tier including CPython, because a guard that
+    only runs where it was needed is a guard nobody maintains.
+  * `_ensure_os_path`, the one `os` primitive MicroPython cannot give the
+    converter (see its own docstring).
+  * the COMPATIBILITY REPORT (#194: report, don't crash), aimed at what the
+    generated SHIM does not implement.
 
-DEFERRED (noted in the summary rather than guessed):
-  __map__        the `.moymap` writer lives in moy-spec's `p8_lua_port` (#32).
-  __gff__        per-sprite flag bits -- Moybyte has no sprite-flag model yet.
+WHY IT IS NOT INSIDE `tools/import_p8.py`. The BROWSER imports carts too (#194):
+`firmware/web_runner/build.sh` stages this file and both vendored ones into the
+wasm console's frozen set, so a `.p8` dropped on the page and a `.p8` handed to
+the CLI go through the SAME code. A second copy in the runner is the shape that
+already cost this repo ten days of carts imported two octaves flat
+(`tools/import_p8.py`'s header), one level down.
 
-THE ZOOM HINT IS NOT OPTIONAL HERE. A p8 cart is 128x128 (`CANVAS_SIZES` carries
-that size "to inherit the PICO-8 back catalogue at native res") and the
-`view(128, 120)` hint is what makes a host with room composite the centred rows
-at its best integer scale instead of letterboxing the square at 1x. moy-spec's
-Lua port puts it behind `--zoom`; a regeneration on 2026-08-11 forgot the flag
-and shipped a tiny Celeste to the glass, and on a drag-and-drop import that
-failure would fire on EVERY cart -- so here it is unconditional, emitted by
-`lua_to_main_py` at the top of every generated `main.py`.
+MICROPYTHON-CLEAN, and that is a CONSTRAINT rather than an accident -- it is
+what lets the browser (and later a board, #194's 2026-08-28 decision) run it:
+no `os.path`, no `os.makedirs`, no f-strings, no `pathlib`. The same constraint
+now binds `p8_lua_port.py` upstream, where it is written down in that file's
+header; `tests/test_p8_micropython.py` is the lane that proves both.
+
+THE ZOOM HINT IS NOT OPTIONAL HERE. A p8 cart is 128x128, and the `view(128,
+120)` hint is what makes a host with room composite the centred rows at its best
+integer scale instead of letterboxing the square at 1x. moy-spec's porter puts
+it behind `--zoom`; a regeneration on 2026-08-11 forgot the flag and shipped a
+tiny Celeste to the glass, and on a drag-and-drop import that failure would fire
+on EVERY cart -- so `P8_CROP` below is passed unconditionally, by every tier.
 """
 
-import json
-
-# The vendored converter. Frozen beside us in the wasm console (and reachable
+# The two vendored files. Frozen beside us in the wasm console (and reachable
 # with `tools/` on sys.path, which is how the CLI and the tests arrive);
 # `tools.p8_import` is the same file seen as a package from the repo root.
 try:
     import p8_import
+    import p8_lua_port
 except ImportError:  # pragma: no cover -- exercised by whichever entry runs
     from tools import p8_import
+    from tools import p8_lua_port
 
-
-CHEATSHEET = "docs/porting_pico8.md"
 
 # The cart canvas an imported p8 declares (SPEC.md 1/3.1) and the viewport hint
-# its main.py opens with. 120 is the 8-row concession that lets a 4:3 host fill
+# its main.lua opens with. 120 is the 8-row concession that lets a 4:3 host fill
 # its height exactly (2x = 256x240 on the handheld, 5x = 640x600 on the P4);
-# nothing is cropped from the RASTER, only from the presentation.
+# nothing is cropped from the RASTER, only from the presentation. `P8_CROP` is
+# the porter's `--zoom` spelled as data, so no tier can forget it.
 P8_CANVAS = "128x128"
 P8_VIEW_W = 128
 P8_VIEW_H = 120
+P8_CROP = (4, 4)
 
 
 # --------------------------------------------------------------------------
-# __lua__  ->  main.py   (reference comment + GUIDED porting notes; NOT executed)
+# what the generated shim does NOT do   (#194: report, don't crash)
 # --------------------------------------------------------------------------
-# This tool ports a PICO-8 cart to PYTHON, and a Python cart can't "just run" a
-# Lua one -- the kid PORTS it, and that's the lesson (issue #36). We DON'T
-# transpile. Instead we keep the original Lua as a reference comment and scaffold
-# the port with inline `# PORT NOTE:` lines for the real PICO-8 -> Moybyte
-# gotchas -- but only for the verbs THIS cart actually uses (scanned from its
-# Lua), so the guidance is relevant, not boilerplate. See docs/porting_pico8.md
-# for the full cheatsheet. (A cart that should stay Lua goes through moy-spec's
-# `moy port` instead, which emits main.lua + the p8 compat shim -- #67.)
-
-# Each entry: pico8 token -> (note lines, checklist line). `note` may span several
-# lines (each becomes a `# PORT NOTE:` line); `checklist` is a one-line tick-box
-# the kid ticks off, or None to keep it out of the checklist.
+# The port covers the p8 verbs a cart actually leans on -- `p8_lua_port.P8_API`
+# is the shim's own list, and a moy Lua cart gets the SPEC.md verb table under
+# that. What is left over is this table: the PICO-8 names that reach nothing, and
+# the three that reach something with different manners. A cart that calls one
+# runs until it gets there, so the report has to name them BEFORE the cart does.
 #
-# Grouped by the three "gotcha" rules from the #13 analysis + the not-here-yet set.
-PORT_NOTES = [
-    # -- inverted draw verbs (PICO-8 names are the OPPOSITE fill in Moybyte) ----
-    ("rectfill", (
-        ["PICO-8 rectfill() = FILLED rect. In Moybyte that verb is rect().",
-         "AND the args change: PICO-8 rectfill(x,y,x1,y1,c) takes the opposite",
-         "CORNER (x1,y1); Moybyte rect(x,y,w,h,c) takes WIDTH,HEIGHT. Convert:",
-         "w = x1-x+1 ; h = y1-y+1."],
-        "[ ] rectfill(x,y,x1,y1,c) -> rect(x,y, x1-x+1, y1-y+1, c)")),
-    ("rect", (
-        ["PICO-8 rect() = OUTLINE. In Moybyte the outline verb is rectb().",
-         "(Moybyte rect() is FILLED -- the names are swapped vs PICO-8!)",
-         "Args also change from corner (x1,y1) to extent (w,h):",
-         "w = x1-x+1 ; h = y1-y+1."],
-        "[ ] rect(x,y,x1,y1,c) outline -> rectb(x,y, x1-x+1, y1-y+1, c)")),
-    ("circfill", (
-        ["PICO-8 circfill(x,y,r,c) = FILLED circle. In Moybyte that is circ().",
-         "(Same x,y,r args -- only the name changes.)"],
-        "[ ] circfill -> circ")),
-    ("circ", (
-        ["PICO-8 circ(x,y,r,c) = OUTLINE circle. In Moybyte the outline verb is",
-         "circb(). (Moybyte circ() is FILLED -- swapped vs PICO-8!)"],
-        "[ ] circ outline -> circb")),
-    # -- buttons (numeric -> named) -------------------------------------------
-    ("btnp", (
-        ["PICO-8 btnp(i) uses NUMBERS 0..5. Moybyte btnp() uses NAMES:",
-         "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
-         "e.g. btnp(4) -> btnp('a')."],
-        "[ ] btnp(0..5) numbers -> btnp('left'/'right'/'up'/'down'/'a'/'b')")),
-    ("btn", (
-        ["PICO-8 btn(i) uses NUMBERS 0..5. Moybyte btn() uses NAMES:",
-         "0->'left' 1->'right' 2->'up' 3->'down' 4->'a'(O) 5->'b'(X).",
-         "e.g. btn(0) -> btn('left')."],
-        "[ ] btn(0..5) numbers -> btn('left'/'right'/'up'/'down'/'a'/'b')")),
-    # -- renames (same idea, different name) ----------------------------------
-    ("pset", (
-        ["PICO-8 pset(x,y,c) sets a pixel. Moybyte uses pix(x,y,c) (3 args = set)."],
-        "[ ] pset -> pix")),
-    ("pget", (
-        ["PICO-8 pget(x,y) reads a pixel. Moybyte uses pix(x,y) (2 args = read)."],
-        "[ ] pget -> pix(x,y) (2 args)")),
-    ("spr", (
-        ["spr(n,x,y) is mostly the same! Moybyte spr(n,x,y) draws tile n.",
-         "Moybyte spr(n,x,y, colorkey, scale, flip, w, h): flip 1/2/3 mirrors",
-         "h/v/both, and w,h give a multi-tile span -- so big/flipped sprites work",
-         "directly (PICO-8's flip_x/flip_y -> flip = flip_x + 2*flip_y)."],
-        None)),
-    ("print", (
-        ["print(s,x,y,c) is mostly 1:1. Moybyte print(s,x,y,c, scale) -- but the",
-         "color is a palette INDEX or col('name'), e.g. col('white')."],
-        None)),
-    ("cls", (
-        ["cls(c) is 1:1. (cls() defaults to color 0 / black on both.)"],
-        None)),
-    ("line", (
-        ["line(x0,y0,x1,y1,c) is 1:1 in Moybyte."],
-        None)),
-    # -- not here (yet) -> adapt or skip --------------------------------------
-    ("map", (
-        ["map()/mget()/mset() draw or read a TILEMAP -- Moybyte HAS these now (#32):",
-         "map(mx,my,w,h, sx,sy, colorkey, scale), mget(x,y), mset(x,y, id).",
-         "This importer does NOT bring the cart's __map__ across yet (#32) -- draw",
-         "your own in the Map tab, or port the level data by hand."],
-        "[ ] map: the cart's __map__ was NOT imported -- redraw it in the Map tab")),
-    ("mget", (
-        ["mget(cx,cy) reads a map cell -- Moybyte has mget(x,y) (#32)."],
-        None)),
-    ("mset", (
-        ["mset(cx,cy,v) writes a map cell -- Moybyte has mset(x,y, id) (#32)."],
-        None)),
-    ("pal", (
-        ["pal(c0,c1) remaps a draw colour -- Moybyte HAS this now (#11), same name;",
-         "pal() with no args resets. Per-sprite transparency is also available as",
-         "the spr() colorkey arg or palt(c, on)."],
-        None)),
-    ("palt", (
-        ["palt(c, on) sets a transparent colour -- Moybyte HAS this now (#11), same",
-         "name; palt() resets. spr()'s colorkey arg also works per draw."],
-        None)),
-    ("camera", (
-        ["camera(x,y) shifts all drawing -- Moybyte HAS this now (#11), same name and",
-         "semantics; camera() with no args resets to (0,0). clip(x,y,w,h) is here too."],
-        None)),
-    ("sspr", (
-        ["sspr() stretches part of the sheet. Moybyte has no sspr() -- use spr()",
-         "with the scale arg for whole-tile scaling, or skip the stretch."],
-        "[ ] sspr: use spr(..., scale=N) or skip")),
-    ("fget", (
-        ["fget()/fset() read/write per-sprite FLAG bits. Moybyte has no sprite",
-         "flags -- track those facts in your own Python data instead."],
-        "[ ] fget/fset: keep sprite flags in your own Python dict/list")),
-    ("fset", (
-        ["fset() sets a sprite flag bit. No sprite flags in Moybyte -- use your own",
-         "Python data."],
-        None)),
-    ("peek", (
-        ["peek()/poke() read/write raw memory. Moybyte has NO raw memory access on",
-         "purpose (it's a kids' console) -- there is no equivalent; rewrite that",
-         "part using normal Python variables/lists."],
-        "[ ] peek/poke: REMOVE -- rewrite with normal Python variables")),
-    ("poke", (
-        ["poke() writes raw memory. Not available in Moybyte by design -- rewrite",
-         "with normal Python variables/lists."],
-        None)),
-]
+# Each entry is (kind, sentence). `kind` is "missing" (nothing answers to that
+# name -- the cart stops with a Lua "attempt to call a nil value") or "differs"
+# (a verb of that name exists and does not mean the same thing, which is worse,
+# because it draws the wrong thing instead of saying anything).
+#
+# tests/test_import_p8.py checks every key against `p8_lua_port.P8_API` and the
+# console's own verb table, so a shim that grows one of these cannot leave a
+# stale "not supported" line behind.
+MISSING = "missing"
+DIFFERS = "differs"
 
-# Map each "verb" token to its index in PORT_NOTES so duplicates (e.g. peek+poke
-# both ticking the same box) don't double-print.
-_NOTE_BY_TOKEN = {}
-for _i in range(len(PORT_NOTES)):
-    _NOTE_BY_TOKEN[PORT_NOTES[_i][0]] = _i
-
-# The verbs with NO Moybyte equivalent, for the compatibility report (#194's
-# "report, don't crash"): a cart that leans on these needs a human decision, not
-# a mechanical rename. Everything else in PORT_NOTES is a rename or an arg shape.
-UNSUPPORTED = {
-    "peek": "peek()/poke() raw memory -- no equivalent (rewrite with variables)",
-    "poke": "peek()/poke() raw memory -- no equivalent (rewrite with variables)",
-    "sspr": "sspr() stretch blits -- use spr(..., scale=N) or skip the stretch",
-    "fget": "fget()/fset() sprite flags -- no sprite-flag model (keep your own)",
-    "fset": "fget()/fset() sprite flags -- no sprite-flag model (keep your own)",
+SHIM_GAPS = {
+    # -- raw memory: no equivalent, by design (it is a kids' console) ---------
+    "peek": (MISSING, "peek()/poke() raw memory -- no equivalent by design; "
+                      "rewrite that part with ordinary variables and tables"),
+    "poke": (MISSING, "peek()/poke() raw memory -- no equivalent by design; "
+                      "rewrite that part with ordinary variables and tables"),
+    "memcpy": (MISSING, "memcpy()/memset() raw memory -- no equivalent by "
+                        "design; copy the table instead"),
+    "memset": (MISSING, "memcpy()/memset() raw memory -- no equivalent by "
+                        "design; copy the table instead"),
+    "reload": (MISSING, "reload()/cstore() re-read the cart ROM -- there is no "
+                        "ROM here; the sheet and the map are files"),
+    "cstore": (MISSING, "reload()/cstore() re-read the cart ROM -- there is no "
+                        "ROM here; the sheet and the map are files"),
+    # -- sheet and flag WRITES (the shim's tables are built once, at start) ---
+    "sget": (MISSING, "sget()/sset() read and write sheet pixels -- the port "
+                      "has no sheet-pixel verb; draw with spr() instead"),
+    "sset": (MISSING, "sget()/sset() read and write sheet pixels -- the port "
+                      "has no sheet-pixel verb; draw with spr() instead"),
+    "fset": (MISSING, "fset() writes a sprite flag -- the port bakes __gff__ "
+                      "in as a read-only table, so fget() works and fset() "
+                      "does not; keep changing flags in your own table"),
+    "mset": (DIFFERS, "mset() writes a map cell -- the console has it, but the "
+                      "shim's map() draws from a copy it built at start, so a "
+                      "written cell does not show up; keep the change in your "
+                      "own table and draw it yourself"),
+    # -- frame and machine state ---------------------------------------------
+    "flip": (MISSING, "flip() shows the frame and waits -- the console calls "
+                      "_draw() for you, so there is nothing to wait for; a "
+                      "cart that loops on flip() needs its loop turned into "
+                      "_update()"),
+    "stat": (MISSING, "stat() reads machine counters (time, memory, the mouse) "
+                      "-- no equivalent; the ones with a home are time() and "
+                      "the touch()/key() verbs"),
+    "extcmd": (MISSING, "extcmd() drives the PICO-8 app itself -- there is no "
+                        "app to drive"),
+    "printh": (MISSING, "printh() prints to a terminal -- there is no terminal "
+                        "behind a cart; draw it with print() instead"),
+    "t": (MISSING, "t() is PICO-8's clock in SECONDS. The console's time() is "
+                   "MILLISECONDS since the cart started -- divide by 1000"),
+    "time": (DIFFERS, "time() exists on both and does not agree: PICO-8 counts "
+                      "SECONDS, the console counts MILLISECONDS -- divide by "
+                      "1000"),
+    # -- persistence ----------------------------------------------------------
+    "cartdata": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- "
+                          "the console's is pmem(); it saves a table"),
+    "dget": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
+                      "console's is pmem(); it saves a table"),
+    "dset": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
+                      "console's is pmem(); it saves a table"),
+    # -- draw state the shim does not carry ----------------------------------
+    "fillp": (MISSING, "fillp() sets a dither pattern for the fill verbs -- no "
+                       "equivalent; draw the pattern yourself"),
+    "cursor": (MISSING, "cursor()/color() set where and in what colour print() "
+                        "carries on -- the port's print() takes x, y and the "
+                        "colour every time"),
+    "color": (MISSING, "cursor()/color() set where and in what colour print() "
+                       "carries on -- the port's print() takes x, y and the "
+                       "colour every time"),
+    "sspr": (DIFFERS, "sspr() exists on both and the first eight arguments "
+                      "agree -- but PICO-8 lets dw/dh default and takes two "
+                      "flip booleans, where the console needs all eight plus a "
+                      "single flip number"),
+    # -- odds and ends --------------------------------------------------------
+    "srand": (MISSING, "srand() seeds the generator -- the console owns the "
+                       "seed so that a replay is a replay; rnd() still works"),
+    "tonum": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string "
+                       "helpers -- Lua's own tonumber(), string.char(), "
+                       "string.byte() and a gmatch loop do the same jobs"),
+    "chr": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string helpers "
+                     "-- Lua's own tonumber(), string.char(), string.byte() "
+                     "and a gmatch loop do the same jobs"),
+    "ord": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string helpers "
+                     "-- Lua's own tonumber(), string.char(), string.byte() "
+                     "and a gmatch loop do the same jobs"),
+    "split": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string "
+                       "helpers -- Lua's own tonumber(), string.char(), "
+                       "string.byte() and a gmatch loop do the same jobs"),
+    "cocreate": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's names for Lua coroutines -- this cart runs "
+                          "on real Lua 5.4, so coroutine.create/resume/status "
+                          "and coroutine.yield are right there"),
+    "coresume": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's names for Lua coroutines -- this cart runs "
+                          "on real Lua 5.4, so coroutine.create/resume/status "
+                          "and coroutine.yield are right there"),
+    "costatus": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's names for Lua coroutines -- this cart runs "
+                          "on real Lua 5.4, so coroutine.create/resume/status "
+                          "and coroutine.yield are right there"),
 }
 
 
 def scan_lua_verbs(lua_lines):
-    """Return the set of PICO-8 verb tokens (from PORT_NOTES) that appear in this
-    cart's Lua as whole-word function calls (`verb` followed by optional spaces
-    then `(`). Word-boundary matched so `rect` doesn't fire inside `rectfill` and
-    `print` doesn't fire inside `sprint`."""
+    """The `SHIM_GAPS` tokens this cart calls, as whole-word calls (`verb`,
+    optional spaces, `(`).
+
+    Word-boundary matched at both ends, so `t` does not fire inside `time` or
+    `set`, and `color` does not fire inside `colorkey`."""
     text = "\n".join(lua_lines)
-    found = set()
-    for tok, _note in PORT_NOTES:
+    n_text = len(text)
+    found = {}
+    for tok in SHIM_GAPS:
         i = 0
         n = len(tok)
         while True:
@@ -225,118 +204,19 @@ def scan_lua_verbs(lua_lines):
             if j < 0:
                 break
             i = j + n
-            # left boundary: not part of a longer identifier
-            if j > 0 and (text[j - 1].isalpha() or text[j - 1].isdigit()
-                          or text[j - 1] == "_"):
-                continue
-            # right boundary: must be a call -> optional spaces then '('
+            prev = text[j - 1] if j > 0 else " "
+            if prev.isalpha() or prev.isdigit() or prev in "._:":
+                continue                    # inside a longer name / a method
             k = j + n
-            while k < len(text) and (text[k] == " " or text[k] == "\t"):
+            if k < n_text and (text[k].isalpha() or text[k].isdigit()
+                               or text[k] == "_"):
+                continue                    # a longer name that starts with it
+            while k < n_text and (text[k] == " " or text[k] == "\t"):
                 k += 1
-            if k < len(text) and text[k] == "(":
-                found.add(tok)
+            if k < n_text and text[k] == "(":
+                found[tok] = True
                 break
-    return found
-
-
-def lua_to_main_py(lua_lines, title):
-    """A runnable cart stub + the original PICO-8 Lua as a reference comment,
-    GUIDED with `# PORT NOTE:` lines + a port checklist for ONLY the PICO-8 verbs
-    this cart actually uses. We do NOT transpile or run Lua here (that is
-    moy-spec's `moy port`)."""
-    safe_title = title.replace('"', "'")[:16]
-    used = scan_lua_verbs(lua_lines)
-    # keep PORT_NOTES order (gotchas first, not-here-yet last) for stable output
-    idx = {}
-    for t in used:
-        idx[_NOTE_BY_TOKEN[t]] = True
-    used_idx = sorted(idx.keys())
-
-    head = (
-        '# Imported from a PICO-8 cart by Moybyte (tools/p8_writer.py).\n'
-        '#\n'
-        '# Only the ASSETS were imported (sprites.moygfx, and sounds.json if\n'
-        '# present -- full-fidelity: 8 waves, effects, 4-channel music).\n'
-        '# This importer targets PYTHON, so a PICO-8 cart does not "just run": you\n'
-        '# PORT it, and that is the fun part. The original PICO-8 Lua is kept below\n'
-        '# as a REFERENCE COMMENT (NOT executed).\n'
-        '#\n'
-        '# Cheatsheet (verb-by-verb PICO-8 -> Moybyte map): ' + CHEATSHEET + '\n'
-        '#\n'
-        '# This stub just draws the imported sprites so you can see the art, then\n'
-        '# you rewrite _update/_draw in Python using the notes below.\n'
-        '\n'
-        '# The cart is 128x128 (PICO-8 native). view() is the ZOOM HINT: a screen\n'
-        '# with room composites the centred 128x' + str(P8_VIEW_H) + ' at its best\n'
-        '# integer scale instead of showing a tiny square in a corner. Keep it.\n'
-        'view(' + str(P8_VIEW_W) + ', ' + str(P8_VIEW_H) + ')\n'
-        '\n'
-        'def _draw():\n'
-        '    cls(0)\n'
-        '    print("imported .p8", 2, 4, col("white"))\n'
-        '    print("' + safe_title + '", 2, 14, col("yellow"))\n'
-        '    # the first two rows of the imported sprite sheet\n'
-        '    for n in range(32):\n'
-        '        spr(n, (n % 16) * 8, 34 + (n // 16) * 8)\n'
-        '    print("edit me!", 2, 62, col("white"))\n'
-        '\n'
-    )
-
-    # Port checklist (stretch goal): only the boxes that apply to THIS cart.
-    checklist_lines = []
-    for i in used_idx:
-        box = PORT_NOTES[i][1][1]
-        if box:
-            checklist_lines.append(box)
-    if checklist_lines:
-        head += (
-            '\n# ===== PORT CHECKLIST (this cart) =====\n'
-            '# Tick each off as you port it from the Lua reference below:\n'
-        )
-        for box in checklist_lines:
-            head += '#   ' + box + '\n'
-
-    # The PORT NOTEs (only for verbs this cart uses), then the Lua reference.
-    head += '\n\n# ----- original PICO-8 __lua__ (reference only; not run) -----\n'
-    if used_idx:
-        head += (
-            '# Watch out for these PICO-8 -> Moybyte differences in the code below\n'
-            '# (only the verbs THIS cart uses are listed; full map: ' + CHEATSHEET + '):\n'
-        )
-        for i in used_idx:
-            for nl in PORT_NOTES[i][1][0]:
-                head += '# PORT NOTE: ' + nl + '\n'
-        head += '#\n'
-
-    body = "\n".join("# " + ln for ln in lua_lines)
-    return head + body + "\n"
-
-
-# --------------------------------------------------------------------------
-# manifest
-# --------------------------------------------------------------------------
-
-def make_manifest(title, icon=None):
-    """The imported cart's manifest.
-
-    `safe_to_share` is FALSE on purpose (#194): importing somebody else's cart to
-    play and study is fine, republishing it is not, so an imported cart must not
-    look like an authored one to any future share path (#122 family)."""
-    man = {
-        "format": "moybyte-cart-v1",
-        "title": title,
-        "type": "game",
-        "runtime": "python",
-        "main": "main.py",
-        "canvas": P8_CANVAS,
-        "permissions": ["graphics", "input", "sound"],
-        "safe_to_share": False,
-        "config": {},
-        "edit": [],
-    }
-    if icon is not None:
-        man["icon"] = icon
-    return man
+    return set(found)
 
 
 # --------------------------------------------------------------------------
@@ -365,6 +245,10 @@ def _ensure_os_path():
     `shims/zlib.py` is, leaving the hash-pinned file untouched and upstream the
     only thing that knows the title RULE.
 
+    `p8_lua_port` needs no such shim: it reaches `os` only for `mkdir`, which
+    every tier has -- that one WAS an upstream fix, because its regex and
+    `str.isalnum` gaps could not be shimmed from out here at all.
+
     `tests/test_p8_import_vendor.py` pins that `os.path.basename` stays the
     converter's only use of `os`, so a re-vendor that reached for more of the
     module cannot pass this shim off as sufficient."""
@@ -382,49 +266,25 @@ def cart_title(sections, filename):
 
 
 # --------------------------------------------------------------------------
-# portable filesystem bits (MicroPython's `os` stops at mkdir)
-# --------------------------------------------------------------------------
-
-def _mkdirs(path):
-    """`os.makedirs(path, exist_ok=True)` for a tier that has only `os.mkdir`."""
-    import os
-    at = "/" if path.startswith("/") else ""
-    for seg in path.split("/"):
-        if not seg:
-            continue
-        at = at + seg if at in ("", "/") else at + "/" + seg
-        try:
-            os.mkdir(at)
-        except OSError:
-            pass                     # exists, or a parent we cannot make -- the
-                                     # write below is what actually reports
-
-
-def _write(out_dir, name, text):
-    # `encoding=` is load-bearing on CPython (a non-UTF-8 locale would mangle an
-    # accented title) and simply ignored by MicroPython's `open`.
-    f = open(out_dir + "/" + name, "w", encoding="utf-8")
-    try:
-        f.write(text)
-    finally:
-        f.close()
-
-
-# --------------------------------------------------------------------------
 # top-level: converted sections -> a .moy folder
 # --------------------------------------------------------------------------
 
 def write_cart(sections, out_dir, title):
     """Write a `.moy` folder at `out_dir` from already-parsed `sections`
-    (`p8_import.read_p8`'s output) and `title`. Returns a summary dict describing
-    what was imported / deferred / not supported.
+    (`p8_import.read_p8`'s output) and `title`. Returns a summary dict for
+    `report_lines`.
+
+    The BYTES are `p8_lua_port.port_sections`'s -- one writer, three tiers, and
+    the only place a cart's shape is decided. What this adds is the two things
+    that are ours: the unconditional zoom crop, and the compatibility summary.
 
     Takes SECTIONS rather than a path so the caller owns the read: the browser
     already holds the dropped bytes, and the CLI already has the file."""
-    _mkdirs(out_dir)
-
     lua_lines = sections.get("lua", [])
-    used_verbs = sorted(scan_lua_verbs(lua_lines))
+    gaps = sorted(scan_lua_verbs(lua_lines))
+
+    wrote = p8_lua_port.port_sections(sections, out_dir, title, P8_CROP)
+    files = wrote["files"]
 
     summary = {
         "title": title,
@@ -433,78 +293,52 @@ def write_cart(sections, out_dir, title):
         "deferred": [],
         "empty": [],
         "unsupported": [],
-        "verbs": used_verbs,
-        "sfx": 0,
-        "music": 0,
+        "differs": [],
+        "verbs": gaps,
+        "files": files,
+        "sfx": wrote["sfx"],
+        "music": wrote["music"],
     }
 
-    # sprites.moygfx (near-verbatim from __gfx__) -- FIRST, because the manifest
-    # takes the cart's launcher icon out of the sheet it produces (SPEC.md 3.4).
-    kgfx = p8_import.gfx_to_kgfx(sections.get("gfx", []))
-    icon = None
-    if kgfx is not None:
-        _write(out_dir, "sprites.moygfx", kgfx)
-        icon = p8_import.icon_tile(kgfx)
-        summary["imported"].append("sprites.moygfx (from __gfx__, palette is identical)")
-    else:
-        summary["empty"].append("sprites.moygfx (no __gfx__ pixels)")
-
-    # manifest.json
-    _write(out_dir, "manifest.json", json.dumps(make_manifest(title, icon)))
+    summary["imported"].append(
+        "main.lua (the cart's own code, converted to Lua 5.4 under a "
+        "generated PICO-8 shim -- it RUNS)")
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))
-
-    # main.py (Lua reference + GUIDED port notes for the verbs this cart uses)
-    _write(out_dir, "main.py", lua_to_main_py(lua_lines, title))
-    if used_verbs:
+    if "sprites.moygfx" in files:
         summary["imported"].append(
-            "main.py (Lua reference + %d PORT NOTE verbs: %s; cheatsheet: %s)"
-            % (len(used_verbs), ", ".join(used_verbs), CHEATSHEET))
+            "sprites.moygfx (from __gfx__, palette is identical)")
     else:
+        summary["empty"].append("sprites.moygfx (no __gfx__ pixels)")
+    if "map.moymap" in files:
         summary["imported"].append(
-            "main.py (Lua reference, no known PICO-8 verbs to annotate)")
-
-    # config.json (empty -- nothing to edit yet)
-    _write(out_dir, "config.json", "{}")
-    summary["imported"].append("config.json (empty)")
-
-    # sounds.json (from __sfx__/__music__)
-    sounds, n_sfx, n_music = p8_import.sfx_music_to_sounds(
-        sections.get("sfx", []), sections.get("music", []))
-    if sounds is not None:
-        _write(out_dir, "sounds.json", json.dumps(sounds))
-        summary["sfx"] = n_sfx
-        summary["music"] = n_music
+            "map.moymap (all 64 rows, including the ones PICO-8 keeps in the "
+            "bottom half of __gfx__)")
+    else:
+        summary["empty"].append("map.moymap (no __map__ cells)")
+    if "sounds.json" in files:
         summary["imported"].append(
-            "sounds.json (from __sfx__/__music__: %d sfx, %d music; "
-            "8 waves 1:1, effects verbatim, 4-channel rows; only custom "
-            "instruments unmodelled)" % (n_sfx, n_music))
+            "sounds.json (from __sfx__/__music__: %d sfx, %d music; 8 waves "
+            "1:1, effects verbatim, 4-channel rows; only custom instruments "
+            "unmodelled)" % (wrote["sfx"], wrote["music"]))
     else:
         summary["empty"].append("sounds.json (no __sfx__/__music__)")
 
-    # deferred sections (note, don't import)
-    for line in sections.get("map", []):
-        if line.strip():
-            summary["deferred"].append(
-                "__map__ (tilemap import lives in `moy port`; #32)")
-            break
-    for line in sections.get("gff", []):
-        if line.strip():
-            summary["deferred"].append("__gff__ (no sprite-flag model)")
-            break
     for line in sections.get("label", []):
         if line.strip():
             summary["deferred"].append("__label__ (cart label image not imported)")
             break
 
-    # verbs with no Moybyte equivalent at all
+    # The two gap kinds are reported apart: one stops the cart, the other draws
+    # the wrong thing quietly, which is the one worth reading twice.
     seen = {}
-    for v in used_verbs:
-        text = UNSUPPORTED.get(v)
-        if text is not None and text not in seen:
-            seen[text] = True
-            summary["unsupported"].append(text)
+    for v in gaps:
+        kind, text = SHIM_GAPS[v]
+        if text in seen:
+            continue
+        seen[text] = True
+        summary["unsupported" if kind == MISSING else "differs"].append(text)
 
     return summary
 
@@ -516,26 +350,27 @@ def write_cart(sections, out_dir, title):
 def report_lines(summary):
     """A short, human compatibility summary of one import.
 
-    The headline is the thing an importer is most likely to be wrong about: the
-    Lua is NOT executed. A kid who drops a cart and sees the sprite sheet needs
-    to be told that in a sentence, not to discover it as a black screen."""
-    out = ['"%s" imported.' % summary.get("title", "cart")]
-    out.append("Art and sound came across. The PICO-8 CODE did NOT: it is kept "
-               "in main.py as a comment for you to port to Python.")
+    The headline is what an importer is most likely to be wrong about, and it
+    INVERTED on 2026-08-29: it used to have to say the code did not run, because
+    the old scaffold kept the Lua as a comment. It runs now, so the headline
+    says that and the rest of the report is about the edges where it will not."""
+    out = ['"%s" imported, and it runs.' % summary.get("title", "cart")]
+    out.append("The art, the sound, the map and the CODE all came across -- the "
+               "cart's own Lua, under a generated PICO-8 shim. Open it and "
+               "read it: this console speaks Lua too.")
     n_sfx = summary.get("sfx") or 0
     n_music = summary.get("music") or 0
     if n_sfx or n_music:
         out.append("sound: %d sfx, %d music track%s"
                    % (n_sfx, n_music, "" if n_music == 1 else "s"))
+    for item in summary.get("differs", ()):
+        out.append("works differently: " + item)
     for item in summary.get("unsupported", ()):
         out.append("not supported: " + item)
     for item in summary.get("deferred", ()):
         out.append("not imported: " + item)
     for item in summary.get("empty", ()):
         out.append("empty: " + item)
-    verbs = summary.get("verbs") or ()
-    if verbs:
-        out.append("this cart uses: " + ", ".join(verbs))
     return out
 
 

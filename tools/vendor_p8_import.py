@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Re-vendor the PICO-8 asset converter from a moy-spec checkout.
+"""Re-vendor the PICO-8 converter and Lua porter from a moy-spec checkout.
 
     make vendor-p8-import                          # ../moy-spec beside this repo
     make vendor-p8-import SPEC=/path/to/moy-spec
     python3 tools/vendor_p8_import.py --check      # what would change, touch nothing
+
+TWO FILES, ONE UPSTREAM.
 
 `p8_import.py` is moy-spec's `.p8`/`.p8.png` -> moy asset converter: sheet, SFX
 bank and music tracks. It lives upstream because SPEC.md is what says what the
@@ -13,6 +15,17 @@ the right note. libmoy's synth implements the other end of that same contract
 (`moy_audio.c`: `p8key = pitch - 24.0f`), and it is vendored here too, so the
 converter and the synth must come from ONE upstream version or they agree by
 luck.
+
+`p8_lua_port.py` is the other half: the same cart's CODE, mechanically converted
+p8-Lua -> Lua 5.4 under a generated PICO-8 compat shim, so an imported cart RUNS
+instead of arriving as a porting exercise (owner call 2026-08-29 -- transcribing
+Lua that is almost identical in Python teaches syntax, not game-making). It is
+upstream for a stronger reason than the converter: SPEC.md is what the shim is
+written AGAINST, verb for verb, and a shim maintained here would drift from the
+verb table the whole point of `.moy` is to share. It is also what emits the
+manifest, the `map.moymap` and the assets now, through the converter's own
+functions -- so the two files re-vendor together or the shim and the bank it
+plays disagree about the same cart.
 
 WHY THIS FILE EXISTS AT ALL. It used to be a hand-copy. Upstream corrected the
 pitch offset (0 -> 24, two octaves) and the copy here never heard about it; this
@@ -31,9 +44,10 @@ tests. Same upstream, same idea, different consumers -- and one script whose
 mechanism they do share -- checkout probe, change report, stamp -- is
 `tools/vendor_common.py`.
 
-WHAT STAYS OURS: `tools/import_p8.py`, the moybyte driver on top -- the CLI, the
-`.moy` folder writer, the guided PICO-8 -> Python port notes (#36). It imports
-the converter from here; it never re-implements a line of it.
+WHAT STAYS OURS: `tools/import_p8.py` (the CLI) and `tools/p8_writer.py` (the
+input guards a frozen opt=3 build needs, the `os.path.basename` shim, and the
+compatibility report). Both DRIVE these two files; neither re-implements a line
+of either, and neither writes a byte of a cart any more.
 """
 
 import os
@@ -54,6 +68,7 @@ SPEC_PROBE = "p8_import.py"
 # what we execute should be a decision somebody made, not whatever a glob found.
 VENDOR = {
     "p8_import.py": "p8_import.py",
+    "p8_lua_port.py": "p8_lua_port.py",
 }
 
 

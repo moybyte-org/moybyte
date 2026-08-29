@@ -210,22 +210,30 @@ cp "${SCRIPT_DIR}/web_p8.py" "${STAGE_DIR}/modules/web_p8.py"
 
 # The PICO-8 importer (#194) -- the ONE thing this build stages out of `tools/`,
 # which board_config's stager knows nothing about (it maps runtime/ and device/).
-# Both files cross UNCHANGED and that is the whole point:
+# All three files cross UNCHANGED and that is the whole point:
 #
-#   p8_import.py  moy-spec's converter, VENDORED and hash-pinned
-#                 (tests/test_p8_import_vendor.py). Editing it here -- or
-#                 forking a browser variant of it, in Python or in JavaScript --
-#                 is the failure vendoring exists to prevent: it happened once,
-#                 and every cart this repo imported came out two octaves flat
-#                 for ten days behind a green `make test`. So the browser runs
-#                 the SAME bytes the desktop does, inside this VM.
-#   p8_writer.py  ours: the `.moy` folder writer, the porting scaffold and the
-#                 compatibility report -- shared with tools/import_p8.py (the
-#                 CLI) for the same reason, one level down.
+#   p8_import.py    moy-spec's ASSET converter, VENDORED and hash-pinned
+#                   (tests/test_p8_import_vendor.py). Editing it here -- or
+#                   forking a browser variant of it, in Python or in
+#                   JavaScript -- is the failure vendoring exists to prevent: it
+#                   happened once, and every cart this repo imported came out
+#                   two octaves flat for ten days behind a green `make test`. So
+#                   the browser runs the SAME bytes the desktop does, in this VM.
+#   p8_lua_port.py  moy-spec's LUA PORTER, vendored beside it: the cart's own
+#                   code under a generated PICO-8 shim, plus the `.moy` folder
+#                   itself. This is what makes a dropped cart RUN rather than
+#                   arrive as a porting exercise (owner call, 2026-08-29). It is
+#                   upstream because SPEC.md is what the shim is written
+#                   against, verb for verb.
+#   p8_writer.py    ours: the input guards a frozen opt=3 build needs, the
+#                   `os.path.basename` shim, and the compatibility report --
+#                   shared with tools/import_p8.py (the CLI) for the same
+#                   reason, one level down.
 #
 # Copied rather than symlinked because the freeze takes a DIRECTORY and a
 # dangling link in it is a build that fails at the last step.
 cp "${REPO_ROOT}/tools/p8_import.py" "${STAGE_DIR}/modules/p8_import.py"
+cp "${REPO_ROOT}/tools/p8_lua_port.py" "${STAGE_DIR}/modules/p8_lua_port.py"
 cp "${REPO_ROOT}/tools/p8_writer.py" "${STAGE_DIR}/modules/p8_writer.py"
 
 # `zlib.decompress` over the built-in `deflate`: MicroPython dropped the zlib

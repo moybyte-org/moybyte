@@ -157,12 +157,13 @@ window.addEventListener("drop",function(e){if(!PZMODE||PZMODE==="board")return;
 e.preventDefault();var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
 if(f)pzImport(f);});
 // ---- the PICO-8 import report (#194) ----------------------------------------
-// "Report, don't crash": what a converted cart used and what did NOT come
-// across is the visible half of this feature, because an import that quietly
-// ran wrong is worse than one that refused. The lines are written by the shared
-// writer (tools/p8_writer.report_lines) so the CLI and the browser say the same
-// things; this only paints them, and offers the one action the page cannot
-// infer -- opening the new cart in the editor.
+// "Report, don't crash": the cart RUNS now, so what this says is where it will
+// stop agreeing with PICO-8 -- the verbs the generated shim has no answer for,
+// and the ones it answers differently. That second kind is why the panel exists
+// at all: a cart that quietly draws the wrong thing is worse than one that
+// refused. The lines come from tools/p8_writer.report_lines so the CLI and the
+// browser say the same things; this only paints them, and offers the one action
+// the page cannot infer -- opening the new cart in the editor.
 var P8=document.getElementById("p8"),P8T=document.getElementById("p8t"),
 P8E=document.getElementById("p8e"),P8X=document.getElementById("p8x"),p8Cart=null;
 function p8Report(lines,ok,dir){p8Cart=ok?(dir||null):null;

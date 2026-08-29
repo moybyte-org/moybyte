@@ -5,24 +5,42 @@ __lua__
 -- by moybyte
 
 -- A cart WE wrote, so the repo may actually carry it. It exists to be
--- imported, not to be fun: every section the importer reads is present and
--- small, and it deliberately uses one verb from each PORT_NOTES family --
--- an inverted fill (rectfill), an inverted outline (circ), numeric buttons
--- (btn), a plain rename (pset) and one verb Moybyte has no answer for at all
--- (sspr), which is what the compatibility report has to surface.
+-- imported, not to be fun -- but since #194's Lua leg it also has to RUN,
+-- because "the imported cart plays" is the claim under test and a fixture
+-- that only has to convert cannot prove it.
+--
+-- So three jobs, and every line serves one of them:
+--   1. every section the importer reads is present and small;
+--   2. the cart's own code is OBSERVABLE once it runs -- `ticks` counts
+--      _update calls (a host test reads the Lua global straight out of the
+--      running state) and _draw paints a big pink square no shell chrome
+--      paints, which is what the browser suite counts on the canvas;
+--   3. it names one verb from each half of the compatibility report --
+--      sspr (exists here, different manners) and dset (nothing answers to
+--      it), the latter parked in a function nothing calls, because the
+--      report's scan is textual and a cart that CALLED it would stop there.
 
 x = 60
 y = 60
+ticks = 0
 
 function _update()
+ ticks += 1
  if btn(0) then x -= 1 end
  if btn(1) then x += 1 end
  if btn(2) then y -= 1 end
  if btn(3) then y += 1 end
 end
 
+-- never called: dead code is ordinary in a p8 cart, and it is what lets the
+-- report name a verb the shim has no answer for without crashing the cart.
+function unused_save()
+ dset(0, ticks)
+end
+
 function _draw()
  cls(0)
+ rectfill(24, 24, 103, 103, 14)
  rectfill(0, 120, 127, 127, 3)
  circ(64, 20, 8, 7)
  pset(x, y, 8)
@@ -42,8 +60,8 @@ __map__
 0102030400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
-000800000e0500e0500e0501105011050110500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-001000002135021350213500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000800000e0500e0500e0501105011050110500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+001000002135021350213500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __music__
 00 00014243
 

@@ -1,19 +1,34 @@
 """The p8 import runs on a REAL MicroPython, not just on CPython (#194).
 
-The browser converts a dropped PICO-8 cart by running the SAME two files the
-desktop CLI runs -- moy-spec's vendored converter and our `.moy` writer --
-inside the wasm VM. Everything else in the tree checks those files under
-CPython, where `os.path`, `zlib`, f-strings and `json.dumps(indent=...)` all
-exist and none of them do in MicroPython. So this suite drives the whole import
-under `make unix-micropython`'s desktop MicroPython, which is the same
-interpreter (v1.28, same stdlib surface) the wasm build is.
+The browser converts a dropped PICO-8 cart by running the SAME THREE files the
+desktop CLI runs -- moy-spec's vendored asset converter, moy-spec's vendored Lua
+porter, and our guards/report file -- inside the wasm VM. Everything else in the
+tree checks those files under CPython, where `os.path`, `zlib`, `str.isalnum`,
+f-strings, `json.dumps(indent=...)` and a full regex engine all exist and none
+of them do in MicroPython. So this suite drives the whole import under `make
+unix-micropython`'s desktop MicroPython, which is the same interpreter (v1.28,
+same stdlib surface) the wasm build is.
 
-WHAT IT IS ACTUALLY GUARDING. Three separate things, each of which would fail
-SILENTLY in the browser and nowhere else:
+THIS IS THE CHECK THAT PAID FOR ITSELF, on 2026-08-29. `p8_lua_port.py` was
+about to be vendored on the strength of "it is stdlib-only Python"; it was, and
+it did not run. `localization_lua`'s two patterns used a LOOKBEHIND, a
+non-capturing group, an inline `(?m)` and a negative lookahead, and MicroPython's
+`re` rejects all four at COMPILE time ("regex too complex") -- so the browser's
+import would have died on the first cart, at a line that reads fine. Three more
+followed: `str.isalnum` (absent, four call sites), `json.dump(indent=2)` (no
+`indent` keyword) and `os.makedirs`/`os.path.join`. All six were fixed UPSTREAM
+in moy-spec and re-vendored, because a regex engine and a str method cannot be
+injected from out here the way `os.path.basename` is.
+
+WHAT IT IS GUARDING NOW. Four things, each of which would fail SILENTLY in the
+browser and nowhere else:
 
   * a CPython-only construct creeping into `tools/p8_writer.py`, whose whole
     reason to exist as a separate file is that it is shared with the wasm
     console;
+  * the same, in a RE-VENDORED `tools/p8_lua_port.py` -- a static scan of that
+    file lives in tests/test_p8_import_vendor.py and knows only the six
+    constructs already found; this lane is what would find the seventh;
   * `firmware/web_runner/shims/zlib.py` -- four lines over the built-in
     `deflate` -- ceasing to inflate a real PNG IDAT, which is the ONLY thing
     standing between the browser and a second, JavaScript reader of the
@@ -26,6 +41,12 @@ SILENTLY in the browser and nowhere else:
 The `.p8.png` case is the one worth the seconds: the PNG unfilter is the
 heaviest interpreted loop in the feature, and every filter type is exercised
 because tests/p8_fixture.py rotates through all five.
+
+MEMORY, measured here 2026-08-29: the fixture imports inside MicroPython's
+2MB unix default; a real BBS cart (Celeste, ~8000 lines) does NOT and needs
+about 8MB. The browser gives the VM 16MB (worker.js), so that is headroom
+rather than a limit -- but it is the number a future DEVICE leg has to clear,
+and it is why this suite drives the small fixture rather than a real cart.
 """
 
 import json
@@ -53,7 +74,8 @@ def _stage(tmp_path):
     import p8_fixture
     import import_p8
 
-    for rel in ("tools/p8_import.py", "tools/p8_writer.py"):
+    for rel in ("tools/p8_import.py", "tools/p8_lua_port.py",
+                "tools/p8_writer.py"):
         src = os.path.join(ROOT, rel)
         with open(src, encoding="utf-8") as f:
             body = f.read()
@@ -85,17 +107,42 @@ summary = p8_writer.write_cart(sections, "out.moy", title)
 out["title"] = title
 out["report"] = p8_writer.report_lines(summary)
 out["unsupported"] = summary["unsupported"]
+out["differs"] = summary["differs"]
 out["files"] = sorted(__import__("os").listdir("out.moy"))
 f = open("out.moy/manifest.json")
-out["manifest"] = json.loads(f.read())
+out["manifest_text"] = f.read()
+out["manifest"] = json.loads(out["manifest_text"])
 f.close()
-f = open("out.moy/main.py")
-out["main_head"] = f.read()[:2000]
+f = open("out.moy/main.lua")
+main = f.read()
 f.close()
-f = open("out.moy/sprites.moygfx")
-out["gfx0"] = f.read().split("\\n")[0]
-f.close()
+out["main_len"] = len(main)
+out["main_sha"] = _sha(main)
+for probe in ("PICO-8 compatibility shim", "local P8_VH = 120",
+              "function p8_draw()", "__p8_gff", "-- Localized p8 API"):
+    out["probe_" + probe.split()[-1]] = probe in main
+# The map and the sheet are OPTIONAL outputs -- a cart with no __map__ gets no
+# map.moymap, and the anon-title fixture is exactly that cart.
+for name, key in (("sprites.moygfx", "gfx"), ("map.moymap", "map")):
+    try:
+        f = open("out.moy/" + name)
+    except OSError:
+        continue
+    text = f.read()
+    f.close()
+    out[key + "_sha"] = _sha(text)
+    if key == "gfx":
+        out["gfx0"] = text.split("\\n")[0]
 print("RESULT " + json.dumps(out))
+"""
+
+# `_sha` rather than shipping whole files back through one JSON line: the point
+# of the cross-tier comparison below is byte identity, and a hash says that in
+# 64 characters. binascii + hashlib are both MicroPython builtins.
+_SHA = """
+import hashlib, binascii
+def _sha(text):
+    return binascii.hexlify(hashlib.sha256(text.encode()).digest()).decode()
 """
 
 
@@ -105,7 +152,7 @@ def _drive(tmp_path, cart, name="run.py"):
             "converter, the .moy writer and the zlib shim -- actually runs on\n"
             "MicroPython. The browser runs those exact files.")
     with open(os.path.join(str(tmp_path), name), "w", encoding="utf-8") as f:
-        f.write(DRIVER)
+        f.write(_SHA + DRIVER)
     r = subprocess.run([exe, name, cart], cwd=str(tmp_path),
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, "MicroPython refused the import:\n%s\n%s" % (
@@ -122,18 +169,58 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
 
     assert got["sections_problem"] is None
     assert got["title"] == "tiny dash"
-    assert got["files"] == ["config.json", "main.py", "manifest.json",
+    assert got["files"] == ["main.lua", "manifest.json", "map.moymap",
                             "sounds.json", "sprites.moygfx"]
-    # The zoom hint (#194's guaranteed footgun) survives the tier change.
     assert got["manifest"]["canvas"] == "128x128"
+    assert got["manifest"]["main"] == "main.lua"
     assert got["manifest"]["safe_to_share"] is False
-    assert "view(128, 120)" in got["main_head"]
+    # The whole POINT, on the tier that nearly could not do it: the shim, the
+    # zoom hint, the renamed lifecycle, the flag table and the localization
+    # block -- the last of which is `localization_lua`, the function whose two
+    # regexes MicroPython refused to compile at all.
+    assert got["probe_shim"] and got["probe_120"] and got["probe_p8_draw()"]
+    assert got["probe___p8_gff"] and got["probe_API"]
     # ...and the ART is really there, not an empty grid from a failed inflate.
     assert got["gfx0"].startswith("0123456789abcdef")
-    # ...and the compatibility report says the two things it must.
+    # ...and the compatibility report says what it must now: it RUNS.
     text = " ".join(got["report"])
-    assert "CODE did NOT" in text
-    assert any("sspr" in u for u in got["unsupported"])
+    assert "imported, and it runs." in text
+    assert "CODE did NOT" not in text
+    assert any("dset" in u for u in got["unsupported"])
+    assert any("sspr" in d for d in got["differs"])
+
+
+def test_micropython_and_cpython_write_the_same_cart(tmp_path):
+    """ONE WRITER, and here is what that has to MEAN: the browser and the CLI
+    produce the same bytes.
+
+    Cheap to say and easy to lose -- MicroPython's dicts are not
+    insertion-ordered, which is why the porter declares its manifest field order
+    instead of taking the dict's. The four files this compares are the ones the
+    two tiers both fully control; `sounds.json` is deliberately not among them,
+    because its nested per-step dicts come out of the vendored converter in a
+    tier-dependent key order (same content, same length -- checked by
+    tests/test_import_p8.py through the audio model, which is the level that
+    matters for a bank)."""
+    import hashlib
+
+    p8, _png = _stage(tmp_path)
+    got = _drive(tmp_path, p8)
+
+    import import_p8
+    out = os.path.join(str(tmp_path), "cpython.moy")
+    import_p8.import_p8(p8, out)
+
+    def sha(name):
+        with open(os.path.join(out, name), encoding="utf-8") as f:
+            return hashlib.sha256(f.read().encode()).hexdigest()
+
+    assert got["main_sha"] == sha("main.lua"), \
+        "main.lua differs between MicroPython and CPython"
+    assert got["gfx_sha"] == sha("sprites.moygfx")
+    assert got["map_sha"] == sha("map.moymap")
+    assert got["manifest_text"] == open(
+        os.path.join(out, "manifest.json"), encoding="utf-8").read()
 
 
 def test_a_cart_with_no_title_comment_is_named_from_its_filename(tmp_path):

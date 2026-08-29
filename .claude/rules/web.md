@@ -81,33 +81,49 @@ nor those docs will warn you about:
   `browsershot.mjs` drives the shipped page in real headless Chrome. **The page
   waits behind a play-button splash unless the scenario passes `?dev=1`**, so a
   scenario that forgets it screenshots a blank canvas and looks like a raster bug.
-- **The p8 converter is UPSTREAM of us.** SPEC.md says what a converted cart
-  MEANS, so corrections are worked out in moy-spec and travel HERE — and once
-  they did not: upstream fixed a pitch offset, our hand-copy never heard, and
-  **every cart imported through this repo came out two octaves flat while
-  `make test` stayed green**, because the tests had pinned the wrong model too.
-  It is vendored now (`make vendor-p8-import`) and **editing it here is a red
-  test**. What stays ours is the CLI, the `.moy` folder writer and the guided
-  port notes. **Do not drop `--zoom`** when regenerating a port: it bakes the
-  `view(128, 120)` hint, and without it the T-Deck letterboxes a 128px square at
-  1× instead of compositing it centered at 2×. `ports/celeste.moy` is gitignored
-  on BOTH repos (CC BY-NC-SA) — never commit or ship it.
-- **The BROWSER imports p8 carts too (#194), by running those same two files.**
-  A dropped `.p8`/`.p8.png` is converted in the wasm VM: `build.sh` stages
-  `tools/p8_import.py` (unchanged, still hash-pinned) and `tools/p8_writer.py`
-  — our `.moy` writer, split out of `import_p8.py` so the CLI and the console
-  share ONE body — into the frozen set, plus `shims/zlib.py`, four lines over
-  MicroPython's `deflate`. **The browser could skip the inflate entirely**
-  (`createImageBitmap` + `getImageData`, then read the low bits in JS) and that
-  is exactly what was DECLINED: it would be a second reader of one format, the
-  same shape as the hand-copied converter, and it does not generalise to a
-  board. Measured on a real MicroPython: 40ms to read a `.p8.png`, 13ms to
-  write the cart. Two rules the tests pin: the **zoom hint is unconditional**
-  here (`view(128, 120)` in every generated `main.py`, canvas `128x128`) because
-  on the web that footgun would fire on every import, and the PNG validation is
-  **explicit** because the frozen build is opt=3, which strips the converter's
-  own asserts. `tests/test_p8_micropython.py` is the lane that proves the shared
-  half still runs on MicroPython at all.
+- **The p8 import is UPSTREAM of us, BOTH halves.** SPEC.md says what a
+  converted cart MEANS, so corrections are worked out in moy-spec and travel
+  HERE — and once they did not: upstream fixed a pitch offset, our hand-copy
+  never heard, and **every cart imported through this repo came out two octaves
+  flat while `make test` stayed green**, because the tests had pinned the wrong
+  model too. `make vendor-p8-import` carries `p8_import.py` (the assets) and,
+  since 2026-08-29, `p8_lua_port.py` (the cart's CODE under a generated p8 shim,
+  plus the `.moy` folder itself). **Editing either here is a red test.** What
+  stays ours is `import_p8.py` (the CLI) and `p8_writer.py` (the input guards,
+  the `os.path` shim, the compatibility report) — neither writes a byte of a
+  cart. The `view(128, 120)` hint is `p8_writer.P8_CROP` now, passed on every
+  tier, so `--zoom` is only the upstream CLI's spelling of it and cannot be
+  forgotten here. `ports/celeste.moy` is gitignored on BOTH repos (CC BY-NC-SA)
+  — never commit or ship it.
+- **The BROWSER imports p8 carts too (#194), by running those same files, and
+  the imported cart RUNS.** A dropped `.p8`/`.p8.png` is converted in the wasm
+  VM: `build.sh` stages `tools/p8_import.py`, `tools/p8_lua_port.py` (both
+  hash-pinned) and `tools/p8_writer.py` into the frozen set, plus `shims/zlib.py`,
+  four lines over MicroPython's `deflate`. **The browser could skip the inflate
+  entirely** (`createImageBitmap` + `getImageData`, then read the low bits in JS)
+  and that is exactly what was DECLINED: it would be a second reader of one
+  format, the same shape as the hand-copied converter, and it does not generalise
+  to a board. Measured on a real MicroPython: 40ms to read a `.p8.png`, 13ms to
+  write a small cart, ~360ms for Celeste. Rules the tests pin: the **zoom hint is
+  unconditional** here (`p8_writer.P8_CROP`, canvas `128x128`) because on the web
+  that footgun would fire on every import; the PNG validation is **explicit**
+  because the frozen build is opt=3, which strips the converter's own asserts;
+  and the browser and the CLI must write **byte-identical** carts, which is why
+  the porter declares its manifest field order (MicroPython dicts are not
+  insertion-ordered).
+- **A file that only has to be "stdlib Python" is NOT known to run on
+  MicroPython — RUN IT.** `p8_lua_port.py` was stdlib-only and did not: its
+  `localization_lua` used a **lookbehind, a `(?:...)`, an inline `(?m)` and a
+  lookahead**, all four of which MicroPython's `re` rejects at COMPILE time
+  ("regex too complex"), so the browser's first import would have died on a line
+  that reads fine. Three more followed — `str.isalnum` (absent), `json` with no
+  `indent=`, and `os.makedirs`/`os.path.join`. All six were fixed UPSTREAM,
+  because unlike `os.path.basename` a regex engine and a str method **cannot be
+  injected from out here**. `tests/test_p8_micropython.py` is the lane that found
+  them and `tests/test_p8_import_vendor.py` scans a re-vendored file for the six
+  statically. **Memory is the other tier fact**: a real BBS cart needs ~8MB of
+  MicroPython heap to import (the fixture fits in 2MB); the browser gives the VM
+  16MB, so that is headroom here and the bar a device leg has to clear.
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.

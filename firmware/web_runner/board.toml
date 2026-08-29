@@ -15,8 +15,9 @@
 #  `palette.py` literal twin, the runner's own authored modules (web_boot.py /
 #  web_canvas.py / gpio_link.py / web_p8.py), which build.sh copies by name the
 #  way a board's tracked modules/ files simply exist -- and the p8 importer
-#  (#194), the one set of modules staged out of `tools/`: the VENDORED converter
-#  and the `.moy` writer it shares with the CLI, plus shims/zlib.py. The stager
+#  (#194), the one set of modules staged out of `tools/`: the two VENDORED files
+#  (the asset converter and the Lua porter) and the guards/report file it shares
+#  with the CLI, plus shims/zlib.py. The stager
 #  maps runtime/ and device/ and has no third source; build.sh carries those
 #  three with the reason written beside the copy.
 

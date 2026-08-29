@@ -8,13 +8,19 @@ converter, VENDORED (see `tools/vendor_p8_import.py`) rather than copied: the
 sheet, the SFX bank and the music tracks are its work, and this file must not
 re-implement or "improve" a line of it.
 
-THE WRITER IS NOT HERE EITHER, since #194. `tools/p8_writer.py` -- also beside
-this file -- holds the `.moy` folder writer, the guided PICO-8 -> Python porting
-scaffold (#36) and the compatibility report, because the BROWSER writes carts
-too: a `.p8` dropped on the wasm console goes through that same file, staged
-into its frozen set by `firmware/web_runner/build.sh`. A second writer over
-there would drift exactly the way the converter once did (below), one level
-down. What is left HERE is the CLI and the host glue.
+THE PORTER IS NOT HERE EITHER. `tools/p8_lua_port.py`, also vendored, converts
+the cart's own Lua and writes the `.moy` FOLDER -- so an imported cart RUNS
+(owner call, 2026-08-29). The Python porting scaffold this tool used to emit is
+gone with it: transcribing Lua into Python when the two are nearly the same text
+teaches syntax rather than game-making. `docs/two_languages.md` is where the
+language differences live now.
+
+WHAT IS OURS is `tools/p8_writer.py` -- the input guards, the `os.path` shim and
+the compatibility report -- and it is a separate file because the BROWSER
+imports carts too: a `.p8` dropped on the wasm console goes through that same
+file, staged into its frozen set by `firmware/web_runner/build.sh`. A second
+copy over there would drift exactly the way the converter once did (below), one
+level down. What is left HERE is the CLI and the host glue.
 
 That split is not tidiness. This file used to carry its own copy of the whole
 converter, upstream corrected the PICO-8 pitch offset in theirs, and ours never
@@ -37,21 +43,20 @@ What a run writes into the `.moy` FOLDER:
                                 pattern lengths, and SPEC.md 8.1's pitch
                                 mapping (p8 pitch 33 = A4 = moy 57, offset 24).
                                 Only the 8 CUSTOM instruments stay unmodelled.
-  __lua__   -> main.py          NOT transpiled / NOT executed. The Lua is
-                                imported as a commented-out reference block with
-                                a working Python stub on top and inline
-                                `# PORT NOTE:` guidance -- ours, in p8_writer.
+  __lua__   -> main.lua         the cart's own Lua, mechanically converted to
+   __gff__                      Lua 5.4 (`!=`, `+=`, one-line `if`) under a
+                                generated PICO-8 compat shim, with the flag
+                                table baked in beside it.
+  __map__   -> map.moymap       all 64 rows -- including the 32 PICO-8 keeps in
+                                the bottom half of __gfx__ -- in the console's
+                                own tilemap format, so the Map editor opens it.
   header/   -> manifest.json    title (from a `__lua__` comment line, else the
-   filename                     filename), type "game", the 128x128 p8 canvas +
-                                the view(128, 120) zoom hint, permissions,
-                                empty config/edit.
-
-  (A Lua-runtime port -- `main.lua` plus a p8 compat shim -- is moy-spec's
-  `moy port`, not this tool. This one is the Python porting exercise.)
+   filename                     filename), "runtime": lua, the 128x128 p8 canvas
+                                + the view(128, 120) zoom hint, and
+                                safe_to_share false (BBS carts are CC BY-NC-SA).
 
 DEFERRED (intentionally, noted rather than guessed):
-  __map__        the `.moymap` writer lives in moy-spec's `p8_lua_port` (#32).
-  __gff__        per-sprite flag bits -- Moybyte has no sprite-flag model yet.
+  __label__      the cart's label image; nothing shows it.
 
 Stdlib only (the vendored converter is stdlib only too, which is what makes the
 browser import in #194 cheap).
@@ -92,12 +97,9 @@ from p8_import import (  # noqa: E402
 # it lives in its own file rather than in this one. Same one-by-one listing for
 # the same reason: a `*` is how a name quietly stops being the shared body's.
 from p8_writer import (  # noqa: E402
-    CHEATSHEET,
-    PORT_NOTES,
+    SHIM_GAPS,
     cart_title,
     looks_like_png,
-    lua_to_main_py,
-    make_manifest,
     png_problem,
     report_lines,
     scan_lua_verbs,
@@ -112,11 +114,10 @@ __all__ = [
     "_music_tracks", "_row_secs", "_sfx_line_to_dict", "_sfx_meta",
     "_title_from", "gfx_to_kgfx", "icon_tile", "music_start_map", "parse_p8",
     "read_p8", "sfx_music_to_sounds",
-    # the shared writer's, re-exported so a caller reaches it through the tool
+    # the shared half's, re-exported so a caller reaches it through the tool
     # it already imports (tools/p8_writer.py)
-    "CHEATSHEET", "PORT_NOTES", "cart_title", "looks_like_png", "lua_to_main_py",
-    "make_manifest", "png_problem", "report_lines", "scan_lua_verbs",
-    "sections_problem", "write_cart",
+    "SHIM_GAPS", "cart_title", "looks_like_png", "png_problem", "report_lines",
+    "scan_lua_verbs", "sections_problem", "write_cart",
     # ours
     "import_p8", "main",
 ]
@@ -156,7 +157,8 @@ def main(argv):
     summary = import_p8(p8_path, out_dir)
     print("Imported PICO-8 cart -> %s" % out_dir)
     print("  title:    %s" % summary["title"])
-    for tag in ("imported", "lossy", "deferred", "empty", "unsupported"):
+    for tag in ("imported", "lossy", "deferred", "empty", "differs",
+                "unsupported"):
         for item in summary.get(tag, ()):
             print("  %-12s %s" % (tag + ":", item))
     print("")

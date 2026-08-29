@@ -71,7 +71,12 @@ BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
 MICROPYTHON_BUILTINS = {
     "array", "binascii", "builtins", "cmath", "collections", "errno", "gc",
     "hashlib", "heapq", "io", "json", "math", "os", "platform", "random", "re",
-    "select", "socket", "ssl", "struct", "sys", "time", "zlib",
+    "select", "socket", "ssl", "struct", "sys", "time",
+    # NOT `zlib`: MicroPython dropped it in v1.21 for `deflate`, and this table
+    # said otherwise until 2026-08-29 -- a false entry in a list whose whole
+    # purpose is claims somebody can check. The web target reaches zlib through
+    # firmware/web_runner/shims/zlib.py, which it STAGES as a module (below);
+    # any other target importing it would now be a finding, which is right.
     # MicroPython-specific
     "machine", "micropython", "network", "esp", "esp32", "bluetooth",
     "framebuf", "neopixel", "uctypes", "_thread", "uasyncio", "asyncio",
@@ -266,12 +271,15 @@ def frozen_set(target):
             if p.exists():
                 mods[name] = p
         # The p8 importer (#194) is the one thing this build stages out of
-        # `tools/`: moy-spec's vendored converter and the `.moy` writer the CLI
-        # shares with it, carried in UNCHANGED (editing the vendored file is a
-        # red test). Plus the `zlib.decompress` shim over MicroPython's
-        # `deflate`, which is what lets the `.p8.png` inflate happen in the
-        # SAME converter the desktop runs instead of a second reader in JS.
+        # `tools/`: moy-spec's two vendored files -- the asset converter and the
+        # Lua porter that makes a dropped cart RUN -- and the guards/report file
+        # the CLI shares with them, carried in UNCHANGED (editing a vendored
+        # file is a red test). Plus the `zlib.decompress` shim over
+        # MicroPython's `deflate`, which is what lets the `.p8.png` inflate
+        # happen in the SAME converter the desktop runs instead of a second
+        # reader in JS.
         for name, src in (("p8_import", ROOT / "tools" / "p8_import.py"),
+                          ("p8_lua_port", ROOT / "tools" / "p8_lua_port.py"),
                           ("p8_writer", ROOT / "tools" / "p8_writer.py"),
                           ("zlib", WEB / "shims" / "zlib.py")):
             if src.exists():

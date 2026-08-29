@@ -15,6 +15,13 @@ Current numbers + verdicts live ONLY in the **#66 performance ledger**.
 grounding), `docs/porting_pico8.md` (the API-alignment surface), and
 `docs/moy_cart_api.md` (the current cart/device API) alongside this.
 
+> *[Editorial note, 2026-08-29 — the sentence above is left as written.
+> `docs/porting_pico8.md` was the hand-port-to-Python guide; it became
+> `docs/two_languages.md` when the browser's PICO-8 drop started emitting a
+> Lua cart that RUNS, so there is no port to guide. What this doc wanted from
+> it — the PICO-8/TIC-80 API-alignment surface these folds were designed
+> against — is `docs/moy_cart_api.md`, already named beside it.]*
+
 Related issues: #43 (draw-call ceiling / native batch / dirty-rect), #54 (scroll
 engine — `make_layer`/`draw_layer`), #32 (native `map()`), #11 (TIC-80-shaped API +
 the global-vs-namespaced rule), #62 (native text), #58 (ESP32-P4 2D accel), #6

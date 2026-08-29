@@ -7,7 +7,8 @@ one __music__ row) and asserts:
     right NOTES -- checked in Hz through runtime.audio, never by restating the
     importer's own constant,
   * manifest.json is valid and well-shaped,
-  * main.py keeps the Lua only as a comment (never executable),
+  * main.lua carries the cart's own code, converted and RUNNING under the
+    generated PICO-8 shim -- not a comment, and not a Python stub,
   * the cart load()s cleanly via runtime.moy_carts.
 
 ...and, since #194 made this importer the browser's too:
@@ -19,6 +20,13 @@ one __music__ row) and asserts:
 Two sibling suites carry the halves this one cannot: tests/test_p8_micropython.py
 runs the same import on a real MicroPython (the browser's interpreter), and
 tests/test_web_p8_e2e.py drives the drop in a real browser.
+
+THE PYTHON PORTING SCAFFOLD IS GONE (2026-08-29), and with it the tests that
+pinned it. `__lua__` used to become a commented reference block with a runnable
+Python stub and `# PORT NOTE:` guidance, because moy-spec's Lua porter was the
+only route that ran and this repo did not have it. It is vendored now, so the
+drop emits a cart that PLAYS -- and the checks that used to assert "the code did
+NOT come across" assert that it did, and that it ticks.
 
 WHY THE Hz. These tests used to assert `steps[0][0] == 0x1E` -- the p8 pitch
 byte, unchanged -- with the comment "pitch maps 1:1". It looked like a tight
@@ -189,9 +197,12 @@ def test_manifest_valid(tmp_path):
     summary = import_p8.import_p8(str(p8), str(out))
 
     man = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
-    assert man["format"] == "moybyte-cart-v1"
-    assert man["type"] == "game"
-    assert man["main"] == "main.py"
+    # A moy-spec cart (SPEC.md 3.1) -- Lua by definition, which is what
+    # moy_carts.load reads "runtime": "lua" and "main.lua" out of.
+    assert man["format"] == "moy-1"
+    assert man["main"] == "main.lua"
+    assert man["fps"] == 30                      # PICO-8's own rate
+    assert man["ported_from"] == "pico-8"
     # A p8 cart is 128x128 (SPEC.md 1/3.1 carries that size to inherit the
     # PICO-8 back catalogue at native res), NOT the 320x240 default -- and the
     # size has to be in moy_carts.CANVAS_SIZES or Player.start refuses the cart.
@@ -200,30 +211,31 @@ def test_manifest_valid(tmp_path):
     # Imported, not authored (#194): republishing somebody else's cart is not
     # what this feature is for, so nothing downstream may treat it as mine.
     assert man["safe_to_share"] is False
-    assert "graphics" in man["permissions"]
-    assert man["config"] == {}
-    assert man["edit"] == []
     # title comes from the first real lua comment line
     assert summary["title"] == "my test cart"
     assert man["title"] == "my test cart"
 
 
-def test_main_py_keeps_lua_as_comment_only(tmp_path):
+def test_main_lua_carries_the_converted_cart_code(tmp_path):
+    """The inversion of the old `test_main_py_keeps_lua_as_comment_only`: the
+    cart's Lua is CODE now, mechanically converted to Lua 5.4, under a shim."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
 
-    src = (out / "main.py").read_text(encoding="utf-8")
-    # the stub is real, runnable Python
-    compile(src, "main.py", "exec")
-    assert "def _draw():" in src
-    # every original lua body line is present but commented out
-    assert "# function _draw()" in src
-    assert "# end" in src
-    # no bare (uncommented) lua leaked into executable scope
-    for line in src.split("\n"):
-        if "function _draw()" in line or line.strip() == "end":
-            assert line.lstrip().startswith("#")
+    src = (out / "main.lua").read_text(encoding="utf-8")
+    assert not (out / "main.py").exists(), "the Python stub is gone"
+    # the shim, then the cart's own body -- as code, not as a comment block
+    assert "PICO-8 compatibility shim" in src
+    assert "function p8_draw()" in src, \
+        "_draw is renamed so the shim can pace it at PICO-8's 30fps"
+    # the p8 dialect is converted, not carried through
+    assert " x = x - (1)" in src, "`x -= 1` must expand to Lua 5.4"
+    assert "-=" not in src.split("end shim")[-1]
+    # every body line is live: nothing from the cart is commented out wholesale
+    body = src.split("end shim ")[-1]
+    assert "cls(0)" in body and not any(
+        ln.strip().startswith("-- cls(0)") for ln in body.split("\n"))
 
 
 def test_cart_loads_via_moy_carts(tmp_path):
@@ -234,7 +246,7 @@ def test_cart_loads_via_moy_carts(tmp_path):
     cart = moy_carts.load(str(out))
     assert cart is not None
     assert cart["title"] == "my test cart"
-    assert cart["type"] == "game"
+    assert cart["runtime"] == "lua" and cart["main"] == "main.lua"
     assert cart["sprites"] is not None
     assert cart["sounds"] is not None
     # the loaded sprite hex is the same grid we emitted
@@ -243,20 +255,24 @@ def test_cart_loads_via_moy_carts(tmp_path):
     AudioBank.from_dict(cart["sounds"])
 
 
-def test_deferred_sections_noted_not_imported(tmp_path):
+def test_the_map_and_the_flags_come_across_now(tmp_path):
+    """`__map__` and `__gff__` used to be DEFERRED -- noted in the report and
+    written nowhere, because the tilemap writer lived only in moy-spec. It is
+    vendored now, so both land: the map as the console's own `map.moymap` (the
+    Map editor opens it) and the flags baked into main.lua for fget()."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
-    summary = import_p8.import_p8(str(p8), str(out))
+    import_p8.import_p8(str(p8), str(out))
 
-    # __map__ and __gff__ are reported as deferred, and no files are written.
-    deferred = " ".join(summary["deferred"])
-    assert "__map__" in deferred
-    assert "__gff__" in deferred
-    assert not (out / "map.moymap").exists()
-    # the cart folder holds exactly the v1 importer outputs
     names = sorted(p.name for p in out.iterdir())
-    assert names == ["config.json", "main.py", "manifest.json",
+    assert names == ["main.lua", "manifest.json", "map.moymap",
                      "sounds.json", "sprites.moygfx"]
+    head, first = (out / "map.moymap").read_text(
+        encoding="utf-8").split("\n")[:2]
+    assert head == "128 64", "all 64 rows, not just __map__'s 32"
+    # p8 cell ids 01 02 03 04 store as id+1 (0 means empty in .moymap)
+    assert first.startswith("0203040500")
+    assert "__p8_gff" in (out / "main.lua").read_text(encoding="utf-8")
 
 
 def test_empty_sections_handled(tmp_path):
@@ -267,6 +283,7 @@ def test_empty_sections_handled(tmp_path):
     summary = import_p8.import_p8(str(p8), str(out))
     assert not (out / "sprites.moygfx").exists()
     assert not (out / "sounds.json").exists()
+    assert not (out / "map.moymap").exists()
     assert any("sprites.moygfx" in e for e in summary["empty"])
     cart = moy_carts.load(str(out))
     assert cart is not None
@@ -274,96 +291,93 @@ def test_empty_sections_handled(tmp_path):
     assert cart["sounds"] is None
 
 
-# -- guided PICO-8 -> Moybyte porting (#36) --------------------------------
+# -- the compatibility report, aimed at the SHIM (#194) ---------------------
+# What replaced the guided PICO-8 -> Python porting scaffold (#36). The old
+# tests here pinned `# PORT NOTE:` lines and a port checklist inside a generated
+# main.py; there is no main.py any more, and the question a report has to answer
+# changed with it -- not "what will you have to rewrite" but "where will the
+# cart that is already running stop agreeing with PICO-8".
 
-def test_port_notes_for_used_verbs_only(tmp_path):
-    """The synthetic cart's Lua uses rectfill, circ, and btn(0). The generated
-    main.py must carry the matching PORT NOTEs (rect inversion + arg-shape, circ
-    inversion, btn names) and MUST NOT emit notes for verbs the cart never uses."""
+def test_the_report_names_only_the_gaps_this_cart_reaches(tmp_path):
+    """The synthetic cart calls cls/btn/rectfill/circ/spr -- all of which the
+    shim implements -- and nothing else. So its report must name NO gaps, which
+    is the half a table of advice gets wrong first: boilerplate for verbs the
+    cart never mentions."""
     p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.moy"
-    import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.py").read_text(encoding="utf-8")
-
-    # gotcha 1+2: rectfill -> rect with corner->extent arg change
-    assert "# PORT NOTE:" in src
-    assert "rectfill() = FILLED rect" in src
-    assert "rect()" in src
-    assert "x1-x+1" in src                       # the corner->w,h conversion rule
-    # gotcha 1: circ outline -> circb
-    assert "circ(x,y,r,c) = OUTLINE circle" in src
-    assert "circb()" in src
-    # gotcha 3: numeric buttons -> names
-    assert "btn(i) uses NUMBERS 0..5" in src
-    assert "btn('left')" in src
-
-    # The cart does NOT use these -> no PORT NOTE should mention them.
-    assert "peek()" not in src
-    assert "poke()" not in src
-    assert "camera(" not in src
-    assert "map()" not in src
-    assert "sspr(" not in src
-    assert "pal()" not in src
-
-    # `rect` token must NOT fire just from being inside `rectfill` (word-boundary).
-    # The cart has no standalone PICO-8 `rect(` call, so the outline-rect note
-    # ("rect() = OUTLINE") must be absent.
-    assert "rect() = OUTLINE" not in src
+    summary = import_p8.import_p8(str(p8), str(tmp_path / "out.moy"))
+    assert summary["unsupported"] == []
+    assert summary["differs"] == []
+    assert summary["verbs"] == []
+    text = "\n".join(import_p8.report_lines(summary))
+    assert "not supported" not in text and "works differently" not in text
 
 
-def test_port_checklist_and_cheatsheet_pointer(tmp_path):
-    p8 = _write_p8(tmp_path)
-    out = tmp_path / "out.moy"
-    import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.py").read_text(encoding="utf-8")
-
-    # stretch goal: a port checklist with the boxes for this cart's verbs
-    assert "PORT CHECKLIST" in src
-    assert "[ ] rectfill" in src
-    assert "[ ] circ outline -> circb" in src
-    assert "[ ]" in src and "btn" in src
-    # and a pointer to the cheatsheet
-    assert "docs/porting_pico8.md" in src
-    # still valid, runnable Python (the notes are all comments)
-    compile(src, "main.py", "exec")
+def test_the_report_separates_missing_verbs_from_differing_ones(tmp_path):
+    """tiny_dash calls sspr() (a verb of that name EXISTS and does not mean the
+    same thing) and dset() (nothing answers to it). Those are different
+    failures -- one draws the wrong picture in silence, the other stops the
+    cart -- so the report says them differently."""
+    p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
+    assert summary["verbs"] == ["dset", "sspr"]
+    assert any("sspr()" in d for d in summary["differs"])
+    assert any("dset()" in u for u in summary["unsupported"])
+    text = "\n".join(import_p8.report_lines(summary))
+    assert "works differently: sspr()" in text
+    assert "not supported: cartdata()/dget()/dset()" in text
 
 
-def test_no_port_notes_when_no_known_verbs(tmp_path):
-    """A cart whose Lua uses no known PICO-8 verbs gets no PORT NOTE / checklist."""
-    p8 = tmp_path / "plain.p8"
-    p8.write_text(
-        "pico-8 cartridge\nversion 41\n__lua__\nx = 1 + 2\nfoo = bar(x)\n",
-        encoding="utf-8")
-    out = tmp_path / "plain.moy"
-    import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.py").read_text(encoding="utf-8")
-    assert "# PORT NOTE:" not in src
-    assert "PORT CHECKLIST" not in src
-    # the cheatsheet pointer is always in the header regardless
-    assert "docs/porting_pico8.md" in src
+def test_every_declared_gap_is_really_a_gap():
+    """The table cannot rot into a lie. A name in SHIM_GAPS marked "missing"
+    must be absent from the generated shim's own API list AND from the console's
+    Lua verb table; one marked "differs" must be present in exactly one of them,
+    because "it exists and disagrees" is what that word claims.
+
+    This is the guard that makes the report survive a re-vendor: upstream
+    growing a shim verb turns a stale "not supported" line red here instead of
+    shipping it to a kid."""
+    import p8_lua_port
+    from p8_writer import SHIM_GAPS, MISSING
+    from runtime.lua_ext import LIBMOY_VERBS
+
+    provided = set(p8_lua_port.P8_API) | set(LIBMOY_VERBS)
+    for name, (kind, advice) in sorted(SHIM_GAPS.items()):
+        if kind == MISSING:
+            assert name not in provided, (
+                "SHIM_GAPS calls %r missing, but the port provides it now -- "
+                "drop the entry (or re-file it as `differs`)." % name)
+        else:
+            assert name in provided, (
+                "SHIM_GAPS calls %r a difference, but nothing provides that "
+                "name at all -- it is `missing`." % name)
+        assert advice.strip() and name in advice, \
+            "%r's advice should name the verb it is about" % name
 
 
 def test_scan_lua_verbs_word_boundaries():
-    """scan_lua_verbs matches whole-word calls only: rect != rectfill, and a
-    word like 'sprint' must not trigger 'spr'/'print'."""
-    found = import_p8.scan_lua_verbs(["rectfill(0,0,1,1,8)", "sprint = 3"])
-    assert "rectfill" in found
-    assert "rect" not in found      # not fired by the substring in rectfill
-    assert "spr" not in found       # not fired by 'sprint'
-    assert "print" not in found
-    # a real spr() call does fire
-    assert "spr" in import_p8.scan_lua_verbs(["spr(1, 0, 0)"])
+    """scan_lua_verbs matches whole-word calls only, at BOTH ends -- `t` must
+    not fire inside `time(`, and a name must not fire as a method call."""
+    found = import_p8.scan_lua_verbs(["time(0)", "sset(1,1,2)"])
+    assert found == {"time", "sset"}
+    assert import_p8.scan_lua_verbs(["local n = settings(1)"]) == set()
+    assert import_p8.scan_lua_verbs(["obj:flip()", "obj.flip()"]) == set()
+    assert import_p8.scan_lua_verbs(["flip()"]) == {"flip"}
+    # a bare mention that is not a call does not count
+    assert import_p8.scan_lua_verbs(["-- peek is not available"]) == set()
 
 
-def test_cheatsheet_doc_exists():
-    doc = ROOT / "docs" / "porting_pico8.md"
+def test_the_two_languages_doc_exists():
+    """The scaffold's cheatsheet was `docs/porting_pico8.md` and is now
+    `docs/two_languages.md` -- repurposed, not deleted, because the kid who
+    opens an imported cart is looking at Lua on a console that also runs
+    Python, which is a real question and no longer a PICO-8 one."""
+    doc = ROOT / "docs" / "two_languages.md"
     assert doc.is_file()
     text = doc.read_text(encoding="utf-8")
-    # the 3 gotchas + the key verb mappings are documented
-    assert "rectfill" in text and "rectb" in text
-    assert "circb" in text
-    assert 'btn("left")' in text
-    assert "peek" in text and "poke" in text
+    assert "elseif" in text and "end" in text        # Lua's own shapes
+    assert "def " in text and "_update(dt)" in text  # ...beside Python's
+    assert "runtime" in text                         # what picks the language
+    assert not (ROOT / "docs" / "porting_pico8.md").exists()
 
 
 # -- full-fidelity audio import (#170): effects, 8 waves, 4-channel rows -----
@@ -496,37 +510,29 @@ def test_every_import_declares_the_view_zoom_hint(tmp_path):
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
-    src = (out / "main.py").read_text(encoding="utf-8")
-    assert "view(128, 120)" in src
-    # ...and it is a real top-level statement, not prose inside a comment.
-    assert any(ln.strip() == "view(128, 120)" for ln in src.split("\n"))
-    # The stub draws inside the 128-wide canvas it just declared.
-    compile(src, "main.py", "exec")
+    src = (out / "main.lua").read_text(encoding="utf-8")
+    # The porter takes the crop as an ARGUMENT (`--zoom` on its own CLI); this
+    # importer passes it as data, from p8_writer.P8_CROP, so there is no flag on
+    # any tier and nothing to forget.
+    assert "local P8_VH = 120" in src
+    assert "if P8_VH < 128 then view(128, P8_VH) end" in src
+    from p8_writer import P8_CROP, P8_VIEW_H
+    assert 128 - P8_CROP[0] - P8_CROP[1] == P8_VIEW_H
 
 
-def test_the_stub_is_a_runnable_cart_on_the_declared_canvas(tmp_path):
-    """The imported cart RUNS (#194's first requirement) -- not the ported game,
-    which is the kid's job, but a real cart that shows the imported art."""
+def test_the_imported_cart_is_a_lua_cart_on_the_declared_canvas(tmp_path):
+    """#194's first requirement, at the store level: what the launcher gets is a
+    real Lua cart on a canvas Player.start will accept."""
     p8 = _write_p8(tmp_path)
     out = tmp_path / "out.moy"
     import_p8.import_p8(str(p8), str(out))
     cart = moy_carts.load(str(out))
     assert cart["canvas"] == (128, 128), \
         "an out-of-set canvas is refused BY NAME in Player.start"
-    ns = {}
-    calls = []
-    ns["view"] = lambda *a: calls.append(("view",) + a)
-    ns["cls"] = lambda *a: calls.append(("cls",) + a)
-    ns["print"] = lambda *a: calls.append(("print",) + a)
-    ns["spr"] = lambda *a: calls.append(("spr",) + a)
-    ns["col"] = lambda name: 7
-    exec(compile((out / "main.py").read_text(encoding="utf-8"), "main.py", "exec"), ns)
-    assert ("view", 128, 120) in calls, "view() must run at cart load"
-    ns["_draw"]()
-    drew = [c for c in calls if c[0] == "spr"]
-    assert drew, "the stub must draw the imported sheet"
-    assert all(0 <= c[2] < 128 and 0 <= c[3] < 128 for c in drew), \
-        "the stub draws outside the 128x128 canvas it declared: %r" % (drew,)
+    assert cart["canvas"] in {v for v in moy_carts.CANVAS_SIZES.values()} \
+        or "128x128" in moy_carts.CANVAS_SIZES
+    assert cart["runtime"] == "lua"
+    assert cart["src"].startswith("-- my test cart")
 
 
 # -- the .p8.png (BBS steganographic) path ----------------------------------
@@ -566,20 +572,20 @@ def test_the_png_cart_loads_and_keeps_its_assets(tmp_path):
 
 # -- report, don't crash (#194) ---------------------------------------------
 
-def test_the_report_says_the_code_did_not_come_across(tmp_path):
-    """The single most misleading thing an import could do is look like it
-    ported the game. The report has to say, first, that it did not."""
+def test_the_report_says_the_code_DID_come_across(tmp_path):
+    """The headline INVERTED on 2026-08-29. It used to have to say the code did
+    not run, because the scaffold kept the Lua as a comment; it runs now, and a
+    report still saying otherwise would be the most misleading line on the
+    page."""
     p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
     summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
     text = "\n".join(import_p8.report_lines(summary))
     assert "tiny dash" in text
-    assert "CODE did NOT" in text
-    # the fixture uses sspr(), which Moybyte has no answer for at all
-    assert "sspr" in text
-    # ...and it has a __map__ this importer does not bring across yet (#32)
-    assert "__map__" in text
-    assert "sspr() stretch blits -- use spr(..., scale=N) or skip the stretch" \
-        in summary["unsupported"]
+    assert "imported, and it runs." in text
+    assert "CODE did NOT" not in text
+    assert "the CODE all came across" in text
+    # the map is no longer a "not imported" line -- it is a file
+    assert "not imported: __map__" not in text
 
 
 def test_png_guards_name_what_the_file_actually_is():
@@ -647,3 +653,58 @@ def test_the_filename_title_is_the_same_on_every_tier(tmp_path):
                   encoding="utf-8")
     summary = import_p8.import_p8(str(p8), str(tmp_path / "out.moy"))
     assert summary["title"] == "space blaster 2"
+
+
+# -- IT RUNS: the imported cart's own code executing (#194's whole point) -----
+
+def _need_lua():
+    """Skip unless the host Lua binding BUILT (a C compiler, not a package --
+    the host runs the BOARDS' Lua now; see runtime/lua_host.py's header)."""
+    from runtime import lua_host
+    if lua_host.moycore_supports("") is not True:
+        pytest.skip("host lua binding not built (needs a C compiler)")
+
+
+def test_the_imported_cart_runs_its_own_code_under_the_player(tmp_path):
+    """The claim the whole vendoring is for, checked without a browser.
+
+    Every other test here proves the FILES are right. This one starts the
+    imported cart on the same Player the console runs, ticks it, and reads the
+    cart's OWN Lua global back out of the live state -- `ticks` is incremented
+    by tiny_dash's `_update`, which the port renamed `p8_update` and the shim
+    paces at PICO-8's fixed 30fps. A stub cart, a shim that never called the
+    body, or a lifecycle that never got wired would all leave it at 0.
+    """
+    _need_lua()
+    from ws_helpers import build_ws
+
+    p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    ws = build_ws(tmp_path)
+    out = Path(ws.carts_root) / "tiny_dash.moy"
+    import_p8.import_p8(p8, str(out))
+
+    cart = moy_carts.load(str(out))
+    ws.launcher.items.append(cart)
+    ws.launcher.sel = len(ws.launcher.items) - 1
+    ws.open()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.player._lua is not None, "the lua runtime seam never started"
+
+    # 30 console frames at the cart's own 1/30 dt -> 30 p8 ticks. The driver
+    # normally opens each frame's input window; there is no driver here.
+    for _ in range(30):
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    assert ws.player._lua.get_global("ticks") == 30, \
+        "the cart's own _update did not run 30 times"
+
+    # ...and the cart's own state moved when a button was held, through the
+    # shim's numeric btn() over the console's named one.
+    before = ws.player._lua.get_global("x")
+    ws.input.set_held("right", True)
+    for _ in range(10):
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+    assert ws.player._lua.get_global("x") == before + 10, \
+        "btn(1) did not reach the cart through the shim"

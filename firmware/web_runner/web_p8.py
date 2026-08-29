@@ -2,13 +2,18 @@
 
 The whole feature, on this side, is three calls the worker makes in order --
 `problem_with()`, `convert()`, and whatever the page does with the report. What
-it is NOT is a converter or a writer: both of those are the SAME code the CLI
-runs (`tools/p8_import.py`, moy-spec's and hash-pinned; `tools/p8_writer.py`,
-ours), staged into this build's frozen set by build.sh. There is no browser
-variant of either, on purpose -- this repo has already paid for a second copy of
-the converter once (ten days of carts two octaves flat, `tools/import_p8.py`'s
+it is NOT is a converter, a porter or a writer: all three are the SAME code the
+CLI runs (`tools/p8_import.py` and `tools/p8_lua_port.py`, moy-spec's and
+hash-pinned; `tools/p8_writer.py`, ours -- the guards and the report), staged
+into this build's frozen set by build.sh. There is no browser variant of any of
+them, on purpose -- this repo has already paid for a second copy of the
+converter once (ten days of carts two octaves flat, `tools/import_p8.py`'s
 header), and a JavaScript reimplementation of the PNG unpack would be the same
 mistake with a language barrier on top.
+
+The imported cart RUNS (owner call, 2026-08-29): `p8_lua_port` emits the cart's
+own Lua under a generated PICO-8 shim, so a drop lands a cart that plays rather
+than a porting exercise.
 
 WHY THE PNG IS INFLATED HERE AND NOT IN JS. The browser could skip the inflate
 entirely -- `createImageBitmap` + a canvas `getImageData` hands the pixels over
