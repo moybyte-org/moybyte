@@ -1316,20 +1316,26 @@ class SettingsLayer:
         elif kind == "webhost":            # WEB CONSOLE: the ADDRESS, not "ON"
             # RIGHT-ALIGNED, not printed at the value column, because the value
             # column is 78px = 9 characters and the thing this row exists to
-            # show is 18 ("192.168.1.155:8080"). It rendered as "192.168.1" on
-            # glass -- an address that is not merely ugly but WRONG, since a kid
-            # would type it into a browser and get nothing. Right-aligning lets
-            # it use the empty gap between the label and the edge, which is
-            # where the room already was; it stops at the label rather than
-            # overprinting it, and only then falls back to dropping :8080 (the
-            # default port a browser assumes for nothing, so it is the last
-            # resort and not the first).
+            # show is longer than that ("192.168.1.155"). It rendered as
+            # "192.168.1" on glass -- an address that is not merely ugly but
+            # WRONG, since a kid would type it into a browser and get nothing.
+            # Right-aligning lets it use the empty gap between the label and the
+            # edge, which is where the room already was; it stops at the label
+            # rather than overprinting it.
+            #
+            # There used to be a last-resort fallback here that dropped a
+            # trailing ":8080" to make a long label fit. It is GONE with the
+            # 2026-08-29 move to port 80 (moy_webserver.DEFAULT_PORT): the
+            # default address no longer carries a port at all, so the rule was
+            # stripping a suffix nothing emits -- and generalising it to any
+            # ":PORT" would be worse than doing nothing, because a browser
+            # handed "10.0.0.5" for a host serving on 8321 goes to 80. A label
+            # that still does not fit (an mDNS hostname, a non-default port)
+            # is clamped below and truncates VISIBLY, which is a kid asking an
+            # adult rather than a kid typing a working-looking wrong address.
             lbl = ws.webhost_label()
             col = (NAMES["orange"] if ws.webhost_serving()
                    else NAMES["dark_grey"])
-            room = w - 84 * lay.fs         # gap after "WEB CONSOLE" at this scale
-            if len(lbl) * fw > room and lbl.endswith(":8080"):
-                lbl = lbl[:-5]
             tx = x + w - len(lbl) * fw - 2
             if tx < x + 84 * lay.fs:       # still too long: keep the tail, which
                 tx = x + 84 * lay.fs       # is the part that varies (the host)

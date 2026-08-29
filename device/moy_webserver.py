@@ -52,7 +52,26 @@ ws_encode = _ws.ws_encode
 ws_decode = _ws.ws_decode
 
 
-DEFAULT_PORT = 8080
+# PORT 80, the one a browser assumes (owner decision, 2026-08-29 -- it was 8080
+# from the start, as a bare constant with no argument behind it).
+#
+# Nothing here ever needed the high port. The privileged-port rule that makes
+# 8080 the reflex is a Unix-root thing; MicroPython/lwIP on a board has no such
+# restriction, and the host dev twin does not use 8080 either
+# (firmware/web_runner/serve.py defaults to 8321), so 8080 was only ever the
+# on-board default and nothing depended on it.
+#
+# What it cost is five characters of an address a KID has to carry from a
+# 320x240 panel to a phone. `http://<ip>:8080/?pin=NNNN` is 35 characters, which
+# moy_qr encodes as a 29-module version-3 symbol; dropping the port makes it 30,
+# a 25-module version 2 -- meaningfully bigger modules in the same rect. The
+# Settings row fits the address without falling back to lying about it, and
+# `moybyte-zero.local` typed bare in a browser resolves only on 80, on the one
+# board with no screen to show a kid the address.
+#
+# NOT a hard-coded 80 anywhere else: `url()` omits the port only when the port
+# IS 80, so `WebHost(port=8321)` still renders `:8321` and stays reachable.
+DEFAULT_PORT = 80
 
 # Consider the WebSocket client DEAD (and drop it) if we haven't seen any read
 # activity for this long. A live client answers pings / sends input; this reaps
@@ -496,7 +515,16 @@ class WebServer:
             self._ws = None
 
     def url(self):
-        return "http://%s:%d/" % (self.ip or "0.0.0.0", self.port)
+        """The address to hand a human. The port is SPELLED unless it is 80.
+
+        Omitting `:80` is what makes the default address short enough to type
+        and small enough to encode (see DEFAULT_PORT); omitting anything else
+        would produce a url a browser sends to the wrong port, so the rule is
+        the port's identity, never "no port was passed"."""
+        host = self.ip or "0.0.0.0"
+        if self.port == 80:
+            return "http://%s/" % host
+        return "http://%s:%d/" % (host, self.port)
 
     def connected(self):
         """True while a WebSocket client is connected and not idle-timed-out."""

@@ -80,7 +80,7 @@ class _Webhost(object):
     error = None
 
     def url(self):
-        return "http://192.168.1.155:8080"
+        return "http://192.168.1.155"
 
 
 class _Keyboard(object):

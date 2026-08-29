@@ -201,7 +201,7 @@ if [ -n "${PIN}" ]; then
   # prompt with nothing to type into it.
   echo "  ================================================================"
   echo "  PAIRED URL (${PIN_STATE} pin) -- open this, or scan it:"
-  echo "      http://${NAME}.local:8080/?pin=${PIN}"
+  echo "      http://${NAME}.local/?pin=${PIN}"
   echo "  Everything but the console's own boot files needs that ?pin=."
   echo "  ================================================================"
 else

@@ -1,8 +1,8 @@
 """A QR encoder small enough to freeze into every board image (#197).
 
-WHY THIS EXISTS AT ALL. The web console's address is `http://<ip>:8080/?pin=NNNN`
--- around 35 characters of IP, port and pairing pin, which a kid has to get from
-a 320x240 panel into a phone. Typed, it is a transcription error waiting to
+WHY THIS EXISTS AT ALL. The web console's address is `http://<ip>/?pin=NNNN`
+-- around 30 characters of IP and pairing pin, which a kid has to get from a
+320x240 panel into a phone. Typed, it is a transcription error waiting to
 happen; scanned, it is a camera gesture. So the connection screen draws the url
 as a QR code, and drawing one means encoding one here: there is no library on a
 board, and the whole point of the pin is that it is not a constant something
@@ -17,9 +17,10 @@ THE SUBSET, and why each bound is where it is:
     not occur here -- and L buys the most payload per module, which is what
     keeps the code small enough to draw at a legible module size on a 320x240
     canvas.
-  * VERSIONS 1..4 (21x21 to 33x33). A paired url is ~35 bytes; version 3 at L
-    holds 53 and version 4 holds 78, so the range covers every address this
-    will ever carry, including IPv4 with a long hostname. Above version 4 an EC
+  * VERSIONS 1..4 (21x21 to 33x33). A paired url on the default port is ~30
+    bytes and lands in version 2 (32 at L); version 3 holds 53 and version 4
+    holds 78, so the range still covers every address this will ever carry --
+    an mDNS hostname, a non-default port, IPv4 with a long name. Above version 4 an EC
     level's codewords split into multiple BLOCKS that must be interleaved, and
     that machinery would be code no console reaches. `encode` raises rather
     than silently truncating.
@@ -38,7 +39,7 @@ MicroPython shape: bytearrays and small ints throughout, no f-strings, no
 comprehension over the module grid, and the GF(256) tables are built once at
 import (512 + 256 bytes) rather than stored as source literals.
 
-    rows = moy_qr.encode("http://10.0.0.5:8080/?pin=4821")
+    rows = moy_qr.encode("http://10.0.0.5/?pin=4821")
     size = len(rows)            # rows[r][c] is 1 for a DARK module
 
 The returned matrix carries NO quiet zone -- the caller knows what it is

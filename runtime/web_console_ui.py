@@ -12,10 +12,10 @@ the glass can be editing it too, because the glass is showing this screen.
 The screen is three things and deliberately nothing else:
 
   * THE QR CODE, which is the feature. The address is
-    `http://<ip>:8080/?pin=NNNN` -- an IP, a port and a pairing pin, ~35
-    characters a kid would otherwise read off a 320x240 panel and type into a
-    phone. Scanned, it is one gesture and no transcription errors. The encoder
-    is `runtime/moy_qr.py`.
+    `http://<ip>/?pin=NNNN` -- an IP and a pairing pin, ~30 characters a kid
+    would otherwise read off a 320x240 panel and type into a phone. Scanned, it
+    is one gesture and no transcription errors. The encoder is
+    `runtime/moy_qr.py`.
   * SHOW ADDRESS, because the QR is useless to a laptop and the address does
     not fit the panel at 1x text alongside everything else. Tap-to-reveal, so
     the common case stays uncluttered and the fallback is one tap away.

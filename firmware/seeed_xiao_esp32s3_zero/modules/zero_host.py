@@ -588,8 +588,11 @@ def serve():
     # edit made on it. Serial is the right channel for it: reading this line
     # takes the cable.
     pin = me.get("pin")
-    print("ZERO serving http://%s:%d/%s  (mDNS %s.local)%s"
-          % (ip, host.port, ("?pin=" + pin) if pin else "", name,
+    # Built by `paired_url()` rather than reassembled here: that is the one
+    # body that knows a port is spelled only when it is not 80, so this line
+    # cannot drift from the url the console's own screens show.
+    print("ZERO serving %s  (mDNS %s.local)%s"
+          % (host.paired_url(), name,
              "" if pin else "  [no pin -- writes are open]"))
     if ota is not None:
         print("ZERO firmware %s (%s, %s)"

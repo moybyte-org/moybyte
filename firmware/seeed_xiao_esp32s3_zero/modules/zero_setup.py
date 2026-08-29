@@ -31,9 +31,13 @@ streaming port measured SoftAP throughput as the cause of its multi-second
 stalls, and this board hands out a ~570KB bundle. The AP is for the form and
 nothing else.
 
-Setup serves on port 80, not the console's 8080: what a person does here is
-type an address into a phone, and `192.168.4.1` is a shorter thing to get
-right than `192.168.4.1:8080`.
+Setup serves on port 80: what a person does here is type an address into a
+phone, and `192.168.4.1` is a shorter thing to get right than
+`192.168.4.1:8080`. That argument won on the SERVING side too on 2026-08-29
+(moy_webserver.DEFAULT_PORT), so both halves are on 80 now -- which collides
+with nothing, because the two are mutually exclusive by construction: a board
+with saved WiFi serves and never reaches here, and a board without one hosts
+this AP and never builds a WebHost (zero_host.serve returns into run() below).
 
 THE CAPTIVE PORTAL, and the decline it reverses (2026-08-29). This docstring
 used to say: "No captive-portal DNS hijack. A phone's connectivity probe will
@@ -573,7 +577,7 @@ body{margin:0;padding:24px 18px 40px;font:16px/1.5 system-ui,sans-serif;
 b{overflow-wrap:anywhere}</style></head><body>
 <h1>saved</h1>
 <p>This board is restarting and will join <b>%s</b>.</p>
-<p>Find it again at <b>http://%s.local:8080/?pin=%s</b> once it is up.</p>
+<p>Find it again at <b>http://%s.local/?pin=%s</b> once it is up.</p>
 <p>Keep the whole address: the <b>?pin=</b> part is what lets the console save
 your work back onto this board. Without it you can play, but nothing you make
 is kept.</p>

@@ -94,7 +94,7 @@ class WebConsole:
     def url(self):
         """The PAIRED url -- what the QR encodes and SHOW ADDRESS reveals.
 
-        `http://<ip>:8080/?pin=NNNN`: the page forwards its own `?pin=` into
+        `http://<ip>/?pin=NNNN`: the page forwards its own `?pin=` into
         every sync batch, so scanning this is the whole pairing gesture. Empty
         when nothing is serving -- there is no address to show then, and a
         placeholder would encode to a QR that sends a phone nowhere."""

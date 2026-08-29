@@ -1063,7 +1063,7 @@ class _FakeHost:
         self.stops += 1
 
     def url(self):
-        return "http://192.168.1.151:8080/"
+        return "http://192.168.1.151/"
 
 
 from ws_helpers import build_ws as _ws
@@ -1102,7 +1102,7 @@ def test_the_row_shows_the_ADDRESS_not_just_ON(tmp_path):
     assert ws.webhost_label() == "OFF"
     ws.toggle_webhost()
     assert ws.webhost_serving() is True
-    assert ws.webhost_label() == "192.168.1.151:8080"   # scheme stripped
+    assert ws.webhost_label() == "192.168.1.151"   # scheme stripped
     ws.toggle_webhost()
     assert ws.webhost_serving() is False
     assert ws.webhost_label() == "OFF"
@@ -1133,7 +1133,7 @@ def test_start_refuses_to_report_serving_when_the_bind_failed(tmp_path):
     h = wh.WebHost.__new__(wh.WebHost)
     h.serving = False
     h.error = None
-    h.port = 8080
+    h.port = 80
     h._ensure_online = lambda: "10.0.0.5"
     h._pin_source = None                    # #197: start() resolves the pin
     h.ip = None
@@ -1391,11 +1391,18 @@ def test_the_pin_is_read_at_START_not_at_construction():
         def launch_named(self, name):
             return None
 
-    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web")
+    # port=0 (the ephemeral-port idiom test_moy_webserver.py already uses),
+    # because start() BINDS: since 2026-08-29 the default is 80, which a board's
+    # lwIP hands out freely and a CPython test process running as a normal user
+    # is refused. The port is not what this test is about.
+    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", port=0)
     assert not seen, "make_webhost read the pin at construction"
     assert host.pin is None
-    host.start(ip="10.0.0.7")
-    assert seen == [1] and host.pin == "1234"
+    try:
+        host.start(ip="10.0.0.7")
+        assert seen == [1] and host.pin == "1234"
+    finally:
+        host.stop()
 
 
 def test_an_explicit_pin_still_wins_over_the_consoles():
@@ -1413,9 +1420,12 @@ def test_an_explicit_pin_still_wins_over_the_consoles():
         def launch_named(self, name):
             return None
 
-    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", pin="0000")
-    host.start(ip="10.0.0.7")
-    assert host.pin == "0000"
+    host = wh.make_webhost(_WS(), "/moy/carts", "/moy/web", pin="0000", port=0)
+    try:
+        host.start(ip="10.0.0.7")
+        assert host.pin == "0000"
+    finally:
+        host.stop()
 
 
 def test_the_paired_url_is_the_address_plus_the_pin(tmp_path):
@@ -1425,15 +1435,37 @@ def test_the_paired_url_is_the_address_plus_the_pin(tmp_path):
     assert ws.web_console_url() == "", "an address while nothing is serving"
     ws.toggle_webhost()
     assert ws.web_console_url() == (
-        "http://192.168.1.151:8080/?pin=" + ws.web_pin())
+        "http://192.168.1.151/?pin=" + ws.web_pin())
 
 
 def test_a_host_without_a_pin_pairs_with_a_bare_url(tmp_path):
     host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
     host.ip = "10.0.0.5"
-    assert host.paired_url() == "http://10.0.0.5:8080/"
+    assert host.paired_url() == "http://10.0.0.5/"
     host.pin = "4821"
-    assert host.paired_url() == "http://10.0.0.5:8080/?pin=4821"
+    assert host.paired_url() == "http://10.0.0.5/?pin=4821"
+
+
+def test_the_url_spells_the_port_unless_it_is_the_default(tmp_path):
+    """The 2026-08-29 move to port 80 is a rule about the port's IDENTITY, not
+    about whether one was passed.
+
+    Omitting `:80` is the whole point (five characters off an address a kid
+    scans, one QR version). Omitting anything else would hand a browser a url
+    that goes to port 80 -- so the host dev twin's 8321, and every explicit
+    port a test or a deployment picks, must still render."""
+    from moy_webserver import DEFAULT_PORT
+    assert DEFAULT_PORT == 80
+    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    host.ip = "10.0.0.5"
+    assert host.port == 80
+    assert host.url() == "http://10.0.0.5/"
+    other = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+                       port=8321)
+    other.ip = "10.0.0.5"
+    other.pin = "4821"
+    assert other.url() == "http://10.0.0.5:8321/"
+    assert other.paired_url() == "http://10.0.0.5:8321/?pin=4821"
 
 
 # -- the switch --------------------------------------------------------------
@@ -1589,7 +1621,7 @@ def test_the_qr_encodes_the_paired_url(tmp_path):
     first = ws.web.ui.matrix(url)
     assert first == moy_qr.encode(url)
     assert ws.web.ui.matrix(url) is first, "re-encoded an unchanged url"
-    assert ws.web.ui.matrix("http://10.0.0.9:8080/?pin=0000") != first
+    assert ws.web.ui.matrix("http://10.0.0.9/?pin=0000") != first
 
 
 def test_the_windowed_tier_parks_FULLSCREEN_not_in_a_window(tmp_path):

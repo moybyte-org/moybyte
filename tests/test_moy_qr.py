@@ -42,7 +42,17 @@ from unix_mp import require_unix_mp                            # noqa: E402
 from runtime import moy_qr                                     # noqa: E402
 
 
-PAIRED_URL = "http://192.168.1.151:8080/?pin=4821"
+# What a board's connection screen encodes since the 2026-08-29 move to port 80
+# (moy_webserver.DEFAULT_PORT): 30 bytes, a 25-module version 2.
+PAIRED_URL = "http://192.168.1.151/?pin=4821"
+
+# The same address on an EXPLICIT port -- 35 bytes, a 29-module version 3. It is
+# what `WebHost(port=...)` still emits (the host dev twin serves on 8321), and it
+# is the payload the segno reference matrix below was generated for, so it stays
+# the known-answer oracle: regenerating that matrix needs segno, which is not a
+# test dependency, and version 3 is the only version any third party has
+# verified this encoder against.
+PORTED_URL = "http://192.168.1.151:8080/?pin=4821"
 
 # `segno` 1.6.6, byte mode, error correction L, mask 0, micro=False, with ONE
 # patch: segno's `write_padding_bits` appends a whole zero codeword when the
@@ -123,8 +133,26 @@ def _text(rows):
 # ---------------------------------------------------------------------------
 
 def test_the_canonical_paired_url_matches_the_reference_matrix():
-    """Every module of a real paired url, against a third-party encoder."""
-    assert _text(moy_qr.encode(PAIRED_URL)) == REFERENCE
+    """Every module of a real paired url, against a third-party encoder.
+
+    The payload is the EXPLICIT-port form (`PORTED_URL`), which is what a
+    non-default port still produces and what segno was run on. The default
+    address is five characters shorter and one version smaller; the two are
+    pinned together by `test_dropping_the_default_port_shrinks_the_symbol`."""
+    assert _text(moy_qr.encode(PORTED_URL)) == REFERENCE
+
+
+def test_dropping_the_default_port_shrinks_the_symbol():
+    """The measured payoff of the 2026-08-29 move to port 80.
+
+    The connection screen fits the code into a rect it already has, so a
+    version it does not need is module size it does not get: the common LAN
+    address goes 35 bytes -> 30, which is version 3 -> version 2 and 29 modules
+    -> 25. Pinned rather than described, because the saving is exactly one
+    version wide and a url that grew five characters back (a scheme, a longer
+    pin, a port spelled out again) would spend it silently."""
+    assert len(PORTED_URL) == 35 and len(moy_qr.encode(PORTED_URL)) == 29
+    assert len(PAIRED_URL) == 30 and len(moy_qr.encode(PAIRED_URL)) == 25
 
 
 def test_the_format_words_match_the_published_table():
@@ -138,7 +166,7 @@ def test_the_format_bits_in_the_matrix_describe_the_mask_actually_applied():
     """The failure this whole file exists for: a code that renders perfectly
     and decodes to noise. Both copies of the word are read back OUT of the
     finished matrix, so a placement typo counts as a mismatch too."""
-    m = moy_qr.encode(PAIRED_URL)
+    m = moy_qr.encode(PORTED_URL)
     size = len(m)
     want = moy_qr.format_bits(moy_qr.MASK)
     first = 0
@@ -305,7 +333,7 @@ def _decode(m):
 
 
 @pytest.mark.parametrize("payload", [
-    "x", "hello world", PAIRED_URL, "http://10.0.0.5:8080/?pin=0001",
+    "x", "hello world", PAIRED_URL, PORTED_URL, "http://10.0.0.5/?pin=0001",
     "z" * 53, "w" * 78])
 def test_the_placement_walk_round_trips(payload):
     """Unmask + walk + parse gives the payload back. The check that catches a
@@ -365,8 +393,8 @@ def test_the_encoder_runs_under_micropython_and_agrees_with_cpython(tmp_path):
         why="Without it the frozen QR encoder is only ever run by CPython, "
             "which is not the interpreter any board uses -- the tier where it "
             "silently did not work at all.")
-    payloads = ["moy", PAIRED_URL, "http://10.0.0.5:8080/?pin=0001",
-                "http://192.168.100.101:8080/?pin=4821",
+    payloads = ["moy", PAIRED_URL, PORTED_URL, "http://10.0.0.5/?pin=0001",
+                "http://192.168.100.101/?pin=4821",
                 "http://moybyte-zero.local/?pin=4821", "x" * 78]
     # Staged FLAT, as `moy_qr`, because that is how a board carries it: the
     # build copies runtime/*.py into modules/ and freezes them as top-level

@@ -81,7 +81,7 @@ plain-text 404, because the PAGE branches on it: worker.js stops its boot and
 the page prompts for a pin instead of showing a broken console.
 
 The BOARDS PASS ONE SINCE #197: `make_webhost` reads `ws.web_pin()` at START,
-the connection screen shows it as a QR of `http://<ip>:8080/?pin=NNNN`, and the
+the connection screen shows it as a QR of `http://<ip>/?pin=NNNN`, and the
 page forwards its own `?pin=` into every request. Read that order carefully --
 the pin is resolved in `start()`, not in `__init__`, because a board CONSTRUCTS
 this before system.json is loaded and a pin captured then would be a pin minted
@@ -395,8 +395,8 @@ class WebHost(WebServer):
         """Bring the link up, then listen. Sets `serving` only if BOTH worked.
 
         The order matters and is not cosmetic: binding first would give a row
-        reading "0.0.0.0:8080" on a board with no network, which looks like
-        success and is not.
+        reading "0.0.0.0" on a board with no network, which looks like success
+        and is not.
 
         `ip` is the address to ADVERTISE, not to bind -- the socket still
         listens on every interface. The base transport reports whatever it was

@@ -174,7 +174,7 @@ APPS = ("artwork", "appearance", "writer", "storybook", "sheets", "files", "calc
 # are the QR's input, and a minted pin would re-encode a different matrix on
 # every run, which is the one way this surface could be non-deterministic.
 GOLDEN_PIN = "4821"
-GOLDEN_URL = "http://192.168.1.151:8080/"
+GOLDEN_URL = "http://192.168.1.151/"
 
 
 class _GoldenWebHost:
