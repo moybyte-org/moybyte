@@ -581,9 +581,11 @@ def test_the_report_says_the_code_DID_come_across(tmp_path):
     summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
     text = "\n".join(import_p8.report_lines(summary))
     assert "tiny dash" in text
-    assert "imported, and it runs." in text
+    assert '"tiny dash" imported.' in text
     assert "CODE did NOT" not in text
-    assert "the CODE all came across" in text
+    # The one line the report keeps about the code: a kid who opens an imported
+    # cart finds Lua, and this is where they are told why.
+    assert "cart's own Lua" in text
     # the map is no longer a "not imported" line -- it is a file
     assert "not imported: __map__" not in text
 

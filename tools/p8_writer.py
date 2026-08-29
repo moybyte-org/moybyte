@@ -350,14 +350,13 @@ def write_cart(sections, out_dir, title):
 def report_lines(summary):
     """A short, human compatibility summary of one import.
 
-    The headline is what an importer is most likely to be wrong about, and it
-    INVERTED on 2026-08-29: it used to have to say the code did not run, because
-    the old scaffold kept the Lua as a comment. It runs now, so the headline
-    says that and the rest of the report is about the edges where it will not."""
-    out = ['"%s" imported, and it runs.' % summary.get("title", "cart")]
-    out.append("The art, the sound, the map and the CODE all came across -- the "
-               "cart's own Lua, under a generated PICO-8 shim. Open it and "
-               "read it: this console speaks Lua too.")
+    Kept plain (owner call 2026-08-29): the cart is already running on screen
+    behind this panel, so the report does not need to announce that it worked.
+    What it is FOR is the edges below -- where the cart will stop agreeing with
+    PICO-8 -- and one line saying what language the code turned out to be,
+    because a kid who opens it finds Lua and deserves to know why."""
+    out = ['"%s" imported.' % summary.get("title", "cart")]
+    out.append("Its code is the cart's own Lua, under a PICO-8 shim.")
     n_sfx = summary.get("sfx") or 0
     n_music = summary.get("music") or 0
     if n_sfx or n_music:

@@ -182,9 +182,10 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert got["probe___p8_gff"] and got["probe_API"]
     # ...and the ART is really there, not an empty grid from a failed inflate.
     assert got["gfx0"].startswith("0123456789abcdef")
-    # ...and the compatibility report says what it must now: it RUNS.
+    # ...and the compatibility report names the cart and says what the code is.
     text = " ".join(got["report"])
-    assert "imported, and it runs." in text
+    assert "imported." in text
+    assert "cart's own Lua" in text
     assert "CODE did NOT" not in text
     assert any("dset" in u for u in got["unsupported"])
     assert any("sspr" in d for d in got["differs"])

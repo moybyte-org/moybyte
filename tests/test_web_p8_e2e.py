@@ -118,8 +118,10 @@ def _check(out, js, form):
     # 2. the compatibility report is REAL prose about THIS cart (#194: report,
     #    don't crash) -- the same lines the CLI prints, written once.
     assert "tiny dash" in report, report
-    assert "imported, and it runs." in report, \
-        "%s: the report must say the code came across: %r" % (form, report)
+    assert "imported." in report, \
+        "%s: the report must name the cart it imported: %r" % (form, report)
+    assert "cart's own Lua" in report, \
+        "%s: the report must say the code is Lua: %r" % (form, report)
     assert "CODE did NOT" not in report, \
         "%s: that headline was inverted on 2026-08-29: %r" % (form, report)
     assert "sspr" in report, \

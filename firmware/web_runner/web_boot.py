@@ -323,8 +323,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
     # console, not the player-only runner #151 originally scoped -- the Make tile
-    # and the editors are the point. Nothing persists across a reload (the VFS is
-    # in-memory), which the page says out loud.
+    # and the editors are the point. This used to add "and nothing persists
+    # across a reload", which #193 made false: a static-host page keeps carts in
+    # OPFS and a board-served one writes them home, so the only in-memory case
+    # left is a browser with no usable OPFS -- and the page still says THAT out
+    # loud.
     # can_manage is wired AFTER the launcher was built, so rebuild the shelf for it
     # to appear.
     ws.launcher.items = ws._launcher_items(ws.carts.all)
@@ -461,13 +464,29 @@ def kiosk(name):
 
 
 def _rescan():
-    """Re-derive the shelf from the store on disk. Both re-scan paths share it,
-    so the launcher items, the slim covers and the dirty flag cannot drift
-    apart depending on which one ran."""
+    """Re-derive the shelf from the store on disk, through the ONE body every
+    other roster change already runs -- `CartManager.apply`.
+
+    It used to hand-roll that: set `carts.all`, rebuild `launcher.items`, slim.
+    This copy was written 2026-08-25, two days BEFORE the #209 carve made
+    `apply` the single body for create/duplicate/delete and the board's sync
+    re-scan -- and living outside `runtime/`, it was the one caller that sweep
+    did not reach. It then drifted three ways, each of which reached a user:
+
+      * it never rebuilt the PICKER, so a cart imported in the browser appeared
+        on the launcher and was MISSING from Projects (#194, reported on the
+        hosted console). `edit_cart`'s own docstring says an imported cart
+        arrives "exactly like an authored one", and the grid disagreed.
+      * it never invalidated the cover caches, and `slim()` bakes each icon and
+        then deletes the art it was baked FROM -- the exact ordering `apply`
+        calls out, where clearing nothing lets a stale entry become permanent.
+      * it used `_launcher_items` where `apply` uses `_launcher_view_items`,
+        dropping an active search filter (#105).
+
+    `apply` also keeps the old shelf when a scan comes back empty rather than
+    blanking it, which is its deliberate failure direction and now this one's."""
     ws = _S["ws"]
-    ws.carts.all = moy_carts.scan(_S["root"])
-    ws.launcher.items = ws._launcher_items(ws.carts.all)
-    ws.carts.slim()
+    ws.carts.apply(moy_carts.scan(_S["root"]))
     ws._dirty = True
 
 
