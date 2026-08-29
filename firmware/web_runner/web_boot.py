@@ -219,18 +219,17 @@ class _PointerSink:
 
 
 def _make_api(*a, **kw):
-    """The shared cart API, plus this tier's one extra gate.
+    """The shared cart API. No tier-specific gate any more, deliberately.
 
-    A wrapper and not a `functools.partial` because the gate is decided AFTER
-    boot: the worker probes POST /gpio while the console is already built, and
-    a cart's namespace is assembled when the cart STARTS. Reading `_S` here is
-    what makes the two orders independent -- the page that turns out to be
-    served by a Zero gets the verbs, the one served by a static host never
-    hears the name.
+    This used to inject the pin backend itself, reading `_S["gpio"]` at cart
+    start so the probe's timing and the cart's timing stayed independent. That
+    worked and was wrong: it handed `pin_write` to EVERY cart the moment the
+    serving host had pins, which is the capability half of the question with the
+    consent half missing -- while cart_api's own comment said pins were gated
+    "the same way as wifi and net", which have both halves. The backend is
+    `ws.gpio` now and `player.start` gates it on the "pins" permission with its
+    two siblings, so there is one gate rather than a second one over here.
     """
-    g = _S.get("gpio")
-    if g is not None:
-        kw["gpio"] = g
     return host_api.make_api(*a, **kw)
 
 
@@ -384,6 +383,11 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
         ws.perf_hud = False
     driver = host_api.ConsoleDriver(ws)
     _S["ws"] = ws
+    # The pin backend, if the worker's probe found one. Stashed by gpio_enable
+    # (which runs BEFORE this, since the probe is answered while the console is
+    # still being built) and hung on the Workstation HERE, because `ws.gpio` is
+    # the seam the Player gates on -- beside ws.wifi and ws.net, in one place.
+    ws.gpio = _S.get("gpio")
     # The 3.4 sync push (moy_sync): watch this VFS store for committed changes
     # and hand them to the worker as wire batches; the worker POSTs them to
     # the relative /sync of whoever served the page. Constructed AFTER the

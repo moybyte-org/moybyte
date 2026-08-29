@@ -103,6 +103,7 @@ SERVICES = {
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
+    "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
     "link": "the #7 ESP-NOW radio: discovery, pairing and the two-console lockstep link",
     "wm": "the presentation tier: windowed desktop vs the fullscreen stack",
     "perf_capture": "per-frame timing measured without drawing the HUD",
@@ -135,6 +136,10 @@ WIRING = {
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
+        "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
+                "keyboard, trackball, radio -- and a cart here runs on the board\n"
+                "itself, so there is no wire to reach a peripheral over. The\n"
+                "verbs stay ABSENT rather than stubbed.",
         "link": INJECTED,
         "wm": "the fullscreen tier (#73). Workstation.__init__ already installs "
               "FullscreenStackWM, and wm_windowed.py is deliberately NOT staged "
@@ -167,6 +172,8 @@ WIRING = {
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
+        "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
+                "the C6, and a cart runs locally. Nothing to expose.",
         "link": INJECTED,
         "wm": INJECTED,
         "perf_capture": INJECTED,
@@ -199,6 +206,8 @@ WIRING = {
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
         "net": INJECTED,
+        "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
+                "panel and touch.",
         "link": INJECTED,
         "wm": "the fullscreen tier, same as the T-Deck: Workstation.__init__ "
               "already installs FullscreenStackWM, and wm_windowed.py is "
@@ -234,6 +243,10 @@ WIRING = {
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
+        "gpio": "a laptop has no pins. The sim could fake some, and deliberately\n"
+                "does not: a pin_write that quietly does nothing is the worst\n"
+                "answer a cart author can get, because the code looks right and\n"
+                "no light ever moves.",
         "link": "no radio on a laptop. The sim gets its second player from a router\n"
                 "slot instead (players.PlayerRouter.add_player), which is the same\n"
                 "seam a radio fills -- so a two-player cart is testable here with\n"
@@ -266,6 +279,7 @@ WIRING = {
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
+        "gpio": INJECTED,
         "link": "a wasm sandbox has no radio, and never will. The browser's "
                 "route to a second player is a controller over the page, not "
                 "ESP-NOW",

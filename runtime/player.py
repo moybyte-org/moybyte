@@ -779,6 +779,17 @@ class Player:
         # handler/inbox from a previous run so a fresh run starts clean; make_api
         # injects `net`/`on_net` into the namespace iff the backend is non-None.
         net = ws.net if ws._cart_has_perm("multiplayer") else None
+        # Physical pins (#9), gated HERE with its two siblings rather than in the
+        # tier that happens to supply it. It used to be injected by the browser
+        # tier's own make_api wrapper the moment the serving host answered the pin
+        # probe -- which gave it the CAPABILITY half of the gate (does this
+        # console have pins) and none of the CONSENT half (did this cart ask),
+        # while cart_api's comment claimed it was gated "the same way as wifi and
+        # net". It was not, and the difference stopped being theoretical once a
+        # dropped .p8 could land in a board's own store: a cart nobody wrote
+        # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
+        # never which carts.
+        gpio = ws.gpio if ws._cart_has_perm("pins") else None
         if net is not None:
             net.reset()
         self._net = net
@@ -840,7 +851,8 @@ class Player:
                          ws.audio, project.tilemap, project.pmem, wifi, project.images,
                          project.scenes,    # #85: scene()/load_scene() over the cart's scenes
                          tables=project.tables, texts=project.texts,  # #78 interop
-                         net=net)           # #65: capability-gated net.* backend
+                         net=net,           # #65: capability-gated net.* backend
+                         gpio=gpio)         # #9: capability-gated physical pins
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.

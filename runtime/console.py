@@ -733,6 +733,19 @@ class Workstation:
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
         # ONLY when its manifest permissions include "multiplayer" (see player.start).
         self.net = None
+        # PHYSICAL PINS (#9): the transport-neutral gpio seam, and the THIRD
+        # capability service beside wifi and net -- exposed to a cart's namespace
+        # ONLY when its manifest permissions include "pins" (see player.start).
+        #
+        # Transport-neutral is the point, because there will be two backends. The
+        # browser tier injects a `gpio_link.GpioLink`, which QUEUES writes and
+        # answers reads from the last batch because a frame may not wait on a
+        # network round trip; a board that grows pins of its own would inject a
+        # direct driver instead. The cart verbs are the same two names either way.
+        # The CONTRACT is written at the remote backend's level (a write is
+        # queued, a read may be one round trip stale), so a native backend is a
+        # strict improvement and no cart has to know which it got.
+        self.gpio = None
         # #65 Phase 2: the live two-console LOCKSTEP session (netplay.LockstepSession),
         # set by a transport once two consoles have agreed on a cart and a seed, and
         # torn down with the run. None = solo, and every cart behaves as it always has.

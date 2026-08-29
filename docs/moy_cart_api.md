@@ -564,7 +564,13 @@ def _update(dt):
         pin_write(LED, 1)
 ```
 
-**These names are only there when the console has pins.** On moybyte.com, on a
+**Your cart must ASK, in its manifest.** `"permissions": ["pins"]` -- the same
+declaration `network` and `multiplayer` need, and for the same reason: a cart
+that can move the wiring in somebody's room should have said so where a person
+can read it before running it. Without it the names are absent even on a console
+that has pins.
+
+**And the names are only there when the console has pins.** On moybyte.com, on a
 T-Deck or a P4, or in a browser tab you opened from a file, `pin_write` does
 not exist at all and using it is a `NameError` — the same rule as `wifi` and
 `net`. That is on purpose: a verb that pretends to work while nothing happens
