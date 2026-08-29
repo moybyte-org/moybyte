@@ -214,7 +214,7 @@ class UpdateUI:
             if i.pressed("b"):                 # abort: nothing was activated yet
                 self._exit_update()
         elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
-                    "c6_uptodate"):
+                    "handed", "c6_uptodate"):
             if i.pressed("b") or i.pressed("a"):
                 self._exit_update()
         # "done": ignore input -- _pump_update reboots into the new image shortly.
@@ -234,7 +234,7 @@ class UpdateUI:
         elif ph == "c6_confirm":
             self._start_c6_download()
         elif ph in ("error", "uptodate", "updated", "rolledback", "nopublish",
-                    "c6_uptodate"):
+                    "handed", "c6_uptodate"):
             self._exit_update()
 
     def _start_c6_download(self):
@@ -338,6 +338,22 @@ class UpdateUI:
             if u.error:
                 self._upd_phase = "error"
                 self._upd_msg = u.error
+                return
+            if getattr(u, "handed_off", False):
+                # A REMOTE backend whose board has a screen of its own took
+                # this onto that screen (firmware/web_runner/update_link.py).
+                # Nothing installs here and nothing should pretend to: a
+                # console advances the flash a chunk per PAINTED FRAME of this
+                # screen, and the board's glass -- not this one -- is where
+                # those frames are.
+                self._upd_phase = "handed"
+                return
+            if getattr(u, "pending", False):
+                # The backend has ASKED and not been answered. Only a remote
+                # one can be in this state (a local check blocks and returns),
+                # and without the probe the very first frame's empty answer
+                # would be reported as "no manifest" against a board that is
+                # simply still looking.
                 return
             if getattr(u, "absent", False):
                 # Nothing published on this channel for this console yet -- the
@@ -462,6 +478,20 @@ class UpdateUI:
             self._line(x, y, "this console yet.", th["ink"])
             y += 14 * fs
             self._line(x, y, "running %s" % vlabel, th["ink_dim"])
+            y += 16 * fs
+            self._line(x, y, "B = BACK", th["accent"])
+        elif phase == "handed":
+            # The browser asked a console WITH GLASS to update. It gave the
+            # glass back and opened this same screen THERE, so the only useful
+            # thing to say here is where to look -- and that this page has
+            # stopped being that console's screen.
+            self._line(x, y, "ON THE CONSOLE NOW", th["play"])
+            y += 14 * fs
+            self._line(x, y, "It took the update", th["ink"])
+            y += 12 * fs
+            self._line(x, y, "onto its own screen.", th["ink"])
+            y += 14 * fs
+            self._line(x, y, "Finish it there.", th["ink_dim"])
             y += 16 * fs
             self._line(x, y, "B = BACK", th["accent"])
         elif phase == "uptodate":

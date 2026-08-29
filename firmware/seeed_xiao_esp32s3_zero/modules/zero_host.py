@@ -209,7 +209,12 @@ class ZeroUpdate:
     is about to reboot out from under the connection.
 
     States: idle -> checking -> {offer | none | error}
-                             -> downloading -> installing -> reboot
+                             -> downloading -> ready -> installing -> reboot
+
+    `ready` is the pause between the two acts of consent (2026-08-29). The
+    browser console this board serves runs the SHARED update screen, which asks
+    once before the download and again before the flash -- so the board has to
+    be able to stop in between, or the second confirm would gate nothing.
     """
 
     def __init__(self, updater):
@@ -217,6 +222,12 @@ class ZeroUpdate:
         self.state = "idle"
         self.error = None
         self.manifest = None
+        # Was the fetched manifest actually OFFERED? Kept apart from `manifest`
+        # because a manifest that was judged not-newer is still what the check
+        # FOUND, and the screen draws "UP TO DATE" from it.
+        self.offered = False
+        self.staged = None         # the downloaded image, waiting for `install`
+        self._channel = None       # the channel the request asked us to check
         # "nothing is published on this channel for this board yet" -- the
         # normal state of a channel before its first release. Carried
         # separately from `state` because "none" covers it AND "up to date",
@@ -228,22 +239,47 @@ class ZeroUpdate:
 
     # -- the request side -----------------------------------------------------
 
-    def request(self, action):
-        """Queue `check`, `install` or `cancel`. Returns (ok, message)."""
-        if action not in ("check", "install", "cancel"):
-            return False, "action must be check, install or cancel"
+    def request(self, action, channel=None):
+        """Queue `check`, `download`, `install` or `cancel`. (ok, message).
+
+        THREE VERBS, ONE PER ACT (2026-08-29). `install` used to mean the whole
+        job -- check, download and flash off one request -- which is the one
+        shape the shared update screen cannot mirror: that screen asks TWICE,
+        once before the download and again before the flash, and a board that
+        did both off the first tap would leave the second confirm gating
+        nothing. So `download` fetches and STOPS at `ready`, and `install`
+        flashes what is staged. `download` still checks first when it has to,
+        which is the convenience the old chained form existed for.
+
+        THE STATE MOVES HERE, not in step(). The WORK still happens in the poll
+        loop and this still answers immediately -- but a status read landing in
+        between would otherwise report the state the request has not been
+        applied to yet, and a remote screen polling that reads it as an answer.
+
+        `channel` is what the caller asked us to look at (the browser's CHANNEL
+        row). None keeps the running build's own channel, which is what every
+        boot check and every curl without one means.
+        """
+        if action not in ("check", "download", "install", "cancel"):
+            return False, "action must be check, download, install or cancel"
         if action == "cancel":
             self._cancel()
             return True, "cancelled"
-        if self.state in ("downloading", "installing", "reboot"):
+        if self.state in ("checking", "downloading", "installing", "reboot"):
             return False, "busy: " + self.state
-        if action == "install" and self.state != "offer":
-            # Check first rather than refusing: a caller that knows it wants
-            # the newest build should not have to make two requests, and the
-            # check is the thing that decides whether there IS an install.
-            self._want = "check+install"
-        else:
-            self._want = action
+        if action == "install":
+            if self.state != "ready":
+                return False, "nothing downloaded yet -- ask for download first"
+            self._want = "install"
+            self.state = "installing"
+            return True, "queued"
+        self._channel = channel or None
+        if action == "download" and self.state == "offer":
+            self._want = "download"
+            self.state = "downloading"
+            return True, "queued"
+        self._want = "check+download" if action == "download" else "check"
+        self.state = "checking"
         return True, "queued"
 
     def boot_check(self):
@@ -275,10 +311,13 @@ class ZeroUpdate:
                 self.ota.reset()
             return True
         want, self._want = self._want, None
-        if want in ("check", "check+install"):
+        if want in ("check", "check+download"):
             found = self._check()
-            if found and want == "check+install":
-                self._begin_install()
+            if found and want == "check+download":
+                self._begin_download()
+            return True
+        if want == "download":
+            self._begin_download()
             return True
         if want == "install":
             self._begin_install()
@@ -302,6 +341,7 @@ class ZeroUpdate:
             return False
         self._checked = True
         self._want = "check"
+        self.state = "checking"
         return True
 
     # -- the phases -----------------------------------------------------------
@@ -310,8 +350,10 @@ class ZeroUpdate:
         self.state = "checking"
         self.error = None
         self.manifest = None
+        self.offered = False
+        self.staged = None
         self.nothing_published = False
-        m = self.ota.check_online()
+        m = self.ota.check_online(self._channel)
         if m is None:
             if self.ota.absent:
                 self.state = "none"
@@ -322,19 +364,23 @@ class ZeroUpdate:
                 self.error = self.ota.error or "check failed"
                 print("ZERO ota: check failed --", self.error)
             return False
-        if not self.ota.offers(m):
+        # KEPT EITHER WAY. A manifest that was fetched and judged not-newer
+        # is still what the check found, and it is what the screen draws "UP TO
+        # DATE" from -- `offered` is the verdict, `manifest` is the evidence.
+        self.manifest = m
+        if not self.ota.offers(m, self._channel):
             self.state = "none"
             print("ZERO ota: up to date (%s)" % self.ota.version_label())
             return False
-        self.manifest = m
+        self.offered = True
         self.state = "offer"
         print("ZERO ota: %s available (%s, %d bytes)"
               % (m.get("label", "?"), m.get("channel", "?"),
                  int(m.get("size", 0) or 0)))
         return True
 
-    def _begin_install(self):
-        if not self.manifest:
+    def _begin_download(self):
+        if not self.manifest or not self.offered:
             self.state = "error"
             self.error = "nothing to install"
             return
@@ -357,16 +403,31 @@ class ZeroUpdate:
             self.error = self.ota.error or "download failed"
             print("ZERO ota: download failed --", self.error)
             return True
+        # STOP HERE. The flash is the SECOND act of consent and it has not been
+        # given yet: the image sits verified on the filesystem until an
+        # `install` request arrives, and the running slot is untouched until
+        # then. This is where the browser's update screen draws its second
+        # confirm, exactly as a board's does with an image found on a card.
+        self.staged = path
+        self.state = "ready"
+        print("ZERO ota: downloaded and verified -- waiting for install")
+        return True
+
+    def _begin_install(self):
+        path = self.staged
+        if not path:
+            self.state = "error"
+            self.error = "nothing downloaded"
+            return
         try:
             total = self.ota.begin(path)
         except Exception as exc:         # noqa: BLE001 -- not an app image
             self.state = "error"
             self.error = str(exc)
             print("ZERO ota: image refused --", self.error)
-            return True
+            return
         self.state = "installing"
         print("ZERO ota: writing %d bytes into the inactive slot" % total)
-        return True
 
     def _install_slice(self):
         # step() returns True WHILE MORE REMAINS (.claude/rules/ota.md: an
@@ -403,8 +464,11 @@ class ZeroUpdate:
             pass
         self.state = "idle"
         self.manifest = None
+        self.offered = False
+        self.staged = None
         self.error = None
         self.nothing_published = False
+        self._channel = None
         self._reboot_in = 0
 
     # -- what a human reads ---------------------------------------------------
@@ -436,13 +500,17 @@ class ZeroUpdate:
                 "size": self.manifest.get("size"),
             }
         progress = None
-        if self.state == "downloading":
+        if self.state in ("downloading", "ready"):
+            # `ready` reports the FINISHED transfer, not a fresh zero: the
+            # screen's second confirm prints how big the thing it is about to
+            # install is, and that number is this one.
             progress = {"done": ota.dl_done, "total": ota.dl_total}
-        elif self.state == "installing":
+        elif self.state in ("installing", "reboot"):
             progress = {"done": ota.done, "total": ota.total}
         return update_status(ota, self.state, False, error=self.error,
                              offer=offer, progress=progress,
-                             absent=self.nothing_published)
+                             absent=self.nothing_published,
+                             staged=self.staged)
 
 
 def _frozen_or_pushed(names=("zero_host", "zero_gpio", "zero_setup",

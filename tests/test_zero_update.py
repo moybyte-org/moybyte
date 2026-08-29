@@ -62,6 +62,8 @@ class _FakeOta:
         self.install_slices = 3
         self.finish_ok = True
         self.offers_it = True
+        self.checked_channel = "-"
+        self.offered_against = "-"
 
     # -- what ZeroUpdate reads
     def version(self):
@@ -76,7 +78,8 @@ class _FakeOta:
     def slot(self):
         return "ota_0"
 
-    def offers(self, manifest):
+    def offers(self, manifest, channel=None):
+        self.offered_against = channel
         return self.offers_it
 
     # -- what ZeroUpdate calls
@@ -84,8 +87,9 @@ class _FakeOta:
         self.calls.append("boot_check")
         return self.boot_verdict
 
-    def check_online(self):
+    def check_online(self, channel=None):
         self.calls.append("check")
+        self.checked_channel = channel
         return self.manifest
 
     def begin_download(self, manifest):
@@ -212,16 +216,84 @@ def test_a_real_check_failure_is_readable_afterwards():
 
 
 def test_up_to_date_is_reported_as_up_to_date_and_not_as_an_offer():
+    """`none` is the verdict; the manifest is the EVIDENCE and is still
+    reported (2026-08-29). The shared update screen draws "UP TO DATE" from
+    what the check found, and a board that threw the manifest away the moment
+    it judged it not-newer left that screen with nothing to print."""
     ota = _FakeOta(MANIFEST)
     ota.offers_it = False
     task = zero_host.ZeroUpdate(ota)
     task.request("check")
     task.step()
     assert task.state == "none"
-    assert "available" not in task.status()
+    assert task.offered is False
+    assert task.status()["available"]["label"] == "0.9"
 
 
-# -- the install -------------------------------------------------------------
+def test_the_requested_channel_reaches_the_check():
+    """The browser's CHANNEL row is the ONLY place this choice can be made --
+    a headless board has no Settings of its own -- so it travels with the
+    request rather than being a setting somebody could have written here."""
+    ota = _FakeOta(MANIFEST)
+    task = zero_host.ZeroUpdate(ota)
+    task.request("check", "unstable")
+    task.step()
+    assert ota.checked_channel == "unstable"
+    assert ota.offered_against == "unstable", \
+        "the offer was judged against a different channel than was checked"
+
+
+def test_no_channel_means_the_running_builds_own():
+    """A boot check and a bare curl both mean "whatever I am on"."""
+    ota = _FakeOta(MANIFEST)
+    task = zero_host.ZeroUpdate(ota)
+    task.request("check")
+    task.step()
+    assert ota.checked_channel is None
+
+
+# -- the two acts ------------------------------------------------------------
+
+
+def _to_offer(task):
+    task.request("check")
+    task.step()
+    assert task.state == "offer"
+
+
+def test_the_download_stops_and_waits_for_the_second_consent():
+    """THE REASON THIS BOARD GREW A `ready` STATE (2026-08-29).
+
+    `install` used to mean the whole job -- check, download and flash off one
+    request -- and the shared update screen cannot mirror that: it asks TWICE,
+    once before the download and again before the flash, exactly as it does for
+    an image found on a card. A board that flashed off the first tap would
+    leave the second confirm gating nothing, and the screen would be drawing an
+    "A = INSTALL" prompt over a board already writing its app partition.
+
+    So the download stops. The image is on the filesystem, verified, and the
+    running slot is untouched until somebody asks again.
+    """
+    ota = _FakeOta(MANIFEST)
+    task = zero_host.ZeroUpdate(ota)
+    _to_offer(task)
+    task.request("download")
+    _drive(task)
+    assert task.state == "ready"
+    assert task.staged == "/moy/update/firmware.bin"
+    assert task.status()["staged"] == "/moy/update/firmware.bin"
+    # The flash has NOT begun and cannot have: nothing touched the slot.
+    assert "begin" not in ota.calls and "install_step" not in ota.calls
+    # ...and the size the second confirm prints is the transfer that happened.
+    assert task.status()["progress"]["total"] == MANIFEST["size"]
+
+
+def test_installing_without_a_download_is_refused_by_name():
+    """The second act cannot be taken first. A caller that asks to flash with
+    nothing staged is told what is missing, not silently handed a check."""
+    task = zero_host.ZeroUpdate(_FakeOta(MANIFEST))
+    ok, msg = task.request("install")
+    assert ok is False and "download" in msg
 
 
 def test_the_install_is_spread_across_poll_iterations():
@@ -231,10 +303,8 @@ def test_the_install_is_spread_across_poll_iterations():
     that this image's rollback confirm is measured on."""
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
-    task.request("check")
-    task.step()
-    assert task.state == "offer"
-    ok, _ = task.request("install")
+    _to_offer(task)
+    ok, _ = task.request("download")
     assert ok
     task.step()
     assert task.state == "downloading"
@@ -244,6 +314,9 @@ def test_the_install_is_spread_across_poll_iterations():
     assert task.status()["progress"]["total"] == MANIFEST["size"]
     _drive(task)
     assert ota.calls.count("download_step") >= 3
+    assert task.state == "ready"
+    task.request("install")
+    _drive(task)
     assert ota.calls.count("install_step") >= 3
     assert "finish" in ota.calls
     assert task.state == "reboot"
@@ -255,6 +328,8 @@ def test_the_board_keeps_serving_for_a_while_before_it_reboots():
     rebooting rather than simply gone."""
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
+    task.request("download")
+    _drive(task)
     task.request("install")
     for _ in range(20):
         task.step()
@@ -264,12 +339,14 @@ def test_the_board_keeps_serving_for_a_while_before_it_reboots():
     assert ota.reset_called == 1
 
 
-def test_installing_without_an_offer_checks_first():
+def test_downloading_without_an_offer_checks_first():
     """A caller that knows it wants the newest build should not have to make two
-    requests, and the check is the thing that decides whether there IS one."""
+    requests, and the check is the thing that decides whether there IS one.
+    This is the convenience the old chained `install` existed for; it belongs to
+    the FETCH, which is reversible, and never to the flash."""
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
-    task.request("install")
+    task.request("download")
     task.step()
     assert ota.calls[:2] == ["check", "begin_download"]
 
@@ -277,11 +354,11 @@ def test_installing_without_an_offer_checks_first():
 def test_a_busy_updater_refuses_a_second_request_rather_than_interleaving():
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
-    task.request("install")
+    task.request("download")
     task.step()
     task.step()
     assert task.state == "downloading"
-    ok, msg = task.request("install")
+    ok, msg = task.request("download")
     assert ok is False and "busy" in msg
 
 
@@ -291,7 +368,7 @@ def test_a_refused_download_says_which_half_refused_it():
     task.request("check")
     task.step()
     ota.error = "http 403"
-    task.request("install")
+    task.request("download")
     task.step()
     assert task.state == "error"
     assert task.status()["error"] == "http 403"
@@ -302,6 +379,8 @@ def test_a_failed_set_boot_never_reads_as_a_finished_install():
     ota = _FakeOta(MANIFEST)
     ota.finish_ok = False
     task = zero_host.ZeroUpdate(ota)
+    task.request("download")
+    _drive(task)
     task.request("install")
     _drive(task)
     assert task.state == "error"
@@ -311,7 +390,7 @@ def test_a_failed_set_boot_never_reads_as_a_finished_install():
 def test_cancel_stops_the_transfer_and_returns_to_idle():
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
-    task.request("install")
+    task.request("download")
     task.step()
     task.step()
     task.request("cancel")

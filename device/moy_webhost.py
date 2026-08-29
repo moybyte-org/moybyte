@@ -390,7 +390,7 @@ def _ota_board():
 
 
 def update_status(ota, state, screen, error=None, offer=None, progress=None,
-                  absent=False):
+                  absent=False, staged=None):
     """The ONE /update document, whichever backend answered.
 
     Both backends build it here, so the page has one shape to read and a board
@@ -419,6 +419,10 @@ def update_status(ota, state, screen, error=None, offer=None, progress=None,
       absent     the channel has published nothing for this board yet -- the
                  normal state of a channel before its first release, and not
                  the same sentence as "up to date".
+      staged     where a downloaded image is waiting for the second confirm.
+                 NAMED by the board rather than guessed by the reader: the
+                 screen prints its basename, and the boards stage in different
+                 places (a card on one, internal flash on another).
       error      the last failure, in words a person can act on.
     """
     out = {
@@ -439,6 +443,8 @@ def update_status(ota, state, screen, error=None, offer=None, progress=None,
         out["progress"] = progress
     if absent:
         out["absent"] = True
+    if staged:
+        out["staged"] = staged
     return out
 
 
@@ -481,18 +487,23 @@ class ConsoleUpdate:
 
     # -- the request side ----------------------------------------------------
 
-    def request(self, action):
+    def request(self, action, channel=None):
         """Queue the hand-off. Returns (ok, message) -- the message is what the
-        page shows, so it says what happened to the page and not to the board.
+        caller shows, so it says what happened to the CALLER, not to the board.
 
-        `check` and `install` are the SAME request here and both are accepted:
-        what this board can be asked for is "start the update flow", and the
-        flow itself decides what to check and what to install, on the glass. A
-        caller that wanted finer control is asking the wrong machine -- the
-        board in front of the person is the one with the buttons.
+        `check`, `download` and `install` are the SAME request here and all
+        three are accepted: what this board can be asked for is "start the
+        update flow", and the flow itself decides what to check, download and
+        install -- on the glass, where the person is. A caller that wanted
+        finer control is asking the wrong machine.
+
+        `channel` is ACCEPTED AND IGNORED, deliberately. The screen this hands
+        off to carries the console's own CHANNEL row, which the person is about
+        to be looking at; taking the remote caller's choice would silently
+        overwrite a setting that is visible two lines above the confirm.
         """
-        if action not in ("check", "install", "cancel"):
-            return False, "action must be check, install or cancel"
+        if action not in ("check", "download", "install", "cancel"):
+            return False, "action must be check, download, install or cancel"
         if action == "cancel":
             # Nothing here to cancel: what a request starts lives on the glass,
             # and its cancel is the X on that screen, in front of whoever is
@@ -502,11 +513,13 @@ class ConsoleUpdate:
             return False, "this console cannot update itself"
         if self.state == "glass" or self._want:
             return False, "the console already has this on its screen"
-        # A retry after a failed hand-off starts clean: leaving the old error
-        # standing would have the page report the LAST attempt's failure while
-        # this one is in flight.
-        self.state = "idle"
+        # THE STATE MOVES HERE and the WORK on the next poll. A caller polling
+        # in between must read "the glass has it", not the state the request
+        # had not been applied to yet -- which it would read as a tap that did
+        # nothing. A retry after a failure also starts clean: leaving the old
+        # error standing would report the LAST attempt while this one is live.
         self.error = None
+        self.state = "glass"
         self._want = True
         return True, "the console took this onto its own screen"
 
@@ -529,7 +542,6 @@ class ConsoleUpdate:
             # ...and only now the screen, because unparking routes home and
             # would pop an update screen pushed before it.
             ws.update_ui.open_update_online()
-            self.state = "glass"
         except Exception as exc:         # noqa: BLE001 -- never break a frame
             self.state = "error"
             self.error = "%s" % exc
@@ -972,12 +984,17 @@ class WebHost(WebServer):
             # action is a caller that did not say, and the harmless reading is
             # the only honest one to pick for a verb that replaces the board.
             action = sent.get("action") or "check"
+            # The caller's CHANNEL choice rides the request. On a headless
+            # board the browser is the ONLY place that choice can be made --
+            # it has no Settings of its own -- so the field is part of the
+            # verb, not a setting anybody could have written here first.
+            channel = sent.get("channel") or None
         except (ValueError, AttributeError):
             return http_response(400, '{"error":"bad json"}')
         doc = self.update.status()
         if doc is None:
             return http_response(503, NO_UPDATER)
-        ok, msg = self.update.request(action)
+        ok, msg = self.update.request(action, channel)
         # ANSWERED IMMEDIATELY, with the state the request left behind. The
         # work happens in step(): holding the socket across a 2MB download (or
         # across a hand-off that closes this very socket) makes every outcome
