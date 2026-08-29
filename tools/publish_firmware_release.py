@@ -96,11 +96,8 @@ OTA_IMAGES = {
     "tdeck": "moybyte_tdeck_app.bin",
     "p4": "moybyte_p4_app.bin",
     "guition_s3": "moybyte_guition_s3_app.bin",
-    # The Zero (#41), OTA-wired 2026-08-29. Note what it does NOT have: an entry
-    # in site/build.py's BOARDS, so the website's flasher has no card for it and
-    # `stage()` publishes no cable-flash image. That is a gap, not a decision --
-    # it is the one follow-up this board's promotion deliberately left open.
-    # The OTA half is independent of that table and works today.
+    # The Zero (#41), OTA-wired 2026-08-29 and given its flasher card the same
+    # day, so it publishes both halves like every other board.
     "xiao_zero": "moybyte_zero_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
@@ -411,11 +408,13 @@ def main():
         if not staged:
             # A board can have an OTA manifest and NO cable-flash image on the
             # release: `stage()` walks site/build.py's BOARDS (the website's
-            # flasher cards) and `stage_ota_all` walks OTA_IMAGES, and since
-            # 2026-08-29 those two lists differ by the Zero. Bailing on an empty
-            # `staged` used to be right when they could not differ; now it would
-            # throw away a perfectly good manifest whenever the only board built
-            # is one the site does not flash.
+            # flasher cards) and `stage_ota_all` walks OTA_IMAGES, which are two
+            # lists and not one. They happen to name the same four boards today
+            # -- they did NOT for the few hours between the Zero becoming a
+            # build target and its card landing, which is when this branch was
+            # written. Bailing on an empty `staged` would throw away a perfectly
+            # good manifest whenever the only board built is one the site does
+            # not flash, so it stays whether or not the lists agree this week.
             print("no flashable images in this run -- publishing OTA manifests "
                   "only (%s)" % ", ".join(sorted(manifests)))
         if args.dry_run:

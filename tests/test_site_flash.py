@@ -187,23 +187,81 @@ def test_no_firmware_at_all_still_builds_a_page(tmp_path):
     assert not os.path.isdir(os.path.join(out, "vendor"))
 
 
-def test_offsets_match_the_cable_flash():
+def _declared_flash():
+    """{`[board] ota` id: (its dir, its [flash] block)} for every board that
+    declares a cable flash. DERIVED from the tree rather than listed, so board
+    N+1 joins the checks below by existing -- the hand-written map this replaced
+    named two of the four boards, and the two it left out were never compared
+    against their own declaration at all."""
+    from tools import board_config
+    import glob
+    out = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, "firmware", "*", "board.toml"))):
+        d = os.path.dirname(path)
+        cfg = board_config.load(d)
+        ota = (cfg.get("board") or {}).get("ota")
+        if ota and "flash" in cfg:
+            out[ota] = (d, cfg["flash"])
+    return out
+
+
+def test_the_page_writes_what_the_cable_flash_writes():
     """The Makefile writes these images over a cable; the site writes the same
-    ones over USB from a browser. If the two offsets ever disagree, one of them
-    bricks a boot -- so read the Makefile and compare."""
+    ones over USB from a browser. If the two disagree on the offset, one of them
+    bricks a boot; if they disagree on the FILE, the page hands a board an image
+    built for something else. So read each board's own declaration and compare.
+
+    This also closes the id loop: the site's board id has to BE the board.toml
+    `[board] ota` id, which is the same string as the CI matrix row (below), the
+    OTA_IMAGES key and the `latest-<board>.json` a device asks for. Four places,
+    one string, and a mismatch is silent everywhere."""
     # The cable flash reads its facts from each board.toml [flash] section
     # (#202 Phase A) -- so compare the site's table against the DECLARATION,
     # which is stronger than the old Makefile regex ever was.
-    from tools import board_config
-    table = {b["id"]: b for b in build.BOARDS}
-    dirs = {"tdeck": "firmware/lilygo_t_deck_plus_mainline",
-            "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b"}
-    for bid, d in dirs.items():
-        fl = board_config.load(os.path.join(ROOT, d))["flash"]
-        assert int(str(fl["offset"]), 16) == table[bid]["offset"], bid
-    # ...and the T-Deck image the site publishes is the one the flash writes.
-    fl = board_config.load(os.path.join(ROOT, dirs["tdeck"]))["flash"]
-    assert str(fl["image"]).split("/")[-1] == table["tdeck"]["images"][0]
+    declared = _declared_flash()
+    assert len(declared) >= 4, "board discovery found %d" % len(declared)
+    for board in build.BOARDS:
+        bid = board["id"]
+        assert bid in declared, (
+            "the site offers %s, which no firmware/*/board.toml declares as its "
+            "`[board] ota` id" % bid)
+        _, fl = declared[bid]
+        assert int(str(fl["offset"]), 16) == board["offset"], bid
+        assert int(fl["baud"]) == board["baud"], bid
+        # ...and the image the site publishes is the one the cable flash writes.
+        assert str(fl["image"]).split("/")[-1] == board["images"][0], bid
+
+
+def test_a_tinyusb_cdc_board_is_never_reset_by_the_page():
+    """The Zero (#41) shares the Guition's chip and NOT its reset fields, which
+    is the one thing on that card that cannot be inherited by analogy.
+
+    It keeps MicroPython's TinyUSB CDC (303a:4001) rather than the console
+    boards' USB-Serial/JTAG promotion, and esptool-js chooses its reset sequence
+    off the PID: the JTAG path is taken for 0x1001, so on 0x4001 anything but
+    `no_reset` falls through to the classic DTR/RTS dance -- which against this
+    board's RUNNING CDC has wedged the USB device, unrecoverable without a
+    replug. Coming back out is the mirror image: `hard_reset` is an RTS wiggle
+    with no circuit behind it, and the `watchdog_reset` that does work here is
+    not implemented by esptool-js at all."""
+    zero = {b["id"]: b for b in build.BOARDS}["xiao_zero"]
+    assert zero["chip"] == "ESP32-S3"
+    assert zero["reset"] == "no_reset"        # in: the human holds BOOT
+    assert zero["after"] is None              # out: the human replugs
+    assert "BOOT" in zero["prep"] and "plug" in zero["done"]
+    # The board's own file is the authority for both halves; if it stops saying
+    # so, the values above are the ones to revisit.
+    toml = open(os.path.join(ROOT, "firmware", "seeed_xiao_esp32s3_zero",
+                             "board.toml"), encoding="utf-8").read()
+    assert '303a:4001' in toml
+    assert "watchdog_reset" in toml and "hard_reset" in toml
+    # It IS the cart store -- no card slot -- so its erase warning cannot borrow
+    # the Guition's "with a TF card in the slot the cartridges survive it". Both
+    # halves matter to whoever ticks that box: where the carts are, and that
+    # nothing here comes through.
+    erase = zero["erase"].lower()
+    assert "internal flash" in erase
+    assert "survive" not in erase
 
 
 def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
@@ -222,24 +280,19 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # for the ones named below. The matrix is include-rows since #202 Phase A
     # (one row per board), so read the `- board:` row keys.
     rows = re.findall(r"^\s+- board: (\S+)", wf, re.M)
-    # A CARD ON THE SITE IS NOT AUTOMATIC, and the gap is named rather than
+    # A CARD ON THE SITE IS NOT AUTOMATIC, and a gap is named rather than
     # tolerated. The two directions are not symmetrical: a site card with no
     # matrix row is a page offering an image nothing builds, which is always a
     # bug; a matrix row with no card is a board CI builds and the website cannot
     # flash, which is a missing feature. This set is the second kind, and it is
-    # compared EXACTLY -- so the entry has to be deleted the day the card lands
+    # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
-    no_site_card = {
-        "xiao_zero":
-            "the headless Zero (#41), a build target since 2026-08-29. Its OTA "
-            "half is wired -- CI builds it, the publisher stages "
-            "latest-xiao_zero.json, and a board on either channel can update "
-            "itself. What is missing is the site half: an entry in "
-            "site/build.py's BOARDS (chip esp32s3, offset 0x0, and the "
-            "reset/prep strings for a TinyUSB CDC part), plus this board's id "
-            "in tools/fetch_ci_firmware.BOARDS. Deliberately left open when the "
-            "board was promoted, not forgotten.",
-    }
+    #
+    # EMPTY since 2026-08-29, when the Zero got its card: every board CI builds
+    # can be flashed from the page. Its entry sat here from the board's
+    # promotion that morning until the card landed the same day -- which is what
+    # this mechanism is for, and the shape to reuse for board N+1.
+    no_site_card = {}
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
         % sorted(set(fetch.BOARDS) - set(rows)))

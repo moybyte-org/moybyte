@@ -51,7 +51,7 @@ sys.path.insert(0, ROOT)
 # into its own subtree of FIRMWARE_SRC, because a browser CANNOT fetch a release
 # asset (no CORS headers) -- every image the page can flash has to be baked into
 # the site. That is also why this list stays short: each variant costs its own
-# copy of every board's image, ~11MB a variant across three boards.
+# copy of every board's image, ~13MB a variant across four boards.
 #
 # Older VERSIONS are deliberately not baked. They live as assets on their `v*`
 # tag, and the page reaches them the only way CORS allows: the visitor downloads
@@ -87,17 +87,19 @@ TIERS = [
 #   tdeck    esptool --chip esp32s3 write_flash 0x0 <full-dio image>
 #   p4       esptool --chip esp32p4 write_flash 0x2000 moybyte_p4.bin
 #   guition  esptool --chip esp32s3 write_flash 0x0 moybyte_guition_s3.bin
+#   zero     esptool --chip esp32s3 write_flash 0x0 moybyte_zero.bin
 #
-# All three write a MERGED image (bootloader + partition table + app) whose header
+# All four write a MERGED image (bootloader + partition table + app) whose header
 # already carries the flash mode/size/frequency the build baked in, which is why
-# the flasher passes "keep" for all three rather than re-deriving them here. The
+# the flasher passes "keep" for all of them rather than re-deriving them here. The
 # partition tail (the VFS, and on the T-Deck otadata) is not part of the image,
 # so an ordinary flash leaves the board's own storage alone.
 #
 # `images` is a preference list: the first name present in the board's artifact
 # folder is the one published. `reset` is how esptool-js is asked to enter the
 # ROM loader, and it is a hardware fact per board, not a preference (see the
-# T-Deck note in CLAUDE.md: its native-USB auto-reset never syncs).
+# T-Deck note in CLAUDE.md: its native-USB auto-reset never syncs) -- so is
+# `after`, and the two S3 boards that share a chip do NOT share either value.
 BOARDS = [
     {
         "id": "tdeck",
@@ -172,6 +174,64 @@ BOARDS = [
                   "mode myself (hold <b>BOOT</b>, tap <b>RST</b>, release "
                   "BOOT). Try this if connecting fails.",
         "cli": "make firmware-flash-guition-s3 PORT=/dev/ttyACM1",
+    },
+    {
+        # The Zero (Seeed XIAO ESP32-S3, #41): a build target since 2026-08-29
+        # and the fourth card. HEADLESS -- no screen, no carts running on it. It
+        # is the store the browser console pairs with, so whoever flashes it is
+        # holding a board there is nothing to look at afterwards.
+        #
+        # ITS RESET FIELDS ARE NOT THE OTHER S3 BOARDS', and that is the one
+        # thing on this card that cannot be inherited by analogy. This board
+        # keeps MicroPython's TinyUSB CDC (303a:4001) instead of the console
+        # boards' USB-Serial/JTAG promotion (its mpconfigboard.h argues why),
+        # and esptool-js picks its reset sequence off the PID: the JTAG path is
+        # chosen for 0x1001, so on 0x4001 anything but `no_reset` falls through
+        # to the CLASSIC DTR/RTS dance. That dance against a RUNNING TinyUSB CDC
+        # is what has wedged this board's USB device before (#63, and the board
+        # README's hardware facts) -- unrecoverable without a replug. So the
+        # page never touches the lines and the human holds BOOT, exactly like
+        # the T-Deck, for a different hardware reason.
+        #
+        # `after` is the same story from the other end: `hard_reset` is an RTS
+        # wiggle with no reset circuit behind it here and does nothing, and what
+        # DOES get this board out of the loader -- esptool's `--after
+        # watchdog_reset` -- esptool-js does not implement. So there is no reset
+        # to ask for, and the card says to replug instead.
+        #
+        # Neither has been run from the page: the pair follows this board's own
+        # documented facts, which is the safe reading, not a browser session.
+        "id": "xiao_zero",
+        "label": "Seeed XIAO ESP32-S3 (Zero)",
+        "chip": "ESP32-S3",
+        "images": ("moybyte_zero.bin",),
+        "offset": 0x0,
+        "baud": 460800,
+        "reset": "no_reset",                # the BOOT hold below did it
+        "manual": None,                     # ... so there is no reset to skip
+        "usb_otg": True,                    # native USB, for esptool-js's sake
+        "after": None,                      # hard_reset is a no-op on this board
+        "done": "Written. Unplug the board and plug it back in to start it.",
+        "prep": "This one has no screen &mdash; it is the cartridge store a "
+                "browser console pairs with, so there is nothing to watch it do "
+                "afterwards. Its USB port is the ESP32-S3&rsquo;s own and there "
+                "is no reset circuit on the other end of it, so you move the "
+                "board in and out of the loader by hand: <b>hold the BOOT button "
+                "while you plug it in</b>, then let go. Flash, pick its port in "
+                "the dialog, and when the write finishes <b>unplug it and plug "
+                "it back in</b> &mdash; it stays in the loader until you do. The "
+                "page deliberately leaves this board&rsquo;s reset lines alone: "
+                "wiggling them while it is running has knocked its USB out "
+                "entirely, and only a replug brings that back.",
+        "erase": "Erase the whole chip first. There is no card slot on this "
+                 "board &mdash; the cartridges are on its internal flash, so "
+                 "this deletes them and their saves. Coming from the old "
+                 "MicroPython layout they go either way: this firmware keeps "
+                 "the filing system somewhere else, so the board comes up with "
+                 "an empty store and wants setting up again. Anything made in "
+                 "the browser is still in the browser and syncs back on the "
+                 "next visit.",
+        "cli": "make firmware-flash-zero PORT=/dev/ttyACM0",
     },
 ]
 

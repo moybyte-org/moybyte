@@ -64,6 +64,15 @@ make firmware-monitor-zero PORT=/dev/ttyACM0         # the only way to watch it
 `[flash]` block and erases otadata first, so a board that has taken an OTA boots
 the slot the cable flash just wrote.
 
+**The website flashes this same image**, since 2026-08-29 — `site/build.py`'s
+`BOARDS` carries the card, and `tools/publish_firmware_release.py` reads that
+same table to publish the asset the page serves. The one field pair that is not
+the Guition's, on the same chip, is the reset: the page asks for `no_reset` and
+offers no reset afterwards, because esptool-js picks its sequence off the USB
+PID and would otherwise put the classic DTR/RTS dance on this board's running
+CDC — the wedge in the hardware facts below. So the browser's gesture is the
+BOOT button held while plugging in, and a replug afterwards.
+
 **The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
 `0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
 filesystem is not where the new image looks and comes up freshly formatted. Run
@@ -216,15 +225,17 @@ boot → connect() finds nothing joinable
 ```
 
 The form is one small self-contained page on **port 80** (a phone types
-`192.168.4.1`, not `192.168.4.1:8080`), and it is a plain `<form>` — the page's
-only script fills the network list, offers the reveal on the password field and
-tells you what the scan found, so a phone with a broken script still has a page
-with a correct static state to type into. The AP is **open on purpose**: there
-is nothing behind it but the form, it exists only while the board is
-unconfigured, and the one secret that crosses it belongs to the person standing
-next to the board. What it costs is that a neighbour in range during that minute
-could configure the board first; what it buys is a setup that needs no printed
-key and no instructions.
+`192.168.4.1`, not `192.168.4.1:8080`) — the same argument that moved the
+serving half onto 80 on 2026-08-29, so both are there now and never collide,
+because a board either serves or hosts this AP and never both. It is a plain
+`<form>` — the page's only script fills the network list, offers the reveal on
+the password field and tells you what the scan found, so a phone with a broken
+script still has a page with a correct static state to type into. The AP is
+**open on purpose**: there is nothing behind it but the form, it exists only
+while the board is unconfigured, and the one secret that crosses it belongs to
+the person standing next to the board. What it costs is that a neighbour in
+range during that minute could configure the board first; what it buys is a
+setup that needs no printed key and no instructions.
 
 **It is a captive portal since 2026-08-29, reversing this port's own recorded
 decline** (the argument, its price and what would reverse it back live in
@@ -329,7 +340,7 @@ update state machine and one whole first run end to end), plus
 - **The pin gate**: `GET /carts.json`, `GET /files.json`, `GET /gpio` and
   `POST /sync` each 403 `{"error":"pin"}` with no pin and answer with one;
   `GET /sync` and `GET /` stay open. **And the prompt**, in real headless
-  Chrome against this board: a page opened at `http://<ip>:8080/?handheld=1`
+  Chrome against this board: a page opened at `http://<ip>/?handheld=1`
   refuses to boot, shows the in-page prompt, and after four digits reloads with
   `?pin=` and comes up on the launcher (`mode: board`, 30 tiles).
 - **The files layer and the journal**: a `{"v":2,"root":"files"}` batch put a
@@ -455,10 +466,10 @@ range" while the phone can see plenty (the STA scan beside a live AP is what
 that means, and it is the one thing only this hardware can test).
 
 **3. The reboot-into-STA leg.** Fill the form in with a real network and submit.
-*Pass:* the "saved" page names the network and shows `http://<name>.local:8080/
+*Pass:* the "saved" page names the network and shows `http://<name>.local/
 ?pin=NNNN`; the monitor prints `ZERO SETUP saved: name=… ssid=… -- rebooting`
 and then, after the reset, `ZERO wifi: <ssid> <ip>` and `ZERO serving
-http://<ip>:8080/?pin=NNNN`. Then check what landed:
+http://<ip>/?pin=NNNN`. Then check what landed:
 `mpremote connect /dev/ttyACM0 fs cat :/moy/wifi.json` — the network just typed
 must be **first** and any older one still there — and `… fs cat :/moy/zero.json`
 → `{"name": …, "pin": …}`. *Fail:* the board reboots straight back into the
@@ -473,7 +484,7 @@ stays on the AP so it can be retried. Restore the real credentials afterwards
 schematic and nobody has looked. With the board serving and its pin known:
 
 ```bash
-curl -s -X POST http://<ip>:8080/gpio \
+curl -s -X POST http://<ip>/gpio \
   -d '{"v":1,"pin":"NNNN","ops":[{"p":21,"mode":"out","v":0}]}'
 # -> {"ok": 1, "reads": {}, "err": []}
 ```
@@ -497,8 +508,8 @@ has only ever been host-checked.
 the pin off the QUERY, the POST included:
 
 ```bash
-curl -s "http://<ip>:8080/update?pin=NNNN"
-curl -s -X POST "http://<ip>:8080/update?pin=NNNN" -d '{"action":"check"}'
+curl -s "http://<ip>/update?pin=NNNN"
+curl -s -X POST "http://<ip>/update?pin=NNNN" -d '{"action":"check"}'
 ```
 
 *Pass:* the GET returns JSON naming the running version/label/channel/slot and
@@ -553,12 +564,6 @@ new image's host did not come up.
 
 ## What is deliberately absent
 
-- **No card for this board in the website's flasher.** `site/build.py`'s
-  `BOARDS` table is what the page's Web Serial flasher writes from *and* what
-  `tools/publish_firmware_release.py` publishes cable-flash images from, and the
-  Zero is not in it. So the OTA half works today and the "flash it from the
-  website" half does not exist — a gap, not a decision, and the one follow-up
-  this board's promotion left open on purpose.
 - **No way for the BOARD to show its own pin.** It has no screen, so the pin
   reaches a human over the cable (`provision.sh`'s paired url, the serial line
   at boot) or off the setup form they just filled in. A QR on a sticker, or a

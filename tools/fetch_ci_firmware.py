@@ -55,7 +55,13 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-BOARDS = ("tdeck", "p4", "guition_s3")
+# The CI matrix's row names, which are also the board.toml `[board] ota` ids and
+# the `latest-<board>.json` a device asks for -- one string, four places
+# (tests/test_site_flash.py pins the agreement). Must match site/build.py's
+# BOARDS ids: this tuple decides what gets pulled, that table decides what the
+# page can flash, and a board in one and not the other is a card with no image
+# or an image no card offers.
+BOARDS = ("tdeck", "p4", "guition_s3", "xiao_zero")
 WORKFLOW = "firmware-build.yml"
 ARTIFACT = "moybyte-firmware-%s"
 RELEASE_TAG = "firmware-latest"
