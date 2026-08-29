@@ -2,45 +2,36 @@
 
 The standing direction doc for adding boards, written the week the fork died
 and the two-board build system collapsed into one strategy (#161 closed
-2026-08-17). It exists because the next two boards are named and the cost
-curve #161 predicted ("the cost curve is in the number of boards") is about to
-be walked: **a port today costs ~400 lines of copied frame loop plus
-hand-written Makefile/CI plumbing**, and that is the remaining bill after
-everything data-driven already landed.
+2026-08-17). **A port reaches console-on-glass in one session** — measured on the
+Guition S3, 2026-08-18, its on-glass suite passing 10/10 that night with both cart
+runtimes. The bill is the table below.
 
 Status lives in the tracker issue (see below), not here. What IS here: the
 lineup, the measured per-board bill, the phases, and the declines.
 
-## The lineup, and why
+## Candidates, and why
+
+The shipped boards are the roster in `README.md`. This table is what is NOT
+ported and the argument for porting it; what a shipped board taught is in its
+own board-dir README and in the sections below.
 
 | board | class | why |
 |---|---|---|
-| **Guition JC1060P470-class (P4 + C6)** | desktop tier | the COST path: ~$33–37 vs the Waveshare 7B's ~$80 (bom_pricing_2026-07: the $100 retail floor "needs the Guition board as the electronics core"). Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + 1024×600 DSI touch — so this is a **variant port**, and its job is to prove variants are cheap. The 2026-06 evaluation (#12) was closed by buying the Waveshare instead; the reason to want the Guition (price) never went away. |
-| **Guition JC3248W535 (S3)** | handheld tier | a ~$15-class 3.5" 320×480 S3 smart display. Same chip as the T-Deck, but a **new port class** on every other axis: QSPI panel (AXS15231B — not `moy_lcd`'s ST7789-over-SPI), touch on the same chip (no keyboard, no trackball), and — owner call at bring-up, 2026-08-18 — LANDSCAPE 480×320 off a portrait-native panel whose MADCTL MV is dead on this glass, so `moy_axs` rotates in its band copy. Its job is to prove the contracts, not the copies. |
+| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. Two further risks: its ESP-Hosted transport to the C6 is unconfirmed while our whole P4 radio stack is the SDIO `moy_c6` shim plus a flashed slave image, and there is no published schematic — which is where several of the Waveshare's hard-won facts came from. |
 
-A working hardware definition for the JC3248W535 already exists at
-`~/Documents/Work/esphome/JC3248W535.yaml` (ESPHome, on the physical board):
-QSPI clk GPIO47 / data [21, 48, 40, 39] / cs 45 @ 40MHz, AXS15231 touch on
-I2C sda 4 / scl 8 (calibrated: swap_xy + mirror_y in landscape), backlight
-PWM GPIO1, battery ADC GPIO5, 16MB flash DIO, octal PSRAM @ 80MHz. Treat its
-pins as verified and its *tuning* as untested here — it runs a 64B cache line,
-and this repo's T-Deck learned on glass that 64B lines break the CPU↔GDMA
-handoff in OUR flush path (sdkconfig.board's cache note). Per-board verdicts
-don't transfer; A/B it.
-
-## What a port costs today (measured 2026-08-17)
+## What a port costs today (re-stated 2026-08-29)
 
 | piece | cost | state |
 |---|---|---|
 | `boards/<B>/` (sdkconfig, cmake, partitions) | per-chip facts + learned prose | irreducible, and good — this is where constraints live |
 | `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
-| panel backend (native C) | 800+ lines | irreducible unless the panel repeats |
-| input drivers | GT911 already exists twice | Phase C |
-| **`modules/moy_runtime.py`** | **~300–460 lines: run_desktop + frame loop** | **Phase B — the big one** |
-| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | Phase B rides along |
-| Makefile targets | hand-written per board | Phase A |
-| CI legs + cache keys | hand-written per board | Phase A |
+| panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
+| input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines** | the invariant order is `device_boot.FrameLoop`, and all three boards ride it |
+| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
+| Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
+| CI legs + cache keys | one include-row per board | derived from the board list |
 | test tables (NATIVE/HOST_ONLY/WIRING…) | one row per board | deliberate tripwires — keep |
 | on-glass suite | cheap since the shared DevChannel | every board gets one at stage 6 |
 
