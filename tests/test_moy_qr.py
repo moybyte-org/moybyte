@@ -27,6 +27,8 @@ So the pin is a KNOWN ANSWER plus the invariants a scanner reads first:
     where it turns.
 """
 
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,6 +36,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+from unix_mp import require_unix_mp                            # noqa: E402
 
 from runtime import moy_qr                                     # noqa: E402
 
@@ -325,3 +329,63 @@ def test_the_error_correction_codewords_are_a_real_reed_solomon_remainder():
 
 def test_bytes_and_str_encode_the_same():
     assert moy_qr.encode("moy") == moy_qr.encode(b"moy")
+
+
+# ---------------------------------------------------------------------------
+# The tier this encoder actually runs on
+# ---------------------------------------------------------------------------
+
+_MP_DRIVER = '''\
+import sys
+sys.path.insert(0, @STAGE@)
+import moy_qr
+for payload in @PAYLOADS@:
+    m = moy_qr.encode(payload)
+    print("|".join("".join(str(c) for c in row) for row in m))
+print("OK")
+'''
+
+
+def test_the_encoder_runs_under_micropython_and_agrees_with_cpython(tmp_path):
+    """Every test above this line runs on CPython, and the encoder does not.
+
+    It is frozen into board images and its only caller is the connection
+    screen, so CPython is the tier it is NEVER exercised on in anger. That gap
+    shipped: `_ec_codewords` shifted its remainder with `del rem[0]`, which
+    CPython allows on a bytearray and MicroPython raises TypeError for, so the
+    encoder failed for every url on every board while all 41 checks here stayed
+    green. `WebConsoleUI.matrix` catches Exception, so the entire symptom was
+    the word NO ADDRESS where the QR belongs -- reported off a T-Deck, not off
+    a test.
+
+    A matrix compared BETWEEN the tiers is what closes it: a construct only one
+    interpreter accepts fails here, and so does a construct both accept that
+    they disagree about."""
+    exe = require_unix_mp(
+        why="Without it the frozen QR encoder is only ever run by CPython, "
+            "which is not the interpreter any board uses -- the tier where it "
+            "silently did not work at all.")
+    payloads = ["moy", PAIRED_URL, "http://10.0.0.5:8080/?pin=0001",
+                "http://192.168.100.101:8080/?pin=4821",
+                "http://moybyte-zero.local/?pin=4821", "x" * 78]
+    # Staged FLAT, as `moy_qr`, because that is how a board carries it: the
+    # build copies runtime/*.py into modules/ and freezes them as top-level
+    # names. Importing it through a `runtime` package here would test a shape
+    # no board has.
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    shutil.copy(ROOT / "runtime" / "moy_qr.py", stage / "moy_qr.py")
+    src = (_MP_DRIVER
+           .replace("@STAGE@", repr(str(stage)))
+           .replace("@PAYLOADS@", repr(payloads)))
+    script = stage / "driver.py"
+    script.write_text(src)
+    out = subprocess.run([exe, str(script)], capture_output=True, text=True,
+                         timeout=120)
+    assert "OK" in out.stdout, out.stdout + out.stderr
+    got = [ln for ln in out.stdout.strip().splitlines() if ln != "OK"]
+    assert len(got) == len(payloads), out.stdout + out.stderr
+    for payload, line in zip(payloads, got):
+        want = "|".join("".join(str(c) for c in row)
+                        for row in moy_qr.encode(payload))
+        assert line == want, "MicroPython and CPython disagree on %r" % payload

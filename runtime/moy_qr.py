@@ -105,8 +105,13 @@ def _ec_codewords(data, n):
     rem = bytearray(n)
     for b in data:
         factor = b ^ rem[0]
-        del rem[0]
-        rem.append(0)
+        # Shift in place. NOT `del rem[0]` + append: a bytearray has no item
+        # deletion on MicroPython, so that form raised TypeError for every url
+        # on every board -- and `matrix()` catches Exception, so the only
+        # symptom was the connection screen reading NO ADDRESS.
+        for i in range(n - 1):
+            rem[i] = rem[i + 1]
+        rem[n - 1] = 0
         if factor:
             lf = _LOG[factor]
             for i in range(n):

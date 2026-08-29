@@ -137,8 +137,14 @@ class WebConsoleUI:
         if url != self._qr_for:
             try:
                 self._qr = _qr.encode(url)
-            except Exception:      # noqa: BLE001 -- a url too long for v4, or worse
+            except Exception as exc:  # noqa: BLE001 -- too long for v4, or worse
+                # Swallowing is right -- a url that will not encode must not
+                # take the console down -- but swallowing SILENTLY is what let a
+                # MicroPython-only TypeError inside the encoder present as
+                # nothing but the words NO ADDRESS, on every board, for the
+                # whole life of the feature. Once per url, say which url and why.
                 self._qr = None
+                print("Moybyte QR encode failed:", url, exc)
             self._qr_for = url
         return self._qr
 
