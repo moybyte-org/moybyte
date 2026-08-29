@@ -1,0 +1,93 @@
+# Moybyte Zero board fragment (Seeed XIAO ESP32-S3, mainline build).
+#
+# This file is the ONE store of every ESP-IDF setting this repo decided for the
+# Zero, prose included; `moybyte_sdkconfig_guard` derives its required-option
+# list from here, so a line written down here is a line the build is made to
+# carry, and a line Kconfig refuses is reported instead of silently doing
+# nothing.
+#
+# The reference point is the Guition's fragment (same chip) -- but only where
+# the workload agrees. This board has NO PANEL, no touch, no frame loop and no
+# carts running on it: it joins WiFi and serves ~630KB of gzipped wasm plus a
+# cart store over TCP. So the panel-shaped levers over there (cache geometry,
+# the 120MHz MSPI profile) are deliberately absent below, each with its reason.
+
+# 8MB flash, QIO @ 80MHz. Not a guess and not the generic default: mainline's
+# sdkconfig.base declares 4MB, and this chip is an ESP32-S3R8 (8MB flash + 8MB
+# octal PSRAM). QIO/80M is what ESP32_GENERIC_S3's own sdkconfig.board sets,
+# which is the image this board has been running since 2026-08-25 -- so the
+# mode is evidence, not a preference.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# THE PARTITION TABLE, and the reason this board needed a new one rather than
+# the siblings' (2026-08-29). The console S3 layout is two 5MB app slots plus a
+# 6MB vfs in 16MB of flash; on 8MB it does not fit, and the failure is not a
+# build error -- the bootloader REJECTS the table at runtime and the board boot
+# loops with no console (learned on this board, README's hardware facts).
+# What makes two slots fit here at all is that this image is headless: no
+# panel/graphics/audio/moycore stack, no frozen console, no baked seed carts.
+# See the CSV itself for the arithmetic and the measured image it is sized
+# against. CONFIG_PARTITION_TABLE_CUSTOM_FILENAME resolves relative to
+# ports/esp32, so build.sh stages the CSV there.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-moybyte-zero.csv"
+
+# Rollback (#53). Restated here (sdkconfig.base already sets it) because this
+# file is what the guard derives its required list from, and because on THIS
+# board it is the whole safety net: every other board confirms a new image by
+# painting frames on its own glass, and this one has none -- see
+# zero_host._confirm_when_serving and moy_ota.confirm_when_serving for what
+# replaces "something reached the glass".
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- TCP throughput: Espressif's "Iperf rank" set, which is ATOMIC ---------
+# Adopted verbatim from the Guition/T-Deck fragments, and this is the board
+# with the strongest claim on it: serving the wasm bundle IS its job. Measured
+# on the T-Deck (same SoC) 2026-08-20, pinned to one AP: 400 -> 2121 KB/s, a
+# 5.3x, and the wasm bundle goes from ~1.35s to ~0.26s. Nothing here has been
+# measured on THIS board; it is a same-chip carry-over, which is the weakest
+# form of evidence this repo accepts and is recorded as such.
+#
+# THESE MOVE TOGETHER OR NOT AT ALL. Raising the two lwIP buffers alone, with
+# the WiFi driver left at stock, measured 20x SLOWER than stock -- a big window
+# puts ~22 segments in flight against an 802.11n reorder window still sized 6.
+#
+# The set is RAM-POSITIVE (TRY_ALLOCATE_WIFI_LWIP moves the lwIP buffers into
+# PSRAM, ~12.7KB, more than paying for STATIC_RX 10 -> 16), and this board has
+# the internal region to itself: no BLE stack, no framebuffers, no DMA bounce
+# slots. The Guition's near-miss (four bytes free, WiFi could not init) was
+# NimBLE's doing, and there is no NimBLE in this image.
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_ESP_WIFI_RX_BA_WIN=32
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+
+# --- what is deliberately NOT here ----------------------------------------
+#
+# CACHE GEOMETRY (the T-Deck's #63 32KB icache / 64KB dcache verdict, and the
+# 32B line the Guition inherited with it). That A/B was run against a workload
+# of "the VM reads frozen bytecode while panel DMA crosses one dcache", and the
+# 32B line exists because 64B lines broke the CPU<->GDMA handoff in the
+# SRAM-bounce FLUSH PATH. There is no flush path in this image and no frozen
+# console to stream. Mainline's defaults stand until somebody measures this
+# board's actual workload; a per-board verdict does not transfer, in either
+# direction (CLAUDE.md).
+#
+# THE 120MHz MSPI PROFILE. Five flags that move together, gated behind
+# IDF_EXPERIMENTAL_FEATURES, requiring the #169 vendor-gate patch or the boot
+# ABORTS SILENTLY. Both siblings took it after an A/B on their own glass paid
+# for it in frames per second. This board's bottleneck is a WiFi link, not
+# PSRAM bandwidth, and it is the one board where a silent boot abort cannot be
+# seen -- there is no screen to be blank. Stay at 80MHz, which is also why
+# build.sh does not apply the retune patch.
+#
+# REPR_C UNBOXED FLOATS (#66). A float-boxing lever for cart frame loops. This
+# board runs no carts; build.sh declines it in writing.

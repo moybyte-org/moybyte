@@ -121,7 +121,8 @@ signature check on device, streamed install, boot the new slot, rollback
 self-heal) has run on the glass of the T-Deck and the P4. Each board also serves
 the browser console below over its own WiFi: the wasm bundle is baked into the
 firmware image, so a phone on the same network gets the full console from the
-device itself.
+device itself — reading that board's cartridges and writing every change back to
+it, behind the pairing pin the board puts on screen.
 
 **Five rendering backends, one contract** — host, three boards, and a browser
 build that rasterizes in WebAssembly. That contract is written down
@@ -201,9 +202,13 @@ points, so it is a second store rather than a way to run one loose folder.)
 **In the browser, for real.** `firmware/web_runner/build.sh` compiles the same
 system to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
 static `dist/` — serve it with `firmware/web_runner/serve.py` and the whole
-system, cart roster included, runs in a tab with no server behind it. That build
-is also what the spec repo vendors as its player, so **you can try a cart without
-cloning anything**: `moy run` over there is one command and no dependencies.
+system, cart roster included, runs in a tab with no server behind it. Carts and
+drawings made there are kept in that browser and are still on the shelf after a
+reload; a `.moy` file carries one in or out. A page served by a *board* instead
+edits that board's store, over the wire — where the page came from decides which,
+once, and the two never mix. That build is also what the spec repo vendors as its
+player, so **you can try a cart without cloning anything**: `moy run` over there
+is one command and no dependencies.
 
 ## Write a cart
 

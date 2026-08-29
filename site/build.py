@@ -227,8 +227,13 @@ FEATURES = [
      "this page &mdash; and every board carries that build inside its firmware. "
      "Switch it on and the board hands the console to any phone or laptop on "
      "the same WiFi: it opens in a tab and runs there at full speed, drawing "
-     "every pixel itself. It is a second console rather than a window onto the "
-     "board&rsquo;s screen, and it does not save back to the board yet."),
+     "every pixel itself rather than mirroring the board&rsquo;s screen. Where "
+     "the page came from decides where its cartridges live. Opened from a "
+     "board, it edits that board&rsquo;s cartridges and writes every change "
+     "back to it, behind the pairing pin the device puts on screen. Opened "
+     "from an ordinary web host &mdash; this page &mdash; the cartridges and "
+     "drawings are kept in your browser and are still there on your next "
+     "visit, and a <code>.moy</code> file carries one in or out."),
 ]
 
 TARGETS = [
@@ -262,10 +267,15 @@ ROUGH = [
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",
     "Open holes are filed rather than hidden: the system apps are not editable "
-    "yet, USB-HID keyboard and audio on the P4 are unbuilt, and the console in "
-    "a browser does not sync with a board yet &mdash; the one on this page "
-    "holds the built-in cartridges only, and a board-served one can read the "
-    "cartridges off that board but cannot save your changes home to it.",
+    "yet, and USB-HID keyboard and audio on the P4 are unbuilt.",
+    "There are no accounts, and nothing syncs between your own devices: "
+    "cartridges made in a browser stay in that browser, and cartridges made on "
+    "a board stay on that board. A <code>.moy</code> file moves one across, and "
+    "a page served by a board edits that board&rsquo;s cartridges directly &mdash; "
+    "but a browser&rsquo;s storage is not a backup, so export the ones you "
+    "would mind losing.",
+    "There is no community gallery: publishing a cartridge for other people to "
+    "browse, download and play is filed, not built.",
 ]
 
 
