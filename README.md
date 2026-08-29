@@ -204,9 +204,13 @@ system to WebAssembly (it fetches emsdk itself; first build is slow) and emits a
 static `dist/` — serve it with `firmware/web_runner/serve.py` and the whole
 system, cart roster included, runs in a tab with no server behind it. Carts and
 drawings made there are kept in that browser and are still on the shelf after a
-reload; a `.moy` file carries one in or out. A page served by a *board* instead
-edits that board's store, over the wire — where the page came from decides which,
-once, and the two never mix. That build is also what the spec repo vendors as its
+reload; a `.moy` file carries one in or out. Drop a **PICO-8** cart on it
+(`.p8` or a `.p8.png` off the BBS) and it converts and runs — the assets and the
+cart's own code, ported to Lua under a generated p8 shim, so it opens in the
+editors like anything else. A page served by a *board* instead edits that
+board's store, over the wire — where the page came from decides which, once, and
+the two never mix — and from there Settings can update the board's firmware,
+which is how the headless Zero is updated at all. That build is also what the spec repo vendors as its
 player, so **you can try a cart without cloning anything**: `moy run` over there
 is one command and no dependencies.
 

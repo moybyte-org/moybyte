@@ -293,7 +293,12 @@ FEATURES = [
      "back to it, behind the pairing pin the device puts on screen. Opened "
      "from an ordinary web host &mdash; this page &mdash; the cartridges and "
      "drawings are kept in your browser and are still there on your next "
-     "visit, and a <code>.moy</code> file carries one in or out. There is "
+     "visit. A <code>.moy</code> file carries a cartridge in or out either "
+     "way, and dropping a <b>PICO-8</b> cartridge on the page converts it and "
+     "plays it &mdash; art, sound, map and the game&rsquo;s own code, which "
+     "you can then open and read, because this console speaks that language "
+     "too. When a board served the page, its Settings can update the board "
+     "itself. There is "
      "nothing to sign into and nothing leaves the machine it was made on; the "
      "trade is that a browser is not a filing cabinet, so export the ones you "
      "would mind losing."),
@@ -312,6 +317,11 @@ TARGETS = [
      "The ~$15 3.5&Prime; smart display, and the third board: a QSPI panel of "
      "its own, touch only, landscape 480&times;320, and cartridges on the TF "
      "card when there is one in the slot."),
+    ("Seeed XIAO ESP32-S3", "ESP32-S3",
+     "The odd one, and the smallest: no screen at all. A browser is its "
+     "console &mdash; it serves that same WebAssembly build off its own flash "
+     "&mdash; and the board is the cartridge store behind it, on whatever "
+     "screen happens to be nearby."),
     ("This browser tab", "WebAssembly",
      "The system compiled to wasm &mdash; MicroPython plus the same C drawing "
      "kernels the boards run. The page draws every pixel itself, a locked "
