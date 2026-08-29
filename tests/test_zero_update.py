@@ -165,16 +165,27 @@ def test_a_boot_check_runs_once_and_installs_nothing_by_default():
     assert task.status()["available"]["label"] == "0.9"
 
 
-def test_ota_auto_is_the_opt_in_that_makes_the_boot_check_install():
-    """OFF by default and a documented field in /moy/zero.json, because a board
-    that lives on a shelf and is never reached for is a real case and so is a
-    board somebody is standing next to."""
+def test_no_setting_turns_the_boot_check_into_an_install():
+    """`"ota_auto": true` in /moy/zero.json used to, and it was DELETED (owner
+    call 2026-08-29). No other board in this tree has an auto-install concept:
+    a console board takes two deliberate human acts, opening the update screen
+    and confirming. This board's screen is the browser it serves, and the
+    request will come from there.
+
+    Pinned as an absence because that is the failure mode -- a flag re-added
+    "off by default" is unattended firmware replacement on the board holding a
+    kid's only local copy of their carts, reachable by editing a JSON file.
+    """
     ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota, auto=True)
+    with pytest.raises(TypeError):
+        zero_host.ZeroUpdate(ota, auto=True)
+    task = zero_host.ZeroUpdate(ota)
+    assert not hasattr(task, "auto")
+    assert "auto" not in task.status()
     task.boot_check_once()
     _drive(task)
-    assert "begin_download" in ota.calls
-    assert task.state in ("downloading", "installing", "reboot")
+    assert "begin_download" not in ota.calls
+    assert task.state == "offer"
 
 
 def test_an_empty_channel_is_not_an_error():
@@ -243,8 +254,8 @@ def test_the_board_keeps_serving_for_a_while_before_it_reboots():
     for this has to be able to read `"state": "reboot"` and learn the board is
     rebooting rather than simply gone."""
     ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota, auto=True)
-    task.boot_check_once()
+    task = zero_host.ZeroUpdate(ota)
+    task.request("install")
     for _ in range(20):
         task.step()
     assert task.state == "reboot"
@@ -265,8 +276,8 @@ def test_installing_without_an_offer_checks_first():
 
 def test_a_busy_updater_refuses_a_second_request_rather_than_interleaving():
     ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota, auto=True)
-    task.boot_check_once()
+    task = zero_host.ZeroUpdate(ota)
+    task.request("install")
     task.step()
     task.step()
     assert task.state == "downloading"
@@ -290,8 +301,8 @@ def test_a_refused_download_says_which_half_refused_it():
 def test_a_failed_set_boot_never_reads_as_a_finished_install():
     ota = _FakeOta(MANIFEST)
     ota.finish_ok = False
-    task = zero_host.ZeroUpdate(ota, auto=True)
-    task.boot_check_once()
+    task = zero_host.ZeroUpdate(ota)
+    task.request("install")
     _drive(task)
     assert task.state == "error"
     assert ota.reset_called == 0
@@ -299,8 +310,8 @@ def test_a_failed_set_boot_never_reads_as_a_finished_install():
 
 def test_cancel_stops_the_transfer_and_returns_to_idle():
     ota = _FakeOta(MANIFEST)
-    task = zero_host.ZeroUpdate(ota, auto=True)
-    task.boot_check_once()
+    task = zero_host.ZeroUpdate(ota)
+    task.request("install")
     task.step()
     task.step()
     task.request("cancel")

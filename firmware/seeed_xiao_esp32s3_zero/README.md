@@ -160,12 +160,21 @@ an instance of it.
 **A boot-time check runs, and installs nothing.** Once the running image has
 certified itself (below), the board checks the manifest once, prints the result
 on serial, and caches it for `GET /update`. Installing takes a request carrying
-the pin — the same act of consent that gates every other write here. The one
-exception is opt-in: `"ota_auto": true` in `/moy/zero.json` makes the boot check
-install what it finds. **It is OFF by default**, because an unattended firmware
-replacement on the board holding a kid's only local copy of their carts should
-be something somebody chose. ON is a defensible setting for a board that lives
-on a shelf and is never reached for; it is a one-word edit.
+the pin — the same act of consent that gates every other write here.
+
+**There is no auto-install, and there was one for a day.** `"ota_auto": true`
+in `/moy/zero.json` made the boot check install what it found, off by default;
+the owner deleted it on 2026-08-29. It was a one-board divergence — no other
+board in this tree has any auto-install concept, and a console board takes two
+deliberate human acts, opening the update screen in Settings and confirming —
+and nothing ever wrote the flag, so reaching it meant hand-editing a JSON file
+over the cable. Unattended firmware replacement, on the board holding the only
+local copy of a kid's carts, down a path that had never run on hardware, is not
+a thing to carry even switched off. **Where the request will come from instead:
+the Settings menu of the browser console this board serves.** The browser is
+this board's screen; `POST /update` is already the right transport and keeps its
+job. That console-side button is a follow-up, not something this board is
+waiting on — the endpoint works today.
 
 **How a human learns it happened**, three ways, none of them a UI:
 
@@ -201,19 +210,37 @@ its own network for as long as it takes to be told about a real one:
 ```
 boot → connect() finds nothing joinable
      → SoftAP `moybyte-zero-XXXX`  (open; the suffix is the AP MAC's tail)
-     → join it from a phone, open http://192.168.4.1/
+     → join it from a phone; the form opens by itself (or open http://192.168.4.1/)
      → name + 4-digit pin + a network from the scan + its password
      → saved → reboot → STA, as normal
 ```
 
 The form is one small self-contained page on **port 80** (a phone types
 `192.168.4.1`, not `192.168.4.1:8080`), and it is a plain `<form>` — the page's
-only script fills the network list, so a phone with a broken one can still be
-typed into. The AP is **open on purpose**: there is nothing behind it but the
-form, it exists only while the board is unconfigured, and the one secret that
-crosses it belongs to the person standing next to the board. What it costs is
-that a neighbour in range during that minute could configure the board first;
-what it buys is a setup that needs no printed key and no instructions.
+only script fills the network list, offers the reveal on the password field and
+tells you what the scan found, so a phone with a broken script still has a page
+with a correct static state to type into. The AP is **open on purpose**: there
+is nothing behind it but the form, it exists only while the board is
+unconfigured, and the one secret that crosses it belongs to the person standing
+next to the board. What it costs is that a neighbour in range during that minute
+could configure the board first; what it buys is a setup that needs no printed
+key and no instructions.
+
+**It is a captive portal since 2026-08-29, reversing this port's own recorded
+decline** (the argument, its price and what would reverse it back live in
+`zero_setup.py`'s docstring, which quotes the decline verbatim). `DnsRedirect`
+answers every name on :53 with the AP's address and every unserved `GET` is a
+302 to `http://192.168.4.1/`, so a phone's connectivity probe reaches this board
+and gets an answer it did not expect — which is what makes both platforms open
+the form without anybody typing an address. It works because ESP-IDF's SoftAP
+DHCP already hands out the AP's own address as the DNS server
+(`CONFIG_LWIP_DHCPS_ADD_DNS`, `y` in this board's generated sdkconfig), so
+nothing has to be configured for the queries to arrive — which is fortunate,
+since MicroPython exposes no `esp_netif_dhcps_option` binding at all, RFC 8910's
+option 114 included. **The portal is optional at every step**: a responder that
+cannot bind :53 prints one line and setup serves exactly as it did before, and
+answers carry TTL 0 so nothing this board says about a name outlives the phone's
+stay on the AP.
 
 Setup writes two files: the network into `/moy/wifi.json` (**merged** — the new
 one goes first, since `connect()` walks the list in order, and older ones are
@@ -287,8 +314,9 @@ partition table, the console arrangement, WiFi with this sdkconfig, the OTA
 endpoints on real flash, and the rollback confirm.
 
 Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
-and `tests/test_zero_update.py` (110-odd cases over the parsing, the refusals,
-the persisted shapes, the browser-side queue and the update state machine), plus
+and `tests/test_zero_update.py` (140-odd cases over the parsing, the refusals,
+the persisted shapes, the captive portal's packets, the browser-side queue, the
+update state machine and one whole first run end to end), plus
 `tests/test_zero_provision.py` and this board's row in
 `tests/test_staging_closure.py`.
 
@@ -336,12 +364,11 @@ the persisted shapes, the browser-side queue and the update state machine), plus
   it is worth doing with `make firmware-monitor-zero` already attached.
 - **A phone has never joined the setup AP.** The HTTP side was driven from the
   board itself, so what is proven is the server, the form, the scan and the
-  parsing — not the phone's association, its captive-portal probe, or how the
-  page looks on a small screen.
-- **The reboot-into-STA leg of a real setup.** The loopback saves into a list,
-  not onto flash, and never calls `machine.reset()` — running the genuine
-  `run()` would have overwritten the board's real credentials with a made-up
-  network. `save_setup` is covered by a host test that round-trips real files.
+  parsing — not the phone's association, whether its connectivity probe really
+  opens the portal, or how the page looks on a small screen. The portal's own
+  parts are host-covered (`dns_reply` against real probe hostnames and against
+  the malformed datagrams it must drop, the responder over a real UDP socket,
+  the 302 for each platform's probe path) — what no host can have is a phone.
 - **The LED's polarity.** Pin 21 takes both levels and reads them back; nobody
   looked at the board. It is documented active-low from the Seeed schematic.
 - **A cart in a browser driving this board's PINS.** The console half is
@@ -350,6 +377,143 @@ the persisted shapes, the browser-side queue and the update state machine), plus
   so `gpio_link` + the worker's pump remain host-checked. The wire shape between
   the two ends is pinned by a test that runs a real batch out of the browser
   queue and into `zero_gpio.handle`.
+
+**The reboot-into-STA leg LEFT this list on 2026-08-29**, and it is worth
+saying how, because the same move is available to the rest of it. The on-glass
+loopback saved into a list and never called `machine.reset()` — running the
+genuine `run()` on the desk would have overwritten that board's real
+credentials with a made-up network — so four pieces were each proven and the
+SEQUENCE was not, which is the half that reboots a board. It is now covered on
+the host by `test_a_whole_first_run_lands_on_flash_and_reboots_in_that_order`:
+the real `run()`, the real transport over a real socket, real files in a tmp
+dir, with only the radio and the reset injected. It pins that a refusal writes
+nothing and does not arm the reboot, that the phone has the whole answer
+**before** the reset (the files are read inside the fake `machine.reset()`, so
+"before" is a fact and not an inference), that the new network goes first and
+the old one is kept, and the order the AP and both sockets come down in. What
+is left on this board is the radio: that the association happens and that the
+reboot comes back up on STA, which is item 1 of the checklist below.
+
+## The bench checklist (one board, one phone, one afternoon)
+
+What the two lists above leave is genuinely hardware-only. This is the order to
+do it in — each step's failure would otherwise be mistaken for the next step's
+— with what a PASS looks like and what a FAILURE looks like, because on a board
+with no screen those are easy to confuse. Attach the monitor first and leave it
+attached for all of it:
+
+```bash
+make firmware-build-zero
+make firmware-flash-zero PORT=/dev/ttyACM0
+make firmware-monitor-zero PORT=/dev/ttyACM0
+```
+
+**0. The image boots at all.** *Pass:* the monitor prints a MicroPython banner
+and then a `ZERO ...` line within a few seconds. *Fail:* a repeating
+`rst:0x3 (RTC_SW_SYS_RST)` / bootloader banner loop with nothing after it —
+that is the partition table being rejected, this board's worst failure mode,
+and it is a build-side fix (the CSV), not anything below. Silence with no
+banner at all is usually the DTR rule, not a dead board: a raw pyserial client
+must set `dtr=True`.
+
+**1. A phone joins the setup AP and the form opens itself.** A board straight
+off the migration flash has no credentials and is already here — the flash
+wipes the store. On a board that has since been provisioned, move them aside
+over the cable and reset:
+
+```bash
+mpremote connect /dev/ttyACM0 fs cp :/moy/wifi.json wifi.json.bak
+mpremote connect /dev/ttyACM0 fs rm :/moy/wifi.json
+mpremote connect /dev/ttyACM0 reset
+```
+
+*Pass:* the monitor prints `ZERO no wifi -- hosting the setup AP` and then
+`ZERO SETUP  join 'moybyte-zero-XXXX' (open) and the form opens itself -- or
+open http://192.168.4.1/`; the phone's WiFi list shows that SSID; joining it
+pops the sign-in sheet within ~10s showing the form, with the AP name in the
+subtitle. *Fail, and which is which:*
+- the line says `-- or open http://192.168.4.1/` **without** "and the form
+  opens itself" → the :53 bind failed and a `no captive portal (dns: …)` line
+  says why. Everything else still works; type the address.
+- the SSID never appears → the AP itself, not the portal.
+- the phone joins, says "no internet", and no sheet appears → the probe is not
+  reaching us. Test the responder directly from a laptop on the same AP:
+  `dig @192.168.4.1 connectivitycheck.gstatic.com +short` should answer
+  `192.168.4.1`. If it does, the phone is not asking us (a private-DNS
+  setting); if it times out, the responder is not answering.
+- the sheet appears but is blank → the page, not the portal. `curl -v
+  http://192.168.4.1/` from the laptop.
+
+**2. The page is usable one-handed.** *Pass:* nothing needs pinch-zoom to read,
+tapping a field does not zoom the page, the pin field brings up a number
+keypad, the network list shows real SSIDs as tappable chips, tapping one fills
+the field, and "show password" reveals what was typed. *Fail:* the page zooms
+on focus (an input smaller than 16px slipped in); the chips are absent and the
+hint still reads "Looking for networks..." (the `/scan` fetch never resolved —
+check `ZERO SETUP scan failed:` on the monitor); the hint reads "No networks in
+range" while the phone can see plenty (the STA scan beside a live AP is what
+that means, and it is the one thing only this hardware can test).
+
+**3. The reboot-into-STA leg.** Fill the form in with a real network and submit.
+*Pass:* the "saved" page names the network and shows `http://<name>.local:8080/
+?pin=NNNN`; the monitor prints `ZERO SETUP saved: name=… ssid=… -- rebooting`
+and then, after the reset, `ZERO wifi: <ssid> <ip>` and `ZERO serving
+http://<ip>:8080/?pin=NNNN`. Then check what landed:
+`mpremote connect /dev/ttyACM0 fs cat :/moy/wifi.json` — the network just typed
+must be **first** and any older one still there — and `… fs cat :/moy/zero.json`
+→ `{"name": …, "pin": …}`. *Fail:* the board reboots straight back into the
+setup AP → it saved but cannot join (a wrong password: the whole reason for the
+reveal in step 2); the page hangs on submit with nothing on the monitor → the
+POST never arrived; `ZERO SETUP save failed:` → the filesystem, and the board
+stays on the AP so it can be retried. Restore the real credentials afterwards
+(`mpremote connect /dev/ttyACM0 fs cp wifi.json.bak :/moy/wifi.json`) or run
+`./provision.sh`.
+
+**4. The LED's polarity.** It is documented active-low from the Seeed
+schematic and nobody has looked. With the board serving and its pin known:
+
+```bash
+curl -s -X POST http://<ip>:8080/gpio \
+  -d '{"v":1,"pin":"NNNN","ops":[{"p":21,"mode":"out","v":0}]}'
+# -> {"ok": 1, "reads": {}, "err": []}
+```
+
+*Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
+that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
+*Fail:* the opposite, in which case the schematic reading is wrong and
+`zero_gpio.PINS`' note about pin 21 needs correcting. Either way, write the
+answer down here. Note `pin_write(21, 0)` then `pin_read(21)` answers 0 and
+leaves the LED as it is — a read never reconfigures a pin.
+
+**5. A cart in a browser drives a pin.** Open the paired url on a laptop,
+write a cart calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer, run
+it. *Pass:* the LED blinks in step with the cart, and the network tab shows
+`POST /gpio` batches carrying the pin. *Fail:* 403 `{"error":"pin"}` → the page
+was opened without `?pin=`; batches leaving with no LED → step 4's polarity;
+no batches at all → `gpio_link` or the worker's pump, which is the half that
+has only ever been host-checked.
+
+**6. The OTA endpoints on real flash.** Both methods are gated and both read
+the pin off the QUERY, the POST included:
+
+```bash
+curl -s "http://<ip>:8080/update?pin=NNNN"
+curl -s -X POST "http://<ip>:8080/update?pin=NNNN" -d '{"action":"check"}'
+```
+
+*Pass:* the GET returns JSON naming the running version/label/channel/slot and
+`"state": "idle"`, plus `"last"` once an install has happened; the POST answers
+`{"ok": true, "message": "queued", …}` **immediately** and the monitor prints a
+`ZERO ota:` line a moment later. *Fail:* `403 {"error":"pin"}` → the pin, and
+note it is not in the body here; `503 {"error":"no updater"}` → `make_updater`
+failed at boot and printed why; a POST that hangs for tens of seconds → it is
+doing the download inline, which is exactly the shape it is written not to have.
+
+**7. The rollback confirm.** After an install, watch for `ZERO ota: this image
+confirmed itself -- rollback cancelled`. *Pass:* it appears once, shortly after
+the store host comes up. *Fail:* it never appears and the next reset comes back
+on the old label — which is the bootloader doing exactly its job, and means the
+new image's host did not come up.
 
 ## Hardware facts (learned the painful way — respect these)
 

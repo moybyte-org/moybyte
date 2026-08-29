@@ -141,11 +141,19 @@ def connect(wait_ms=15000, hostname=None):
 # `GET /update`; it does not install. Installing is `POST /update` carrying the
 # pin -- the same act of consent that gates every other write to this board.
 #
-# The one exception is opt-in and lives in /moy/zero.json: `"ota_auto": true`
-# makes the boot check install what it finds. It is OFF by default because an
-# unattended install on the board that holds the kid's only copy of their carts
-# should be something somebody chose, and ON is a defensible choice for a board
-# that lives on a shelf and is never reached for -- see the README.
+# THERE IS NO EXCEPTION, and there was one until 2026-08-29 (owner call): an
+# `"ota_auto": true` in /moy/zero.json made the boot check install what it
+# found. It is deleted. No other board in this tree has any auto-install
+# concept -- a console board takes two deliberate human acts, opening the
+# update screen in Settings and confirming -- so this was a one-board
+# divergence, on the board holding the only local copy of a kid's carts,
+# down a path that had never run on hardware. Nothing wrote the flag either:
+# reaching it meant hand-editing a JSON file over the cable.
+#
+# WHERE THE REQUEST WILL COME FROM instead: the browser console this board
+# serves. The browser IS this board's screen, so its Settings menu is where
+# "update this board" belongs, and it will POST the same /update this file
+# already gates. That is a follow-up, not something this file does today.
 #
 # HOW A HUMAN LEARNS IT HAPPENED, all three ways, none of them a UI:
 #   * serial -- every transition prints a `ZERO ota:` line, and the boot line
@@ -197,9 +205,8 @@ class ZeroUpdate:
                              -> downloading -> installing -> reboot
     """
 
-    def __init__(self, updater, auto=False):
+    def __init__(self, updater):
         self.ota = updater
-        self.auto = bool(auto)
         self.state = "idle"
         self.error = None
         self.manifest = None
@@ -271,14 +278,18 @@ class ZeroUpdate:
         return False
 
     def boot_check_once(self):
-        """Queue the once-per-boot manifest check. Deliberately called only
-        after the running image has been CONFIRMED (see serve()): looking for
-        the next firmware before the current one has certified itself is how a
-        board chases a bad update round a rollback loop."""
+        """Queue the once-per-boot manifest check. It LOOKS and never installs
+        -- installing takes a request carrying the pin, and there is no setting
+        that changes that (see the ota_auto note in this module's header).
+
+        Deliberately called only after the running image has been CONFIRMED
+        (see serve()): looking for the next firmware before the current one has
+        certified itself is how a board chases a bad update round a rollback
+        loop."""
         if self._checked:
             return False
         self._checked = True
-        self._want = "check+install" if self.auto else "check"
+        self._want = "check"
         return True
 
     # -- the phases -----------------------------------------------------------
@@ -387,7 +398,6 @@ class ZeroUpdate:
         ota = self.ota
         out = {
             "state": self.state,
-            "auto": self.auto,
             "running": {"version": ota.version(), "label": ota.version_label(),
                         "channel": ota.channel(), "slot": ota.slot(),
                         "board": _ota_board()},
@@ -538,7 +548,7 @@ def make_updater(me):
         ota.set_wifi(_ZeroWifi(),
                      go_online=lambda: connect(hostname=me.get("name")
                                                or HOSTNAME))
-        task = ZeroUpdate(ota, auto=bool(me.get("ota_auto")))
+        task = ZeroUpdate(ota)
         return ota, task
     except Exception as exc:             # noqa: BLE001
         print("ZERO ota: updater unavailable:", exc)
