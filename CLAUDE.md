@@ -949,8 +949,8 @@ Record: `docs/history/sweeps_2026-08.md`; the gates are in #206, #207, #208.
 The console UI is **one codebase** that both the host simulator and the
 device run — they render the *same* 320×240 pixels with the *same* petme128 font.
 The canonical sources live in `runtime/`; `build.sh` **stages copies into the
-firmware `modules/` tree** so the device freezes the identical code (same pattern,
-re-staged every build, gitignored). The shipped **2026-07 shell** (spec
+firmware `modules/` tree**, re-staged every build and gitignored, so the device
+freezes the identical code. The shipped **2026-07 shell** (spec
 `docs/shell_ux_v1.md`) is everything-is-a-process: two concerns — authoring and
 playing — joined by one primitive, `run(cart)` plays until exit and returns control
 to whoever called it.
@@ -962,9 +962,9 @@ to whoever called it.
   the user sees is an app it runs. Backend-agnostic: injected `make_api` + cart
   store. (frozen as `console`)
 - `runtime/project.py` / `player.py` / `editor_app.py` / `wm.py` — the 2026-07 shell
-  split (build-staged like the rest): **`Project`** = the open cart's live workspace
-  (cart/config/sheet/tilemap/images/pmem + the `commit_*` persistence verbs; a commit
-  also appends the undo journal and runs graduation detection). **`Player`** = the
+  split (build-staged like the rest): **`Project`** = the open cart's live workspace and its
+  `commit_*` verbs (`runtime/README.md` lists what it holds; the rule here is that
+  a commit also appends the undo journal and runs graduation detection). **`Player`** = the
   `run(cart) → plays → returns` black box: starts the cart under the frozen
   `make_api`, ticks it, turns any crash into the **crash-to-code throw**
   (2026-07-23: the run exits straight into the Editor's Code tab with the caret
@@ -993,10 +993,9 @@ to whoever called it.
   the desk is a window with a WM title strip (minimize/maximize/close),
   draggable by the strip and resizable by the bottom-right grip
   (apply-on-release rubber band). The **PLAY icon drops to the fullscreen
-  Library** (the play world): system-app carts leave the shelf on this tier
-  ("apps are windows, games are fullscreen"), a tap runs the game FULLSCREEN
-  exactly like the small tiers (windows only exist above `"desk"`, so every
-  `not _order` deferral presents fullscreen; `composite_game` routes the play
+  Library** (the play world) — `docs/shell_ux_v1.md` is the UX authority for both
+  worlds; the rule a coder needs is that windows exist ONLY above `"desk"`, so
+  every `not _order` deferral presents fullscreen ( `composite_game` routes the play
   world through the polymorphic `_blit_game` — native P4 blit / web b64-spr),
   and the Make tile / a card's CHANGE drop back to the desk (CHANGE with that
   project's Editor open). `ws.windowed_chrome` is a world-aware PROPERTY
@@ -1260,7 +1259,28 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
 
 ### Hard device constraints (learned the painful way — respect these)
 
-- **SD shares the SPI host with the display.** **SD is no longer mounted before `init_display()` (#56).** The old boot prefetch read carts via `machine.SDCard` *before* the panel came up; that re-runs `spi_bus_initialize()`, and on a **populated** card the mount succeeds but leaves the shared host claimed, so the next `init_display()` intermittently failed with `can't convert '' to int` (the "no-SD / empty-SD boots, SD-with-files doesn't" bug, confirmed + fixed on hardware). So `moybyte_shell.main()` now defaults `PREFETCH_SD_BEFORE_DISPLAY=False`: **nothing touches SD before the panel is up**, and `run_desktop` loads carts *after* init via `with_sd_live` (`prefetched=None → _load_carts(with_sd_live)`), degrading to built-in carts on any SD failure (so this can only make display init MORE reliable). Mounting `machine.SDCard` **after** the panel is live still hard-hangs the board (gray screen, dead USB): `esp_lcd` and `machine.SDCard` are two driver stacks fighting over one host and CS-deselect alone is not enough — which is exactly why the post-display path uses the native `moy_sd` attach (below), not `machine.SDCard`. **Live reads/writes (post-display) go through the native `moy_sd` module** (`native/moy_sd/modmoy_sd.c`), which *attaches* the card to the host `esp_lcd` already initialized (`sdspi_host_init_device`, no bus re-init — the ESP-IDF "Sharing the SPI Bus" pattern) and leaves the panel device intact. `moybyte_sd.with_sd_live(fn)` mounts via `moy_sd` **once and keeps the card resident** for the session, then just runs `fn`. **Do not tear the SD device down between ops** (learned the painful way): a per-op `sdspi_host_deinit` — or reconfiguring the panel's `TFT_CS` via `Pin(...)` — corrupts the shared bus/DMA state and the *next panel flush silent-hangs the board* (the write itself lands on SD, then resume freezes; no panic, USB stays enumerated but dead). So leave `TFT_CS`/`SD_CS` alone (driver-owned; only park the unused LoRa `RADIO_CS` high) and never flush the panel inside the session — the desktop loop is single-threaded, so SD ops run between frames. On-device writes are enabled (`Workstation.can_manage`, wired to `with_sd_live` in `run_desktop`).
+- **SD shares the SPI host with the display, and getting it wrong HANGS the
+  board** — gray screen, dead USB, no panic. Three rules, each learned on
+  hardware:
+  - **Nothing touches SD before the panel is up** (#56). A pre-display mount
+    re-runs `spi_bus_initialize()`, and on a POPULATED card it succeeds while
+    leaving the shared host claimed, so the next `init_display()` intermittently
+    failed — the "no-SD boots, SD-with-files doesn't" bug.
+    `PREFETCH_SD_BEFORE_DISPLAY=False`; carts load after init and degrade to the
+    built-ins on any SD failure.
+  - **After the panel is live, never `machine.SDCard`** — `esp_lcd` and that
+    driver fight over one host and a CS-deselect is not enough. Live reads and
+    writes go through the native `moy_sd` ATTACH (`sdspi_host_init_device`, no bus
+    re-init — the ESP-IDF "Sharing the SPI Bus" pattern), which leaves the panel
+    device intact. `moybyte_sd.with_sd_live(fn)` mounts once and keeps the card
+    RESIDENT for the session.
+  - **Do not tear the SD device down between ops, and do not touch the CS pins.**
+    A per-op `sdspi_host_deinit`, or reconfiguring `TFT_CS` via `Pin(...)`,
+    corrupts the shared bus/DMA state and the NEXT PANEL FLUSH silently hangs the
+    board — the write itself lands, then resume freezes. Leave `TFT_CS`/`SD_CS`
+    alone (driver-owned); park only the unused LoRa `RADIO_CS`. Never flush the
+    panel inside a session: the loop is single-threaded, so SD ops run between
+    frames. (`tests/test_moybyte_sd.py` pins which lifecycle touches which pin.)
 - **T-Deck serial RX WORKS, and the fix was three things at once (#201, 2026-08-16).** TX always
   streamed (PERF/HITCH lines flow for hours). RX did not, and the explanations in this file were
   wrong twice: first "this fork's USB-CDC stack has no at-arrival interrupt-char scan" (false —
@@ -1364,10 +1384,131 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
   - When a T-Deck sits wedged for esptool, `--before usb_reset` connects where
     `default_reset` write-times-out.
 - **Cart versioning (#47):** every `system_carts/*/manifest.json` carries an integer `"version"`. `seed_builtins` re-seeds an on-SD built-in only when the baked version is **newer**, and preserves the kid's data (`pmem.json` saves + `config.json` tuning) across the re-seed. **Bump a built-in's manifest `version` whenever you change its content**, or an already-seeded device keeps the stale copy.
-- **Device performance — the single source of truth is issue #66** (the living "performance ledger": current per-cart fps, the frame-budget model, shipped/reverted/open levers, how to measure). **Edit #66's body when new hardware numbers land** (comments = changelog), then `make sync-issues`; do NOT scatter numbers into this file, the plan, or new docs — they go stale. The **cross-board strategic analysis** (why we trail native emulators, the frame-budget taxes, the PPA scale-only verdict, and the ranked lever roadmap — frameskip / `-Ofast` / SRAM working set / `moy_gfx` IRAM / dual-core / Lua / render-overlap) lives in **`docs/perf_native_gap_v1.md`**, tracked by **#77**; P4 numbers are in **#58**. **No per-cart fps snapshot lives here** — one did, and it went stale exactly as this paragraph warns: it still quoted "Brick Siege 25-33" long after the board reached the 60 cap, inside the sentence forbidding scattered numbers. Read #66 for where the roster stands and #58 for the P4; the shipped-lever facts below are dated and stay. **The engine-side lever chain is exhausted** — every feed/dispatch/GC-cost lever tried and either shipped (auto-native carts #67, live-set diet, pal-state variant cache #72, layer pool, `background()`) or reverted with a recorded verdict (Fold-2 auto map cache, third bounce slot — the latter also retired the core-1 feeder unbuilt); remaining fps levers are per-cart render diets (Brick Siege field layer), the #67 Lua tier (strategic), and the P4 (#58). **Frameskip (#77) SHIPPED 2026-07-10, both boards** (Settings → FRAMESKIP, default OFF, persisted; P4 serial `skip 0|1`): a GAME's logic+input+audio tick every loop frame, render+composite+flush every second — logic at the full rate, motion at 30Hz; the trade is ~2× alloc churn (GC collects come ~2× as often). The same build's `-O3` moy_gfx pragma is **A/B-confirmed on the S3** (one pragma line: Brick Siege 33-36 → 51-54fps, render −40%; compute-bound there, unlike the dispatch-bound P4 where the same pragma measured null — per-board verdicts don't transfer), see #66/#77. Every draw verb is native (#43/#32/#62/#63) and the "draw LESS" idioms are both modeled by the seed carts and taught in docs/moy_cart_api.md → "Make it fast" — kids copy the carts, the carts model the doc. Remaining play defects: the #74 touch stalls (fingerprinted: boot-wake one-shot + rare steady-state; INT-pin gating is next) and the launcher live-wallpaper cost (~10fps launcher; the Make picker went static-black). Kid mode (#68): Settings → PERF DIAG (default OFF) gates the diag frame-eaters — **measurement sessions need it ON** — and DIAG SD LOG separately gates the periodic diag→SD write (keep OFF for stutter-free serial measurement). Three interpreter-vs-kid-idiom taxes were found and fixed ENGINE-SIDE, kid API untouched: per-draw-call dispatch (#43 batch + #63 native `spr_gate`), call-frame heap-spill (#63), and **float boxing** (#66: REPR_A allocated 16B per float result — 73KB/frame in sakura — whose heap-wrap gc collect was the long-standing ~150ms micro-stutter; fixed by the REPR_C build patch, unboxed 30-bit floats). Banding is structurally gone (#66 SRAM-bounce flush: the panel DMA only reads internal SRAM; the esp_lcd no-acquire patch makes banded tx_color queue-only). Remaining known frame spikes are tracked: #68 (diag-caused, kid-mode gate) and #69 (keyboard+touch I2C stalls, sized via I2CSTAT). Diagnostics: `PERF`/`DRAWBRK`/`DRAW2`(now with per-verb map/text/fill)/`BATCH`/`FLUSHBRK`/`CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH` serial lines, gated behind `perf_capture`.
-- **OTA / on-device firmware update (#53):** the build is now **dual-OTA** (`build.sh --ota` → `otadata + ota_0 + ota_1 + vfs`; the slot sizes are NOT the same on the two boards and are not repeated here — read `firmware/lilygo_t_deck_plus_mainline/build.sh`'s generated table and `firmware/esp32_p4_wifi6_touch_lcd_7b/boards/MOYBYTE_P4/partitions-moybyte-p4.csv`, which are the only things that decide whether an image fits), so the device can flash a new `.bin` from `/sd/update` into the **inactive** slot and ping-pong (`moy_ota.OtaUpdater` + Settings → UPDATE FW). The running slot is never touched and rollback is on (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`), so a bad image self-heals — `moy_runtime.run_desktop` calls `updater.mark_valid()` once the desktop is up to confirm the new image. **The app (ota_0) moved off 0x10000 → 0x20000**, so `build.sh` merges the full image at the derived offset and the Makefile uses `MPY_APP_OFFSET`. **BOTH BOARDS ARE ALREADY ON THE DUAL-OTA LAYOUT** (owner-confirmed 2026-08-15) and have taken OTA updates on glass — see the channel entry below. So the one-time migration is HISTORY, not a step anybody has to plan: `make firmware-flash-lilygo-micropython-full-erase` (rewrite the partition table + clear `otadata` so the bootloader boots ota_0) is what a board that has NEVER carried the OTA table needs — a fresh unit, or one recovered to a legacy single-app image. The ordinary targets assume the table is there, which on these two it is. **Phase 3** adds Settings → UPDATE ONLINE: it reads `/sd/update/ota.json` (`{"manifest_url": ...}`), fetches a manifest (`version`/`url`/`sha256`/`size`), and if newer than `moy_ota.FIRMWARE_VERSION` streams the `.bin` to SD then installs it. **Bump `moy_ota.FIRMWARE_VERSION` on every release** (like cart versioning) or the online check won't offer the update. **This is VERIFIED on hardware, on both boards** — flash, reboot-into-new-slot, rollback and the WiFi download all ran on glass on 2026-08-02 (the numbers are in the channel entry below), which also settled the WLAN-vs-LCD-DMA coexistence that #38 had flagged as the open risk. This paragraph carried "still NEEDS ON-HARDWARE VERIFICATION" for two weeks after the entry directly beneath it recorded the whole chain passing; if you are about to re-verify OTA because a doc told you to, read that entry first.
-- **Branches and releases (2026-08-02):** **`dev` is where work lands; `master` is what users get.** Commit to `dev` by default — a change is not on master until a human has tested it on the boards it touches. The two branches ARE the two OTA channels and the two rolling releases, and CI keeps them apart: a push to `dev` builds a **beta** (channel `unstable` → the `firmware-beta` release), a push to `master` builds a **stable** (channel `stable` → `firmware-latest`, which is what the site's flasher writes and what the stable OTA offers). Host CI (tests) runs on both; the site (Pages) only ever republishes off master. Firmware builds are path-filtered pushes (`firmware/`, `runtime/`, `system_carts/`) and the workflow's per-ref `cancel-in-progress` collapses a burst of dev pushes into one build of the last commit — so "every push builds" costs one build, not ten. **The merge into master IS the release**, and `make release NAME=0.7` (`tools/release.py`) is how it happens: clean-tree + upstream checks → `make test` → `merge --no-ff dev` → bump `moy_ota.FIRMWARE_VERSION` **and** set `FIRMWARE_NAME` → commit + tag `v<NAME>` → **stop**, printing the push command (pushing master is the moment a device somewhere is offered the build, so it is a separate deliberate keystroke; `PUSH=1` skips the pause, `NOTES="…"` records what changed beside the constant). **`NAME` is the release**: `MAJOR.MINOR` (a third component only for a pure fix release), checked for shape, and it becomes the git tag, the `label` in the OTA manifest and the string on the kid's update screen — `FIRMWARE_VERSION` stays an opaque counter nobody reads, because it is signed as an int and betas stamp a build epoch into it. Re-cutting under a name already tagged is refused, which is the prompt to pick `0.6.1`. Both boards' `build.sh` read `FIRMWARE_NAME` for the stable `OTA_LABEL`. GitHub's default branch stays `master` so the public face of the repo is the tested tree. Don't hand-bump `FIRMWARE_VERSION`, and don't push straight to master for anything a board can run.
-- **Two OTA channels (#53):** STABLE (master) and UNSTABLE/BETA (dev) — the branch mapping above, now literal. Settings → CHANNEL toggles which the device checks; `ota.json` carries `{"channels": {"stable": url, "unstable": url}}`, and when the card says nothing `moy_ota.default_manifest_url()` points each channel at the **per-board** `latest-<board>.json` CI publishes on that channel's release (per board because an OTA payload is an app-partition image — Xtensa on the T-Deck, RISC-V on the P4 — so the wrong one is a valid image that cannot boot; the board is therefore INSIDE the signature (scheme `moybyte-ota-v2`) and a manifest naming another board is refused by name before the signature is even checked) — so a board straight off the flasher can update over the internet with **no ota.json and no host of the owner's** (the card still WINS, which is how a LAN/offline host overrides it; `_http_open` follows redirects because a release download 302s to the CDN). The build STAMPS its identity into a gitignored `modules/_ota_build.py` (CHANNEL/VERSION/LABEL) from `MOYBYTE_OTA_CHANNEL` (default `stable`; CI derives it from the ref), so the channel is a **build choice, not a per-branch source edit** (clean across merges) — `moy_ota` imports it and offers an install when the manifest's channel **differs** from the running one (a switch — incl. beta→stable rollback) **or** is a higher version **within** the channel. A beta's version is the build epoch (auto-newer each publish), shown via a human `label`; the CI publisher reads that stamp back out of the build artifact rather than re-deriving it, because a manifest advertising a version the image doesn't carry would offer the same install forever. **Publish the current working tree (uncommitted OK) as a beta the device pulls over WiFi:** `make ota-publish-unstable` (builds with the unstable stamp → `OTA_ROOT/unstable/{firmware.bin,latest.json}`), served by a persistent host (`make ota-serve-install` → systemd `--user` unit `tools/moybyte-ota.service`) — the LAN path, for when you don't want to push. Both boards are past the one USB flash the first two-channel firmware needed, so betas reach them over WiFi. **The GitHub-served channels are VERIFIED on glass** (P4, 2026-08-02, real WiFi): saved-credential autoconnect → TLS to github.com → the **302 to the release CDN** (whose header block is **5167 B** — the reader's 16K cap exists for exactly this; the 4096 this code shipped with would have failed precisely here) → the 846 B manifest → **signature verified on-device in 46 ms** against the baked key (tampered + unsigned both refused) → 3,085,168 B streamed to the internal VFS at **~55 KB/s** (55 s), sha256-checked against the SIGNED manifest → installed in 11 steps (55 s) → booted into the other slot, correctly stamped `beta <epoch> / unstable`. **The T-Deck ran the same chain on 2026-08-02** (owner-driven, baked urls): stable → 404 → “no STABLE build for this console yet”, beta → `hdr=5177B` → verify in **53 ms** (the S3 is barely slower than the P4's 46 ms) → 4,296,752 B at **~137 KB/s** (~31 s) → install ~380 ms per 32 KB block (~50 s) → “MOYBYTE UPDATED”. That download rate **supersedes the ≈72 KB/s “TCP ceiling”** quoted elsewhere for OTA; the install is the slow half now. A leftover `/sd/update/ota.json` silently reroutes every check (the card WINS, and a card url needs no signature), so delete it before testing the real path. Two things that path taught: **`ensure_online()` must WAIT for the link** after the autoconnect (`ONLINE_WAIT_MS`) — `DeviceWifi.connect()` polls 4 s and gives up, and a saved network came up **1.5 s after it did**, so a perfectly good network read as “wifi offline” (the wait belongs there, not in `connect()`, which would then freeze the desktop on every wrong password); and a **cable flash over a pending marker** makes the next boot report `rolled_back` — accurate (the OTA'd image is not what is running) but a developer-only artifact. **CI collected only the T-Deck's `ota_build.json`** (the P4's lives at `dist/p4/`, outside `firmware/`), so every P4 beta shipped a correctly-stamped IMAGE under a manifest whose version fell back to the committed `FIRMWARE_VERSION` — i.e. a P4 already on beta compares its epoch against a manifest claiming `2` and is **never offered a newer beta at all**. Fixed + pinned by a test; the step now warns if any board's stamp goes missing.
-- **OTA works on the P4 too (#53/#58, on-glass 2026-08-02):** the partition table was OTA-shaped from bring-up and `update_ui` was always frozen in; what was missing was `moy_ota` itself (now staged from the T-Deck tree — it is board-agnostic, `update_dir` is a constructor arg), the **staging directory** (`/moy/update` on the internal VFS — this console has no SD, and `with_sd` is a plain call-through here), the `_ota_build` identity stamp (now including `BOARD`), `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` (was never set — add it to build.sh's sdkconfig regeneration guard or an existing config silently keeps it off), the app-partition image (`dist/p4/moybyte_p4_app.bin` — `moybyte_p4.bin` is bootloader+table+app merged for a cable flash at 0x2000, and handing THAT to `esp32.Partition` would write a bootloader into an app slot), and the `mark_valid()` call at a healthy boot. **Verified end to end on hardware** by installing the board's own running image into the inactive slot (3,085,216 B in 11 steps, ~45s; reboot came up on `ota_1` and marked valid). Two things that misfire and are worth knowing: `step()` returns **True while more remains** (`runtime/update_ui.py` drives it as `more = u.step()`) — inverting it writes a truncated image, whose `set_boot` is then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED` and leaves the board on its old slot; and a **cable flash must erase otadata first** (`make firmware-flash-p4` now does, `P4_OTADATA_OFFSET`) or a board that has taken an OTA writes ota_0 and boots the stale ota_1, looking exactly like a flash that did nothing.
-- **"Did the update work?" is now two mechanisms, both on-glass (#53, 2026-08-02):** the rollback confirm fires from the **frame loop**, not the boot path — `moy_ota.confirm_when_healthy(ws._frames_drawn)`, called every iteration, needs `HEALTHY_PAINTS` (=1) frames to have reached the glass AND `HEALTHY_LOOPS` (=120) iterations to have survived. Confirming where the desktop is merely CONSTRUCTED certifies an image that has never drawn a pixel, which is exactly #56. **The paint threshold cannot be raised**: the console repaints only when something changes, so a quiet desktop sits at ONE painted frame indefinitely (measured — a 120-*paint* gate would roll back every update nobody was touching); the loop counter is what carries the wait. And `finish()` writes `<update_dir>/pending.json` naming the slot it pointed the bootloader at, which `boot_check()` compares against the running slot on the next boot → `("ok"|"rolled_back", text)`. The marker is cleared at the **confirm**, not at the read, so an image that boots, reports, and then dies still carries its evidence into the boot after the rollback. The verdict surfaces as a **system notice banner** (`ws.notice()` / `announce_update()`; a new overlay layer registers ONCE, in `FullscreenStackWM._overlay_layers` — the twin ladders both WMs used to carry were unified 2026-08-18) and again on Settings → UPDATE. Rollback self-heal is **verified on the P4** by resetting inside the confirm window (the state a firmware that dies in its first seconds leaves behind — no deliberately broken binary needed): the bootloader reverted, the board came back on the old slot and said so. While the banner is up the desktop repaints every frame, so the loop runs ~12/s instead of ~40/s and the confirm takes ~10s, not ~3.
-- **OTA manifests are SIGNED (2026-08-02):** the device's `ssl.wrap_socket` does no certificate verification, so TLS alone left any board on a hostile WiFi installable-by-anyone — and the manifest's own `sha256` is no defence against whoever wrote the manifest. So CI signs the manifest (`tools/ota_sign.py`, RSA-2048/SHA-256 PKCS#1 v1.5 over `channel|version|size|sha256`) and `moy_ota.verify_manifest` checks it against `OTA_PUBLIC_KEYS` baked into the running image; the image itself rides the signed `sha256`, which the download already verifies. **RSA and not Ed25519 purely for the verifier**: `pow(sig, 65537, n)` is ~17 modular squarings that MicroPython does in C with no native module of ours, where pure-Python curve arithmetic would be seconds (3-arg `pow` needs `MICROPY_PY_BUILTINS_POW3`, which the esp32 port's `ROM_LEVEL_EXTRA_FEATURES` enables). **Measured on the P4** (2026-08-02, the shipped verifier ast-extracted and run on real MicroPython over the serial harness — `tests/test_p4_on_glass.py`): **35ms modexp, 41ms a whole `verify_manifest`**, with tamper/junk/unsigned all refused and `int(hex,16)`@512 chars, `to_bytes(256,'big')` and `hashlib.sha256` all confirmed present. Budget ~100ms on the slower T-Deck; it is once per check, behind a CHECKING screen already waiting on the network. (The original "single-digit ms" estimate was wrong by ~5× — mpz reduces by division.) The **url and label are deliberately unsigned** so a classroom can mirror the official manifest to a LAN host and rewrite the url — the bytes stay pinned by the signed hash. **Policy:** a manifest from a BAKED channel url must be signed; one reached because the owner put an `ota.json` on the card need not be (writing to the SD card is a physical act of consent, and it keeps the key-free LAN dev loop working) — but a signature that IS present is always checked, so a tampered official manifest can't be laundered through a local host. A build with no baked key can't require one (it would just brick updates). The private key is a repo secret (`MOYBYTE_OTA_SIGNING_KEY`, `make ota-keygen` generates it and prints the `gh secret set` line + the constant to paste); `OTA_PUBLIC_KEYS` is a TUPLE so a key can be rotated by publishing an image trusted by the old key and signed by the new. Signing needs the `release` extra; **verifying needs nothing**, which is what lets the security-critical half be tested in ordinary CI (`tests/test_ota_signing.py` carries a throwaway key and signs with `pow(m, d, n)`). Residual, accepted: a compromised GitHub account can sign a real update, and boards running an image with no baked key stay unprotected until one update later.
+- **Device performance — #66 is the single source of truth** (the living ledger:
+  current per-cart fps, the frame-budget model, shipped/reverted/open levers, how
+  to measure). **Edit #66's BODY when new hardware numbers land; comments are the
+  changelog** — then `make sync-issues`. P4 numbers are **#58**; the cross-board
+  strategic analysis (why we trail native emulators, the frame-budget taxes, the
+  PPA scale-only verdict, the ranked lever roadmap) is
+  `docs/perf_native_gap_v1.md`, tracked by **#77**.
+  - **Do NOT scatter numbers into this file.** One snapshot here quoted a cart's
+    fps long after the board had passed it, inside the sentence forbidding
+    scattered numbers.
+  - **The engine-side lever chain is EXHAUSTED.** Every feed/dispatch/GC-cost
+    lever was tried and either shipped (auto-native carts #67, live-set diet,
+    pal-state variant cache #72, layer pool, `background()`) or reverted with a
+    recorded verdict (Fold-2 auto map cache; the third bounce slot, which also
+    retired the core-1 feeder unbuilt). What is left: per-cart render diets, the
+    #67 Lua tier, and the P4 (#58).
+  - **Per-board verdicts do NOT transfer.** The `-O3` `moy_gfx` pragma is
+    A/B-confirmed on the S3 (compute-bound there) and measured NULL on the
+    dispatch-bound P4 — one pragma line, opposite answers.
+  - **Frameskip (#77) ships OFF** (Settings → FRAMESKIP, persisted, serial
+    `skip 0|1`): a GAME's logic+input+audio tick every loop frame, render and
+    flush every second — full-rate logic, 30Hz motion, at the cost of roughly
+    double the alloc churn.
+  - **Kid mode (#68): PERF DIAG is OFF by default and gates the diag frame-eaters
+    — a measurement session needs it ON**, and DIAG SD LOG separately gates the
+    periodic diag→SD write (keep it off for stutter-free serial measurement).
+  - Three interpreter-vs-kid-idiom taxes were fixed ENGINE-SIDE with the kid API
+    untouched: per-draw-call dispatch (#43/#63), call-frame heap-spill (#63), and
+    **float boxing** — REPR_A allocated per float result, and the resulting
+    heap-wrap collect was the long-standing micro-stutter; the REPR_C build patch
+    (unboxed 30-bit floats) fixed it. Banding is structurally gone (the SRAM-bounce
+    flush: panel DMA reads only internal SRAM).
+  - Diagnostics, all gated behind `perf_capture`: `PERF`/`DRAWBRK`/`DRAW2`/
+    `BATCH`/`FLUSHBRK`/`CHROMEBRK`/`PUMP`/`I2CSTAT`/`CALIB`/`HITCH`.
+  - Open defects: #74 touch stalls, the launcher live-wallpaper cost, and #69's
+    keyboard+touch I2C stalls (sized via I2CSTAT).
+- **OTA and firmware updates (#53)** — verified end to end on the T-Deck and the
+  P4 (2026-08-02: real WiFi, on-device signature check, streamed install, boot
+  into the new slot, rollback self-heal). **Timings, sizes and rates live in
+  #53**, not here.
+  - **Both boards are dual-OTA already** (`otadata + ota_0 + ota_1 + vfs`), so the
+    one-time migration is HISTORY. The slot sizes differ per board and are NOT
+    repeated here: each `build.sh`'s generated table and the P4's partition CSV
+    are the only things that decide whether an image fits.
+  - **The OTA payload is the APP-PARTITION image, never the merged one.**
+    `…_app.bin` is the payload; `…​.bin` is bootloader+table+app for a cable flash.
+    Handing the merged one to `esp32.Partition` writes a bootloader into an app
+    slot.
+  - **`step()` returns True WHILE MORE REMAINS** (`update_ui` drives it as
+    `more = u.step()`). Inverting it writes a truncated image, whose `set_boot` is
+    then correctly refused with `ESP_ERR_OTA_VALIDATE_FAILED`.
+  - **A cable flash must erase otadata FIRST**, or a board that has taken an OTA
+    writes ota_0 and boots the stale ota_1 — indistinguishable from a flash that
+    did nothing. `tools/board_flash.py` does it, from `[flash]` data.
+  - **The rollback confirm fires from the FRAME LOOP**, not the boot path:
+    `confirm_when_healthy(ws._frames_drawn)` needs `HEALTHY_PAINTS` frames on the
+    glass AND `HEALTHY_LOOPS` iterations survived. Confirming where the desktop is
+    merely CONSTRUCTED certifies an image that never drew a pixel (#56). **The
+    paint threshold cannot be raised** — the console repaints only on change, so
+    a quiet desktop sits at ONE painted frame indefinitely and a paint-based gate
+    would roll back every update nobody was touching. The loop counter carries the
+    wait.
+  - **`finish()` writes `pending.json` naming the slot it pointed the bootloader
+    at**; `boot_check()` compares it against the running slot next boot. **The
+    marker is cleared at the CONFIRM, not at the read**, so an image that boots,
+    reports and then dies still carries its evidence into the boot after the
+    rollback. The verdict surfaces as a notice banner and again on Settings →
+    UPDATE.
+  - **Two channels, and the channel is a BUILD choice**: STABLE from master,
+    UNSTABLE/BETA from dev, stamped into a gitignored `modules/_ota_build.py` from
+    `MOYBYTE_OTA_CHANNEL` — clean across merges, never a per-branch source edit.
+    An install is offered when the manifest's channel DIFFERS from the running one
+    (a switch, including beta→stable rollback) **or** is higher WITHIN the channel.
+    A card's `ota.json` always WINS over the baked url, which is how a LAN or
+    offline host overrides it — so **delete a leftover one before testing the
+    real path**, or it silently reroutes every check.
+  - **The manifest is SIGNED, and the BOARD is inside the signature** (scheme
+    `moybyte-ota-v2`): an OTA payload is an app-partition image, so another
+    board's is a valid image that cannot boot, and a manifest naming one is
+    refused BY NAME before the signature is even checked. `ssl.wrap_socket` does
+    no certificate verification on device, which is *why* the manifest is signed
+    rather than trusted for arriving over TLS.
+  - **RSA, not Ed25519, purely for the verifier**: `pow(sig, 65537, n)` is a
+    handful of modular squarings MicroPython does in C, where pure-Python curve
+    arithmetic would take seconds. **Signing needs the `release` extra; verifying
+    needs nothing**, which is what lets the security-critical half be tested in
+    ordinary CI (`tests/test_ota_signing.py`, `tests/test_moy_ota.py`).
+  - **The url and label are deliberately UNSIGNED** so a classroom can mirror the
+    official manifest to a LAN host and rewrite the url — the bytes stay pinned
+    by the signed hash. **Policy:** a manifest from a BAKED channel url must be
+    signed; one reached because the owner put an `ota.json` on the card need not
+    be (writing to the card is a physical act of consent, and it keeps the
+    key-free LAN dev loop working) — but a signature that IS present is always
+    checked, so a tampered official manifest cannot be laundered through a local
+    host. A build with no baked key cannot require one.
+  - **`OTA_PUBLIC_KEYS` is a TUPLE so a key can be ROTATED** — publish an image
+    trusted by the old key and signed by the new.
+  - **`ensure_online()` must WAIT for the link** after autoconnect
+    (`ONLINE_WAIT_MS`): `DeviceWifi.connect()` polls briefly and gives up, and a
+    saved network that comes up just after reads as "wifi offline". The wait
+    belongs there, not in `connect()`, which would freeze the desktop on every
+    wrong password.
+  - **Bump `moy_ota.FIRMWARE_VERSION` only via `make release`** — a hand bump
+    desynchronises the stamp CI reads back out of the artifact, and a manifest
+    advertising a version the image does not carry offers the same install
+    forever.
+- **Branches and releases: `dev` is where work lands; `master` is what users get.**
+  Commit to `dev` by default — a change is not on master until a human has tested
+  it on the boards it touches, and **never push straight to master anything a
+  board can run**.
+  - **The two branches ARE the two OTA channels.** A push to `dev` builds a beta
+    (channel `unstable` → the `firmware-beta` release); a push to `master` builds
+    a stable (→ `firmware-latest`, which the site's flasher writes and the stable
+    OTA offers). Host CI runs on both; the site republishes only off master.
+  - **The merge into master IS the release**, and `make release NAME=0.7` is how:
+    clean-tree checks → `make test` → `merge --no-ff dev` → bump
+    `FIRMWARE_VERSION` AND set `FIRMWARE_NAME` → commit + tag → **stop**, printing
+    the push command. Pushing master is the moment a device somewhere is offered
+    the build, so it stays a separate deliberate keystroke.
+  - **`NAME` is the release** (`MAJOR.MINOR`; a third component only for a pure fix
+    release). It becomes the tag, the manifest `label` and the string on the kid's
+    update screen. `FIRMWARE_VERSION` stays an opaque counter nobody reads — it is
+    signed as an int and betas stamp a build epoch into it. **Do not hand-bump it.**
+    Re-cutting a name already tagged is refused, which is the prompt to pick a fix
+    release.
+  - Firmware builds are path-filtered pushes and the workflow's per-ref
+    `cancel-in-progress` collapses a burst of dev pushes into one build of the last
+    commit, so "every push builds" costs one build, not ten.

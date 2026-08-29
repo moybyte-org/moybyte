@@ -220,8 +220,8 @@ def check_paths():
 
 SHINGLE = 10
 DUP_BUDGET = {
-    ("CLAUDE.md", "docs/shell_ux_v1.md"): 31,
-    ("CLAUDE.md", "runtime/README.md"): 27,
+    ("CLAUDE.md", "docs/shell_ux_v1.md"): 23,
+    ("CLAUDE.md", "runtime/README.md"): 13,
     ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 13,
     ("CLAUDE.md",
      "native/moy_audio/libmoy/UPSTREAM.md"): 16,
