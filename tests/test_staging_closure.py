@@ -258,13 +258,24 @@ def frozen_set(target):
         # died with the inline list.
         mods = {Path(name).stem: path for name, path
                 in board_config.staged_modules(WEB, ROOT).items()}
-        # web_boot/web_canvas/gpio_link are the runner's AUTHORED modules,
-        # copied by name in build.sh; its moy.py and serve.py are HOST dev
-        # tools and never enter the image.
-        for name in ("web_boot", "web_canvas", "gpio_link"):
+        # web_boot/web_canvas/gpio_link/web_p8 are the runner's AUTHORED
+        # modules, copied by name in build.sh; its moy.py and serve.py are HOST
+        # dev tools and never enter the image.
+        for name in ("web_boot", "web_canvas", "gpio_link", "web_p8"):
             p = WEB / (name + ".py")
             if p.exists():
                 mods[name] = p
+        # The p8 importer (#194) is the one thing this build stages out of
+        # `tools/`: moy-spec's vendored converter and the `.moy` writer the CLI
+        # shares with it, carried in UNCHANGED (editing the vendored file is a
+        # red test). Plus the `zlib.decompress` shim over MicroPython's
+        # `deflate`, which is what lets the `.p8.png` inflate happen in the
+        # SAME converter the desktop runs instead of a second reader in JS.
+        for name, src in (("p8_import", ROOT / "tools" / "p8_import.py"),
+                          ("p8_writer", ROOT / "tools" / "p8_writer.py"),
+                          ("zlib", WEB / "shims" / "zlib.py")):
+            if src.exists():
+                mods[name] = src
     else:
         # The boards DECLARE their staging (#161 Phase 3): board.toml holds
         # the denylist over runtime/ and the allowlist over the shared device

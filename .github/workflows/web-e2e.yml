@@ -14,6 +14,11 @@ name: Web console E2E
 #                                  in one pinned Chrome profile, the .moy zip
 #                                  round trip, and the negative case -- a
 #                                  BOARD-served page must keep nothing locally.
+#   tests/test_web_p8_e2e.py       #194: a .p8 and a .p8.png dropped on the page
+#                                  convert in the wasm VM, RUN, and open in the
+#                                  editor -- plus the refusal case, because an
+#                                  import that silently ran wrong is the worst
+#                                  outcome this feature has.
 #
 # Both are gated on MOYBYTE_WEB_E2E, and until this workflow existed nothing set
 # it: the whole browser tier -- the thing a visitor actually touches -- had no
@@ -45,6 +50,9 @@ on:
       - "system_carts/**"          # the twin's seeded shelf
       - "tests/test_web_*"
       - "tests/web_e2e.py"
+      - "tests/fixtures/**"         # the p8 cart the drop suite imports
+      - "tools/p8_import.py"        # the vendored converter the wasm freezes
+      - "tools/p8_writer.py"        # ...and the .moy writer it shares with the CLI
       - ".github/workflows/web-e2e.yml"
   pull_request:
     branches: [master, dev]
@@ -55,6 +63,9 @@ on:
       - "system_carts/**"
       - "tests/test_web_*"
       - "tests/web_e2e.py"
+      - "tests/fixtures/**"
+      - "tools/p8_import.py"
+      - "tools/p8_writer.py"
       - ".github/workflows/web-e2e.yml"
   workflow_dispatch:
 
@@ -142,7 +153,8 @@ jobs:
       - name: Drive the hosted console in real Chrome
         run: |
           .venv/bin/python -m pytest -rs --junitxml=web-e2e.xml \
-            tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py
+            tests/test_web_sync_e2e.py tests/test_web_persist_e2e.py \
+            tests/test_web_p8_e2e.py
 
       # pytest was green -- but was it green over anything? The prerequisite
       # skips fail hard above, so this catches the other way of proving nothing:

@@ -52,7 +52,9 @@ pzMode(m.mode,m.s);}
 else if(m.t==="keep"){pzKeep();}
 else if(m.t==="carts"){pzFill(m.names);}
 else if(m.t==="exported"){pzDownload(m.name,m.buf);}
-else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();}
+else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();
+if(m.report)p8Report(m.report,m.ok,m.dir);}
+else if(m.t==="edited"){window.__moyEdited=m.s;pzSay(m.s,!m.ok);}
 else if(m.t==="pin"){pinAsk(m.tried);}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 else if(m.t==="error"){console.error("[moy]",m.s);
@@ -147,12 +149,35 @@ WORKER.postMessage({t:"import",name:file.name,buf:buf},[buf]);})
 .catch(function(e){pzSay("could not read that file",true);console.error(e);});}
 pzI.addEventListener("change",function(){if(pzI.files&&pzI.files[0])pzImport(pzI.files[0]);
 pzI.value="";});
-// Drop a .moy zip anywhere on the page. Only in a mode that has a local store:
-// on a board-served page the drop would write to a store the board owns.
+// Drop a .moy zip or a PICO-8 cart (.p8 / .p8.png, #194) anywhere on the page.
+// Only in a mode that has a local store: on a board-served page the drop would
+// write to a store the board owns.
 window.addEventListener("dragover",function(e){if(PZMODE&&PZMODE!=="board")e.preventDefault();});
 window.addEventListener("drop",function(e){if(!PZMODE||PZMODE==="board")return;
 e.preventDefault();var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
 if(f)pzImport(f);});
+// ---- the PICO-8 import report (#194) ----------------------------------------
+// "Report, don't crash": what a converted cart used and what did NOT come
+// across is the visible half of this feature, because an import that quietly
+// ran wrong is worse than one that refused. The lines are written by the shared
+// writer (tools/p8_writer.report_lines) so the CLI and the browser say the same
+// things; this only paints them, and offers the one action the page cannot
+// infer -- opening the new cart in the editor.
+var P8=document.getElementById("p8"),P8T=document.getElementById("p8t"),
+P8E=document.getElementById("p8e"),P8X=document.getElementById("p8x"),p8Cart=null;
+function p8Report(lines,ok,dir){p8Cart=ok?(dir||null):null;
+P8T.innerHTML="";
+for(var i=0;i<lines.length;i++){var p=document.createElement("p");
+if(i===0)p.className="head";p.textContent=lines[i];P8T.appendChild(p);}
+P8.className=ok?"":"bad";
+P8E.style.display=p8Cart?"":"none";
+P8.style.display="block";
+// Readable by a harness without scraping the DOM, the same way __moyImported is.
+window.__moyReport=lines.join(" | ");}
+if(P8X)P8X.addEventListener("click",function(){P8.style.display="none";});
+if(P8E)P8E.addEventListener("click",function(){if(!WORKER||!p8Cart)return;
+pzSay("opening "+p8Cart+" in the editor...",false);
+WORKER.postMessage({t:"edit",cart:p8Cart});});
 // The loader module hands the worker over once constructed.
 window.__moyAttach=function(w){WORKER=w;w.onmessage=function(e){onWorker(e.data);};};
 // ?pad=1 forces the touch controls on ANY device (desktop demos, touch laptops).

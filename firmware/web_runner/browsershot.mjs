@@ -12,6 +12,8 @@
 // Same scenario vocabulary as pageshot.mjs where it makes sense --
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
 //   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
+//   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
+//                                           (an ArrayBuffer, for the drop paths)
 // -- with coordinates in CANVAS pixels (the page's own 1024x600-style space);
 // they are mapped through the canvas's on-screen rect for you.
 //
@@ -211,6 +213,29 @@ for (const step of scenario.steps || []) {
                 await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
             }
             await sleep(150);
+        }
+        // {"file": path, "as": "__name"} -- a LOCAL file's bytes as an
+        // ArrayBuffer on window. The drop paths (#193's .moy zips, #194's
+        // PICO-8 carts) take real bytes and nothing else, and a base64 blob
+        // pasted into a scenario would be a fixture nobody could regenerate.
+        // `$NAME` resolves from the environment, so a test can point one
+        // scenario at a file it just built in a tmpdir.
+        if (step.file) {
+            const p = step.file.startsWith("$")
+                ? (process.env[step.file.slice(1)] || "")
+                : resolve(HERE, step.file);
+            if (!p) throw new Error("no path for " + step.file);
+            const b64 = readFileSync(p).toString("base64");
+            const as = step.as || "__file";
+            // ...and its NAME beside it, because a drop carries one and half of
+            // what the p8 import does with a file is decided by its suffix.
+            await evaluate(`window[${JSON.stringify(as)}] =`
+                + ` Uint8Array.from(atob(${JSON.stringify(b64)}),`
+                + ` c => c.charCodeAt(0)).buffer,`
+                + ` window[${JSON.stringify(as + "Name")}] =`
+                + ` ${JSON.stringify(p.split("/").pop())},`
+                + ` "loaded ${b64.length}b64"`);
+            console.log("   file ->", p);
         }
         if (step.js) console.log("   js ->", JSON.stringify(await evaluate(step.js)));
         if (step.shot) await shot(step.shot);

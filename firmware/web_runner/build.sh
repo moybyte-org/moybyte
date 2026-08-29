@@ -206,6 +206,33 @@ mkdir -p "${STAGE_DIR}/modules"
 cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
 cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
 cp "${SCRIPT_DIR}/gpio_link.py" "${STAGE_DIR}/modules/gpio_link.py"
+cp "${SCRIPT_DIR}/web_p8.py" "${STAGE_DIR}/modules/web_p8.py"
+
+# The PICO-8 importer (#194) -- the ONE thing this build stages out of `tools/`,
+# which board_config's stager knows nothing about (it maps runtime/ and device/).
+# Both files cross UNCHANGED and that is the whole point:
+#
+#   p8_import.py  moy-spec's converter, VENDORED and hash-pinned
+#                 (tests/test_p8_import_vendor.py). Editing it here -- or
+#                 forking a browser variant of it, in Python or in JavaScript --
+#                 is the failure vendoring exists to prevent: it happened once,
+#                 and every cart this repo imported came out two octaves flat
+#                 for ten days behind a green `make test`. So the browser runs
+#                 the SAME bytes the desktop does, inside this VM.
+#   p8_writer.py  ours: the `.moy` folder writer, the porting scaffold and the
+#                 compatibility report -- shared with tools/import_p8.py (the
+#                 CLI) for the same reason, one level down.
+#
+# Copied rather than symlinked because the freeze takes a DIRECTORY and a
+# dangling link in it is a build that fails at the last step.
+cp "${REPO_ROOT}/tools/p8_import.py" "${STAGE_DIR}/modules/p8_import.py"
+cp "${REPO_ROOT}/tools/p8_writer.py" "${STAGE_DIR}/modules/p8_writer.py"
+
+# `zlib.decompress` over the built-in `deflate`: MicroPython dropped the zlib
+# module in v1.21 and the converter inflates a .p8.png's IDAT with it. Staged
+# from shims/ under the plain name -- see that file's header for why it may not
+# simply sit beside the other authored modules.
+cp "${SCRIPT_DIR}/shims/zlib.py" "${STAGE_DIR}/modules/zlib.py"
 
 
 # palette.py: runtime/palette.py builds its HSV ramp with CPython's colorsys, so

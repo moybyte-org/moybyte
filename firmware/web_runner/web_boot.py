@@ -502,10 +502,9 @@ def reload_cart(name=None):
     return open_cart(name) if name else True
 
 
-def open_cart(name):
-    """Select + run a cart by folder name ('star_catcher.moy', extension
-    optional) or manifest title, skipping the launcher -- the single-cart-embed
-    path (?cart=...). Unknown name -> False (the shelf stays up)."""
+def _select_cart(name):
+    """Point the launcher at the cart `name` names (folder name with or without
+    `.moy`, or manifest title). True when it landed on one."""
     ws = _S["ws"]
     want = str(name).lower()
     if want.endswith(".moy"):
@@ -517,9 +516,67 @@ def open_cart(name):
             folder = folder[:-4]
         if want in (folder, c.get("title", "").lower()):
             ws.launcher.sel = i
-            ws.open()
             return True
     return False
+
+
+def open_cart(name):
+    """Select + run a cart by folder name ('star_catcher.moy', extension
+    optional) or manifest title, skipping the launcher -- the single-cart-embed
+    path (?cart=...). Unknown name -> False (the shelf stays up)."""
+    if not _select_cart(name):
+        return False
+    _S["ws"].open()
+    return True
+
+
+_EDIT_TABS = {"paint": "open_paint", "map": "open_map", "music": "open_music",
+              "scene": "open_scene", "blocks": "open_blocks"}
+
+
+def edit_cart(name, tab=None):
+    """Open a cart in the EDITOR, landing on its tabs with its own assets --
+    the "open in editor" half of the p8 drop (#194).
+
+    The tap that RUNS a cart and the one that EDITS it are different verbs in
+    the shell (shell_ux_v1.md: a launcher tap always runs), and this is the
+    edit one -- the same entry the Editor's project picker uses, so an imported
+    cart arrives in the Sprites / Map / Music tabs exactly like an authored one.
+    `tab` lands on one of them ("paint"/"map"/"music"/...) instead of the
+    default Config landing.
+
+    Returns a small JSON state so the caller can SEE it landed rather than
+    assume: an editor that silently did not open looks identical to one that
+    did until somebody screenshots it."""
+    ws = _S["ws"]
+    # END any run FIRST, and before the launcher selection is moved. On the
+    # windowed desk a cart plays in its own window, so an editor opened over a
+    # still-running import leaves the game sitting on top of the code it is
+    # meant to show -- and the run's world would outlive the workspace the
+    # Editor rebuilds. PLAY in the Editor is how it starts again.
+    if getattr(ws, "cart", None) is not None:
+        _S["exit"]()              # the REAL exit (kiosk wraps ws._exit_to_caller)
+    ok = _select_cart(name)
+    if ok:
+        ws.open_in_editor()
+        opener = _EDIT_TABS.get(tab)
+        if opener is not None:
+            getattr(ws.editor_app, opener)()
+    return json.dumps({
+        "ok": ok,
+        "screen": getattr(ws, "screen", None),
+        "tab": getattr(ws, "menu_view", None),
+        "title": _cart_title(),
+    })
+
+
+def import_p8_json(path, name, out_dir):
+    """Convert a dropped PICO-8 cart at `path` into a `.moy` folder (#194).
+
+    Lazily imported so the console boots without the converter in RAM: a session
+    that never drops a cart never pays for it."""
+    import web_p8
+    return web_p8.import_p8_json(path, name, out_dir)
 
 
 def _cart_title():

@@ -26,8 +26,10 @@ Four ways the copy stops being a copy, and a test for each:
      so that test is conditional, and only fires when the checkout sits at the
      commit the manifest pins. Upstream having moved on is not drift; it is
      what a pin is for.
-  3. Somebody re-implements a converter verb in `tools/import_p8.py` "just for
-     now", and the file grows a second copy back.
+  3. Somebody re-implements a converter verb in `tools/import_p8.py` or
+     `tools/p8_writer.py` "just for now", and the file grows a second copy back.
+     Both are checked: the writer is the half the BROWSER also runs (#194), so
+     it is now the file most likely to sprout "just a small local fix".
   4. Nobody edits anything, and the two vendored halves simply disagree --
      which is what a wrong pitch offset IS. Checked directly, against no
      checkout and no manifest: p8's A4 must be moy's A4 must be 440 Hz.
@@ -43,6 +45,7 @@ TOOLS = os.path.join(ROOT, "tools")
 MANIFEST = os.path.join(TOOLS, "p8_import_vendor.json")
 VENDORED = os.path.join(TOOLS, "p8_import.py")
 DRIVER = os.path.join(TOOLS, "import_p8.py")
+WRITER = os.path.join(TOOLS, "p8_writer.py")
 LIBMOY_AUDIO = os.path.join(
     ROOT, "native", "moy_audio", "libmoy", "moy_audio.c")
 
@@ -92,19 +95,49 @@ def _toplevel_names(path):
     return names
 
 
-def test_the_driver_does_not_redefine_a_converter_name():
-    """`tools/import_p8.py` drives the converter; it never re-grows one.
+@pytest.mark.parametrize("ours", [DRIVER, WRITER])
+def test_our_half_does_not_redefine_a_converter_name(ours):
+    """Our two files DRIVE the converter; neither re-grows one.
 
     A re-implemented verb beside the vendored one is how the duplication came
     back last time -- and it reads as an innocent local fix right up until the
-    two disagree.
+    two disagree. `p8_writer.py` is checked as well as the CLI because it is the
+    half that also runs inside the browser (#194), which is precisely where
+    "just do the PNG bit here, it is only a few lines" is most tempting.
     """
-    shared = _toplevel_names(DRIVER) & _toplevel_names(VENDORED)
+    shared = _toplevel_names(ours) & _toplevel_names(VENDORED)
     assert not shared, (
-        "tools/import_p8.py defines %s, which tools/p8_import.py already "
-        "defines. Import it from there instead: the vendored converter is the "
-        "one moy-spec's SPEC.md and libmoy's synth are written against."
-        % ", ".join(sorted(shared)))
+        "tools/%s defines %s, which tools/p8_import.py already defines. Import "
+        "it from there instead: the vendored converter is the one moy-spec's "
+        "SPEC.md and libmoy's synth are written against."
+        % (os.path.basename(ours), ", ".join(sorted(shared))))
+
+
+def test_the_converter_reaches_os_for_exactly_one_thing():
+    """`p8_writer._ensure_os_path` supplies the converter with an
+    `os.path.basename` on a tier that has no `os.path` (MicroPython has none,
+    and no way to grow one). That shim is only sufficient while `basename` is
+    the ONLY thing the converter asks `os` for -- a re-vendor that reached for
+    `os.stat` or `os.sep` would make the browser and device import fail on a
+    line nobody changed here.
+    """
+    with open(VENDORED, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    uses = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name) and node.value.id == "os"):
+            uses.add("os." + node.attr)
+        elif (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "os"):
+            uses.add("os.%s.%s" % (node.value.attr, node.attr))
+    assert uses == {"os.path", "os.path.basename"}, (
+        "tools/p8_import.py now reaches os for %s. The MicroPython tiers get "
+        "`os.path.basename` injected by tools/p8_writer._ensure_os_path and "
+        "nothing else -- widen that shim (or take the fix upstream) before this "
+        "converter can run in the browser again." % ", ".join(sorted(uses)))
 
 
 # -- 4. the two vendored halves have to agree on where A4 is -----------------

@@ -49,6 +49,14 @@ FEATURES = {
               "dist/ predates the browser store (no moy_store.mjs)"),
     "pin": (lambda: "__moyPinRestore" in (DIST / "index.html").read_text(),
             "dist/index.html predates the in-page pin prompt"),
+    # #194. Two halves, both of which can be stale on their own: the page has
+    # to carry the report card, and the WASM has to carry the frozen converter.
+    # A dist/ with the first and not the second imports nothing and says so in
+    # a way that reads exactly like a broken feature.
+    "p8": (lambda: ("__moyReport" in (DIST / "index.html").read_text()
+                    and b"p8_writer" in (DIST / "micropython.wasm").read_bytes()),
+           "dist/ predates the PICO-8 drop (no report card, or the frozen "
+           "console has no p8 converter in it)"),
 }
 
 

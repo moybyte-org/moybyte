@@ -92,6 +92,22 @@ nor those docs will warn you about:
   `view(128, 120)` hint, and without it the T-Deck letterboxes a 128px square at
   1× instead of compositing it centered at 2×. `ports/celeste.moy` is gitignored
   on BOTH repos (CC BY-NC-SA) — never commit or ship it.
+- **The BROWSER imports p8 carts too (#194), by running those same two files.**
+  A dropped `.p8`/`.p8.png` is converted in the wasm VM: `build.sh` stages
+  `tools/p8_import.py` (unchanged, still hash-pinned) and `tools/p8_writer.py`
+  — our `.moy` writer, split out of `import_p8.py` so the CLI and the console
+  share ONE body — into the frozen set, plus `shims/zlib.py`, four lines over
+  MicroPython's `deflate`. **The browser could skip the inflate entirely**
+  (`createImageBitmap` + `getImageData`, then read the low bits in JS) and that
+  is exactly what was DECLINED: it would be a second reader of one format, the
+  same shape as the hand-copied converter, and it does not generalise to a
+  board. Measured on a real MicroPython: 40ms to read a `.p8.png`, 13ms to
+  write the cart. Two rules the tests pin: the **zoom hint is unconditional**
+  here (`view(128, 120)` in every generated `main.py`, canvas `128x128`) because
+  on the web that footgun would fire on every import, and the PNG validation is
+  **explicit** because the frozen build is opt=3, which strips the converter's
+  own asserts. `tests/test_p8_micropython.py` is the lane that proves the shared
+  half still runs on MicroPython at all.
 - **Trust zepto8 for p8 semantics, not the wiki**: the pattern-length rule is the
   first non-looping channel, and all-looping means the SLOWEST channel — the
   wiki's "all-looping loops forever" is WRONG.

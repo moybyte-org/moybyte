@@ -27,7 +27,10 @@
 //   {t:"kept", state}    the page's answer to {t:"keep"}: "granted" | "denied"
 //   {t:"carts"}          list the cart folders (the export picker)
 //   {t:"export", cart}   zip one cart out of the VFS
-//   {t:"import", name, buf}  unzip a .moy zip into the store
+//   {t:"import", name, buf}  a dropped file into the store: a .moy zip, or a
+//                        PICO-8 .p8 / .p8.png, which is CONVERTED first (#194)
+//   {t:"edit", cart, tab}  open a cart in the Editor (the import report's
+//                        action); `tab` optionally lands on paint/map/music
 // worker -> main:
 //   {t:"status", s}      boot progress text
 //   {t:"assets", json}   the page's metadata payload (size/title/audio/input)
@@ -44,11 +47,16 @@
 //                        one did not work".
 //   {t:"carts", names}   the shelf's folder names
 //   {t:"exported", name, buf}  a .moy zip, TRANSFERRED
-//   {t:"imported", s, ok}    the result of an import, in the page's words
+//   {t:"imported", s, ok, report, dir}  the result of an import, in the page's
+//                        words; `report` is the p8 compatibility summary (the
+//                        shared writer's own lines) when there was one
+//   {t:"edited", s, ok}  the result of an "open in editor"
 import { loadMicroPython } from "./micropython.mjs";
 import * as store from "./moy_store.mjs";
 
 let mp = null, step = null, applyEvents = null, assets = null, reload = null;
+// The p8 drop's two Python entry points (#194), bound at boot like the rest.
+let importP8Json = null, editCart = null, openCart = null;
 let wantAssets = false;   // an assets request that arrived before the VM was up
 let idleCollect = null;
 let fbAddr = null, fbLen = null;
@@ -364,6 +372,65 @@ async function importZip(name, buf) {
     return { dir, n };
 }
 
+// -- the PICO-8 drop (#194) --------------------------------------------------
+//
+// A `.p8` / `.p8.png` is CONVERTED on the way in and is an ordinary editable
+// `.moy` from then on -- there is deliberately no "run a p8 directly" tier
+// (issue #194, 2026-08-28): a cart you can play but not open would be the one
+// thing on this console that lies about what the console is.
+//
+// NOTHING IS CONVERTED IN JAVASCRIPT HERE, and that is the load-bearing part.
+// The page could reach a `.p8.png`'s ROM without inflating anything --
+// createImageBitmap + getImageData hands over the pixels and the low bits are
+// two lines of JS -- and it would be a SECOND reader of a format the vendored
+// converter already reads. That is the shape that cost this repo ten days of
+// carts imported two octaves flat. So the bytes go into the VFS and the
+// converter reads them there, in Python, exactly as it does on a desktop.
+const P8_TMP = "/moy/tmp";
+
+// Which importer a dropped file goes to. The NAME decides for a text `.p8`,
+// but the BYTES have to decide for the PNG form: a BBS cart is downloaded as
+// `foo.p8.png` and saved by a human as anything at all, and the file that
+// arrives is a cart either way. There is no ambiguity to resolve -- the only
+// other thing this page imports is a `.moy` export, which is a zip and starts
+// "PK" -- so a dropped PNG is a PICO-8 cart attempt, and `png_problem` is what
+// says so kindly when it turns out to be a holiday photo.
+function isP8Drop(name, buf) {
+    const n = String(name || "").toLowerCase();
+    if (n.endsWith(".p8") || n.endsWith(".p8.png")) return true;
+    if (!buf || buf.byteLength < 8) return false;
+    const b = new Uint8Array(buf, 0, 8);
+    return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+}
+
+// The store's own folder rule, over a p8 file name. `cartBase` strips `.zip`
+// and `.moy` (it was written for the zip path), so the p8 suffixes come off
+// here -- otherwise `celeste.p8.png` becomes the folder `celeste_p8_png.moy`.
+function p8Base(name) {
+    return store.cartBase(String(name || "cart")
+        .replace(/\.p8\.png$/i, "").replace(/\.p8$/i, ""));
+}
+
+async function importP8(name, buf) {
+    if (!importP8Json) throw new Error("this console cannot import PICO-8 carts");
+    const dir = store.uniqueCartDir((n) => vfsExists(CARTS_ROOT + "/" + n),
+                                    p8Base(name));
+    mkdirs(P8_TMP);
+    // One fixed path rather than the dropped name: the name is attacker-shaped
+    // text (it came off a file a browser handed us) and the converter only ever
+    // needs SOME path to read. The real name still travels as `name`, which is
+    // what upstream titles the cart from when its Lua has no title comment.
+    const tmp = P8_TMP + "/drop";
+    mp.FS.writeFile(tmp, new Uint8Array(buf));
+    const r = JSON.parse(importP8Json(tmp, name, CARTS_ROOT + "/" + dir));
+    if (!r.ok) return { ok: false, report: r.report || ["that cart could not be imported"] };
+    // Same rule as importZip: do NOT rebase the sync watcher. An import is a
+    // CHANGE, so the new files must stay pending and reach the local store on
+    // the next sweep like any other commit.
+    if (rescan) rescan();
+    return { ok: true, dir, title: r.title, report: r.report };
+}
+
 // THE PIN, on every request that needs it. A GET has nowhere else to carry a
 // credential, so it rides the query -- the same `?pin=` the page itself was
 // opened with (a QR scan, or the prompt's remembered value). A page with no pin
@@ -454,7 +521,8 @@ async function init(search) {
         + "from web_boot import assets_json, step_frame_json, apply_events_json, "
         + "reload_cart, idle_collect, fb_addr, fb_len, "
         + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
-        + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off");
+        + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
+        + "import_p8_json, edit_cart, open_cart");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
     assets = mp.globals.get("assets_json");
@@ -466,6 +534,9 @@ async function init(search) {
     syncAck = mp.globals.get("sync_ack");
     syncOff = mp.globals.get("sync_off");
     rescan = mp.globals.get("rescan_store");
+    importP8Json = mp.globals.get("import_p8_json");
+    editCart = mp.globals.get("edit_cart");
+    openCart = mp.globals.get("open_cart");
     if (gpioPins) {
         gpioPoll = mp.globals.get("gpio_poll_json");
         gpioAck = mp.globals.get("gpio_ack_json");
@@ -787,13 +858,46 @@ self.onmessage = async (ev) => {
             }
         } else if (m.t === "import") {
             try {
-                const r = await importZip(m.name, m.buf);
-                self.postMessage({ t: "imported", ok: true,
-                    s: "imported " + r.dir + " (" + r.n + " files)" });
+                if (isP8Drop(m.name, m.buf)) {
+                    const r = await importP8(m.name, m.buf);
+                    if (!r.ok) {
+                        self.postMessage({ t: "imported", ok: false,
+                            s: "could not import " + m.name, report: r.report });
+                    } else {
+                        // IT RUNS IMMEDIATELY (#194). The whole point of
+                        // converting on import is that the result is an
+                        // ordinary cart, so the honest proof is that it plays
+                        // the moment it lands -- not a row on a shelf.
+                        if (openCart) openCart(r.dir);
+                        self.postMessage({ t: "imported", ok: true,
+                            s: "imported " + r.dir + " into your carts",
+                            report: r.report, dir: r.dir });
+                    }
+                } else {
+                    const r = await importZip(m.name, m.buf);
+                    self.postMessage({ t: "imported", ok: true,
+                        s: "imported " + r.dir + " (" + r.n + " files)" });
+                }
                 if (assets) self.postMessage({ t: "assets", json: assets() });
             } catch (e) {
                 self.postMessage({ t: "imported", ok: false,
                     s: "import failed: " + ((e && e.message) || e) });
+            }
+        } else if (m.t === "edit") {
+            // The import report's one action. Like export, a failure is a
+            // MESSAGE and never the fatal {t:"error"}: the console is fine.
+            try {
+                if (!editCart) throw new Error("no editor on this console");
+                const st = JSON.parse(editCart(m.cart, m.tab || null));
+                self.postMessage({ t: "edited", ok: !!st.ok,
+                    s: st.ok ? ("editing " + (st.title || m.cart)
+                                + " (" + (st.screen || "?") + "/"
+                                + (st.tab || "?") + ")")
+                             : ("no cart called " + m.cart) });
+                if (assets) self.postMessage({ t: "assets", json: assets() });
+            } catch (e) {
+                self.postMessage({ t: "edited", ok: false,
+                    s: "could not open the editor: " + ((e && e.message) || e) });
             }
         }
     } catch (e) {

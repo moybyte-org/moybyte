@@ -10,6 +10,16 @@ one __music__ row) and asserts:
   * main.py keeps the Lua only as a comment (never executable),
   * the cart load()s cleanly via runtime.moy_carts.
 
+...and, since #194 made this importer the browser's too:
+  * every import declares the view(128, 120) ZOOM HINT -- the one guaranteed
+    footgun, and the reason it is not a flag any more,
+  * a `.p8` and the same cart as a `.p8.png` produce byte-identical folders,
+  * a file that is not a cart produces a SENTENCE, not a traceback.
+
+Two sibling suites carry the halves this one cannot: tests/test_p8_micropython.py
+runs the same import on a real MicroPython (the browser's interpreter), and
+tests/test_web_p8_e2e.py drives the drop in a real browser.
+
 WHY THE Hz. These tests used to assert `steps[0][0] == 0x1E` -- the p8 pitch
 byte, unchanged -- with the comment "pitch maps 1:1". It looked like a tight
 assertion and it was a copy of the bug: PICO-8's tracker LABELS its pitch 0 as
@@ -33,6 +43,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import import_p8  # noqa: E402
+import p8_fixture  # noqa: E402
 from runtime import moy_carts  # noqa: E402
 from runtime.audio import AudioBank, note_to_freq  # noqa: E402
 from runtime.editors import SpriteSheet  # noqa: E402
@@ -181,7 +192,14 @@ def test_manifest_valid(tmp_path):
     assert man["format"] == "moybyte-cart-v1"
     assert man["type"] == "game"
     assert man["main"] == "main.py"
-    assert man["canvas"] == "320x240"
+    # A p8 cart is 128x128 (SPEC.md 1/3.1 carries that size to inherit the
+    # PICO-8 back catalogue at native res), NOT the 320x240 default -- and the
+    # size has to be in moy_carts.CANVAS_SIZES or Player.start refuses the cart.
+    assert man["canvas"] == "128x128"
+    assert man["canvas"] in moy_carts.CANVAS_SIZES
+    # Imported, not authored (#194): republishing somebody else's cart is not
+    # what this feature is for, so nothing downstream may treat it as mine.
+    assert man["safe_to_share"] is False
     assert "graphics" in man["permissions"]
     assert man["config"] == {}
     assert man["edit"] == []
@@ -326,15 +344,15 @@ def test_no_port_notes_when_no_known_verbs(tmp_path):
 
 
 def test_scan_lua_verbs_word_boundaries():
-    """_scan_lua_verbs matches whole-word calls only: rect != rectfill, and a
+    """scan_lua_verbs matches whole-word calls only: rect != rectfill, and a
     word like 'sprint' must not trigger 'spr'/'print'."""
-    found = import_p8._scan_lua_verbs(["rectfill(0,0,1,1,8)", "sprint = 3"])
+    found = import_p8.scan_lua_verbs(["rectfill(0,0,1,1,8)", "sprint = 3"])
     assert "rectfill" in found
     assert "rect" not in found      # not fired by the substring in rectfill
     assert "spr" not in found       # not fired by 'sprint'
     assert "print" not in found
     # a real spr() call does fire
-    assert "spr" in import_p8._scan_lua_verbs(["spr(1, 0, 0)"])
+    assert "spr" in import_p8.scan_lua_verbs(["spr(1, 0, 0)"])
 
 
 def test_cheatsheet_doc_exists():
@@ -465,3 +483,167 @@ def test_multichannel_track_emits_row_secs_when_rows_differ(tmp_path):
     assert "row_secs" in trk
     assert abs(trk["row_secs"][0] - 32 * 32 / 120.0) < 1e-9
     assert abs(trk["row_secs"][1] - 32 * 16 / 120.0) < 1e-9
+
+
+# -- the zoom hint, which must not be an option anybody can forget (#194) ----
+
+def test_every_import_declares_the_view_zoom_hint(tmp_path):
+    """THE footgun. A 128x128 p8 cart without `view(128, 120)` letterboxes at 1x
+    instead of compositing centred at the biggest integer scale that fits -- a
+    regeneration on 2026-08-11 dropped moy-spec's `--zoom` and shipped a tiny
+    Celeste to the glass. In a browser that failure would fire on EVERY drop, so
+    here the hint is unconditional: no flag, no default, no way to omit it."""
+    p8 = _write_p8(tmp_path)
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(p8), str(out))
+    src = (out / "main.py").read_text(encoding="utf-8")
+    assert "view(128, 120)" in src
+    # ...and it is a real top-level statement, not prose inside a comment.
+    assert any(ln.strip() == "view(128, 120)" for ln in src.split("\n"))
+    # The stub draws inside the 128-wide canvas it just declared.
+    compile(src, "main.py", "exec")
+
+
+def test_the_stub_is_a_runnable_cart_on_the_declared_canvas(tmp_path):
+    """The imported cart RUNS (#194's first requirement) -- not the ported game,
+    which is the kid's job, but a real cart that shows the imported art."""
+    p8 = _write_p8(tmp_path)
+    out = tmp_path / "out.moy"
+    import_p8.import_p8(str(p8), str(out))
+    cart = moy_carts.load(str(out))
+    assert cart["canvas"] == (128, 128), \
+        "an out-of-set canvas is refused BY NAME in Player.start"
+    ns = {}
+    calls = []
+    ns["view"] = lambda *a: calls.append(("view",) + a)
+    ns["cls"] = lambda *a: calls.append(("cls",) + a)
+    ns["print"] = lambda *a: calls.append(("print",) + a)
+    ns["spr"] = lambda *a: calls.append(("spr",) + a)
+    ns["col"] = lambda name: 7
+    exec(compile((out / "main.py").read_text(encoding="utf-8"), "main.py", "exec"), ns)
+    assert ("view", 128, 120) in calls, "view() must run at cart load"
+    ns["_draw"]()
+    drew = [c for c in calls if c[0] == "spr"]
+    assert drew, "the stub must draw the imported sheet"
+    assert all(0 <= c[2] < 128 and 0 <= c[3] < 128 for c in drew), \
+        "the stub draws outside the 128x128 canvas it declared: %r" % (drew,)
+
+
+# -- the .p8.png (BBS steganographic) path ----------------------------------
+
+def test_both_cart_forms_produce_the_same_moy_folder(tmp_path):
+    """#194's done-when, at the file level: a `.p8` and the SAME cart as a
+    `.p8.png` must import to byte-identical carts.
+
+    The PNG twin is built here (tests/p8_fixture.py) rather than committed --
+    the fixture is a cart we wrote, and the stego encoder is the exact inverse
+    of the converter's own reader, so this exercises the real chunk walk, the
+    real unfilter (all five PNG filter types) and the real ROM unpack."""
+    p8, png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    a, b = tmp_path / "from_p8.moy", tmp_path / "from_png.moy"
+    sa = import_p8.import_p8(p8, str(a))
+    sb = import_p8.import_p8(png, str(b))
+    assert sa["title"] == sb["title"] == "tiny dash"
+    names = sorted(p.name for p in a.iterdir())
+    assert names == sorted(p.name for p in b.iterdir())
+    for name in names:
+        assert (a / name).read_text(encoding="utf-8") == \
+               (b / name).read_text(encoding="utf-8"), \
+            "%s differs between the .p8 and the .p8.png form" % name
+
+
+def test_the_png_cart_loads_and_keeps_its_assets(tmp_path):
+    p8, png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    out = tmp_path / "png.moy"
+    import_p8.import_p8(png, str(out))
+    cart = moy_carts.load(str(out))
+    assert cart is not None
+    assert cart["sprites"] is not None and cart["sounds"] is not None
+    sheet = SpriteSheet.from_hex(cart["sprites"], cols=16, rows=16, spec=False)
+    assert sheet.to_hex().split("\n")[0].startswith("0123456789abcdef")
+    AudioBank.from_dict(cart["sounds"])
+
+
+# -- report, don't crash (#194) ---------------------------------------------
+
+def test_the_report_says_the_code_did_not_come_across(tmp_path):
+    """The single most misleading thing an import could do is look like it
+    ported the game. The report has to say, first, that it did not."""
+    p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
+    text = "\n".join(import_p8.report_lines(summary))
+    assert "tiny dash" in text
+    assert "CODE did NOT" in text
+    # the fixture uses sspr(), which Moybyte has no answer for at all
+    assert "sspr" in text
+    # ...and it has a __map__ this importer does not bring across yet (#32)
+    assert "__map__" in text
+    assert "sspr() stretch blits -- use spr(..., scale=N) or skip the stretch" \
+        in summary["unsupported"]
+
+
+def test_png_guards_name_what_the_file_actually_is():
+    """A frozen build at opt=3 strips the converter's assert-based PNG
+    validation, so malformed input would fail deep inside a struct unpack. These
+    guards are what stands in for those asserts on every tier."""
+    from p8_writer import looks_like_png, png_problem
+
+    assert not looks_like_png(b"pico-8 cartridge\n")
+    assert png_problem(b"pico-8 cartridge\n") == "that file is not a PNG"
+    assert "truncated" in png_problem(b"\x89PNG\r\n\x1a\n")
+    # a real PNG, but a picture rather than a cart: 8x8 RGBA
+    import struct
+    import zlib
+
+    def _png(w, h, depth=8, ctype=6):
+        raw = b"".join(b"\x00" + b"\x00" * (w * 4) for _ in range(h))
+
+        def chunk(t, b):
+            return (struct.pack(">I", len(b)) + t + b
+                    + struct.pack(">I", zlib.crc32(t + b) & 0xFFFFFFFF))
+        return (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, depth, ctype, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+    assert "160x205" in png_problem(_png(8, 8))
+    assert "8-bit RGBA" in png_problem(_png(160, 205, ctype=2))
+    assert png_problem(_png(160, 205)) is None      # the right SHAPE passes
+
+
+def test_a_file_that_is_not_a_cart_reports_instead_of_importing():
+    from p8_writer import sections_problem
+    assert sections_problem(import_p8.parse_p8("hello, I am a readme\n"))
+    assert sections_problem(import_p8.parse_p8(SYNTHETIC_P8)) is None
+
+
+def test_pxa_compressed_code_is_a_sentence_not_a_traceback(tmp_path):
+    """PICO-8 >= 0.2.0 packs its Lua with a scheme the converter detects and
+    refuses. It refuses by raising SystemExit -- which is NOT an Exception
+    subclass, so a caller's `except Exception` sails straight past it and the
+    import dies as an interpreter exit. Anything catching converter failures has
+    to name SystemExit explicitly; this is the check that keeps that true."""
+    p8, png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    blob = bytearray(open(png, "rb").read())
+    rom = bytearray(p8_fixture.sections_to_rom(
+        import_p8.parse_p8(p8_fixture.read_p8_text())))
+    rom[p8_fixture.CODE_AT:p8_fixture.CODE_AT + 4] = b"\x00pxa"
+    pxa = tmp_path / "pxa.p8.png"
+    pxa.write_bytes(p8_fixture.rom_to_png(bytes(rom)))
+    assert len(blob) > 0
+    with pytest.raises(SystemExit) as exc:
+        import_p8.read_p8(str(pxa))
+    assert "pxa" in str(exc.value)
+    assert not isinstance(exc.value, Exception), \
+        "SystemExit is not an Exception -- a bare `except Exception` misses it"
+
+
+def test_the_filename_title_is_the_same_on_every_tier(tmp_path):
+    """The companion to tests/test_p8_micropython.py's shim check: the title a
+    comment-less cart gets from its FILENAME must be the same string on CPython
+    (where `os.path.basename` is real) and on MicroPython (where p8_writer
+    injects one). Two tiers, one rule -- upstream's."""
+    p8 = tmp_path / "space-blaster_2.p8"
+    p8.write_text("pico-8 cartridge\nversion 41\n__lua__\nx = 1\n",
+                  encoding="utf-8")
+    summary = import_p8.import_p8(str(p8), str(tmp_path / "out.moy"))
+    assert summary["title"] == "space blaster 2"

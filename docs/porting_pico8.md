@@ -9,12 +9,19 @@
 > code transforms cannot drift. The guide below is the
 > **hand-port-to-Python** path: slower, but it's the one that teaches.
 
-So you imported a PICO-8 `.p8` with `tools/import_p8.py` and now you have a
-`.moy`. The **art and sound came across automatically**, but the **code did
-not run** — and that's on purpose. This guide ports to **Python**, PICO-8 is
-**Lua**, so you don't *run* a PICO-8 cart here, you **port** it. Porting it is
-how you learn how two little game consoles say the same thing in different
-words.
+So you imported a PICO-8 cart — by **dropping it on the browser console**
+(a `.p8` or a `.p8.png`, #194) or with `tools/import_p8.py` — and now you have
+a `.moy`. Both routes run the same converter and the same writer, so they give
+you the same cart. The **art and sound came across automatically**, but the
+**code did not run** — and that's on purpose. This guide ports to **Python**,
+PICO-8 is **Lua**, so you don't *run* a PICO-8 cart here, you **port** it.
+Porting it is how you learn how two little game consoles say the same thing in
+different words.
+
+Your imported cart is **128×128**, PICO-8's own size, and its `main.py` opens
+with `view(128, 120)`. That line is what makes a big screen show the cart
+*large* instead of as a small square in the middle — keep it, and keep drawing
+in PICO-8 coordinates (0–127) so the Lua below translates straight across.
 
 The importer kept the original Lua inside your `main.py` as a big comment, with
 `# PORT NOTE:` lines next to it for the tricky bits *your* cart uses. This page is

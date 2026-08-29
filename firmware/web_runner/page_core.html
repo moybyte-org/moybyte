@@ -87,6 +87,21 @@ color:#c2c3c7;background:#1d2b53;border:1px solid #29366f;border-radius:4px;padd
 #pz button,#pz .fb{cursor:pointer}
 #pz .fb:hover,#pz button:hover{border-color:#5f6f9f}
 #pzs.warn{color:#ffa300}
+/* PICO-8 import report (#194). An import that silently ran WRONG is the worst
+   outcome, so what a cart used and what did not come across is shown as prose
+   rather than left to a black screen -- and it sits UNDER the canvas, never
+   over it, because the cart is already running behind this card. */
+#p8{display:none;max-width:min(560px,94vw);margin:8px 0 0;padding:10px 12px;
+border-radius:6px;background:#1d2b53;border:1px solid #29366f;text-align:left;
+font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}
+#p8.bad{border-color:#ff004d}
+#p8 p{margin:0 0 4px}
+#p8 p.head{color:#fff1e8}
+#p8 .act{margin-top:8px;display:flex;gap:8px}
+#p8 button{font:12px ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7;
+background:#29366f;border:1px solid #5f6f9f;border-radius:4px;padding:4px 9px;
+cursor:pointer}
+#p8 button:hover{background:#3d4a8a}
 /* Pin prompt (2026-08-25): a board's whole store is behind its pairing pin, so
    a page opened without one has to ask. IN THE PAGE and never window.prompt --
    a native dialog cannot be styled, cannot be screenshotted and cannot be
@@ -116,7 +131,9 @@ white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}<
 <div id=pz><span id=pzs></span>
 <select id=pzc title="cart to export"></select>
 <button id=pze>export .moy</button>
-<label class=fb>import .moy<input id=pzi type=file accept=".zip,.moy" style="display:none"></label></div>
+<label class=fb>import .moy / .p8<input id=pzi type=file accept=".zip,.moy,.p8,.png" style="display:none"></label></div>
+<div id=p8><div id=p8t></div><div class=act><button id=p8e>open in editor</button>
+<button id=p8x>close</button></div></div>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
 <div id=pin><div class=card><h2>this console needs a pin</h2>
