@@ -85,6 +85,14 @@ const SYNC_MS = 1000;
 let gpioPoll = null, gpioAck = null, gpioOff = null;
 let gpioBusy = false, lastGpioAt = 0;
 const GPIO_MS = 33;
+// The board's UPDATER, reached through the same shape (#41/#53). One second,
+// not GPIO's 33ms: nothing here is felt by a running cart, and the numbers this
+// carries change on the scale a flash write takes. The pump only speaks when a
+// SCREEN is waiting -- `updateWants` is false on an idle console, so a page
+// nobody is updating from never touches the wire.
+let updatePoll = null, updateWants = null, updateAck = null, updateOff = null;
+let updateBusy = false, lastUpdateAt = 0;
+const UPDATE_MS = 1000;
 // MODE 1 (#193): the same batches, applied into OPFS instead of POSTed. `mode`
 // is decided ONCE at boot, before anything is written, because it decides where
 // the VFS is seeded FROM -- a board's carts.json, or the browser's own store.
@@ -505,6 +513,7 @@ async function init(search) {
     // probe passes through the PIN gate: a page opened without the board's
     // ?pin= is refused now rather than on every write it later makes.
     const gpioPins = await probeGpio(pin);
+    const updateDoc = await probeUpdate(pin);
     mp.runPython(boot + "import web_boot\n"
         // BEFORE boot(): the mode is what decides whether the carts watcher
         // sweeps the journal, and boot() is where that watcher is built.
@@ -513,6 +522,10 @@ async function init(search) {
         + "web_boot.store_mode(" + JSON.stringify(mode || "") + ")\n"
         + (gpioPins ? "web_boot.gpio_enable(" + JSON.stringify(JSON.stringify(gpioPins)) + ")\n" : "")
         + "web_boot.boot('/moy/carts'" + bootArgs + ")\n"
+        // AFTER boot(), unlike gpio_enable: this one hangs the updater on the
+        // live Workstation, which boot() is what creates.
+        + (updateDoc ? "web_boot.update_enable("
+            + JSON.stringify(JSON.stringify(updateDoc)) + ")\n" : "")
         + (desktop && cart ? "web_boot.open_cart(" + JSON.stringify(cart) + ")\n" : "")
         // Single-cart bundle: kiosk mode -- the exit gesture restarts the game
         // instead of dropping into the shell (the game IS the page).
@@ -522,6 +535,7 @@ async function init(search) {
         + "reload_cart, idle_collect, fb_addr, fb_len, "
         + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
+        + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
         + "import_p8_json, edit_cart, open_cart");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
@@ -542,6 +556,21 @@ async function init(search) {
         gpioAck = mp.globals.get("gpio_ack_json");
         gpioOff = mp.globals.get("gpio_off");
         console.log("[moy] gpio: " + gpioPins.length + " pins on the host");
+    }
+    if (updateDoc) {
+        updatePoll = mp.globals.get("update_poll_json");
+        updateWants = mp.globals.get("update_wants_poll");
+        updateAck = mp.globals.get("update_ack_json");
+        updateOff = mp.globals.get("update_off");
+        console.log("[moy] update: the host serves " + updateDoc.running
+                    + (updateDoc.screen ? " (has its own screen)"
+                                        : " (headless -- this page IS it)"));
+        // Tell the PAGE too. Nothing in the chrome draws an update any more --
+        // the console's own Settings row does -- but "did the bridge bind?" is
+        // otherwise observable only in a devtools log, and that is not
+        // something a harness or a person can check. One message, no UI.
+        self.postMessage({ t: "update", running: updateDoc.running,
+                           screen: !!updateDoc.screen });
     }
     if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });
@@ -590,6 +619,67 @@ async function probeGpio(pin) {
     } catch (e) {
         return null;                 // no such host, no such endpoint: fine
     }
+}
+
+// Does whoever served this page have an UPDATER? One GET, before the console
+// exists, so `ws.updater` is decided exactly once and Settings either has an
+// update row or has never heard of one -- the same rule as the pin verbs, and
+// the reason a static host (moybyte.com, an export) shows nothing rather than a
+// row that fails when tapped. The GET carries the pin the only place a GET can.
+async function probeUpdate(pin) {
+    try {
+        const u = pin ? "update?pin=" + encodeURIComponent(pin) : "update";
+        const r = await fetch(u);
+        if (!r.ok) return null;
+        const d = await r.json();
+        return (d && d.running) ? d : null;
+    } catch (e) {
+        return null;                 // no such host, no such endpoint: fine
+    }
+}
+
+function updatePump() {
+    if (updateBusy || !updatePoll) return;
+    const now = performance.now();
+    if (now - lastUpdateAt < UPDATE_MS) return;
+    lastUpdateAt = now;
+    let body = "";
+    try { body = updatePoll(); } catch (e) { return; }
+    if (!body) {
+        // Nothing queued. GET the status only while a screen is waiting on
+        // something; otherwise say nothing at all.
+        let wants = false;
+        try { wants = updateWants(); } catch (e) { return; }
+        if (!wants) return;
+    }
+    updateBusy = true;
+    // A POST carries its pin in the BODY (take_json put it there, like gpio); a
+    // GET has nowhere but the query, which is what withPin is for.
+    const req = body
+        ? fetch("update", { method: "POST", body: body,
+                            headers: { "Content-Type": "application/json" } })
+        : fetch(withPin("update"));
+    req.then((r) => {
+            // The boot probe already cleared these, so meeting one HERE means
+            // the host changed under us -- rebooted into setup, pin rotated.
+            // Go inert once rather than retry-logging: the SCREEN stays up and
+            // reads an error, which is the most a person looking at it can be
+            // told.
+            if (r.status === 404 || r.status === 405 || r.status === 501
+                || r.status === 403) {
+                try { updateAck(0, ""); updateOff(); } catch (e) { }
+                updatePoll = null;
+                console.log("[moy] update off: host stopped answering ("
+                            + r.status + ")");
+                return null;
+            }
+            const ok = r.ok ? 1 : 0;
+            return r.text().then((t) => {
+                try { updateAck(ok, t); } catch (e) { }
+            });
+        })
+        .catch(() => { try { updateAck(0, ""); } catch (e) { } })
+        .finally(() => { updateBusy = false; });
 }
 
 function gpioPump() {
@@ -779,6 +869,7 @@ function loop() {
         }
         syncPump();
         gpioPump();
+        updatePump();
     } catch (e) {
         self.postMessage({ t: "error", s: String((e && e.message) || e) });
         running = false;

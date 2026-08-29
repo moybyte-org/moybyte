@@ -836,6 +836,71 @@ def gpio_enable(pins_json):
     return ""
 
 
+def update_enable(status_json):
+    """The host answered the /update probe: give the console an UPDATER (#41).
+
+    Same shape and same moment as `gpio_enable`, and for the same reason -- the
+    availability question is a fact about the far end, settled once, before any
+    screen can ask. A host that did not answer never calls this, `ws.updater`
+    stays None, and Settings simply has no update row: the standing rule for a
+    capability that is not there, rather than a row that fails when tapped.
+
+    What this buys is the whole point of doing it here instead of in the page:
+    `runtime/update_ui.py` is 659 lines that are ALREADY frozen into this
+    bundle, and were dead only because nothing was injected. The console gets
+    the same update screen every board shows, reached from the same Settings
+    row, with the same two-act confirm -- rather than a second update UI drawn
+    in page chrome.
+    """
+    try:
+        doc = json.loads(status_json)
+    except Exception:                # noqa: BLE001 -- a garbled probe answer
+        return ""
+    if not isinstance(doc, dict) or "running" not in doc:
+        return ""
+    try:
+        from update_link import RemoteUpdater
+        _S["update"] = RemoteUpdater(doc)
+        _S["ws"].updater = _S["update"]
+    except Exception as exc:         # noqa: BLE001 -- never block a boot
+        print("update unavailable:", exc)
+    return ""
+
+
+def update_poll_json():
+    """The next queued request, or "" -- the worker POSTs it to /update. When
+    there is nothing to send it answers "" and `update_wants_poll` decides
+    whether to GET instead."""
+    u = _S.get("update")
+    return u.take_json(_S.get("sync_pin")) if u is not None else ""
+
+
+def update_wants_poll():
+    """True when the screen is waiting on something and no request is in
+    flight, so the worker should GET the status. Polling only while a screen
+    cares is what keeps an idle console off the wire entirely."""
+    u = _S.get("update")
+    return bool(u is not None and u.wants_poll())
+
+
+def update_ack_json(ok, text=""):
+    """Settle the in-flight request or poll: `text` is the board's status
+    document, which is where every number the screen prints comes from."""
+    u = _S.get("update")
+    if u is not None:
+        u.ack(bool(ok), text or "")
+    return ""
+
+
+def update_off():
+    """The far end stopped answering. The updater STAYS (a screen may still be
+    open) and goes inert reporting an error -- see RemoteUpdater.stop."""
+    u = _S.get("update")
+    if u is not None:
+        u.stop()
+    return ""
+
+
 def gpio_poll_json():
     """The next batch of queued pin ops, or "" -- the worker POSTs it to the
     relative /gpio of whoever served the page, exactly like the sync push."""

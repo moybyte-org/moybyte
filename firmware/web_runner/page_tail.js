@@ -54,6 +54,7 @@ else if(m.t==="carts"){pzFill(m.names);}
 else if(m.t==="exported"){pzDownload(m.name,m.buf);}
 else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();
 if(m.report)p8Report(m.report,m.ok,m.dir);}
+else if(m.t==="update"){updBound(m);}
 else if(m.t==="edited"){window.__moyEdited=m.s;pzSay(m.s,!m.ok);}
 else if(m.t==="pin"){pinAsk(m.tried);}
 else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
@@ -299,167 +300,12 @@ LNKB.textContent=(kind==="lost")
 LNK.className=(kind==="lost")?"bad":"";
 LNK.style.display="block";
 // Readable by the browser harness without scraping, the way __moyReport is.
-window.__moyLink=kind;
-updStop();
-if(UPD)UPD.style.display="none";}
+window.__moyLink=kind;}
 window.__moyLinkLost=linkLost;
-// ---- FIRMWARE UPDATES (#41/#53) ---------------------------------------------
-// The board that served this page can update itself, and this is where a person
-// asks it to and watches it happen. TWO different boards answer, and the
-// document says which (moy_webhost.update_status):
-//
-//   screen:false  a HEADLESS board (the Zero). It has no other display, so this
-//                 strip IS its update screen: check, offer, then progress. The
-//                 two taps here are the two acts of consent every other board
-//                 takes on its glass.
-//   screen:true   a console with glass of its own. Triggering hands the glass
-//                 BACK -- wasm mode goes off and the board's own update screen
-//                 takes over, with its own two confirms -- so the one tap here
-//                 opens a screen and installs nothing, and this page stops
-//                 being the console, which the link surface then says.
-//
-// POLLED, and only while something is moving. There is nothing to make faster:
-// the megabytes never cross this link at all, because the BOARD downloads its
-// own firmware over its own WiFi and this reads a number.
-var UPD=document.getElementById("upd"),UPDS=document.getElementById("upds"),
-UPDB=document.getElementById("updb"),updDoc=null,updTimer=0,updBusy=false,updFails=0;
-// Polls to keep the "working" line up while an accepted request has not moved
-// the board's state yet. A board ANSWERS a request and does it on its next poll
-// (moy_webhost's /update), so there is a window where the honest answer is the
-// state the request has not been applied to -- and rendering THAT would put the
-// button back one poll before the news, which reads as a tap that did nothing.
-// So the wait is "until the state leaves the one the tap found", bounded,
-// because it covers a race and nothing longer.
-var updWaiting=0,updWaitFrom=null;
-var UPD_MS=1000;
-// A FLASHING BOARD LEGITIMATELY STOPS ANSWERING for seconds at a time -- it is
-// writing an app partition on a single-threaded machine -- so this threshold is
-// deliberately far above gpio_link's MAX_FAILS=5, which counts a link that
-// should never stall at all. Half a minute of silence during an install is a
-// board that is gone, and it goes to the ONE surface above.
-var UPD_GIVE_UP=30;
-function updUrl(){var p=new URLSearchParams(location.search).get("pin");
-return "update"+(p?"?pin="+encodeURIComponent(p):"");}
-function updSize(n){n=+n||0;
-return (n>=1048576)?((n/1048576).toFixed(1)+" MB"):(Math.round(n/1024)+" KB");}
-// Probed ONCE, like PLAY ON DEVICE's: a static host 404s, a board flashed
-// before the route 404s, a board that cannot take an OTA answers 503, and all
-// three mean the same thing to a person -- there is nothing here to press.
-function updProbe(){if(!UPD)return;
-fetch(updUrl()).then(function(r){return r.ok?r.json():null;})
-.then(function(d){if(d){updDoc=d;updRender();}})
-.catch(function(){});}
-function updStop(){if(updTimer){clearTimeout(updTimer);updTimer=0;}}
-function updPollSoon(){if(updTimer||linkGone)return;
-updTimer=setTimeout(function(){updTimer=0;
-fetch(updUrl()).then(function(r){return r.ok?r.json():null;})
-.then(function(d){if(!d)throw 0;updFails=0;updDoc=d;updRender();})
-.catch(function(){if(++updFails>=UPD_GIVE_UP)
-linkLost("lost","the console stopped answering mid-update",
-"It has not said anything for "+UPD_GIVE_UP+" seconds.");
-else updPollSoon();});},UPD_MS);}
-function updRender(){
-if(!UPD)return;
-var d=updDoc;
-if(!d){UPD.style.display="none";return;}
-var r=d.running||{},st=d.state||"idle",pg=d.progress,av=d.available;
-var say="firmware "+(r.label||"?")+" ("+(r.channel||"?")+")",act="",poll=false;
-if(updWaiting>0&&st===updWaitFrom){updWaiting--;
-UPDS.textContent="asking the console...";UPDS.className="";
-UPDB.style.display="none";UPD.style.display="flex";updPollSoon();return;}
-updWaiting=0;
-if(st==="reboot"){
-// The install landed and the board is resetting into the new slot. That is
-// the board GOING AWAY for a reason somebody chose, which is exactly what the
-// link surface is for -- so this strip stops here rather than inventing a
-// second way to say it.
-linkLost("expected","the board is installing and restarting",
-"It will come back on its own, on the new version. Give it a minute, then "
-+"reload this page.");
-return;}
-if(st==="glass"){say="the console is updating on its own screen";}
-else if(st==="checking"){say="looking for a new version...";poll=true;}
-else if(st==="offer"&&av){
-say=(r.label||"?")+"  ->  "+(av.label||"?")+(av.channel?" ("+av.channel+")":"")
-+(av.size?"  "+updSize(av.size):"");
-// THE SECOND ACT OF CONSENT, and the only one this page owns. The first was
-// asking it to look.
-act="install it";}
-else if(st==="downloading"){
-say="downloading"+(pg&&pg.total?"  "+updSize(pg.done)+" / "+updSize(pg.total):"");
-poll=true;}
-else if(st==="installing"){
-say="installing"+(pg&&pg.total?"  "+updSize(pg.done)+" / "+updSize(pg.total):"")
-+"  -  do not unplug the board";
-poll=true;}
-else if(st==="none"){
-// Two different sentences, deliberately: a channel with nothing published on
-// it yet is the normal state of a channel before its first release, and it is
-// not the same news as being up to date.
-say=d.absent?"nothing published on this channel yet"
-:"up to date  ("+(r.label||"?")+")";
-act="check again";}
-else if(st==="error"){say=d.error||"the update didn't finish -- nothing changed";
-act="try again";}
-else{
-if(d.last)say+=(d.last.result==="ok")
-?"  -  the last update worked"
-:"  -  the last update didn't start up, so your old firmware went back";
-act=d.screen?"update on the console":"check for updates";}
-UPDS.textContent=say;
-UPDS.className=(st==="error")?"warn":"";
-UPDB.textContent=act;
-UPDB.style.display=act?"":"none";
-UPD.style.display="flex";
-window.__moyUpdate=st;
-if(poll)updPollSoon();else updStop();}
-if(UPDB)UPDB.addEventListener("click",function(){
-if(updBusy||!updDoc)return;
-var screened=!!updDoc.screen;
-// ONE vocabulary, and the BOARD decides what it means: `check` is "start the
-// update flow" -- a headless board looks and then offers, a board with glass
-// hands the glass back. `install` is the second consent, which only a headless
-// board ever reaches, because only it showed the offer here.
-var was=updDoc.state||"idle";
-var action=(was==="offer")?"install":"check";
-updBusy=true;UPDB.disabled=true;UPDS.textContent="asking the console...";
-// The pin rides THIS page's own url, exactly as PLAY ON DEVICE's does. Both
-// methods of /update read it off the query, which is the endpoint's one rule.
-fetch(updUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-body:JSON.stringify({action:action})})
-.then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
-.then(function(x){
-updDoc=x.j;
-if(!x.j||!x.j.ok){
-// REFUSED, and the document says why in words meant for a person.
-UPDS.textContent=(x.j&&x.j.message)||"the console refused that";
-UPDS.className="warn";return;}
-if(screened){
-// The board is about to close this socket -- turning wasm mode off is what
-// unparks its glass -- so say it now, from the answer, rather than letting
-// the next request fail into silence.
-linkLost("expected","the console took the update onto its own screen",
-"Finish it there: it asks before it downloads and again before it installs. "
-+"The board restarts when it is done, and it has stopped serving this page in "
-+"the meantime -- reload once the console is back.");
-return;}
-// QUEUED, not done. Poll for the outcome rather than believing the answer's
-// own state, which is the state the request had not been applied to yet.
-updFails=0;updWaiting=6;updWaitFrom=was;updRender();})
-.catch(function(){UPDS.textContent="the console didn't answer";
-UPDS.className="warn";})
-.then(function(){updBusy=false;UPDB.disabled=false;});});
-// The loader module calls this on the play-button gesture (which also unlocks
-// WebAudio), once the worker has booted and shipped its assets.
-window.__moyStart=function(){
-getA().then(function(){sEl.textContent="live";sEl.style.color="#00e436";
-if(WORKER)WORKER.postMessage({t:"run"});
-podProbe();updProbe();
-requestAnimationFrame(tick);setInterval(plog,PERF_MS);cv.focus();})
-.catch(function(e){console.error(e);sEl.textContent="no assets";sEl.style.color="#ff004d";});};
-window.__moyRefetchAssets=function(){getA().catch(function(){});};
-</script>
-<script type=module>
+// The worker bound the update bridge: the board serving this page offers
+// firmware updates, and the console's Settings row is live. Recorded rather
+// than drawn -- the page owns no update UI now.
+function updBound(m){window.__moyUpdate={running:m.running,screen:!!m.screen};}
 // ---- loader: spawn the console worker, wire it to the page -------------------
 // The VM used to boot HERE, on the main thread. It now lives in worker.js; this
 // module only constructs it, forwards the query string (tier + cart) and owns the

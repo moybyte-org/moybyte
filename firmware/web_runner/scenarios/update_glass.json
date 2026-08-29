@@ -1,11 +1,5 @@
 {"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
-  {"note": "a console WITH GLASS served this page: the strip offers a hand-off, not an install"},
-  {"js": "JSON.stringify({at:'idle',shown:getComputedStyle(document.getElementById('upd')).display,say:document.getElementById('upds').textContent,act:document.getElementById('updb').textContent})"},
-  {"shot": "idle"},
-
-  {"note": "one tap: the board takes it onto its own screen and stops serving this page"},
-  {"js": "JSON.stringify({at:'handed',ok:(document.getElementById('updb').click(),true)})"},
-  {"wait": 4000},
-  {"js": "JSON.stringify({at:'after',link:window.__moyLink||'',head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,panel:getComputedStyle(document.getElementById('lnk')).display,bad:document.getElementById('lnk').className,strip:getComputedStyle(document.getElementById('upd')).display})"},
-  {"shot": "handed_off"}
+  {"note": "A board WITH GLASS served this page. The bridge binds identically; what differs is the hardware claim it carries, and that claim is what makes the console hand the glass back instead of installing here.", "wait": 3000},
+  {"js": "JSON.stringify({at:'bound',u:window.__moyUpdate||null,noStrip:document.getElementById('upd')===null})"},
+  {"shot": "glass_bound"}
 ]}

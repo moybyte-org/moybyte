@@ -107,59 +107,42 @@ def _probes(scenario, base, outdir):
     return out, run.stdout
 
 
-def test_a_headless_board_is_updated_from_the_page(tmp_path):
+def test_a_headless_board_binds_the_update_bridge(tmp_path):
+    """The console gets an UPDATER, in a real browser, from a real probe.
+
+    This is the browser's whole job here. The update FLOW -- check, offer, the
+    second consent, the polled progress, the reboot -- is driven in
+    tests/test_remote_update.py against a real Workstation and the real
+    UpdateUI, where the phase machine is cheap to exercise and a failure names
+    the phase. Clicking a Settings row through headless Chrome would pin the
+    row's COORDINATES; what cannot be tested anywhere else is that the probe,
+    web_boot.update_enable and the worker's pump actually meet."""
     web_e2e.require("update")
     with _twin(tmp_path, "headless") as base:
         p, out = _probes("update_headless.json", base, tmp_path / "shots")
-        for at in ("idle", "offered", "moving", "gone"):
-            assert at in p, (at, out[-3000:])
-
-        # The strip appears at all only because the far end ANSWERED. A static
-        # host 404s and this is invisible there, which is the whole gate.
-        assert p["idle"]["shown"] != "none", p["idle"]
-        assert "0.8" in p["idle"]["say"], p["idle"]
-        assert p["idle"]["act"] == "check for updates", p["idle"]
-
-        # ACT ONE landed and the board came back with something to install.
-        assert p["offered"]["st"] == "offer", p["offered"]
-        assert "0.9" in p["offered"]["say"], p["offered"]
-        assert p["offered"]["act"] == "install it", \
-            "the second consent is not being asked for"
-
-        # ACT TWO: from here the BOARD is working and this page reads a number.
-        assert p["moving"]["st"] in ("downloading", "installing"), p["moving"]
-        assert "MB" in p["moving"]["say"], p["moving"]
-        assert not p["moving"]["link"], "the link surface fired mid-transfer"
-
-        # ...and the reset at the end is the board going away ON PURPOSE.
-        assert p["gone"]["link"] == "expected", p["gone"]
-        assert p["gone"]["panel"] != "none", p["gone"]
-        assert "restart" in p["gone"]["head"], p["gone"]
-        assert "do not reload" not in p["gone"]["body"].lower(), \
-            "an update people asked for must not carry the data-loss warning"
-        assert p["gone"]["strip"] == "none", \
-            "two surfaces are up at once, saying the same thing twice"
+        assert "bound" in p, out[-3000:]
+        u = p["bound"]["u"]
+        assert u, "the bridge never bound -- ws.updater is None, so Settings " \
+                  "has no update row at all"
+        assert u.get("running"), u
+        # The hardware claim the whole design branches on. False here means
+        # THIS page is the only progress report that exists.
+        assert u.get("screen") is False, u
+        assert p["bound"]["noStrip"] is True, \
+            "the page still draws an update UI of its own"
 
 
-def test_a_console_with_glass_takes_the_update_onto_its_own_screen(tmp_path):
+def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
+    """Same bridge, opposite hardware claim -- and that claim is the whole
+    branch: `screen` true means triggering an update ENDS this page's job as the
+    console, because the board's own update screen is where the frames that
+    advance the flash are painted."""
     web_e2e.require("update")
     with _twin(tmp_path, "glass") as base:
         p, out = _probes("update_glass.json", base, tmp_path / "shots")
-        for at in ("idle", "after"):
-            assert at in p, (at, out[-3000:])
-
-        # The label says what will HAPPEN, before the tap -- the board's own
-        # `screen` flag is what the page branched on.
-        assert p["idle"]["act"] == "update on the console", p["idle"]
-
-        # One tap, and this page has stopped being the console. It says so.
-        assert p["after"]["link"] == "expected", p["after"]
-        assert p["after"]["panel"] != "none", p["after"]
-        assert "own screen" in p["after"]["head"], p["after"]
-        assert "reload" in p["after"]["body"], p["after"]
-        # NOT the loss styling and NOT the loss warning: nothing is at risk,
-        # and crying wolf on every ordinary update is exactly the failure the
-        # one-surface-with-a-reason design exists to avoid.
-        assert p["after"]["bad"] != "bad", p["after"]
-        assert "do not reload" not in p["after"]["body"].lower(), p["after"]
-        assert p["after"]["strip"] == "none", p["after"]
+        assert "bound" in p, out[-3000:]
+        u = p["bound"]["u"]
+        assert u, "the bridge never bound against a board with glass"
+        assert u.get("screen") is True, u
+        assert p["bound"]["noStrip"] is True, \
+            "the page still draws an update UI of its own"
