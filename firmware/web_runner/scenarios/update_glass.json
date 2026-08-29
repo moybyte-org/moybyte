@@ -1,5 +1,22 @@
-{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
-  {"note": "A board WITH GLASS served this page. The bridge binds identically; what differs is the hardware claim it carries, and that claim is what makes the console hand the glass back instead of installing here.", "wait": 3000},
-  {"js": "JSON.stringify({at:'bound',u:window.__moyUpdate||null,noStrip:document.getElementById('upd')===null})"},
-  {"shot": "glass_bound"}
-]}
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "A board WITH GLASS served this page. The bridge binds identically; what differs is the hardware claim it carries, and that claim is what makes the console hand the glass back instead of installing here.",
+   "wait": 3000
+  },
+  {
+   "note": "FIRST: did the console actually START? Two probes, because the obvious one lies: `#s` reads 'live' from page_core's FRAME path as well as from __moyStart, so it stays green over a page whose entry point is missing -- which is how a black screen shipped past this very check on 2026-08-29. `typeof __moyStart` pins the symbol the loader calls, and the lit-pixel count pins that something was actually drawn."
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,px:(function(){try{var d=cx.getImageData(0,0,cv.width,cv.height).data,n=0;for(var i=0;i<d.length;i+=4){if(d[i]|d[i+1]|d[i+2])n++;}return n;}catch(e){return -1;}})()})"
+  },
+  {
+   "js": "JSON.stringify({at:'bound',u:window.__moyUpdate||null,noStrip:document.getElementById('upd')===null})"
+  },
+  {
+   "shot": "glass_bound"
+  }
+ ]
+}

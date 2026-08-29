@@ -120,6 +120,15 @@ def test_a_headless_board_binds_the_update_bridge(tmp_path):
     web_e2e.require("update")
     with _twin(tmp_path, "headless") as base:
         p, out = _probes("update_headless.json", base, tmp_path / "shots")
+        # The console must have STARTED and DRAWN. `#s` is not the probe for
+        # that -- page_core sets it to "live" off the frame path too, so it
+        # stays green over a page whose entry point is gone. These two cannot:
+        # the loader calls window.__moyStart by name, and a black canvas has no
+        # lit pixels.
+        assert p["live"]["fn"] == "function", \
+            "window.__moyStart is missing -- the page cannot boot: %r" % (p["live"],)
+        assert p["live"]["px"] > 0, \
+            "the console drew nothing: %r" % (p["live"],)
         assert "bound" in p, out[-3000:]
         u = p["bound"]["u"]
         assert u, "the bridge never bound -- ws.updater is None, so Settings " \
@@ -140,6 +149,15 @@ def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
     web_e2e.require("update")
     with _twin(tmp_path, "glass") as base:
         p, out = _probes("update_glass.json", base, tmp_path / "shots")
+        # The console must have STARTED and DRAWN. `#s` is not the probe for
+        # that -- page_core sets it to "live" off the frame path too, so it
+        # stays green over a page whose entry point is gone. These two cannot:
+        # the loader calls window.__moyStart by name, and a black canvas has no
+        # lit pixels.
+        assert p["live"]["fn"] == "function", \
+            "window.__moyStart is missing -- the page cannot boot: %r" % (p["live"],)
+        assert p["live"]["px"] > 0, \
+            "the console drew nothing: %r" % (p["live"],)
         assert "bound" in p, out[-3000:]
         u = p["bound"]["u"]
         assert u, "the bridge never bound against a board with glass"

@@ -302,6 +302,20 @@ LNK.style.display="block";
 // Readable by the browser harness without scraping, the way __moyReport is.
 window.__moyLink=kind;}
 window.__moyLinkLost=linkLost;
+
+// The loader module calls this on the play-button gesture (which also unlocks
+// WebAudio), once the worker has booted and shipped its assets. It is the whole
+// page's entry point: without it nothing starts and the canvas stays black.
+// It lived at the TAIL of the update strip's block, after code it had nothing
+// to do with, and went out with it (2026-08-29) -- a black screen everywhere,
+// past a green suite.
+window.__moyStart=function(){
+getA().then(function(){sEl.textContent="live";sEl.style.color="#00e436";
+if(WORKER)WORKER.postMessage({t:"run"});
+podProbe();
+requestAnimationFrame(tick);setInterval(plog,PERF_MS);cv.focus();})
+.catch(function(e){console.error(e);sEl.textContent="no assets";sEl.style.color="#ff004d";});};
+window.__moyRefetchAssets=function(){getA().catch(function(){});};
 // The worker bound the update bridge: the board serving this page offers
 // firmware updates, and the console's Settings row is live. Recorded rather
 // than drawn -- the page owns no update UI now.
