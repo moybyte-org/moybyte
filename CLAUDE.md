@@ -65,7 +65,8 @@ because those are the design, not a measurement of it.
 ## What this repo is
 
 Moybyte is an operating system for ESP32 boards: a console where the software is
-cartridges, running as firmware on three boards plus a host simulator and a browser build.
+cartridges, running as firmware on three console boards (plus one headless companion)
+alongside a host simulator and a browser build.
 Everything is ONE system: **`.moy` is the only cart format.** (A separate
 `.moyproj` SDK was deleted 2026-07-31 because nothing depended on it but its own
 tests; the block compiler was always separate and lives in `runtime/blocks.py`.
@@ -73,7 +74,10 @@ Git history has the rest — do not reintroduce the format.)
 
 - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
 - `firmware/lilygo_t_deck_plus_mainline/` · `firmware/esp32_p4_wifi6_touch_lcd_7b/`
-  · `firmware/guition_jc3248w535/` — the three board ports (MicroPython). Each
+  · `firmware/guition_jc3248w535/` — the three console board ports (MicroPython).
+  `firmware/seeed_xiao_esp32s3_zero/` is the fourth build target and the odd one:
+  HEADLESS (#41), the kid's cart store the browser console pairs with, promoted
+  out of its stock-MicroPython/pushed-modules arrangement on 2026-08-29. Each
   dir's README is the authority on its hardware; `.claude/rules/boards.md` carries
   the constraints that hang a board.
 - `system_carts/*.moy` — seed cartridges (folder = `manifest.json` + `main.py` + `config.json`).

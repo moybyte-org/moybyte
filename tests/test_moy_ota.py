@@ -514,15 +514,25 @@ def test_the_published_payload_is_the_app_image_not_the_cable_merge():
     except ImportError:                                # pragma: no cover
         import tomli as tomllib
 
-    boards = {"tdeck": "lilygo_t_deck_plus_mainline",
-              "p4": "esp32_p4_wifi6_touch_lcd_7b",
-              "guition_s3": "guition_jc3248w535"}
-    assert set(publish.OTA_IMAGES) == set(boards)
-    for board_id, folder in boards.items():
+    # DERIVED from the tree, not listed: every firmware directory that declares
+    # a flashable image is a board that publishes, so a new one joins this check
+    # by EXISTING. The hand-written map this replaced was three boards long the
+    # day a fourth arrived, and the failure it protects against is precisely a
+    # board that builds and quietly gets no manifest -- which is what kept the
+    # Guition's first beta off the channel on 2026-08-20.
+    boards = {}
+    for path in sorted((ROOT / "firmware").glob("*/board.toml")):
+        with open(path, "rb") as f:
+            cfg = tomllib.load(f)
+        if "flash" in cfg and cfg.get("board", {}).get("ota"):
+            boards[cfg["board"]["ota"]] = cfg["flash"]["image"]
+    assert len(boards) >= 4, "board discovery found %d" % len(boards)
+    assert set(publish.OTA_IMAGES) == set(boards), (
+        "a board that builds an image but has no OTA_IMAGES entry gets no "
+        "manifest, silently, on every channel")
+    for board_id, merged in boards.items():
         ota = publish.OTA_IMAGES[board_id]
         assert ota.endswith("_app.bin"), board_id
-        with open(ROOT / "firmware" / folder / "board.toml", "rb") as f:
-            merged = tomllib.load(f)["flash"]["image"]
         assert Path(merged).name != ota, (
             "%s publishes its cable-flash merge as the OTA payload" % board_id)
         assert Path(merged).name == ota.replace("_app.bin", ".bin"), board_id

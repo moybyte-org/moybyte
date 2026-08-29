@@ -58,8 +58,19 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 #       input polling, timers and compositing on either board; long enough that a
 #       crash in the ordinary run of things lands inside it, short enough that
 #       nobody power-cycles before it.
+#   HEALTHY_SERVES -- the HEADLESS twin of the pair above (the Zero, 2026-08-29).
+#       That board paints nothing ever, so a paint threshold there is not a weak
+#       gate, it is an unreachable one: every update would roll back. What plays
+#       the part of "something reached the glass" is the only externally visible
+#       thing this board does -- its store host is up and listening on a joined
+#       network -- and the part of HEALTHY_LOOPS is played by surviving this many
+#       poll iterations afterwards. 300 rather than 120 because that loop's duty
+#       cycle is a 10ms sleep, so 120 would be ~1.2s; 300 is ~3s, inside the same
+#       "a crash in the ordinary run of things lands here" window the frame-loop
+#       number was chosen for.
 HEALTHY_PAINTS = 1
 HEALTHY_LOOPS = 120
+HEALTHY_SERVES = 300
 PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
 # How long ensure_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
@@ -351,6 +362,42 @@ class OtaUpdater:
         self._loops += 1
         if frames_drawn < HEALTHY_PAINTS or self._loops < HEALTHY_LOOPS:
             return False
+        return self._confirm()
+
+    def confirm_when_serving(self, serving):
+        """The same confirm, for a board with no glass (the Zero, #41).
+
+        `confirm_when_healthy` asks two questions -- did anything reach the
+        display, and did the loop keep running -- and on a headless board the
+        first one has no answer. Answering it with a constant would certify
+        every image unconditionally; leaving it at zero would roll every image
+        back. So the caller supplies the evidence its own hardware can give:
+        `serving` is True while the store host is up and listening on a joined
+        network, which is the only thing about this board a human outside it
+        could ever observe. The loop half is unchanged in spirit and counted
+        here, one call per poll iteration (HEALTHY_SERVES).
+
+        Deliberately NOT a `frames_drawn=1` call into the method above: that
+        would put a lie in the argument list, and the next reader would have to
+        work out that a board with no panel was claiming a painted frame.
+        Returns True the one iteration it confirms."""
+        if self.confirmed:
+            return False
+        if not serving:
+            # Not a countdown pause: an image whose host never comes up is
+            # exactly the image the bootloader should take back, so the counter
+            # only advances while the thing being certified is working.
+            self._loops = 0
+            return False
+        self._loops += 1
+        if self._loops < HEALTHY_SERVES:
+            return False
+        return self._confirm()
+
+    def _confirm(self):
+        """Mark the running image valid and retire the pending marker. Both
+        confirm gates above end here, so "what confirming DOES" is one body and
+        only "when is it honest" differs per board."""
         self.confirmed = True
         ok = self.mark_valid()
         # The pending marker is cleared HERE and not where it was read, so that an

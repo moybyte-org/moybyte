@@ -1,15 +1,47 @@
 #!/usr/bin/env bash
-# Provision a stock-MicroPython XIAO ESP32-S3 as the Zero (headless cart-store
-# host, #41 / sync RPC). No ESP-IDF build: flash stock MP once (README), then
-# this script PUSHES plain .py files + the web bundle + seed carts over USB.
-# Idempotent -- run it again after editing any pushed module.
+# Provision a Moybyte Zero's STORE: the cart roster, the WiFi credentials and
+# the pairing pin. Idempotent -- run it again whenever the seed roster changes.
 #
-#   ./provision.sh [/dev/ttyACM0] [path/to/wifi.json]
+#   ./provision.sh [--modules] [--web] [--clean] [/dev/ttyACM0] [path/to/wifi.json]
+#
+# WHAT THIS SCRIPT IS, SINCE 2026-08-29. It used to be the whole port: this
+# board ran stock MicroPython, and the nine shared modules it needs were PUSHED
+# here as plain files, so the `cp` list below WAS the module set and
+# `tests/test_zero_provision.py` existed to keep that list honest. The board
+# has a frozen image now (`build.sh`), so the module set is `board.toml` and
+# this script provisions what an image cannot carry: a kid's carts, somebody's
+# WiFi password, and a pin minted per board.
+#
+# The push did not go away, it became OPT-IN (`--modules`). Same doctrine as
+# the web bundle, one level up: STORAGE WINS, so a push stays the sub-minute
+# dev loop and the image is the guarantee, not the ceiling. And the same
+# hazard: MicroPython searches / before .frozen, so a pushed copy shadows the
+# image silently and forever. That is why it is a flag, why `--clean` exists to
+# undo it, and why `zero_host.serve()` prints which modules are shadowed.
+#
+# The pushed list is DERIVED from board.toml, never typed here: a hand-list is
+# the thing that falls behind the code it is a list of, and this board has
+# already paid for that once (moy_store.mjs became an asset the worker
+# statically imports and the hand-list missed it the same day, which is a
+# console that cannot boot).
 #
 # wifi.json is the console's own shape ({"networks": [{"ssid", "password"}]})
 # and is a SECRET -- it is never in the repo; hand the script a copy (e.g. one
 # read off a console board) and it lands at /moy/wifi.json.
 set -euo pipefail
+
+PUSH_MODULES=0
+PUSH_WEB=0
+CLEAN=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --modules) PUSH_MODULES=1; shift ;;
+    --web)     PUSH_WEB=1; shift ;;
+    --clean)   CLEAN=1; shift ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    *) break ;;
+  esac
+done
 
 PORT="${1:-/dev/ttyACM0}"
 WIFI="${2:-}"
@@ -17,53 +49,86 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "${HERE}/../.." && pwd)"
 MP="${REPO}/.venv/bin/mpremote"
 [ -x "${MP}" ] || MP="mpremote"
+PY="${REPO}/.venv/bin/python"
+[ -x "${PY}" ] || PY="python3"
 DIST="${REPO}/firmware/web_runner/dist"
 
 run() { "${MP}" connect "${PORT}" "$@"; }
 
-# Stop a running serve() loop so the fs is quiet while we copy.
+# Stop a running serve() loop so the fs is quiet while we copy. (This is also
+# the check that the board's REPL is reachable at all -- it goes through the
+# TinyUSB CDC path mpconfigboard.h keeps for exactly this.)
 run exec "pass" >/dev/null 2>&1 || true
 
-# THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), so the module set is
-# the sync stack's whole import closure and not the minimum that boots:
-#   moy_carts   the #108 files layer -- FILE_KINDS and files_root are what
-#               moy_sync asks for before it will serve /files.json or apply a
-#               v2 files batch, so without it the kid's drawings do not travel.
-#   moy_journal the store-of-record journal: this board takes browser pushes,
-#               so this board is where their undo history has to live.
-#   moy_image   moy_carts' only other import (thumbnails / .moyimg codec).
-# `blocks` is deliberately NOT here: moy_carts imports it lazily inside one
-# function that only a console calls, and this board has no console.
-echo "== modules"
-run cp \
-  "${REPO}/device/moy_webserver.py" \
-  "${REPO}/device/moy_webhost.py" \
-  "${REPO}/runtime/moy_sync.py" \
-  "${REPO}/runtime/moy_fs.py" \
-  "${REPO}/runtime/moy_carts.py" \
-  "${REPO}/runtime/moy_journal.py" \
-  "${REPO}/runtime/moy_image.py" \
-  "${REPO}/runtime/web_view_ws.py" \
-  "${REPO}/runtime/ticks.py" \
-  "${HERE}/zero_host.py" \
-  "${HERE}/zero_setup.py" \
-  "${HERE}/zero_gpio.py" \
-  "${HERE}/main.py" \
-  : >/dev/null
+if [ "${CLEAN}" = "1" ]; then
+  # UNDO A PUSH. A module pushed to / outranks the frozen one for as long as it
+  # exists, so a board that was ever developed against keeps running whatever
+  # was on it the day somebody stopped -- while every diagnostic points at the
+  # image. The list is board.toml's, so this removes exactly what --modules
+  # puts there and never a file that is somebody's own.
+  echo "== removing pushed module copies (the image's own take over again)"
+  NAMES="$(MOY_REPO="${REPO}" MOY_BOARD="${HERE}" "${PY}" - <<'PYEOF'
+import os, sys
+repo = os.environ["MOY_REPO"]
+sys.path.insert(0, repo)
+from tools import board_config
+names = sorted(board_config.staged_modules(os.environ["MOY_BOARD"], repo))
+names += sorted(p for p in os.listdir(os.path.join(os.environ["MOY_BOARD"],
+                                                   "modules"))
+                if p.endswith(".py"))
+print("\n".join(sorted(set(names))))
+PYEOF
+)"
+  for n in ${NAMES}; do
+    run exec "import os
+try: os.remove('/${n}')
+except OSError: pass" >/dev/null 2>&1 || true
+  done
+  echo "   (${PORT}: reset it to run the image's modules)"
+fi
+
+if [ "${PUSH_MODULES}" = "1" ]; then
+  # THE DEV LOOP. Everything board.toml says this image freezes, pushed as
+  # plain files so an edit is a second rather than a reflash. Derived, not
+  # typed -- see the header.
+  echo "== modules (DEV PUSH -- these SHADOW the image until ./provision.sh --clean)"
+  FILES="$(MOY_REPO="${REPO}" MOY_BOARD="${HERE}" "${PY}" - <<'PYEOF'
+import os, sys
+repo = os.environ["MOY_REPO"]
+board = os.environ["MOY_BOARD"]
+sys.path.insert(0, repo)
+from tools import board_config
+# The staged set (board.toml's [modules.shared] allowlist + [modules.device]),
+# then the board's OWN modules/ -- tracked files only, which is what separates
+# them from copies a previous build staged into the same directory.
+out = [str(p) for p in board_config.staged_modules(board, repo).values()]
+import subprocess
+tracked = subprocess.run(["git", "ls-files", "modules"], cwd=board,
+                         capture_output=True, text=True).stdout.split()
+out += [os.path.join(board, t) for t in tracked if t.endswith(".py")]
+print("\n".join(out))
+PYEOF
+)"
+  # shellcheck disable=SC2086
+  run cp ${FILES} : >/dev/null
+fi
 
 echo "== dirs"
-for d in /moy /moy/carts /moy/web; do
+for d in /moy /moy/carts /moy/web /moy/update; do
   run exec "import os
 try: os.mkdir('${d}')
 except OSError: pass" >/dev/null
 done
 
-echo "== web bundle (gzipped -- moy_webhost prefers the .gz copies)"
-# The asset SET is moy_webhost.ASSETS's business, not this script's: a file the
-# worker statically imports but nobody pushed is a console that cannot boot
-# (moy_store.mjs joined 2026-08-25 and the hand-list here missed it same-day).
-if [ -d "${DIST}" ]; then
-  ASSET_LIST="$(MOY_REPO="${REPO}" "${REPO}/.venv/bin/python" - <<'PYEOF'
+if [ "${PUSH_WEB}" = "1" ]; then
+  # The web bundle OVERRIDE. Baked into the image since this board became a
+  # build target, so this is the same dev-loop trade as --modules: faster than
+  # a reflash, and it wins until it is deleted. The asset SET is
+  # moy_webhost.ASSETS's business, not this script's -- a file the worker
+  # statically imports but nobody pushed is a console that cannot boot.
+  echo "== web bundle (gzipped -- moy_webhost prefers the .gz copies)"
+  if [ -d "${DIST}" ]; then
+    ASSET_LIST="$(MOY_REPO="${REPO}" "${PY}" - <<'PYEOF'
 import os, sys
 repo = os.environ["MOY_REPO"]
 sys.path.insert(0, repo)
@@ -72,14 +137,15 @@ import moy_webhost
 print("\n".join(moy_webhost.ASSETS))
 PYEOF
 )"
-  for a in ${ASSET_LIST}; do
-    run cp "${DIST}/${a}.gz" :/moy/web/ >/dev/null
-  done
-else
-  echo "   (no ${DIST} -- build firmware/web_runner first; skipping)"
+    for a in ${ASSET_LIST}; do
+      run cp "${DIST}/${a}.gz" :/moy/web/ >/dev/null
+    done
+  else
+    echo "   (no ${DIST} -- build firmware/web_runner first; skipping)"
+  fi
 fi
 
-echo "== seed carts (the whole roster -- ~1.1MB against a ~6MB flash store)"
+echo "== seed carts (the whole roster -- 763KB measured, against a 2.4MB vfs)"
 for cart in "${REPO}"/system_carts/*.moy; do
   run cp -r "${cart}" :/moy/carts/ >/dev/null
 done

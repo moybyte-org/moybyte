@@ -14,10 +14,14 @@ paths:
   P4 (2026-08-02: real WiFi, on-device signature check, streamed install, boot
   into the new slot, rollback self-heal). **Timings, sizes and rates live in
   #53**, not here.
-  - **Both boards are dual-OTA already** (`otadata + ota_0 + ota_1 + vfs`), so the
+  - **Every board is dual-OTA** (`otadata + ota_0 + ota_1 + vfs`), so the
     one-time migration is HISTORY. The slot sizes differ per board and are NOT
-    repeated here: each `build.sh`'s generated table and the P4's partition CSV
-    are the only things that decide whether an image fits.
+    repeated here: each board's partition CSV is the only thing that decides
+    whether an image fits, and the build prints the headroom against it (#168).
+    **The Zero's is the one authored under a real constraint** — 8MB of flash,
+    where the console layout does not fit and the bootloader REJECTS the table
+    into a silent boot loop. Its CSV carries the arithmetic and the measured
+    image it is sized against.
   - **The OTA payload is the APP-PARTITION image, never the merged one.**
     `…_app.bin` is the payload; `…​.bin` is bootloader+table+app for a cable flash.
     Handing the merged one to `esp32.Partition` writes a bootloader into an app
@@ -36,6 +40,18 @@ paths:
     a quiet desktop sits at ONE painted frame indefinitely and a paint-based gate
     would roll back every update nobody was touching. The loop counter carries the
     wait.
+  - **A HEADLESS board confirms on different evidence, through the same body**
+    (the Zero, 2026-08-29). The frame gate is unreachable there in BOTH
+    directions: a made-up frame count certifies every image, a zero rolls every
+    image back. `confirm_when_serving(serving)` counts `HEALTHY_SERVES` poll
+    iterations of a live store host, and a host that falls over RESETS the count
+    rather than pausing it. Both gates end in one `_confirm()`, so the marker's
+    lifetime below is not re-implemented. **Do NOT merge them behind a flag** —
+    the argument list is where the claim about the hardware lives.
+  - **With no screen the update UI is two pin-gated JSON endpoints**
+    (`zero_host.ZeroUpdate`): the POST queues and answers, the work runs in the
+    poll loop, and the last verdict is a field rather than a banner. The board's
+    README states the trigger decision and its reasoning.
   - **`finish()` writes `pending.json` naming the slot it pointed the bootloader
     at**; `boot_check()` compares it against the running slot next boot. **The
     marker is cleared at the CONFIRM, not at the read**, so an image that boots,

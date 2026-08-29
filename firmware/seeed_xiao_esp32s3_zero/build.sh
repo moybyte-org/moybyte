@@ -52,22 +52,46 @@ moybyte_setup_idf esp32s3 \
 
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- EMPTY, and that is this board's shortest description.
-#    Every patch the siblings apply is a fix for something this board does not
-#    do, so each is declined here in writing rather than by omission:
+#    Every shared patch is per-board and OPT-IN, and a board that does not call
+#    one declines it HERE IN WRITING (`# DECLINED <fn> <reason>` -- board.toml's
+#    `[[deny]] why=` in the one file that is not board.toml). Silence is neither,
+#    and `tests/test_micropython_spike.py` fails a build.sh that is silent.
 #
-#    * REPR_C unboxed floats (#66) -- a cart frame loop's float-boxing tax.
-#      This board runs no carts and has no frame loop; the win is zero and the
-#      cost is a non-default object representation on the board with the least
-#      on-glass coverage in the fleet.
-#    * esp_native_code_free_all (#66) -- reclaims the @micropython.native exec
-#      arena after a cart compile. Nothing here compiles a cart.
-#    * the ESP-NOW ring torn-read race (#7) -- modespnow is not in this image
-#      (no [modules.device] espnow, no netplay, no second console to pair with).
-#    * the PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI
-#      profile and inert without it. sdkconfig.board stays at 80MHz and says
-#      why, so the patch would be a no-op with a boot-abort failure mode.
-#    * the esp_lcd tx_color no-acquire patch -- there is no panel.
-#    * the #69 I2C GIL release -- there is no input poller and no I2C device.
+# DECLINED moybyte_patch_repr_c -- unboxed 30-bit floats (#66). The lever is a
+#    CART INTERPRETER tax: REPR_A boxes every float RESULT in 16 bytes of heap,
+#    sakura measured ~73KB of that per frame, and the heap-wrap collect it
+#    forces is the 130-175ms micro-stutter. Every term in that sentence is a
+#    cart frame loop, and this board has neither: carts run in the BROWSER when
+#    they are paired with a Zero, and this image compiles in neither moy_lua nor
+#    moycore. What is left is a non-default object representation carried by the
+#    board with the least on-glass coverage in the fleet, for no measurable win.
+#    Revisit the day something on this flash executes a cart.
+#
+# DECLINED moybyte_patch_psram_retune -- the #169 vendor-gate patch. This is
+#    NOT a "no carts" argument, because the PSRAM is real (8MB octal, and the
+#    heap and the lwIP buffers both live in it). It is a dependency argument:
+#    the patch relaxes a vendor gate inside IDF's MSPI *timing tuning* task,
+#    which is only compiled in by
+#    CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR -- a member of the
+#    five-flag 120MHz profile. sdkconfig.board keeps this board at
+#    CONFIG_SPIRAM_SPEED_80M (its reasoning is beside the block), so the tuner
+#    never runs and the patch would be inert. The repo already states this rule
+#    in the direction that matters: a board that takes the patch must be on the
+#    120MHz profile, and the spike suite fails one that is not. The empirical
+#    half agrees -- this board has run 80MHz octal PSRAM unpatched since
+#    2026-08-25 on stock MicroPython, which carries no such patch at all.
+#    These two move together: take the 120MHz profile and take this with it.
+#
+# DECLINED moybyte_patch_native_code_free -- reclaims the @micropython.native
+#    exec arena after a cart compile misses. Nothing here compiles a cart.
+#
+# DECLINED moybyte_patch_espnow_ring_race -- a torn-read race in modespnow's
+#    recv ring (#7). modespnow is not in this image: no netplay, no cart net.*
+#    inbox, and no second console to pair with.
+#
+#    Also not applied, and never were: the esp_lcd tx_color no-acquire patch
+#    (there is no panel) and the #69 I2C GIL release (no input poller, no I2C
+#    device on the bus).
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

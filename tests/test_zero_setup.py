@@ -16,7 +16,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "device"))            # moy_webserver
-sys.path.insert(0, str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero"))
+# APPENDED, not inserted, since the Zero became a build target (2026-08-29):
+# that directory now holds the board's own modules AND the copies its build
+# stages there, and a staged `moy_webserver.py` is exactly the untracked stale
+# copy tests/test_staging_closure.py exists to stop anything reading. `device/`
+# stays first, so only the board-AUTHORED names resolve out of here.
+sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
 
 import zero_setup                                              # noqa: E402
 import zero_host                                               # noqa: E402

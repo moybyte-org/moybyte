@@ -20,7 +20,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "device"))            # moy_webserver
-sys.path.insert(0, str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero"))
+# APPENDED for the same reason as the line below, plus one of its own since the
+# Zero became a build target (2026-08-29): its modules/ now holds the copies the
+# build stages there as well as the board's own files, and a staged
+# `moy_webserver.py` is precisely the untracked stale copy
+# tests/test_staging_closure.py exists to stop anything reading.
+sys.path.append(str(ROOT / "firmware" / "seeed_xiao_esp32s3_zero" / "modules"))
 # APPENDED, not inserted: that directory also holds web_boot/web_canvas/serve,
 # and this suite has no business changing which module a bare import of one of
 # those resolves to elsewhere in the run.

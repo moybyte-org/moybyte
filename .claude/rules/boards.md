@@ -37,11 +37,15 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   shared module reaches every board by default and staying off one is a written decision; the old
   per-board allowlists are what let the T-Deck silently miss the web console. The `device/` allowlist
   stays an allowlist because `runtime/` is a shared tree whose default answer is "yes" and the device
-  tier's is not. The stager also **prunes untracked strays** — `modules/` is gitignored and never
+  tier's is not — **which is also why the headless Zero inverts it** (2026-08-29): that board has no
+  console, so `runtime/`'s default answer there is "no", and `strategy = "allowlist"` with a group
+  per capability is the honest shape. Which shape a board uses is DECLARED
+  (`board_config.shared_strategy`) and pinned in both directions, because a board silently changing
+  shape silently changes what it freezes. The stager also **prunes untracked strays** — `modules/` is gitignored and never
   cleaned while the freeze takes the whole DIRECTORY, so deleted modules kept shipping in images
   built on a warm tree. **The shared half of every board build is `tools/esp32_build_lib.sh`**
-  (sourced by all three build.sh scripts; landed 2026-08-17 with two, and the
-  Guition was provisioned on it the next day): toolchain setup with the export.sh probe +
+  (sourced by every board's build.sh; landed 2026-08-17 with two, the Guition was provisioned on it
+  the next day, and the Zero graduated onto it 2026-08-29): toolchain setup with the export.sh probe +
   install self-heal, IDF_COMPONENTS append, the native-code-free patch, native staging + the web
   blob (generated into the STAGED copy — a build must never write into the shared `native/` tree),
   the OTA identity stamp (every board reads `device/moy_ota.py`, one path), the frozen manifest +
@@ -146,6 +150,33 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     saved), and #159's L2 cache 128→256KB closed the game chapter (512KB does not
     boot — internal/DMA pool 0x101).
   - Status and numbers: **#58**. Open: USB-HID keyboard, audio (ES8311).
+
+
+### Fourth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)
+
+`firmware/seeed_xiao_esp32s3_zero/` became a build target on **2026-08-29**
+(owner call, reversing its own "DELIBERATELY NOT A BUILD TARGET"; its board.toml
+records the reversal). No panel, no touch, no frame loop, no carts — the browser
+is the console and this board is the store behind it. **That dir's README is the
+authority**; what belongs here is only what bites:
+
+- **It is the shape a port takes when the checklist's stages 1-6 are all
+  absent** — no panel, touch, input, storage or audio to bring up, and nothing
+  for `run_desktop`/`FrameLoop`/an on-glass suite to construct. Stage 0 is the
+  whole port.
+- **8MB of flash: the console table does not fit, and the bootloader rejects an
+  oversized one into a silent boot loop** — on a board with no screen that is
+  indistinguishable from dead. Its CSV is authored, not inherited.
+- **Its patch ladder is empty and says so** (`# DECLINED <fn>` per patch, which
+  is the mechanism `moybyte_patch_repr_c`'s header already specified). Do not
+  give it the #169 retune without the 120MHz profile; the spike suite refuses
+  that pairing.
+- **It keeps TinyUSB CDC** rather than the #201 promotion (which exists for a
+  board that never returns to the REPL; this one is interrupted into it on every
+  provision). So `303a:4001`, and DTR must be asserted at open. In via
+  `machine.bootloader()`, out via `--after watchdog_reset`, never `hard_reset`.
+- **A pushed `.py` SHADOWS the frozen one** — `/` is searched before `.frozen` —
+  so its module push is opt-in and undoable, and the board announces it at boot.
 
 
 ### Hard device constraints (learned the painful way — respect these)

@@ -218,8 +218,32 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     assert "name: moybyte-firmware-${{ matrix.board }}" in wf
     assert fetch.ARTIFACT % "tdeck" == "moybyte-firmware-tdeck"
     assert set(fetch.BOARDS) == {b["id"] for b in build.BOARDS}
-    # Every board of the matrix has a card on the site, and vice versa. The
-    # matrix is include-rows since #202 Phase A (one row per board), so read
-    # the `- board:` row keys.
+    # Every board of the matrix has a card on the site, and vice versa -- except
+    # for the ones named below. The matrix is include-rows since #202 Phase A
+    # (one row per board), so read the `- board:` row keys.
     rows = re.findall(r"^\s+- board: (\S+)", wf, re.M)
-    assert set(rows) == set(fetch.BOARDS)
+    # A CARD ON THE SITE IS NOT AUTOMATIC, and the gap is named rather than
+    # tolerated. The two directions are not symmetrical: a site card with no
+    # matrix row is a page offering an image nothing builds, which is always a
+    # bug; a matrix row with no card is a board CI builds and the website cannot
+    # flash, which is a missing feature. This set is the second kind, and it is
+    # compared EXACTLY -- so the entry has to be deleted the day the card lands
+    # (this test says so), and a board that silently loses its card is caught.
+    no_site_card = {
+        "xiao_zero":
+            "the headless Zero (#41), a build target since 2026-08-29. Its OTA "
+            "half is wired -- CI builds it, the publisher stages "
+            "latest-xiao_zero.json, and a board on either channel can update "
+            "itself. What is missing is the site half: an entry in "
+            "site/build.py's BOARDS (chip esp32s3, offset 0x0, and the "
+            "reset/prep strings for a TinyUSB CDC part), plus this board's id "
+            "in tools/fetch_ci_firmware.BOARDS. Deliberately left open when the "
+            "board was promoted, not forgotten.",
+    }
+    assert set(fetch.BOARDS) - set(rows) == set(), (
+        "the site offers a board CI does not build: %s"
+        % sorted(set(fetch.BOARDS) - set(rows)))
+    assert set(rows) - set(fetch.BOARDS) == set(no_site_card), (
+        "matrix rows with no site card must be named above, with why -- "
+        "unexplained: %s"
+        % sorted((set(rows) - set(fetch.BOARDS)) - set(no_site_card)))

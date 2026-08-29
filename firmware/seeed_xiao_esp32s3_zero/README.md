@@ -13,55 +13,185 @@ The predecessor tree (the "browser is the GPU" streaming port) died with the
 2026-08 streaming sunset and was deleted 2026-08-17 (`931ede6`); git history
 has it. Nothing here descends from it except the hardware facts below.
 
-## Provisioning (no ESP-IDF build — deliberate)
+## A real board since 2026-08-29 — and what that replaced
 
-1. **Flash stock MicroPython once** (v1.28.0, `ESP32_GENERIC_S3-SPIRAM_OCT`
-   from micropython.org — this board has 8MB flash + 8MB octal PSRAM):
+This board spent 2026-07..2026-08 running **stock MicroPython** with the shared
+modules PUSHED here as plain files by `provision.sh`. There was no ESP-IDF
+build, no frozen image and no OTA, and `board.toml` said so in capitals:
+*"DELIBERATELY NOT A BUILD TARGET … If this board ever earns a frozen image, it
+graduates to the ordinary port-kit shape and this file grows the sections."*
 
-   ```bash
-   # from a running MicroPython, the SAFE way into the ROM loader:
-   mpremote connect /dev/ttyACM0 exec "import machine; machine.bootloader()"
-   python -m esptool --chip esp32s3 --port /dev/ttyACM0 --before no_reset \
-       --after no_reset erase_flash
-   python -m esptool --chip esp32s3 --port /dev/ttyACM0 --before no_reset \
-       --after watchdog_reset write_flash 0x0 ESP32_GENERIC_S3-SPIRAM_OCT-*.bin
-   ```
+That was the right shape for a spike. A push is a sub-minute dev loop, an
+ESP-IDF build is not, and nothing needed freezing that a `cp` could not deliver.
+**The owner reversed it on 2026-08-29**, and the graduation is the one that
+paragraph predicted: `build.sh` over `tools/esp32_build_lib.sh`, a
+`boards/MOYBYTE_ZERO/` board def, and `board.toml` grown its `[modules]` /
+`[native]` / `[flash]` sections.
 
-2. **Push everything else** (modules + web bundle + seed carts, and optionally
-   creds):
+What ended the no-build arrangement is that the board stopped being a spike and
+became the thing a kid's carts actually live on. Three properties a pushed tree
+cannot have started to matter:
 
-   ```bash
-   ./provision.sh /dev/ttyACM0 [path/to/wifi.json]
-   ```
+- **The browser console rides the image.** `native/moy_web` bakes the gzipped
+  bundle into the firmware so the page a board serves cannot drift behind the
+  board serving it. That has been true of every console board since 2026-08-15;
+  this board had no image, so it was the last place the drift survived — its
+  bundle was only ever a copy somebody pushed.
+- **A second app slot**, so the board can be updated by anyone who is not
+  holding a cable. It is headless and lives on a shelf; a cable is a real cost.
+- **One declaration of what it runs.** The module set was a `cp` list in a shell
+  script — the exact thing that falls behind the code it is a list of, which had
+  already happened here once (`moy_store.mjs` became an asset the worker
+  statically imports and the hand-list missed it the same day, which is a
+  console that cannot boot). `board.toml` is the declaration now, and
+  `tests/test_staging_closure.py` derives this board's frozen set from it and
+  asserts every import of every staged module resolves on this target — the same
+  net all three console boards ride.
 
-   `wifi.json` is the console's own store shape
-   (`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the
-   repo. Reading it off a console board over its dev channel works. **Omitting
-   it is now a supported answer**: a board with no credentials hosts its own
-   setup AP (below), and re-running the script without the argument leaves an
-   existing `/moy/wifi.json` alone.
+`provision.sh` survives and **changed jobs**: it provisions the STORE (carts,
+credentials, the pairing pin) and keeps the module push as an opt-in dev loop.
+See "Provisioning" below.
 
-   The script **mints a pairing pin** when the board has none, and prints the
-   paired url at the end. That is the whole gesture: since 2026-08-25 the pin
-   gates everything but the console's boot files, so a page opened without it
-   can read nothing. Minted on the board — the "is there one?" check and the
-   write are one read of one filesystem — and **kept** when there is one, so
-   re-provisioning never rotates a pin somebody has already scanned.
+## Build, flash, look
 
-   The **module set is the sync stack's whole import closure**, not the
-   minimum that boots (owner call 2026-08-25, "the Zero supports all
-   features"): `moy_carts` + `moy_image` are what make `GET /files.json` and
-   the v2 files batches work at all (without them `moy_sync.file_kinds()`
-   answers None, which every caller reads as *refuse*), and `moy_journal` is
-   what lets this board keep the undo history for the commits it receives.
-   `tests/test_zero_provision.py` is the ratchet: a module something on the
-   board imports and nothing pushes fails there rather than at somebody's desk.
+```bash
+make firmware-build-zero                             # -> dist/zero/
+make firmware-flash-zero PORT=/dev/ttyACM0           # merged image at 0x0
+make firmware-monitor-zero PORT=/dev/ttyACM0         # the only way to watch it
+```
 
-3. Watch it come up: `mpremote connect /dev/ttyACM0 repl` prints
-   `ZERO serving http://<ip>:8080/?pin=NNNN` (mDNS `moybyte-zero.local`). Open
-   that — the whole url, `?pin=` included; authoring is on, and every commit
-   syncs back to the board. Typing the address without the pin is not a dead
-   end: the page prompts for it, and remembers it per browser.
+`tools/board_flash.py` reads the offsets from this board's `board.toml`
+`[flash]` block and erases otadata first, so a board that has taken an OTA boots
+the slot the cable flash just wrote.
+
+**The migration flash WIPES THE STORE.** The new partition table puts `vfs` at
+`0x5A0000`; the stock MicroPython table it replaces put it far lower, so the old
+filesystem is not where the new image looks and comes up freshly formatted. Run
+`./provision.sh` afterwards to put the seed roster, the credentials and the pin
+back. A kid's browser-made carts are not lost by this — the browser keeps its
+own copy in OPFS and syncs them back on the next visit — but anything that
+existed *only* here is.
+
+### The image
+
+- **8MB flash, two OTA slots** (`boards/MOYBYTE_ZERO/partitions-moybyte-zero.csv`).
+  The console S3 layout does not fit 8MB, and the failure is not a build error:
+  the bootloader rejects the table and the board boot loops with no console at
+  all. That was learned here — see the hardware facts below — so this table is
+  authored, not inherited.
+- **What makes two slots fit** is that the image is headless: no console, no
+  canvas, no seed carts, and only one shared native module. Measured on the first
+  build, 2026-08-29: **2,158,384 B of a 2,883,584 B slot, 708 KB headroom**,
+  against the Guition's 3,668,096 B the day before. The CSV carries the full
+  arithmetic and what would falsify it; the build prints the headroom on every
+  run and fails on an overflow (#168).
+- **The frozen set is `board.toml`.** This is the one board whose
+  `[modules.shared]` is an ALLOWLIST rather than a denylist, and its board file
+  argues the case at length: a denylist is right when the source tree's default
+  answer is yes, `runtime/` IS the console, and this board is not one.
+- **One shared C module, `moy_web`.** The other seven are denied with the
+  hardware or the workload that is missing.
+
+## Provisioning (the store, not the modules)
+
+```bash
+./provision.sh [--modules] [--web] [--clean] [/dev/ttyACM0] [path/to/wifi.json]
+```
+
+Default: make the directories, copy the whole seed roster into `/moy/carts`,
+optionally write the credentials, mint or keep the pairing pin, reboot, and
+print the paired url.
+
+`wifi.json` is the console's own store shape
+(`{"networks": [{"ssid", "password"}]}`) and is a secret — never in the repo.
+Reading one off a console board over its dev channel works. **Omitting it is a
+supported answer**: a board with no credentials hosts its own setup AP (below),
+and re-running the script without the argument leaves an existing
+`/moy/wifi.json` alone.
+
+The script **mints a pairing pin** when the board has none, and prints the
+paired url at the end. That is the whole gesture: since 2026-08-25 the pin gates
+everything but the console's boot files, so a page opened without it can read
+nothing. Minted on the board — the "is there one?" check and the write are one
+read of one filesystem — and **kept** when there is one, so re-provisioning
+never rotates a pin somebody has already scanned.
+
+### The flags, and the one hazard they exist for
+
+`--modules` pushes the image's own module set as plain files, and `--web` pushes
+the wasm bundle. Both are **dev loops**, and both are the same trade the bundle
+already makes on every board: **storage WINS, so the image is the guarantee and
+not the ceiling.** A push is a second, a reflash is minutes.
+
+The hazard is that MicroPython searches `/` before `.frozen`, so a pushed `.py`
+outranks the image's own copy **on every boot after it**, silently and forever,
+while every diagnostic still points at the firmware. Three things answer that:
+the push is a flag rather than the default, `--clean` removes exactly what
+`--modules` put there, and `zero_host.serve()` prints a loud
+`ZERO NOTE: pushed copies are SHADOWING the image for: …` line at boot.
+
+Neither list is written in the script. The module list comes from `board.toml`
+(the same call the build stages from) and the asset list from
+`moy_webhost.ASSETS`; a hand-list is what broke this board once already.
+
+## Updates, on a board with no screen
+
+Every other board triggers and reports an update on its own glass — Settings →
+UPDATE ONLINE, a progress bar, and a banner naming what the last install did.
+This one has no glass, so the same `moy_ota.OtaUpdater` is driven by
+`zero_host.ZeroUpdate` and reported as JSON.
+
+**The trigger is a request, not a timer.**
+
+```
+GET  /update?pin=NNNN   → the running version/label/channel/slot, the PREVIOUS
+                          install's verdict, and live progress
+POST /update            → {"action": "check" | "install" | "cancel", ...}
+                          answers immediately; the work runs in the poll loop
+```
+
+Both methods are gated. There is deliberately **no read-half exemption**: what a
+GET reveals is which firmware a specific board on somebody's home network is
+running, which is a shopping list for whoever wants to hand it an image — the
+same call `/gpio`'s GET was brought under on 2026-08-25. The doctrine and its
+reasoning live in `device/moy_webhost.py`'s SECURITY docstring; this endpoint is
+an instance of it.
+
+**A boot-time check runs, and installs nothing.** Once the running image has
+certified itself (below), the board checks the manifest once, prints the result
+on serial, and caches it for `GET /update`. Installing takes a request carrying
+the pin — the same act of consent that gates every other write here. The one
+exception is opt-in: `"ota_auto": true` in `/moy/zero.json` makes the boot check
+install what it finds. **It is OFF by default**, because an unattended firmware
+replacement on the board holding a kid's only local copy of their carts should
+be something somebody chose. ON is a defensible setting for a board that lives
+on a shelf and is never reached for; it is a one-word edit.
+
+**How a human learns it happened**, three ways, none of them a UI:
+
+- **serial** — every transition prints a `ZERO ota:` line, and the boot line
+  names the running label. The cable is how a pin reaches a human on this board
+  anyway.
+- **`GET /update?pin=`** — including `last`, the previous install's verdict:
+  `ok` (the slot we pointed the bootloader at is the one running) or
+  `rolled_back` (the bootloader gave up on it). That is the headless replacement
+  for the console's notice banner, and it is why the pending marker is cleared
+  at the CONFIRM rather than at the read.
+- **the page itself** — the console is baked into the image, so a board that
+  updated is serving a different console the next time it is opened.
+
+**The rollback confirm is the one piece of OTA that could not be reused.**
+`confirm_when_healthy` waits for frames on the glass, and this board paints
+none: a constant there would certify every image unconditionally, and a zero
+would roll every image back. So `moy_ota.confirm_when_serving` takes the
+evidence this hardware can give — the store host is up and listening on a joined
+network — and counts poll iterations survived after it. An image whose host
+never comes up never confirms, which is exactly the image the bootloader should
+take back.
+
+The board id inside a signed manifest is **`xiao_zero`**, which is also its CI
+matrix row and the `latest-xiao_zero.json` a device asks for. Channels are the
+repo's two: `dev` → beta/`unstable`, `master` → stable.
 
 ## First-run setup, with no cable (`zero_setup.py`, #41)
 
@@ -100,8 +230,9 @@ docstring, which this board's host is an instance of. What is true *here*:
   for a board that never saw that form. The old "no `zero.json`, so writes stay
   open" state is gone — once reads are gated too, a pinless board is one
   handing its entire store to whoever is on the WiFi.
-- **`/gpio` is gated on both methods**, which is this board's own addition to
-  the table — see the Pins section below for why the `GET` stopped being free.
+- **`/gpio` and `/update` are gated on both methods**, which is this board's own
+  addition to the table — see the Pins and Updates sections for why neither
+  `GET` is free.
 - **Nothing here can show the pin to a human.** No screen: it reaches you over
   the cable (`provision.sh`'s paired url, the boot line) or off the setup form
   you just filled in. Keep the url; opening the bare address is not a dead end,
@@ -145,34 +276,42 @@ so an unwired pin reads 1 and a button to ground reads 0.
 
 ## Verified where
 
-Hardware, on this board (2026-08-25), and host tests for everything else —
-`tests/test_zero_setup.py` and `tests/test_zero_gpio.py`, 80-odd cases over the
-parsing, the refusals, the persisted shapes and the browser-side queue.
+**The frozen image has never run on hardware.** It was built on 2026-08-29 —
+that is a real build, with real numbers (the sizes above come out of it), and it
+is the *only* thing about the image that has been checked. No Zero has been
+flashed with it. Everything in the two lists below that is dated 2026-08-25 was
+measured on the **pushed** arrangement this build replaces; the modules are the
+same files, so what those runs prove about `moy_sync`, the pin gate and the
+files layer still holds, and what they say nothing about is the image: the
+partition table, the console arrangement, WiFi with this sdkconfig, the OTA
+endpoints on real flash, and the rollback confirm.
 
-**On glass:**
+Host tests cover the rest: `tests/test_zero_setup.py`, `tests/test_zero_gpio.py`
+and `tests/test_zero_update.py` (110-odd cases over the parsing, the refusals,
+the persisted shapes, the browser-side queue and the update state machine), plus
+`tests/test_zero_provision.py` and this board's row in
+`tests/test_staging_closure.py`.
+
+**On glass (2026-08-25, on the pushed arrangement):**
 
 - The whole seed roster: `provision.sh` then `carts.json` → **36 cart folders /
   132 files** (all 35 in `system_carts/`, plus one made in the browser on an
   earlier session and synced back — which is the pull and push halves both
   still working), 763KB in 11.6s over the LAN.
-- **The pin gate** (2026-08-25): `GET /carts.json`, `GET /files.json`,
-  `GET /gpio` and `POST /sync` each 403 `{"error":"pin"}` with no pin and
-  answer with one; `GET /sync` and `GET /` stay open. **And the prompt**, in real headless
+- **The pin gate**: `GET /carts.json`, `GET /files.json`, `GET /gpio` and
+  `POST /sync` each 403 `{"error":"pin"}` with no pin and answer with one;
+  `GET /sync` and `GET /` stay open. **And the prompt**, in real headless
   Chrome against this board: a page opened at `http://<ip>:8080/?handheld=1`
   refuses to boot, shows the in-page prompt, and after four digits reloads with
   `?pin=` and comes up on the launcher (`mode: board`, 30 tiles).
-- **The files layer and the journal**, which are what the extra modules bought:
-  a `{"v":2,"root":"files"}` batch put a drawing in `/moy/files/drawings/` and
-  `files.json` served it back; two carts pushes left a real `journal/` on the
-  board (`journal.jsonl` + `cursor.json` + per-commit snapshots under `s/`, the
-  identical second manifest correctly deduped to no entry), and
-  `journal_undo`/`journal_redo` walked the live `main.py` back and forward
-  between the two browser-era commits. Both test artifacts removed afterwards
-  through the same endpoint (`dc` for the cart, `d` for the drawing).
-- The nine pushed modules all import cleanly on-device. The three added that
-  day are **131KB of source** (`moy_carts` 95KB, `moy_journal` 28KB,
-  `moy_image` 9KB); the store went 3,436KB free → **3,196KB** across the whole
-  re-provision, so flash is not remotely the constraint here.
+- **The files layer and the journal**: a `{"v":2,"root":"files"}` batch put a
+  drawing in `/moy/files/drawings/` and `files.json` served it back; two carts
+  pushes left a real `journal/` on the board (`journal.jsonl` + `cursor.json` +
+  per-commit snapshots under `s/`, the identical second manifest correctly
+  deduped to no entry), and `journal_undo`/`journal_redo` walked the live
+  `main.py` back and forward between the two browser-era commits. Both test
+  artifacts removed afterwards through the same endpoint.
+- All nine pushed modules imported cleanly on-device.
 - `GET /gpio` and the empty-batch probe answer the allowlist; a write→read
   round trip on GPIO 2 reports `1` then `0`; an untouched pin reads `1` through
   its pull-up; GPIO 21 (the LED) takes both levels; `44 / 30 / 19 / 3` are each
@@ -184,15 +323,21 @@ parsing, the refusals, the persisted shapes and the browser-side queue.
   real form, naming the AP), `GET /scan` → 200 listing the real networks around
   the desk (an STA scan running beside a live AP, which is the part that could
   only be tested here), `POST /setup` → 200 with the pinned url and the parsed
-  fields, and a bad pin → 400 saying "4 digits" with nothing saved. Credentials
-  restored afterwards; the board is back on STA serving the full store.
+  fields, and a bad pin → 400 saying "4 digits" with nothing saved.
+  Credentials restored afterwards.
 
-**NOT verified on hardware**, deliberately:
+**NOT verified on hardware**, and each for its own reason:
 
-- **A phone has never joined this AP.** The HTTP side was driven from the board
-  itself, so what is proven is the server, the form, the scan and the parsing —
-  not the phone's association, its captive-portal probe, or how the page looks
-  on a small screen.
+- **The image, end to end.** Nothing below has been on this glass: the new
+  partition table (a bootloader that rejects a table boot loops silently — this
+  board's own worst failure mode), WiFi under this board's sdkconfig, the
+  TinyUSB CDC console in a Moybyte build, the baked bundle being served, the
+  OTA endpoints, and the rollback confirm. **The first flash is the check**, and
+  it is worth doing with `make firmware-monitor-zero` already attached.
+- **A phone has never joined the setup AP.** The HTTP side was driven from the
+  board itself, so what is proven is the server, the form, the scan and the
+  parsing — not the phone's association, its captive-portal probe, or how the
+  page looks on a small screen.
 - **The reboot-into-STA leg of a real setup.** The loopback saves into a list,
   not onto flash, and never calls `machine.reset()` — running the genuine
   `run()` would have overwritten the board's real credentials with a made-up
@@ -200,43 +345,68 @@ parsing, the refusals, the persisted shapes and the browser-side queue.
 - **The LED's polarity.** Pin 21 takes both levels and reads them back; nobody
   looked at the board. It is documented active-low from the Seeed schematic.
 - **A cart in a browser driving this board's PINS.** The console half is
-  proven against this board now (a real Chrome session pulled its store and
-  came up on the launcher), but nothing has yet called `pin_write` from a
-  running cart, so `gpio_link` + the worker's pump remain host-checked. The
-  wire shape between the two ends is pinned by a test that runs a real batch
-  out of the browser queue and into `zero_gpio.handle`.
+  proven against this board (a real Chrome session pulled its store and came up
+  on the launcher), but nothing has yet called `pin_write` from a running cart,
+  so `gpio_link` + the worker's pump remain host-checked. The wire shape between
+  the two ends is pinned by a test that runs a real batch out of the browser
+  queue and into `zero_gpio.handle`.
 
 ## Hardware facts (learned the painful way — respect these)
 
 - **The REPL is silent unless the host asserts DTR.** A raw pyserial client
-  must set `dtr=True`; mpremote does. Looks exactly like a dead board.
+  must set `dtr=True`; mpremote does. Looks exactly like a dead board. This
+  survives the graduation on purpose: the image keeps MicroPython's TinyUSB CDC
+  console rather than adopting the console boards' USB-Serial/JTAG promotion,
+  because that promotion exists for a board that never returns to the REPL and
+  this one is interrupted into the REPL every time it is provisioned. The
+  reasoning is in `boards/MOYBYTE_ZERO/mpconfigboard.h`; flipping it would
+  change both the USB id and the DTR rule, and is an A/B for somebody holding
+  the board.
 - **Getting OUT of the ROM loader needs no replug after all** (2026-08-25):
   `esptool --after watchdog_reset` exits download mode cleanly on this board.
   The old note ("only a physical replug exits ROM mode") predates it — that
   was `hard_reset`, which indeed does nothing here. Prefer
   `machine.bootloader()` to get IN (an esptool DTR-dance against the running
-  TinyUSB CDC has wedged the USB device before — memory: `zero-port-xiao`).
-- **The dual-OTA console partition table does not fit its 8MB flash** — but
-  stock MicroPython ships its own single-app 8MB table, so on this
-  arrangement that whole class of problem is gone.
+  TinyUSB CDC has wedged the USB device before). The BOOT button is the last
+  resort: hold it while powering on.
+- **The console dual-OTA partition table does not fit this 8MB flash**, and the
+  failure is silent: the bootloader REJECTS the table and the board boot loops
+  with no console. That is why this board has its own CSV rather than the
+  siblings', and it is why the first flash of a new table deserves a monitor.
+  (The stock MicroPython single-app 8MB table this board used to run had no such
+  problem, and no second slot either.)
 - **STA, not SoftAP.** The old streaming port measured SoftAP throughput as
-  the cause of its multi-second stalls. Serving a ~570KB gzipped bundle wants
-  the router; a board with no saved network prints and drops to the REPL.
-  (SoftAP provisioning — the self-contained pocket story — is a recorded
-  follow-up in #41, not built here.)
+  the cause of its multi-second stalls. Serving a ~630KB gzipped bundle wants
+  the router; a board with no saved network hosts the setup AP instead.
+- **No BLE in this image, and it is not a preference.** Dropping
+  `boards/sdkconfig.ble` removes the IDF component but not MicroPython's nimble
+  sources, so `MICROPY_PY_BLUETOOTH` has to be cleared in `mpconfigboard.h` as
+  well — measured on this board's first build, which failed at
+  `nimble/nimble_port.h: No such file or directory`. The two are halves of one
+  decision, and the payoff is the internal RAM the Guition's fragment records
+  BLE eating (that board had four bytes free with the stack active, and WiFi
+  could not initialise at all).
 
 ## What is deliberately absent
 
+- **No card for this board in the website's flasher.** `site/build.py`'s
+  `BOARDS` table is what the page's Web Serial flasher writes from *and* what
+  `tools/publish_firmware_release.py` publishes cable-flash images from, and the
+  Zero is not in it. So the OTA half works today and the "flash it from the
+  website" half does not exist — a gap, not a decision, and the one follow-up
+  this board's promotion left open on purpose.
 - **No way for the BOARD to show its own pin.** It has no screen, so the pin
   reaches a human over the cable (`provision.sh`'s paired url, the serial line
   at boot) or off the setup form they just filled in. A QR on a sticker, or a
   button that re-prints it, is still #41's. Until then: keep the url.
-- **No frozen image / no build.sh** — provision.sh's cp list IS the module
-  set. Graduate to the port kit only when something needs freezing.
-  (`tests/test_zero_provision.py` is what keeps that list honest.)
 - **No `files/` UI of its own** — this board *stores* the #108 layer and
   serves it; the browsing, editing and undo of those files happen in the
   console that pairs with it. Note the asymmetry the sync stack carries: the
   carts root has a real journal here, the files root's `.history/` sidecars
   are a different mechanism and are neither synced nor written by the
   receiver.
+- **No on-glass suite.** The other three boards have one
+  (`tests/test_*_on_glass.py` over the shared dev channel); this board has no
+  console, no `DevChannel` and no frames to assert about. Its equivalent is
+  `GET /update` and `GET /carts.json` over the network, which is what a person
+  would check by hand anyway.

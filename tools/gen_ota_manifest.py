@@ -41,8 +41,16 @@ DEFAULT_PORT = 8000
 
 
 def read_ota_build(path=OTA_BUILD_JSON):
-    """The {channel, version, label} build.sh stamped for the last build, or {} if
-    absent -- so the manifest matches the image's baked OTA identity (#53 two-channel)."""
+    """The {channel, version, label, board} build.sh stamped for a build, or {}.
+
+    So the manifest matches the image's baked OTA identity (#53 two-channel).
+    Callers should hand it the stamp BESIDE THE IMAGE they are describing
+    (`<bin>.parent/ota_build.json`): every board writes one into its own
+    `dist/<board>/`, and reading a fixed path would describe one board's image
+    with another board's identity. That is not hypothetical at the scale of one
+    field -- CI shipped a P4 beta stamped "stable v2" once by looking up the
+    wrong board's stamp, and every P4 on beta was offered the same install
+    forever."""
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
@@ -113,6 +121,11 @@ def main(argv=None):
                     "(default: ota_build.json, else stable)")
     ap.add_argument("--label", help="human label shown on the update screen "
                     "(default: ota_build.json, else v<version>)")
+    ap.add_argument("--board", help="board id inside the manifest "
+                    "(default: ota_build.json beside the .bin, else tdeck). "
+                    "A device REFUSES a manifest naming a board it is not, by "
+                    "name and before the signature, so the LAN dev loop needs "
+                    "this right for anything that is not a T-Deck")
     ap.add_argument("--out", help="output manifest path (default: latest.json beside the .bin)")
     ap.add_argument("--root", help="PUBLISH mode: copy the image + manifest into "
                     "ROOT/<channel>/ (firmware.bin + latest.json) ready to serve")
@@ -125,14 +138,15 @@ def main(argv=None):
         ap.error("image not found: %s\n  build it first: "
                  "make firmware-build-lilygo-micropython" % bin_path)
 
-    # Identity: CLI > the build stamp (ota_build.json) > moy_ota.FIRMWARE_VERSION/stable.
-    bld = read_ota_build()
+    # Identity: CLI > the build stamp BESIDE THIS IMAGE > moy_ota's defaults.
+    bld = read_ota_build(bin_path.parent / "ota_build.json")
     channel = args.channel or bld.get("channel") or "stable"
     version = (args.version if args.version is not None
                else bld.get("version", None))
     if version is None:
         version = read_firmware_version()
     label = args.label or bld.get("label") or ("v%d" % int(version))
+    board = args.board or bld.get("board") or "tdeck"
 
     if args.root:
         # Publish: ROOT/<channel>/{firmware.bin, latest.json}; url points at the bin.
@@ -150,10 +164,11 @@ def main(argv=None):
         url = _resolve_url(args, bin_path)
         out = Path(args.out) if args.out else bin_path.with_name("latest.json")
 
-    manifest = build_manifest(dest_bin, url, version, channel, label)
+    manifest = build_manifest(dest_bin, url, version, channel, label, board)
     out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-    print("Wrote %s  (channel=%s label=%s)" % (out, channel, label))
+    print("Wrote %s  (board=%s channel=%s label=%s)"
+          % (out, board, channel, label))
     print(json.dumps(manifest, indent=2))
     if args.root:
         base = url.rsplit("/", 2)[0]

@@ -169,6 +169,24 @@ guard list), a `native/micropython.cmake` including the board modules +
 `make test`: the staging-closure/board-toml suites must pass before any
 hardware exists.
 
+**Stages 1-6 are SKIPPABLE, all of them, and one board skips all of them.**
+The Zero (`firmware/seeed_xiao_esp32s3_zero/`, promoted to a build target
+2026-08-29) has no panel, no touch, no input device, no card slot, no audio and
+no frame loop: the browser runs the console and the board is its cart store. So
+the port was stage 0 and stopped. Two things that walk out of it and apply to
+the next one:
+
+* **A tier decides the module set, and "headless" is a tier.** That board's
+  `[modules.shared]` is an ALLOWLIST — the first — because `runtime/` is the
+  console and the default answer on a board with no console is no, not yes. The
+  shape is declared in `board.toml` and pinned in both directions; the reasoning
+  is in that file and in `tools/board_config.shared_strategy`.
+* **Stage 6's exit criteria assume glass and do not generalise.** "The desktop
+  on glass" and "the board's on-glass suite passes" have no headless meaning;
+  what replaced them there is the board answering its own endpoints over the
+  network. A future headless port should say what its equivalent is rather than
+  quietly dropping the criterion.
+
 **Stage 1 — panel.** The board's compositor (implementing
 `docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
 native panel module. A board that PUSHES frames writes neither half from

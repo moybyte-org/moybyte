@@ -89,10 +89,19 @@ CHANNELS = {
 # boot. Hence a manifest per (channel, board) rather than one per channel --
 # moy_ota.default_manifest_url builds the same name from the board stamped into
 # the running image.
+# The KEY is the board's `[board] ota` id -- the string stamped into the image
+# by build.sh, named by the CI matrix row, and asked for by the device as
+# `latest-<board>.json`. It is not the board's short name and not its directory.
 OTA_IMAGES = {
     "tdeck": "moybyte_tdeck_app.bin",
     "p4": "moybyte_p4_app.bin",
     "guition_s3": "moybyte_guition_s3_app.bin",
+    # The Zero (#41), OTA-wired 2026-08-29. Note what it does NOT have: an entry
+    # in site/build.py's BOARDS, so the website's flasher has no card for it and
+    # `stage()` publishes no cable-flash image. That is a gap, not a decision --
+    # it is the one follow-up this board's promotion deliberately left open.
+    # The OTA half is independent of that table and works today.
+    "xiao_zero": "moybyte_zero_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 
@@ -396,9 +405,19 @@ def main():
         staged = stage(boards, os.path.abspath(args.artifacts), workdir)
         manifests = stage_ota_all(tag, channel, os.path.abspath(args.artifacts),
                                   workdir)
-        if not staged:
+        if not staged and not manifests:
             print("nothing built in this run -- the release is unchanged")
             return 0
+        if not staged:
+            # A board can have an OTA manifest and NO cable-flash image on the
+            # release: `stage()` walks site/build.py's BOARDS (the website's
+            # flasher cards) and `stage_ota_all` walks OTA_IMAGES, and since
+            # 2026-08-29 those two lists differ by the Zero. Bailing on an empty
+            # `staged` used to be right when they could not differ; now it would
+            # throw away a perfectly good manifest whenever the only board built
+            # is one the site does not flash.
+            print("no flashable images in this run -- publishing OTA manifests "
+                  "only (%s)" % ", ".join(sorted(manifests)))
         if args.dry_run:
             print("would upload to %s: %s"
                   % (tag, ", ".join(sorted(os.listdir(workdir)))))

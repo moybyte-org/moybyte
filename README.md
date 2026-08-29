@@ -320,6 +320,7 @@ cost a debugging session.
 | `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
 | `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |
+| `firmware/seeed_xiao_esp32s3_zero/` | the Zero: a headless companion, not a console — it stores and serves a kid's carts to the browser build |
 | `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
 | `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |
 | `docs/` | cart API, shell UX, visual identity, architecture and design docs |

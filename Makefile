@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv firmware-build-guition-s3 firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: check-venv firmware-build-guition-s3 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -75,7 +75,8 @@ VENV_TARGETS := test \
                 site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
-                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3
+                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
+                firmware-flash-zero firmware-monitor-zero
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -476,6 +477,28 @@ firmware-monitor-guition-s3:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc3248w535 --port $(PORT)
+
+# Zero -- Seeed XIAO ESP32-S3 (#41), a build target since 2026-08-29. Headless,
+# so there is nothing to look at after a flash: `make firmware-monitor-zero` is
+# how you read the boot line, the paired url and every `ZERO ota:` transition.
+#
+# THE MIGRATION FLASH IS A STORE WIPE. This board's new table puts vfs at
+# 0x5A0000; the stock MicroPython table it is replacing put it far lower, so the
+# old filesystem is not where the new image looks and comes up freshly
+# formatted. Re-run provision.sh afterwards -- see the board README.
+
+firmware-build-zero:
+	firmware/seeed_xiao_esp32s3_zero/build.sh
+
+firmware-flash-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/seeed_xiao_esp32s3_zero --port $(PORT)
+
+firmware-monitor-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/seeed_xiao_esp32s3_zero --port $(PORT)
 
 # T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
 # CLICK is GPIO0: hold the trackball in while powering the board on, then

@@ -20,20 +20,21 @@
 #
 # THE SLOT SIZE, and what it is sized against.
 #
-#   measured 2026-08-29, this board's first build, on this table:
-#     app image   2,097,552 B   (dist/zero/moybyte_zero_app.bin)
+#   MEASURED 2026-08-29, this board's first build, on this table (the build
+#   prints exactly this line):
+#     app image   2,158,384 B   (dist/zero/moybyte_zero_app.bin)
 #     slot        2,883,584 B   (0x2C0000)
-#     headroom      786,032 B   (767 KB)
+#     headroom      725,200 B   (708 KB)
 #
-#   The image is HALF a console board's (the Guition's was 3,668,096 B the day
-#   before) and the difference is the whole argument for two slots fitting in
-#   8MB: this one freezes no console -- no wm, no launcher, no editors, no
+#   The image is 59% of a console board's (the Guition's was 3,668,096 B the
+#   day before) and the difference is the whole argument for two slots fitting
+#   in 8MB: this one freezes no console -- no wm, no launcher, no editors, no
 #   apps, no seed carts -- and compiles in none of the graphics/audio/Lua C
 #   modules. What it does carry is the same 627,373 B baked web console every
-#   other board carries (native/moy_web), which is 30% of the image and the
+#   other board carries (native/moy_web), which is 29% of the image and the
 #   single largest thing in it.
 #
-#   767 KB of headroom is 3.8x the #168 warning floor and ~37% of the image, on
+#   708 KB of headroom is 3.5x the #168 warning floor and ~34% of the image, on
 #   a board whose payload is not expected to grow: its frozen set is the sync
 #   stack's import closure, and the web bundle grows with the console rather
 #   than with this board. The alternative sizings were priced: 3MB slots leave
