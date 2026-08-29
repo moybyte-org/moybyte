@@ -110,13 +110,21 @@ if(PINF)PINF.addEventListener("keydown",function(e){
 if(e.key==="Enter"){e.preventDefault();pinSubmit();}});
 // ---- persistence row (#193) -------------------------------------------------
 // The worker decides the MODE (board vs browser-local) and this only reports it.
-// On a board-served page the row never appears: the console owns the carts.
+// The row appears in EVERY mode, including board-served. It used to be hidden
+// there, on the reading that "the console owns the carts" -- but the 2026-08-25
+// owner call this cited says something narrower: a board-served page uses the
+// BOARD's store and never a second one, which is about where carts LIVE, not
+// about which direction they may travel. That call names ".moy export/import
+// and the p8 converter" as ordinary parts of the picture. A board-served page
+// already writes to the board's store on every edit, through the same sync
+// push an import rides -- so importing there was never a new kind of write,
+// and exporting is a read. (Owner correction, 2026-08-29.)
 var pzEl=document.getElementById("pz"),pzS=document.getElementById("pzs"),
 pzC=document.getElementById("pzc"),pzE=document.getElementById("pze"),
 pzI=document.getElementById("pzi"),PZMODE=null;
 function pzSay(s,warn){pzS.textContent=s;pzS.className=warn?"warn":"";}
 function pzMode(mode,s){PZMODE=mode;pzSay(s,mode==="none");
-if(mode!=="board"){pzEl.style.display="flex";pzAsk();}}
+pzEl.style.display="flex";pzAsk();}
 function pzAsk(){if(WORKER)WORKER.postMessage({t:"carts"});}
 // The worker decided this page keeps its carts HERE, in OPFS -- which the
 // browser may evict under disk pressure unless the origin is asked to be made
@@ -150,10 +158,13 @@ WORKER.postMessage({t:"import",name:file.name,buf:buf},[buf]);})
 pzI.addEventListener("change",function(){if(pzI.files&&pzI.files[0])pzImport(pzI.files[0]);
 pzI.value="";});
 // Drop a .moy zip or a PICO-8 cart (.p8 / .p8.png, #194) anywhere on the page.
-// Only in a mode that has a local store: on a board-served page the drop would
-// write to a store the board owns.
-window.addEventListener("dragover",function(e){if(PZMODE&&PZMODE!=="board")e.preventDefault();});
-window.addEventListener("drop",function(e){if(!PZMODE||PZMODE==="board")return;
+// In every mode, once the worker has reported one. On a board-served page the
+// new cart lands in the VFS like any other change and the sweep ships it to the
+// board -- the identical path Make -> +New already takes, pin and all. The
+// import deliberately does NOT rebase the sync watcher for exactly this reason:
+// an import is a CHANGE and must stay pending until the far end has it.
+window.addEventListener("dragover",function(e){if(PZMODE)e.preventDefault();});
+window.addEventListener("drop",function(e){if(!PZMODE)return;
 e.preventDefault();var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
 if(f)pzImport(f);});
 // ---- the PICO-8 import report (#194) ----------------------------------------

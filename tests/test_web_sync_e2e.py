@@ -97,8 +97,10 @@ def _twin(store, pin=None):
         server.wait(timeout=10)
 
 
-def _browsershot(scenario, base, outdir):
+def _browsershot(scenario, base, outdir, drop=None):
     env = dict(os.environ, MOY_BASE=base)
+    if drop is not None:
+        env["MOY_DROP"] = str(drop)
     run = subprocess.run(
         ["node", "browsershot.mjs", "scenarios/" + scenario, str(outdir)],
         cwd=RUNNER, env=env, capture_output=True, text=True, timeout=240)
@@ -191,3 +193,58 @@ def test_a_pinned_board_prompts_in_the_page_and_then_works(tmp_path):
         new = store / "new_cart.moy"
         assert new.is_dir(), \
             "no cart reached the store after pairing:\n%s" % out[-2000:]
+
+
+def test_a_pico8_cart_dropped_on_a_board_page_lands_on_the_board(tmp_path):
+    """The drop works on a BOARD-served page, and the cart reaches the board.
+
+    This is the correction of 2026-08-29. The page used to hide the
+    import/export row in board mode and return early from the drop listener,
+    citing the "two modes are total" owner call -- but that call is about where
+    carts LIVE (a board-served page has ONE store, the board's), not about which
+    direction they may travel, and it names ".moy export/import and the p8
+    converter" as ordinary parts of the picture. A board-served page writes to
+    the board's store on every edit, through the same sweep an import rides.
+
+    So this drives the PAGE's own drop listener -- a real DragEvent with a real
+    File, not the worker postMessage the p8 scenario uses -- because the listener
+    is where the guard was. Then it asserts the whole chain landed: convert in
+    the wasm VM, into the VFS, caught by the watcher, POST /sync, applied by the
+    board's own apply_ops, on disk."""
+    web_e2e.require("sync", "p8")
+    sys.path.insert(0, str(ROOT / "tests"))
+    import p8_fixture                                        # noqa: E402
+    sys.path.insert(0, str(ROOT / "tools"))
+    import import_p8                                         # noqa: E402
+
+    p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
+    store = _seeded_store(tmp_path)
+    with _twin(store) as base:
+        run_out = _browsershot("sync_p8_drop.json", base, tmp_path / "shots",
+                               drop=p8)
+        landed = store / "tiny_dash.moy"
+        assert landed.is_dir(), (
+            "a p8 dropped on a board-served page never reached the board:\n%s"
+            % run_out[-2500:])
+        got = sorted(p.name for p in landed.iterdir())
+        # The LUA port, not the old Python scaffold: main.lua is the proof the
+        # cart's own code crossed, and the manifest must route it to the Lua
+        # runtime or the board would try to exec it as Python.
+        assert "main.lua" in got, got
+        man = json.loads((landed / "manifest.json").read_text())
+        # The cart must RUN as Lua on the board -- but `runtime` is DERIVED, not
+        # written: moy_carts.scan reads `format: moy-1` as a spec cart and
+        # defaults it to lua. So assert the derived value the board will act on,
+        # through the same scan the board runs, rather than a manifest key whose
+        # absence is correct.
+        assert man.get("format") == "moy-1", man
+        assert man.get("main") == "main.lua", man
+        from runtime import moy_carts                         # noqa: E402
+        scanned = {c["path"].rsplit("/", 1)[-1]: c
+                   for c in moy_carts.scan(str(store))}
+        entry = scanned.get("tiny_dash.moy")
+        assert entry, sorted(scanned)
+        assert entry.get("runtime") == "lua", entry
+        # Imported carts stay private by default (#194): a board is where a cart
+        # could plausibly be published FROM, so this matters more here.
+        assert man.get("safe_to_share") is False, man

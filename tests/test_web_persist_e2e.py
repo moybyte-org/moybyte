@@ -141,8 +141,14 @@ def test_a_cart_exports_and_imports_as_a_zip(tmp_path):
 
 def test_a_board_served_page_keeps_nothing_locally(tmp_path):
     """The other half of a total split: serve.py --carts answers GET /sync, so
-    the page must stay in BOARD mode -- no local store, and no export row that
-    would invite one."""
+    the page must stay in BOARD mode and open no local store.
+
+    What this does NOT assert any more is that the import/export row is hidden.
+    It used to, and that conflated two different things: the owner call is that
+    a board-served page has ONE store -- the board's -- not that carts may not
+    travel. The row is shown in every mode since 2026-08-29 (a board-served
+    import rides the same sync push every edit already takes). The invariant
+    that matters is the one below: OPFS is never opened here."""
     web_e2e.require("store")
     store = tmp_path / "store"
     store.mkdir()
@@ -154,8 +160,8 @@ def test_a_board_served_page_keeps_nothing_locally(tmp_path):
         out, js = _run("persist_board_mode", base, tmp_path / "chrome", tmp_path / "s1")
         assert len(js) >= 2, out[-2000:]
         display, _, said = js[0].partition("|")
-        assert display.strip() == "", \
-            "the browser-store row must stay hidden on a board: %r" % display
+        assert display.strip() == "flex", \
+            "the import/export row must be offered on a board too: %r" % display
         assert "kept on the console" in said, said
         # No local store was opened, seeded or read: the detail is empty because
         # board mode never touches OPFS at all.
