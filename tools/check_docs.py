@@ -220,12 +220,14 @@ def check_paths():
 
 SHINGLE = 10
 DUP_BUDGET = {
-    ("CLAUDE.md", "docs/shell_ux_v1.md"): 23,
-    ("CLAUDE.md", "runtime/README.md"): 13,
-    ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 13,
-    ("CLAUDE.md",
-     "native/moy_audio/libmoy/UPSTREAM.md"): 16,
+    # These pairs used to be CLAUDE.md's. The prose moved into path-scoped rules
+    # on 2026-08-29, so the pins moved with it -- and every one came DOWN,
+    # because the root no longer restates what the rule now owns.
     ("CLAUDE.md", "docs/perf_native_gap_v1.md"): 5,
+    (".claude/rules/shell.md", "docs/shell_ux_v1.md"): 7,
+    (".claude/rules/rendering.md", "moybyte_console_plan_2026-07.md"): 6,
+    (".claude/rules/carts.md",
+     "native/moy_audio/libmoy/UPSTREAM.md"): 16,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
     ("CONTRIBUTING.md", "README.md"): 12,
     ("LICENSE.md", "README.md"): 7,
