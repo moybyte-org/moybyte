@@ -14,13 +14,20 @@ lines.
     tools/board_flash.py monitor <board_dir> --port /dev/ttyACM0
 
 The flash ORDER is fixed here, once: erase otadata FIRST (with --after
-no_reset), then write the merged image (with --after hard_reset), so the board
-leaves the flash running the slot just written. A board that has taken an OTA
-is on ota_1, and skipping the erase makes a cable flash into ota_0 look like a
-flash that did nothing. `--before` comes from the toml: the T-Deck declares
-usb_reset (measured: default_reset write-times-out against a wedged
-USB-Serial/JTAG node, usb_reset connects), the P4's CH343 is happy with the
-esptool default.
+no_reset), then write the merged image, so the board leaves the flash running
+the slot just written. A board that has taken an OTA is on ota_1, and skipping
+the erase makes a cable flash into ota_0 look like a flash that did nothing.
+
+`--before` and `--after` come from the toml, because how a board enters and
+leaves the ROM loader is a hardware fact and not a preference. The T-Deck
+declares `before = usb_reset` (measured: default_reset write-times-out against
+a wedged USB-Serial/JTAG node, usb_reset connects); the P4's CH343 is happy
+with the esptool default. `after` defaults to hard_reset, which is what the
+three console boards want -- and the Zero declares `watchdog_reset`, because
+hard_reset does NOTHING on its TinyUSB CDC and a board left sitting in the
+loader after a flash reads exactly like a board that did not take the image.
+That fact was written in that board's own toml while this file hardcoded the
+opposite.
 
 esptool runs from THIS interpreter (`sys.executable -m esptool`) -- the venv's,
 via the Makefile. The fork-era esptool_no_modem wrapper is not needed on either
@@ -113,7 +120,7 @@ def flash(board_dir, port, verify=True):
     args = []
     if fl.get("before"):
         args += ["--before", str(fl["before"])]
-    args += ["--after", "hard_reset", "write_flash",
+    args += ["--after", str(fl.get("after", "hard_reset")), "write_flash",
              str(fl["offset"]), str(image)]
     return _esptool(chip, port, baud, *args)
 

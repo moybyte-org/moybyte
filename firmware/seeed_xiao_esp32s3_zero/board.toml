@@ -200,10 +200,15 @@ this one paints none. See zero_host.serve()."""
 # usb_reset workaround. The hazard here is the opposite one and is a HARDWARE
 # FACT, recorded in README: an esptool DTR dance against the RUNNING CDC has
 # wedged the USB device. The safe way into the loader is
-# `machine.bootloader()` from a live MicroPython; the way out is
-# `--after watchdog_reset`, never hard_reset.
+# `machine.bootloader()` from a live MicroPython.
+#
+# `after` is the way OUT, and it is why this key exists at all: hard_reset --
+# every other board's answer, and board_flash.py's hardcoded one until
+# 2026-08-29 -- does nothing here, so a cable flash used to leave the board
+# sitting in the loader, which reads exactly like an image that did not take.
 image          = "dist/zero/moybyte_zero.bin"
 offset         = "0x0"
+after          = "watchdog_reset"
 baud           = 460800
 otadata_offset = "0x1d000"
 otadata_size   = "0x2000"

@@ -314,6 +314,32 @@ def test_flash_facts_are_declared_and_shaped(board):
     assert cfg.get("monitor", {}).get("baud"), "%s has no [monitor] baud" % board
 
 
+def test_the_way_out_of_the_loader_is_declared_where_it_is_not_hard_reset():
+    """`after` is optional and means "hard_reset", which is what the three
+    console boards want. The Zero must DECLARE watchdog_reset, because
+    hard_reset does nothing on its TinyUSB CDC (its README's hardware facts) --
+    and a board left sitting in the loader after a flash reads exactly like an
+    image that did not take.
+
+    This is pinned because the fact was already written in that board's own
+    toml prose while board_flash.py hardcoded the opposite, which is the shape
+    of bug this repo keeps turning declarations into data to avoid."""
+    zero = board_config.load(ZERO)["flash"]
+    assert zero.get("after") == "watchdog_reset"
+    for name in ("tdeck", "p4", "guition-s3"):
+        fl = board_config.load(BOARDS[name])["flash"]
+        assert fl.get("after", "hard_reset") == "hard_reset", name
+
+
+def test_board_flash_takes_the_after_from_the_declaration():
+    """The reader half. A hardcoded --after is what this key replaced, so the
+    literal must not come back: the only `hard_reset` left in the writer is the
+    DEFAULT in the lookup."""
+    src = (ROOT / "tools" / "board_flash.py").read_text()
+    assert 'fl.get("after", "hard_reset")' in src
+    assert '"--after", "hard_reset"' not in src
+
+
 def test_the_two_boards_otadata_offsets_differ_as_their_tables_do():
     """The per-board fact this section exists for: the T-Deck's otadata sits at
     0x1d000 and the P4's at 0xd000 -- one transposed digit apart, and erasing
