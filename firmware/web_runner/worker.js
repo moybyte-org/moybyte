@@ -75,6 +75,28 @@ let fbAddr = null, fbLen = null;
 let syncPoll = null, syncAck = null, syncOff = null, rescan = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
+// How many consecutive pushes may fail before this page admits the board is
+// gone. Between gpio_link's 5 (a pin link that stalls at all is broken) and
+// update_link's 30 (a board WRITING FLASH legitimately goes quiet): a board
+// that is merely busy serving can miss a few sweeps, and 15 seconds of silence
+// is not busy. The count is the point -- before this, a vanished board was
+// retried FOREVER and the chip went on saying the carts were safe on it.
+const SYNC_GIVE_UP = 15;
+let syncFails = 0, syncLostSaid = false;
+
+// The board stopped answering. In BOARD MODE this page keeps no local store by
+// design, so whatever has not been pushed lives only in this tab -- which is
+// why this is the one disconnect that carries the data-loss warning, and why
+// the chip must stop claiming the carts are kept on a console that is gone.
+function syncLost(head, body) {
+    if (syncLostSaid) return;
+    syncLostSaid = true;
+    persist("none", "the console is not answering -- recent changes are only here");
+    self.postMessage({ t: "lost", kind: "lost",
+        head: head || "the console stopped answering",
+        body: body || ("It has not accepted anything for " + SYNC_GIVE_UP
+                       + " seconds.") });
+}
 // #9 physical I/O: the same pump shape as the sync push, at a physical-I/O
 // rate. A cart's pin_write QUEUES (gpio_link.py: it must never stall a frame
 // on the wire), so the pace here IS the latency a kid feels between the cart
@@ -793,11 +815,25 @@ function syncPump() {
                 try { syncAck(0); syncOff(); } catch (e) { }
                 syncPoll = null;
                 console.log("[moy] sync off: board refused the pin");
+                // SAY SO. This is the silent-loss case in its purest form: the
+                // board is right there and answering, the page looks entirely
+                // healthy, and nothing a kid types will ever reach the console
+                // again. A devtools line is not a person being told.
+                syncLostSaid = false;
+                syncLost("the console refused this page",
+                         "It is asking for a pin this page was not opened with. "
+                         + "Re-scan the code on its WEB CONSOLE screen.");
                 return;
             }
+            if (r.ok) { syncFails = 0; syncLostSaid = false; }
+            else if (++syncFails >= SYNC_GIVE_UP) syncLost();
             try { syncAck(r.ok ? 1 : 0); } catch (e) { }
         })
-        .catch(() => { try { syncAck(0); } catch (e) { } })
+        .catch(() => {
+            // The board is unreachable, not merely unhappy: no status at all.
+            if (++syncFails >= SYNC_GIVE_UP) syncLost();
+            try { syncAck(0); } catch (e) { }
+        })
         .finally(() => { syncBusy = false; });
 }
 
