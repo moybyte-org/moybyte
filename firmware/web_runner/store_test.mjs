@@ -108,6 +108,56 @@ ok("a board that wants a pin is still a board", await store.probeMode(
     async (u, o) => (o && o.method === "POST") ? { ok: false, status: 403 }
                                                : { ok: false, status: 404 }) === "board");
 
+// ---- asking the browser to keep it ------------------------------------------
+// Every shape a real navigator turns up in, because all of them are supported
+// states and NONE of them may throw: an origin already durable, a browser that
+// grants, one that refuses, a Worker (persisted/estimate but no persist -- the
+// context worker.js actually runs in), an API that throws, and no storage at all.
+const nav = (storage) => ({ storage });
+const already = await store.requestPersistence(nav({
+    persisted: async () => true,
+    persist: async () => { throw new Error("must not be asked again"); },
+    estimate: async () => ({ usage: 2097152, quota: 10737418240 }),
+}));
+ok("an origin already durable is not re-asked", already.state === "granted", already.state);
+ok("the estimate rides along", already.usage === 2097152 && already.quota === 10737418240);
+ok("a granted origin reads as kept, with its usage",
+   store.storageNote(already) === "kept 2.0MB/10240MB", store.storageNote(already));
+
+const granted = await store.requestPersistence(nav({
+    persisted: async () => false, persist: async () => true }));
+ok("a browser that grants says granted", granted.state === "granted");
+ok("no estimate means no numbers, not zeroes", store.storageNote(granted) === "kept",
+   store.storageNote(granted));
+
+const denied = await store.requestPersistence(nav({
+    persisted: async () => false, persist: async () => false,
+    estimate: async () => ({ usage: 0, quota: 10737418240 }) }));
+ok("a browser that refuses says denied", denied.state === "denied");
+ok("a denied store is EVICTABLE in the page's words",
+   store.storageNote(denied) === "evictable 0.0MB/10240MB", store.storageNote(denied));
+
+// The one that costs a session if it is read wrong: storage.persist() is
+// [Exposed=Window], so the worker's own navigator has no `persist` at all.
+// That is "cannot ask here", NOT "was refused" -- the page is asked instead.
+const inWorker = await store.requestPersistence(nav({
+    persisted: async () => false, getDirectory: async () => null,
+    estimate: async () => ({ usage: 0, quota: 1073741824 }) }));
+ok("a context with no persist() is unsupported, not denied",
+   inWorker.state === "unsupported", inWorker.state);
+ok("...and says so rather than claiming a refusal",
+   store.storageNote(inWorker) === "evictable (cannot ask here) 0.0MB/1024MB",
+   store.storageNote(inWorker));
+
+const angry = await store.requestPersistence(nav({
+    persisted: async () => { throw new Error("site data blocked"); },
+    persist: async () => { throw new Error("site data blocked"); },
+    estimate: async () => { throw new Error("site data blocked"); } }));
+ok("an API that throws is a state, not a crash", angry.state === "unsupported");
+ok("no storage manager at all is a state too",
+   (await store.requestPersistence({})).state === "unsupported"
+   && (await store.requestPersistence(null)).state === "unsupported");
+
 // ---- the store --------------------------------------------------------------
 for (const sync of [true, false]) {
     const label = sync ? "sync handle" : "createWritable";

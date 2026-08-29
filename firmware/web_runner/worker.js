@@ -24,6 +24,7 @@
 //   {t:"run"}            start stepping (the page's play-button gesture)
 //   {t:"fbret", b}       a framebuffer being handed BACK for reuse (see below)
 //   {t:"reload"}         dev hot-reload: re-read carts.json/files.json, restart
+//   {t:"kept", state}    the page's answer to {t:"keep"}: "granted" | "denied"
 //   {t:"carts"}          list the cart folders (the export picker)
 //   {t:"export", cart}   zip one cart out of the VFS
 //   {t:"import", name, buf}  unzip a .moy zip into the store
@@ -33,6 +34,9 @@
 //   {t:"frame", s, fb}   frame metadata + the RGB565 framebuffer, TRANSFERRED
 //   {t:"error", s}       fatal: the page shows it and stops
 //   {t:"persist", mode, s}   where carts are being kept, in the page's words
+//   {t:"keep"}           site mode: ask the browser to make this origin
+//                        durable. Sent to the PAGE because storage.persist()
+//                        is window-only -- a Worker cannot ask, only look.
 //   {t:"pin", tried}     this board is PINNED and this page cannot read it, so
 //                        the boot stopped before the VM: the page prompts.
 //                        `tried` = a pin WAS offered and refused (a wrong one),
@@ -87,6 +91,13 @@ let mode = null, persistFails = 0, persistSaid = false;
 const opfsStores = {};
 let persistBatches = 0;
 const PERSIST_GIVE_UP = 3;
+// What the browser answered when asked to KEEP this origin (site mode only;
+// moy_store's requestPersistence has the three outcomes). "granted" is the
+// only one that lets the chip say the carts are safe here -- every other one
+// means saved-but-evictable, and #193's rule is that eviction is never the
+// silent kind. `sitePartial` is the seed tally's "some roots had no OPFS", kept
+// so a later batch cannot quietly upgrade a partial store's sentence.
+let keep = null, sitePartial = false;
 let running = false, ahead = -1, inbox = [];
 // Framebuffer ping-pong. A painted frame is copied out of the wasm heap into a
 // plain ArrayBuffer and TRANSFERRED to the page (zero-copy handoff); the page
@@ -174,6 +185,39 @@ function persist(m, s, d) {
     console.log("[moy] persist: " + m + " -- " + s + (d ? " (" + d + ")" : ""));
 }
 
+// The SITE-mode sentence, in one place: the boot says it, every later batch
+// repeats it, and the page's answer to {t:"keep"} re-says it. It promises
+// exactly what the browser granted -- an evictable store is still a store, and
+// which one this is has to be readable BEFORE a cart goes missing, not after.
+function siteSaid() {
+    const base = sitePartial ? "carts saved here (some kinds could not)"
+                             : "carts & drawings saved in this browser";
+    if (keep && keep.state === "granted") return base;
+    return base + " -- the browser may clear them if space runs short";
+}
+
+// ...and one site-mode REPORT, so the two halves of the detail line cannot come
+// apart. `siteDetail` is the evidence of the last thing that happened to the
+// store ("loaded in 79ms", "carts 3 ops in 5.6ms"); the storage note is appended
+// at SEND time, because the page's answer lands whenever it lands. Re-emitting
+// with the note ALONE would drop that evidence the moment a late answer arrives,
+// and the evidence is what the E2E reads back.
+let siteDetail = "";
+function sitePersist(detail) {
+    if (detail !== undefined) siteDetail = detail;
+    const note = store.storageNote(keep);
+    persist("site", siteSaid(), siteDetail + (siteDetail && note ? ", " : "") + note);
+}
+
+// The page asked on our behalf (see initStore) and this is what it got. Re-word
+// the chip, but only while site mode is still the truth: a store that has since
+// given up is saying something more important.
+function keptAnswer(state) {
+    if (!keep || (state !== "granted" && state !== "denied")) return;
+    keep.state = state;
+    if (mode === "site") sitePersist();
+}
+
 // Seed ONE root into the VFS, and in site mode into that root's OWN OPFS store.
 // `data` is the served bundle for this root ({} / null when the host does not
 // serve it). Returns "board" | "site" | "none" for the caller's tally, and sets
@@ -222,6 +266,15 @@ async function seedRoot(root, data, site) {
 async function initStore(fetched) {
     const t0 = performance.now();
     const site = (await store.probeMode((u, o) => fetch(u, o))) !== "board";
+    // Ask the browser to KEEP this origin BEFORE a byte is written -- OPFS is
+    // best-effort and an origin under pressure is evicted whole. Here in the
+    // Worker this can only READ the answer (persist() is window-only), so an
+    // origin that is not already durable gets a {t:"keep"} sent to the page,
+    // which can ask; its {t:"kept"} re-words the chip when it lands. That half
+    // is deliberately NOT awaited: Firefox raises a permission PROMPT on
+    // persist(), and a console that boots behind a dialog looks hung.
+    keep = site ? await store.requestPersistence(navigator) : null;
+    if (keep && keep.state !== "granted") self.postMessage({ t: "keep" });
     let anySite = false, anyNone = false, loaded = false;
     for (const root of store.ROOTS) {
         const data = fetched[root.id];
@@ -244,11 +297,12 @@ async function initStore(fetched) {
     } else {
         // "loaded" once any root read the kid's work back from OPFS (a revisit);
         // "seeded" on a first visit. The word is the persistence evidence the
-        // E2E reads back.
-        persist("site", anyNone ? "carts saved here (some kinds could not)"
-                                : "carts & drawings saved in this browser",
-                (loaded ? "loaded" : "seeded") + " in "
-                + (performance.now() - t0).toFixed(0) + "ms");
+        // E2E reads back, and the storage note behind it is the OTHER evidence:
+        // whether the browser agreed to keep any of it, and how close the store
+        // is to the quota it would be evicted at.
+        sitePartial = anyNone;
+        sitePersist((loaded ? "loaded" : "seeded") + " in "
+                    + (performance.now() - t0).toFixed(0) + "ms");
     }
 }
 
@@ -525,9 +579,8 @@ async function pumpLocal(body) {
         persistFails = 0;
         persistBatches++;
         try { syncAck(1); } catch (e) { }
-        persist("site", "carts & drawings saved in this browser",
-                rootId + " " + ops.length + " ops in "
-                + (performance.now() - t0).toFixed(1) + "ms");
+        sitePersist(rootId + " " + ops.length + " ops in "
+                    + (performance.now() - t0).toFixed(1) + "ms");
     } catch (e) {
         // Quota, or the browser evicted the store under us. Requeue; after a
         // few consecutive failures stop pretending, once, and tell the page --
@@ -714,6 +767,8 @@ self.onmessage = async (ev) => {
             if (files) writeStore(store.rootById("files").vfs, files);
             reload();
             self.postMessage({ t: "assets", json: assets() });
+        } else if (m.t === "kept") {
+            keptAnswer(m.state);
         } else if (m.t === "carts") {
             self.postMessage({ t: "carts", names: cartNames() });
         } else if (m.t === "export") {

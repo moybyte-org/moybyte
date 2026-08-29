@@ -132,6 +132,74 @@ export async function probeMode(fetchFn) {
 }
 
 // ---------------------------------------------------------------------------
+// Asking the browser to KEEP it.
+// ---------------------------------------------------------------------------
+
+// OPFS is BEST-EFFORT storage: a browser under disk pressure evicts an origin
+// WHOLE, and the only thing this build did about that was advise "export your
+// cart" -- after a write had already failed. `storage.persist()` asks for the
+// durable bucket instead, and SITE MODE IS THE ONLY MODE THAT ASKS: a
+// board-served page keeps nothing here, so asking there would raise a
+// permission prompt for a store that is never written.
+//
+// THE ASK ONLY EXISTS ON THE MAIN THREAD. `persist()` is `[Exposed=Window]`;
+// inside a Worker `navigator.storage` carries `persisted()`, `estimate()` and
+// `getDirectory()` but no `persist` at all (measured in Chrome, 2026-08-29).
+// So this one body does both halves: the worker calls it to LEARN the state,
+// the page calls it to CHANGE it, and a context that cannot ask says
+// "unsupported" rather than pretending it was refused.
+//
+// Three outcomes, all of them normal states:
+//   granted      the origin is durable; only the user can clear it
+//   denied       the browser said no -- Chrome asks a site-engagement
+//                heuristic and mostly answers no on a first visit. The carts
+//                are still saved; they are merely evictable, and the page must
+//                SAY that rather than promise more than it was given.
+//   unsupported  no persist() in reach (Safari, a Worker, a locked-down profile)
+//
+// It must never throw. A private window, blocked site data and file:// all
+// arrive here, and every one of them is a supported way to run.
+export async function requestPersistence(nav) {
+    const st = nav && nav.storage;
+    const out = { state: "unsupported", usage: null, quota: null };
+    if (!st) return out;
+    try {
+        // persisted() FIRST: an origin already granted must not be re-asked,
+        // because Firefox raises its permission prompt on every persist().
+        if (typeof st.persisted === "function" && await st.persisted())
+            out.state = "granted";
+        else if (typeof st.persist === "function")
+            out.state = (await st.persist()) ? "granted" : "denied";
+    } catch (e) { /* an ask that throws is an ask that was never answered */ }
+    if (typeof st.estimate === "function") {
+        try {
+            const e = await st.estimate();
+            if (e && typeof e.usage === "number") out.usage = e.usage;
+            if (e && typeof e.quota === "number") out.quota = e.quota;
+        } catch (e) { /* the estimate is evidence, never a boot condition */ }
+    }
+    return out;
+}
+
+function mbytes(n) {
+    const mb = n / 1048576;
+    return (mb < 10 ? mb.toFixed(1) : mb.toFixed(0)) + "MB";
+}
+
+// The answer in the page's words -- the tail of the persist chip's detail line,
+// which is where the E2E (and a curious owner in devtools) reads it back. The
+// estimate rides along because #193's failure mode is SILENT eviction, and a
+// store's distance from its quota is the one number that sees it coming.
+export function storageNote(p) {
+    if (!p) return "";
+    const word = p.state === "granted" ? "kept"
+               : p.state === "denied" ? "evictable"
+                                      : "evictable (cannot ask here)";
+    if (p.usage === null || p.quota === null) return word;
+    return word + " " + mbytes(p.usage) + "/" + mbytes(p.quota);
+}
+
+// ---------------------------------------------------------------------------
 // The OPFS store.
 // ---------------------------------------------------------------------------
 

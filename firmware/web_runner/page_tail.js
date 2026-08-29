@@ -49,6 +49,7 @@ pendingFrame=m.s;pendingFB=m.fb||null;}
 // capturing them, and this is the evidence that the store is being written.
 else if(m.t==="persist"){window.__moyPersist={mode:m.mode,s:m.s,d:m.d||"",n:m.n||0};
 pzMode(m.mode,m.s);}
+else if(m.t==="keep"){pzKeep();}
 else if(m.t==="carts"){pzFill(m.names);}
 else if(m.t==="exported"){pzDownload(m.name,m.buf);}
 else if(m.t==="imported"){window.__moyImported=m.s;pzSay(m.s,!m.ok);if(m.ok)pzAsk();}
@@ -115,6 +116,18 @@ function pzSay(s,warn){pzS.textContent=s;pzS.className=warn?"warn":"";}
 function pzMode(mode,s){PZMODE=mode;pzSay(s,mode==="none");
 if(mode!=="board"){pzEl.style.display="flex";pzAsk();}}
 function pzAsk(){if(WORKER)WORKER.postMessage({t:"carts"});}
+// The worker decided this page keeps its carts HERE, in OPFS -- which the
+// browser may evict under disk pressure unless the origin is asked to be made
+// durable. THIS thread has to do the asking: storage.persist() is
+// [Exposed=Window] and simply does not exist on the worker's navigator, so the
+// worker (which owns the mode, and only asks in site mode) sends {t:"keep"}
+// and this answers. Never throws and never blocks anything: a refusal, a
+// missing API and a locked-down profile are all just states the chip reports.
+function pzKeep(){var st=navigator.storage;
+if(!st||typeof st.persist!=="function")return;
+Promise.resolve().then(function(){return st.persist();})
+.then(function(okd){if(WORKER)WORKER.postMessage({t:"kept",state:okd?"granted":"denied"});})
+.catch(function(){});}
 function pzFill(names){var keep=pzC.value;pzC.innerHTML="";
 for(var i=0;i<names.length;i++){var o=document.createElement("option");
 o.value=names[i];o.textContent=names[i];pzC.appendChild(o);}
