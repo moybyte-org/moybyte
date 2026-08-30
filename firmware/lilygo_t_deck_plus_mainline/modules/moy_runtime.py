@@ -30,7 +30,12 @@ from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
 # there. Everything below that is not one of those is hardware.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
                          OtaHealth, PerfSampler, apply_touch, poll_webhost)
-from carts_data import CARTS          # generated from system_carts/ at build time
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
 from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
                          sram_census)
 from device_wifi import make_wifi, autoconnect_wifi
@@ -81,6 +86,19 @@ POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic --
 # and it only fires on commits, never per frame.
 SD_TRACE = True
+
+# WHERE THE STORE LIVES WHEN THERE IS NO CARD. This board's carts normally live
+# on the TF card (moy_carts.CARTS_DIR, /sd/moybyte/carts) -- but a T-Deck with
+# an empty slot used to boot to the EMBEDDED carts with a None root, which
+# `wire_workstation_core` turns into can_manage=False: a read-only console, no
+# saving, no editing, no importing, and the only explanation one serial line on
+# a board whose USB-CDC RX is dead under the desktop. These are the same paths
+# the P4 has always used for the same reason, and a card put in later is picked
+# up on the next boot -- ONE store per boot, decided before anything is written,
+# because two live stores is the arrangement where a kid's save goes to the one
+# they are not looking at.
+FLASH_CARTS_ROOT = "/moy/carts"
+FLASH_UPDATE_DIR = "/moy/update"
 
 
 def run_desktop(fps_cap=60):
@@ -176,7 +194,14 @@ def run_desktop(fps_cap=60):
     # seed+scan; `with_sd_live` attaches once and keeps the card resident.
     carts, carts_root = boot.load_carts(moy_carts, CARTS,
                                         session=_sd_session,
-                                        media="SD")
+                                        media="SD",
+                                        fallback_root=FLASH_CARTS_ROOT)
+    # Did the card actually take the store? Everything below that exists ONLY
+    # because SD shares the panel's SPI host -- the session bracket and the OTA
+    # staging dir -- has to follow the store, or a card-less board brackets the
+    # panel for a bus it is not using and stages its update onto a card that is
+    # not there.
+    on_sd = carts_root is not None and carts_root.startswith("/sd")
     sram_census("carts")
     boot.note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
@@ -225,12 +250,22 @@ def run_desktop(fps_cap=60):
             print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
             _sd_traced[0] = True
 
+    def _direct(fn):
+        """The no-card store lifecycle: just call it. Internal flash shares no
+        bus with the panel, so there is nothing to drain and nothing to mount --
+        and routing it through the SD bracket would fail every write."""
+        return fn()
+
+    _store_session = _with_sd_synced if on_sd else _direct
+
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
-        _ws._with_sd = _with_sd_synced
+        _ws._with_sd = _store_session
         try:
             import moy_ota
-            _ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
+            _ws.updater = moy_ota.OtaUpdater(
+                _store_session,
+                update_dir=None if on_sd else FLASH_UPDATE_DIR)
         except Exception as exc:  # noqa: BLE001
             print("Moybyte: OTA updater unavailable:", exc)
 
@@ -299,10 +334,14 @@ def run_desktop(fps_cap=60):
     # the LCD DMA flush needs, which is why boot does NOT autoconnect. Turning
     # the row on takes that risk knowingly, exactly as UPDATE ONLINE does.
     try:
-        from moy_webhost import make_webhost, SD_WEB_DIR
-        ws.webhost = make_webhost(ws, carts_root, SD_WEB_DIR,
+        from moy_webhost import make_webhost, SD_WEB_DIR, INTERNAL_WEB_DIR
+        # Both arguments follow the store for the same reason: the push-a-bundle
+        # override belongs on the media the board is actually using, and the SD
+        # gate is only a gate when SD is the bus.
+        ws.webhost = make_webhost(ws, carts_root,
+                                  SD_WEB_DIR if on_sd else INTERNAL_WEB_DIR,
                                   autoconnect=autoconnect_wifi,
-                                  with_sd=_with_sd_synced)
+                                  with_sd=_store_session)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte: web console unavailable:", exc)
 

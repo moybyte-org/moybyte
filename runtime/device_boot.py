@@ -159,7 +159,8 @@ class DeviceBoot:
 
     # -- the steps -----------------------------------------------------------
 
-    def load_carts(self, store, seed, root=None, session=None, media="SD"):
+    def load_carts(self, store, seed, root=None, session=None, media="SD",
+                   fallback_root=None, fallback_media="flash"):
         """Seed + scan the cart store, falling back to the embedded carts.
 
         Returns `(carts, carts_root)`; a None root means "management disabled",
@@ -170,23 +171,52 @@ class DeviceBoot:
         must bracket the whole seed+scan), on the P4 nothing at all, because the
         store is internal flash and races no one. `media` is the word that
         appears in the serial lines ("SD" / "flash").
+
+        `fallback_root` is the SECOND STORE to try before giving up, and it is
+        what keeps a card-less board WRITABLE. Without it a T-Deck with no card
+        in the slot booted to the embedded carts with a None root, i.e. a
+        read-only console: every cart visible, none editable, nothing saveable,
+        and the only explanation a single serial line nobody was attached to
+        read. The retry runs with NO session, because a board only ever needs a
+        lifecycle wrapper for the bus it just failed on -- internal flash races
+        nobody on any board here.
+
+        Why a retry rather than a probe: on this hardware there is nothing to
+        probe. The Guition mounts its card once at boot and asks the mount, but
+        the T-Deck's card shares the panel's SPI host and is mounted PER
+        SESSION, so the only honest question is "did a real session work" --
+        which is this call. The boards differ because the buses do.
         """
         if root is None:
             root = store.CARTS_DIR
+        carts = self._try_store(store, seed, root, session, media)
+        if carts:
+            return carts, root
+        if fallback_root is not None and fallback_root != root:
+            carts = self._try_store(store, seed, fallback_root, None,
+                                    fallback_media)
+            if carts:
+                return carts, fallback_root
+        self.say("using built-in carts")
+        return store.embedded_floor(seed), None
+
+    def _try_store(self, store, seed, root, session, media):
+        """One store attempt: seed it, scan it, say what happened. [] on any
+        failure OR an empty scan -- the caller decides whether another store is
+        left to try."""
         try:
             def _seed_and_scan():
                 store.ensure_dirs(root)
-                store.seed_builtins(seed, root, progress=self.seed_progress)
+                store.seed_any(seed, root, progress=self.seed_progress)
                 return store.scan(root)
 
             carts = _seed_and_scan() if session is None else session(_seed_and_scan)
             if carts:
                 self.say("loaded %d carts from %s" % (len(carts), media))
-                return carts, root
+                return carts
         except Exception as exc:  # noqa: BLE001 -- any store failure degrades
             self.say("%s carts unavailable: %s" % (media, exc))
-        self.say("using built-in carts")
-        return [dict(c) for c in seed], None
+        return []
 
     def lua_runtime(self, ws, log=None):
         """The #67 Lua cart runtime, and a line saying whether it is in this image.

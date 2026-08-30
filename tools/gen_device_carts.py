@@ -44,8 +44,8 @@ generated output for the frozen tiers, which have no `system_carts/`).
 Pure stdlib so it runs under any Python the build has.
 
 TWO PAYLOAD REPRESENTATIONS, ONE READER OF THE DECLARATIONS. `carts_data.py`
-comes in a PLAIN form (`CARTS = [...]`, what the console boards freeze) and a
-PACKED form (`CARTS_Z = [(title, version, <raw deflate>)]`, what the Zero
+comes in a PLAIN form (`CARTS = [...]`, which nothing freezes any more) and a
+PACKED form (`CARTS_Z = [(title, version, <raw deflate>)]`, what every board
 freezes since 2026-08-30). Everything above this line -- the manifests'
 `system`/`order`/`targets`/`app` declarations and the cart bodies built from
 them -- is identical in both; only how the bytes are spelled differs. The packed
@@ -398,10 +398,20 @@ def render_app_decls(decls):
 
 def as_module(system_carts_dir):
     """An in-memory `carts_data` module (so host tests can exec moy_runtime,
-    which does `from carts_data import CARTS`, without writing a file)."""
+    which does `from carts_data import CARTS_Z`, without writing a file).
+
+    BOTH forms, because both are real: every console board freezes the packed
+    roster and the plain one is still what the packer is checked against. A
+    host test that wants the cart dicts reads `CARTS`; one that wants what a
+    board actually holds reads `CARTS_Z` and inflates it, which is the round
+    trip worth exercising.
+    """
     import types
     mod = types.ModuleType("carts_data")
     mod.CARTS = build_carts(system_carts_dir)
+    mod.CARTS_Z = [(c["title"], int(c.get("version", 0)), pack_cart(c))
+                   for c in mod.CARTS]
+    mod.SEED_FORMAT = SEED_FORMAT
     return mod
 
 

@@ -74,7 +74,17 @@ def _load_moy_runtime():
 
 
 def _carts_by_title():
-    return {c["title"]: c for c in _load_moy_runtime().CARTS}
+    """The carts the DEVICE holds, inflated back to dicts.
+
+    Since 2026-08-30 every board freezes the packed roster, so `moy_runtime.CARTS`
+    is `[(title, version, blob)]`. Inflating it here through the real
+    `moy_carts.unpack_seed` means these parity checks now also prove the pack ->
+    freeze -> inflate round trip preserves every cart byte for byte -- the
+    compression cannot quietly lose a sprite sheet without failing this file.
+    """
+    import moy_carts
+    return {c["title"]: c
+            for c in moy_carts.embedded_floor(_load_moy_runtime().CARTS)}
 
 
 def _manifest(folder):

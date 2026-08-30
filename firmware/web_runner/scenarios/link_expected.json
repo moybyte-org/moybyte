@@ -1,0 +1,22 @@
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "The board is going away ON PURPOSE -- somebody asked for an update, or turned wasm mode off and took the glass back. It will return. Nothing is at risk, so this panel must NOT carry the unsynced-work warning: a surface that warns every time is a surface nobody reads on the day it is true.",
+   "wait": 3000
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,px:(function(){try{var d=cx.getImageData(0,0,cv.width,cv.height).data,n=0;for(var i=0;i<d.length;i+=4){if(d[i]|d[i+1]|d[i+2])n++;}return n;}catch(e){return -1;}})()})"
+  },
+  {
+   "js": "window.__moyLinkLost('expected','installing an update','The console is restarting. This page will not work until it is back.'); JSON.stringify({at:'fired'})"
+  },
+  {
+   "js": "JSON.stringify({at:'expected',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"
+  },
+  {
+   "shot": "link_expected"
+  }
+ ]
+}

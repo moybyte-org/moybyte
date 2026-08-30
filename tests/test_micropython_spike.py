@@ -132,7 +132,12 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     runtime = _device_backend_src()
 
     assert "import moy_ota" in runtime
-    assert "ws.updater = moy_ota.OtaUpdater(_with_sd_synced)" in runtime
+    # The gate and the staging dir both FOLLOW THE STORE (2026-08-30): a T-Deck
+    # with no card keeps a writable store on internal flash, and an updater that
+    # went on bracketing the SD bus and staging onto /sd/update would be aimed
+    # at a card that is not there.
+    assert "ws.updater = moy_ota.OtaUpdater(\n                _store_session," in runtime
+    assert 'update_dir=None if on_sd else FLASH_UPDATE_DIR)' in runtime
     # The rollback confirm is made from the FRAME LOOP, once the console has
     # actually painted -- not on the boot path, where "the desktop was built"
     # would confirm an image that never reaches the glass (#56). See
@@ -299,7 +304,10 @@ def test_micropython_native_sd_shares_display_spi_host():
     # The SD session is wrapped so it drains any in-flight panel DMA first (the
     # #40 double-buffer SD-vs-panel mutual exclusion), but still delegates to the
     # native live-mount path.
-    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "ws._with_sd = _store_session" in runtime
+    assert "_store_session = _with_sd_synced if on_sd else _direct" in runtime, (
+        "the SD bracket is only a bracket while SD is the store -- a card-less "
+        "board writes to internal flash, which shares no bus with the panel")
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
     # can_manage defaults to "the store root is known" inside the shared
     # console.wire_workstation_core (the runtime hands it carts_root).
@@ -2098,7 +2106,7 @@ def test_icon_theme_editor_wired_into_device_shell():
 
     # The same persistence wrapper + can_manage gate the device wires for cart saves
     # already covers the theme save -- with_sd_live is the live SD write path.
-    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "ws._with_sd = _store_session" in runtime
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
 
 

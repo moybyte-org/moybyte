@@ -90,23 +90,31 @@ class FakeWs:
 class FakeStore:
     CARTS_DIR = "/sd/moybyte/carts"
 
-    def __init__(self, carts=None, raise_on=None):
+    def __init__(self, carts=None, raise_on=None, dead_root=None):
         self.carts = carts if carts is not None else [{"title": "a"}]
         self.raise_on = raise_on
+        # A store that is dead at ONE root and fine at another: an empty card
+        # slot, which is not "storage is broken" but "storage is elsewhere".
+        self.dead_root = dead_root
         self.calls = []
 
     def ensure_dirs(self, root):
         self.calls.append(("ensure_dirs", root))
-        if self.raise_on == "ensure_dirs":
+        if self.raise_on == "ensure_dirs" or root == self.dead_root:
             raise OSError("no card")
 
-    def seed_builtins(self, seed, root, progress=None):
+    def seed_any(self, seed, root, progress=None):
+        # The real store dispatches on the roster's FORM (moy_carts.seed_any);
+        # what the boot spine has to get right is that it calls the one door.
         self.calls.append(("seed_builtins", root, len(seed)))
         if self.raise_on == "seed_builtins":
             raise OSError("write failed")
         if progress is not None:
             for i in range(len(seed)):
                 progress(i, len(seed), seed[i].get("title"))
+
+    def embedded_floor(self, seed):
+        return [dict(c) for c in seed]
 
     def scan(self, root):
         self.calls.append(("scan", root))
@@ -218,6 +226,12 @@ def test_a_splash_that_never_composed_still_shows_the_logo():
 # -- the cart store -----------------------------------------------------------
 
 
+def _raises_session(fn):
+    """The T-Deck's `with_sd_live` against an empty slot: the mount itself is
+    what fails, before fn() is ever reached."""
+    return fn()
+
+
 def test_the_carts_load_through_the_boards_storage_session(capsys):
     boot, _, _ = _boot()
     store = FakeStore(carts=[{"title": "a"}, {"title": "b"}])
@@ -265,6 +279,67 @@ def test_an_unreadable_store_degrades_to_the_embedded_carts(capsys):
     out = capsys.readouterr().out
     assert "Moybyte SD carts unavailable: no card" in out
     assert "Moybyte using built-in carts" in out
+
+
+def test_a_cardless_board_keeps_a_writable_store_on_internal_flash(capsys):
+    """The T-Deck bug: no card in the slot meant a None root, which
+    `wire_workstation_core` turns into can_manage=False -- a console showing
+    every cart and able to save, edit or import none of them."""
+    boot, _, _ = _boot()
+    store = FakeStore(dead_root="/sd/moybyte/carts")
+
+    carts, root = boot.load_carts(store, [{"title": "s"}], session=_raises_session,
+                                  media="SD", fallback_root="/moy/carts")
+
+    assert root == "/moy/carts", ("a board with no card must still get a real "
+                                  "root -- that is what keeps it writable")
+    assert ("seed_builtins", "/moy/carts", 1) in store.calls, \
+        "the fallback store must be SEEDED, not just scanned"
+    out = capsys.readouterr().out
+    assert "Moybyte SD carts unavailable: no card" in out
+    assert "Moybyte loaded 1 carts from flash" in out
+    assert "using built-in carts" not in out, \
+        "the embedded read-only floor is for when BOTH stores are gone"
+
+
+def test_the_fallback_store_runs_without_the_boards_session():
+    """The session wrapper exists for the bus that just failed. Internal flash
+    shares nothing with the panel, and routing it through the SD bracket would
+    mount a card that is not there."""
+    boot, _, _ = _boot()
+    seen = []
+
+    def session(fn):
+        seen.append("used")
+        raise OSError("no card")
+
+    boot.load_carts(FakeStore(), [{"title": "s"}], session=session,
+                    fallback_root="/moy/carts")
+    assert seen == ["used"], "the primary attempt uses it exactly once"
+
+
+def test_both_stores_gone_still_reaches_the_read_only_floor(capsys):
+    boot, _, _ = _boot()
+    store = FakeStore(raise_on="ensure_dirs")
+    seed = [{"title": "built-in"}]
+
+    carts, root = boot.load_carts(store, seed, fallback_root="/moy/carts")
+
+    assert root is None and carts == seed and carts[0] is not seed[0]
+    out = capsys.readouterr().out
+    assert "Moybyte flash carts unavailable: no card" in out
+    assert "Moybyte using built-in carts" in out
+
+
+def test_a_working_card_is_never_second_guessed():
+    """No fallback attempt when the primary store answered: two live stores is
+    the arrangement where a save lands in the one nobody is looking at."""
+    boot, _, _ = _boot()
+    store = FakeStore()
+    carts, root = boot.load_carts(store, [{"title": "s"}],
+                                  fallback_root="/moy/carts")
+    assert root == store.CARTS_DIR
+    assert not any("/moy/carts" in str(c) for c in store.calls)
 
 
 def test_an_empty_store_also_falls_back(capsys):

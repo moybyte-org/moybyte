@@ -766,11 +766,17 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
 # 51 KB left -- it fits, by less than 2%, under the #168 warning floor and one
 # cart from a build failure, in a slot the board pays for TWICE.
 #
-# So the Zero freezes `carts_data.CARTS_Z` instead: the SAME carts, one raw
+# So the Zero froze `carts_data.CARTS_Z` instead: the SAME carts, one raw
 # deflate stream each (tools/gen_device_carts.py --packed), which builds to
 # 2,399,232 B and leaves 473 KB. The unit of work is ONE CART -- inflate it,
 # hand it to `seed_builtins`, drop it -- because the roster inflates to 732 KB
 # and no board should ever hold that at once.
+#
+# EVERY BOARD FREEZES THE PACKED ROSTER since 2026-08-30, and the argument on
+# the three that fit is not the fit, it is the MARGIN: the roster only grows and
+# a slot does not, so the board with the least room decides the form for all of
+# them, and a lever that lives on one target is the lever the next port forgets.
+# `seed_any` below is the one door a boot calls, so nothing else had to change.
 #
 # Nothing about the seed CONTRACT changes: the #47 version rules, the manifest
 # regeneration, the preserved pmem/config all stay in `seed_builtins`, which is
@@ -851,6 +857,45 @@ def seed_packed(packed, root=CARTS_DIR, progress=None):
         seed_builtins([unpack_seed(blob)], root)
         written += 1
     return written
+
+
+# -- which roster is this? ----------------------------------------------------
+#
+# Since every console board freezes the PACKED roster (2026-08-30), the two
+# seeders both exist on every board and something has to choose. That choice
+# lives HERE, in the module that owns both bodies, and not in the boot spine:
+# it is a property of the DATA -- what `carts_data` was generated as -- and a
+# board passing the wrong flag beside the right roster is a failure mode worth
+# not having. A packed entry is a `(title, version, blob)` tuple; a plain one is
+# a cart dict. Nothing else has ever been in a roster.
+
+
+def is_packed(seed):
+    """True if `seed` is a packed roster (`carts_data.CARTS_Z`)."""
+    return bool(seed) and not isinstance(seed[0], dict)
+
+
+def seed_any(seed, root=CARTS_DIR, progress=None):
+    """Seed a roster of either form. The one call a board's boot makes."""
+    if is_packed(seed):
+        return seed_packed(seed, root, progress=progress)
+    return seed_builtins(seed, root, progress=progress)
+
+
+def embedded_floor(seed):
+    """The read-only carts a board falls back to when it has NO writable store.
+
+    Nearly unreachable since 2026-08-30: every board now retries on internal
+    flash before it gets here (device_boot.load_carts `fallback_root`), so
+    reaching this means the internal VFS itself is gone -- a board that cannot
+    save anything at all. That is the only reason inflating the WHOLE roster is
+    acceptable here: ~732 KB held at once, which every console board has in
+    PSRAM and none should ever spend on a warm path. The Zero, whose store is
+    the only thing it has, has no floor to fall to and does not call this.
+    """
+    if is_packed(seed):
+        return [unpack_seed(blob) for _title, _version, blob in seed]
+    return [dict(c) for c in seed]
 
 
 def load(path):

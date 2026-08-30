@@ -238,21 +238,67 @@ def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
 
 # -- the build wiring ------------------------------------------------------
 
-def test_the_zeros_build_bakes_the_packed_roster():
-    """The one line that turns a flashed Zero into a board with carts on it.
+# Every build target that bakes a roster, and the runtime module that reads it.
+# The Zero is headless (zero_host), the other three boot the shared console.
+_BOARDS = {
+    "seeed_xiao_esp32s3_zero": "zero_host.py",
+    "lilygo_t_deck_plus_mainline": "moy_runtime.py",
+    "esp32_p4_wifi6_touch_lcd_7b": "moy_runtime.py",
+    "guition_jc3248w535": "moy_runtime.py",
+}
 
-    `--packed` specifically: the plain invocation would emit 731,592 B into an
-    image with 689,472 B of room, and the #168 guard would fail the build --
-    which is the good failure, but this is the line that keeps it from ever
-    being reached.
+
+@pytest.mark.parametrize("board", sorted(_BOARDS))
+def test_every_board_bakes_the_packed_roster(board):
+    """The one line that turns a flashed board into a board with carts on it.
+
+    `--packed` specifically. On the Zero the plain invocation would emit
+    731,592 B into an image with 689,472 B of room and the #168 guard would fail
+    the build -- the good failure, but this is the line that keeps it from being
+    reached. On the three console boards it fits and the argument is the margin:
+    a roster that only grows against a slot that does not, and the P4's 4 MB
+    slots on a 32 MB chip are the ones with the least room to be wrong about.
+
+    PARAMETRIZED because that is the whole point (2026-08-30). This was one
+    board's test while it was one board's mechanism, and a per-board test is
+    exactly how a lever ends up shipped on one target and forgotten on the rest.
     """
-    with open(os.path.join(ZERO, "build.sh")) as f:
+    fw = os.path.join(ROOT, "firmware", board)
+    with open(os.path.join(fw, "build.sh")) as f:
         sh = f.read()
     assert "gen_device_carts.py\" --packed" in sh.replace("\\\n", "")
     from tools import board_config
-    keep = board_config.load(ZERO).get("modules", {}).get("keep", [])
+    keep = board_config.load(fw).get("modules", {}).get("keep", [])
     assert "carts_data.py" in keep, (
         "the stager would prune the generated roster before the freeze")
+    # ...and the module that consumes it must read the PACKED name, or the board
+    # freezes a compressed roster and imports a plain one that is not there.
+    with open(os.path.join(fw, "modules", _BOARDS[board])) as f:
+        assert "CARTS_Z" in f.read()
+
+
+def test_the_seeder_is_chosen_by_the_rosters_form_not_by_the_board():
+    """`seed_any` is the one door every board's boot calls. The dispatch lives
+    with the two bodies it chooses between, so a board cannot pass the wrong
+    flag beside the right roster -- there is no flag."""
+    plain = gen.build_carts(SYSTEM_CARTS)
+    packed = gen.build_packed(SYSTEM_CARTS)
+    assert moy_carts.is_packed(packed) and not moy_carts.is_packed(plain)
+    # An empty roster is not "packed" -- it has no form at all, and reading a
+    # form off nothing is how an empty build would pick the wrong decoder.
+    assert not moy_carts.is_packed([])
+
+
+def test_the_read_only_floor_inflates_a_packed_roster(tmp_path):
+    """The floor a board reaches only if it has NO writable store at all. It
+    must hand back cart DICTS whichever roster the board froze, because the
+    launcher renders them directly -- a board that fell this far showing tuples
+    would be a crash on top of a dead filesystem."""
+    packed = gen.build_packed(SYSTEM_CARTS)
+    plain = gen.build_carts(SYSTEM_CARTS)
+    floor = moy_carts.embedded_floor(packed)
+    assert [c["title"] for c in floor] == [c["title"] for c in plain]
+    assert floor == plain, "the floor is the same carts, not a lossy summary"
 
 
 # -- and on a real MicroPython ---------------------------------------------

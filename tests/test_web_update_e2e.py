@@ -164,3 +164,67 @@ def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
         assert u.get("screen") is True, u
         assert p["bound"]["noStrip"] is True, \
             "the page still draws an update UI of its own"
+
+
+# -- the board went away ------------------------------------------------------
+#
+# Two disconnects, one panel, and the whole value is that they read differently.
+# The DETECTION lives with the pump that sees the failures (worker.js's
+# SYNC_GIVE_UP, gpio_link's MAX_FAILS, the persist give-up) and is pinned in the
+# host suites. What no host suite can reach is the surface: whether a person
+# staring at a stalled page is actually TOLD, and whether the sentence they get
+# is the true one. Before these two tests the entire net under that was
+# `"__moyLinkLost" in index.html` -- a symbol check, which is the exact shape of
+# check that let a black screen ship on 2026-08-29.
+
+
+def test_a_vanished_board_warns_that_this_tab_is_the_only_copy(tmp_path):
+    web_e2e.require("update")
+    with _twin(tmp_path, "headless") as base:
+        p, out = _probes("link_lost.json", base, tmp_path / "shots")
+        assert p["live"]["fn"] == "function" and p["live"]["px"] > 0, \
+            "the console never booted, so nothing below means anything: %r" % (p["live"],)
+        # Nothing is wrong yet. A panel that shows before a failure would pass
+        # every assertion after this one while being useless.
+        assert p["quiet"]["shown"] == "none", p["quiet"]
+        assert p["quiet"]["link"] is None, p["quiet"]
+
+        lost = p["lost"]
+        assert lost["shown"] != "none", \
+            "the board vanished and the page said nothing"
+        assert lost["cls"] == "bad", \
+            "a loss must be styled as a loss, not as an ordinary notice: %r" % (lost,)
+        assert lost["link"] == "lost", lost
+        assert "stopped answering" in lost["head"], lost
+        # THE sentence. Board mode keeps no local store, so unshipped work is in
+        # this tab only -- and the one action that destroys it is the reload a
+        # person reaches for when a page looks stuck.
+        assert "keeps no copy of its own" in lost["body"], lost
+        assert "do not reload" in lost["body"], lost
+        # The caller passed only the count; the warning is appended by the
+        # surface, so a caller cannot forget it.
+        assert "15 seconds" in lost["body"], lost
+
+        # First reason wins: the silence after a loss must not get relabelled.
+        assert p["after"]["cls"] == "bad", p["after"]
+        assert "stopped answering" in p["after"]["head"], \
+            "a later 'expected' overwrote the loss -- the warning would vanish " \
+            "at the moment it is true: %r" % (p["after"],)
+
+
+def test_an_update_says_so_and_does_not_cry_wolf(tmp_path):
+    web_e2e.require("update")
+    with _twin(tmp_path, "glass") as base:
+        p, _ = _probes("link_expected.json", base, tmp_path / "shots")
+        assert p["live"]["fn"] == "function" and p["live"]["px"] > 0, p["live"]
+        e = p["expected"]
+        assert e["shown"] != "none", \
+            "a board restarting on purpose still owes the page an explanation"
+        assert e["link"] == "expected" and e["cls"] != "bad", e
+        assert "restarting" in e["body"], e
+        # The half that makes the other test worth anything: nothing is at risk
+        # here, so the data-loss sentence must be ABSENT.
+        assert "keeps no copy of its own" not in e["body"], \
+            "warning about unsynced work on an ordinary update is how the " \
+            "warning stops being read: %r" % (e,)
+        assert "do not reload" not in e["body"], e

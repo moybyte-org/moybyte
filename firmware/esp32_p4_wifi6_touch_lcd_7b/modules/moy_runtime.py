@@ -41,7 +41,12 @@ from console import Pointer, Workstation, wire_workstation_core
 # here is hardware: the DPI scan-out, the PPA composite, BLE HID.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
                          OtaHealth, PerfSampler, apply_touch, poll_webhost)
-from carts_data import CARTS   # build-time generated from system_carts/
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp

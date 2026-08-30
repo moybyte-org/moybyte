@@ -75,7 +75,12 @@ moybyte_patch_psram_retune
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 
-"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"
+#    carts_data.py is built from system_carts/ so the seed + embedded-fallback
+#    carts can never drift from the host source of truth. PACKED (2026-08-30):
+#    one raw-deflate blob per cart instead of 732 KB of literal source, because
+#    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
+#    decoder off the roster's FORM, so nothing else in the boot changed.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
 #    The OTA identity stamp (#53): a fresh board id -- an OTA payload is an
 #    app-partition image and the manifest is per board.
