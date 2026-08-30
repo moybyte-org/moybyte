@@ -182,8 +182,17 @@ def seed_carts(root=CARTS_DIR):
         presence and will not, so a new image with the fix in it changes
         nothing. That is the price of never overwriting a kid's cart, and it is
         the right way round on the board holding the only copy -- but it means
-        the recovery is manual and worth knowing: delete the cart and reboot
-        (it re-seeds), or `./provision.sh --carts`, which forces the push.
+        the recovery is manual and worth knowing. It needs no cable: the sync
+        protocol already has a whole-cart delete, so
+
+            curl -X POST "http://<board>/sync?pin=NNNN" \
+                 -d '{"v":1,"ops":[{"p":"hop_quest.moy","dc":1}]}'
+
+        removes it (journal and all), and the next boot seeds the image's copy.
+        `./provision.sh --carts` forces the push over USB if you have the board
+        in your hand. Prefer the POST: an `mpremote` command stops the console,
+        and on this board getting back out of that has its own failure mode
+        (see the README's hardware notes).
 
     It bit immediately. `Pin Light` shipped crashing on its first frame
     (2026-08-30, colour names where the draw verbs take indices), and the three

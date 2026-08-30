@@ -594,9 +594,13 @@ new image's host did not come up.
   change both the USB id and the DTR rule, and is an A/B for somebody holding
   the board.
 - **Software entry into the loader is NOT reliable, and the failure wedges USB**
-  (2026-08-30, REPRODUCED twice in one session). `mpremote exec "import machine;
-  machine.bootloader()"` works on a board that has just been power-cycled and
-  fails on the *second* attempt in the same session, leaving the board answering
+  (2026-08-30, THREE times in one session). `mpremote exec "import machine;
+  machine.bootloader()"` succeeded once, on a board that had just been
+  power-cycled with BOOT held, and failed every time after — including on the
+  first mpremote command of a fresh session, so "once per session" is not the
+  rule; if there is one, a flash's watchdog reset does not restore whatever the
+  power cycle does. Treat it as unreliable and do not build a flow on it. It
+  leaves the board answering
   neither HTTP nor the REPL, with esptool getting a pySerial **write timeout**
   on every `--before` mode. Nothing software-side recovers it: a `USBDEVFS_RESET`
   ioctl needs root and the CDC endpoint is already gone. **Hold BOOT while
@@ -607,6 +611,18 @@ new image's host did not come up.
     That is the safe side to fail on if you were about to reflash — anything you
     changed in the store stays changed, and the old image is not running to
     undo it — but it means the board is off the network until it is power-cycled.
+  - **So do store surgery over HTTP, not over the cable.** The sync protocol has
+    a whole-cart delete, which is the one store edit this board actually needs
+    (replacing a built-in that shipped broken — the seed reads presence, so a
+    new image will not overwrite it):
+
+    ```bash
+    curl -X POST "http://<board>/sync?pin=NNNN" \
+         -d '{"v":1,"ops":[{"p":"pin_light.moy","dc":1}]}'
+    ```
+
+    It takes the journal with it, and the next boot seeds the image's copy. No
+    cable, no stopped console, and nothing that can wedge USB.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow
