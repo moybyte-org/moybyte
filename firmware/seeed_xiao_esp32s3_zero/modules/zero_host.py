@@ -171,11 +171,24 @@ def seed_carts(root=CARTS_DIR):
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
 
-    THE ONE CONSEQUENCE, said out loud: a built-in a kid DELETED comes back on
-    the next boot, because "missing" is all this can see and a deletion leaves
-    exactly that. The alternative is a tombstone file, which is a store format
-    change for a case a reflash also undoes -- and the other way round is worse,
-    because it is the way a new built-in never arrives.
+    TWO CONSEQUENCES, both said out loud because neither is obvious:
+
+      - a built-in a kid DELETED comes back on the next boot, because "missing"
+        is all this can see and a deletion leaves exactly that. The alternative
+        is a tombstone file, which is a store format change for a case a reflash
+        also undoes.
+      - a built-in that ships BROKEN cannot be fixed in place here. The console
+        boards take a #47 version bump and replace their copy; this board reads
+        presence and will not, so a new image with the fix in it changes
+        nothing. That is the price of never overwriting a kid's cart, and it is
+        the right way round on the board holding the only copy -- but it means
+        the recovery is manual and worth knowing: delete the cart and reboot
+        (it re-seeds), or `./provision.sh --carts`, which forces the push.
+
+    It bit immediately. `Pin Light` shipped crashing on its first frame
+    (2026-08-30, colour names where the draw verbs take indices), and the three
+    console boards took the fix from a version bump while this one had to have
+    the folder removed.
     """
     try:
         from carts_data import CARTS_Z

@@ -59,20 +59,26 @@ def _update(dt):
         _apply()
 
 
+# Colours go through col(): the draw verbs take a palette INDEX and mask it, so
+# a bare name reaches them as a string and raises `unsupported operand & for
+# str and int`. And the greys are spelled the British way -- `col()` answers an
+# unknown name with white rather than failing, so `dark_gray` would have drawn
+# silently wrong instead of crashing, which is worse.
 def _draw():
-    cls("dark_blue")
-    print("PIN LIGHT", 116, 24, "white")
+    cls(col("dark_blue"))
+    print("PIN LIGHT", 116, 24, col("white"))
     if not HAS_PINS:
-        print("this console has no pins", 60, 104, "orange")
-        print("open it from a board that does", 36, 120, "gray")
+        print("this console has no pins", 60, 104, col("orange"))
+        print("open it from a board that does", 36, 120, col("light_grey"))
         return
     x, y, w, h = _button()
-    face = "green" if on else "dark_gray"
+    face = "green" if on else "dark_grey"
     if flash > 0:
         face = "white"
-    rect(x, y, w, h, face)
-    rectb(x, y, w, h, "white")
-    print("ON" if on else "OFF", x + (66 if on else 62), y + 28, "black" if on else "white")
+    rect(x, y, w, h, col(face))
+    rectb(x, y, w, h, col("white"))
+    print("ON" if on else "OFF", x + (66 if on else 62), y + 28,
+          col("black" if on else "white"))
     print("pin %d is %s" % (_pin(), "LOW (lit)" if on else "HIGH (dark)"),
-          72, 184, "gray")
-    print("tap it, or press A", 96, 204, "dark_gray")
+          72, 184, col("light_grey"))
+    print("tap it, or press A", 96, 204, col("dark_grey"))
