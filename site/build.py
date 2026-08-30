@@ -273,15 +273,21 @@ FEATURES = [
      "patterns, SFX loop ranges."),
     ("Cartridges are folders",
      "A manifest, a script, an indexed sheet, a tilemap, a sound bank. No build "
-     "step, no per-device binary: copy a folder onto the SD card and it is on the "
-     "launcher. Built-in carts re-seed by version and keep your saves and tuning."),
+     "step, no per-device binary: copy a folder onto the card and it is on the "
+     "launcher. Every board carries the whole set inside its firmware and writes "
+     "them out on first boot, so a freshly flashed board is already full of "
+     "things to play &mdash; with or without a card in the slot, since a board "
+     "with an empty slot keeps its cartridges in its own flash and stays just as "
+     "editable. Built-in carts re-seed by version and keep your saves and tuning."),
     ("Wireless",
      "WiFi setup lives in Settings, so it works while a game runs. Firmware "
      "updates over the air on two channels into an inactive OTA slot, with "
      "bootloader rollback if the new image does not come up. This is not a "
      "demo: it is how the T-Deck and the P4 actually get their updates &mdash; "
      "download, install, and rolling a bad image back have all run on the real "
-     "hardware. The Guition's updater is wired and awaits its first release."),
+     "hardware. The screenless board takes the same updates through the same "
+     "Settings screen, shown in a browser instead of on glass. The Guition's "
+     "updater is wired and awaits its first release."),
     ("The console in a browser",
      "The same system also compiles to WebAssembly &mdash; it is what runs on "
      "this page &mdash; and every board carries that build inside its firmware. "
@@ -321,7 +327,9 @@ TARGETS = [
      "The odd one, and the smallest: no screen at all. A browser is its "
      "console &mdash; it serves that same WebAssembly build off its own flash "
      "&mdash; and the board is the cartridge store behind it, on whatever "
-     "screen happens to be nearby."),
+     "screen happens to be nearby. It arrives with the cartridges already on "
+     "it, joins your WiFi from a form its own setup network hands your phone, "
+     "and updates itself over the air like the others."),
     ("This browser tab", "WebAssembly",
      "The system compiled to wasm &mdash; MicroPython plus the same C drawing "
      "kernels the boards run. The page draws every pixel itself, a locked "
@@ -508,11 +516,15 @@ def font_face():
 # The at-a-glance status list: the honest state of the machine, as data. Dots are
 # role colours (ok / wip / warn), so "what works" is readable before any prose.
 STATUS = [
-    ("ok", "The system", "boots on three ESP32 boards"),
+    ("ok", "The system", "boots on four ESP32 boards"),
     ("ok", "Editors", "on the device itself"),
     ("ok", "OTA updates", "hardware-confirmed"),
     ("wip", "System apps", "not editable yet"),
-    ("ok", "Streams to a browser", "verified on the T-Deck"),
+    # NOT "streams". The page runs the console itself -- the feature text below
+    # is explicit that nothing is mirrored from the board's screen, and a
+    # one-word summary contradicting it is the kind of small lie a shop window
+    # gets believed on.
+    ("ok", "Runs in a browser", "off the board's own flash"),
 ]
 
 REPO = "https://github.com/moybyte-org/moybyte"

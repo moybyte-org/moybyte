@@ -819,7 +819,7 @@ def unpack_seed(blob):
     return json.load(_packed_stream(blob))
 
 
-def seed_packed(packed, root=CARTS_DIR, progress=None):
+def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
     """`seed_builtins` over a PACKED roster, one cart inflated at a time.
 
     `packed` is `[(title, version, blob)]`. The title and the version ride
@@ -827,6 +827,17 @@ def seed_packed(packed, root=CARTS_DIR, progress=None):
     inflating: a board that is already seeded walks the whole roster doing 35
     directory stats and no decompression at all, which is what keeps this off
     the warm-boot path rather than merely cheap on it.
+
+    `only_new` changes the skip rule from "already CURRENT" to "already THERE",
+    and it is the Zero's (2026-08-30). On a console board the store is a CACHE
+    of the image's built-ins, so #47 replaces a cart whose baked version is
+    newer and accepts that on-device edits to a built-in's code are lost. On the
+    Zero the store is the RECORD -- the only copy of a cart made in a browser,
+    with a `moy_journal` history behind it -- and `seed_builtins` names a folder
+    by the TITLE slug, so a version bump is exactly what would overwrite a kid's
+    edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
+    which is the whole difference: this seeds what is MISSING and never rewrites
+    what is present.
 
     Returns the number of carts actually written.
     """
@@ -840,7 +851,7 @@ def seed_packed(packed, root=CARTS_DIR, progress=None):
             except Exception:             # noqa: BLE001 -- as in seed_builtins
                 progress = None
         d = root + "/" + slug(title) + ".moy"
-        if _exists(d) and int(version) <= _cart_version(d):
+        if _exists(d) and (only_new or int(version) <= _cart_version(d)):
             continue
         # One cart in flight. seed_builtins gets a ONE-element list so every
         # rule it owns still applies -- and no progress hook, because the

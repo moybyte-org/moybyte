@@ -123,15 +123,23 @@ def identity():
 # got an empty console and no hint that a second, cabled step existed. There is
 # no second step now.
 #
-# ONLY WHEN THE STORE IS EMPTY, and this board is where that rule differs from
-# the console boards'. On a console board the store is a CACHE of the image's
+# ONLY WHAT IS MISSING, and this board is where that rule differs from the
+# console boards'. On a console board the store is a CACHE of the image's
 # built-ins, so #47 re-seeds a cart whose baked version is newer and accepts
 # that on-device edits to a built-in's code are discarded. Here the store is the
 # RECORD -- it is the only copy of a cart a kid made in the browser, it has a
 # `moy_journal` history behind it, and `seed_builtins` names a folder by the
 # TITLE slug, so a kid's edited "Hop Quest" is exactly what a version bump would
-# overwrite. So the gate is emptiness, not version: this board seeds a fresh
-# store and never touches one that has anything in it.
+# overwrite. So the gate is PRESENCE, not version.
+#
+# It was EMPTINESS until 2026-08-30, gating the whole roster on the store having
+# no cart at all, and that was too coarse in both directions. A cart that is not
+# there has nothing to overwrite, so refusing to write it protects nothing --
+# and the two things it cost were real: a new built-in could never reach a Zero
+# that had been used once (`Pin Light` shipped and no Zero could receive it),
+# and a seed interrupted by a power cut left a part-seeded store that the next
+# boot read as "not empty" and never finished. Per-cart presence fixes both and
+# gives up nothing: a kid's cart is still never rewritten.
 
 
 def store_is_empty(root=CARTS_DIR):
@@ -152,7 +160,10 @@ def store_is_empty(root=CARTS_DIR):
 
 
 def seed_carts(root=CARTS_DIR):
-    """Write the image's baked roster into an EMPTY store. Returns the count.
+    """Write any of the image's baked carts that this store is MISSING.
+
+    Returns the count written -- 0 on the ordinary warm boot, where this walks
+    the roster doing one directory stat per cart and inflates nothing.
 
     Best-effort in every direction, because none of the ways this can fail may
     cost the board its job -- which is serving whatever carts it DOES have. An
@@ -160,15 +171,12 @@ def seed_carts(root=CARTS_DIR):
     tree may have none), a full filesystem, a corrupt blob: each prints one
     `ZERO seed:` line and returns, because serial is this board's only display.
 
-    THE ONE CONSEQUENCE OF GATING ON EMPTINESS, said out loud: a seed
-    interrupted halfway -- a power cut on a first boot -- leaves carts in the
-    store, so the next boot sees a store that is not empty and does not finish
-    the job. That is the price of never overwriting a kid's cart, and it is the
-    right way round on the board that holds the only copy. `./provision.sh
-    --carts` is the recovery, or a reflash.
+    THE ONE CONSEQUENCE, said out loud: a built-in a kid DELETED comes back on
+    the next boot, because "missing" is all this can see and a deletion leaves
+    exactly that. The alternative is a tombstone file, which is a store format
+    change for a case a reflash also undoes -- and the other way round is worse,
+    because it is the way a new built-in never arrives.
     """
-    if not store_is_empty(root):
-        return 0
     try:
         from carts_data import CARTS_Z
     except ImportError:
@@ -188,11 +196,15 @@ def seed_carts(root=CARTS_DIR):
         # writes ~763 KB across 155 files to the internal VFS, so on a first
         # boot it is the longest silence in the log -- and on a board with no
         # screen a silence is what a hang looks like.
-        print("ZERO seed: empty store -- inflating %d carts from the image"
-              % len(CARTS_Z))
+        missing = sum(1 for t, _v, _b in CARTS_Z
+                      if not moy_carts._exists(root + "/" + moy_carts.slug(t) + ".moy"))
+        if missing:
+            print("ZERO seed: inflating %d carts from the image" % missing)
         started = ticks._ticks_ms()
-        written = moy_carts.seed_packed(CARTS_Z, root)
+        written = moy_carts.seed_packed(CARTS_Z, root, only_new=True)
         elapsed = ticks._ticks_diff(ticks._ticks_ms(), started)
+        if not written:
+            return 0
     except Exception as exc:             # noqa: BLE001 -- a partial store beats none
         print("ZERO seed: FAILED (the store may be partly seeded):", exc)
         return 0

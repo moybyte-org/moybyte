@@ -171,13 +171,14 @@ PYEOF
   fi
 fi
 
-# THE CARTS, and the question of whether they are already there. The image
-# seeds an EMPTY store itself now, so the default job here is to notice a board
-# that has none -- an old image, a wiped vfs, an interrupted first boot -- and
-# fill it; `--carts` forces the push for a roster that moved since the image
-# was built. The emptiness question is asked ON THE BOARD, the same read
-# `zero_host.store_is_empty()` does, so the cable and the image cannot disagree
-# about what "already there" means.
+# THE CARTS, and the question of whether they are already there. The image seeds
+# whatever a store is MISSING on every boot now (zero_host.seed_carts), so the
+# default job here is only to notice a board that has no carts at all -- an
+# image built before the roster was baked in -- and fill it; `--carts` forces
+# the push for a roster that moved since the image was built. The emptiness
+# question is asked ON THE BOARD, the same read `zero_host.store_is_empty()`
+# does, so the cable and the image cannot disagree about what "already there"
+# means.
 HAS_CARTS="$(run exec "import os
 try:
     print('CARTS %d' % len([n for n in os.listdir('/moy/carts') if n.endswith('.moy')]))

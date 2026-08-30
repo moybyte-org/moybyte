@@ -44,9 +44,10 @@ the public spec for that cart format and its verb table.
 | target | what it is |
 |---|---|
 | **PC simulator** | `tools/simulate_desktop.py` over the same `runtime/` the boards run. The host reference and the fast dev loop. Needs a C compiler — the raster is compiled libmoy, the same one the boards use. |
-| **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD, OTA updates. |
+| **LilyGO T-Deck Plus** (ESP32-S3) | MicroPython firmware, native 320×240, keyboard + trackball + touch, carts on SD — or on internal flash when the slot is empty — and OTA updates. |
 | **Waveshare ESP32-P4 7B** | 1024×600 MIPI-DSI. Same system, second presentation tier: a windowed desktop with draggable app windows. |
 | **Guition JC3248W535** (ESP32-S3) | the ~$15 3.5″ smart display: a QSPI AXS15231B panel, touch-only, landscape 480×320, carts on the TF card when one is in the slot. |
+| **Seeed XIAO ESP32-S3** | the fourth build target and the odd one: no screen at all. It serves the WebAssembly console off its own flash and is the cartridge store behind it, so the console runs on whatever screen is nearby. Same OTA, same Settings. |
 | **Browser** | MicroPython compiled to WebAssembly (`firmware/web_runner/`) — the OS *is* the page, no server. |
 
 Host and device are **one codebase**, not a port. `runtime/` is canonical; each
@@ -268,13 +269,18 @@ expected to differ there.
 
 ## The hardware, honestly
 
-All three boards are real and all three boot to Moybyte — but all three are
+All four boards are real and all four boot to Moybyte — but all four are
 off-the-shelf dev boards; bespoke hardware is roadmap, not shipped. The T-Deck
 Plus is a keyboard handheld; the P4 board is a 7″ desktop; the Guition is a
-~$15 touch-only 3.5″ display. What's honest about the state:
+~$15 touch-only 3.5″ display; the XIAO has no display at all and lends its
+console to a browser. What's honest about the state:
 
 - **It plays.** The seed carts run at playable frame rates on the boards, with
   the whole editor suite usable on the device itself.
+- **A flashed board is not an empty board.** Every image carries the whole
+  cartridge roster compressed inside it and writes it out on first boot, so
+  there is no cable step between flashing a board and playing on it — and no
+  SD card needed either, on any of them.
 - **Performance is tracked in the open, not claimed.** Per-cart fps, the frame
   budget model, and every lever *including the ones that were built, measured
   and reverted* live in [issue #66](https://github.com/moybyte-org/moybyte/issues/66)
@@ -292,11 +298,12 @@ Build and flash:
 make firmware-build-tdeck-mainline && make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-build-p4             && make firmware-flash-p4             PORT=/dev/ttyACM0
 make firmware-build-guition-s3     && make firmware-flash-guition-s3     PORT=/dev/ttyACM0
+make firmware-build-zero           && make firmware-flash-zero           PORT=/dev/ttyACM0
 ```
 
 Without the toolchain: every build off `master` publishes to the rolling
 [`firmware-latest`](https://github.com/moybyte-org/moybyte/releases/tag/firmware-latest)
-release, and the project site flashes any of the three boards straight from the browser
+release, and the project site flashes any of the boards straight from the browser
 over Web Serial (Chrome or Edge) — the same image at the same offset as the
 commands above. The site serves its own copy of each image because that is the
 only origin a browser may fetch firmware from; `tools/fetch_ci_firmware.py` is

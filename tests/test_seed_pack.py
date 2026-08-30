@@ -164,15 +164,11 @@ def _zero_host(tmp_path, monkeypatch):
     return zero_host
 
 
-def test_the_zero_seeds_only_an_empty_store(tmp_path, monkeypatch):
-    """The rule this board does NOT share with the console boards.
-
-    A console board's store is a CACHE of the image's built-ins, so #47
-    re-seeds a stale one. This board's store is the RECORD -- the only copy of
-    a cart a kid made in the browser, with a journal behind it -- and
-    `seed_builtins` names a folder by the title slug, so a version bump is
-    exactly what would overwrite an edited "Hop Quest".
-    """
+def test_an_empty_store_is_one_with_no_cart_in_it(tmp_path, monkeypatch):
+    """`store_is_empty` no longer gates the seed (that is per-cart presence
+    now), but provision.sh still asks it -- over the cable, on the board, with
+    this exact read -- to decide whether a board needs the roster pushed at all.
+    Sidecars a sync leaves behind are not carts."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root)
@@ -203,27 +199,56 @@ def _fake_roster(monkeypatch):
     return mod
 
 
-def test_the_zeros_seed_leaves_an_occupied_store_alone(tmp_path, monkeypatch):
+def test_the_zeros_seed_never_rewrites_a_cart_that_is_there(tmp_path, monkeypatch):
+    """The rule that protects a kid's work: PRESENCE, not version.
+
+    A folder that exists is left exactly as it is, even though the roster
+    carries a cart of that name at a newer version -- because on this board that
+    folder may be the only copy of something a kid changed in a browser.
+    """
     zero_host = _zero_host(tmp_path, monkeypatch)
-    _fake_roster(monkeypatch)
+    mod = _fake_roster(monkeypatch)
     root = str(tmp_path / "carts")
     os.makedirs(root + "/hop_quest.moy")
     with open(root + "/hop_quest.moy/main.py", "w") as f:
         f.write("the kid's own")
 
-    called = []
-    real = moy_carts.seed_packed
-    monkeypatch.setattr(moy_carts, "seed_packed",
-                        lambda *a, **kw: called.append(a) or real(*a, **kw))
-    assert zero_host.seed_carts(root) == 0
-    assert not called, "the Zero re-seeded a store that already had a cart"
-    assert sorted(os.listdir(root)) == ["hop_quest.moy"]
+    written = zero_host.seed_carts(root)
+
     with open(root + "/hop_quest.moy/main.py") as f:
-        assert f.read() == "the kid's own"
+        assert f.read() == "the kid's own", \
+            "a baked version bump overwrote a cart the kid edited"
+    # ...and everything the store did NOT have arrived, which is the half the
+    # emptiness gate used to refuse.
+    assert written == len(mod.CARTS_Z) - 1
+    assert len(os.listdir(root)) == len(mod.CARTS_Z)
+
+
+def test_a_zero_that_has_been_used_still_receives_a_new_builtin(tmp_path, monkeypatch):
+    """The gap that made presence-gating necessary (2026-08-30).
+
+    Under the old emptiness gate a Zero with any cart at all took NOTHING from
+    a new image, so `Pin Light` shipped in four firmwares and could not reach
+    the one board it was written for.
+    """
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
+
+    # A newer image: same roster plus one cart this store has never seen.
+    fresh = gen.build_carts(SYSTEM_CARTS)[0]
+    fresh = dict(fresh, title="Brand New")
+    mod.CARTS_Z = mod.CARTS_Z + [("Brand New", 1, gen.pack_cart(fresh))]
+
+    assert zero_host.seed_carts(root) == 1, \
+        "a used Zero must still receive a built-in it has never had"
+    assert os.path.isdir(root + "/brand_new.moy")
 
 
 def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
-    """...and the same call on an empty store DOES seed, so the test above is
+    """...and the same call on an empty store DOES seed, so the tests above are
     measuring the gate and not a function that never runs."""
     zero_host = _zero_host(tmp_path, monkeypatch)
     mod = _fake_roster(monkeypatch)
@@ -233,7 +258,22 @@ def test_the_zeros_seed_fills_an_empty_store(tmp_path, monkeypatch):
     assert zero_host.seed_carts(root) == len(mod.CARTS_Z)
     seeded = sorted(n for n in os.listdir(root) if n.endswith(".moy"))
     assert len(seeded) == len(mod.CARTS_Z)
-    assert zero_host.seed_carts(root) == 0          # ...and only once
+    assert zero_host.seed_carts(root) == 0          # ...and nothing on a warm boot
+
+
+def test_a_half_seeded_store_is_finished_on_the_next_boot(tmp_path, monkeypatch):
+    """The power-cut case the emptiness gate named as its own price: a store
+    with SOME carts in it read as "not empty" and was never completed."""
+    zero_host = _zero_host(tmp_path, monkeypatch)
+    mod = _fake_roster(monkeypatch)
+    root = str(tmp_path / "carts")
+    os.makedirs(root)
+    # Interrupted: only the first three ever landed.
+    moy_carts.seed_packed(mod.CARTS_Z[:3], root)
+    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == 3
+
+    assert zero_host.seed_carts(root) == len(mod.CARTS_Z) - 3
+    assert len([n for n in os.listdir(root) if n.endswith(".moy")]) == len(mod.CARTS_Z)
 
 
 # -- the build wiring ------------------------------------------------------

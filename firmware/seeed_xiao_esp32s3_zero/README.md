@@ -122,10 +122,10 @@ them back on the next visit — but anything that existed *only* here is.
 
 Default: make the directories, optionally write the credentials, mint or keep
 the pairing pin, reboot, and print the paired url. It copies the seed roster
-**only onto a board that has no carts at all** — the image seeds itself now, so
-this is the safety net for an old image or a wiped filesystem, and the
-emptiness question is asked on the board with the same read `store_is_empty()`
-does. `--carts` forces the push, for a roster that moved since the image was
+**only onto a board that has no carts at all** — the image now writes out
+whatever its store is missing on every boot, so this is the safety net for an
+image built before the roster was baked in, and the emptiness question is asked
+on the board with the same read `store_is_empty()` does. `--carts` forces the push, for a roster that moved since the image was
 built; forcing it writes the repo's copy of a cart over whatever is on the
 board, which on the one board that is the store *of record* is a real thing to
 mean.
@@ -397,29 +397,40 @@ update state machine and one whole first run end to end), plus
   fields, and a bad pin → 400 saying "4 digits" with nothing saved.
   Credentials restored afterwards.
 
+**Verified on this board on 2026-08-29/30**, which is most of what the list
+below used to hold:
+
+- **The image, end to end.** The authored dual-OTA table boots — no silent
+  bootloader loop — and the board comes up on WiFi, serves the baked bundle, and
+  answers `GET /update` with a real verdict (`no build published on this channel
+  yet`, which is the correct answer to a channel with nothing on it, and proves
+  the endpoint rather than the install).
+- **A phone joins the setup AP and the portal opens itself.** The sign-in sheet
+  appeared on association with no address typed, the form was usable one-handed,
+  and submitting it rebooted the board onto the home network — the whole
+  first-run leg, on a real phone, which is the one thing no host could cover.
+- **The LED is ACTIVE-LOW**, confirmed by looking at the board rather than by
+  reading the schematic: `{"p":21,"v":0}` lights it. So a cart writing 1 to
+  "turn it on" turns it off, which is why `Pin Light`'s `_apply()` inverts.
+- **A freshly flashed board is not an empty board.** The compressed roster
+  (`carts_data.CARTS_Z`) inflated on first boot with no cable step: 36 carts
+  served from `GET /carts.json` on a board that had just been erased. This was
+  the last thing standing between "flashed" and "usable" and it is gone.
+
 **NOT verified on hardware**, and each for its own reason:
 
-- **The image, end to end.** Nothing below has been on this glass: the new
-  partition table (a bootloader that rejects a table boot loops silently — this
-  board's own worst failure mode), WiFi under this board's sdkconfig, the
-  TinyUSB CDC console in a Moybyte build, the baked bundle being served, the
-  OTA endpoints, and the rollback confirm. **The first flash is the check**, and
-  it is worth doing with `make firmware-monitor-zero` already attached.
-- **A phone has never joined the setup AP.** The HTTP side was driven from the
-  board itself, so what is proven is the server, the form, the scan and the
-  parsing — not the phone's association, whether its connectivity probe really
-  opens the portal, or how the page looks on a small screen. The portal's own
-  parts are host-covered (`dns_reply` against real probe hostnames and against
-  the malformed datagrams it must drop, the responder over a real UDP socket,
-  the 302 for each platform's probe path) — what no host can have is a phone.
-- **The LED's polarity.** Pin 21 takes both levels and reads them back; nobody
-  looked at the board. It is documented active-low from the Seeed schematic.
+- **An OTA install on this board, and the rollback confirm after it.** The
+  endpoints answer and the channel is empty, so nothing has yet been downloaded
+  into the inactive slot here. That needs a published build, not a bench —
+  steps 6 and 7 below are the check, and the first release is when they run.
 - **A cart in a browser driving this board's PINS.** The console half is
   proven against this board (a real Chrome session pulled its store and came up
-  on the launcher), but nothing has yet called `pin_write` from a running cart,
-  so `gpio_link` + the worker's pump remain host-checked. The wire shape between
-  the two ends is pinned by a test that runs a real batch out of the browser
-  queue and into `zero_gpio.handle`.
+  on the launcher) and the LED takes both levels over `POST /gpio`, but nothing
+  has yet called `pin_write` from a running cart, so `gpio_link` + the worker's
+  pump remain host-checked. The wire shape between the two ends is pinned by a
+  test that runs a real batch out of the browser queue and into
+  `zero_gpio.handle`, and `Pin Light` (`system_carts/pin_light.moy`) is the cart
+  that closes it — step 5 below.
 
 **The reboot-into-STA leg LEFT this list on 2026-08-29**, and it is worth
 saying how, because the same move is available to the rest of it. The on-glass
