@@ -764,7 +764,7 @@ class Workstation:
         # OTA firmware updater (#53): injected by the device (moy_ota.OtaUpdater); None
         # on the host. When present AND the build is OTA-capable, Settings grows an
         # "UPDATE FW" row that flashes a new image from /sd/update to the inactive slot.
-        self.updater = None
+        self._updater = None
         self.c6_updater = None   # P4 only: the radio co-processor's updater (#7/#58)
         # Serve the web console FROM this console (moycore plan 3.4 pull half):
         # injected by the device (moy_webhost.WebHost); None on the host and on a
@@ -1705,6 +1705,24 @@ class Workstation:
     # settings_layer.py is the authority); only the remaining "mock" rows step a
     # cosmetic placeholder value. Each row is (key, label, kind).
 
+
+    # `updater` is a PROPERTY so that injecting one INVALIDATES the two cached
+    # availability answers below. Four places inject an updater -- three boards
+    # at boot and web_boot's update_enable -- and that last one binds LATE, from
+    # the worker, once the /update probe has answered. Anything that asked
+    # "is there an updater" before that moment cached False for the whole
+    # session, and the Settings rows it gates could then never appear no matter
+    # what bound afterwards. A setter cannot be forgotten by the next injector;
+    # a `remember to clear the cache` comment can.
+    @property
+    def updater(self):
+        return self._updater
+
+    @updater.setter
+    def updater(self, u):
+        self._updater = u
+        self._updater_ok = None
+        self._online_ok = None
 
     def _update_available(self):
         """True when an OTA updater is injected AND this build is OTA-capable (the

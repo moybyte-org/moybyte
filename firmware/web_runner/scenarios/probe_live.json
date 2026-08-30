@@ -1,0 +1,9 @@
+{
+ "query": "?handheld=1&pin=0000",
+ "boot_ms": 25000,
+ "steps": [
+  {"note": "Pointed at a REAL board. What binds, and what does the console think it has?", "wait": 6000},
+  {"js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,upd:window.__moyUpdate||null,link:window.__moyLink||null})"},
+  {"shot": "probe_live"}
+ ]
+}

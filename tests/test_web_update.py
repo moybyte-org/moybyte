@@ -403,3 +403,48 @@ def test_the_two_backends_are_not_one_behind_a_flag():
     # ...and the Zero no longer carries a route of its own.
     assert "def _update(" not in zero
     assert "update_status" in zero, "the Zero stopped sharing the document"
+
+
+def test_binding_an_updater_late_still_grows_the_settings_rows(tmp_path):
+    """The web console binds its updater LATE and the cache did not know.
+
+    `_update_available`/`_online_update_available` cache for the boot, which is
+    right on a board: the answer is a fact about the partition table, settled
+    before anything can ask. But `web_boot.update_enable` binds a RemoteUpdater
+    from the WORKER, after the /update probe answers -- so anything that asked
+    first (a Settings screen drawn during the probe, a future caller) cached
+    False, and CHANNEL / UPDATE ONLINE could then never appear however healthy
+    the bridge was. On a headless board those rows are the only update UI there
+    is.
+
+    A property setter, so the next thing that injects an updater cannot forget.
+    """
+    import tempfile
+    from runtime import host_app
+
+    ws = host_app.build_workstation(tempfile.mkdtemp(dir=str(tmp_path)))
+
+    def update_rows():
+        return [r[1] for r in ws.settings_layer._settings_rows()
+                if r[1] in ("UPDATE FW", "CHANNEL", "UPDATE ONLINE")]
+
+    assert update_rows() == [], "no updater yet, so no rows -- and NOW it is cached"
+
+    class Remote:
+        dead = False
+
+        def available(self):
+            return False              # no local .bin over a wire; see update_link
+
+        def online_available(self):
+            return not self.dead
+
+    ws.updater = Remote()
+    assert update_rows() == ["CHANNEL", "UPDATE ONLINE"], (
+        "the bridge bound and Settings never noticed -- a headless console with "
+        "no way to update itself")
+
+    # ...and the invalidation is not a one-way door: losing the updater has to
+    # take the rows with it, or a dead link leaves rows that cannot work.
+    ws.updater = None
+    assert update_rows() == []

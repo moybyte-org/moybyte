@@ -157,7 +157,12 @@ def test_console_settings_has_firmware_update_screen():
     # console.py); the queries/config + dispatch stay in console.py.
     update_ui = (Path("runtime") / "update_ui.py").read_text(encoding="utf-8")
 
-    assert "self.updater = None" in console
+    # The seam a board injects into. It is a PROPERTY since 2026-08-30 -- the
+    # setter clears the cached availability answers, because the web console
+    # binds its updater late and Settings had already cached "no updater".
+    # The BEHAVIOUR is pinned in tests/test_web_update.py; this is the routing.
+    assert "self._updater = None" in console
+    assert "@updater.setter" in console
     assert "def _update_available" in console
     assert "def _settings_rows" in settings_layer
     assert '"UPDATE FW"' in settings_layer
