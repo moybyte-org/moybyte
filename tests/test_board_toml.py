@@ -18,6 +18,7 @@ with itself". pytest depends on `tomli` below 3.11, so this check runs in CI
 rather than being skipped where it matters.
 """
 
+import re
 import shutil
 import subprocess
 import sys
@@ -365,6 +366,31 @@ def test_makefile_flashes_via_the_declaration():
         body = mk.split(target, 1)[1].split("\n\n", 1)[0]
         assert "write_flash" not in body, "%s restates flash facts" % target
         assert "board_flash.py" in body
+
+
+def test_every_target_the_makefile_suggests_exists():
+    """A hint that names a missing target is worse than no hint.
+
+    `PORT is not set -- ... (try: make device-port)` shipped pointing at a
+    target nobody had written, so the one message a person sees at exactly the
+    moment they do not know the answer sent them to `No rule to make target`.
+    Any `make <x>` this file offers has to be a real target.
+    """
+    mk = (ROOT / "Makefile").read_text(encoding="utf-8")
+    # Targets are the `name:` at the start of a line (skip the `.PHONY:` etc).
+    defined = set(re.findall(r"^([a-zA-Z][\w.-]*):", mk, re.M))
+    assert "device-port" in defined, "the PORT hint's target is missing"
+    # Only what the Makefile SAYS to a person: the body of an `echo` and the
+    # `## ` help text. Scanning all prose instead catches things like "what
+    # make does", which is a sentence, not a suggestion.
+    advice = " ".join(re.findall(r'echo "([^"]*)"', mk)
+                      + re.findall(r"##\s*(.*)$", mk, re.M))
+    suggested = set(re.findall(r"\bmake ([a-z][\w-]*)", advice))
+    assert suggested, "no `make <target>` advice found -- the scan missed it"
+    for name in suggested:
+        assert name in defined, (
+            "the Makefile tells people to run `make %s`, which is not a target"
+            % name)
 
 
 # -- [serial]: the cart-push transport, as data (tools/push_cart.py) ----------
