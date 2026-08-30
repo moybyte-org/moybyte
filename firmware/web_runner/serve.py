@@ -48,6 +48,7 @@ import http.server
 import json
 import os
 import sys
+import time
 
 _here = os.path.dirname(os.path.abspath(__file__))
 args = [a for a in sys.argv[1:]]
@@ -69,6 +70,18 @@ if "--update" in args:
         # is a plain static server and the flag would be accepted and ignored,
         # which is how a scenario ends up testing nothing.
         raise SystemExit("--update needs --carts (it is part of the board twin)")
+# THE GOODBYE, on a timer. A board that is going away on purpose -- WEB CONSOLE
+# switched off, an update about to reboot -- keeps answering for a few seconds
+# to SAY so (moy_webhost.stop's closing window), because from the browser a
+# deliberate shutdown and an unplugged board look identical. `--close-after N`
+# makes this twin do the same N seconds in, which is the only way to drive that
+# path from a browser test: killing the process proves the opposite case.
+close_after = None
+_started = time.time()
+if "--close-after" in args:
+    i = args.index("--close-after")
+    close_after = float(args[i + 1])
+    del args[i:i + 2]
 if "--pin" in args:
     i = args.index("--pin")
     pin = args[i + 1]
@@ -213,6 +226,18 @@ else:
             self.end_headers()
             self.wfile.write(body)
 
+        def _closing(self):
+            """True (and the 503 already sent) once the goodbye window opens.
+
+            Ahead of routing AND ahead of the pin, exactly as the board does it:
+            a page that was never given a pin still deserves to know the console
+            was switched off rather than be left to decide it vanished.
+            """
+            if close_after is None or (time.time() - _started) < close_after:
+                return False
+            self._send(503, b'{"error":"closing","why":"off"}')
+            return True
+
         def _refused(self, sent):
             """True (and the 403 already sent) when this request lacks the pin.
 
@@ -225,6 +250,8 @@ else:
             return True
 
         def do_GET(self):
+            if self._closing():
+                return
             path = self.path.split("?", 1)[0]
             if path == "/sync":
                 # The MODE MARKER (#193): a host that answers this owns the
@@ -268,6 +295,8 @@ else:
             super().do_GET()          # the boot assets: never gated
 
         def do_POST(self):
+            if self._closing():
+                return
             path = self.path.split("?", 1)[0]
             if path == "/update":
                 if update is None:

@@ -130,16 +130,48 @@ class WebConsole:
         self.ui.on_enter()
         self.ws.go_home()
 
-    def stop(self):
-        """The connection screen's TURN OFF.
+    @staticmethod
+    def _stop_saying_why(wh, why):
+        """`wh.stop(why=...)`, falling back to a host that cannot take one.
+
+        SAY WHY. This is the one place a person deliberately takes the console
+        back, and the page cannot tell that from an unplugged board unless the
+        board says so before it goes (moy_webhost's closing window). Without it
+        a kid who pressed this got the vanished-board panel and its data-loss
+        warning.
+
+        The fallback is not politeness. `toggle` wraps this in a bare except
+        that turns any failure into the row's label, so a host with the older
+        no-argument `stop()` -- the host simulator's, a test's fake -- would
+        raise TypeError, be swallowed, and NOT STOP, leaving a row that says ON
+        over a console the kid just switched off. Catching the signature
+        mismatch here and retrying without the reason keeps the stop
+        unconditional and makes the goodbye the optional part, which is the
+        right way round.
+        """
+        if why is None:
+            wh.stop()               # no goodbye: the caller has another signal
+            return
+        try:
+            wh.stop(why=why)
+        except TypeError:
+            wh.stop()
+
+    def stop(self, why="off"):
+        """The connection screen's TURN OFF, and the update hand-off's.
 
         Not `toggle` directly, and the difference is the one state a toggle gets
         wrong: if the host stopped UNDERNEATH the parked screen (a socket error,
         a stop from somewhere else), toggling would read "not serving" and START
         it again -- a button labelled TURN OFF that turns it on. Ask what the
-        user wants, which is out."""
+        user wants, which is out.
+
+        `why` rides through to the browser (see toggle). The default is a person
+        pressing TURN OFF; `ConsoleUpdate` passes "update", because a console
+        board handing its glass back to run its own update screen is not the
+        same event to whoever is watching in a tab."""
         if self.serving():
-            self.toggle()
+            self.toggle(why=why)
         else:
             self.unpark()
 
@@ -182,8 +214,14 @@ class WebConsole:
         # them on something every browser assumes anyway.
         return url.replace("http://", "").rstrip("/") or "ON"
 
-    def toggle(self):
+    def toggle(self, why="off"):
         """Start or stop serving, and park or unpark the glass with it (#197).
+
+        `why` is what the browser is told when this STOPS the host -- "off" for
+        a person switching the row, "update" for the console taking its glass
+        back to run its own update screen. It reaches the page through
+        moy_webhost.stop's closing window and decides which sentence a reader
+        gets; it is ignored when this call starts the host.
 
         Starting touches WiFi, which can fail slowly and in ways nobody can act
         on from a Settings screen (no AP, wrong password, DHCP). A raised
@@ -202,7 +240,7 @@ class WebConsole:
         try:
             wh.error = None
             if getattr(wh, "serving", False):
-                wh.stop()
+                self._stop_saying_why(wh, why)
             else:
                 wh.start()
         except Exception as exc:  # noqa: BLE001

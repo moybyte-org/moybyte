@@ -737,6 +737,18 @@ function updatePump() {
             const ok = r.ok ? 1 : 0;
             return r.text().then((t) => {
                 try { updateAck(ok, t); } catch (e) { }
+                // The board said it is about to reboot. Said HERE rather than
+                // from the board's closing window because during an install the
+                // board must keep answering /update -- on a headless console
+                // this page IS the progress screen -- so it cannot go quiet the
+                // way a switch-off can. And "first reason wins" in the panel
+                // means the silence that follows reads as this, not as a loss.
+                try {
+                    if ((JSON.parse(t) || {}).state === "reboot") {
+                        expected("the console is restarting",
+                                 "It is booting the version it just installed.");
+                    }
+                } catch (e) { }
             });
         })
         .catch(() => { try { updateAck(0, ""); } catch (e) { } })
@@ -866,6 +878,7 @@ function syncPump() {
                 return;
             }
             if (r.ok) { syncOk(now); outstanding = false; }
+            else if (r.status === 503) { closing(r); }
             else syncFailed(now);
             try { syncAck(r.ok ? 1 : 0); } catch (e) { }
         })
@@ -892,9 +905,44 @@ function heartbeat(now) {
     lastHeartbeatAt = now;
     syncBusy = true;
     fetch("sync", { method: "GET" })
-        .then((r) => { if (r.ok) syncOk(now); else syncFailed(now); })
+        .then((r) => {
+            if (r.ok) syncOk(now);
+            else if (r.status === 503) closing(r);
+            else syncFailed(now);
+        })
         .catch(() => syncFailed(now))
         .finally(() => { syncBusy = false; });
+}
+
+// THE BOARD'S GOODBYE (moy_webhost's closing window). A console that is going
+// away on purpose keeps answering for a few seconds to say so, because from out
+// here a deliberate switch-off and an unplugged board look identical -- and
+// guessing wrong means either an alarm nobody needed or a silence at the moment
+// it mattered. This is the board removing the guess.
+//
+// It is EXPECTED, so it carries no data-loss warning: the board is right there
+// and took everything it was given.
+function closing(r) {
+    r.text().then((t) => {
+        let why = "";
+        try { why = (JSON.parse(t) || {}).why || ""; } catch (e) { }
+        if (why === "update") {
+            expected("the console is updating itself",
+                     "It will restart on the new version. This page will not "
+                     + "work until it is back.");
+        } else {
+            expected("the console took its screen back",
+                     "WEB CONSOLE was switched off on the device. Turn it on "
+                     + "again there to carry on here.");
+        }
+    }).catch(() => expected("the console is shutting down", ""));
+}
+
+function expected(head, body) {
+    if (syncLostSaid) return;
+    syncLostSaid = true;
+    self.postMessage({ t: "lost", kind: "expected", risk: false,
+                       head: head, body: body });
 }
 
 // Self-driven frame loop. setTimeout (not rAF -- workers have none) against a

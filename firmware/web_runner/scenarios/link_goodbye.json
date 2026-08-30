@@ -1,0 +1,23 @@
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "THE BOARD SAYS GOODBYE. Somebody switched WEB CONSOLE off on the device -- so the console is not gone, it took its screen back, and it says so for a few seconds before closing (moy_webhost.stop's window; the twin does the same via --close-after). What this must prove is that the page reads that as EXPECTED: no alarm, no data-loss warning, and a sentence that says what to do. Before this, every deliberate shutdown reached a reader as the vanished-board panel.",
+   "wait": 2000
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,link:window.__moyLink||null})"
+  },
+  {
+   "note": "Nothing is touched. The idle heartbeat is what finds the goodbye, which is also the case the reader was in. The wait is long because the twin's --close-after counts from when IT started, which is before the browser has even booted -- so the window has to open between the two probes, not before the first.",
+   "wait": 26000
+  },
+  {
+   "js": "JSON.stringify({at:'bye',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"
+  },
+  {
+   "shot": "link_goodbye"
+  }
+ ]
+}

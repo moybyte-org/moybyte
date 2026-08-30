@@ -556,7 +556,15 @@ def poll_webhost(ws):
     for a single-threaded board. Never breaks a frame. Returns elapsed ms
     (0 when idle/absent) so the T-Deck's HITCH line can carry web=."""
     wh = getattr(ws, "webhost", None)
-    if wh is None or not getattr(wh, "serving", False):
+    if wh is None:
+        return 0
+    # `closing` as well as `serving`: a host saying goodbye (moy_webhost.stop's
+    # grace window) has already gone `serving = False` so the Settings row and
+    # the glass follow the kid's tap at once, and its socket outlives that by a
+    # few seconds purely to tell the browser this was deliberate. Polling only
+    # on `serving` would leave nobody to answer, which is the bug the window
+    # exists to fix.
+    if not (getattr(wh, "serving", False) or getattr(wh, "closing", None)):
         return 0
     t0 = _ticks_ms()
     try:

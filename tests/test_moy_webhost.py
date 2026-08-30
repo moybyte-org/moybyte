@@ -145,6 +145,11 @@ def _host(tmp_path, web=True):
     h.web_dir = str(wdir)
     h._with_sd = lambda fn: fn()
     h.pin = None                                # OPEN: the LAN dev-loop shape
+    # NOT serving, and not saying goodbye either -- the ordinary state. This
+    # fixture predates __init__ being socket-free and hand-builds what the
+    # routing reads, so a new field on the host has to be declared here too.
+    h.closing = None
+    h.closing_at = 0
     return h
 
 
@@ -1876,3 +1881,138 @@ def test_the_dev_channel_run_uses_the_same_lookup():
     src = (ROOT / "runtime" / "dev_channel.py").read_text()
     assert "ws.launch_named(" in src
     assert "ws.launch_selected()" not in src, "the dev channel re-grew a lookup"
+
+
+# -- the goodbye ------------------------------------------------------------
+#
+# A board that is going away ON PURPOSE -- WEB CONSOLE switched off, or an
+# update about to reboot -- looks exactly like an unplugged one from the far
+# end, because stop() just closed the socket. The page has carried an
+# "expected" kind for this since the surface was written and NOTHING in the
+# system could produce it, so every deliberate shutdown reached a reader as the
+# vanished-board panel with its data-loss warning. Reported from a P4 session,
+# 2026-08-30.
+
+
+def test_a_stop_with_a_reason_keeps_answering_to_give_it(tmp_path):
+    h = _host(tmp_path)
+    h.serving = True
+    h.stop(why="off")
+
+    assert h.serving is False, (
+        "`serving` is the console's notion of the feature being ON -- the row "
+        "reads it and web_console unparks the glass on it, so holding it true "
+        "would leave a kid staring at a parked screen for the whole window")
+    assert h.closing == "off", "the socket has to outlive `serving` to say why"
+    r = h.handle_http("GET", "/carts.json", b"")
+    assert b"503" in r.split(b"\r\n")[0]
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "closing",
+                                                     "why": "off"}
+
+
+def test_the_goodbye_outranks_the_pin(tmp_path):
+    """Deliberately ahead of the gate. A page that was never given a pin still
+    deserves to know the console was switched off rather than be left to decide
+    it vanished -- and this says nothing except that somebody turned it off."""
+    h = _pinned(tmp_path)
+    h.serving = True
+    h.stop(why="off")
+    r = h.handle_http("GET", "/carts.json", b"")
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1])["error"] == "closing"
+
+
+def test_the_window_closes_the_socket_when_it_expires(tmp_path, monkeypatch):
+    h = _host(tmp_path)
+    h.serving = True
+    h.sock = None
+    h._ws = None
+    h.update = None                      # poll() pumps this; nothing to pump here
+    h.stop(why="off")
+
+    clock = [0]
+    monkeypatch.setattr(wh, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(wh, "_ticks_diff", lambda a, b: a - b)
+    h.closing_at = 0
+
+    clock[0] = h.CLOSING_MS - 1
+    h.poll()
+    assert h.closing == "off", "closed early -- the page may not have asked yet"
+
+    clock[0] = h.CLOSING_MS
+    h.poll()
+    assert h.closing is None and h.serving is False
+
+
+def test_a_bare_stop_still_closes_at_once(tmp_path):
+    """What a teardown and an error path want: no window, no waiting. The
+    goodbye is opt-in, so nothing that used to stop instantly now lingers."""
+    h = _host(tmp_path)
+    h.serving = True
+    h.sock = None
+    h._ws = None
+    h.stop()
+    assert h.serving is False and h.closing is None
+
+
+def test_starting_again_cancels_the_goodbye(tmp_path):
+    """Toggled off and straight back on inside the window. A host left
+    `closing` would answer 503 to everything while its Settings row said ON."""
+    h = _host(tmp_path)
+    h.serving = True
+    h.stop(why="off")
+    assert h.closing == "off"
+    h.closing = None                     # what start() does; no socket here
+    r = h.handle_http("GET", "/carts.json", b"")
+    assert not isinstance(r, bytes) or b"503" not in r.split(b"\r\n")[0]
+
+
+def test_the_frame_loop_keeps_polling_a_host_that_is_saying_goodbye():
+    """The half that makes the window real. `serving` goes false at once so the
+    row and the glass follow the tap; the socket outlives it by a few seconds
+    purely to answer. Polling only on `serving` would leave nobody to answer,
+    which is the bug the window exists to fix."""
+    from runtime import device_boot
+
+    class Host:
+        serving = False
+        closing = "off"
+        polled = 0
+
+        def poll(self):
+            Host.polled += 1
+
+    class Ws:
+        webhost = Host()
+
+    device_boot.poll_webhost(Ws())
+    assert Host.polled == 1
+
+    Ws.webhost.closing = None
+    device_boot.poll_webhost(Ws())
+    assert Host.polled == 1, "a host that is neither serving nor closing is idle"
+
+
+def test_turning_the_row_off_still_stops_a_host_that_cannot_take_a_reason():
+    """`toggle` turns any failure into the row's label, so a host with the older
+    no-argument `stop()` would raise TypeError, be swallowed, and NOT STOP --
+    a row saying ON over a console the kid just switched off. The stop is
+    unconditional; the goodbye is the optional part."""
+    from runtime.web_console import WebConsole
+
+    class Old:
+        stopped = False
+
+        def stop(self):                  # no `why`
+            Old.stopped = True
+
+    WebConsole._stop_saying_why(Old(), "off")
+    assert Old.stopped, "an older host was left running"
+
+    seen = {}
+
+    class New:
+        def stop(self, why=None):
+            seen["why"] = why
+
+    WebConsole._stop_saying_why(New(), "off")
+    assert seen["why"] == "off", "a host that CAN take a reason must get one"

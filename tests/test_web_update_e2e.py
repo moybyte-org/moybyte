@@ -60,7 +60,7 @@ def _free_port():
 
 
 @contextlib.contextmanager
-def _twin(tmp_path, mode):
+def _twin(tmp_path, mode, close_after=None):
     """serve.py's board twin with a faked /update of the given shape.
 
     Yields `(base_url, process)`. The process is handed out because one test
@@ -76,6 +76,8 @@ def _twin(tmp_path, mode):
     port = _free_port()
     argv = [sys.executable, "serve.py", str(port), "dist",
             "--carts", str(store), "--update", mode]
+    if close_after is not None:
+        argv += ["--close-after", str(close_after)]
     server = subprocess.Popen(argv, cwd=RUNNER, stdout=subprocess.DEVNULL,
                               stderr=subprocess.STDOUT)
     base = "http://127.0.0.1:%d" % port
@@ -332,3 +334,32 @@ def test_an_idle_page_still_notices_and_does_not_cry_wolf(tmp_path):
             % (gone,))
         assert "do not reload" not in gone["body"], gone
         assert "Nothing of yours is waiting to be saved" in gone["body"], gone
+
+
+def test_a_board_that_says_goodbye_is_not_reported_as_lost(tmp_path):
+    """The other half of the report: it should never have said "lost" at all.
+
+    Turning WEB CONSOLE off is deliberate, the console is fine, and nothing is
+    at risk -- but a closed socket looks exactly like an unplugged board, so the
+    page had no way to know. The board removes the guess by answering
+    `{"error":"closing"}` for a few seconds before it goes.
+
+    The page carried an "expected" kind for this from the day the surface was
+    written, with NOTHING in the system able to produce it. This is the test
+    that makes it a real path rather than a branch only scenarios reach.
+    """
+    web_e2e.require("update")
+    with _twin(tmp_path, "headless", close_after=30.0) as (base, _server):
+        p, out = _probes("link_goodbye.json", base, tmp_path / "shots")
+        assert p["live"]["fn"] == "function", p["live"]
+        assert p["live"]["link"] is None, p["live"]
+
+        bye = p["bye"]
+        assert bye["link"] == "expected", (
+            "a deliberate switch-off still reads as a vanished board: %r" % (bye,))
+        assert bye["shown"] != "none", "the reader was told nothing at all"
+        assert bye["cls"] != "bad", "styled as a failure; nothing failed"
+        assert "took its screen back" in bye["head"], bye
+        assert "keeps no copy of its own" not in bye["body"], (
+            "warned about unsynced work over a console that is fine and took "
+            "everything it was given: %r" % (bye,))

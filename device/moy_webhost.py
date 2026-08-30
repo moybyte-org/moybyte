@@ -130,6 +130,14 @@ import json as _json
 from moy_webserver import (WebServer, http_response, FileResponse,
                            ChunkedResponse, BlobResponse, query_param)
 
+# The tree's one clock shim (runtime/ticks.py), staged to every board and
+# importable on the host -- so the closing grace window below is testable
+# without a board and cannot drift from the frame loop's own clock.
+try:
+    from ticks import _ticks_ms, _ticks_diff
+except ImportError:                      # pragma: no cover -- host package lane
+    from runtime.ticks import _ticks_ms, _ticks_diff
+
 # The console BAKED INTO THIS IMAGE (native/moy_web + tools/gen_web_blob.py).
 # Optional by construction: a build without it (a host test, an older image, a
 # firmware built with no web bundle available) simply falls back to storage,
@@ -538,7 +546,22 @@ class ConsoleUpdate:
                 # host AND unparks the glass, and it asks what the user wants
                 # rather than toggling -- a host that had already fallen over
                 # under the parked screen would otherwise be STARTED here.
-                web.stop()
+                # A BARE stop, deliberately: no closing window here.
+                #
+                # This path can FAIL after the stop -- `open_update_online`
+                # below raises and the board is left at its desktop, not
+                # updating -- and the page is where that error is readable. A
+                # host that had already gone into its goodbye window would
+                # answer 503 to the very request that was going to explain
+                # what went wrong.
+                #
+                # It costs nothing, because this is the console-board branch
+                # (`screen: true`): the page told this board to update on its
+                # OWN screen, so it already knows what the silence means. The
+                # window exists for the case that has no other signal -- a
+                # person switching WEB CONSOLE off, which the page cannot
+                # otherwise tell from an unplugged board.
+                web.stop(why=None)
             # ...and only now the screen, because unparking routes home and
             # would pop an update screen pushed before it.
             ws.update_ui.open_update_online()
@@ -618,6 +641,11 @@ class WebHost(WebServer):
         # injecting this costs nothing until a kid turns it on.
         self.serving = False
         self.error = None
+        # The goodbye (see stop()). None = serving normally; a reason string =
+        # in the grace window, answering every request with it and about to
+        # close. `closing_at` is meaningless while `closing` is None.
+        self.closing = None
+        self.closing_at = 0
         # Brought up by start(), because a Settings toggle cannot be asked to
         # connect the WiFi first: the row is the whole UI this feature has.
         self._ensure_online = ensure_online
@@ -666,6 +694,10 @@ class WebHost(WebServer):
         if not WebServer.start(self, ip):
             raise OSError("port %d busy" % self.port)
         self.serving = True
+        # A restart inside the grace window cancels the goodbye: the board is
+        # not going anywhere after all, and a host that stayed "closing" would
+        # answer 503 to every request while its row said ON.
+        self.closing = None
         try:
             print("WEBHOST", self.source_note())
         except Exception:                # noqa: BLE001 -- a log is never fatal
@@ -708,6 +740,12 @@ class WebHost(WebServer):
         before. Guarded, because on a console board this is the frame tail and
         a firmware endpoint must not be able to break a frame.
         """
+        # The goodbye's countdown, before anything else: once the window is up
+        # there is nothing left to serve or pump, and the socket should go.
+        if self.closing is not None:
+            if _ticks_diff(_ticks_ms(), self.closing_at) >= self.CLOSING_MS:
+                self.stop()      # for real this time: socket closed, flag cleared
+                return False
         did = WebServer.poll(self)
         u = self.update
         if u is not None:
@@ -723,9 +761,49 @@ class WebHost(WebServer):
     # without the pump. Re-aliased here rather than left as a trap.
     service = poll
 
-    def stop(self):
-        WebServer.stop(self)
+    # How long a board that is going away KEEPS ANSWERING, to say so. The page
+    # asks every 3s when idle (worker.js HEARTBEAT_MS) and every 1s while it has
+    # something to push, so this has to outlast the slower of those plus a
+    # request already in flight. Five seconds of a socket nobody is using, once,
+    # in exchange for the difference between "your console handed the screen
+    # back" and "your console vanished, your work may be lost".
+    CLOSING_MS = 5000
+
+    def stop(self, why=None):
+        """Stop serving. With `why`, SAY SO first.
+
+        A bare stop() closes the socket, and from the far end that is
+        indistinguishable from the board being unplugged -- so a kid who turned
+        WEB CONSOLE off themselves, or asked for an update, got the page's
+        vanished-board panel with its data-loss warning. Reported from a P4
+        session on 2026-08-30, and the page had carried an "expected" kind for
+        this since the surface was written with NOTHING in the system able to
+        produce it.
+
+        The board is the only thing that knows the difference, and it knows it
+        BEFORE it goes. So a `why` starts a short grace window in which every
+        request is answered `{"error":"closing","why":...}` -- one round trip is
+        all the page needs -- and the socket closes when it expires.
+
+        `serving` GOES FALSE AT ONCE, and that separation is the whole point.
+        `serving` is the console's notion of the feature being ON: the Settings
+        row reads it, and `web_console.toggle` unparks the glass on it. Holding
+        it true across the window would leave a kid staring at a parked screen
+        for five seconds after they turned the row off. The lingering socket is
+        a transport detail, so it gets its own flag and `device_boot.poll_webhost`
+        polls on either.
+
+        Without a `why` the old behaviour stands, which is what a test teardown
+        and an error path want: no window, no waiting.
+        """
         self.serving = False
+        if why is None:
+            WebServer.stop(self)
+            self.closing = None
+            return
+        self.closing = why
+        self.closing_at = _ticks_ms()
+
 
     def paired_url(self):
         """`url()` with the pin on it -- the ONE string worth handing a human.
@@ -751,6 +829,15 @@ class WebHost(WebServer):
         return http_response(403, PIN_REFUSED)
 
     def handle_http(self, method, path, body):
+        # THE GOODBYE, before routing and before the pin: a board in its closing
+        # window is going away on purpose and the only useful thing it can say
+        # is that. Ahead of the gate deliberately -- a page that was never
+        # given a pin still deserves to be told the console was switched off
+        # rather than left to conclude it vanished, and this leaks nothing but
+        # the fact that somebody turned it off.
+        if self.closing is not None:
+            return http_response(
+                503, '{"error":"closing","why":"%s"}' % self.closing)
         # `path` is the request TARGET (query string included, since 2026-08-25
         # -- see the SECURITY note). Route on the bare path, gate on the target.
         target = path
