@@ -246,9 +246,18 @@ usb  = "303a:1001"
 # 303a:1001, and `find_port` tells same-id boards apart by ASKING them over the
 # dev channel -- which this one does not have. Its USB serial number is stable
 # and `udevadm` prints it, so tools/device_port.py matches on this instead of a
-# round trip. Board-specific by nature: read it off YOUR board with
+# round trip.
+#
+# It is the chip's MAC, and it moved WITH the peripheral: TinyUSB reported
+# `b8f862f8973c0000`, USB-Serial/JTAG reports `B8:F8:62:F8:97:3C`. The new form
+# is the better one for this job because it is the SAME string running and in
+# the ROM loader, so a board can be found in either state -- the old one was
+# not, and `make device-port` lost the board exactly when it was sitting in the
+# loader waiting to be flashed.
+#
+# Board-specific by nature: read it off YOUR board with
 #   udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT
-serial_number = "b8f862f8973c0000"
+serial_number = "B8:F8:62:F8:97:3C"
 chunk = 768
 attach_only = false
 

@@ -1,5 +1,5 @@
 {
- "query": "?handheld=1&dev=1",
+ "query": "?handheld=1&pin=0000",
  "boot_ms": 20000,
  "steps": [
   {"note": "What does the CONSOLE have, as opposed to what the probe answered?", "wait": 4000},
