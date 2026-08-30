@@ -37,6 +37,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -60,7 +61,12 @@ def _free_port():
 
 @contextlib.contextmanager
 def _twin(tmp_path, mode):
-    """serve.py's board twin with a faked /update of the given shape."""
+    """serve.py's board twin with a faked /update of the given shape.
+
+    Yields `(base_url, process)`. The process is handed out because one test
+    has to UNPLUG the console mid-session, and there is no way to test a
+    vanished board without being able to make it vanish.
+    """
     store = tmp_path / "store"
     store.mkdir()
     # Two carts: a single-cart store trips worker.js's kiosk path (the game IS
@@ -84,7 +90,7 @@ def _twin(tmp_path, mode):
                 time.sleep(0.1)
         else:
             pytest.fail("serve.py never answered /sync")
-        yield base
+        yield base, server
     finally:
         server.terminate()
         server.wait(timeout=10)
@@ -118,7 +124,7 @@ def test_a_headless_board_binds_the_update_bridge(tmp_path):
     row's COORDINATES; what cannot be tested anywhere else is that the probe,
     web_boot.update_enable and the worker's pump actually meet."""
     web_e2e.require("update")
-    with _twin(tmp_path, "headless") as base:
+    with _twin(tmp_path, "headless") as (base, _server):
         p, out = _probes("update_headless.json", base, tmp_path / "shots")
         # The console must have STARTED and DRAWN. `#s` is not the probe for
         # that -- page_core sets it to "live" off the frame path too, so it
@@ -147,7 +153,7 @@ def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
     console, because the board's own update screen is where the frames that
     advance the flash are painted."""
     web_e2e.require("update")
-    with _twin(tmp_path, "glass") as base:
+    with _twin(tmp_path, "glass") as (base, _server):
         p, out = _probes("update_glass.json", base, tmp_path / "shots")
         # The console must have STARTED and DRAWN. `#s` is not the probe for
         # that -- page_core sets it to "live" off the frame path too, so it
@@ -180,7 +186,7 @@ def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
 
 def test_a_vanished_board_warns_that_this_tab_is_the_only_copy(tmp_path):
     web_e2e.require("update")
-    with _twin(tmp_path, "headless") as base:
+    with _twin(tmp_path, "headless") as (base, _server):
         p, out = _probes("link_lost.json", base, tmp_path / "shots")
         assert p["live"]["fn"] == "function" and p["live"]["px"] > 0, \
             "the console never booted, so nothing below means anything: %r" % (p["live"],)
@@ -214,7 +220,7 @@ def test_a_vanished_board_warns_that_this_tab_is_the_only_copy(tmp_path):
 
 def test_an_update_says_so_and_does_not_cry_wolf(tmp_path):
     web_e2e.require("update")
-    with _twin(tmp_path, "glass") as base:
+    with _twin(tmp_path, "glass") as (base, _server):
         p, _ = _probes("link_expected.json", base, tmp_path / "shots")
         assert p["live"]["fn"] == "function" and p["live"]["px"] > 0, p["live"]
         e = p["expected"]
@@ -228,3 +234,64 @@ def test_an_update_says_so_and_does_not_cry_wolf(tmp_path):
             "warning about unsynced work on an ordinary update is how the " \
             "warning stops being read: %r" % (e,)
         assert "do not reload" not in e["body"], e
+
+
+def _probes_while(scenario, base, outdir, kill_after, victim):
+    """`_probes`, but `victim` is terminated `kill_after` seconds in.
+
+    The scenario has to keep running while the server dies, so browsershot goes
+    through Popen rather than subprocess.run -- there is no other way to unplug
+    a console in the middle of a browser session.
+    """
+    run = subprocess.Popen(
+        ["node", "browsershot.mjs", "scenarios/" + scenario, str(outdir)],
+        cwd=RUNNER, env=dict(os.environ, MOY_BASE=base),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    killed = [False]
+
+    def _kill():
+        time.sleep(kill_after)
+        if run.poll() is None:
+            victim.terminate()
+            killed[0] = True
+
+    t = threading.Thread(target=_kill, daemon=True)
+    t.start()
+    try:
+        out, err = run.communicate(timeout=300)
+    finally:
+        t.join(timeout=5)
+    assert killed[0], "the board outlived the scenario -- nothing was unplugged"
+    assert run.returncode == 0, \
+        "browsershot failed:\n%s\n%s" % (out[-3000:], err[-500:])
+    probes = {}
+    for m in re.findall(r"^   js -> (.*)$", out, re.M):
+        d = json.loads(json.loads(m))
+        probes[d["at"]] = d
+    return probes, out
+
+
+def test_the_page_notices_a_board_that_actually_vanished(tmp_path):
+    """The chain the other two link tests assume.
+
+    They call `__moyLinkLost` and prove the SURFACE -- which is worth proving,
+    and is not the same as proving anything fires. Here the console is genuinely
+    unplugged mid-session and nothing in the scenario touches the link API: the
+    sweep's POST has to fail, worker.js has to count to SYNC_GIVE_UP, and the
+    panel has to arrive on its own. Without that, "we tell the kid when the
+    board is gone" rests on a function nobody calls in anger.
+    """
+    web_e2e.require("update")
+    with _twin(tmp_path, "headless") as (base, _server):
+        p, out = _probes_while("link_vanish.json", base, tmp_path / "shots",
+                               kill_after=12.0, victim=_server)
+        assert p["live"]["fn"] == "function", p["live"]
+        assert p["live"]["link"] is None, \
+            "the panel was up before the board was unplugged: %r" % (p["live"],)
+
+        gone = p["gone"]
+        assert gone["link"] == "lost", (
+            "the board was unplugged and the page never noticed -- the "
+            "detection never fired, whatever the surface can do: %r" % (gone,))
+        assert gone["shown"] != "none" and gone["cls"] == "bad", gone
+        assert "keeps no copy of its own" in gone["body"], gone

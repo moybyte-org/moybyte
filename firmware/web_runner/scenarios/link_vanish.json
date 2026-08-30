@@ -1,0 +1,30 @@
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "THE BOARD ACTUALLY VANISHES. The two link_* scenarios beside this one call __moyLinkLost directly, which drives the SURFACE and assumes the trigger -- the same shape as testing that a page is 'live' while its entry point is gone. This one unplugs the console: the harness kills serve.py part-way through and NOTHING here touches the link API. What is proven is the whole chain -- the sweep's POST fails, worker.js counts to SYNC_GIVE_UP, and the page tells the person on its own.",
+   "wait": 1500
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,link:window.__moyLink||null})"
+  },
+  {
+   "note": "Make a real change first. syncPump only counts a failure when syncPoll() HAS a body, so an idle page whose board vanished stays quiet by design -- there is nothing of the kid's to lose. The give-up is about undelivered WORK. MAKE STUDIO, then +New: a genuine store mutation through the real UI, exactly as sync_create.json does it."
+  },
+  {"click": [63, 120]},
+  {"wait": 1500},
+  {"click": [63, 120]},
+  {"wait": 2000},
+  {
+   "note": "The board is killed by the harness somewhere in here. 15 consecutive failed sweeps at a 1s cadence is the give-up, so this waits well past it -- and past it is the point: a page that gave up EARLY would be crying wolf at a board that was merely busy.",
+   "wait": 30000
+  },
+  {
+   "js": "JSON.stringify({at:'gone',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"
+  },
+  {
+   "shot": "link_vanish"
+  }
+ ]
+}
