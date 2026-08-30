@@ -2016,3 +2016,48 @@ def test_turning_the_row_off_still_stops_a_host_that_cannot_take_a_reason():
 
     WebConsole._stop_saying_why(New(), "off")
     assert seen["why"] == "off", "a host that CAN take a reason must get one"
+
+
+def test_update_wants_its_pin_on_the_query_for_BOTH_methods(tmp_path):
+    """The mirror of the /sync rule above, and the pair is the whole trap.
+
+    /sync and /run read the pin from the BODY. /update reads it from the QUERY
+    on both methods -- deliberately, because a GET has nowhere else and one
+    endpoint spending the credential in two places is a rule nobody holds. Two
+    endpoints, two rules, and the page has to know which is which.
+
+    It did not. The worker put the update POST's pin in the body only, so on
+    every pinned board -- which is every real one -- the first POST came back
+    403; the worker's 403 branch calls update_off(), which latches the link
+    dead; and UPDATE ONLINE reported "the console stopped answering" instantly,
+    before any offer, on a board answering perfectly.
+    """
+    h = _pinned(tmp_path)
+    h.update = _StubUpdate()
+
+    # Body-only: refused, exactly as it was in the wild.
+    r = h.handle_http("POST", "/update", b'{"action":"check","pin":"4321"}')
+    assert b"403" in r.split(b"\r\n")[0], (
+        "a body pin authorized /update -- then the page's bug would be "
+        "invisible here too")
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
+
+    # On the query: accepted, both methods.
+    r = h.handle_http("POST", "/update?pin=4321", b'{"action":"check"}')
+    assert b"200" in r.split(b"\r\n")[0], r[:80]
+    r = h.handle_http("GET", "/update?pin=4321", b"")
+    assert b"200" in r.split(b"\r\n")[0], r[:80]
+
+
+class _StubUpdate:
+    """The smallest thing /update will talk to: it only has to be present and
+    answer, since what is under test is the GATE in front of it."""
+
+    def status(self):
+        return {"running": {"board": "test", "version": 1}, "state": "none"}
+
+    def request(self, action, channel=None):
+        return True, "queued"
+
+    def step(self):
+        return False

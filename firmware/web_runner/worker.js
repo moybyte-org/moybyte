@@ -730,10 +730,21 @@ function updatePump() {
         if (!wants) return;
     }
     updateBusy = true;
-    // A POST carries its pin in the BODY (take_json put it there, like gpio); a
-    // GET has nowhere but the query, which is what withPin is for.
+    // BOTH METHODS PUT THE PIN ON THE QUERY, because that is what /update
+    // reads. moy_webhost._update says so in as many words -- "both read the pin
+    // off ?pin=, and that is deliberate even though /sync and /run take theirs
+    // from the body ... so the query is the rule here and the page puts it on
+    // both" -- and the page did not. The POST went out with the pin in the body
+    // only, where this endpoint never looks.
+    //
+    // The cost was total and silent: on ANY pinned board -- which is every real
+    // one -- the first update POST came back 403, and the 403 branch below
+    // calls updateOff(), which latches the link dead. So a kid pressing UPDATE
+    // ONLINE got "the console stopped answering" instantly, before any offer,
+    // on a board that was answering perfectly. `take_json` still adds it to the
+    // body as well; that is what /sync and /run want and is inert here.
     const req = body
-        ? fetch("update", { method: "POST", body: body,
+        ? fetch(withPin("update"), { method: "POST", body: body,
                             headers: { "Content-Type": "application/json" } })
         : fetch(withPin("update"));
     req.then((r) => {

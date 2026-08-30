@@ -448,3 +448,26 @@ def test_binding_an_updater_late_still_grows_the_settings_rows(tmp_path):
     # take the rows with it, or a dead link leaves rows that cannot work.
     ws.updater = None
     assert update_rows() == []
+
+
+def test_the_page_puts_the_update_pin_on_the_query_for_both_methods():
+    """ROUTING, and the one grep worth keeping in this file.
+
+    The board's rule is behavioural and pinned in test_moy_webhost.py: /update
+    reads the pin off `?pin=` for GET and POST alike. What no host test can see
+    is whether the PAGE obeys it, because the caller is JavaScript in a worker
+    -- and it did not, sending the POST's pin in the body only. Every pinned
+    board 403'd the first update POST and latched the link dead.
+
+    So: the update POST must go through `withPin`, the same helper the GET uses.
+    """
+    worker = (ROOT / "firmware" / "web_runner" / "worker.js").read_text(
+        encoding="utf-8")
+    body = worker.split("function updatePump()", 1)[1].split("\nfunction ", 1)[0]
+    posts = [l for l in body.splitlines()
+             if "fetch(" in l and "update" in l]
+    assert posts, "updatePump no longer fetches /update -- this grep is stale"
+    for line in posts:
+        assert 'withPin("update")' in line, (
+            "an /update fetch that does not carry the pin on the query: %s"
+            % line.strip())

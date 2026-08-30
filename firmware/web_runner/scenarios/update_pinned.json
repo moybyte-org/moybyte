@@ -1,0 +1,16 @@
+{
+ "query": "?handheld=1&pin=4321",
+ "boot_ms": 20000,
+ "steps": [
+  {
+   "note": "A PINNED board, which every real one is. The update POST has to carry the pin the way /update reads it -- on the QUERY. It carried it in the body only, so the first POST came back 403, the worker's 403 branch latched the link dead, and a kid pressing UPDATE ONLINE got 'the console stopped answering' instantly on a board that was answering fine. Every other update test ran against an OPEN twin and could not see it.",
+   "wait": 5000
+  },
+  {"js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,upd:window.__moyUpdate||null})"},
+  {
+   "note": "Ask the console to check, through the same bridge Settings uses, and let the pump carry it.",
+   "js": "JSON.stringify({at:'asked',ok:!!window.__moyUpdate})"
+  },
+  {"shot": "update_pinned"}
+ ]
+}
