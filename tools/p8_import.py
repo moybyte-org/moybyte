@@ -448,10 +448,147 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 #   0x0000 gfx (2px/byte, low nibble = left)   0x2000 map rows 0-31
 #   0x3000 gff        0x3100 music (4B/pattern, flag bits ride bit7 of ch0-2)
 #   0x3200 sfx (64x68B: 32 2-byte notes + editor/speed/loop)   0x4300 code
-# Code is raw ASCII or the OLD ":c:" compression (pre-0.2.0 carts -- the BBS
-# classics); the newer "\x00pxa" scheme is detected and reported, not decoded.
+# Code is raw ASCII, the OLD ":c:" compression (pre-0.2.0 carts -- the BBS
+# classics), or the "\x00pxa" scheme every PICO-8 >= 0.2.0 writes.
 
 _OLD_LOOKUP = b"#\n 0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_"
+
+# --- the "\x00pxa" code compression (PICO-8 >= 0.2.0) -----------------------
+#
+# What every modern BBS cart uses, so without it a dropped .p8.png is refused
+# with "save it as text .p8 first" -- which is a fair instruction and a bad
+# answer, since the whole point of dropping a cart is not having PICO-8 open.
+#
+# Implemented from Lexaloffle's own reference (dansanderson/lexaloffle,
+# pxa_compress_snippets.c: `pxa_decompress`), which is the only description
+# precise enough to be worth following -- the wiki gives the header and the
+# three chunk kinds and none of the bit widths.
+#
+#   header   8 bytes, read through the SAME bit reader as the body:
+#            "\x00pxa", then raw_len and comp_len, each 2 bytes MSB-first.
+#   bits     LSB-FIRST within each byte, which is the one thing a reader
+#            written from the prose gets wrong half the time.
+#   CHR      a literal, as an index into a move-to-front table of all 256
+#            bytes: a unary run of 1-bits chooses a widening window, then the
+#            index within it. The byte moves to the front, so a cart's own
+#            alphabet drifts into the cheap end of the table.
+#   REF      a back-reference: a distance, then a chained length. The copy is
+#            byte-at-a-time and MAY overlap itself -- that is how a run is
+#            spelled, so memcpy or a slice is wrong here.
+#   RAW      the 0.2.0j escape: a distance whose encoding is the reserved
+#            value means "plain bytes follow, until a NUL or the end".
+_PXA_TINY_LITERAL_BITS = 4
+_PXA_BLOCK_LEN_CHAIN_BITS = 3
+_PXA_MIN_BLOCK_LEN = 3
+_PXA_BLOCK_DIST_BITS = 5
+
+
+class _PxaBits:
+    """LSB-first bit reader over a bytes-like, with the byte cursor exposed --
+    the decompress loop stops on `comp_len` bytes consumed, not on bits."""
+
+    def __init__(self, buf, pos=0):
+        self.buf = buf
+        self.pos = pos
+        self.bit = 1
+
+    def bit1(self):
+        if self.pos >= len(self.buf):
+            return 0
+        ret = 1 if (self.buf[self.pos] & self.bit) else 0
+        self.bit <<= 1
+        if self.bit == 256:
+            self.bit = 1
+            self.pos += 1
+        return ret
+
+    def val(self, bits):
+        v = 0
+        for i in range(bits):
+            if self.bit1():
+                v |= 1 << i
+        return v
+
+    def chain(self, link_bits, max_bits):
+        """Sum of `link_bits`-wide links, ending at the first non-maximal one.
+        A full link means 'and more follows', so a value is spelled in as many
+        links as it needs -- cheap for the small values that dominate."""
+        top = (1 << link_bits) - 1
+        val = 0
+        read = 0
+        vv = top
+        while vv == top:
+            vv = self.val(link_bits)
+            read += link_bits
+            val += vv
+            if read >= max_bits:
+                break
+        return val
+
+    def num(self):
+        """A back-reference distance. The width is chosen first, in 5-bit steps
+        (15 bits is commonest so it is the 1-bit prefix), then the value. The
+        one reserved combination -- zero in a 10-bit field -- is the RAW-block
+        marker, and is returned as -1."""
+        bits = (3 - self.chain(1, 2)) * _PXA_BLOCK_DIST_BITS
+        val = self.val(bits)
+        if val == 0 and bits == 10:
+            return -1
+        return val
+
+
+def _pxa_decompress(rom, pos=0x4300, max_len=0x10000):
+    """The code section at `pos` -> its bytes. Raises ValueError on a stream
+    that decodes to nonsense rather than returning half a program."""
+    bits = _PxaBits(rom, pos)
+    header = [bits.val(8) for _ in range(8)]
+    raw_len = header[4] * 256 + header[5]
+    comp_len = header[6] * 256 + header[7]
+    # The table starts as identity; every emitted byte moves to the front.
+    table = list(range(256))
+    out = bytearray()
+    end = pos + comp_len
+    while bits.pos < end and len(out) < raw_len and len(out) < max_len:
+        if bits.bit1() == 0:
+            offset = bits.num() + 1
+            if offset == 0:                       # RAW: plain bytes to a NUL
+                while len(out) < raw_len:
+                    b = bits.val(8)
+                    if b == 0:
+                        break
+                    out.append(b)
+                continue
+            if offset > len(out):
+                raise ValueError("pxa: back-reference past the start")
+            length = bits.chain(_PXA_BLOCK_LEN_CHAIN_BITS, 100000) \
+                + _PXA_MIN_BLOCK_LEN
+            # ONE BYTE AT A TIME, and not a slice: a reference may reach into
+            # what this very loop is writing, which is how a repeated run is
+            # spelled. A slice would copy the pre-loop bytes and repeat garbage.
+            start = len(out) - offset
+            for i in range(length):
+                if len(out) >= max_len:
+                    break
+                out.append(out[start + i])
+        else:
+            lpos = 0
+            nbits = 0
+            safety = 0
+            while bits.bit1() == 1 and safety < 16:
+                lpos += 1 << (_PXA_TINY_LITERAL_BITS + nbits)
+                nbits += 1
+                safety += 1
+            nbits += _PXA_TINY_LITERAL_BITS
+            lpos += bits.val(nbits)
+            if lpos > 255:
+                raise ValueError("pxa: literal index %d out of range" % lpos)
+            c = table[lpos]
+            out.append(c)
+            # move-to-front
+            for i in range(lpos, 0, -1):
+                table[i] = table[i - 1]
+            table[0] = c
+    return bytes(out)
 
 
 def _png_scanlines(data):
@@ -568,9 +705,8 @@ def _p8png_sections(rom):
     sections["sfx"] = sfx
     code = rom[0x4300:]
     if code[:4] == b"\x00pxa":
-        raise SystemExit("this cart uses the newer pxa code compression "
-                         "(PICO-8 >= 0.2.0) -- save it as text .p8 first")
-    if code[:4] == b":c:\x00":
+        lua = _pxa_decompress(rom, 0x4300).decode("ascii", "replace")
+    elif code[:4] == b":c:\x00":
         lua = _old_decompress(rom, 0x4300)
     else:
         end = code.find(b"\x00")

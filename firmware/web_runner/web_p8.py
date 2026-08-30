@@ -91,12 +91,20 @@ def convert(path, name, out_dir):
     try:
         sections = p8_import.read_p8(path)
     except SystemExit as exc:
-        # NOT an Exception subclass -- caught by name or not at all. The
-        # converter exits this way for PICO-8 >= 0.2.0's `pxa` code
-        # compression, which is a real cart it cannot read, so the message is
-        # already the right thing to show.
+        # NOT an Exception subclass -- caught by name or not at all, which is
+        # why it is named here even though the converter no longer has a
+        # reachable one (it refused `pxa` this way until 2026-08-30, when it
+        # learned to read it). Kept because the day one comes back, a bare
+        # `except Exception` would let it kill the worker instead of the import.
         raise P8Problem(str(exc) or "that cart uses a code compression this "
                                     "importer cannot read")
+    except Exception as exc:                 # noqa: BLE001
+        # A cart that IS the right shape and still does not decode -- a
+        # truncated download, a hand-edited PNG, a `pxa` stream whose
+        # back-reference points before the start. The converter raises for
+        # those now rather than refusing up front, and a raise that reaches the
+        # worker is a dead console, not a message.
+        raise P8Problem("that cart did not decode (%s)" % (exc,))
     problem = p8_writer.sections_problem(sections)
     if problem:
         raise P8Problem(problem)

@@ -624,25 +624,27 @@ def test_a_file_that_is_not_a_cart_reports_instead_of_importing():
     assert sections_problem(import_p8.parse_p8(SYNTHETIC_P8)) is None
 
 
-def test_pxa_compressed_code_is_a_sentence_not_a_traceback(tmp_path):
-    """PICO-8 >= 0.2.0 packs its Lua with a scheme the converter detects and
-    refuses. It refuses by raising SystemExit -- which is NOT an Exception
-    subclass, so a caller's `except Exception` sails straight past it and the
-    import dies as an interpreter exit. Anything catching converter failures has
-    to name SystemExit explicitly; this is the check that keeps that true."""
-    p8, png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
-    blob = bytearray(open(png, "rb").read())
+def test_a_nonsense_pxa_stream_raises_rather_than_returning_half_a_program(tmp_path):
+    """PICO-8 >= 0.2.0 packs its Lua with the `pxa` scheme, which the converter
+    READS since 2026-08-30 -- it used to refuse it and tell the reader to
+    re-save the cart as text, which is a fair instruction and a bad answer.
+
+    What has to stay true is the failure shape. A header that says `pxa` over
+    bytes that are not one decodes to nonsense, and the honest answer is a
+    raise: half a program that silently loses its second half is the one
+    outcome worse than a refusal. `firmware/web_runner/web_p8.py` turns this
+    into a sentence for the browser.
+    """
     rom = bytearray(p8_fixture.sections_to_rom(
         import_p8.parse_p8(p8_fixture.read_p8_text())))
-    rom[p8_fixture.CODE_AT:p8_fixture.CODE_AT + 4] = b"\x00pxa"
+    # A `pxa` header claiming 4KB of code, over the cart's plain ASCII.
+    rom[p8_fixture.CODE_AT:p8_fixture.CODE_AT + 8] = b"\x00pxa\x10\x00\x10\x00"
     pxa = tmp_path / "pxa.p8.png"
     pxa.write_bytes(p8_fixture.rom_to_png(bytes(rom)))
-    assert len(blob) > 0
-    with pytest.raises(SystemExit) as exc:
+
+    with pytest.raises(ValueError) as exc:
         import_p8.read_p8(str(pxa))
     assert "pxa" in str(exc.value)
-    assert not isinstance(exc.value, Exception), \
-        "SystemExit is not an Exception -- a bare `except Exception` misses it"
 
 
 def test_the_filename_title_is_the_same_on_every_tier(tmp_path):
@@ -710,3 +712,155 @@ def test_the_imported_cart_runs_its_own_code_under_the_player(tmp_path):
         ws.frame(1 / 30)
     assert ws.player._lua.get_global("x") == before + 10, \
         "btn(1) did not reach the cart through the shim"
+
+
+# -- the pxa code compression ------------------------------------------------
+#
+# Every PICO-8 >= 0.2.0 writes its code this way, so before 2026-08-30 most of
+# the BBS was refused with "save it as text .p8 first". The decoder is in the
+# VENDORED converter (moy-spec's p8_import.py) and was verified there against
+# four real carts -- celeste_classic_2, crimson_night, mossmoss, picooffroad --
+# each decoding to EXACTLY the byte count its own header declares.
+#
+# Those carts are other people's work and are not committed (the same rule
+# `ports/celeste.moy` lives under), so what runs here is an ENCODER written
+# separately from the same reference, driven over payloads chosen to make each
+# chunk kind appear. It is a weaker check than a real cart on its own -- an
+# encoder and a decoder written by one reader can share a misreading -- which
+# is why the real-cart verification is recorded above rather than assumed.
+
+
+class _PxaWriter:
+    """The smallest valid pxa encoder: LSB-first bits, literals through the
+    move-to-front table, and back-references for repeats."""
+
+    def __init__(self):
+        self.out = bytearray()
+        self.bit = 1
+
+    def put_bit(self, v):
+        if self.bit == 1:
+            self.out.append(0)
+        if v:
+            self.out[-1] |= self.bit
+        self.bit = 1 if self.bit == 128 else self.bit << 1
+
+    def put_val(self, val, bits):
+        for i in range(bits):
+            self.put_bit((val >> i) & 1)
+
+    def put_chain(self, val, link_bits):
+        top = (1 << link_bits) - 1
+        while True:
+            v = min(val, top)
+            self.put_val(v, link_bits)
+            val -= v
+            if v != top:
+                return
+
+    def literal(self, table, byte):
+        lpos = table.index(byte)
+        self.put_bit(1)                       # block_type: literal
+        # The unary run widens the window in steps of 4 bits; lpos < 16 needs
+        # none, so a single 0 ends the run.
+        nbits, base = 4, 0
+        run = 0
+        while lpos >= base + (1 << nbits):
+            base += 1 << nbits
+            nbits += 1
+            run += 1
+        for _ in range(run):
+            self.put_bit(1)
+        self.put_bit(0)
+        self.put_val(lpos - base, nbits)
+        table.insert(0, table.pop(lpos))      # move to front
+
+    def ref(self, offset, length):
+        self.put_bit(0)                       # block_type: back-reference
+        self.put_bit(0)                       # chain(1,2) -> 0 -> a 15-bit distance
+        self.put_val(offset - 1, 15)
+        self.put_chain(length - 3, 3)
+
+    def finish(self, raw_len):
+        body = bytes(self.out)
+        head = bytearray(b"\x00pxa")
+        head += bytes((raw_len >> 8, raw_len & 0xFF))
+        total = len(body) + 8
+        head += bytes((total >> 8, total & 0xFF))
+        return bytes(head) + body
+
+
+def _pxa_encode(payload):
+    """`payload` -> a pxa stream, using a reference wherever a run repeats so
+    the REF path (including a self-overlapping one) is actually exercised."""
+    w = _PxaWriter()
+    table = list(range(256))
+    i = 0
+    while i < len(payload):
+        best_off = best_len = 0
+        for off in range(1, min(i, 32767) + 1):
+            n = 0
+            while (i + n < len(payload) and n < 200
+                   and payload[i + n - off] == payload[i + n]):
+                n += 1
+            if n > best_len:
+                best_off, best_len = off, n
+        if best_len >= 3:
+            # NO move-to-front here, and that is the reference's rule rather
+            # than an omission: only a CHR literal touches the table, so bytes
+            # that arrive through a REF leave it exactly as they found it. This
+            # encoder did update it, and the short payloads still round-tripped
+            # -- they had no literal AFTER a reference, so nothing ever read
+            # the table the two sides disagreed about. The full-cart case did.
+            w.ref(best_off, best_len)
+            i += best_len
+        else:
+            w.literal(table, payload[i])
+            i += 1
+    return w.finish(len(payload))
+
+
+@pytest.mark.parametrize("name,payload", [
+    ("literals only", b"function _draw() cls(1) end"),
+    # A long self-overlapping run: the reference reaches into what the copy is
+    # writing, which is how pico-8 spells a repeat. A slice copy passes the
+    # short cases and produces garbage here.
+    ("overlapping run", b"ab" + b"xy" * 40),
+    ("repeated blocks", b"local t={}\n" * 12),
+    ("the whole byte range", bytes(range(256)) + bytes(range(256))),
+    ("one byte", b"x"),
+])
+def test_a_pxa_stream_round_trips(name, payload):
+    rom = bytearray(0x8000)
+    stream = _pxa_encode(payload)
+    rom[0x4300:0x4300 + len(stream)] = stream
+    import p8_import
+
+    assert p8_import._pxa_decompress(rom, 0x4300) == payload, name
+
+
+def test_a_pxa_cart_imports_end_to_end(tmp_path):
+    """The reader's actual gesture: a .p8.png whose code is pxa-packed goes in,
+    a cart with that code in it comes out. Everything else about the cart --
+    gfx, map, sfx -- rides the same ROM and must be untouched by the change."""
+    text = p8_fixture.read_p8_text()
+    sections = import_p8.parse_p8(text)
+    lua = "\n".join(sections["lua"]).encode("ascii", "replace")
+
+    rom = bytearray(p8_fixture.sections_to_rom(sections))
+    stream = _pxa_encode(lua)
+    rom[0x4300:] = b"\x00" * (len(rom) - 0x4300)
+    rom[0x4300:0x4300 + len(stream)] = stream
+    png = tmp_path / "packed.p8.png"
+    png.write_bytes(p8_fixture.rom_to_png(bytes(rom)))
+
+    got = import_p8.read_p8(str(png))
+    assert "\n".join(got["lua"]) == lua.decode("ascii")
+    # ...and the rest of the ROM came through, so this reads a cart and not
+    # just a code section. Compared over the rows the source declares: a ROM
+    # always carries all 128 gfx / 32 map rows, and a .p8 text stops writing
+    # them once the rest are blank, so the tails differ by construction.
+    assert got["gfx"][:len(sections["gfx"])] == sections["gfx"]
+    assert got["map"][:len(sections["map"])] == sections["map"]
+    assert set("".join(got["gfx"][len(sections["gfx"]):])) <= {"0"}, \
+        "the rows past the source's own are not blank -- the ROM shifted"
