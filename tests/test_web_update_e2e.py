@@ -142,6 +142,16 @@ def test_a_headless_board_binds_the_update_bridge(tmp_path):
         assert u, "the bridge never bound -- ws.updater is None, so Settings " \
                   "has no update row at all"
         assert u.get("running"), u
+        # ASK THE CONSOLE, do not infer from the message. This assertion read
+        # `u.get("running")` alone until 2026-08-30 and passed for the whole
+        # life of a build in which `update_link.py` was never staged into the
+        # bundle: web_boot.update_enable raised ImportError, ws.updater stayed
+        # None, a headless Zero had no update row -- and this test was green,
+        # because the message it reads is sent off the back of the PROBE
+        # answering. `bound` comes from web_boot.services_json.
+        assert u.get("bound") is True, (
+            "the probe answered but the console has no updater: %r" % (u,))
+        assert (u.get("services") or {}).get("updater") is True, u
         # The hardware claim the whole design branches on. False here means
         # THIS page is the only progress report that exists.
         assert u.get("screen") is False, u
@@ -169,6 +179,8 @@ def test_a_console_with_glass_binds_and_says_it_has_a_screen(tmp_path):
         assert "bound" in p, out[-3000:]
         u = p["bound"]["u"]
         assert u, "the bridge never bound against a board with glass"
+        assert u.get("bound") is True, (
+            "the probe answered but the console has no updater: %r" % (u,))
         assert u.get("screen") is True, u
         assert p["bound"]["noStrip"] is True, \
             "the page still draws an update UI of its own"

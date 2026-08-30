@@ -331,7 +331,11 @@ window.__moyRefetchAssets=function(){getA().catch(function(){});};
 // The worker bound the update bridge: the board serving this page offers
 // firmware updates, and the console's Settings row is live. Recorded rather
 // than drawn -- the page owns no update UI now.
-function updBound(m){window.__moyUpdate={running:m.running,screen:!!m.screen};}
+// `bound`/`services` come from the CONSOLE (web_boot.services_json), not from
+// this message having been sent -- the sending only ever proved the board's
+// probe answered, which is a different fact and was reported as this one.
+function updBound(m){window.__moyUpdate={running:m.running,screen:!!m.screen,
+bound:(m.bound===undefined?null:m.bound),services:m.services||null};}
 // ---- loader: spawn the console worker, wire it to the page -------------------
 // The VM used to boot HERE, on the main thread. It now lives in worker.js; this
 // module only constructs it, forwards the query string (tier + cart) and owns the

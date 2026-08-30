@@ -597,6 +597,7 @@ async function init(search) {
         + "sync_poll_json, sync_ack, sync_off, sync_config, store_mode, "
         + "rescan_store, gpio_poll_json, gpio_ack_json, gpio_off, "
         + "update_poll_json, update_wants_poll, update_ack_json, update_off, "
+        + "services_json, "
         + "import_p8_json, edit_cart, open_cart");
     step = mp.globals.get("step_frame_json");
     applyEvents = mp.globals.get("apply_events_json");
@@ -630,8 +631,23 @@ async function init(search) {
         // the console's own Settings row does -- but "did the bridge bind?" is
         // otherwise observable only in a devtools log, and that is not
         // something a harness or a person can check. One message, no UI.
+        //
+        // `bound` is ASKED OF THE CONSOLE, not inferred from this branch. It
+        // used to be inferred, and the difference is the whole bug: this block
+        // runs because the PROBE answered, so the message reported an updater
+        // whether or not web_boot.update_enable had actually hung one on the
+        // Workstation -- and a browser test asserting on it proved the probe.
+        let bound = null;
+        try { bound = JSON.parse(mp.globals.get("services_json")()); }
+        catch (e) { }
+        if (bound && !bound.updater) {
+            console.log("[moy] update: the PROBE answered but the console has "
+                        + "no updater -- Settings will have no update row");
+        }
         self.postMessage({ t: "update", running: updateDoc.running,
-                           screen: !!updateDoc.screen });
+                           screen: !!updateDoc.screen,
+                           bound: bound ? !!bound.updater : null,
+                           services: bound });
     }
     if (pin) mp.globals.get("sync_config")(pin);
     self.postMessage({ t: "assets", json: assets() });

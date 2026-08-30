@@ -853,6 +853,34 @@ def gpio_enable(pins_json):
     return ""
 
 
+def services_json():
+    """Which capability seams this console ACTUALLY has, as JSON.
+
+    Written because the observable lied. The worker posted `{t:"update"}` on the
+    strength of the PROBE having answered and its own comment called that "did
+    the bridge bind?" -- so a page could report an updater while the console
+    behind it had none, and a browser test asserting on that message proved the
+    probe and nothing else. A seam is live or it is not, and only the console
+    can say which.
+
+    Cheap and read-only: four getattrs, called once after boot and by a harness
+    that wants to know. It is the browser tier's answer to the question
+    tests/test_board_service_parity.py asks of every other tier by reading
+    source -- here the wiring is decided at RUNTIME, by what the far end
+    answered, so no amount of source-reading can settle it.
+    """
+    ws = _S.get("ws")
+    if ws is None:
+        return "{}"
+    return json.dumps({
+        "updater": getattr(ws, "updater", None) is not None,
+        "wifi": getattr(ws, "wifi", None) is not None,
+        "gpio": getattr(ws, "gpio", None) is not None,
+        "net": getattr(ws, "net", None) is not None,
+        "can_manage": bool(getattr(ws, "can_manage", False)),
+    })
+
+
 def update_enable(status_json):
     """The host answered the /update probe: give the console an UPDATER (#41).
 

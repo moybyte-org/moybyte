@@ -202,11 +202,19 @@ mkdir -p "${STAGE_DIR}/modules"
 # derives the web frozen set from that declaration, same as the boards'.
 "${PY}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 # The runner's own AUTHORED modules -- the analogue of a board's tracked
-# modules/ files, copied by name because the stage dir is rebuilt from scratch.
-cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
-cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
-cp "${SCRIPT_DIR}/gpio_link.py" "${STAGE_DIR}/modules/gpio_link.py"
-cp "${SCRIPT_DIR}/web_p8.py" "${STAGE_DIR}/modules/web_p8.py"
+# modules/ files, copied BY NAME because the stage dir is rebuilt from scratch.
+#
+# COPIED BY NAME IS THE HAZARD, and it bit: `update_link.py` was written, tested
+# and imported and never added to this list, so `web_boot.update_enable` raised
+# ImportError on every build for as long as the feature existed. It catches and
+# prints, into a WORKER console nobody reads, and the page went on reporting an
+# updater because that message was sent off the back of the board's PROBE
+# answering rather than off the console actually binding one. A headless Zero
+# therefore had no update row at all. tests/test_staging_closure.py now derives
+# this list rather than trusting it.
+for _mod in web_boot web_canvas gpio_link update_link web_p8; do
+  cp "${SCRIPT_DIR}/${_mod}.py" "${STAGE_DIR}/modules/${_mod}.py"
+done
 
 # The PICO-8 importer (#194) -- the ONE thing this build stages out of `tools/`,
 # which board_config's stager knows nothing about (it maps runtime/ and device/).

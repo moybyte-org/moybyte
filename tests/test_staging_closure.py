@@ -117,6 +117,11 @@ NATIVE = {
 # mirror-image bug, a module that imports fine and then cannot work. Per target
 # and not global, because `host_api` is genuinely the WEB head's cart API
 # (web_boot.py imports it by name) while being meaningless on a board.
+
+# The only .py files in firmware/web_runner/ that must NOT be frozen: host dev
+# tools with no place in the image. Everything else there is an authored module
+# and ships -- see the derivation below, and why it is a derivation.
+WEB_HOST_ONLY = frozenset({"serve", "moy"})
 #
 # The boards' rows used to be four names shorter than the web's -- no
 # `gfx_binding`, `native_build`, `host_canvas` or `input` -- which is to say the
@@ -267,13 +272,18 @@ def frozen_set(target):
         # died with the inline list.
         mods = {Path(name).stem: path for name, path
                 in board_config.staged_modules(WEB, ROOT).items()}
-        # web_boot/web_canvas/gpio_link/web_p8 are the runner's AUTHORED
-        # modules, copied by name in build.sh; its moy.py and serve.py are HOST
-        # dev tools and never enter the image.
-        for name in ("web_boot", "web_canvas", "gpio_link", "web_p8"):
-            p = WEB / (name + ".py")
-            if p.exists():
-                mods[name] = p
+        # The runner's AUTHORED modules, DERIVED from the directory rather
+        # than listed. A hand-written copy of this list lived here and another
+        # in build.sh, and they were wrong in the SAME WAY: `update_link.py`
+        # was in neither, so it was never staged, never frozen, and
+        # web_boot.update_enable raised ImportError on every build for as long
+        # as the feature existed -- a headless Zero with no update row, behind
+        # two green lists. Anything ending .py that is not a host-only dev tool
+        # ships, so a new module cannot be forgotten in one place or both.
+        for p in sorted(WEB.glob("*.py")):
+            if p.stem in WEB_HOST_ONLY:
+                continue
+            mods[p.stem] = p
         # The p8 importer (#194) is the one thing this build stages out of
         # `tools/`: moy-spec's two vendored files -- the asset converter and the
         # Lua porter that makes a dropped cart RUN -- and the guards/report file
@@ -762,3 +772,36 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
             "%s: NATIVE tripwire %s != declaration %s + board-authored %s"
             % (target, sorted(NATIVE[target]), sorted(shared),
                sorted(authored)))
+
+
+def test_every_authored_web_module_reaches_the_bundle():
+    """build.sh copies the runner's own modules BY NAME, and a name left out of
+    that list fails in the quietest way this tree has.
+
+    `update_link.py` was missing from it for the whole life of the feature. The
+    import that needs it sits inside a try/except that prints to a WORKER
+    console, the page went on reporting an updater because that message is sent
+    when the board's PROBE answers rather than when the console binds one, and
+    the browser suite asserted on the message. Green everywhere; no update row
+    on the one board whose only screen is that page.
+
+    So: every module in the directory is in the copy loop, and the two lists
+    that disagreed are one derivation now.
+    """
+    # COMMENTS STRIPPED. A first version of this grepped the whole file and
+    # passed its own mutation test, because the comment above the copy loop
+    # names `update_link.py` -- the check has to read what the script DOES.
+    sh = "\n".join(line.split("#", 1)[0]
+                   for line in (WEB / "build.sh").read_text(encoding="utf-8")
+                                                 .splitlines())
+    authored = sorted(p.stem for p in WEB.glob("*.py")
+                      if p.stem not in WEB_HOST_ONLY)
+    assert len(authored) >= 4, authored
+    for name in authored:
+        assert name in sh, (
+            "%s.py is an authored web module and build.sh never copies it into "
+            "the stage -- it will ImportError at runtime" % name)
+    for name in sorted(WEB_HOST_ONLY):
+        if (WEB / (name + ".py")).exists():
+            assert name not in sh, (
+                "%s.py is a host dev tool and must not enter the image" % name)
