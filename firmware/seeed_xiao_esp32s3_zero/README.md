@@ -423,6 +423,21 @@ below used to hold:
 - **The rollback confirm fires on real flash** (checklist step 7): `ZERO ota:
   this image confirmed itself -- rollback cancelled`, once, right after the
   store host comes up.
+- **A COMPLETE OTA, over WiFi, end to end** (2026-08-30). `0.8` on `ota_0` ->
+  `beta 2026-08-30 15:16` on `ota_1`, and every stage of it observed:
+  - check on the `unstable` channel: manifest fetched through GitHub's 302 to
+    release-assets, parsed, **signature verified**;
+  - download **streamed straight into the inactive slot** — 2,384,304 bytes in
+    ~48s (≈50 KB/s, the MicroPython TCP ceiling this board has always had);
+  - install in ~2 seconds, because there was nothing left to flash: the bytes
+    were already in the slot, so the whole install is the `set_boot`;
+  - reboot into `ota_1`, and the new image **confirmed itself** —
+    `"last": {"result": "ok", "detail": "0.8 -> beta 2026-08-30 15:16"}`, which
+    is the rollback being cancelled by an image that came up healthy.
+  - the store came through untouched: 44 carts after, including the
+    browser-made ones. The slots and the vfs are different partitions and this
+    is what that buys.
+  That is checklist steps 6 and 7, the last two that needed hardware.
 - **The online OTA check reaches the internet**, not merely the endpoint: DNS,
   TLS to github.com, the request, and a real `http status=404` read back for a
   channel with nothing on it — which is the correct answer, and every layer
@@ -430,10 +445,6 @@ below used to hold:
 
 **NOT verified on hardware**, and each for its own reason:
 
-- **An OTA install on this board.** The endpoints answer, the whole online path
-  to the manifest works and the rollback confirm fires — but the channel is
-  empty, so nothing has been downloaded into the inactive slot here yet. That
-  needs a published build, not a bench: step 6 below runs at the first release.
 - **A cart in a browser driving this board's PINS.** The console half is
   proven against this board (a real Chrome session pulled its store and came up
   on the launcher) and the LED takes both levels over `POST /gpio`, but nothing
