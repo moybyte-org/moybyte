@@ -416,13 +416,24 @@ below used to hold:
   (`carts_data.CARTS_Z`) inflated on first boot with no cable step: 36 carts
   served from `GET /carts.json` on a board that had just been erased. This was
   the last thing standing between "flashed" and "usable" and it is gone.
+- **The seed adds what is missing and rewrites nothing.** A later image carrying
+  one new cart (`Pin Light`) was flashed onto a board holding 43: all 36 roster
+  carts ended up present, the new one among them, and the eight browser-made
+  carts beside them — an imported PICO-8 Celeste included — were untouched.
+- **The rollback confirm fires on real flash** (checklist step 7): `ZERO ota:
+  this image confirmed itself -- rollback cancelled`, once, right after the
+  store host comes up.
+- **The online OTA check reaches the internet**, not merely the endpoint: DNS,
+  TLS to github.com, the request, and a real `http status=404` read back for a
+  channel with nothing on it — which is the correct answer, and every layer
+  under it had to work to produce it.
 
 **NOT verified on hardware**, and each for its own reason:
 
-- **An OTA install on this board, and the rollback confirm after it.** The
-  endpoints answer and the channel is empty, so nothing has yet been downloaded
-  into the inactive slot here. That needs a published build, not a bench —
-  steps 6 and 7 below are the check, and the first release is when they run.
+- **An OTA install on this board.** The endpoints answer, the whole online path
+  to the manifest works and the rollback confirm fires — but the channel is
+  empty, so nothing has been downloaded into the inactive slot here yet. That
+  needs a published build, not a bench: step 6 below runs at the first release.
 - **A cart in a browser driving this board's PINS.** The console half is
   proven against this board (a real Chrome session pulled its store and came up
   on the launcher) and the LED takes both levels over `POST /gpio`, but nothing
