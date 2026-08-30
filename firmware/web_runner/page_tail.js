@@ -64,7 +64,7 @@ else if(m.t==="wperf"){console.log("[moy worker] "+m.s);}
 // own. `kind` is the whole contract: "lost" adds the unsynced-work warning,
 // anything else is a restart somebody asked for.
 else if(m.t==="lost"){linkLost(m.kind||"lost",m.head||"the console is not answering",
-m.body||"");}
+m.body||"",m.risk!==false);}
 else if(m.t==="error"){console.error("[moy]",m.s);
 sEl.textContent="console crash (see devtools)";sEl.style.color="#ff004d";}}
 // ---- the pin prompt (2026-08-25) --------------------------------------------
@@ -278,6 +278,15 @@ console.log("[moy] play on device failed: "+err);});});
 // case that matters, and a surface that always carried it would cry wolf on
 // every ordinary update -- which is the same mistake twice.
 //
+// AND EVEN WITHIN "lost" it is conditional (2026-08-30), on `risk`: whether
+// this page is actually holding work the board never took. A reader who had
+// changed nothing, watching a console they had just switched off themselves,
+// was told "anything you changed in the last few seconds is only in this tab"
+// -- which is alarming, useless, and false. The worker knows the answer
+// (`outstanding`), so the surface asks rather than assumes. `risk` defaults to
+// TRUE for any caller that does not say, because under-warning is the worse
+// direction and window.__moyLinkLost has other callers.
+//
 // THE FIRST REASON WINS. An update that was asked for will be followed by
 // exactly the silence a loss looks like, and re-reporting it as a loss thirty
 // seconds later is the wolf again.
@@ -288,14 +297,17 @@ console.log("[moy] play on device failed: "+err);});});
 // through window.__moyLinkLost or the worker's {t:"lost"} above.
 var LNK=document.getElementById("lnk"),LNKH=document.getElementById("lnkh"),
 LNKB=document.getElementById("lnkb"),linkGone=false;
-function linkLost(kind,head,body){
+function linkLost(kind,head,body,risk){
 if(linkGone)return;
 linkGone=true;
 LNKH.textContent=head;
 LNKB.textContent=(kind==="lost")
-?((body?body+" ":"")+"This page keeps no copy of its own while a console is "
+?((body?body+" ":"")+((risk===false)
+?"Nothing of yours is waiting to be saved. Reopen the console's WEB CONSOLE "
++"screen to carry on."
+:"This page keeps no copy of its own while a console is "
 +"serving it, so anything you changed in the last few seconds is only in this "
-+"tab -- do not reload until the console is back.")
++"tab -- do not reload until the console is back."))
 :body;
 LNK.className=(kind==="lost")?"bad":"";
 LNK.style.display="block";

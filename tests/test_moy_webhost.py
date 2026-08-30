@@ -597,6 +597,43 @@ def test_the_pin_rides_the_query_because_a_get_has_nowhere_else(tmp_path):
     assert hasattr(r, "body_iter")
 
 
+def test_a_post_wants_its_pin_in_the_body_and_ignores_the_query(tmp_path):
+    """The asymmetry, pinned because it cost a wrong instruction in the Zero's
+    README: a GET carries the pin on the QUERY (it has nowhere else) and POST
+    /sync carries it in the BODY, which is what the protocol envelope declares
+    and what `doc["pin"]` reads. Writing `POST /sync?pin=NNNN` looks obviously
+    right, is refused, and the refusal says `{"error":"pin"}` -- which reads as
+    a wrong pin rather than a misplaced one."""
+    h = _pinned(tmp_path)
+    op = {"p": "hop.moy/main.py", "t": "x = 1\n"}
+
+    r = h.handle_http("POST", "/sync?pin=4321", _batch(op))
+    assert b"403" in r.split(b"\r\n")[0], "a query pin must not authorize a POST"
+    assert json.loads(r.split(b"\r\n\r\n", 1)[1]) == {"error": "pin"}
+
+    r = h.handle_http("POST", "/sync", _batch(op, pin="4321"))
+    assert b"200" in r.split(b"\r\n")[0], "the body pin is the one that works"
+
+
+def test_a_whole_cart_delete_takes_the_cart_and_its_journal(tmp_path):
+    """`{"p": "<cart>.moy", "dc": 1}` is the documented way to remove a
+    built-in that shipped broken from a board whose seed reads PRESENCE and will
+    not overwrite it (the Zero). Over HTTP, so the recovery needs no cable and
+    cannot wedge that board's USB the way an mpremote session can."""
+    root = _store(tmp_path)
+    h = wh.WebHost(str(root), str(tmp_path / "web"), pin="4321")
+    (root / "hop.moy" / "journal").mkdir(parents=True, exist_ok=True)
+    (root / "hop.moy" / "journal" / "journal.jsonl").write_text("{}\n")
+    assert (root / "hop.moy").is_dir()
+
+    r = h.handle_http("POST", "/sync",
+                      _batch({"p": "hop.moy", "dc": 1}, pin="4321"))
+    assert b"200" in r.split(b"\r\n")[0]
+    assert not (root / "hop.moy").exists(), (
+        "the cart survived -- and a journal left behind is what makes the next "
+        "boot's re-seed land on top of stale history")
+
+
 def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path):
     """The one exemption that is a NECESSITY, not a judgement: the page is what
     shows the pin prompt, so a board that gated its own console behind the pin

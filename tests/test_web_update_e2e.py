@@ -295,3 +295,40 @@ def test_the_page_notices_a_board_that_actually_vanished(tmp_path):
             "detection never fired, whatever the surface can do: %r" % (gone,))
         assert gone["shown"] != "none" and gone["cls"] == "bad", gone
         assert "keeps no copy of its own" in gone["body"], gone
+
+
+def test_an_idle_page_still_notices_and_does_not_cry_wolf(tmp_path):
+    """The reported failure, both halves (2026-08-30).
+
+    A reader sat on a console, switched it off themselves, changed nothing --
+    and got no notice for over a minute, then got one warning them their work
+    was only in that tab.
+
+    Both came from the same place. The give-up counted failed PUSHES, and a page
+    with nothing to push never posts, so the counter never advanced: the notice
+    arrived whenever they next happened to change something. And the data-loss
+    sentence was attached to the KIND rather than to whether anything was
+    actually at risk.
+
+    So this scenario touches nothing at all. Only the heartbeat can see the
+    board go, and the wording has to reflect an empty outbox.
+    """
+    web_e2e.require("update")
+    with _twin(tmp_path, "headless") as (base, _server):
+        p, out = _probes_while("link_vanish_idle.json", base, tmp_path / "shots",
+                               kill_after=10.0, victim=_server)
+        assert p["live"]["fn"] == "function", p["live"]
+        assert p["live"]["link"] is None, p["live"]
+
+        gone = p["gone"]
+        assert gone["link"] == "lost", (
+            "an IDLE page never noticed the board was gone -- which is the "
+            "'after a minute or more' half of the report: %r" % (gone,))
+        assert gone["shown"] != "none" and gone["cls"] == "bad", gone
+        # Nothing was typed, so nothing is at risk, so the alarming sentence
+        # must NOT be there -- and something calmer must be.
+        assert "keeps no copy of its own" not in gone["body"], (
+            "told a reader who changed nothing that their work is at risk: %r"
+            % (gone,))
+        assert "do not reload" not in gone["body"], gone
+        assert "Nothing of yours is waiting to be saved" in gone["body"], gone

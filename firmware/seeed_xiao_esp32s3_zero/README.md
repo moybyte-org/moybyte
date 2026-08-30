@@ -617,12 +617,19 @@ new image's host did not come up.
     new image will not overwrite it):
 
     ```bash
-    curl -X POST "http://<board>/sync?pin=NNNN" \
-         -d '{"v":1,"ops":[{"p":"pin_light.moy","dc":1}]}'
+    curl -X POST http://<board>/sync -H "Content-Type: application/json" \
+         -d '{"v":1,"pin":"NNNN","ops":[{"p":"pin_light.moy","dc":1}]}'
+    # -> {"err": [], "ok": 1}
     ```
 
-    It takes the journal with it, and the next boot seeds the image's copy. No
-    cable, no stopped console, and nothing that can wedge USB.
+    **The pin goes in the BODY here**, not the query — `moy_webhost` reads
+    `doc["pin"]` for a POST, which is what the protocol envelope declares, and a
+    `?pin=` is refused with `{"error":"pin"}`. (The GETs are the other way
+    round, which is exactly why this is worth writing down.) It takes the
+    journal with it; the next BOOT seeds the image's copy, so it still wants a
+    power cycle — there is no reset endpoint. No cable, no stopped console, and
+    nothing that can wedge USB. Verified on this board 2026-08-30, create and
+    delete both.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow

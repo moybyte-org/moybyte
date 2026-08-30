@@ -183,16 +183,19 @@ def seed_carts(root=CARTS_DIR):
         nothing. That is the price of never overwriting a kid's cart, and it is
         the right way round on the board holding the only copy -- but it means
         the recovery is manual and worth knowing. It needs no cable: the sync
-        protocol already has a whole-cart delete, so
+        protocol already has a whole-cart delete, and the pin rides in the BODY
+        for a POST (a `?pin=` on this endpoint is refused -- moy_webhost reads
+        `doc["pin"]`, which is what the protocol envelope declares):
 
-            curl -X POST "http://<board>/sync?pin=NNNN" \
-                 -d '{"v":1,"ops":[{"p":"hop_quest.moy","dc":1}]}'
+            curl -X POST http://<board>/sync -H "Content-Type: application/json" \
+                 -d '{"v":1,"pin":"NNNN","ops":[{"p":"hop_quest.moy","dc":1}]}'
 
-        removes it (journal and all), and the next boot seeds the image's copy.
-        `./provision.sh --carts` forces the push over USB if you have the board
-        in your hand. Prefer the POST: an `mpremote` command stops the console,
-        and on this board getting back out of that has its own failure mode
-        (see the README's hardware notes).
+        That removes it, journal and all -> `{"err": [], "ok": 1}`. The next
+        BOOT seeds the image's copy, so it still wants a power cycle; there is
+        no reset endpoint. `./provision.sh --carts` forces the push over USB if
+        the board is in your hand -- but prefer the POST: an `mpremote` command
+        stops the console, and getting back out of that has its own failure mode
+        (the README's hardware notes).
 
     It bit immediately. `Pin Light` shipped crashing on its first frame
     (2026-08-30, colour names where the draw verbs take indices), and the three

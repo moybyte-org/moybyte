@@ -75,27 +75,66 @@ let fbAddr = null, fbLen = null;
 let syncPoll = null, syncAck = null, syncOff = null, rescan = null;
 let syncBusy = false, lastSyncAt = 0;
 const SYNC_MS = 1000;
-// How many consecutive pushes may fail before this page admits the board is
-// gone. Between gpio_link's 5 (a pin link that stalls at all is broken) and
-// update_link's 30 (a board WRITING FLASH legitimately goes quiet): a board
-// that is merely busy serving can miss a few sweeps, and 15 seconds of silence
-// is not busy. The count is the point -- before this, a vanished board was
-// retried FOREVER and the chip went on saying the carts were safe on it.
-const SYNC_GIVE_UP = 15;
-let syncFails = 0, syncLostSaid = false;
+// How long the board may stay silent before this page admits it is gone. A
+// board that is merely busy serving can miss a few sweeps, and 15 seconds of
+// silence is not busy.
+//
+// TIME, NOT A COUNT (2026-08-30). It was "15 consecutive failed pushes", which
+// is 15 seconds ONLY while there is something to push every second -- and a
+// page nobody is typing into pushes NOTHING, so the counter never advanced and
+// an idle tab watching a board that had been switched off sat there for
+// minutes. Reported from a real session: "I turned off wasm while I was
+// connected... I only got this after like a minute or more". A clock cannot
+// have that bug, and it also makes the sentence below TRUE, which the count
+// only was by coincidence.
+const SYNC_GIVE_UP_MS = 15000;
+// What an idle page asks with. GET /sync is the capability marker: open on a
+// pinned board by design, no store walk behind it, `{"sync":1}` either way --
+// the cheapest question that has an answer. Slower than the push sweep because
+// nothing is waiting on it; still well inside the give-up.
+const HEARTBEAT_MS = 3000;
+let lastHeartbeatAt = 0;
+// The clock the give-up reads: when the board last answered ANYTHING.
+let lastSyncOkAt = 0;
+let syncFailing = false;      // at least one failure since the last answer
+// Is there work this page holds that the board has not taken? Set when a poll
+// hands us a batch, cleared when one is accepted. THIS is what decides whether
+// a disconnect is frightening or merely inconvenient -- see syncLost.
+let outstanding = false;
+let syncLostSaid = false;
+
+function syncFailed(now) {
+    syncFailing = true;
+    if (!lastSyncOkAt) lastSyncOkAt = now;      // first contact never made
+    if (now - lastSyncOkAt >= SYNC_GIVE_UP_MS) syncLost();
+}
+
+function syncOk(now) {
+    lastSyncOkAt = now;
+    syncFailing = false;
+    syncLostSaid = false;
+}
 
 // The board stopped answering. In BOARD MODE this page keeps no local store by
 // design, so whatever has not been pushed lives only in this tab -- which is
-// why this is the one disconnect that carries the data-loss warning, and why
-// the chip must stop claiming the carts are kept on a console that is gone.
+// why this is the one disconnect that can carry a data-loss warning.
+//
+// CAN, not does. The warning is for work at risk, and this page KNOWS whether
+// it is holding any: `outstanding` is true only when a batch was polled and
+// never accepted. Telling an idle reader that "anything you changed in the last
+// few seconds is only in this tab" when they changed nothing is the cry-wolf
+// half of the same mistake the expected/lost split exists to avoid -- and it
+// was what a real session got after switching the console off deliberately.
 function syncLost(head, body) {
     if (syncLostSaid) return;
     syncLostSaid = true;
-    persist("none", "the console is not answering -- recent changes are only here");
-    self.postMessage({ t: "lost", kind: "lost",
+    persist("none", outstanding
+        ? "the console is not answering -- recent changes are only here"
+        : "the console is not answering");
+    self.postMessage({ t: "lost", kind: "lost", risk: outstanding,
         head: head || "the console stopped answering",
-        body: body || ("It has not accepted anything for " + SYNC_GIVE_UP
-                       + " seconds.") });
+        body: body || ("It has not answered for "
+                       + Math.round(SYNC_GIVE_UP_MS / 1000) + " seconds.") });
 }
 // #9 physical I/O: the same pump shape as the sync push, at a physical-I/O
 // rate. A cart's pin_write QUEUES (gpio_link.py: it must never stall a frame
@@ -795,7 +834,8 @@ function syncPump() {
     }
     let body = "";
     try { body = syncPoll(); } catch (e) { return; }
-    if (!body) return;
+    if (!body) { heartbeat(now); return; }
+    outstanding = true;
     syncBusy = true;
     if (mode === "site") { pumpLocal(body); return; }
     fetch("sync", { method: "POST", body: body,
@@ -825,15 +865,35 @@ function syncPump() {
                          + "Re-scan the code on its WEB CONSOLE screen.");
                 return;
             }
-            if (r.ok) { syncFails = 0; syncLostSaid = false; }
-            else if (++syncFails >= SYNC_GIVE_UP) syncLost();
+            if (r.ok) { syncOk(now); outstanding = false; }
+            else syncFailed(now);
             try { syncAck(r.ok ? 1 : 0); } catch (e) { }
         })
         .catch(() => {
             // The board is unreachable, not merely unhappy: no status at all.
-            if (++syncFails >= SYNC_GIVE_UP) syncLost();
+            syncFailed(now);
             try { syncAck(0); } catch (e) { }
         })
+        .finally(() => { syncBusy = false; });
+}
+
+// WHAT AN IDLE PAGE ASKS. With nothing to push there is no POST, and with no
+// POST there was nothing to fail -- so a tab left sitting on a console that was
+// then switched off noticed only when the reader happened to change something.
+// This is the question that keeps the clock honest: GET /sync, the open
+// capability marker, no pin and no store walk behind it.
+//
+// It shares syncOk/syncFailed with the push, so both paths feed ONE give-up
+// rather than two thresholds that could disagree about when a board is gone.
+function heartbeat(now) {
+    if (mode !== "board") return;
+    if (!lastSyncOkAt) lastSyncOkAt = now;      // start the clock at first idle
+    if (now - lastHeartbeatAt < HEARTBEAT_MS) return;
+    lastHeartbeatAt = now;
+    syncBusy = true;
+    fetch("sync", { method: "GET" })
+        .then((r) => { if (r.ok) syncOk(now); else syncFailed(now); })
+        .catch(() => syncFailed(now))
         .finally(() => { syncBusy = false; });
 }
 
