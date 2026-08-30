@@ -107,3 +107,70 @@ def test_a_seed_cart_survives_its_first_frames(console, folder):
     err = ws.cart_error
     ws.cart_error = None
     assert err is None, "%s crashes on a real console: %s" % (folder, err)
+
+
+# -- and their Config cards are cards --------------------------------------
+
+
+def _check(field):
+    """`CardsLayer._validate_field` against the real class attributes.
+
+    A bare `_validate_field(None, f)` reaches `self._DISPLAYS` and dies, so the
+    shim carries the two tuples the method reads -- taken FROM the class, not
+    copied, so a new display kind cannot make this quietly permissive. Building
+    a whole CardsLayer would need a Workstation for a pure function.
+    """
+    from cards_layer import CardsLayer
+
+    class _Shim:
+        _DISPLAYS = CardsLayer._DISPLAYS
+        _CELL_DISPLAYS = CardsLayer._CELL_DISPLAYS
+
+    return CardsLayer._validate_field(_Shim(), field)
+
+
+def _edit_fields(folder):
+    import json
+    man = os.path.join(SYSTEM_CARTS, folder + ".moy", "manifest.json")
+    with open(man, encoding="utf-8") as f:
+        return json.load(f).get("edit") or []
+
+
+@pytest.mark.parametrize("folder", _titles())
+def test_a_seed_carts_config_cards_are_valid(folder):
+    """Run every shipped `edit` schema through the console's OWN validator.
+
+    `pin_light` shipped with `"type": "number"`, which is not a type -- the set
+    is `int` and `choice` -- so its one tunable rendered as an inline "!" card
+    and could not be stepped. It is the kind of mistake that reads fine to a
+    person writing JSON and is invisible until someone opens the Config tab on a
+    board, which is the last place to find out.
+
+    Asserting through `_validate_field` rather than against a list of type names
+    keeps this honest: the validator also catches min > max, a zero step, empty
+    choices and a `display` that does not match its type, and it cannot drift
+    from the console because it IS the console.
+    """
+    fields = _edit_fields(folder)
+    if not fields:
+        pytest.skip("%s declares no tunables" % folder)
+    for field in fields:
+        why = _check(field)
+        assert why is None, "%s: card %r is %s" % (
+            folder, field.get("key", field), why)
+
+
+def test_the_validator_this_leans_on_still_rejects_things():
+    """The check above is only worth its line if the validator has teeth -- a
+    `_validate_field` that returned None for everything would make every cart
+    pass while proving nothing."""
+    assert _check({"key": "pin", "type": "number"}), "an unknown type"
+    assert _check({"key": "pin", "type": "int", "min": 9, "max": 1})
+    assert _check({"key": "pin", "type": "int", "step": 0})
+    assert _check({"type": "int"}), "a missing key"
+    assert _check({"key": "k", "type": "choice", "choices": []})
+    assert _check({"key": "k", "type": "choice", "choices": ["a"],
+                   "display": "gauge"}), "a display that needs type int"
+    # ...and the shape pin_light actually ships now must pass.
+    assert _check({"key": "pin", "type": "int", "min": 1, "max": 21,
+                   "card": "DRIVES PIN {value}"}) is None
