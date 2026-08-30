@@ -313,11 +313,24 @@ def boot(carts_root="/moy/carts", cart=None, width=320, height=240,
     except ImportError:
         pass
     # The board-agnostic service wiring, in the one canonical order (host + both
-    # boards + this runner). Runner-only: can_manage=False (no Make tile / no
-    # project management); the FakeWifi keeps any wifi UI harmless.
+    # boards + this runner).
+    #
+    # NO WIFI SERVICE, and that is the honest answer rather than a missing one.
+    # This wired host_api's FakeWifi until 2026-08-30 -- the SIMULATOR's stand-in,
+    # whose whole job is to invent four access points ("Home WiFi", "Coffee
+    # Shop", "Neighbor 5G", "Library Guest") and a 192.168.1.42 so the desktop's
+    # WIFI panel can be developed with no radio. On a page SERVED BY A BOARD that
+    # is not a stand-in, it is a lie: the Zero is headless, so this panel is the
+    # only WIFI screen that board has, and it listed networks that do not exist
+    # and accepted a join that went nowhere. Reported from a real session.
+    #
+    # `None` is the shape every other absent capability uses here, and the shell
+    # already knows it -- settings_layer says NO WIFI SERVICE and stops. A page
+    # cannot reach a radio, and the day it can it will be through a bridge to the
+    # board's own service (as gpio_link and update_link are), not a fake.
     console.wire_workstation_core(
         ws, moy_carts, carts_root, _make_api,
-        host_api.make_wifi(moy_carts, carts_root),
+        None,
         make_audio=_make_audio, lua_runtime=lua_runtime, can_manage=True,
         pointer=console.Pointer(sysc.w, sysc.h), inp=inp)
     # AUTHORING IS ON, BOTH TIERS (owner call): the browser build is the whole
