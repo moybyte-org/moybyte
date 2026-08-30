@@ -50,6 +50,7 @@ class _FakeOta:
         self.manifest = manifest
         self.absent = absent
         self.error = None
+        self.to_slot = False        # set by begin_download; the Zero always asks
         self.boot_verdict = None
         self.confirmed = False
         self.dl_total = 0
@@ -92,8 +93,9 @@ class _FakeOta:
         self.checked_channel = channel
         return self.manifest
 
-    def begin_download(self, manifest):
+    def begin_download(self, manifest, to_slot=False):
         self.calls.append("begin_download")
+        self.to_slot = to_slot
         if self.error:
             raise ValueError(self.error)
         self.dl_total = int(manifest.get("size", 0) or 0)
@@ -107,7 +109,12 @@ class _FakeOta:
 
     def download_finish(self):
         self.calls.append("download_finish")
-        return None if self.error else "/moy/update/firmware.bin"
+        if self.error:
+            return None
+        return "<slot>" if self.to_slot else "/moy/update/firmware.bin"
+
+    def staged_in_slot(self):
+        return bool(self.to_slot)
 
     def begin(self, path):
         self.calls.append("begin")
@@ -271,8 +278,12 @@ def test_the_download_stops_and_waits_for_the_second_consent():
     leave the second confirm gating nothing, and the screen would be drawing an
     "A = INSTALL" prompt over a board already writing its app partition.
 
-    So the download stops. The image is on the filesystem, verified, and the
-    running slot is untouched until somebody asks again.
+    So the download stops. The image is verified and the RUNNING slot is
+    untouched until somebody asks again -- which is the invariant, and it did
+    not move when the bytes started streaming into the INACTIVE slot instead of
+    a file (2026-08-30). What the second consent gates went from "write the
+    bytes" to "point the bootloader at them", because writing an inactive slot
+    changes nothing a board runs and `set_boot` is what makes it the next boot.
     """
     ota = _FakeOta(MANIFEST)
     task = zero_host.ZeroUpdate(ota)
@@ -280,10 +291,11 @@ def test_the_download_stops_and_waits_for_the_second_consent():
     task.request("download")
     _drive(task)
     assert task.state == "ready"
-    assert task.staged == "/moy/update/firmware.bin"
-    assert task.status()["staged"] == "/moy/update/firmware.bin"
-    # The flash has NOT begun and cannot have: nothing touched the slot.
-    assert "begin" not in ota.calls and "install_step" not in ota.calls
+    assert task.staged == "<slot>"
+    assert task.status()["staged"] == "<slot>"
+    # The ACTIVATION has not happened and cannot have: nothing pointed the
+    # bootloader anywhere, which is the thing a reboot would act on.
+    assert "finish" not in ota.calls and "install_step" not in ota.calls
     # ...and the size the second confirm prints is the transfer that happened.
     assert task.status()["progress"]["total"] == MANIFEST["size"]
 
@@ -508,3 +520,42 @@ def test_the_update_route_does_not_shadow_the_store(host):
     assert host.handle_http("GET", "/updates?pin=1234", None) is None
     code, _ = _status(host.handle_http("GET", "/carts.json", None))
     assert code == 403, "the store's own gate still applies"
+
+
+def test_this_board_downloads_STRAIGHT_INTO_THE_SLOT():
+    """Not a preference on the Zero -- the difference between working and not.
+
+    Its whole filesystem is 2.38MB with ~180KB free and the image is 2.27MB, so
+    a staged copy could not fit on an EMPTY volume. The measured symptom was
+    `OSError 28` (ENOSPC) 184KB into the transfer, on the first OTA anyone ever
+    asked this board for. The inactive slot is 2.75MB and empty.
+    """
+    ota = _FakeOta(MANIFEST)
+    task = zero_host.ZeroUpdate(ota)
+    _to_offer(task)
+    task.request("download")
+    _drive(task)
+
+    assert ota.to_slot is True, (
+        "the download staged to a file -- on this board that is ENOSPC, not a "
+        "slower path")
+
+
+def test_an_image_already_in_the_slot_installs_without_a_second_pass():
+    """The bytes were written and verified as they arrived, so the install is
+    the set_boot and nothing else. Asking `begin()` for a sentinel that is not a
+    path would fail, and re-flashing what is already there would be a second
+    full write of the same image."""
+    ota = _FakeOta(MANIFEST)
+    task = zero_host.ZeroUpdate(ota)
+    _to_offer(task)
+    task.request("download")
+    _drive(task)
+    assert task.state == "ready", (task.state, ota.calls)
+
+    ota.calls[:] = []
+    task.request("install")
+    _drive(task)
+    assert "begin" not in ota.calls, (
+        "the install re-flashed an image already in the slot: %s" % (ota.calls,))
+    assert "finish" in ota.calls, ota.calls

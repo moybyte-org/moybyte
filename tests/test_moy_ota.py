@@ -1389,3 +1389,149 @@ def test_logging_can_never_break_an_update(board, capsys):
     board.mod._log("fine")
     board.mod._log("bad", _Explodes())
     assert "Moybyte OTA: fine" in capsys.readouterr().out
+
+
+# -- streaming straight into the slot ---------------------------------------
+#
+# The Zero could not update at all: its download staged to a FILE on a 2.38MB
+# filesystem with ~180KB free, for a 2.27MB image, and died with OSError 28
+# (ENOSPC) 184KB in. It could not have fit on an EMPTY volume. The inactive slot
+# is 2.75MB and empty, which is what it is for -- so the bytes go there as they
+# come off the wire. Half the flash writes on every other board too, since the
+# staged path writes every byte twice.
+
+
+class _Wire:
+    """A socket that hands the body over in the sizes a network actually uses --
+    never respecting a 4K page boundary, which is the whole reason there is a
+    buffer between the wire and the partition."""
+
+    def __init__(self, payload, sizes):
+        self.buf = payload
+        self.sizes = list(sizes)
+        self.pos = 0
+        self.closed = False
+
+    def read(self, n):
+        if self.pos >= len(self.buf):
+            return b""
+        take = self.sizes.pop(0) if self.sizes else n
+        take = min(take, n, len(self.buf) - self.pos)
+        out = self.buf[self.pos:self.pos + take]
+        self.pos += take
+        return out
+
+    def close(self):
+        self.closed = True
+
+
+def _slot_board(tmp_path, monkeypatch, payload, sizes=(1, 4095, 700, 9000, 33)):
+    """A board whose download goes to the SLOT, with `payload` on the wire."""
+    import hashlib
+
+    mod = _fresh()
+    esp = _Esp32()
+    _install_esp32(monkeypatch, esp)
+    d = tmp_path / "update"
+    d.mkdir(exist_ok=True)
+    u = mod.OtaUpdater(lambda fn: fn(), update_dir=str(d))
+    wire = _Wire(payload, sizes)
+    u._http_open = lambda url, hops=4: (wire, 200, len(payload), b"")
+    manifest = {"url": "https://x/f.bin", "size": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest()}
+    return mod, u, esp, manifest
+
+
+def _drain(u):
+    while u.download_step():
+        pass
+    return u.download_finish()
+
+
+def test_a_slot_download_reassembles_the_image_byte_for_byte(tmp_path, monkeypatch):
+    """Socket reads arrive in whatever size the network gives; partition writes
+    are 4K-aligned. The buffer between them is where an off-by-one silently
+    corrupts an image that then does not boot."""
+    import os as _os
+
+    payload = _os.urandom(4096 * 3 + 1234)      # three whole pages and a short tail
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+
+    u.begin_download(manifest, to_slot=True)
+    assert _drain(u) == mod.SLOT_STAGED, u.error
+
+    img = esp.other.image()
+    assert len(img) == 4096 * 4, "the tail must be written as a whole page"
+    assert img[:len(payload)] == payload, "the image is not what arrived"
+    assert set(img[len(payload):]) == {0xFF}, (
+        "the tail is padded with something other than erased flash")
+    # ...and NOTHING was staged on the filesystem, which is the entire point.
+    assert not list((tmp_path / "update").iterdir()), \
+        "a staging file was written after all -- on the Zero this is ENOSPC"
+
+
+def test_a_slot_download_needs_no_second_pass_to_install(tmp_path, monkeypatch):
+    """The bytes are already in the slot, so the install phase is the set_boot
+    and nothing else. `step()` must report 'no work' rather than trying to read
+    a file that was never opened."""
+    # A REAL app image, not random bytes: set_boot validates the header on a
+    # board and the flash double does too, which is the point of that double.
+    payload = app_image(4096 * 2)
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+    u.begin_download(manifest, to_slot=True)
+    assert _drain(u) == mod.SLOT_STAGED, u.error
+
+    assert u.staged_in_slot() is True
+    assert u.step() is False, "the install tried to flash an image already in place"
+    assert u.finish() is True, u.error
+    assert esp.other.booted is True
+
+
+def test_a_slot_download_that_fails_its_hash_cannot_be_activated(tmp_path, monkeypatch):
+    """The guard that matters. `finish()` activates whatever partition handle it
+    finds, and a download that failed verification has left a PARTIAL image in
+    the slot -- so a retry, or any stray finish(), would set_boot an image we
+    just proved was wrong. Rollback would catch it; a guard leaning on the last
+    line of defence is not a guard."""
+    payload = b"z" * 8192
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+    manifest["sha256"] = "00" * 32              # never going to match
+
+    u.begin_download(manifest, to_slot=True)
+    assert _drain(u) is None
+    assert "sha256" in (u.error or "")
+    assert u.staged_in_slot() is False
+    assert u.finish() is False, "a failed download stayed activatable"
+    assert esp.other.booted is False, "set_boot ran on an image that failed its hash"
+
+
+def test_an_image_too_big_for_the_slot_is_refused_before_the_transfer(tmp_path,
+                                                                     monkeypatch):
+    """Caught at begin, not discovered at the end of a transfer that could never
+    have fit -- and the socket is closed rather than left open."""
+    payload = b"q" * 4096
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+    esp.other.size = 1024
+    manifest["size"] = 999999
+
+    with pytest.raises(ValueError) as e:
+        u.begin_download(manifest, to_slot=True)
+    assert "slot" in str(e.value)
+    assert u._sock is None, "the socket was left open on the refusal path"
+
+
+def test_the_staged_file_path_still_works(tmp_path, monkeypatch):
+    """The other half of the seam. UPDATE FW installs a .bin a human put on a
+    card, and that path writes a file and flashes it in a second pass -- which
+    is what boards with room still do, and what must not have moved."""
+    import os as _os
+
+    payload = _os.urandom(5000)
+    mod, u, esp, manifest = _slot_board(tmp_path, monkeypatch, payload)
+
+    u.begin_download(manifest)                  # to_slot defaults False
+    got = _drain(u)
+    assert got and got.endswith("firmware.bin"), u.error
+    assert u.staged_in_slot() is False
+    with open(got, "rb") as f:
+        assert f.read() == payload

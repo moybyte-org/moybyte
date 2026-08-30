@@ -517,7 +517,12 @@ class ZeroUpdate:
             self.error = "nothing to install"
             return
         try:
-            self.ota.begin_download(self.manifest)
+            # STRAIGHT INTO THE SLOT on this board, and it is not a preference.
+            # The whole filesystem here is 2.38MB with ~180KB free and the image
+            # is 2.27MB: a staged copy could not fit on an EMPTY volume, and the
+            # symptom was OSError 28 (ENOSPC) 184KB in. The inactive slot is
+            # 2.75MB and empty, which is what it is for.
+            self.ota.begin_download(self.manifest, to_slot=True)
         except Exception as exc:         # noqa: BLE001 -- bad url / non-200
             self.state = "error"
             self.error = self.ota.error or str(exc)
@@ -535,11 +540,16 @@ class ZeroUpdate:
             self.error = self.ota.error or "download failed"
             print("ZERO ota: download failed --", self.error)
             return True
-        # STOP HERE. The flash is the SECOND act of consent and it has not been
-        # given yet: the image sits verified on the filesystem until an
+        # STOP HERE. The ACTIVATION is the second act of consent and it has not
+        # been given yet: the verified image sits in the INACTIVE slot until an
         # `install` request arrives, and the running slot is untouched until
         # then. This is where the browser's update screen draws its second
         # confirm, exactly as a board's does with an image found on a card.
+        #
+        # What the second consent gates moved with the streaming download, from
+        # "write the bytes" to "point the bootloader at them" -- which is the
+        # one that matters. Writing an inactive slot changes nothing a board
+        # runs; set_boot is what makes the new image the next one to boot.
         self.staged = path
         self.state = "ready"
         print("ZERO ota: downloaded and verified -- waiting for install")
@@ -550,6 +560,13 @@ class ZeroUpdate:
         if not path:
             self.state = "error"
             self.error = "nothing downloaded"
+            return
+        if self.ota.staged_in_slot():
+            # Already written and verified, page by page, as it came off the
+            # wire. Nothing to flash -- the whole install is the set_boot that
+            # _install_slice's finish() does, so go there with no work queued.
+            self.state = "installing"
+            print("ZERO ota: image already in the inactive slot -- activating")
             return
         try:
             total = self.ota.begin(path)

@@ -97,7 +97,12 @@ class _FakeOta:
         self.checked_channel = channel
         return self.manifest
 
-    def begin_download(self, manifest):
+    def begin_download(self, manifest, to_slot=False):
+        # `to_slot` streams into the inactive partition instead of a staging
+        # file (the Zero's whole filesystem is smaller than its own image). The
+        # BOARD chooses it; this double only has to accept it, since what these
+        # tests drive is the screen above the wire.
+        self.to_slot = to_slot
         if self.error:
             raise ValueError(self.error)
         self.dl_total = int(manifest.get("size") or 0)
@@ -110,7 +115,13 @@ class _FakeOta:
         return self.dl_done < self.dl_total
 
     def download_finish(self):
-        return None if self.error else "/moy/update/firmware.bin"
+        if self.error:
+            return None
+        return "<slot>" if getattr(self, "to_slot", False) \
+            else "/moy/update/firmware.bin"
+
+    def staged_in_slot(self):
+        return bool(getattr(self, "to_slot", False))
 
     def begin(self, path):
         self.total = 1000
@@ -340,9 +351,12 @@ def test_the_two_taps_gate_the_two_halves_of_the_boards_work(tmp_path):
     _frames(ws, link, n=20)
     assert ws.update_ui._upd_phase == "confirm"
     assert board.state == "ready"
-    # NOTHING has been flashed, and the screen is what is holding it back.
+    # NOTHING has been activated, and the screen is what is holding it back.
+    # `<slot>` rather than a path because this board streams into the inactive
+    # partition -- the bytes are down and verified, and the running slot is
+    # still what a reboot would come back on.
     assert "flash" not in ota.calls
-    assert ws.update_ui._upd_bin[0] == "/moy/update/firmware.bin"
+    assert ws.update_ui._upd_bin[0] == "<slot>"
     assert ws.update_ui._upd_bin[1] == MANIFEST["size"]
 
     # Frames keep painting while the kid decides. Still nothing flashed.
