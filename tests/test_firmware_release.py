@@ -364,3 +364,32 @@ def test_the_workflows_keep_the_branches_apart():
     # The public site follows master only -- a beta build must not republish it.
     assert "github.event.workflow_run.head_branch == 'master'" in pages
     assert "branches: [master]" in pages
+
+
+# -- the notes name every board, and name them in Markdown --------------------
+
+
+def test_the_release_notes_offer_a_cable_command_for_every_board():
+    """The block was hand-written until 2026-08-30 and had drifted exactly the
+    way a hand-written copy of a growing list does: it named the T-Deck and the
+    P4 while four boards were being published, so a Guition or a Zero owner was
+    told there was no cable command for their board. It is derived now, from
+    the same BOARDS table the row list above it comes from."""
+    block = publish.cable_block(publish.boards_table())
+    for board in build.BOARDS:
+        assert board["cli"] in block, board["id"]
+    assert block.count("make firmware-flash") == len(build.BOARDS)
+
+
+def test_board_names_reach_the_notes_as_markdown_not_html():
+    """site/build.py's labels are HTML source, because their home is a web page.
+    Release notes render as Markdown, where `3.5&Prime;` is just those nine
+    characters -- which is how every release before 2026-08-30 named the
+    Guition."""
+    for board in build.BOARDS:
+        assert "&" not in publish.label(board), (
+            "%s reaches the notes carrying an HTML entity" % board["id"])
+    # ...and the unescaping is real, not a table that happens to be plain: at
+    # least one label must actually contain an entity, or this proves nothing.
+    assert any("&" in b["label"] for b in build.BOARDS), (
+        "no label carries an entity any more -- this check has stopped biting")

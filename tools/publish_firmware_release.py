@@ -42,6 +42,7 @@ delete the other board's image.
 
 import argparse
 import datetime
+import html
 import importlib.util
 import hashlib
 import json
@@ -120,10 +121,7 @@ built from.
 
 Flash it from the site, or over a cable:
 
-```
-make firmware-flash-lilygo-micropython-full PORT=/dev/ttyACM0   # T-Deck
-make firmware-flash-p4 PORT=/dev/ttyACM0                        # ESP32-P4
-```
+{cable}
 """
 
 NOTES_OTA = """
@@ -136,6 +134,30 @@ payload is an app-partition image, so the T-Deck's is Xtensa and the P4's is
 RISC-V, and the board is inside the signature.
 
 """
+
+
+def label(board):
+    """A board's name as MARKDOWN. site/build.py's labels are HTML source --
+    `3.5&Prime;`, `&mdash;` -- because their home is a web page, and release
+    notes are rendered as Markdown, where an entity is just the literal text.
+    Every release before 2026-08-30 named the Guition `3.5&Prime;`."""
+    return html.unescape(board["label"])
+
+
+def cable_block(boards):
+    """The `make firmware-flash-*` lines, DERIVED from the same BOARDS table the
+    row list above comes from.
+
+    Hand-written until 2026-08-30, and it had drifted the way a hand-written
+    copy of a growing list always does: it named the T-Deck and the P4 while
+    four boards were being published, so every release told a Guition or a Zero
+    owner there was no cable command for their board. The `cli` field is
+    already the browser flasher's counterpart -- there was never a second list
+    to keep, only a second COPY.
+    """
+    width = max(len(b["cli"]) for b in boards)
+    lines = ["%-*s  # %s" % (width, b["cli"], label(b)) for b in boards]
+    return "```\n" + "\n".join(lines) + "\n```"
 
 
 def boards_table():
@@ -359,16 +381,17 @@ def notes(tag, channel, boards, workdir, site, manifests=None):
     for board in boards:
         src = existing_source(tag, board["id"], workdir)
         if not src:
-            rows.append("| %s | — | — | not published yet | — |" % board["label"])
+            rows.append("| %s | — | — | not published yet | — |" % label(board))
             continue
         commit = src.get("commit", "")
         rows.append("| %s | `%s-%s` | `0x%x` | %s | %s |"
-                    % (board["label"], board["id"], src.get("image", "?"),
+                    % (label(board), board["id"], src.get("image", "?"),
                        board["offset"], src.get("built", "?")[:10],
                        ("`%s`" % commit[:7]) if commit else "—"))
     head = NOTES_HEAD.format(channel="beta" if channel == "unstable" else channel,
                              branch=spec["branch"], blurb=spec["blurb"], site=site)
-    body = head + "\n".join(rows) + "\n" + NOTES_TAIL
+    body = (head + "\n".join(rows) + "\n"
+            + NOTES_TAIL.format(cable=cable_block(boards)))
     if manifests:
         body += NOTES_OTA
         for board in sorted(manifests):
