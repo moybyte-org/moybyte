@@ -203,16 +203,19 @@ this one paints none. See zero_host.serve()."""
 # purpose (see the partition CSV), and erased FIRST so a board that has taken
 # an OTA boots the slot the cable flash just wrote rather than the stale one.
 #
-# No `before`: this board's TinyUSB CDC has not been seen to need the T-Deck's
-# usb_reset workaround. The hazard here is the opposite one and is a HARDWARE
-# FACT, recorded in README: an esptool DTR dance against the RUNNING CDC has
-# wedged the USB device. The safe way into the loader is
-# `machine.bootloader()` from a live MicroPython.
+# No `before`: the default reset drives this board into the loader now that it
+# is on USB-Serial/JTAG (2026-08-30), the same way it does the console S3s.
+# Until then it could not be driven there AT ALL -- `machine.bootloader()` is an
+# endless loop on this chip in upstream MicroPython, esptool's reset times out
+# over the OTG interface, the 1200-baud touch is unimplemented, and the attempt
+# WEDGED the CDC. Every flash needed a human holding BOOT. mpconfigboard.h
+# carries that evidence; the BOOT hold remains the recovery, not the routine.
 #
-# `after` is the way OUT, and it is why this key exists at all: hard_reset --
-# every other board's answer, and board_flash.py's hardcoded one until
-# 2026-08-29 -- does nothing here, so a cable flash used to leave the board
-# sitting in the loader, which reads exactly like an image that did not take.
+# `after` stays watchdog_reset, which is PROVEN on this board, rather than
+# following the peripheral to the console boards' hard_reset. hard_reset did
+# nothing here on CDC -- a cable flash left the board sitting in the loader,
+# reading exactly like an image that did not take -- and one change at a time is
+# how that was found out.
 image          = "dist/zero/moybyte_zero.bin"
 offset         = "0x0"
 after          = "watchdog_reset"
@@ -221,16 +224,31 @@ otadata_offset = "0x1d000"
 otadata_size   = "0x2000"
 
 [serial]
-# Stock MicroPython on the S3's native USB is TinyUSB CDC (303a:4001,
-# "Espressif Device") -- NOT the USB-Serial/JTAG id the console S3 boards
-# show, and the Moybyte image KEEPS that arrangement rather than adopting the
-# #201 promotion (mpconfigboard.h carries the reasoning). DTR must be asserted
-# or the REPL is silent (the memory's oldest Zero fact, still true); mpremote
-# handles it. Resets are fine (nothing on this board holds state a reset
-# loses), so no attach_only.
+# USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board
+# shows 303a:1001 and NOT the TinyUSB CDC 303a:4001 it used to. mpconfigboard.h
+# carries why: on CDC there was no software path into the ROM loader at all, so
+# every flash needed a human holding BOOT.
+#
+# The line state at open flipped WITH the peripheral, and this is the half that
+# bites. On CDC, DTR had to be ASSERTED or the REPL was silent. On
+# USB-Serial/JTAG the lines are read the other way: opening with both LOW is a
+# CHIP RESET, and both HIGH (pyserial's default) attaches cleanly. Same two
+# values, opposite reasons -- which is why they are data here and not a habit.
+#
+# Resets remain harmless on this board (nothing holds state a reset loses), so
+# still no attach_only -- and unlike the console boards there is no dev channel
+# to answer an identity probe, so tools/device_port.py tells it apart by its USB
+# serial rather than by asking.
 dtr  = true
 rts  = true
-usb  = "303a:4001"
+usb  = "303a:1001"
+# THE TIEBREAK, and the one cost of the promotion. Three boards now show
+# 303a:1001, and `find_port` tells same-id boards apart by ASKING them over the
+# dev channel -- which this one does not have. Its USB serial number is stable
+# and `udevadm` prints it, so tools/device_port.py matches on this instead of a
+# round trip. Board-specific by nature: read it off YOUR board with
+#   udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT
+serial_number = "b8f862f8973c0000"
 chunk = 768
 attach_only = false
 

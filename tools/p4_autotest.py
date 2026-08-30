@@ -80,8 +80,11 @@ def declared_serial(board_dir=P4_BOARD_DIR):
 
     Missing keys fall back to the P4's, because a driver that refuses to start
     is worse than one on a default."""
+    # `serial_number` is the tiebreak for a board that shares a USB id with
+    # others and cannot be ASKED which it is -- the headless Zero, since it took
+    # the USB-Serial/JTAG promotion and joined the console boards on 303a:1001.
     out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None,
-           "usb": None}
+           "usb": None, "serial_number": None}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import board_config

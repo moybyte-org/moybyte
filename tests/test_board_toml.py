@@ -423,12 +423,19 @@ def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
     -- attach, never pulse. The P4's CH343 is external, so an explicit reset is
     safe and dtr/rts LOW at open never glitches its auto-reset circuit.
 
-    The Zero is the THIRD combination and not a mistake: it is an S3 whose image
-    keeps TinyUSB CDC rather than the #201 USB-Serial/JTAG promotion (its
-    mpconfigboard.h argues that), so DTR must be asserted at open -- the CDC
-    rule, and the memory's oldest Zero fact -- while a reset is perfectly safe
-    because nothing on that board holds state a reset loses. Lines-asserted is
-    therefore NOT the tell for attach_only; the part behind them is.
+    The Zero is the THIRD combination and not a mistake. It took the
+    USB-Serial/JTAG promotion on 2026-08-30 (its mpconfigboard.h carries the
+    evidence: on TinyUSB CDC there was no software path into the ROM loader at
+    all), so it opens lines-HIGH like the console S3s -- but a reset is
+    perfectly safe on it, because nothing there holds state a reset loses, so it
+    is NOT attach_only. Lines-asserted is therefore not the tell for
+    attach_only; the part behind them is.
+
+    Worth keeping about the switch: the two line VALUES did not move, and their
+    reason inverted. On CDC, DTR had to be asserted or the REPL was silent. On
+    USB-Serial/JTAG, opening with both LOW is a chip reset and both HIGH
+    attaches cleanly. Same `true`, opposite fact -- which is the argument for
+    these being data with a comment rather than a habit.
     """
     for name in ("tdeck", "guition-s3"):
         ser = board_config.load(str(_DEVICE_BOARDS[name]))["serial"]
@@ -440,9 +447,15 @@ def test_the_soc_usb_boards_are_attach_only_and_the_external_uart_is_not():
     zero = board_config.load(str(ZERO))["serial"]
     assert zero["dtr"] is True and zero["rts"] is True
     assert zero["attach_only"] is False
-    assert zero["usb"] == "303a:4001", (
-        "the Zero's USB id is TinyUSB CDC's; 303a:1001 would mean its image "
-        "switched to USB-Serial/JTAG, which changes the DTR rule with it")
+    assert zero["usb"] == "303a:1001", (
+        "the Zero shows the S3's USB-Serial/JTAG id since 2026-08-30; 303a:4001 "
+        "would mean its image went back to TinyUSB CDC, which takes the "
+        "software route into the ROM loader with it")
+    # ...and it now SHARES that id with the two console boards, which is the one
+    # cost of the switch: `find_port` can no longer tell them apart by id alone,
+    # and this board has no dev channel to answer an identity probe.
+    assert zero["usb"] == board_config.load(
+        str(_DEVICE_BOARDS["guition-s3"]))["serial"]["usb"]
 
 
 def test_the_p4_chunk_stays_under_its_uart_ring():

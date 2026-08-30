@@ -20,6 +20,7 @@ was not plugged in.
 """
 
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,6 +43,36 @@ BOARDS = [
 ROM_LOADER_USB = "303a:1001"
 
 
+# A board's USB SERIAL number, when `board.toml` names one. The Zero needs this:
+# since it took the USB-Serial/JTAG promotion it shares 303a:1001 with the two
+# console boards, and `find_port` tells same-id boards apart by ASKING them --
+# over the dev channel, which a headless board does not have. Its serial number
+# is stable, printed by `udevadm`, and settles it without a round trip.
+def _serial_of(port):
+    try:
+        out = subprocess.run(["udevadm", "info", "-q", "property", "-n", port],
+                             capture_output=True, text=True, timeout=5).stdout
+    except Exception:                       # noqa: BLE001 -- no udevadm, no hint
+        return None
+    for line in out.splitlines():
+        if line.startswith("ID_SERIAL_SHORT="):
+            return line.split("=", 1)[1].strip()
+    return None
+
+
+def _resolve(board_dir, ports):
+    """`find_port`, with a serial-number answer for a board that declares one."""
+    want = pa.declared_serial(board_dir).get("serial_number")
+    if want:
+        hits = [p for p in ports if _serial_of(p) == want]
+        if len(hits) == 1:
+            return hits[0]
+        raise RuntimeError(
+            "no port has usb serial %s (this board is identified by serial "
+            "number, not by asking -- it has no dev channel)" % want)
+    return pa.find_port(board_dir)
+
+
 def main(argv):
     ports = pa.serial_ports()
     if not ports:
@@ -59,7 +90,7 @@ def main(argv):
         board_dir = os.path.join(ROOT, rel)
         name = os.path.basename(rel)
         try:
-            port = pa.find_port(board_dir)
+            port = _resolve(board_dir, ports)
         except Exception as exc:                # noqa: BLE001 -- the reason IS the answer
             unresolved.append((name, target, str(exc).split(" (saw:")[0]))
             continue

@@ -91,3 +91,14 @@ CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 #
 # REPR_C UNBOXED FLOATS (#66). A float-boxing lever for cart frame loops. This
 # board runs no carts; build.sh declines it in writing.
+
+# THE USB CONSOLE (2026-08-30). Part 2 of the #201 three-part arrangement, now
+# this board's too; parts 1 and 3 are MICROPY_HW_ENABLE_USBDEV / UART_REPL in
+# mpconfigboard.h, whose block carries the evidence for the switch. Promoting
+# USB-Serial/JTAG to the PRIMARY console is what gives esptool a reset it can
+# drive -- on TinyUSB CDC there is no software path into the ROM loader at all
+# and every flash needed a human holding BOOT.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

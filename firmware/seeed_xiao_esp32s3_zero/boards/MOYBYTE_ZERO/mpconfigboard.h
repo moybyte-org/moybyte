@@ -6,26 +6,49 @@
 #endif
 #define MICROPY_HW_MCU_NAME                 "ESP32S3"
 
-// USB: TinyUSB CDC, which is the port's own S3 default and is DELIBERATELY NOT
-// the two console S3 boards' arrangement.
+// USB: the S3's USB-Serial/JTAG peripheral, the same arrangement the three
+// console boards use. This board ran TinyUSB CDC from 2026-08-25 and the A/B
+// its old note asked for was settled on 2026-08-30, by the board.
 //
-// Those boards set MICROPY_HW_ENABLE_USBDEV (0) and promote USB-Serial/JTAG to
-// the primary IDF console -- the #201 three-part fix, whose whole subject is a
-// board that never returns to the REPL: the desktop frame loop owns the CPU
-// forever, so stdin has to work without one. This board's `serve()` loop is
-// interruptible and IS interrupted, every time anyone provisions it
-// (`mpremote exec` enters the raw REPL through this exact CDC path, which is
-// how provision.sh quiets the filesystem before it copies). So the condition
-// that made the promotion necessary does not hold here, and the arrangement
-// that is PROVEN on this board -- stock ESP32_GENERIC_S3-SPIRAM_OCT, since
-// 2026-08-25 -- is the one it keeps.
+// WHAT THE OLD REASONING GOT RIGHT AND WHAT IT MISSED. It argued the #201
+// promotion was not NECESSARY here -- true: that fix is for a board whose
+// desktop frame loop owns the CPU forever and never returns to a REPL, and
+// this board's `serve()` loop is interruptible. But "not necessary" is not
+// "free", and the price of staying on CDC was never measured. It is:
 //
-// Two facts hang off this and are recorded in board.toml's [serial]: the USB
-// id stays 303a:4001 ("Espressif Device", TinyUSB) rather than the S3
-// USB-Serial/JTAG's 303a:1001, and DTR MUST be asserted at open or the REPL is
-// silent. Flipping to USB-Serial/JTAG would change both, and is an A/B for
-// somebody holding the board -- not a paper decision, and not one to make on
-// the only interface a headless board has.
+//   THERE IS NO SOFTWARE PATH INTO THE ROM LOADER. Every flash needs a human
+//   holding BOOT while the board is power-cycled, on the one board in the
+//   roster with no screen. Three things were tried on the hardware:
+//     * `machine.bootloader()` -- upstream MicroPython implements it fully only
+//       for ARDUINO_NANO_ESP32; elsewhere it enters an endless loop, which is
+//       exactly what was observed (unresponsive, never re-enumerates, three
+//       times in one session).
+//     * `esptool --before default_reset` against a HEALTHY board -- a pySerial
+//       write timeout. Espressif's own troubleshooting says the reset
+//       activation works over UART, not over the OTG/USB interface.
+//     * the 1200-baud touch (the Arduino/TinyUSB convention) -- not implemented
+//       by MicroPython's CDC; the board ignored it.
+//   And an esptool DTR dance against a running CDC WEDGES the USB device, so
+//   the failed attempt costs the power cycle it was trying to avoid.
+//
+// The promotion buys the thing the other three S3 boards already have: esptool
+// resets them into the loader and back out with nothing to hold. Two facts move
+// with it and are recorded in board.toml's [serial] -- the USB id becomes
+// 303a:1001 (USB-Serial/JTAG) rather than 303a:4001 ("Espressif Device",
+// TinyUSB), and opening with DTR/RTS LOW is a CHIP RESET on this peripheral, so
+// a raw client opens HIGH instead of asserting DTR to wake a silent REPL.
+//
+// The REPL still works, which is the half the old note was protecting:
+// `serve()` is interruptible either way, and mpremote reaches it over
+// USB-Serial/JTAG exactly as it does over CDC. The recovery if any of this is
+// wrong is unchanged -- hold BOOT while powering on -- so the downside is the
+// status quo.
+#define MICROPY_HW_ENABLE_USBDEV            (0)
+
+// UART REPL OFF, same reason as the console boards: it shares stdin_ringbuf
+// with the USB path, and U0RXD is a floating pin whose noise reads as typed
+// input exactly while the USB path is being debugged.
+#define MICROPY_HW_ENABLE_UART_REPL         (0)
 
 // NO BLUETOOTH IN THIS IMAGE, and this line is REQUIRED rather than tidy.
 // mpconfigport.h defaults MICROPY_PY_BLUETOOTH to 1 on every esp32 target, and

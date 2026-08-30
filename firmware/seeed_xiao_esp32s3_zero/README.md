@@ -593,7 +593,38 @@ new image's host did not come up.
   reasoning is in `boards/MOYBYTE_ZERO/mpconfigboard.h`; flipping it would
   change both the USB id and the DTR rule, and is an A/B for somebody holding
   the board.
-- **Software entry into the loader is NOT reliable, and the failure wedges USB**
+- **Flashing needs no button dance any more** (2026-08-30). This board took the
+  USB-Serial/JTAG promotion the three console boards use, so
+  `make firmware-flash-zero PORT=…` resets it into the loader and back out with
+  nothing to hold. `make device-port` prints which port it is.
+
+  Everything below about the BOOT hold is what that replaced, and is kept
+  because the BOOT hold is still the RECOVERY. Three ways in were tried on the
+  hardware and all three failed, which is what settled the switch:
+  - **`machine.bootloader()`** — upstream MicroPython implements it fully only
+    for `ARDUINO_NANO_ESP32`; on other boards it enters an endless loop. That is
+    exactly what was seen: unresponsive, never re-enumerating, three times.
+  - **`esptool --before default_reset` against a HEALTHY board** — a pySerial
+    write timeout. Espressif's own troubleshooting says the reset activation
+    works over UART, not over the OTG/USB interface.
+  - **the 1200-baud touch** (the Arduino/TinyUSB convention) — not implemented
+    by MicroPython's CDC; the board ignored it entirely.
+
+  And the failed attempt COST the power cycle it was trying to avoid: an esptool
+  DTR dance against a running CDC wedges the USB device.
+
+- **The DTR rule inverted with the peripheral, and the value did not.** On CDC,
+  DTR had to be asserted or the REPL was silent. On USB-Serial/JTAG, opening
+  with both lines LOW is a chip reset and both HIGH attaches cleanly. Still
+  `dtr = true, rts = true` in `board.toml`, for the opposite reason.
+
+- **It now shares `303a:1001` with the two console S3 boards**, and unlike them
+  it has no dev channel to answer "which board are you". `board.toml` names its
+  USB `serial_number` and `tools/device_port.py` matches on that. Read yours
+  with `udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT` if you
+  are working with a different unit.
+
+- **(Historical) Software entry into the loader is NOT reliable, and the failure wedges USB**
   (2026-08-30, THREE times in one session). `mpremote exec "import machine;
   machine.bootloader()"` succeeded once, on a board that had just been
   power-cycled with BOOT held, and failed every time after — including on the
