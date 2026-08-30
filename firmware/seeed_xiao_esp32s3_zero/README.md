@@ -523,8 +523,10 @@ stays on the AP so it can be retried. Restore the real credentials afterwards
 (`mpremote connect /dev/ttyACM0 fs cp wifi.json.bak :/moy/wifi.json`) or run
 `./provision.sh`.
 
-**4. The LED's polarity.** It is documented active-low from the Seeed
-schematic and nobody has looked. With the board serving and its pin known:
+**4. The LED's polarity.** ANSWERED 2026-08-30: it is **active-low**, confirmed
+by watching the board rather than by reading the schematic. Kept here because it
+is the check to repeat on a board that behaves oddly. With the board serving and
+its pin known:
 
 ```bash
 curl -s -X POST http://<ip>/gpio \
@@ -534,14 +536,14 @@ curl -s -X POST http://<ip>/gpio \
 
 *Pass:* the on-board user LED **lights** on `v:0` and goes out on `v:1` —
 that is active-low, and it means a cart writing 1 to "turn it on" turns it off.
-*Fail:* the opposite, in which case the schematic reading is wrong and
-`zero_gpio.PINS`' note about pin 21 needs correcting. Either way, write the
-answer down here. Note `pin_write(21, 0)` then `pin_read(21)` answers 0 and
-leaves the LED as it is — a read never reconfigures a pin.
+*Fail:* the opposite, in which case this board differs from the one this was
+measured on and `zero_gpio.PINS`' note about pin 21 needs correcting. Note
+`pin_write(21, 0)` then `pin_read(21)` answers 0 and leaves the LED as it is —
+a read never reconfigures a pin.
 
-**5. A cart in a browser drives a pin.** Open the paired url on a laptop,
-write a cart calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer, run
-it. *Pass:* the LED blinks in step with the cart, and the network tab shows
+**5. A cart in a browser drives a pin.** `Pin Light` ships in the roster for
+exactly this — open the paired url, open it from the launcher, tap the button.
+(Or write your own calling `pin_write(21, 0)` / `pin_write(21, 1)` on a timer.) *Pass:* the LED blinks in step with the cart, and the network tab shows
 `POST /gpio` batches carrying the pin. *Fail:* 403 `{"error":"pin"}` → the page
 was opened without `?pin=`; batches leaving with no LED → step 4's polarity;
 no batches at all → `gpio_link` or the worker's pump, which is the half that
@@ -580,7 +582,20 @@ new image's host did not come up.
   reasoning is in `boards/MOYBYTE_ZERO/mpconfigboard.h`; flipping it would
   change both the USB id and the DTR rule, and is an A/B for somebody holding
   the board.
-- **Getting OUT of the ROM loader needs no replug after all** (2026-08-25):
+- **Software entry into the loader is NOT reliable, and the failure wedges USB**
+  (2026-08-30). `mpremote exec "import machine; machine.bootloader()"` worked
+  once and, on a second attempt in the same session, left the board answering
+  neither HTTP nor the REPL, with esptool getting a pySerial **write timeout**
+  on every `--before` mode. Nothing software-side recovers it: a `USBDEVFS_RESET`
+  ioctl needs root and the CDC endpoint is already gone. **Hold BOOT while
+  power-cycling** — that is the recovery, and on an unattended board it is the
+  reason to prefer it as the way IN too.
+- **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
+  interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
+  nothing on the network and looks dead while being perfectly healthy. Follow
+  any `mpremote` with `mpremote connect <port> reset`. This is how a
+  "moybyte-zero.local refused to connect" was self-inflicted twice.
+- **Getting OUT of the ROM loader needs no replug** (2026-08-25):
   `esptool --after watchdog_reset` exits download mode cleanly on this board.
   The old note ("only a physical replug exits ROM mode") predates it — that
   was `hard_reset`, which indeed does nothing here. Prefer

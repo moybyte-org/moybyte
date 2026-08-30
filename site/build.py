@@ -343,7 +343,7 @@ TARGETS = [
 # Being straight about the state is the point of this section. Update it when
 # one of these lands -- a stale honesty list is worse than none.
 ROUGH = [
-    "All three boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
+    "All four boards are off-the-shelf dev boards. Bespoke hardware is roadmap, not shipped.",
     "Per-cart frame rates, the frame-budget model and every lever &mdash; including "
     "the ones built, measured and reverted &mdash; are tracked in public issues, "
     "not claimed here.",

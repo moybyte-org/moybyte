@@ -524,10 +524,19 @@ def test_the_native_module_serves_the_bytes_it_baked():
         return
     assets, _ = gwb.collect(str(ROOT / "firmware" / "web_runner" / "dist"))
     baked = {a[0]: (a[2], a[3][:16]) for a in assets}
-    assert sum(v[0] for v in baked.values()) == total
+    # THE BINARY IS CACHED AND THE BUNDLE IS NOT. `require_unix_mp` returns
+    # whatever `make unix-micropython` last built and never rebuilds it, so
+    # rebuilding the web bundle alone leaves a binary carrying the PREVIOUS
+    # blob -- and the bare size mismatch that produces reads like a generator
+    # bug rather than a stale artifact, which is an afternoon lost. Say it.
+    stale = ("this binary was built against a DIFFERENT bundle than "
+             "firmware/web_runner/dist holds now -- re-run `make "
+             "unix-micropython` after building the bundle. (If they were "
+             "built together, the generator really is dropping bytes.)")
+    assert sum(v[0] for v in baked.values()) == total, stale
     for line in lines[1:]:
         name, size, sha = line.split()
-        assert baked[name] == (int(size), sha), name
+        assert baked[name] == (int(size), sha), "%s: %s" % (name, stale)
 
 
 def test_the_native_module_refuses_a_write_to_flash():

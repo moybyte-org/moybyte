@@ -91,7 +91,7 @@ jobs:
             dir: firmware/seeed_xiao_esp32s3_zero
             make_target: firmware-build-zero
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
-    # branch build does all three boards in the matrix; a dispatch honours the
+    # branch build does every board in the matrix; a dispatch honours the
     # choice.
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
