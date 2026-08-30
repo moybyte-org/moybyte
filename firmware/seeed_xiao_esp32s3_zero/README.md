@@ -594,13 +594,19 @@ new image's host did not come up.
   change both the USB id and the DTR rule, and is an A/B for somebody holding
   the board.
 - **Software entry into the loader is NOT reliable, and the failure wedges USB**
-  (2026-08-30). `mpremote exec "import machine; machine.bootloader()"` worked
-  once and, on a second attempt in the same session, left the board answering
+  (2026-08-30, REPRODUCED twice in one session). `mpremote exec "import machine;
+  machine.bootloader()"` works on a board that has just been power-cycled and
+  fails on the *second* attempt in the same session, leaving the board answering
   neither HTTP nor the REPL, with esptool getting a pySerial **write timeout**
   on every `--before` mode. Nothing software-side recovers it: a `USBDEVFS_RESET`
   ioctl needs root and the CDC endpoint is already gone. **Hold BOOT while
-  power-cycling** — that is the recovery, and on an unattended board it is the
-  reason to prefer it as the way IN too.
+  power-cycling** — that is the recovery, and because the failure is repeatable
+  it is also the way to get IN when a flash matters.
+  - One consequence worth planning around: an mpremote command leaves the
+    console STOPPED (below), so a wedge after one leaves the board not running.
+    That is the safe side to fail on if you were about to reflash — anything you
+    changed in the store stays changed, and the old image is not running to
+    undo it — but it means the board is off the network until it is power-cycled.
 - **`mpremote` of any kind STOPS the console.** `exec`, `fs cat`, `fs cp` all
   interrupt `main.py`, which kills `zero_host.serve()` — the board then answers
   nothing on the network and looks dead while being perfectly healthy. Follow
