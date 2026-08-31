@@ -116,6 +116,47 @@ SHIM_GAPS = {
     "fset": (MISSING, "fset() writes a sprite flag -- the port bakes __gff__ "
                       "in as a read-only table, so fget() works and fset() "
                       "does not; keep changing flags in your own table"),
+    "peek2": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
+                       "memory in 2- and 4-byte words -- no equivalent "
+                       "by design; rewrite that part with ordinary "
+                       "variables and tables"),
+    "peek4": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
+                       "memory in 2- and 4-byte words -- no equivalent "
+                       "by design; rewrite that part with ordinary "
+                       "variables and tables"),
+    "poke2": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
+                       "memory in 2- and 4-byte words -- no equivalent "
+                       "by design; rewrite that part with ordinary "
+                       "variables and tables"),
+    "poke4": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
+                       "memory in 2- and 4-byte words -- no equivalent "
+                       "by design; rewrite that part with ordinary "
+                       "variables and tables"),
+    "serial": (MISSING, "serial() streams bytes to a p8 hardware port -- "
+                        "no equivalent; there is nothing on the other end"),
+    # -- restarting, stopping and loading a cart --------------------------
+    # run() IS shimmed (it re-runs _init), so it is not here. The rest ask
+    # the CONSOLE to do something, and this console's answer is the launcher.
+    "reboot": (MISSING, "reboot()/load() restart the machine or swap the cart "
+                        "-- the launcher does that here; from inside a cart, "
+                        "reset your own state instead"),
+    "load": (MISSING, "reboot()/load() restart the machine or swap the cart "
+                      "-- the launcher does that here; from inside a cart, "
+                      "reset your own state instead"),
+    "stop": (MISSING, "stop() drops to PICO-8's command line -- there is no "
+                      "command line here; return from _update() instead"),
+    "holdframe": (MISSING, "holdframe() pairs with flip() to hold a frame -- "
+                           "the console calls _draw() for you, so there is "
+                           "no frame to hold"),
+    # -- the developer's console, which a kid's console does not have ------
+    "info": (MISSING, "info() prints cart stats to PICO-8's console -- no "
+                      "console here; print() draws on the screen instead"),
+    "trace": (MISSING, "trace() returns a Lua stack traceback for printh() -- "
+                       "no equivalent; the cart error screen shows the line"),
+    "yield": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                       "PICO-8's coroutines -- the console's Lua does not "
+                       "open the coroutine library, so rewrite that part as "
+                       "a state machine driven from _update()"),
     "stat": (MISSING, "stat() reads machine counters (time, memory, the mouse) "
                       "-- no equivalent; the ones with a home are time() and "
                       "the touch()/key() verbs"),
@@ -281,6 +322,24 @@ def write_cart(sections, out_dir, title):
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))
+    custom = p8_import.custom_instrument_waves(sections.get("sfx", []))
+    used = set()
+    for line in sections.get("sfx", []):
+        body = "".join(line.strip().lower().split())[8:]
+        for i in range(32):
+            chunk = body[i * 5:i * 5 + 5]
+            if len(chunk) == 5 and chunk[3] in "1234567" \
+                    and chunk[2] in "89abcdef":
+                used.add(int(chunk[2], 16))
+    if used & set(custom):
+        # Not a verb, so the gap table cannot carry it -- and it is a
+        # SUBSTITUTION, which is the kind of gap that says nothing and just
+        # sounds wrong. One cart played 32 notes of its music as static.
+        summary["lossy"].append(
+            "%d custom instrument%s (a p8 sound slot used AS an instrument) "
+            "-- the port has one wave per note, so each folds onto the "
+            "builtin wave that slot mostly plays"
+            % (len(used & set(custom)), "" if len(used & set(custom)) == 1 else "s"))
     if "sprites.moygfx" in files:
         summary["imported"].append(
             "sprites.moygfx (from __gfx__, palette is identical)")
@@ -337,6 +396,8 @@ def report_lines(summary):
     if n_sfx or n_music:
         out.append("sound: %d sfx, %d music track%s"
                    % (n_sfx, n_music, "" if n_music == 1 else "s"))
+    for item in summary.get("lossy", ()):
+        out.append("approximated: " + item)
     for item in summary.get("differs", ()):
         out.append("works differently: " + item)
     for item in summary.get("unsupported", ()):

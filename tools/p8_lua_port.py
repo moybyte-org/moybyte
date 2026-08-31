@@ -1094,6 +1094,15 @@ do
     return v
   end
   unpack = table.unpack
+  function pack(...) return {n = select("#", ...), ...} end
+  -- p8's run() RESTARTS the cart. There is no reload verb here, so the
+  -- closest honest thing is the cart's own _init again -- which is what a
+  -- game-over `run()` is reaching for. It does NOT reset globals the way a
+  -- real restart does, and unlike p8's it RETURNS, so the rest of the caller
+  -- still runs. Reported as approximated, not silently substituted.
+  function run()
+    if p8_init then p8_init() end
+  end
   function band(a, b) return flr(a) & flr(b) end
   function bor(a, b) return flr(a) | flr(b) end
   function bxor(a, b) return flr(a) ~ flr(b) end
@@ -1280,7 +1289,7 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "add del all foreach count sub tostr sgn mid rnd mget fget map "
           # 2026-08-30: the gaps that were only ever a naming difference.
           "t time chr ord tonum split mset sspr "
-          "oval ovalfill ceil srand deli unpack "
+          "oval ovalfill ceil srand deli unpack pack run "
           "band bor bxor bnot shl shr rotl rotr").split()
 
 
@@ -1445,9 +1454,17 @@ def _mkdirs(path):
 def _write(out_dir, name, text):
     # `encoding=` is load-bearing on CPython (a non-UTF-8 locale would mangle an
     # accented title) and simply ignored by MicroPython's `open`.
+    #
+    # `text` may be a LIST of pieces, and on the small tiers that is the point:
+    # the map is 16KB, and joining it into one string before writing needs that
+    # 16KB twice at once. MicroPython ran out of heap on exactly that join.
     f = open(out_dir + "/" + name, "w", encoding="utf-8")
     try:
-        f.write(text)
+        if isinstance(text, list):
+            for piece in text:
+                f.write(piece)
+        else:
+            f.write(text)
     finally:
         f.close()
 
@@ -1495,7 +1512,8 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
                 v = int(r[i:i + 2], 16)
                 cells.append("%02x" % (0 if v == 255 else (v + 1) & 0xFF if v else 0))
             out_rows.append("".join(cells))
-        _write(out_dir, "map.moymap", "128 64\n" + "\n".join(out_rows) + "\n")
+        out_rows.append("")
+        _write(out_dir, "map.moymap", ["128 64\n", "\n".join(out_rows)])
         written.append("map.moymap")
 
     kgfx = gfx_to_kgfx(sections.get("gfx", []))

@@ -178,9 +178,14 @@ def gfx_to_kgfx(gfx_lines):
 #     key ([pitch, wave, 0]) -- PICO-8 rests do, and a following slide
 #     (eff 1) glides from that key.
 #   * WAVE: all 8 builtin instruments map 1:1 (table below -- the two consoles
-#     number them differently). The 8 CUSTOM instruments (waveform 8..15,
-#     defined in __sfx__ slots 0..7) are still not modelled; we fold them onto
-#     the builtin in the low 3 bits (w & 7).
+#     number them differently). The 8 CUSTOM instruments (waveform 8..15) are
+#     an SFX slot 0..7 used AS an instrument, which the moy model has no way to
+#     say. They still fold onto one builtin wave -- but onto the wave that
+#     slot actually plays, not onto `w & 7`. The low-bits fold was arbitrary
+#     and it was audibly wrong: a cart using custom instrument 6 got `6 & 7`
+#     = p8 waveform 6 = NOISE, so 32 notes of a real cart's music played as
+#     static. The report names the substitution now instead of doing it
+#     silently.
 #   * SPEED: PICO-8 "note duration" D is ticks-per-row at 120 ticks/sec, so
 #     speed = 120/D steps/sec exactly (SPEC.md 8.1's speed is not
 #     integer-only; rounding it drifts the row clock). D==0 plays flat out.
@@ -215,7 +220,37 @@ def _hx(s, lo, hi):
         return 0
 
 
-def _sfx_line_to_dict(line):
+def custom_instrument_waves(sfx_lines):
+    """The builtin wave each p8 CUSTOM instrument (8..15) folds onto.
+
+    A custom instrument is __sfx__ slot 0..7 played as an instrument. The moy
+    model has one wave per note and no way to name a slot, so the fold has to
+    pick a builtin -- and the honest pick is the wave that slot mostly plays,
+    read off the slot itself. Falls back to the low-bits fold for a slot that
+    is empty or all rests.
+    """
+    waves = {}
+    for k in range(8):
+        if k >= len(sfx_lines):
+            break
+        s = "".join(sfx_lines[k].strip().lower().split())
+        seen = {}
+        notes = s[8:]
+        for i in range(32):
+            chunk = notes[i * 5:i * 5 + 5]
+            if len(chunk) < 5 or chunk[3] not in "1234567":
+                continue                 # a rest says nothing about the timbre
+            instr = int(chunk[2], 16) if chunk[2] in "0123456789abcdef" else 0
+            if instr >= 8:
+                continue                 # a custom instrument defined by one
+            seen[instr] = seen.get(instr, 0) + 1
+        if seen:
+            top = max(seen.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+            waves[8 + k] = _IMPORT_INSTRUMENT_TO_WAVE.get(top, 0)
+    return waves
+
+
+def _sfx_line_to_dict(line, custom=None):
     """One PICO-8 __sfx__ hex line -> a moy SFX dict (or None if all-rest).
 
     The header's LOOP RANGE (bytes 4..8: loop start / loop end) carries over
@@ -243,7 +278,10 @@ def _sfx_line_to_dict(line):
         instrument = int(chunk[2], 16) if chunk[2] in "0123456789abcdef" else 0
         vol = int(chunk[3], 16) if chunk[3] in "01234567" else 0
         eff = int(chunk[4], 16) if chunk[4] in "01234567" else 0
-        wave = _IMPORT_INSTRUMENT_TO_WAVE.get(instrument & 7, 0)
+        if instrument >= 8 and custom and instrument in custom:
+            wave = custom[instrument]
+        else:
+            wave = _IMPORT_INSTRUMENT_TO_WAVE.get(instrument & 7, 0)
         if vol <= 0:
             # keep the key: a PICO-8 rest is silent but still the origin a
             # following slide (eff 1) glides from
@@ -416,10 +454,11 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     up). Music patterns map to moy 1-channel `pattern` lists."""
     sfx = []
     n_real = 0
+    custom = custom_instrument_waves(sfx_lines)
     for i, line in enumerate(sfx_lines):
         if i >= max_sfx:
             break
-        d = _sfx_line_to_dict(line)
+        d = _sfx_line_to_dict(line, custom)
         if d is None:
             # keep the id slot so __music__ references stay aligned
             sfx.append({"speed": 8, "loop": False, "steps": []})
