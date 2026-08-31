@@ -1,10 +1,10 @@
 {
   "files": {
-    "tools/p8_import.py": "3e07e28e3c2d3d979f1aa802b0d67746e82c3fdfc001a59123c85e3f72718cd3",
+    "tools/p8_import.py": "7d9356eacd30e8e0d0187f515a8c2262592f1895ed172ac24afb47a300be90bb",
     "tools/p8_lua_port.py": "5ae5dbc97827f486cea796a86f5d616734afc8eeebeef3ddbbbc38d44995493b"
   },
   "upstream": {
-    "commit": "d56f78b7fd38191bf86950d64cda1885ea312138",
+    "commit": "300798f9ff861313ef41e0a30ab19f122afbf785",
     "date": "2026-08-31",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"

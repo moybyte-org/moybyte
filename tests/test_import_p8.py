@@ -1020,3 +1020,29 @@ def test_a_button_code_reads_the_same_by_every_route(tmp_path):
     assert rows[0] == rows[2], "the escape must draw what the letter draws"
     assert rows[1] == rows[2], "chr() must draw what the letter draws"
     assert any(v for v in rows[2]), "the probe drew nothing at all"
+
+
+def test_the_title_comes_from_the_header_block_not_any_comment(tmp_path):
+    """PICO-8's convention is `-- title` above the first line of code, and
+    "above the first line of code" is the rule that matters.
+
+    Scanning the whole cart for a comment finds whatever the author last
+    commented OUT. `bunnysurvivor` has no header at all and imported under the
+    title `print("kb"..stat(0),(playerx)-64,(player` -- a debug line it
+    disabled on line 67."""
+    header = {"lua": ["-- pico off road", "-- by assembler bot", "x=1"]}
+    assert import_p8._title_from(header, "cart.p8") == "pico off road"
+
+    # a blank line before the header is still the header
+    padded = {"lua": ["", "-- moss moss", "-- by noel cody", "x=1"]}
+    assert import_p8._title_from(padded, "cart.p8") == "moss moss"
+
+    # NO header: the first `--` is code the author disabled, deep in the cart
+    headless = {"lua": ["is_draw = 0", "kills = 0"] + [""] * 60
+                       + ['--print("kb"..stat(0),(playerx)-64,2)']}
+    assert import_p8._title_from(headless, "bunny_survivor-9.p8.png") \
+        == "bunny survivor 9"
+
+    # a cart whose author only credited themselves still gets a real name
+    only_by = {"lua": ["-- by someone", "x=1"]}
+    assert import_p8._title_from(only_by, "star_catcher.p8") == "star catcher"

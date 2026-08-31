@@ -67,15 +67,28 @@ def parse_p8(text):
 
 
 def _title_from(sections, p8_path):
-    """Best-effort cart title: the first non-empty `__lua__` comment line that
-    looks like a name, else the filename stem."""
+    """Best-effort cart title: the cart's HEADER comment, else the filename.
+
+    PICO-8's convention is `-- title` / `-- by author` in the block above the
+    first line of code, and "the block above the first line of code" is the
+    whole rule -- not "the first comment anywhere". A cart with no header at
+    all has its first `--` wherever the author happened to comment something
+    out, and `bunnysurvivor` imported under the title
+
+        print("kb"..stat(0),(playerx)-64,(player
+
+which is a debug line it disabled on line 67. Reading past real code to find
+    a name is how that happens, so this stops there and takes the filename.
+    """
     for line in sections.get("lua", []):
         s = line.strip()
-        # PICO-8 carts conventionally start with `-- title` / `-- by author`.
-        if s.startswith("--"):
-            cand = s[2:].strip()
-            if cand and not cand.lower().startswith(("by ", "by:")):
-                return cand[:40]
+        if not s:
+            continue
+        if not s.startswith("--"):
+            break                       # code: the header block is over
+        cand = s[2:].strip()
+        if cand and not cand.lower().startswith(("by ", "by:")):
+            return cand[:40]
     stem = os.path.basename(p8_path)
     if stem.lower().endswith(".p8"):
         stem = stem[:-3]
