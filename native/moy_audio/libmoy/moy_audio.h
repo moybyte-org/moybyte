@@ -50,11 +50,23 @@ typedef struct {
     uint8_t eff;                /* 0..7 */
 } moy_note;
 
+/* PICO-8's per-sfx FILTER byte, carried verbatim the way `eff` is (SPEC.md
+ * 8.1). Five independent settings packed into one byte, and a cart from 0.2.4
+ * on leans on them hard -- one measured cart used reverb on 17 of its 23
+ * sounds, dampen on 14, detune on 13. Absent or 0 is the dry sound every
+ * earlier cart has, so this is additive. */
+#define MOY_A_F_NOIZ(f)    (((f) & 0x2) != 0)   /* noise x sawtooth */
+#define MOY_A_F_BUZZ(f)    (((f) & 0x4) != 0)   /* the harsher wave variants */
+#define MOY_A_F_DETUNE(f)  (((f) / 8) % 3)      /* 0 none, 1 or 2 */
+#define MOY_A_F_REVERB(f)  (((f) / 24) % 3)
+#define MOY_A_F_DAMPEN(f)  (((f) / 72) % 3)
+
 typedef struct {
     float    speed;             /* steps per second, default 8 */
     uint8_t  loop;
     uint8_t  loop_start;
     uint8_t  nsteps;
+    uint8_t  filters;           /* PICO-8's filter byte; 0 = dry */
     moy_note steps[MOY_A_STEPS_MAX];
 } moy_sfx_def;
 
@@ -74,6 +86,21 @@ typedef struct {
     int nsfx, nmusic;
 } moy_bank;
 
+/* A biquad, Direct Form I. Only the two "dampen" high shelves use it, and
+ * their coefficients come from the W3C audio-EQ cookbook. */
+typedef struct {
+    float c1, c2, c3, c4, c5;
+    float li, lli, lo, llo;
+} moy_biquad;
+
+/* The reverb delay lines, in samples AT 22050 Hz -- PICO-8's own rate, and
+ * the device's. 16.6 ms and 33.2 ms. They are int16_t rather than float
+ * because they are the single biggest thing in this struct and it lives in a
+ * board's .bss: float would cost 17.6 KB of SRAM across four voices, and the
+ * ring already holds what is about to become an int16 sample anyway. */
+#define MOY_A_REVERB1  366
+#define MOY_A_REVERB2  732
+
 /* One playing sfx. Internal, but in the header so the whole state is a
  * plain struct a host (or a test) can place and inspect. */
 typedef struct {
@@ -91,6 +118,22 @@ typedef struct {
                                  * purpose -- 8.1 says a slide carries across
                                  * a row boundary. -1 = no previous note yet */
     float    prev_vol;
+    /* --- the filter set (SPEC.md 8.1's `filters`), all per-CHANNEL ------ */
+    float    dphase, dphase2;   /* detune: the second oscillator's own phase,
+                                 * accumulated at freq*factor rather than
+                                 * scaled off `phase` -- a wrapped phase
+                                 * cannot be multiplied by a non-integer */
+    uint8_t  cyc;               /* which of the saw buzz's two cycles we are
+                                 * in; its dip loops on a 2x period */
+    int16_t  rv1[MOY_A_REVERB1];
+    int16_t  rv2[MOY_A_REVERB2];
+    int      rvi;
+    int      rvn1, rvn2;        /* the rings' live length at THIS rate */
+    uint8_t  fxlast;            /* the filters of the last sfx that played --
+                                 * a reverb tail has to ring out AFTER the
+                                 * note that made it has ended */
+    int      fxtail;            /* frames of tail still owed */
+    moy_biquad damp1, damp2;
 } moy_voice;
 
 typedef struct {

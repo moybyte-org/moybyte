@@ -1,8 +1,8 @@
 {
   "files": {
     "native/moy_audio/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moy_audio/libmoy/moy_audio.c": "86fa35380ef5b48fd761faba624e1377984dad9a5f9243c580f82a2ba6c00ea8",
-    "native/moy_audio/libmoy/moy_audio.h": "c580b1414246a02e615cefa622e7b8e3fc01b8590ee713fc43458a0a40265a53",
+    "native/moy_audio/libmoy/moy_audio.c": "e502649651c6d0dad305ae901abd14be236d2f97e15343aeadd19dffa5a0b302",
+    "native/moy_audio/libmoy/moy_audio.h": "cc54bda1648e3159bd0d98701ad8f492efd43b6f1e2304f92ca5032fb578b910",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moy_gfx/libmoy/moy.h": "0d097b1e12ae21fbfc29930778fc4c582b04b4c051b283ed0041415773f5bf36",
     "native/moy_gfx/libmoy/moy_canvas.c": "3daca6597183de95ec10b216dc6e5b79bbe8aa62a9fa9a33ead666c47753aee4",
@@ -13,8 +13,8 @@
     "native/moycore/libmoy/moy_lua.c": "baefceacd65490d97751eb3f2be70aff5a485f61b1f4fc51dfc2b6e13ac86874"
   },
   "upstream": {
-    "commit": "31e71e9c06c2f3fd0c7268d0c7825723c6f71720",
-    "date": "2026-08-19",
+    "commit": "09dae1af25de1e7de2574ef89521f81adccb8bb1",
+    "date": "2026-08-31",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

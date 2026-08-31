@@ -264,6 +264,13 @@ def _sfx_line_to_dict(line, custom=None):
     # ticks-per-note at 120 ticks/sec -> steps/sec, kept exact: a D=32 sfx is
     # 3.75 steps/s, and rounding that to 4 drifts it against the row clock.
     # SPEC.md 8.1's speed is not integer-only.
+    # Byte 0 is "filters + editor flag", and it used to be read as "editor"
+    # and dropped. It is not: PICO-8 0.2.4 packs noiz/buzz/detune/reverb/
+    # dampen into it, and a modern cart uses them on most of its sounds --
+    # one measured 17 reverbs, 14 dampens and 13 detunes across 23 sfx. Bit 0
+    # IS the editor flag and means nothing to playback; the rest carry over
+    # verbatim, exactly like the effect nibble.
+    filters = _hx(s, 0, 2) & 0xFE
     duration = _hx(s, 2, 4)
     speed = round(120.0 / duration, 4) if duration else 120.0
     loop_s = _hx(s, 4, 6)
@@ -299,6 +306,8 @@ def _sfx_line_to_dict(line, custom=None):
         d = {"speed": speed, "loop": True, "steps": steps}
         if loop_s:
             d["loop_start"] = int(loop_s)
+        if filters:
+            d["filters"] = filters
         return d
     if loop_e == 0 and 0 < loop_s < len(steps):
         # p8's length trick: loop start with end 0 = "play this many notes"
@@ -308,7 +317,10 @@ def _sfx_line_to_dict(line, custom=None):
         steps.pop()
     if not steps:
         return None
-    return {"speed": speed, "loop": False, "steps": steps}
+    d = {"speed": speed, "loop": False, "steps": steps}
+    if filters:
+        d["filters"] = filters
+    return d
 
 
 def _music_line_channels(line):
