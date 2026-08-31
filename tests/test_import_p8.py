@@ -877,3 +877,146 @@ def test_a_pxa_cart_imports_end_to_end(tmp_path):
     assert got["map"][:len(sections["map"])] == sections["map"]
     assert set("".join(got["gfx"][len(sections["gfx"]):])) <= {"0"}, \
         "the rows past the source's own are not blank -- the ROM shifted"
+
+
+def test_button_glyphs_become_numbers_in_code_and_letters_in_text():
+    """PICO-8's six button glyphs are ORDINARY CHARACTERS in cart source, and
+    they mean two different things depending on where they sit.
+
+    In an expression -- `btn(<right>)` -- they are the button NUMBER, and Lua
+    5.4 will not take the character at all, so the cart does not load. In a
+    string -- `"press <x> to start"` -- they are an icon the cart draws, and
+    the console's font is petme128, ASCII and nothing else, so they drew as
+    blank: the cart's own control legend, missing.
+
+    The text side deliberately becomes A and B rather than any attempt at
+    PICO-8's own badges. This console's buttons ARE named A and B (the shim
+    maps p8 button 4 to `a` and 5 to `b`), so an O/X icon would be a faithful
+    copy of the wrong instruction.
+    """
+    import p8_lua_port
+    LEFT, RIGHT, UP, DOWN = "\x8b", "\x91", "\x94", "\x83"
+    O, X = "\x8e", "\x97"
+
+    code = p8_lua_port.p8_lua_to_lua54([
+        "if btn(%s) and btnp(%s) then y=1 end" % (RIGHT, X),
+        'print("press %s to start")' % X,
+        'print("%s%s%s%s")' % (LEFT, UP, RIGHT, DOWN),
+        'print("%s/z")' % O,
+    ])
+    assert "btn(1) and btnp(5)" in code
+    assert '"press B to start"' in code
+    assert '"<^>v"' in code
+    assert '"A/z"' in code
+    assert not any(ord(c) > 126 for c in code), "no glyph may survive to Lua"
+
+
+def test_the_utf8_spelling_of_the_glyphs_maps_the_same_way():
+    """A `.p8.png` ROM stores P8SCII bytes; a text `.p8` stores the UTF-8
+    emoji. Same six buttons, two spellings, and a cart imported either way has
+    to come out the same."""
+    import p8_lua_port
+    code = p8_lua_port.p8_lua_to_lua54([
+        'if btn(\u27a1\ufe0f) then y=1 end',
+        'print("press \u274e now")',
+    ])
+    assert "btn(1)" in code
+    assert '"press B now"' in code
+
+
+def test_a_glyph_with_no_ascii_stand_in_is_reported_not_guessed():
+    """The cat, the face and the house have no honest ASCII analogue, so they
+    are left alone -- and SAID, because a wrong icon is worse than a missing
+    one and a missing one says nothing by itself."""
+    import p8_lua_port
+    from p8_writer import report_lines
+    assert "\x82" not in p8_lua_port._GLYPH_TEXT      # the cat
+    lines = report_lines({"title": "x", "unsupported": [], "differs": [],
+                          "lossy": ["2 PICO-8 picture characters the console's "
+                                    "font has no letter for -- they draw as "
+                                    "blank space"]})
+    assert any("picture characters" in ln for ln in lines)
+
+
+def test_the_picture_glyphs_are_escaped_not_written_as_bytes():
+    """A P8SCII byte in a string leaves as `\\ddd`, never as itself.
+
+    main.lua is written UTF-8, so a literal 0x87 becomes TWO bytes on disk --
+    and the shim's print() reads BYTES, so it looked up 0xC2 and the heart
+    never drew. The bug lived entirely inside one file write, which is why a
+    probe cart whose escaped glyphs rendered and whose literal ones did not was
+    what found it."""
+    import p8_lua_port
+    code = p8_lua_port.p8_lua_to_lua54(['print("a\x87b\x92")'])
+    assert '"a\\135b\\146"' in code
+    assert not any(ord(c) > 126 for c in code)
+
+
+def test_every_picture_glyph_round_trips_through_its_packed_hex():
+    """The art is authored as ASCII rows and shipped as packed bytes; this is
+    the only thing standing between a typo in the packing and a wrong icon."""
+    import p8_lua_port
+    hx = p8_lua_port._wide_glyph_hex()
+    assert len(hx) == 26 * 10, "26 codes, 5 rows, one byte each"
+    for code in range(0x80, 0x9A):
+        rows = p8_lua_port._P8_WIDE_ART.get(code)
+        off = (code - 0x80) * 10
+        for r in range(5):
+            v = int(hx[off + r * 2:off + r * 2 + 2], 16)
+            if rows is None:
+                assert v == 0, "%s should pack as blank" % hex(code)
+                continue
+            got = "".join("#" if v >> c & 1 else "." for c in range(7))
+            assert got == rows[r], (hex(code), r, got, rows[r])
+
+
+def test_the_six_buttons_are_letters_and_never_drawn_as_badges():
+    """Deliberate, and the reason belongs next to the assertion: this console's
+    buttons ARE named A and B, so a pixel-perfect PICO-8 badge would be a
+    faithful copy of the wrong instruction."""
+    import p8_lua_port
+    for code in (0x8b, 0x91, 0x94, 0x83, 0x8e, 0x97):
+        assert code not in p8_lua_port._P8_WIDE_ART, hex(code)
+        assert chr(code) in p8_lua_port._GLYPH_TEXT, hex(code)
+
+
+def test_a_button_code_reads_the_same_by_every_route(tmp_path):
+    """Literal, `\\151` escape, and chr(151) must all draw the same thing.
+
+    The import rewrites the LITERAL, which is what makes the ported source
+    readable -- but a cart that escapes it, or builds it at runtime, never
+    passes through that rewrite. So print() and chr() resolve the codes too,
+    and this runs the cart to prove the three agree rather than trusting that
+    three code paths were each remembered."""
+    _need_lua()
+    from ws_helpers import build_ws
+
+    src = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+           "function _draw()\n"
+           " cls(0)\n"
+           ' print("\\151",0,0,7)\n'
+           ' print(chr(151),0,8,7)\n'
+           ' print("B",0,16,7)\n'
+           "end\n")
+    p8 = tmp_path / "btn.p8"
+    p8.write_text(src, encoding="utf-8")
+
+    ws = build_ws(tmp_path)
+    out = Path(ws.carts_root) / "btn.moy"
+    import_p8.import_p8(str(p8), str(out))
+    cart = moy_carts.load(str(out))
+    ws.launcher.items.append(cart)
+    ws.launcher.sel = len(ws.launcher.items) - 1
+    ws.open()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    for _ in range(4):
+        ws.input.begin_frame()
+        ws.frame(1 / 30)
+    assert ws.player.cart_error is None, ws.player.cart_error
+
+    canvas = ws.canvas
+    rows = [[canvas.pix(x, y0 + dy) for dy in range(5) for x in range(4)]
+            for y0 in (0, 8, 16)]
+    assert rows[0] == rows[2], "the escape must draw what the letter draws"
+    assert rows[1] == rows[2], "chr() must draw what the letter draws"
+    assert any(v for v in rows[2]), "the probe drew nothing at all"

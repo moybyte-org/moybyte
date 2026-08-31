@@ -322,6 +322,25 @@ def write_cart(sections, out_dir, title):
     summary["imported"].append(
         "manifest.json (canvas %s + the view(%d, %d) zoom hint)"
         % (P8_CANVAS, P8_VIEW_W, P8_VIEW_H))
+    # P8SCII characters the port can neither DRAW nor transliterate. The shim
+    # carries PICO-8's own 3x5 font plus our 7x5 picture glyphs for 128..153,
+    # and maps the six button symbols to this console's A/B and arrows -- but
+    # P8SCII also holds two full Japanese kana alphabets (154..253) and those
+    # have no glyph here. They draw as BLANK, which is a cart's own text
+    # quietly missing rather than anything that looks like an error.
+    drawn = set(p8_lua_port._P8_WIDE_ART)
+    left = set()
+    for line in lua_lines:
+        for ch in line:
+            if ord(ch) > 0x7F and ch not in p8_lua_port._GLYPH_TEXT \
+                    and ord(ch) not in drawn:
+                left.add(ch)
+    if left:
+        summary["lossy"].append(
+            "%d PICO-8 character%s outside the shim's font (its Japanese "
+            "kana, most likely) -- they draw as blank space"
+            % (len(left), "" if len(left) == 1 else "s"))
+
     custom = p8_import.custom_instrument_waves(sections.get("sfx", []))
     used = set()
     for line in sections.get("sfx", []):

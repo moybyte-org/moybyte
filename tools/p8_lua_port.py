@@ -238,6 +238,70 @@ _GLYPH_BTN = {
 }
 _VARIATION = "\ufe0f"
 
+# The same glyphs INSIDE a string, where a cart is not asking for a button
+# number but printing an icon: `"press <x> to start"`, `"<left><up><right>
+# <down>"`. The console's font is petme128, ASCII 0x20..0x7f and nothing else,
+# so every one of these drew as blank -- the cart's own control legend, gone.
+#
+# The two BUTTON glyphs deliberately become "A" and "B" rather than any
+# attempt at PICO-8's own badges: this console's buttons ARE named A and B
+# (the shim maps p8 button 4 to `a` and 5 to `b`), so an O/X icon here would
+# be a faithful copy of the wrong instruction. The arrows are the d-pad and
+# read as one on any font.
+_GLYPH_TEXT = {
+    "\x8b": "<", "\x91": ">", "\x94": "^", "\x83": "v",
+    "\x8e": "A", "\x97": "B",
+    "\u2b05": "<", "\u27a1": ">", "\u2b06": "^", "\u2b07": "v",
+    "\U0001f17e": "A", "\u274e": "B",
+}
+
+# The PICTURE glyphs, 128..153, drawn rather than transliterated -- P8SCII's
+# double-wide set, 7x5 on an 8px advance, beside the shim's 3x5 ASCII on 4px.
+# These are OUR bitmaps, not PICO-8's font: the shapes are generic (a heart, a
+# star, a block) and the font itself is Lexaloffle's, so it is not ours to
+# ship. The six BUTTONS are deliberately absent -- they become "A"/"B" and the
+# arrows above, because this console's buttons ARE named A and B and a
+# pixel-perfect (x) badge would be a faithful copy of the wrong instruction.
+_P8_WIDE_ART = {
+    0x80: ("#######", "#######", "#######", "#######", "#######"),  # block
+    0x81: ("#.#.#.#", ".#.#.#.", "#.#.#.#", ".#.#.#.", "#.#.#.#"),  # checker
+    0x82: ("#.....#", "###.###", "#######", "#.#.#.#", ".#####."),  # cat
+    0x84: ("#...#..", "..#...#", "#...#..", "..#...#", "#...#.."),  # shade
+    0x85: ("...#...", "#..#..#", ".#####.", "#..#..#", "...#..."),  # burst
+    0x86: ("..###..", ".#####.", "#######", ".#####.", "..###.."),  # dot
+    0x87: (".##.##.", "#######", "#######", ".#####.", "...#..."),  # heart
+    0x88: ("..###..", ".#...#.", "#..#..#", ".#...#.", "..###.."),  # sun
+    0x89: ("..###..", "..###..", "#######", "...#...", "..#.#.."),  # person
+    0x8A: ("...#...", ".#####.", "#######", "#.....#", "#.###.#"),  # house
+    0x8C: (".#####.", "#.....#", "#.#.#.#", "#.###.#", ".#####."),  # face
+    0x8D: ("...####", "...#..#", "...#...", ".###...", ".###..."),  # note
+    0x8F: ("...#...", "..###..", ".#####.", "..###..", "...#..."),  # diamond
+    0x90: (".......", ".......", ".......", ".......", "#..#..#"),  # ellipsis
+    0x92: ("...#...", "..###..", "#######", ".#####.", ".##.##."),  # star
+    0x93: ("#######", ".#####.", "...#...", ".#####.", "#######"),  # hourglass
+    0x95: (".......", ".#####.", "#.....#", ".......", "......."),  # arc
+    0x96: ("...#...", "..#.#..", ".#...#.", "#.....#", "......."),  # chevron
+    0x98: ("#######", ".......", "#######", ".......", "#######"),  # h-lines
+    0x99: ("#.#.#.#", "#.#.#.#", "#.#.#.#", "#.#.#.#", "#.#.#.#"),  # v-lines
+}
+
+
+def _wide_glyph_hex():
+    """The art above as 5 bytes per code, bit c = column c (bit 0 leftmost) --
+    the same bit order the 3x5 set uses. Codes with no art pack as zero so the
+    table indexes straight off the byte."""
+    out = []
+    for code in range(0x80, 0x9A):
+        rows = _P8_WIDE_ART.get(code)
+        for r in range(5):
+            v = 0
+            if rows:
+                for c in range(7):
+                    if rows[r][c] == "#":
+                        v |= 1 << c
+            out.append("%02x" % v)
+    return "".join(out)
+
 
 def _read_number(code, i):
     """Read ONE p8 numeric literal starting at `i`; return (end, Lua spelling).
@@ -324,6 +388,26 @@ def _fix_p8_tokens(code):
     while i < n:
         ch = code[i]
         if q:
+            if ch in _GLYPH_TEXT:
+                out.append(_GLYPH_TEXT[ch])
+                i += 1
+                if i < n and code[i] == _VARIATION:
+                    i += 1
+                continue
+            if ch > "\x7f":
+                # A P8SCII byte, spelled as a Lua ESCAPE rather than left as
+                # itself. main.lua is written UTF-8, which turns byte 0x80 into
+                # TWO bytes -- and the shim's print() reads bytes, so the glyph
+                # it looked up was 0xC2 and the picture never drew. Caught by a
+                # probe cart whose escaped glyphs rendered and whose literal
+                # ones did not, which is the same text either side of one file
+                # write.
+                cp = ord(ch)
+                out.append("\\%d" % cp if cp < 256 else "?")
+                i += 1
+                if i < n and code[i] == _VARIATION:
+                    i += 1
+                continue
             if ch == "\\" and i + 1 < n:
                 nxt = code[i + 1]
                 if nxt not in _LUA_ESCAPES and not nxt.isdigit():
@@ -916,6 +1000,29 @@ do
       P8_GLYPHS[i + 32] = tonumber(string.sub(hex, i * 4 + 1, i * 4 + 4), 16)
     end
   end
+  local P8_WIDE = {}
+  do
+    local hex = "7f7f7f7f7f552a552a5541777f553e0000000000114411441108493e49081c3e"
+             .. "7f3e1c367f7f3e081c2249221c1c1c7f0814083e7f415d00000000003e41555d"
+             .. "3e7848080e0e0000000000081c3e1c0800000000490000000000081c7f3e367f"
+             .. "3e083e7f0000000000003e410000081422410000000000007f007f007f555555"
+             .. "5555"
+    for i = 0, 25 do
+      local rows, any = {}, false
+      for r = 0, 4 do
+        local v = tonumber(string.sub(hex, i * 10 + r * 2 + 1, i * 10 + r * 2 + 2), 16)
+        rows[r] = v
+        if v ~= 0 then any = true end
+      end
+      if any then P8_WIDE[128 + i] = rows end
+    end
+  end
+  -- The button codes resolved to LETTERS at draw time, so every route agrees:
+  -- a literal glyph the import rewrote, a `\151` escape it did not, chr(151),
+  -- string.char, a concatenation built at runtime. The import-time rewrite is
+  -- what makes the ported source readable; this is what makes it correct.
+  local BTN_GLYPH = {[139] = 60, [145] = 62, [148] = 94, [131] = 118,
+                     [142] = 65, [151] = 66}
   local sbyte = string.byte
   function print(s, x, y, c)
     s = tostring(s)
@@ -927,13 +1034,31 @@ do
       if b == 10 then
         cx, cy = lx, cy + 6
       else
+        b = BTN_GLYPH[b] or b
         local g = P8_GLYPHS[b]
-        if g and g ~= 0 then
-          for p = 0, 14 do
-            if (g >> p) & 1 == 1 then m_pix(cx + p % 3, cy + p // 3, c) end
+        if g then
+          if g ~= 0 then
+            for p = 0, 14 do
+              if (g >> p) & 1 == 1 then m_pix(cx + p % 3, cy + p // 3, c) end
+            end
+          end
+          cx = cx + 4
+        else
+          -- P8SCII's picture glyphs are DOUBLE WIDE: 7x5 on an 8px advance,
+          -- which is why the advance cannot just be 4 for everything.
+          local w = P8_WIDE[b]
+          if w then
+            for r = 0, 4 do
+              local v = w[r]
+              for k = 0, 6 do
+                if (v >> k) & 1 == 1 then m_pix(cx + k, cy + r, c) end
+              end
+            end
+            cx = cx + 8
+          else
+            cx = cx + 4
           end
         end
-        cx = cx + 4
       end
     end
   end
@@ -1004,7 +1129,20 @@ do
   -- STRING HELPERS. Real Lua 5.4 has every one of these under another name, so
   -- these are renames rather than implementations -- except split(), which is
   -- PICO-8's own and has no stdlib twin.
-  chr = string.char
+  -- The six button codes agree with what the IMPORT does to the same glyph in
+  -- a literal: a cart that builds its legend with chr(151) must not get a
+  -- different answer from one that typed the character.
+  local BTN_CHR = {[139] = "<", [145] = ">", [148] = "^", [131] = "v",
+                   [142] = "A", [151] = "B"}
+  function chr(...)
+    local n = select("#", ...)
+    if n == 1 then
+      local c = ...
+      local b = BTN_CHR[c]
+      if b then return b end
+    end
+    return string.char(...)
+  end
   function ord(s, i, n)
     if s == nil or s == "" then return nil end
     if n then return string.byte(s, i or 1, (i or 1) + n - 1) end
