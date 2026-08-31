@@ -670,7 +670,7 @@ def _old_decompress(rom, start):
             cnt = (second >> 4) + 2
             for _ in range(cnt):
                 out.append(out[-off])
-    return out.decode("ascii", "replace")
+    return out.decode("latin-1")
 
 
 def _p8png_sections(rom):
@@ -705,14 +705,21 @@ def _p8png_sections(rom):
     sections["sfx"] = sfx
     code = rom[0x4300:]
     if code[:4] == b"\x00pxa":
-        lua = _pxa_decompress(rom, 0x4300).decode("ascii", "replace")
+        lua = _pxa_decompress(rom, 0x4300).decode("latin-1")
     elif code[:4] == b":c:\x00":
         lua = _old_decompress(rom, 0x4300)
     else:
         end = code.find(b"\x00")
-        lua = code[:end if end >= 0 else len(code)].decode("ascii", "replace")
+        lua = code[:end if end >= 0 else len(code)].decode("latin-1")
     sections["lua"] = lua.split("\n")
     return sections
+
+
+# The cart's code comes out of the ROM as P8SCII, and every byte >= 0x80 is a
+# GLYPH -- the six button symbols among them. `ascii/replace` turned all of
+# them into one U+FFFD, so `btn(<left>)` and `btn(<x>)` decoded to the same
+# text: not "unreadable", WRONG, and identically wrong. latin-1 is the decode
+# that cannot lose a byte; `p8_lua_port` maps the glyphs that mean something.
 
 
 def read_p8(path):

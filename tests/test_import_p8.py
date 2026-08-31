@@ -313,17 +313,29 @@ def test_the_report_names_only_the_gaps_this_cart_reaches(tmp_path):
 
 
 def test_the_report_separates_missing_verbs_from_differing_ones(tmp_path):
-    """tiny_dash calls sspr() (a verb of that name EXISTS and does not mean the
-    same thing) and dset() (nothing answers to it). Those are different
-    failures -- one draws the wrong picture in silence, the other stops the
-    cart -- so the report says them differently."""
+    """Two different failures, said differently: a verb of that name EXISTS and
+    does not mean the same thing (draws the wrong picture in silence), against
+    nothing answering to it at all (stops the cart).
+
+    The fixture's sspr() graduated to the shim on 2026-08-30, so the `differs`
+    side is asserted on the table rather than on that cart -- what must not rot
+    is that BOTH kinds still reach the reader as their own sentence.
+    """
     p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
     summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
-    assert summary["verbs"] == ["dset", "sspr"]
-    assert any("sspr()" in d for d in summary["differs"])
+    assert summary["verbs"] == ["dset"]
     assert any("dset()" in u for u in summary["unsupported"])
+
+    # The MECHANISM, not the census. As of 2026-08-30 every `differs` verb has
+    # graduated to the shim, so there is no live one to drive this with -- and
+    # deleting the check because the table happens to be empty is how the
+    # distinction quietly stops working before the next one arrives.
+    from p8_writer import report_lines
+    lines = report_lines({"title": "x", "differs": ["sspr() takes flip flags"],
+                          "unsupported": ["dset() is a save slot"]})
+    assert any(l.startswith("works differently: ") for l in lines)
+    assert any(l.startswith("not supported: ") for l in lines)
     text = "\n".join(import_p8.report_lines(summary))
-    assert "works differently: sspr()" in text
     assert "not supported: cartdata()/dget()/dset()" in text
 
 
@@ -355,10 +367,11 @@ def test_every_declared_gap_is_really_a_gap():
 
 
 def test_scan_lua_verbs_word_boundaries():
-    """scan_lua_verbs matches whole-word calls only, at BOTH ends -- `t` must
-    not fire inside `time(`, and a name must not fire as a method call."""
-    found = import_p8.scan_lua_verbs(["time(0)", "sset(1,1,2)"])
-    assert found == {"time", "sset"}
+    """scan_lua_verbs matches whole-word calls only, at BOTH ends -- a short
+    name must not fire inside a longer one, and a name must not fire as a
+    method call."""
+    found = import_p8.scan_lua_verbs(["stat(0)", "sset(1,1,2)"])
+    assert found == {"stat", "sset"}
     assert import_p8.scan_lua_verbs(["local n = settings(1)"]) == set()
     assert import_p8.scan_lua_verbs(["obj:flip()", "obj.flip()"]) == set()
     assert import_p8.scan_lua_verbs(["flip()"]) == {"flip"}

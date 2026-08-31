@@ -188,7 +188,13 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert "cart's own Lua" in text
     assert "CODE did NOT" not in text
     assert any("dset" in u for u in got["unsupported"])
-    assert any("sspr" in d for d in got["differs"])
+    # `differs` is EMPTY, and that is the assertion: as of 2026-08-30 every verb
+    # that used to mean something else here graduated to a real shim. The
+    # CPython twin (tests/test_import_p8.py) guards the reporting MECHANISM with
+    # a synthetic entry, so this side only has to prove the census is honest --
+    # naming a verb here rots the moment that verb is shimmed, which is exactly
+    # how this line came to assert a shipped sspr() was still broken.
+    assert got["differs"] == []
 
 
 def test_micropython_and_cpython_write_the_same_cart(tmp_path):

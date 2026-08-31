@@ -116,30 +116,36 @@ SHIM_GAPS = {
     "fset": (MISSING, "fset() writes a sprite flag -- the port bakes __gff__ "
                       "in as a read-only table, so fget() works and fset() "
                       "does not; keep changing flags in your own table"),
-    "mset": (DIFFERS, "mset() writes a map cell -- the console has it, but the "
-                      "shim's map() draws from a copy it built at start, so a "
-                      "written cell does not show up; keep the change in your "
-                      "own table and draw it yourself"),
-    # -- frame and machine state ---------------------------------------------
+    "stat": (MISSING, "stat() reads machine counters (time, memory, the mouse) "
+                      "-- no equivalent; the ones with a home are time() and "
+                      "the touch()/key() verbs"),
+    # The console's Lua opens base, math, string and table and NOT coroutine
+    # (libmoy/moy_lua.c), so these are not renames waiting to happen -- the
+    # name `coroutine` does not exist to rename FROM. This table said they were
+    # "right there" until 2026-08-30, which sent a reader to a shim that fails
+    # while it loads. Opening the library is a one-line spec decision.
+    "cocreate": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's coroutines -- the console's Lua does not "
+                          "open the coroutine library, so rewrite that part as "
+                          "a state machine driven from _update()"),
+    "coresume": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's coroutines -- the console's Lua does not "
+                          "open the coroutine library, so rewrite that part as "
+                          "a state machine driven from _update()"),
+    "costatus": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                          "PICO-8's coroutines -- the console's Lua does not "
+                          "open the coroutine library, so rewrite that part as "
+                          "a state machine driven from _update()"),
     "flip": (MISSING, "flip() shows the frame and waits -- the console calls "
                       "_draw() for you, so there is nothing to wait for; a "
                       "cart that loops on flip() needs its loop turned into "
                       "_update()"),
-    "stat": (MISSING, "stat() reads machine counters (time, memory, the mouse) "
-                      "-- no equivalent; the ones with a home are time() and "
-                      "the touch()/key() verbs"),
+    "cartdata": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- "
+                          "the console's is pmem(); it saves a table"),
     "extcmd": (MISSING, "extcmd() drives the PICO-8 app itself -- there is no "
                         "app to drive"),
     "printh": (MISSING, "printh() prints to a terminal -- there is no terminal "
                         "behind a cart; draw it with print() instead"),
-    "t": (MISSING, "t() is PICO-8's clock in SECONDS. The console's time() is "
-                   "MILLISECONDS since the cart started -- divide by 1000"),
-    "time": (DIFFERS, "time() exists on both and does not agree: PICO-8 counts "
-                      "SECONDS, the console counts MILLISECONDS -- divide by "
-                      "1000"),
-    # -- persistence ----------------------------------------------------------
-    "cartdata": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- "
-                          "the console's is pmem(); it saves a table"),
     "dget": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
                       "console's is pmem(); it saves a table"),
     "dset": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
@@ -153,37 +159,6 @@ SHIM_GAPS = {
     "color": (MISSING, "cursor()/color() set where and in what colour print() "
                        "carries on -- the port's print() takes x, y and the "
                        "colour every time"),
-    "sspr": (DIFFERS, "sspr() exists on both and the first eight arguments "
-                      "agree -- but PICO-8 lets dw/dh default and takes two "
-                      "flip booleans, where the console needs all eight plus a "
-                      "single flip number"),
-    # -- odds and ends --------------------------------------------------------
-    "srand": (MISSING, "srand() seeds the generator -- the console owns the "
-                       "seed so that a replay is a replay; rnd() still works"),
-    "tonum": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string "
-                       "helpers -- Lua's own tonumber(), string.char(), "
-                       "string.byte() and a gmatch loop do the same jobs"),
-    "chr": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string helpers "
-                     "-- Lua's own tonumber(), string.char(), string.byte() "
-                     "and a gmatch loop do the same jobs"),
-    "ord": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string helpers "
-                     "-- Lua's own tonumber(), string.char(), string.byte() "
-                     "and a gmatch loop do the same jobs"),
-    "split": (MISSING, "tonum()/chr()/ord()/split() are PICO-8's string "
-                       "helpers -- Lua's own tonumber(), string.char(), "
-                       "string.byte() and a gmatch loop do the same jobs"),
-    "cocreate": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's names for Lua coroutines -- this cart runs "
-                          "on real Lua 5.4, so coroutine.create/resume/status "
-                          "and coroutine.yield are right there"),
-    "coresume": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's names for Lua coroutines -- this cart runs "
-                          "on real Lua 5.4, so coroutine.create/resume/status "
-                          "and coroutine.yield are right there"),
-    "costatus": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's names for Lua coroutines -- this cart runs "
-                          "on real Lua 5.4, so coroutine.create/resume/status "
-                          "and coroutine.yield are right there"),
 }
 
 
