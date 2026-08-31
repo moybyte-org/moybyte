@@ -1046,3 +1046,85 @@ def test_the_title_comes_from_the_header_block_not_any_comment(tmp_path):
     # a cart whose author only credited themselves still gets a real name
     only_by = {"lua": ["-- by someone", "x=1"]}
     assert import_p8._title_from(only_by, "star_catcher.p8") == "star catcher"
+
+
+def _run_p8(tmp_path, body, frames=60, dt=1.0 / 60):
+    """Import a scrap of p8 source and run it on the real Player."""
+    from ws_helpers import build_ws
+
+    src = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+           + body)
+    p8 = tmp_path / "probe.p8"
+    p8.write_text(src, encoding="utf-8")
+    ws = build_ws(tmp_path)
+    out = Path(ws.carts_root) / "probe.moy"
+    import_p8.import_p8(str(p8), str(out))
+    cart = moy_carts.load(str(out))
+    ws.launcher.items.append(cart)
+    ws.launcher.sel = len(ws.launcher.items) - 1
+    ws.open()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    for _ in range(frames):
+        ws.input.begin_frame()
+        ws.frame(dt)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    return ws
+
+
+def test_a_cart_that_defines_update60_actually_updates(tmp_path):
+    """A cart picks its rate by which lifecycle it DEFINES, and reading only
+    `_update` did not make a 60fps cart slow -- it made it DEAD.
+
+    `bunnysurvivor` defines `_update60` and nothing else, so its update never
+    ran once: it drew its first frame forever and answered no input. Nothing
+    errored, which is why it took playing the cart to notice. The report even
+    said the import was clean."""
+    _need_lua()
+    ws = _run_p8(tmp_path, "ticks = 0\n"
+                           "function _update60() ticks = ticks + 1 end\n"
+                           "function _draw() cls(0) end\n",
+                 frames=60, dt=1.0 / 60)
+    assert ws.player._lua.get_global("ticks") == 60, \
+        "_update60 must run once per frame at 60fps"
+
+
+def test_update60_beats_update_when_a_cart_defines_both(tmp_path):
+    """PICO-8's own precedence, and a cart that ships both is relying on it."""
+    _need_lua()
+    ws = _run_p8(tmp_path, "slow, fast = 0, 0\n"
+                           "function _update() slow = slow + 1 end\n"
+                           "function _update60() fast = fast + 1 end\n"
+                           "function _draw() cls(0) end\n",
+                 frames=60, dt=1.0 / 60)
+    assert ws.player._lua.get_global("fast") == 60
+    assert ws.player._lua.get_global("slow") == 0
+
+
+def test_a_plain_update_cart_still_ticks_at_thirty(tmp_path):
+    """The rate lock must not have moved the default."""
+    _need_lua()
+    ws = _run_p8(tmp_path, "ticks = 0\n"
+                           "function _update() ticks = ticks + 1 end\n"
+                           "function _draw() cls(0) end\n",
+                 frames=30, dt=1.0 / 30)
+    assert ws.player._lua.get_global("ticks") == 30
+
+
+def test_rnd_of_a_table_returns_an_element_of_it(tmp_path):
+    """`rnd(t)` on a TABLE is a different verb wearing the same name (p8
+    0.2.0): it picks an element. The numeric form multiplied the table and the
+    cart died on `attempt to perform arithmetic on a table value` -- on the
+    first frame its update ever ran, which is how one bug hid behind another
+    here."""
+    _need_lua()
+    ws = _run_p8(tmp_path, "picked, empty, num = 0, -1, -1\n"
+                           "function _update()\n"
+                           " picked = rnd({7, 7, 7})\n"
+                           " empty = rnd({}) or -1\n"
+                           " num = rnd(0)\n"
+                           "end\n"
+                           "function _draw() cls(0) end\n",
+                 frames=4, dt=1.0 / 30)
+    assert ws.player._lua.get_global("picked") == 7, "must pick an element"
+    assert ws.player._lua.get_global("empty") == -1, "an empty table is nil"
+    assert ws.player._lua.get_global("num") == 0, "the numeric form still works"

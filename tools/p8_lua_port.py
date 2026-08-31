@@ -898,7 +898,7 @@ SHIM = r'''-- ============================================================
 -- is core (SPEC.md 6) and cannot mislead a cart, so no guard -- lossy only at
 -- PRESENTATION.
 local P8_VH = __P8_VH__
-local P8_DT = 1 / 30               -- PICO-8 _update runs at a fixed 30fps
+local P8_DT = 1 / 30               -- _update's rate; _update60 relocks it to 60
 if P8_VH < 128 then view(128, P8_VH) end
 do
   local m_spr, m_btn, m_btnp = spr, btn, btnp
@@ -1114,7 +1114,19 @@ do
   tostr = tostring
   function sgn(x) if (x or 0) < 0 then return -1 end return 1 end
   function mid(a, b, c) return max(min(a, b), min(max(a, b), c)) end
-  function rnd(n) return mrandom() * (n or 1) end
+  -- rnd(t) on a TABLE returns a random ELEMENT of it (p8 0.2.0), which is not
+  -- a variant of the numeric form -- it is a different verb wearing the same
+  -- name, and carts use it for exactly the kind of pick-one that appears in
+  -- every update: `rnd(spawn_points)`. Without it the cart dies on arithmetic
+  -- against a table the first time that line runs.
+  function rnd(n)
+    if type(n) == "table" then
+      local c = #n
+      if c == 0 then return nil end
+      return n[mrandom(c)]
+    end
+    return mrandom() * (n or 1)
+  end
 
   -- THE CLOCK. PICO-8 counts SECONDS since the cart started; the console's
   -- time() counts MILLISECONDS. Both p8 names, because carts use either, and
@@ -1362,7 +1374,26 @@ do
   local EPS = P8_DT * 0.02      -- absorbs an integer-ms host period (33 vs 33.33)
   local MAX_CATCHUP = 4         -- past this the board genuinely cannot keep up
   local acc = 0
+  -- A cart picks its own rate by which one it DEFINES: `_update60` runs the
+  -- game at 60, `_update` at 30, and a cart that defines both means the 60 (so
+  -- does PICO-8). The choice cannot be made when this shim loads -- the cart's
+  -- own functions are defined below it -- so it is locked on the first frame,
+  -- which is also the first moment it can be known.
+  --
+  -- Reading only `p8_update` was not a slow cart, it was a DEAD one: a
+  -- 60fps cart's update never ran at all, so it drew its first frame forever
+  -- and answered no input. `bunnysurvivor` is one, and "couldn't send any
+  -- input" is exactly what that looks like from the outside.
+  local tick, locked = nil, false
   function _update(dt)
+    if not locked then
+      locked = true
+      tick = p8_update60 or p8_update
+      if p8_update60 then
+        P8_DT = 1 / 60
+        EPS = P8_DT * 0.02
+      end
+    end
     for i = 0, 5 do                              -- latch edges EVERY frame
       if m_btnp(BTN[i]) then pending[i] = true end
     end
@@ -1373,7 +1404,7 @@ do
     while acc >= P8_DT - EPS and n < MAX_CATCHUP do
       acc = acc - P8_DT
       n = n + 1
-      if p8_update then p8_update() end
+      if tick then tick() end
       for i = 0, 5 do pending[i] = false end     -- the tick consumed the edges
       ticked = true
     end
