@@ -1,0 +1,89 @@
+{
+  "_": "The PICO-8 conformance corpus: which carts the p8 importer is tested against, and where to get them. THE CARTS ARE NOT REDISTRIBUTED -- they are their authors' work, several under licences that forbid it, so this file holds LINKS and the fetcher caches them outside the tree. Chosen to stress DIFFERENT things rather than to be a top twelve by rating: a raycaster, a world-gen sim, a minified bytecode VM, two carts whose graphics live in packed strings. Twelve similar carts would have found perhaps three of the fifteen dialect bugs the first pass over these found.",
+  "carts": [
+    {
+      "lid": "bunnysurvivor-9",
+      "stresses": "60fps _update60 cart; btnp-driven upgrade menu",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/bu/bunnysurvivor-9.p8.png",
+      "title": "Buns: Bunny survivor",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=48032"
+    },
+    {
+      "lid": "celeste_classic_2-5",
+      "stresses": "the famous one; fillp, peek, stat",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/ce/celeste_classic_2-5.p8.png",
+      "title": "celeste classic 2",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=41282"
+    },
+    {
+      "lid": "crimson_night-5",
+      "stresses": "all five per-sfx audio filters; P8SCII glyphs in text",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/cr/crimson_night-5.p8.png",
+      "title": "Crimson Night",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=150672"
+    },
+    {
+      "lid": "dank_tomb-0",
+      "stresses": "reads its level data as raw memory (peek 0x2000)",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/da/dank_tomb-0.p8.png",
+      "title": "Dank Tomb is out!",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=29709"
+    },
+    {
+      "lid": "dungeons_and_diagrams-5",
+      "stresses": "menus, dget/dset save data, fillp",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/du/dungeons_and_diagrams-5.p8.png",
+      "title": "Dungeons & Diagrams PICO-8 Demake",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=48966"
+    },
+    {
+      "lid": "lowmemsky-1",
+      "stresses": "60fps, procedural, fillp-heavy, memcpy; no btn calls at all",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/lo/lowmemsky-1.p8.png",
+      "title": "Low Mem Sky",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=32724"
+    },
+    {
+      "lid": "mossmoss-17",
+      "stresses": "writes `if cond do` throughout; coroutines",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/mo/mossmoss-17.p8.png",
+      "title": "Moss Moss",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=155371"
+    },
+    {
+      "lid": "nimudazus-27",
+      "stresses": "Tempest 2000, minified into a bytecode VM",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/ni/nimudazus-27.p8.png",
+      "title": "Tempest 2000",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=158132"
+    },
+    {
+      "lid": "petal_quest-12",
+      "stresses": "coroutine-driven scenes; button-glyph control legend",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/pe/petal_quest-12.p8.png",
+      "title": "Petal Quest",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=146496"
+    },
+    {
+      "lid": "picooffroad-5",
+      "stresses": "3D road; car mesh packed into a [[ ]] binary blob",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/pi/picooffroad-5.p8.png",
+      "title": "Pico Off Road",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=41897"
+    },
+    {
+      "lid": "poom_0-9",
+      "stresses": "Doom demake; renders by poking screen memory",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/po/poom_0-9.p8.png",
+      "title": "POOM",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=45572"
+    },
+    {
+      "lid": "terra_1cart-44",
+      "stresses": "Terraria demake; world gen, sset-packed sheet",
+      "cart": "https://www.lexaloffle.com/bbs/cposts/te/terra_1cart-44.p8.png",
+      "title": "Terra - A Terraria Demake",
+      "thread": "https://www.lexaloffle.com/bbs/?tid=44606"
+    }
+  ]
+}
