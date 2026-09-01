@@ -124,8 +124,11 @@ def _check(out, js, form):
         "%s: the report must say the code is Lua: %r" % (form, report)
     assert "CODE did NOT" not in report, \
         "%s: that headline was inverted on 2026-08-29: %r" % (form, report)
-    assert "sspr" in report, \
-        "%s: the report must name the verbs that differ: %r" % (form, report)
+    # The gap THIS cart reaches, in the CLI's own words. Do not pin a verb that
+    # is merely unshimmed today: an `sspr` here went on asserting a shipped shim
+    # was still broken (cfe89bf).
+    assert "approximated: cartdata()/dget()/dset()" in report, \
+        "%s: the report must name the gap this cart reaches: %r" % (form, report)
     assert panel.startswith("block|"), \
         "%s: the report card never showed: %r" % (form, panel)
     assert panel.endswith("|"), "a successful import must not paint as an error"
