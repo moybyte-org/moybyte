@@ -3,7 +3,7 @@
   "carts": {
     "bunnysurvivor-9": {
       "boots": true,
-      "distinct": 117,
+      "distinct": 119,
       "responds": true
     },
     "celeste_classic_2-5": {
@@ -13,7 +13,7 @@
     },
     "crimson_night-5": {
       "boots": true,
-      "distinct": 76,
+      "distinct": 72,
       "responds": true
     },
     "dank_tomb-0": {
@@ -50,7 +50,7 @@
     },
     "picooffroad-5": {
       "boots": true,
-      "distinct": 1,
+      "distinct": 0,
       "responds": true
     },
     "poom_0-9": {

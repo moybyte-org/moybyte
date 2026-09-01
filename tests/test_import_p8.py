@@ -939,7 +939,10 @@ def test_button_glyphs_become_numbers_in_code_and_letters_in_text():
         'print("%s%s%s%s")' % (LEFT, UP, RIGHT, DOWN),
         'print("%s/z")' % O,
     ])
-    assert "btn(1) and btnp(5)" in code
+    # The glyph becomes a NAME the shim predefines to the button number --
+    # not the bare number -- because a cart may also ASSIGN to a glyph
+    # (see the squiddy case below). The VALUE is pinned at runtime.
+    assert "btn(_p8g145) and btnp(_p8g151)" in code
     assert '"press B to start"' in code
     assert '"<^>v"' in code
     assert '"A/z"' in code
@@ -955,7 +958,7 @@ def test_the_utf8_spelling_of_the_glyphs_maps_the_same_way():
         'if btn(\u27a1\ufe0f) then y=1 end',
         'print("press \u274e now")',
     ])
-    assert "btn(1)" in code
+    assert "btn(_p8g145)" in code
     assert '"press B now"' in code
 
 
@@ -1269,3 +1272,76 @@ def test_releasing_resets_the_repeat(tmp_path):
     per_hold = 1 + (20 - 15 - 1) // 4 + 1
     assert ws.player._lua.get_global("edges") == 2 * per_hold, \
         "each hold must start its repeat clock from zero"
+
+
+def test_a_transparent_fillp_does_not_paint_the_screen_black(tmp_path):
+    """p8's fillp() marks colour 1 TRANSPARENT with the pattern's fractional
+    0.5 bit, and carts fade between scenes by setting one and filling the whole
+    screen. The console fills solid, so ignoring that bit turns every fade into
+    a black rectangle over the game -- strictly worse than the flat fill the
+    rest of the pattern degrades to.
+
+    The dithering itself is still not drawn; this pins the half that CAN be
+    honoured exactly.
+    """
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "function _update() end\n"
+                 "function _draw()\n"
+                 " cls(0)\n"
+                 " rectfill(0,0,127,127,12)\n"          # a scene
+                 " fillp(0b0011001100110011.1)\n"       # transparent overlay
+                 " rectfill(0,0,127,127,0)\n"
+                 " fillp()\n"
+                 "end\n",
+                 frames=6, dt=1.0 / 30)
+    cv = ws.canvas
+    lit = sum(1 for y in range(0, 100, 7) for x in range(0, 100, 7)
+              if cv.pix(x, y) != 0)
+    assert lit > 100, ("the transparent overlay painted the scene out -- "
+                       "only %d of the sampled pixels survived" % lit)
+
+
+def test_an_opaque_fillp_still_fills(tmp_path):
+    """The transparency skip must not swallow an ordinary fill: a pattern with
+    no fractional bit is opaque, and the console draws it solid."""
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "function _update() end\n"
+                 "function _draw()\n"
+                 " cls(0)\n"
+                 " fillp(0b0011001100110011)\n"
+                 " rectfill(0,0,127,127,12)\n"
+                 " fillp()\n"
+                 "end\n",
+                 frames=6, dt=1.0 / 30)
+    cv = ws.canvas
+    lit = sum(1 for y in range(0, 100, 7) for x in range(0, 100, 7)
+              if cv.pix(x, y) != 0)
+    assert lit > 100, "an opaque fillp must still draw (%d lit)" % lit
+
+
+def test_a_glyph_works_as_a_value_and_as_a_variable(tmp_path):
+    """p8 lets a glyph be either, and carts use both.
+
+    `fillp(<shade>)` wants the character's own code; `squiddy`, a 1k-jam cart,
+    writes `<right> = 0` and uses the glyph as a VARIABLE to save bytes.
+    Choosing one reading breaks the other -- emitting the bare number turned
+    that assignment into `1 = 0`, which is not Lua. A predefined name is both.
+    """
+    _need_lua()
+    ws = _run_p8(tmp_path,
+                 "btnval, shade, asvar = -1, -1, -1\n"
+                 "function _update()\n"
+                 " btnval = \u27a1\ufe0f\n"       # the right-arrow glyph
+                 " shade = \x87\n"                 # a non-button P8SCII glyph
+                 " \u2b06\ufe0f = 42\n"           # assign THROUGH a glyph
+                 " asvar = \u2b06\ufe0f\n"
+                 "end\n"
+                 "function _draw() cls(0) end\n",
+                 frames=4, dt=1.0 / 30)
+    lua = ws.player._lua
+    assert lua.get_global("btnval") == 1, "the right arrow is button 1"
+    assert lua.get_global("shade") == 0x87, \
+        "a non-button glyph carries its own P8SCII code"
+    assert lua.get_global("asvar") == 42, "a glyph must work as a variable"

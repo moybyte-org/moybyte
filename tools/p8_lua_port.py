@@ -78,6 +78,8 @@ from p8_import import (  # the asset converters, vendored beside this file
 # regex on the hot path, no str.isalnum, and one line's tokens at a time.
 
 _LIFECYCLE = ("_init", "_update", "_update60", "_draw")
+# Words that CLOSE a block, so a `?`'s arguments stop before them.
+_BLOCK_ENDS = ("end", "else", "elseif", "until")
 
 _GLYPH_BTN = {
     "\x8b": "0", "\x91": "1", "\x94": "2",
@@ -86,6 +88,15 @@ _GLYPH_BTN = {
     "\u2b07": "3", "\U0001f17e": "4", "\u274e": "5",
 }
 _VARIATION = "\ufe0f"
+
+# The P8SCII code each button spelling stands for, so a `.p8.png` byte and a
+# text `.p8`'s emoji land on the same generated name.
+_GLYPH_CODE = {
+    "\x8b": 0x8b, "\x91": 0x91, "\x94": 0x94,
+    "\x83": 0x83, "\x8e": 0x8e, "\x97": 0x97,
+    "\u2b05": 0x8b, "\u27a1": 0x91, "\u2b06": 0x94,
+    "\u2b07": 0x83, "\U0001f17e": 0x8e, "\u274e": 0x97,
+}
 
 # The same glyphs INSIDE a string, where a cart is not asking for a button
 # number but printing an icon: `"press <x> to start"`, `"<left><up><right>
@@ -428,21 +439,33 @@ def lex_line(line, state=None):
             continue
 
         if ch in _GLYPH_BTN:
-            # a button glyph in an EXPRESSION is the button NUMBER
-            toks.append((T_NUM, _GLYPH_BTN[ch]))
+            # A button glyph in an expression means the button NUMBER -- but
+            # `squiddy` assigns to two of them, using single glyphs as variable
+            # names to save bytes, and `1 = 0` is not Lua. So it becomes a NAME
+            # the shim predefines to that number: `btn(<right>)` still reads 1,
+            # and a cart that would rather use the glyph as a variable can.
+            toks.append((T_NAME, "_p8g%d" % _GLYPH_CODE[ch]))
             i += 1
             if i < n and line[i] == _VARIATION:
                 i += 1
             continue
 
         if ch > "\x7f":
-            # Any OTHER P8SCII character in an expression: its own code. Carts
-            # pass the shading glyphs to fillp() as the pattern -- `fillp(#)`
-            # with the checker glyph -- and Lua cannot lex the character at
-            # all, so the cart did not load. A glyph used as a NAME would be
-            # read wrong here, but a glyph constant is the common case by far
-            # and a glyph variable is not something carts do.
-            toks.append((T_NUM, str(ord(ch))))
+            # Any OTHER P8SCII character becomes a NAME that the shim predefines
+            # to the character's own code.
+            #
+            # Emitting the number directly was the first attempt and it was
+            # half right: `fillp(#)` with a shading glyph wants the value, but
+            # carts ALSO use single glyphs as variable names to save bytes --
+            # `squiddy`, a 1k-jam cart, assigns to three of them, and `1 = 0`
+            # is not Lua. A predefined name reads correctly in BOTH positions,
+            # which is what makes it strictly better than choosing one.
+            # Only the P8SCII range gets a name -- those are the ones the
+            # shim predefines. A stray character from somewhere else keeps its
+            # code, which at least parses.
+            cp = ord(ch)
+            toks.append((T_NAME, "_p8g%d" % cp) if cp <= 0xff
+                        else (T_NUM, str(cp)))
             i += 1
             if i < n and line[i] == _VARIATION:
                 i += 1
@@ -1005,22 +1028,50 @@ def if_do_to_then(toks):
 
 
 def expand_print_shorthand(toks):
-    """p8's `?x` -> `print(x)`, at a STATEMENT START only.
+    """p8's `?x` -> `print(x)`, wherever it appears.
 
-    `?` prints the rest of the LINE, so the closing paren has to go where a
-    statement ends. Firing after a `then` closed it past the line's own `end`.
+    `?` has no other meaning in p8, so the only real question is where the
+    closing paren goes: `?` prints the rest of the LINE, but a line can end
+    with block keywords that must stay OUTSIDE the call. Firing blindly turned
+    `if a then ?x end` into `if a then print(x end)`.
+
+    So the arguments run to the end of the line minus any trailing `end` /
+    `else` / `elseif` / `until` and any comment. That is what lets this fire
+    mid-line, which the earlier statement-start-only rule could not: `squiddy`
+    minifies to `y=-y?"text",108,60` and its print was left as a bare `?`.
     """
-    i = _skip_ws(toks, 0)
-    if i >= len(toks) or toks[i][0] != T_OP or toks[i][1] != "?":
-        return toks
-    rest = toks[i + 1:]
-    if not [t for t in rest if t[0] not in (T_WS, T_COMMENT)]:
-        return toks
-    tail = []
-    while rest and rest[-1][0] == T_COMMENT:
-        tail.insert(0, rest.pop())
-    return (toks[:i] + [(T_NAME, "print"), (T_OP, "(")] + rest
-            + [(T_OP, ")")] + tail)
+    for i in range(len(toks)):
+        if toks[i][0] != T_OP or toks[i][1] != "?":
+            continue
+        rest = toks[i + 1:]
+        if not [t for t in rest if t[0] not in (T_WS, T_COMMENT)]:
+            return toks                  # a `?` with nothing after it
+        tail = []
+        while rest:
+            last = None
+            for k in range(len(rest) - 1, -1, -1):
+                if rest[k][0] not in (T_WS, T_COMMENT):
+                    last = k
+                    break
+            if last is None:
+                break
+            if rest[last][0] == T_NAME and rest[last][1] in _BLOCK_ENDS:
+                tail = rest[last:] + tail
+                rest = rest[:last]
+                continue
+            break
+        while rest and rest[-1][0] == T_COMMENT:
+            tail.insert(0, rest.pop())
+        while rest and rest[-1][0] == T_WS:
+            rest.pop()
+        while rest and rest[0][0] == T_WS:
+            rest = rest[1:]
+        head = [] if (i and toks[i - 1][0] == T_WS) else [(T_WS, " ")]
+        if tail and tail[0][0] != T_WS:
+            tail = [(T_WS, " ")] + tail
+        return (toks[:i] + head + [(T_NAME, "print"), (T_OP, "(")]
+                + rest + [(T_OP, ")")] + tail)
+    return toks
 
 
 # p8's one-line block forms and the word that opens their body in Lua. `while`
@@ -1143,12 +1194,39 @@ def _is_empty_music_stub(toks):
         and len(core) == k + 2
 
 
+def _compound_wants_more(toks):
+    """Does this line end on an `op=` with nothing after it?
+
+    p8 lets an expression continue onto the next line, and a compound assign is
+    where that bites: `peephole +=` on one line with its value on the next
+    expanded to `peephole = peephole + ()` -- an empty pair of parens.
+    `PICO-BALL` writes it that way, and a line-at-a-time pipeline cannot see
+    the value from here.
+    """
+    for i in range(len(toks)):
+        if toks[i][0] == T_OP and toks[i][1] in _COMPOUND:
+            if not [t for t in toks[i + 1:] if t[0] not in (T_WS, T_COMMENT)]:
+                return True
+    return False
+
+
 def p8_lua_to_lua54(lines):
     out = []
     state = None
+    pending = ""
     for line in lines:
         line = line.replace("\t", "  ").rstrip()
+        if pending:
+            line = pending + " " + line.lstrip()
+            pending = ""
         toks, state = lex_line(line, state)
+        # Hold a line that ends on an `op=` and glue the next one to it. The
+        # blank keeps the line COUNT, so a later error still points where the
+        # cart's author would look.
+        if state is None and _compound_wants_more(toks):
+            pending = line
+            out.append("")
+            continue
         if _is_empty_music_stub(toks):
             out.append("-- [port] dropped the cart's empty music() stub "
                        "(imported __music__ plays instead)")
@@ -1274,8 +1352,27 @@ do
   -- 15. The delay is one tick longer; nothing can feel that.
   local pending, hold = {}, {}
   local RPT_DELAY, RPT_EVERY = 15, 4
-  function btn(i) return m_btn(BTN[i] or "a") end
+  -- btn() with NO argument is a different verb: p8 returns a BITFIELD of every
+  -- button, bit i for button i. `squiddy` reads `b=btn()` and then does
+  -- arithmetic on it, so returning a boolean stopped the cart on flr(true).
+  function btn(i)
+    if i == nil then
+      local m = 0
+      for k = 0, 5 do
+        if m_btn(BTN[k]) then m = m | (1 << k) end
+      end
+      return m
+    end
+    return m_btn(BTN[i] or "a")
+  end
   function btnp(i)
+    if i == nil then
+      local m = 0
+      for k = 0, 5 do
+        if btnp(k) then m = m | (1 << k) end
+      end
+      return m
+    end
     if pending[i] then return true end
     local h = hold[i]
     if h and h > RPT_DELAY and (h - RPT_DELAY - 1) % RPT_EVERY == 0 then
@@ -1290,6 +1387,24 @@ do
   -- so this shim floors at the boundary.
   local mfloor = math.floor
   local function fl(v) return mfloor(v or 0) end
+
+  -- Declared HERE, above the fill verbs that read it. It was declared beside
+  -- fillp() further down, which is after rectfill -- so rectfill closed over
+  -- nothing and read a nil GLOBAL instead, and the transparency skip was dead
+  -- code that tested green by doing nothing. A test that filled the screen
+  -- and looked at it is what caught that.
+  local fill_pattern, fill_transparent = 0, false
+
+  -- Every P8SCII picture character, as a global holding its own code. The
+  -- porter renames a glyph in the cart's code to one of these, so a cart that
+  -- passes a shading glyph to fillp() gets the number and one that uses a
+  -- glyph as a VARIABLE gets a variable.
+  for _c = 0x80, 0xff do
+    _ENV["_p8g" .. _c] = _c
+  end
+  -- ...except the six BUTTONS, which stand for the button they name.
+  _p8g139, _p8g145, _p8g148 = 0, 1, 2      -- left, right, up
+  _p8g131, _p8g142, _p8g151 = 3, 4, 5      -- down, O, X
 
   function camera(cx, cy) m_camera(fl(cx), fl(cy)) end
   -- p8 math over the sandboxed Lua math lib (the moy api only registers
@@ -1331,6 +1446,7 @@ do
 
   -- p8 rect/circ are OUTLINES and rectangles take the far corner
   function rectfill(x0, y0, x1, y1, c)
+    if fill_transparent then return end
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
@@ -1342,7 +1458,10 @@ do
     if y1 < y0 then y0, y1 = y1, y0 end
     m_rectb(x0, y0, x1 - x0 + 1, y1 - y0 + 1, fl(c))
   end
-  function circfill(x, y, r, c) m_circ(fl(x), fl(y), fl(r), fl(c)) end
+  function circfill(x, y, r, c)
+    if fill_transparent then return end
+    m_circ(fl(x), fl(y), fl(r), fl(c))
+  end
   function circ(x, y, r, c) m_circb(fl(x), fl(y), fl(r), fl(c)) end
   -- SPEC.md 6 gives `print` fixed 8px glyphs -- TWICE the size p8 meant on a
   -- native 128px raster, and celeste's memorial letters its text at the p8
@@ -1822,8 +1941,20 @@ do
   -- so the pattern is remembered and not used: the cart runs and its gradients
   -- come out flat. Six of twelve measured carts call it, and every one of them
   -- used to stop dead here.
-  local fill_pattern = 0
-  function fillp(p) fill_pattern = p or 0 end
+  -- fillp() is a DITHER PATTERN for the fill verbs, and the console fills
+  -- solid -- but the pattern's fractional 0.5 bit means "colour 1 is
+  -- TRANSPARENT", and that half we can honour exactly by not drawing.
+  --
+  -- It matters more than the dithering does. Carts fade between scenes by
+  -- setting a transparent pattern and filling the whole screen:
+  -- `picooffroad` does exactly that every transition, and ignoring the
+  -- transparency turned each fade into a solid black screen -- strictly worse
+  -- than the flat fill everything else gets.
+  function fillp(p)
+    p = p or 0
+    fill_pattern = p
+    fill_transparent = (p % 1) >= 0.5
+  end
 
   -- The SHEET is a file here, not memory. sget reads back 0 rather than
   -- refusing: a cart doing collision off sheet pixels will be wrong, and one
