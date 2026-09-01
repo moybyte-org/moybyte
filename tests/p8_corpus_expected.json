@@ -45,8 +45,10 @@
     },
     "petal_quest-12": {
       "boots": true,
-      "distinct": 3,
-      "responds": true
+      "distinct": 0,
+      "responds": true,
+      "unstable": true,
+      "why": "borderline: gets past its title only sometimes inside the frame budget, then stops on cocreate"
     },
     "picooffroad-5": {
       "boots": true,

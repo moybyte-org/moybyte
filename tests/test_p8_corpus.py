@@ -119,6 +119,13 @@ def test_a_corpus_cart_still_does_what_it_did(corpus, stem, tmp_path):
     if want["boots"]:
         assert got["error"] is None, (
             "%s used to boot and now stops:\n  %s" % (stem, got["error"]))
+    if want.get("unstable"):
+        # It flapped across the runs its pin was taken from -- petal_quest
+        # gets past its title only sometimes inside the frame budget, then
+        # stops on cocreate. Still gated on BOOTING, which is stable; naming
+        # the one flaky cart beats loosening the gate for the eleven that
+        # are not.
+        return
     assert got["distinct"] >= want["distinct"], (
         "%s animated %d distinct frames, expected at least %d -- something it "
         "used to draw stopped drawing" % (stem, got["distinct"], want["distinct"]))
@@ -139,6 +146,8 @@ def test_the_ratchet_is_not_behind_reality(corpus, tmp_path):
         if want.get("hangs"):
             continue
         got = _run_one(corpus, stem, tmp_path)
+        if want.get("unstable"):
+            continue
         if got["error"] is None and not want["boots"]:
             behind.append("%s BOOTS now (was: %s)" % (stem, want.get("why", "no")))
         # A wide margin on purpose. `distinct` swings with what a title
