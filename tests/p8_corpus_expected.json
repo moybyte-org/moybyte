@@ -3,17 +3,17 @@
   "carts": {
     "bunnysurvivor-9": {
       "boots": true,
-      "distinct": 119,
+      "distinct": 97,
       "responds": true
     },
     "celeste_classic_2-5": {
       "boots": true,
-      "distinct": 113,
+      "distinct": 92,
       "responds": true
     },
     "crimson_night-5": {
       "boots": true,
-      "distinct": 72,
+      "distinct": 62,
       "responds": true
     },
     "dank_tomb-0": {
@@ -24,17 +24,17 @@
     },
     "dungeons_and_diagrams-5": {
       "boots": true,
-      "distinct": 15,
+      "distinct": 13,
       "responds": true
     },
     "lowmemsky-1": {
       "boots": true,
-      "distinct": 128,
+      "distinct": 104,
       "responds": false
     },
     "mossmoss-17": {
       "boots": true,
-      "distinct": 128,
+      "distinct": 104,
       "responds": true
     },
     "nimudazus-27": {
@@ -50,12 +50,12 @@
     },
     "picooffroad-5": {
       "boots": true,
-      "distinct": 0,
+      "distinct": 1,
       "responds": true
     },
     "poom_0-9": {
       "boots": true,
-      "distinct": 14,
+      "distinct": 12,
       "responds": true
     },
     "terra_1cart-44": {
