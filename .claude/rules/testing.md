@@ -24,8 +24,18 @@ paths:
   one in a job that asked for the suite, so the workflow also refuses a run in
   which nothing ran.
 
-- **The p8 importer has a REAL-CART gate, and it exists because the unit tests
-  could not have found any of this.** Every porter bug of 2026-09-01 — fifteen
+- **The p8 importer's cart gate lives UPSTREAM, and moybyte's copy is a
+  tier-parity check.** `make -C libmoy p8-carts` in moy-spec runs the corpus
+  through `run_cart` -- the real C console on the real LUA_32BITS VM, which is
+  where the porter lives and where a porter bug should turn red. That VM is not
+  a detail: lua_Number is a SINGLE-PRECISION float there, and a 16.16
+  fixed-point implementation of p8's bitwise operators passed every test here
+  and returned 0 there. `tests/test_p8_corpus.py` runs the same carts through
+  moybyte's Python host instead, so what it proves is that both consoles agree
+  -- "one cart, every tier". Do not justify the split by input: libmoy has a
+  full input API and `run_cart --hold` uses it.
+
+- **That gate exists because the unit tests could not have found any of this.** Every porter bug of 2026-09-01 — fifteen
   dialect rules, a 60fps cart whose update never ran, a tap that moved two menu
   slots — was found by importing a famous cart and LOOKING at it, while the
   suite stayed green throughout. A cart that never ticks never errors either,

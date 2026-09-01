@@ -1,13 +1,26 @@
-"""The p8 importer against REAL carts, ratcheted.
+"""Imported p8 carts on THIS host -- a TIER-PARITY check, not the porter's gate.
 
-Why this exists, and why it is not one more unit test: every porter bug found
-on 2026-09-01 -- fifteen dialect rules, a 60fps cart whose update never ran, a
-tap that moved two menu slots -- was found by importing a famous cart and
-LOOKING at it. Not one was caught by the suite, which stayed green throughout.
-A cart that never ticks never errors either, so "no exception" is not a
-measurement; the measurement is whether the screen changes.
+The porter's own gate is upstream, in moy-spec: `make -C libmoy p8-carts` runs
+the same corpus through run_cart, which is the real C console on the real
+LUA_32BITS VM, and measures runs/animates/responds there. That is where a
+porter bug should turn something red, because that is where the porter lives.
 
-So the corpus is a gate now. `tests/p8_corpus_expected.json` records what each
+What THIS file adds is a second implementation. moybyte's host is a Python
+console -- `runtime/console.py`, `device_canvas`, the Player -- and "one cart,
+every tier" is a project invariant, so a cart that runs under libmoy and not
+here is a real bug in one of them. That is the claim being tested, and it is
+not the same claim as upstream's.
+
+(An earlier version of this docstring said the split existed because only the
+host could feed input. That was wrong: libmoy has always had a full input API,
+run_cart just did not use it. It does now.)
+
+Why either exists at all: every porter bug found on 2026-09-01 -- fifteen
+dialect rules, a 60fps cart whose update never ran, a tap that moved two menu
+slots -- was found by importing a famous cart and LOOKING at it. Not one was
+caught by the unit suite, which stayed green throughout. A cart that never
+ticks never errors either, so "no exception" is not a measurement; the
+measurement is whether the screen changes. `tests/p8_corpus_expected.json` records what each
 cart currently does, and this test fails when a cart does LESS. A cart that
 does more fails too, loudly, asking for the file to be updated -- a ratchet
 that only moves one way is the point.
