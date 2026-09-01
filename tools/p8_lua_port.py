@@ -245,6 +245,44 @@ def _read_number(s, i):
     return j, s[i:j]
 
 
+def _long_to_quoted(text):
+    """A single-line `[[...]]` holding P8SCII bytes, respelled as a quoted
+    string with escapes -- or None to leave it alone.
+
+    A long string takes no escapes, so its bytes go to the file as themselves;
+    main.lua is written UTF-8, so byte 0x9d becomes two bytes and every index
+    into the string shifts. `picooffroad` keeps its car mesh in one of these
+    and unpacks it with ord(), which then read the wrong bytes and did
+    arithmetic on nil. Quoted-with-escapes carries the exact bytes.
+    """
+    body = text
+    lvl = 0
+    while body[1 + lvl:2 + lvl] == "=":
+        lvl += 1
+    open_len = 2 + lvl
+    close = "]" + "=" * lvl + "]"
+    if not body.endswith(close):
+        return None                      # unterminated: spans lines, leave it
+    inner = body[open_len:-len(close)]
+    if "\n" in inner or not any(c > "\x7f" for c in inner):
+        return None
+    out = ['"']
+    for ch in inner:
+        cp = ord(ch)
+        if cp > 255:
+            return None                  # not a P8SCII byte; do not guess
+        if cp > 126 or cp < 32:
+            out.append("\\%d" % cp)
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\\":
+            out.append("\\\\")
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
 def _fix_string(text):
     """A p8 string literal, spelled so Lua both PARSES and RECEIVES it.
 
@@ -364,7 +402,9 @@ def lex_line(line, state=None):
             if k < 0:
                 toks.append((T_LONG, line[i:]))
                 return toks, ("string", lv)
-            toks.append((T_LONG, line[i:k + len(close)]))
+            raw = line[i:k + len(close)]
+            quoted = _long_to_quoted(raw)
+            toks.append((T_STR, quoted) if quoted else (T_LONG, raw))
             i = k + len(close)
             continue
 
@@ -756,6 +796,115 @@ def _expand_sigils_once(toks):
     return out
 
 
+# The binary bitwise operators, TIGHTEST FIRST. Order is the whole correctness
+# argument: rewriting `<<` before `&` means that by the time `&` is considered,
+# its left operand is a finished call and therefore a primary, so `a << b & c`
+# becomes `band(shl(a,b), c)` and not `a << band(b,c)`.
+_BITOPS = (("<<", "shl"), (">>", "shr"), ("&", "band"), ("~", "bxor"),
+           ("|", "bor"))
+
+
+def expand_bitops(toks):
+    """`a & b` -> `band(a, b)`, for operands that are PRIMARIES.
+
+    Lua 5.4 refuses a bitwise operator on a non-integral float; p8's numbers
+    are 16.16 fixed point and it allows them. `picooffroad` computes
+    `(((i>>4)+time()*2)*4) & 7` for a dither index, and time() makes that a
+    float, so the cart stopped on its title screen.
+
+    Only primary operands are rewritten -- a parenthesised expression, a name
+    or number with its index/call chain, or a unary minus on one. Anything
+    else is left alone rather than guessed at, because getting precedence
+    wrong here would silently compute the wrong number instead of failing.
+    """
+    for op, fn in _BITOPS:
+        guard = 0
+        while guard < 64:
+            guard += 1
+            at = -1
+            for i in range(len(toks)):
+                if toks[i][0] != T_OP or toks[i][1] != op:
+                    continue
+                lo = _primary_start(toks, i)
+                if lo < 0:
+                    continue
+                hi = _primary_end(toks, i + 1)
+                if hi < 0:
+                    continue
+                at = i
+                break
+            if at < 0:
+                break
+            lo = _primary_start(toks, at)
+            hi = _primary_end(toks, at + 1)
+            left = toks[lo:_skip_ws_back(toks, at)]
+            right = toks[_skip_ws(toks, at + 1):hi]
+            toks = (toks[:lo] + [(T_NAME, fn), (T_OP, "(")] + left
+                    + [(T_OP, ","), (T_WS, " ")] + right + [(T_OP, ")")]
+                    + toks[hi:])
+    return toks
+
+
+def _primary_start(toks, opi):
+    """Start of the PRIMARY ending just before `opi`, or -1.
+
+    The mirror of _primary_end: a `)`/`]` closes back to its opener, a name or
+    number takes its `.name` / `[...]` / `(...)` chain, and a leading unary
+    minus comes along.
+    """
+    i = _skip_ws_back(toks, opi)
+    if i <= 0:
+        return -1
+    end = i
+    prev = toks[i - 1]
+    if prev[0] == T_OP and prev[1] in (")", "]"):
+        want = "(" if prev[1] == ")" else "["
+        depth = 0
+        k = i
+        while k > 0:
+            t = toks[k - 1]
+            if t[0] == T_OP and t[1] in (")", "]"):
+                depth += 1
+            elif t[0] == T_OP and t[1] in ("(", "["):
+                depth -= 1
+                if depth == 0:
+                    break
+            k -= 1
+        if depth != 0:
+            return -1
+        i = k - 1
+        # A call or index has a name in front of it -- but a KEYWORD is not a
+        # callee. `return (a) & 1` looks exactly like a call to something
+        # named `return`, and taking it produced `band(return (a), 1)`.
+        j = _skip_ws_back(toks, i)
+        if j > 0 and toks[j - 1][0] == T_NAME \
+                and toks[j - 1][1] not in _NOT_TERM:
+            i = j - 1
+        else:
+            return i
+    elif prev[0] in (T_NAME, T_NUM):
+        if prev[0] == T_NAME and prev[1] in _NOT_TERM:
+            return -1
+        i -= 1
+    else:
+        return -1
+    # walk back over a `.name` / `:name` chain
+    while True:
+        j = _skip_ws_back(toks, i)
+        if j > 1 and toks[j - 1][0] == T_OP and toks[j - 1][1] in (".", ":") \
+                and toks[j - 2][0] in (T_NAME, T_NUM):
+            i = j - 2
+            continue
+        break
+    # a unary minus belongs to the primary
+    j = _skip_ws_back(toks, i)
+    if j > 0 and toks[j - 1][0] == T_OP and toks[j - 1][1] == "-":
+        k = _skip_ws_back(toks, j - 1)
+        if k == 0 or (toks[k - 1][0] == T_OP and toks[k - 1][1] not in (")", "]")):
+            i = j - 1
+    return i if i < end else -1
+
+
 def if_do_to_then(toks):
     """p8 accepts `do` wherever Lua wants `then`.
 
@@ -936,6 +1085,7 @@ def p8_lua_to_lua54(lines):
             continue
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
+        toks = expand_bitops(toks)
         toks = if_do_to_then(toks)
         toks = expand_oneline_if(toks)
         toks = expand_compound(toks)
@@ -1561,8 +1711,28 @@ do
   -- The SHEET is a file here, not memory. sget reads back 0 rather than
   -- refusing: a cart doing collision off sheet pixels will be wrong, and one
   -- doing an effect will just not see it.
-  function sget(x, y) return 0 end
-  function sset(x, y, c) end
+  -- The sheet is a FILE here, not memory -- but a cart that reads it back
+  -- needs to read what it wrote. `__p8_sheet` is baked in (only for carts
+  -- that call these), so sget sees the real art and sset is visible to sget.
+  -- What sset is NOT visible to is spr(), which keeps drawing the imported
+  -- sheet; that is the part the report calls an approximation.
+  local sheet = __p8_sheet
+  local HEXD = "0123456789abcdef"
+  function sget(x, y)
+    if sheet == nil then return 0 end
+    x, y = fl(x), fl(y)
+    if x < 0 or x > 127 or y < 0 or y > 127 then return 0 end
+    return tonumber(string.sub(sheet[y + 1], x + 1, x + 1), 16) or 0
+  end
+  function sset(x, y, c)
+    if sheet == nil then return end
+    x, y = fl(x), fl(y)
+    if x < 0 or x > 127 or y < 0 or y > 127 then return end
+    c = fl(c or 6) % 16
+    local row = sheet[y + 1]
+    sheet[y + 1] = string.sub(row, 1, x) .. string.sub(HEXD, c + 1, c + 1)
+                   .. string.sub(row, x + 2)
+  end
   function fset(n, f, v) end
   -- There is no ROM to re-read, and no terminal behind a cart.
   function reload(...) end
@@ -1726,7 +1896,17 @@ def music_map_lua(sections):
     return "__music_map = {%s}" % pairs
 
 
-def data_tables_lua(sections):
+def data_tables_lua(sections, want_sheet=False):
+    """The cart's baked-in data, emitted BEFORE the shim so it can close over
+    it as upvalues.
+
+    `want_sheet` bakes the 128x128 sprite sheet in as text, which costs ~16KB
+    of main.lua -- so it is only done for a cart that actually calls sget or
+    sset. It is not a luxury for those: `terra` UNPACKS its graphics into the
+    sheet with sset at load and then reads them back to generate its world, so
+    with sset dropped its "scan down for solid ground" loop never terminated.
+    Sixty million mget calls in, it was still looking.
+    """
     lines = [music_map_lua(sections),
              "-- __gff__ (the map itself ships as map.moymap)",
              "__p8_gff = {}",
@@ -1741,6 +1921,19 @@ def data_tables_lua(sections):
              "  if __moy_map_flags ~= nil then __moy_map_flags(gff) end",
              "end",
               ""]
+    if want_sheet:
+        rows = (gfx_to_kgfx(sections.get("gfx", [])) or "").split("\n")
+        rows = [(r + "0" * 128)[:128] for r in rows][:128]
+        while len(rows) < 128:
+            rows.append("0" * 128)
+        lines.append("-- __gfx__ as READABLE pixels, for sget/sset. spr() still")
+        lines.append("-- draws sprites.moygfx, so an sset is visible to sget and")
+        lines.append("-- not to the screen.")
+        lines.append("__p8_sheet = {")
+        for r in rows:
+            lines.append('  "%s",' % r)
+        lines.append("}")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -1758,6 +1951,23 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
           "band bor bxor bnot shl shr rotl rotr").split()
+
+
+def _calls_verb(body, name):
+    """`name(` in the body at a word boundary."""
+    i = 0
+    n = len(name)
+    while True:
+        j = body.find(name, i)
+        if j < 0:
+            return False
+        i = j + n
+        prev = body[j - 1] if j > 0 else " "
+        k = j + n
+        while k < len(body) and body[k] in " \t":
+            k += 1
+        if not (_ident_char(prev) or prev in "._:") and body[k:k + 1] == "(":
+            return True
 
 
 def _defines_function(body, name):
@@ -1959,9 +2169,10 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
         raise SystemExit("--zoom: the view crop is 8 rows (128x120) or nothing"
                          " -- T+B must be 8 or 0, got %d,%d" % tuple(crop))
     shim = SHIM.replace("__P8_VH__", str(vh))
+    want_sheet = _calls_verb(body, "sget") or _calls_verb(body, "sset")
     # Data tables BEFORE the shim, so the shim captures them as upvalues.
-    main_lua = (header + data_tables_lua(sections) + "\n" + shim + "\n"
-                + localization_lua(body) + body)
+    main_lua = (header + data_tables_lua(sections, want_sheet) + "\n" + shim
+                + "\n" + localization_lua(body) + body)
     _write(out_dir, "main.lua", main_lua)
     written.append("main.lua")
 
