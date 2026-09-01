@@ -1128,3 +1128,109 @@ def test_rnd_of_a_table_returns_an_element_of_it(tmp_path):
     assert ws.player._lua.get_global("picked") == 7, "must pick an element"
     assert ws.player._lua.get_global("empty") == -1, "an empty table is nil"
     assert ws.player._lua.get_global("num") == 0, "the numeric form still works"
+
+
+_BTNP_PROBE = ("edges, held, ticks = 0, 0, 0\n"
+               "function %s()\n"
+               " ticks = ticks + 1\n"
+               " if btnp(1) then edges = edges + 1 end\n"
+               " if btn(1) then held = held + 1 end\n"
+               "end\n"
+               "function _draw() cls(0) end\n")
+
+
+def _tap(tmp_path, lifecycle, host_dt, hold_frames):
+    """Import a btnp probe, hold `right` for `hold_frames` console frames."""
+    from ws_helpers import build_ws
+
+    src = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+           + _BTNP_PROBE % lifecycle)
+    (tmp_path / "probe.p8").write_text(src, encoding="utf-8")
+    ws = build_ws(tmp_path)
+    out = Path(ws.carts_root) / "probe.moy"
+    import_p8.import_p8(str(tmp_path / "probe.p8"), str(out))
+    cart = moy_carts.load(str(out))
+    ws.launcher.items.append(cart)
+    ws.launcher.sel = len(ws.launcher.items) - 1
+    ws.open()
+    assert ws.player.cart_error is None, ws.player.cart_error
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(host_dt)
+    ws.input.set_held("right", True)
+    for _ in range(hold_frames):
+        ws.input.begin_frame()
+        ws.frame(host_dt)
+    ws.input.set_held("right", False)
+    for _ in range(3):
+        ws.input.begin_frame()
+        ws.frame(host_dt)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    lua = ws.player._lua
+    return (lua.get_global("edges"), lua.get_global("held"),
+            lua.get_global("ticks"))
+
+
+@pytest.mark.parametrize("lifecycle", ["_update", "_update60"])
+@pytest.mark.parametrize("host_dt", [1.0 / 60, 1.0 / 30])
+def test_one_tap_is_one_btnp_edge_at_every_pair_of_rates(tmp_path, lifecycle,
+                                                         host_dt):
+    """The cart's rate and the host's are independent, and ONE press has to be
+    one edge across every combination of them.
+
+    Both directions have bitten. Reading the engine's edge directly ate half of
+    a 30fps cart's presses, because that edge lives one CONSOLE frame and the
+    cart ticks every other one. Latching fixed that and introduced the
+    opposite: a 60fps cart on a 30fps host runs two ticks inside one console
+    frame, the first cleared the latch, and the second still saw the engine's
+    edge -- so one tap of left moved TWO slots in an upgrade menu. btnp reads
+    the latch and nothing else now."""
+    edges, held, _ = _tap(tmp_path, lifecycle, host_dt, hold_frames=1)
+    assert edges == 1, "one tap must be one edge"
+    assert held >= 1, "btn() must see the press at all"
+
+
+@pytest.mark.parametrize("host_dt", [1.0 / 60, 1.0 / 30])
+def test_a_short_hold_does_not_repeat_before_the_delay(tmp_path, host_dt):
+    """The repeat below must not turn a slightly-long tap into two moves."""
+    edges, _, _ = _tap(tmp_path, "_update60", host_dt, hold_frames=5)
+    assert edges == 1
+
+
+def test_btnp_repeats_while_held_on_the_carts_own_clock(tmp_path):
+    """p8's btnp fires again after a 15-tick delay, then every 4 -- that is
+    what scrolls a menu on a held button, and the cadence is counted in the
+    CART's ticks, so it is the same hold at either host rate."""
+    fast, _, ticks_fast = _tap(tmp_path, "_update60", 1.0 / 60, hold_frames=40)
+    assert ticks_fast >= 40
+    assert fast == 1 + (40 - 15 - 1) // 4 + 1, \
+        "one press then a repeat every 4 ticks after 15"
+
+    # Same CART ticks, half the console frames: the cadence must not change.
+    slow, _, _ = _tap(tmp_path, "_update60", 1.0 / 30, hold_frames=20)
+    assert slow == fast, "the repeat is the cart's clock, not the host's"
+
+
+def test_releasing_resets_the_repeat(tmp_path):
+    """Otherwise the next tap inherits the last hold's counter and fires twice."""
+    from ws_helpers import build_ws
+
+    src = ("pico-8 cartridge // http://www.pico-8.com\nversion 42\n__lua__\n"
+           + _BTNP_PROBE % "_update60")
+    (tmp_path / "probe.p8").write_text(src, encoding="utf-8")
+    ws = build_ws(tmp_path)
+    out = Path(ws.carts_root) / "probe.moy"
+    import_p8.import_p8(str(tmp_path / "probe.p8"), str(out))
+    cart = moy_carts.load(str(out))
+    ws.launcher.items.append(cart)
+    ws.launcher.sel = len(ws.launcher.items) - 1
+    ws.open()
+    for held in (True, False, True, False):
+        ws.input.set_held("right", held)
+        for _ in range(20 if held else 5):
+            ws.input.begin_frame()
+            ws.frame(1.0 / 60)
+    assert ws.player.cart_error is None, ws.player.cart_error
+    per_hold = 1 + (20 - 15 - 1) // 4 + 1
+    assert ws.player._lua.get_global("edges") == 2 * per_hold, \
+        "each hold must start its repeat clock from zero"

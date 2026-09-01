@@ -918,12 +918,43 @@ do
 
   local BTN = {[0] = "left", [1] = "right", [2] = "up", [3] = "down",
                [4] = "a", [5] = "b"}
-  -- btnp edges are latched across console frames (see _update below): a game
-  -- tick runs only ~every other console frame and an engine press edge lasts
-  -- ONE console frame, so an unlatched port would eat ~half of all presses.
-  local pending = {}
+  -- btnp reads the LATCH and nothing else, and both halves of that matter.
+  --
+  -- Latched, because a 30fps cart ticks every OTHER console frame while an
+  -- engine press edge lasts ONE, so reading the engine directly ate half of
+  -- all presses.
+  --
+  -- And nothing else, because the fallback that used to sit here double-
+  -- counted the other way round: a 60fps cart on a 30fps host runs TWO ticks
+  -- inside one console frame, the first tick cleared the latch, and the second
+  -- still saw the engine's edge -- which is live for that whole frame. One tap
+  -- of left moved two slots in an upgrade menu. The latch is set once per
+  -- console frame and cleared by the tick that consumes it, so one press is
+  -- one edge at any pair of rates.
+  --
+  -- Held, btnp REPEATS: p8 fires again after a 15-tick delay, then every 4.
+  -- That is what makes a menu scroll while a cart holds left, and without it
+  -- the only way through a long upgrade list is to tap it item by item. The
+  -- counters advance per TICK (the cart's own frames), not per console frame,
+  -- so the cadence is the cart's at either rate.
+  --
+  -- ONE DELIBERATE DIVERGENCE from fake-08, which is otherwise the reference
+  -- here. Its predicate is `held == 15 or (held >= 15 and held % 4 == 0)`,
+  -- which fires on tick 15 AND tick 16 -- two edges one tick apart, which is
+  -- precisely the doubled menu move this repeat was added alongside fixing.
+  -- We keep its steady-state cadence (16, 20, 24 ...) and drop the adjacent
+  -- 15. The delay is one tick longer; nothing can feel that.
+  local pending, hold = {}, {}
+  local RPT_DELAY, RPT_EVERY = 15, 4
   function btn(i) return m_btn(BTN[i] or "a") end
-  function btnp(i) return pending[i] or m_btnp(BTN[i] or "a") end
+  function btnp(i)
+    if pending[i] then return true end
+    local h = hold[i]
+    if h and h > RPT_DELAY and (h - RPT_DELAY - 1) % RPT_EVERY == 0 then
+      return true
+    end
+    return false
+  end
 
   -- PICO-8 numbers are 16.16 fixed point and every API arg is implicitly
   -- FLOORED (p8 carts pass float colors/coords everywhere -- celeste's "1000"
@@ -1404,6 +1435,9 @@ do
     while acc >= P8_DT - EPS and n < MAX_CATCHUP do
       acc = acc - P8_DT
       n = n + 1
+      for i = 0, 5 do                            -- hold length, in CART ticks
+        hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
+      end
       if tick then tick() end
       for i = 0, 5 do pending[i] = false end     -- the tick consumed the edges
       ticked = true
