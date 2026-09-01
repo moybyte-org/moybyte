@@ -3,7 +3,7 @@
 # a cart roster when the board has none. Idempotent -- run it again whenever
 # the credentials or the roster change.
 #
-#   ./provision.sh [--modules] [--web] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
+#   ./provision.sh [--modules] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
 #
 # WHAT THIS SCRIPT IS, SINCE 2026-08-29. It used to be the whole port: this
 # board ran stock MicroPython, and the nine shared modules it needs were PUSHED
@@ -22,7 +22,7 @@
 # gap: the website's flasher can write a Zero, and a person who used it got an
 # empty console with no hint that a second, cabled step existed.
 #
-# So the cart push became the SAME trade as `--modules` and `--web`: a dev loop
+# So the cart push became the SAME trade as `--modules`: a dev loop
 # for a roster that changed since the image was built, not the way carts
 # arrive. Default is "push only if the board has no carts at all", which is the
 # image's own rule so the two paths cannot fight; `--carts` forces the push.
@@ -36,12 +36,11 @@
 # forcing a push onto an image-seeded store leaves the launcher showing both.
 # Delete the store (or reflash) if that is what you have done.
 #
-# The push did not go away, it became OPT-IN (`--modules`). Same doctrine as
-# the web bundle, one level up: STORAGE WINS, so a push stays the sub-minute
-# dev loop and the image is the guarantee, not the ceiling. And the same
-# hazard: MicroPython searches / before .frozen, so a pushed copy shadows the
-# image silently and forever. That is why it is a flag, why `--clean` exists to
-# undo it, and why `zero_host.serve()` prints which modules are shadowed.
+# The push did not go away, it became OPT-IN (`--modules`): a sub-minute dev
+# loop for a module that changed since the image was built. The hazard is why
+# it is a flag -- MicroPython searches / before .frozen, so a pushed copy
+# shadows the image silently and forever. `--clean` undoes it, and
+# `zero_host.serve()` prints which modules are shadowed.
 #
 # The pushed list is DERIVED from board.toml, never typed here: a hand-list is
 # the thing that falls behind the code it is a list of, and this board has
@@ -55,13 +54,11 @@
 set -euo pipefail
 
 PUSH_MODULES=0
-PUSH_WEB=0
 PUSH_CARTS=0
 CLEAN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --modules) PUSH_MODULES=1; shift ;;
-    --web)     PUSH_WEB=1; shift ;;
     --carts)   PUSH_CARTS=1; shift ;;
     --clean)   CLEAN=1; shift ;;
     -h|--help) sed -n '2,54p' "$0"; exit 0 ;;
@@ -140,36 +137,12 @@ PYEOF
 fi
 
 echo "== dirs"
-for d in /moy /moy/carts /moy/web /moy/update; do
+for d in /moy /moy/carts /moy/update; do
   run exec "import os
 try: os.mkdir('${d}')
 except OSError: pass" >/dev/null
 done
 
-if [ "${PUSH_WEB}" = "1" ]; then
-  # The web bundle OVERRIDE. Baked into the image since this board became a
-  # build target, so this is the same dev-loop trade as --modules: faster than
-  # a reflash, and it wins until it is deleted. The asset SET is
-  # moy_webhost.ASSETS's business, not this script's -- a file the worker
-  # statically imports but nobody pushed is a console that cannot boot.
-  echo "== web bundle (gzipped -- moy_webhost prefers the .gz copies)"
-  if [ -d "${DIST}" ]; then
-    ASSET_LIST="$(MOY_REPO="${REPO}" "${PY}" - <<'PYEOF'
-import os, sys
-repo = os.environ["MOY_REPO"]
-sys.path.insert(0, repo)
-sys.path.insert(0, os.path.join(repo, "device"))
-import moy_webhost
-print("\n".join(moy_webhost.ASSETS))
-PYEOF
-)"
-    for a in ${ASSET_LIST}; do
-      run cp "${DIST}/${a}.gz" :/moy/web/ >/dev/null
-    done
-  else
-    echo "   (no ${DIST} -- build firmware/web_runner first; skipping)"
-  fi
-fi
 
 # THE CARTS, and the question of whether they are already there. The image seeds
 # whatever a store is MISSING on every boot now (zero_host.seed_carts), so the

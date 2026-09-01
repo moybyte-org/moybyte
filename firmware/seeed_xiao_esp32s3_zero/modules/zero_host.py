@@ -7,7 +7,7 @@ on its own flash, served and SYNCED over WiFi, and its PINS (#9). It is
 deliberately the smallest possible host of the 3.4 sync RPC:
 
     boot -> join WiFi (creds in /moy/wifi.json, the console's own shape)
-         -> WebHost(/moy/carts, /moy/web) + /gpio   [the SAME class the boards
+         -> WebHost(/moy/carts) + /gpio             [the SAME class the boards
          -> poll() forever                           inject, one endpoint more]
 
     ...no joinable network
@@ -20,13 +20,9 @@ lands on this flash about a second after its commit, and is still there --
 served back -- on the next visit. That is the whole product: a console in your
 pocket whose screen is whatever browser is nearby.
 
-Since 2026-08-29 the bundle comes from THIS IMAGE (native/moy_web, the same
-627KB .incbin every other board carries), with a pushed copy in /moy/web still
-winning if one is there. Until that day this board had no image of its own, so
-the baked half was structurally unreachable here and a hand-pushed copy was the
-only source -- which is precisely the silent drift baking it was introduced to
-end, and this board was the last place it survived. `serve()` prints which of
-the two it is about to serve, for the same reason.
+The bundle comes from THIS IMAGE (native/moy_web, the same .incbin every other
+board carries), so the console this board serves is the one its firmware was
+built with and changes only when it is reflashed.
 
 `POST /gpio` is the second half of the same idea (zero_gpio): the cart in the
 browser calls `pin_write`, the page batches it here, and this board -- which
@@ -60,7 +56,6 @@ import zero_gpio
 
 ROOT = "/moy"
 CARTS_DIR = ROOT + "/carts"
-WEB_DIR = ROOT + "/web"
 WIFI_STORE = ROOT + "/wifi.json"
 ZERO_STORE = ROOT + "/zero.json"   # this board's own name + write pin (setup)
 # Where an OTA payload is staged. On the internal VFS because there is no card
@@ -755,7 +750,6 @@ def serve():
     (which is how provision.sh and mpremote get the board back)."""
     _mkdir(ROOT)
     _mkdir(CARTS_DIR)
-    _mkdir(WEB_DIR)
     # BEFORE the radio, on purpose: seeding is local, and a board that cannot
     # find a network still ends up with a store -- it goes on to host the setup
     # AP, and the first page served after that form is answered has carts behind
@@ -772,7 +766,7 @@ def serve():
         import zero_setup
         zero_setup.run(WIFI_STORE, ZERO_STORE)
         return
-    host = zero_host_class()(CARTS_DIR, WEB_DIR, pin=me.get("pin"))
+    host = zero_host_class()(CARTS_DIR, pin=me.get("pin"))
     ota, task = make_updater(me)
     host.update = task
     if task is not None:

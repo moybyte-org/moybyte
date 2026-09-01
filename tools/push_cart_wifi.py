@@ -1,51 +1,31 @@
 #!/usr/bin/env python3
-"""Put a folder of files onto a board over WiFi.
+"""Put a folder of files onto a board over WiFi -- normally a cart.
 
-    python tools/p4_push_web.py --port /dev/ttyACM1              # the web console
-    python tools/p4_push_web.py --dir ports/celeste.moy \
-        --dest /moy/carts/celeste.moy --port /dev/ttyACM1        # any cart
+    python tools/push_cart_wifi.py --board guition_s3 \
+        --dir ports/celeste.moy --dest /sd/carts/celeste.moy
 
-The board serves `firmware/web_runner/dist` from `/moy/web` (P4) or `/sd/web`
-(T-Deck); this is how those ~1.17MB get there.
+--board is REQUIRED and has no default, for the reason push_cart.py and
+p4_perf.py spell out: the boards differ in the serial line state at open, and
+opening an S3 with the P4's low lines CHIP-RESETS it.
 
-Since 2026-08-15 the bundle also rides the FIRMWARE IMAGE (`native/moy_web`),
-and storage still wins over it -- which is what keeps this tool worth having:
-baking made a flashed board current-by-default, this makes a new web build
-testable in seconds instead of a reflash. Delete `/moy/web` when you are done
-with an experiment, or the board keeps serving your copy; it says which one it
-is serving on the serial line `WEBHOST ...` when the row is switched on.
+**The board PULLS.** This stands up a throwaway HTTP server on the machine you
+run it from and hands the board a URL over serial; the board then downloads the
+files over WiFi. The board already has WiFi up (the WEB CONSOLE row needs it
+anyway) and pulls at tens of KB/s, so a whole cart takes seconds and this needs
+no firmware support at all.
 
-**The board PULLS.** This script stands up a throwaway HTTP server on the
-machine you run it from and hands the board a URL over serial; the board then
-downloads the four files over WiFi. The obvious alternative -- pushing the bytes
-down the serial link -- means ~1500 base64'd chunks through a REPL for
-`micropython.wasm` alone, and it cannot carry binary without escaping it. The
-board already has WiFi up (the WEB CONSOLE row needs it anyway) and pulls at
-tens of KB/s, so this takes seconds and needs no firmware support at all.
-
-That last part is the point: this works against a board that has ALREADY been
-flashed. Deploying a new web build costs no rebuild and no reflash.
+WHY NOT JUST SERIAL. `tools/push_cart.py` sends a cart down the serial link as
+base64 chunks and is the ordinary route; it works, and its chunk size is tuned
+per board (the P4's UART stdin ring is ~256 bytes with no flow control -- see
+board.toml's [serial]). But it moves roughly 500 B/s, so an 88KB main.lua is
+about three minutes and a whole cart is four to five; the same cart over this
+downloader is under 40 seconds. It is also immune to the failure serial has:
+a multi-second stall (a BLE keyboard scan) overflows the board's receive buffer
+mid-line, the harness resends a chunk the board never heard the start of, and
+the resend lands on the truncated remains as a SyntaxError.
 
 It is deliberately not a `make` target. It needs a board on a serial port and
 both machines on one network, which is a bench operation, not a build step.
-
-WHY IT ALSO PUSHES CARTS (2026-08-15). `tools/push_cart.py` sends a cart down
-the SERIAL link as base64 chunks, and on a 43KB main.lua that failed: the board
-stalled ~7.5s (a BLE keyboard scan), its UART receive buffer overflowed mid-line
-while it was not draining, the harness resent the chunk it had heard nothing
-about, and the resend landed on the truncated remains as a SyntaxError. No chunk
-size fixes a multi-second stall -- but the board is already on WiFi and already
-knows how to pull, so the same downloader that carries a 1MB wasm carries a cart
-in one request.
-
-That stall mechanism is real and still is. What it does NOT mean, and what this
-paragraph used to read as, is that serial cart push does not work. Dropping the
-chunk 768 -> 256 (the P4's UART stdin ring is ~256 bytes with no flow control;
-board.toml's [serial] block carries the measurement) took the same 44KB cart
-clean on the FIRST try, 2026-08-19 -- 88s there, 45s on the T-Deck, whose RX
-#201 fixed three days earlier. So tools/push_cart.py is the ordinary route for a
-cart on any of the three boards; THIS downloader stays the right answer for the
-~1MB web bundle, where one HTTP request beats thousands of base64 chunks.
 """
 
 from __future__ import annotations
@@ -59,23 +39,9 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from p4_autotest import P4Board                                # noqa: E402
+from p4_autotest import P4Board, board_dirs                   # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIST = os.path.join(ROOT, "firmware", "web_runner", "dist")
-
-# What the board serves, and nothing else -- moy_webhost.ASSETS is the allowlist
-# on the device side, so pushing a file that is not in it would just sit there,
-# and pushing FEWER means the board keeps serving its baked copy (the pushed set
-# only wins when it is complete). Read from the one list, not restated: this
-# tuple was a hand copy of four names, and when moy_store.mjs joined ASSETS
-# (2026-08-25) the push kept quietly shipping an incomplete set that could never
-# take over. carts.json is NOT here on purpose: the board GENERATES that from
-# its own store, which is the entire point of serving the console from the
-# console.
-import gen_web_blob                                            # noqa: E402
-FILES = tuple(gen_web_blob.asset_names())
-
 
 def _lan_ip():
     """This machine's address ON THE BOARD'S NETWORK.
@@ -157,34 +123,23 @@ print("PUSH done")
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--port", default="/dev/ttyACM1", help="board serial port")
-    ap.add_argument("--web-dir", default="/moy/web",
-                    help="destination on the board (/sd/web on the T-Deck)")
-    ap.add_argument("--dist", default=DIST)
-    ap.add_argument("--dir", help="push THIS folder instead of the web bundle")
-    ap.add_argument("--dest", help="destination for --dir (e.g. /moy/carts/x.moy)")
+    ap.add_argument("--board", required=True, choices=sorted(board_dirs()),
+                    help="which board; supplies the serial line state at open")
+    ap.add_argument("--port", help="override the port --board resolves to")
+    ap.add_argument("--dir", required=True, help="the folder to push")
+    ap.add_argument("--dest", required=True,
+                    help="destination on the board (e.g. /sd/carts/x.moy)")
     ap.add_argument("--http-port", type=int, default=8731)
     args = ap.parse_args(argv)
 
     global FILES
-    if args.dir:
-        args.dist = args.dir.rstrip("/")
-        if not args.dest:
-            sys.exit("--dir needs --dest (e.g. /moy/carts/celeste.moy)")
-        args.web_dir = args.dest
-        FILES = tuple(sorted(f for f in os.listdir(args.dist)
-                             if os.path.isfile(os.path.join(args.dist, f))
-                             and not f.startswith(".")))
-        if not FILES:
-            sys.exit("no files in " + args.dist)
-
-    # Push the PRE-GZIPPED copy when the build made one: the board serves
-    # `<name>.gz` with Content-Encoding and never inflates anything, so this
-    # halves both the push and every later page load (1.13MB -> 0.56MB). Raw
-    # stays the fallback for a dist built before build.sh emitted .gz.
-    if not args.dir:
-        FILES = tuple((f + ".gz") if os.path.exists(
-            os.path.join(args.dist, f + ".gz")) else f for f in FILES)
+    args.dist = args.dir.rstrip("/")
+    args.web_dir = args.dest
+    FILES = tuple(sorted(f for f in os.listdir(args.dist)
+                         if os.path.isfile(os.path.join(args.dist, f))
+                         and not f.startswith(".")))
+    if not FILES:
+        sys.exit("no files in " + args.dist)
 
     missing = [f for f in FILES if not os.path.exists(os.path.join(args.dist, f))]
     if missing:
@@ -211,10 +166,18 @@ def main(argv=None):
     ip = _lan_ip()
     print("  http://%s:%d/  ->  %s on the board" % (ip, args.http_port,
                                                     args.web_dir))
-    board = P4Board(args.port, log=lambda s: None)
+    board = P4Board(args.port or "auto", board_dir=board_dirs()[args.board],
+                    log=lambda s: None)
     ok = False
     try:
-        board.reset(boot_timeout=90)
+        # A CH343 board gets a clean slate first. An attach_only board must not
+        # be reset at all -- its USB serial is on the SoC, so the pulse strands
+        # this handle -- and does not need to be: the downloader below runs
+        # against whatever state it is already in.
+        if board.attach_only:
+            board.drain(1.0)
+        else:
+            board.reset(boot_timeout=90)
         time.sleep(2)
         # The WEB CONSOLE row owns the WiFi bring-up (and its 12s link wait), so
         # turning it on is also how this gets a network. Idempotent: already-on

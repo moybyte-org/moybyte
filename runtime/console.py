@@ -1471,15 +1471,15 @@ class Workstation:
         return self.web.unpark()
 
     def webhost_serving(self):
-        """`web.serving()` -- settings_layer, tools/p4_push_web.py."""
+        """`web.serving()` -- settings_layer, tools/push_cart_wifi.py."""
         return self.web.serving()
 
     def webhost_label(self):
-        """`web.label()` -- the Settings row, tools/p4_push_web.py."""
+        """`web.label()` -- the Settings row, tools/push_cart_wifi.py."""
         return self.web.label()
 
     def toggle_webhost(self):
-        """`web.toggle()` -- settings_layer, the dev channel, p4_push_web."""
+        """`web.toggle()` -- settings_layer, the dev channel, push_cart_wifi."""
         return self.web.toggle()
 
     def rescan_carts(self):

@@ -573,15 +573,12 @@ def test_the_web_console_is_baked_into_this_image(board):
         assert size > 0, name
 
 
-def test_the_console_serves_the_image_when_storage_has_none(board):
-    """Storage WINS on purpose (a pushed copy is a human's explicit override),
-    so this asserts the fallback the way the handler sees it -- pointed at a
-    directory that cannot exist. If the real /moy/web has a pushed copy, that
-    is the correct answer for the live host and the reason `start()` prints
-    which source it is using."""
+def test_the_console_is_served_out_of_the_firmware_image(board):
+    """The console this board hands a browser comes out of its own image --
+    the megabyte the page cannot boot without, read straight from flash."""
     assert board.pyexec(
         "import moy_webhost\n"
-        "H = moy_webhost.WebHost('/moy/carts', '/moy/no_such_web')\n"
+        "H = moy_webhost.WebHost('/moy/carts')\n"
         "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
     kind = board.pyval("eval('type(R).__name__', ws._g)")
     assert kind == "BlobResponse", kind

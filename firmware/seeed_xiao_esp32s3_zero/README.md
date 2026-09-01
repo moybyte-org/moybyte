@@ -117,7 +117,7 @@ them back on the next visit — but anything that existed *only* here is.
 ## Provisioning (the store, not the modules)
 
 ```bash
-./provision.sh [--modules] [--web] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
+./provision.sh [--modules] [--carts] [--clean] [/dev/ttyACM0] [wifi.json]
 ```
 
 Default: make the directories, optionally write the credentials, mint or keep
@@ -146,11 +146,10 @@ never rotates a pin somebody has already scanned.
 
 ### The flags, and the one hazard they exist for
 
-`--modules` pushes the image's own module set as plain files, `--web` pushes the
-wasm bundle, and `--carts` re-pushes the seed roster. All three are **dev
-loops**, and all three are the same trade the bundle already makes on every
-board: **storage WINS, so the image is the guarantee and not the ceiling.** A
-push is a second, a reflash is minutes.
+`--modules` pushes the image's own module set as plain files and `--carts`
+re-pushes the seed roster. Both are **dev loops**: a push is a second, a
+reflash is minutes. The wasm bundle is not among them — it is served from the
+image and changes only when the board is reflashed.
 
 The hazard is that MicroPython searches `/` before `.frozen`, so a pushed `.py`
 outranks the image's own copy **on every boot after it**, silently and forever,

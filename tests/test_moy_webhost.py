@@ -132,17 +132,12 @@ def test_an_unreadable_file_is_skipped_not_fatal(tmp_path):
 
 # -- the handler -------------------------------------------------------------
 
-def _host(tmp_path, web=True):
+def _host(tmp_path):
+    """A host with NO console bundle. Assets come from the firmware image, so a
+    test that wants one installs it with the `baked` fixture."""
     root = _store(tmp_path)
-    wdir = tmp_path / "web"
-    wdir.mkdir()
-    if web:
-        (wdir / "index.html").write_text("<!doctype html>console")
-        (wdir / "micropython.wasm").write_bytes(b"\x00asm" + b"x" * 5000)
-        (wdir / "worker.js").write_text("// worker")
     h = wh.WebHost.__new__(wh.WebHost)          # no socket needed
     h.carts_root = str(root)
-    h.web_dir = str(wdir)
     h._with_sd = lambda fn: fn()
     h.pin = None                                # OPEN: the LAN dev-loop shape
     # NOT serving, and not saying goodbye either -- the ordinary state. This
@@ -153,32 +148,16 @@ def _host(tmp_path, web=True):
     return h
 
 
-def test_the_root_serves_the_console_page(tmp_path):
+def test_the_root_serves_the_console_page(tmp_path, baked):
+    from moy_webserver import BlobResponse
+    baked({"index.html.gz": b"\x1f\x8bpage"})
     h = _host(tmp_path)
     for path in ("/", "/index.html"):
         r = h.handle_http("GET", path, b"")
-        assert isinstance(r, FileResponse), path
+        assert isinstance(r, BlobResponse), path
         assert r.content_type.startswith("text/html")
 
 
-def test_a_megabyte_asset_is_streamed_not_held(tmp_path):
-    """The whole reason FileResponse exists. `micropython.wasm` is ~1.0MB and
-    the S3 has ~23KB of internal SRAM free in play (#66), so a response built
-    as one bytes object is not a slow path -- it is one that does not run."""
-    h = _host(tmp_path)
-    r = h.handle_http("GET", "/micropython.wasm", b"")
-    assert isinstance(r, FileResponse)
-    assert r.content_type == "application/wasm"
-    assert r.size == 5004
-    assert r.CHUNK <= 4096, "a chunk this big defeats the purpose"
-    head = r.head().decode()
-    assert "Content-Length: 5004" in head
-    # NOT cached. This shipped as max-age=86400 on the reasoning that the
-    # assets change only on a reflash -- they change on every web-build push,
-    # which is the routine action, and a board then served a correct console to
-    # a browser showing yesterday's for a day. A full reload is ~1.5s at the
-    # measured ~700KB/s, which is the price of never being stale.
-    assert "no-store" in head and "max-age" not in head
 
 
 def test_carts_json_is_json_and_live(tmp_path):
@@ -197,25 +176,27 @@ def test_only_the_four_known_assets_are_reachable(tmp_path):
     risks handing out wifi.json -- and "reject .." is one encoding trick from
     being wrong."""
     h = _host(tmp_path)
-    (Path(h.web_dir).parent / "secret.txt").write_text("wifi password")
+    (tmp_path / "secret.txt").write_text("wifi password")
     for path in ("/secret.txt", "/../secret.txt", "/carts/hop.moy/main.py",
                  "/%2e%2e/secret.txt", "/wifi.json"):
         assert h.handle_http("GET", path, b"") is None, path
 
 
-def test_a_query_string_does_not_hide_an_asset(tmp_path):
+def test_a_query_string_does_not_hide_an_asset(tmp_path, baked):
     """The page opens itself with `?dev=1`; a served index must survive it."""
+    from moy_webserver import BlobResponse
+    baked({"index.html.gz": b"\x1f\x8bpage"})
     h = _host(tmp_path)
-    assert isinstance(h.handle_http("GET", "/?dev=1", b""), FileResponse)
+    assert isinstance(h.handle_http("GET", "/?dev=1", b""), BlobResponse)
 
 
-def test_a_board_with_no_bundle_says_which_directory(tmp_path):
-    """Copying dist/ to the board is a SETUP step, and its failure looks
-    exactly like a broken feature in a browser. Name the path."""
-    h = _host(tmp_path, web=False)
+def test_a_board_with_no_bundle_says_how_to_get_one(tmp_path):
+    """A firmware built with no web bundle looks exactly like a broken feature
+    in a browser. Name the build step, since that is the whole fix."""
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/", b"")
     assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
-    assert h.web_dir.encode() in r and b"web_runner/dist" in r
+    assert b"web_runner/dist" in r and b"reflash" in r
 
 
 # -- the bundle baked into the firmware image --------------------------------
@@ -265,7 +246,7 @@ def test_the_image_serves_the_console_when_storage_has_none(tmp_path, baked):
     from moy_webserver import BlobResponse
     baked({"index.html.gz": b"\x1f\x8b" + b"page",
            "micropython.wasm.gz": b"\x1f\x8b" + b"w" * 900})
-    h = _host(tmp_path, web=False)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/", b"")
     assert isinstance(r, BlobResponse)
     assert r.content_type.startswith("text/html")
@@ -275,34 +256,13 @@ def test_the_image_serves_the_console_when_storage_has_none(tmp_path, baked):
     assert "no-store" in head
 
 
-def test_a_pushed_copy_BEATS_the_baked_one(tmp_path, baked):
-    """THE PRECEDENCE DECISION, and it is not arbitrary. A copy on the board is
-    an explicit human action (tools/p4_push_web.py, a card reader). If the
-    image won, that dev loop would die and a baked bundle would be one nobody
-    could iterate on without a full reflash."""
-    baked({"index.html.gz": b"BAKED", "worker.js.gz": b"BAKED"})
-    h = _host(tmp_path)                     # writes index.html + worker.js
-    r = h.handle_http("GET", "/", b"")
-    assert isinstance(r, FileResponse)
-    assert r.path.endswith("index.html"), "the image overrode a pushed copy"
-
-
-def test_a_pushed_gz_also_beats_the_baked_one(tmp_path, baked):
-    baked({"worker.js.gz": b"BAKED"})
-    h = _host(tmp_path)
-    (Path(h.web_dir) / "worker.js.gz").write_bytes(b"\x1f\x8bPUSHED")
-    r = h.handle_http("GET", "/worker.js", b"")
-    assert isinstance(r, FileResponse) and r.path.endswith(".gz")
-    assert r.encoding == "gzip"
-
-
 def test_a_raw_baked_asset_is_served_without_an_encoding(tmp_path, baked):
     """The build bakes .gz today, but the lookup is the same two-step rule as
     on storage, so a raw bundle needs no code change -- and must not be
     announced as gzip, which is a page that fails to boot."""
     from moy_webserver import BlobResponse
     baked({"worker.js": b"// raw"})
-    h = _host(tmp_path, web=False)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/worker.js", b"")
     assert isinstance(r, BlobResponse)
     assert r.encoding is None
@@ -314,10 +274,10 @@ def test_an_image_with_no_bundle_falls_through_to_the_404(tmp_path, baked):
     CI refuses to publish one). The module is still there and reports nothing,
     so the request must land on the 404 -- not on an exception mid-request."""
     baked({})
-    h = _host(tmp_path, web=False)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/", b"")
     assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
-    assert b"no web bundle in this firmware" in r
+    assert b"no web console baked in" in r
 
 
 def test_a_broken_native_module_is_not_a_broken_request(tmp_path, monkeypatch):
@@ -328,7 +288,7 @@ def test_a_broken_native_module_is_not_a_broken_request(tmp_path, monkeypatch):
             raise RuntimeError("nope")
 
     monkeypatch.setattr(wh, "_moy_web", _Boom())
-    h = _host(tmp_path, web=False)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/", b"")
     assert isinstance(r, bytes) and b"404" in r.split(b"\r\n")[0]
 
@@ -340,7 +300,7 @@ def test_the_baked_response_holds_no_copy_of_the_bundle(tmp_path, baked):
     it is one that does not run."""
     from moy_webserver import BlobResponse
     mod = baked({"micropython.wasm.gz": b"\x1f\x8b" + b"z" * 4000})
-    h = _host(tmp_path, web=False)
+    h = _host(tmp_path)
     r = h.handle_http("GET", "/micropython.wasm", b"")
     assert isinstance(r, BlobResponse)
     assert r.data is mod.blobs["micropython.wasm.gz"], "the bundle was copied"
@@ -434,14 +394,10 @@ def test_the_blob_send_pays_no_storage_gate(tmp_path, baked):
     The baked bundle is in flash and races nothing, so the SEND takes no gate --
     a mount in the path of every asset byte would be an unrelated cost.
 
-    The PROBE that chose the blob is a different question with the other answer:
-    storage wins over the image, so `_asset` stats `/sd/web/...` whether or not a
-    copy is there, and that stat has to be inside the gate (the test below) --
-    so the two are measured separately.
     """
     baked({"worker.js.gz": b"\x1f\x8bx"})
     entered = []
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "nowhere"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       with_sd=lambda fn: (entered.append(1), fn())[1])
     resp = host._asset("worker.js")        # the probe: gated, on purpose
     del entered[:]                         # measure only the send
@@ -451,50 +407,6 @@ def test_the_blob_send_pays_no_storage_gate(tmp_path, baked):
     assert bytes(conn.sent).endswith(b"\x1f\x8bx")
 
 
-@pytest.mark.parametrize("pushed", [True, False])
-def test_the_asset_probe_never_stats_storage_outside_the_gate(tmp_path,
-                                                              monkeypatch,
-                                                              pushed):
-    """An asset request may not touch the card before it has taken the gate.
-
-    `handle_http` runs at the FRAME TAIL, whose panel fence is conditional
-    (`if not loop.drew: comp.sync()`), so on a frame that PAINTED there is a
-    flush still shipping. On the T-Deck `web_dir` is on the card sharing that
-    SPI host, and an sdspi transaction concurrent with band queueing from the
-    other core is the documented Cache/MMU panic; the gate is what drains the
-    flush and brackets the session.
-
-    A MISS costs the same directory read as a hit, so a board serving the BAKED
-    bundle is not exempt: both cases run here.
-    """
-    web = tmp_path / "web"
-    web.mkdir()
-    if pushed:
-        (web / "index.html").write_text("<!doctype html>")
-    depth = [0]
-    entries = []
-    probes = []
-
-    def gate(fn):
-        entries.append(1)
-        depth[0] += 1
-        try:
-            return fn()
-        finally:
-            depth[0] -= 1
-
-    real_size = wh._file_size
-    monkeypatch.setattr(
-        wh, "_file_size",
-        lambda path: (probes.append(depth[0]), real_size(path))[1])
-    host = wh.WebHost(str(tmp_path / "carts"), str(web), with_sd=gate)
-    host.handle_http("GET", "/", b"")
-
-    assert probes, "the probe stopped touching storage -- retarget this test"
-    assert 0 not in probes, "an asset probe stat ran outside the storage gate"
-    # ONE session for both probes: every entry drains the panel, so a gate per
-    # file would pay the fence twice per request.
-    assert len(entries) == 1, entries
 
 
 def test_a_write_anywhere_but_sync_is_still_405(tmp_path):
@@ -526,7 +438,7 @@ def _batch(*ops, pin=None, root=None):
 
 def test_sync_applies_into_the_store(tmp_path):
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync",
                       _batch({"p": "hop.moy/main.py", "t": "x = 7\n"}))
     assert b"200" in r.split(b"\r\n")[0]
@@ -537,7 +449,7 @@ def test_sync_applies_into_the_store(tmp_path):
 
 def test_sync_refuses_a_bad_batch_and_a_bad_path(tmp_path):
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     assert b"400" in h.handle_http("POST", "/sync", b"junk").split(b"\r\n")[0]
     r = h.handle_http("POST", "/sync",
                       _batch({"p": "../../wifi.json", "t": "stolen"}))
@@ -550,7 +462,7 @@ def test_sync_pin_gate(tmp_path):
     """pin=None keeps the desk's open dev loop; a host built WITH a pin
     refuses a batch that does not carry it, before any op is looked at."""
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"), pin="4321")
+    h = wh.WebHost(str(root), pin="4321")
     op = {"p": "hop.moy/main.py", "t": "x = 9\n"}
     r = h.handle_http("POST", "/sync", _batch(op))
     assert b"403" in r.split(b"\r\n")[0]
@@ -626,7 +538,7 @@ def test_a_whole_cart_delete_takes_the_cart_and_its_journal(tmp_path):
     not overwrite it (the Zero). Over HTTP, so the recovery needs no cable and
     cannot wedge that board's USB the way an mpremote session can."""
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"), pin="4321")
+    h = wh.WebHost(str(root), pin="4321")
     (root / "hop.moy" / "journal").mkdir(parents=True, exist_ok=True)
     (root / "hop.moy" / "journal" / "journal.jsonl").write_text("{}\n")
     assert (root / "hop.moy").is_dir()
@@ -639,14 +551,16 @@ def test_a_whole_cart_delete_takes_the_cart_and_its_journal(tmp_path):
         "boot's re-seed land on top of stale history")
 
 
-def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path):
+def test_the_boot_assets_stay_open_or_nothing_can_ask_for_the_pin(tmp_path, baked):
     """The one exemption that is a NECESSITY, not a judgement: the page is what
     shows the pin prompt, so a board that gated its own console behind the pin
     would have nothing left to ask the question with. These are the same bytes
     every build ships and say nothing about this board."""
+    from moy_webserver import BlobResponse
+    baked({n + ".gz": b"\x1f\x8b" + n.encode() for n in wh.ASSETS})
     h = _pinned(tmp_path)
     for path in ("/", "/index.html", "/worker.js", "/micropython.wasm"):
-        assert isinstance(h.handle_http("GET", path, b""), FileResponse), path
+        assert isinstance(h.handle_http("GET", path, b""), BlobResponse), path
 
 
 def test_the_capability_marker_stays_open_and_says_only_that(tmp_path):
@@ -696,7 +610,7 @@ def test_a_push_extends_the_carts_own_journal(tmp_path):
     from runtime import moy_journal
 
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     for src in ("cls(2)\n", "cls(3)\n"):
         r = h.handle_http("POST", "/sync",
                           _batch({"p": "hop.moy/main.py", "t": src}))
@@ -736,7 +650,7 @@ def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
         finally:
             depth[0] -= 1
 
-    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    h = wh.WebHost(str(root), with_sd=gate)
     seen = []
     real = wh.moy_sync.apply_ops
     wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
@@ -753,7 +667,7 @@ def test_sync_apply_runs_inside_the_storage_gate(tmp_path):
 def test_sync_shelf_refresh_fires_only_when_the_shelf_changed(tmp_path):
     root = _store(tmp_path)
     hits = []
-    h = wh.WebHost(str(root), str(tmp_path / "web"),
+    h = wh.WebHost(str(root),
                    on_sync=lambda: hits.append(1))
     h.handle_http("POST", "/sync",
                   _batch({"p": "hop.moy/main.py", "t": "x = 2\n"}))
@@ -839,7 +753,7 @@ def test_a_host_with_no_files_layer_404s_and_says_so_by_being_silent(tmp_path,
     moy_carts, so it cannot resolve a files root at all. That is the SAME
     answer a board flashed before files sync gives -- the page then builds no
     files watcher, and nothing retries a batch this host could only refuse."""
-    h = wh.WebHost(str(_store(tmp_path)), str(tmp_path / "web"))
+    h = wh.WebHost(str(_store(tmp_path)))
     monkeypatch.setattr(wh.moy_sync, "files_root", lambda root: None)
     assert h.handle_http("GET", "/files.json", b"") is None
     r = h.handle_http("POST", "/sync", _batch(
@@ -861,7 +775,7 @@ def test_the_sd_gate_wraps_the_files_read_too(tmp_path):
 def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
     root = _store(tmp_path)
     files = _files(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
         {"p": "drawings/sunset.moyimg", "t": "7,"}, root="files"))
     assert b"200" in r.split(b"\r\n")[0]
@@ -873,7 +787,7 @@ def test_sync_routes_a_files_batch_into_the_files_root(tmp_path):
 def test_sync_refuses_a_files_path_that_is_not_a_kind(tmp_path):
     root = _store(tmp_path)
     files = _files(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
         {"p": "trash/drawings/gone.moyimg", "t": "stolen"},
         {"p": ".history/drawings/sunset.jsonl", "t": "stolen"}, root="files"))
@@ -888,7 +802,7 @@ def test_a_files_batch_never_fires_the_shelf_rescan(tmp_path):
     root = _store(tmp_path)
     _files(tmp_path)
     hits = []
-    h = wh.WebHost(str(root), str(tmp_path / "web"),
+    h = wh.WebHost(str(root),
                    on_sync=lambda: hits.append(1))
     h.handle_http("POST", "/sync", _batch(
         {"p": "drawings/new.moyimg", "t": "0,"}, root="files"))
@@ -909,7 +823,7 @@ def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
         finally:
             depth[0] -= 1
 
-    h = wh.WebHost(str(root), str(tmp_path / "web"), with_sd=gate)
+    h = wh.WebHost(str(root), with_sd=gate)
     seen = []
     real = wh.moy_sync.apply_ops
     wh.moy_sync.apply_ops = lambda *a, **kw: (seen.append(depth[0]),
@@ -924,7 +838,7 @@ def test_the_files_apply_runs_inside_the_storage_gate(tmp_path):
 
 def test_an_unknown_root_is_a_bad_batch_not_a_guess(tmp_path):
     root = _store(tmp_path)
-    h = wh.WebHost(str(root), str(tmp_path / "web"))
+    h = wh.WebHost(str(root))
     r = h.handle_http("POST", "/sync", _batch(
         {"p": "hop.moy/main.py", "t": "x"}, root="wifi"))
     assert b"400" in r.split(b"\r\n")[0]
@@ -1271,14 +1185,14 @@ def test_make_webhost_reads_the_wifi_service_lazily():
 # SD, the P4 has no card, and the Guition -- which does have a slot -- still
 # stages the pushed bundle on the internal VFS.
 BOARDS = (
-    ("lilygo_t_deck_plus_mainline", "SD_WEB_DIR"),
-    ("esp32_p4_wifi6_touch_lcd_7b", "INTERNAL_WEB_DIR"),
-    ("guition_jc3248w535", "INTERNAL_WEB_DIR"),
+    "lilygo_t_deck_plus_mainline",
+    "esp32_p4_wifi6_touch_lcd_7b",
+    "guition_jc3248w535",
 )
 
 
-@pytest.mark.parametrize("board,web_dir", BOARDS, ids=[b for b, _ in BOARDS])
-def test_every_board_injects_the_web_console(board, web_dir):
+@pytest.mark.parametrize("board", BOARDS)
+def test_every_board_injects_the_web_console(board):
     """THE PIN FOR THIS WHOLE CLASS OF BUG.
 
     The web console shipped on the P4 with every shared piece already in place
@@ -1296,7 +1210,6 @@ def test_every_board_injects_the_web_console(board, web_dir):
     src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
     assert "make_webhost(" in src, "%s never builds a WebHost" % board
     assert "ws.webhost" in src, "%s never attaches one to the console" % board
-    assert web_dir in src, "%s does not pass its own web directory" % board
 
 
 class _Conn:
@@ -1307,50 +1220,21 @@ class _Conn:
         self.sent += bytes(b)
 
 
-def test_asset_streaming_goes_through_the_storage_gate(tmp_path):
-    """The megabyte is the part that needs gating.
-
-    On the T-Deck the bundle lives on an SD card sharing the panel's SPI host,
-    and an SD op that overlaps an in-flight panel DMA is the documented hard
-    hang -- the read lands, then the next flush freezes the board silently. The
-    store walk was already gated; the ~1MB micropython.wasm was not, which is
-    the wrong way round.
-    """
-    web = tmp_path / "web"
-    web.mkdir()
-    (web / "worker.js").write_text("console.log(1)\n" * 200)
-    entered = []
-
-    def _gate(fn):
-        entered.append(1)
-        return fn()
-
-    host = wh.WebHost(str(tmp_path / "carts"), str(web), with_sd=_gate)
-    conn = _Conn()
-    host._send_file(conn, host._asset("worker.js"))
-    assert entered, "the asset stream bypassed the SD gate"
-    assert b"console.log(1)" in bytes(conn.sent)
-    assert b"200 OK" in bytes(conn.sent)
-
-
-def test_a_board_without_shared_storage_pays_no_gate(tmp_path):
-    """The P4's bundle is on internal flash and races nothing, so it must not
-    acquire a gate it does not need."""
-    web = tmp_path / "web"
-    web.mkdir()
-    (web / "worker.js").write_text("x")
-    host = wh.WebHost(str(tmp_path / "carts"), str(web))
+def test_a_board_without_shared_storage_pays_no_gate(tmp_path, baked):
+    """A board that declares no shared-storage gate must not acquire one."""
+    baked({"worker.js.gz": b"\x1f\x8bx"})
+    host = wh.WebHost(str(tmp_path / "carts"))
     assert host.stream_gate is None
     conn = _Conn()
-    host._send_file(conn, host._asset("worker.js"))
-    assert bytes(conn.sent).endswith(b"x")
+    host._send_blob(conn, host._asset("worker.js"))
+    assert bytes(conn.sent).endswith(b"\x1f\x8bx")
 
 
 def test_the_link_wait_is_shared_and_not_recopied_per_board():
     """It was a 25-line closure in the P4's run_desktop. Writing it per board is
     precisely how the T-Deck went without the feature, so the helper is shared
     and the boards must not grow private copies of it again."""
-    for board, _ in BOARDS:
+    for board in BOARDS:
         src = (ROOT / "firmware" / board / "modules" / "moy_runtime.py").read_text()
         assert "ONLINE_WAIT_MS" not in src.replace("moy_ota's ONLINE_WAIT_MS", "")
         assert "def _web_online" not in src, "%s re-grew a private link wait" % board
@@ -1481,7 +1365,7 @@ def test_the_paired_url_is_the_address_plus_the_pin(tmp_path):
 
 
 def test_a_host_without_a_pin_pairs_with_a_bare_url(tmp_path):
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    host = wh.WebHost(str(tmp_path / "carts"))
     host.ip = "10.0.0.5"
     assert host.paired_url() == "http://10.0.0.5/"
     host.pin = "4821"
@@ -1498,11 +1382,11 @@ def test_the_url_spells_the_port_unless_it_is_the_default(tmp_path):
     port a test or a deployment picks, must still render."""
     from moy_webserver import DEFAULT_PORT
     assert DEFAULT_PORT == 80
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    host = wh.WebHost(str(tmp_path / "carts"))
     host.ip = "10.0.0.5"
     assert host.port == 80
     assert host.url() == "http://10.0.0.5/"
-    other = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    other = wh.WebHost(str(tmp_path / "carts"),
                        port=8321)
     other.ip = "10.0.0.5"
     other.pin = "4821"
@@ -1689,7 +1573,7 @@ def test_run_plays_the_named_cart_on_the_glass(tmp_path):
     """The whole protocol is a cart NAME. The answer carries the TITLE that
     actually started, because the page sent a name it guessed at."""
     seen = []
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       on_run=lambda name: (seen.append(name), "Star Catcher")[1])
     r = host.handle_http("POST", "/run", b'{"cart": "star_catcher"}')
     assert b"200" in r.split(b"\r\n")[0]
@@ -1701,7 +1585,7 @@ def test_run_takes_the_same_pin_gate_as_sync(tmp_path):
     """Starting code on a kid's console is a WRITE by any reading of the word,
     and the gate closes before the name is even looked at."""
     launched = []
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       pin="4321", on_run=lambda n: (launched.append(n), "X")[1])
     r = host.handle_http("POST", "/run", b'{"cart": "hop"}')
     assert b"403" in r.split(b"\r\n")[0]
@@ -1712,7 +1596,7 @@ def test_run_takes_the_same_pin_gate_as_sync(tmp_path):
 
 
 def test_run_answers_404_for_a_cart_this_board_does_not_have(tmp_path):
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       on_run=lambda n: None)
     assert b"404" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
 
@@ -1721,12 +1605,12 @@ def test_run_answers_501_where_there_is_no_console_behind_it(tmp_path):
     """The dev server and the CI harness serve the store with no glass. 501 and
     not 404, because a page reads 404 as "no such endpoint" and would stop
     offering the button against a board that simply has no runner."""
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"))
+    host = wh.WebHost(str(tmp_path / "carts"))
     assert b"501" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
 
 
 def test_run_refuses_a_body_that_is_not_a_json_object(tmp_path):
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       on_run=lambda n: "X")
     for body in (b"junk", b"[1,2]", b'"hop"', b""):
         assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
@@ -1737,7 +1621,7 @@ def test_run_refuses_an_empty_cart_name_without_launching(tmp_path):
     runs the FIRST cart (the serial `run` with no arg), so a malformed PLAY ON
     DEVICE would otherwise start a random game. Refused before on_run fires."""
     launched = []
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       on_run=lambda n: (launched.append(n), "X")[1])
     for body in (b'{"cart": null}', b'{"cart": ""}', b'{"cart": "   "}', b'{}'):
         assert b"400" in h_status(host.handle_http("POST", "/run", body)), body
@@ -1750,7 +1634,7 @@ def test_a_crashing_launch_is_a_500_not_a_dead_request(tmp_path):
     def boom(name):
         raise RuntimeError("nope")
 
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"), on_run=boom)
+    host = wh.WebHost(str(tmp_path / "carts"), on_run=boom)
     assert b"500" in h_status(host.handle_http("POST", "/run", b'{"cart":"x"}'))
 
 
@@ -1771,7 +1655,7 @@ def test_the_launch_runs_inside_the_storage_gate(tmp_path):
             depth[0] -= 1
 
     inside = []
-    host = wh.WebHost(str(tmp_path / "carts"), str(tmp_path / "web"),
+    host = wh.WebHost(str(tmp_path / "carts"),
                       with_sd=gate,
                       on_run=lambda n: (inside.append(depth[0]), "X")[1])
     host.handle_http("POST", "/run", b'{"cart": "hop"}')

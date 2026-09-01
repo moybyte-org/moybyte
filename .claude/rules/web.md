@@ -22,11 +22,11 @@ nor those docs will warn you about:
   565 system canvas** — `wallpaper._backdrop_blit` probes for it and otherwise
   expands a palette-INDEX buffer that does not exist, drawing nothing: a black
   desk with correct chrome on top, which is exactly what the first build did.
-- **The bundle rides BOTH board images**, because a copy a human put on storage
-  drifts with nothing to detect it. **Storage still WINS**, so a push stays the
-  sub-minute dev loop and the image is the guarantee, not the ceiling — and
-  `start()` prints which of the two it is serving, because a stale pushed copy
-  shadowing a good baked one is the same bug one level down. An oversized image is
+- **The bundle rides the firmware image on every board, and that is its ONLY
+  source.** There is no copy on storage and no way to change what one board
+  serves without reflashing it, so "which console is this board serving?" is
+  answered by its firmware version alone. Changing a web build means
+  `firmware/web_runner/build.sh`, then rebuild and reflash. An oversized image is
   a BUILD FAILURE on every board.
 - **`worker.js` STATICALLY imports `moy_store.mjs`**, so it must be in
   `moy_webhost.ASSETS`: a board that does not serve it serves a console that

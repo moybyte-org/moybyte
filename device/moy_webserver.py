@@ -283,13 +283,11 @@ class FileResponse(_SizedResponse):
     play, and a whole-file `bytes` would have to come out of PSRAM and be built
     before the first byte reached the wire.
 
-    NOT CACHED, and the reasoning that said otherwise was wrong (fixed
-    2026-08-15). This shipped with `max-age=86400` on the argument that these
-    are build artifacts which "change only when the console is reflashed" --
-    but they change whenever someone pushes a new web build, which is the
-    routine action and the entire point of tools/p4_push_web.py needing NO
-    reflash. The result was a board serving a correct new console to a browser
-    that kept showing yesterday's, for a day, with nothing to indicate why.
+    NOT CACHED. These are build artifacts, but a browser that has cached one
+    holds a console the board is no longer serving, with nothing on either side
+    to indicate why -- and it stays that way for the whole max-age. That
+    failure is silent and lasts a day; the cost of being right is measured
+    below and is 1.5 seconds.
 
     The cost of being right is small and measured: the 1MB wasm streams at
     ~700KB/s off the P4, so a full reload is ~1.5s. `max_age` stays a parameter

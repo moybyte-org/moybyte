@@ -147,19 +147,10 @@ try:
 except ImportError:                      # pragma: no cover -- host/no-bundle
     _moy_web = None
 
-# Where a PUSHED copy of `firmware/web_runner/dist` lives on this board -- the
-# override, not the source of truth: since 2026-08-15 the bundle is baked into
-# the firmware image (native/moy_web) and this directory is what a human puts
-# there to iterate faster than a reflash. The caller passes the directory
-# rather than this module guessing; these are the two conventional homes.
-#
-# NAMED FOR THE STORAGE, NOT FOR A BOARD. They were TDECK_/P4_ when there were
-# two boards and each used a different one, which read as a per-board constant
-# and is not: it is a storage choice, and the third board picked the internal
-# one while carrying an SD slot of its own. A board name here would have to be
-# re-decided every time the roster grows; the storage fact does not move.
-SD_WEB_DIR = "/sd/web"
-INTERNAL_WEB_DIR = "/moy/web"
+# THE BUNDLE IS BAKED INTO THE FIRMWARE IMAGE (native/moy_web) and that is the
+# only place it is read from. There is no copy on storage and no way to
+# override one board's console without reflashing it, which is what makes "the
+# console a board serves" answerable from its firmware version alone.
 
 # Only these are ever served, and only from the web dir. An allowlist and not a
 # path check, because "reject .." is the kind of rule that is one encoding trick
@@ -336,22 +327,6 @@ def _file_size(path):
         return os.stat(path)[6]
     except OSError:
         return None
-
-
-def _pushed_copy(full):
-    """(path, size, encoding) for a PUSHED copy of `full`, or None.
-
-    Both probes in ONE call so `_asset` pays ONE storage session for them.
-    The pre-gzipped copy wins; raw is the fallback (a plain static host sets no
-    Content-Encoding, so `dist/` keeps both).
-    """
-    size = _file_size(full + ".gz")
-    if size is not None:
-        return (full + ".gz", size, "gzip")
-    size = _file_size(full)
-    if size is not None:
-        return (full, size, None)
-    return None
 
 
 def _baked(name):
@@ -607,7 +582,7 @@ class ConsoleUpdate:
 class WebHost(WebServer):
     """The transport, with the console's own pages and store wired to it."""
 
-    def __init__(self, carts_root, web_dir, port=None, with_sd=None,
+    def __init__(self, carts_root, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
                  on_run=None, update=None):
         if port is None:
@@ -615,7 +590,6 @@ class WebHost(WebServer):
         else:
             WebServer.__init__(self, port=port)
         self.carts_root = carts_root
-        self.web_dir = web_dir
         # The push half's consent gate + the console's shelf-refresh hook (see
         # the module docstring). pin=None means the write endpoint is as open
         # as the read one -- what a test or the dev server wants, and NOT what
@@ -654,11 +628,11 @@ class WebHost(WebServer):
         # the hard-constraints section of CLAUDE.md). The P4 has no SD and
         # passes None, which makes this a plain call-through.
         self._with_sd = with_sd or (lambda fn: fn())
-        # ...and the SAME gate guards asset STREAMING, which is where the bytes
-        # actually are: /sd/web/micropython.wasm is ~1MB off that shared bus,
-        # against a carts.json walk that is comparatively tiny. Gating only the
-        # store walk would have left the megabyte ungated. None on the P4, whose
-        # bundle is on internal flash and races nothing.
+        # ...and the SAME gate guards file STREAMING out of the store, which is
+        # where the bytes are: a cart download off that shared bus against a
+        # carts.json walk that is comparatively tiny. None on the P4, whose
+        # store is on internal flash and races nothing. The console bundle is
+        # not on this path at all -- it is served from the image.
         self.stream_gate = with_sd
 
     def start(self, ip=None):
@@ -704,31 +678,24 @@ class WebHost(WebServer):
             pass
 
     def source_note(self):
-        """One line naming WHICH bundle this board is about to serve.
+        """One line naming the bundle this board serves. There is only one.
 
-        Storage overriding the image is the right precedence and also the exact
-        shape of the old bug -- a stale pushed copy shadowing a good one, with
-        nothing anywhere saying so. It cost a day the last time. So the override
-        announces itself, with the image's own stamp beside it: two strings on
-        one serial line, and the question stops needing an investigation.
+        Until 2026-09-01 a copy on storage OVERRODE the image, so that a new web
+        build could be tested without a reflash. That precedence was also a
+        standing trap -- a stale pushed copy shadowing a good one, which cost a
+        day once and then, on the day the override was removed, had a freshly
+        flashed P4 still serving a month-old console. Announcing it was not
+        enough, because nothing reads a serial line it is not already
+        suspicious about. The image is now the ONLY source: `.incbin`ed at build
+        time, replaced by a reflash, and impossible to shadow.
 
-        The probe goes through the storage gate, because on the T-Deck a stat
-        of /sd/web touches a card that shares the panel's SPI host.
+        Removing the override also took a probe off the per-request path: it
+        used to take the storage gate on EVERY asset request, which on the
+        T-Deck means a card sharing the panel's SPI host.
         """
-        pushed = self._with_sd(lambda: [
-            n for n in ASSETS
-            if _file_size(self.web_dir + "/" + n + ".gz") is not None
-            or _file_size(self.web_dir + "/" + n) is not None])
         stamp = baked_stamp()
-        if not pushed:
-            return "serving the bundle baked into this firmware (%s)" % (
-                stamp or "NONE -- this image has no web console")
-        if len(pushed) == len(ASSETS):
-            return "serving the PUSHED copy at %s, not the image's (%s)" % (
-                self.web_dir, stamp or "none")
-        return "MIXED: %d of %d assets pushed to %s, the rest from the " \
-               "image (%s) -- push them all or delete them" % (
-                   len(pushed), len(ASSETS), self.web_dir, stamp or "none")
+        return "serving the bundle baked into this firmware (%s)" % (
+            stamp or "NONE -- this image has no web console")
 
     def poll(self):
         """One transport poll, then ONE slice of the update backend.
@@ -889,50 +856,33 @@ class WebHost(WebServer):
         # A PRE-GZIPPED copy wins when it is there. The board does no
         # compressing -- it serves `<name>.gz` verbatim and lets the browser
         # inflate it, so the only cost is picking the file. Worth it because
-        # the wire is the expensive part here: the assets are 1,230,814 B
-        # raw and 609,268 B gzipped, and on the T-Deck they stream off SD
-        # inside the DMA gate, so halving the bytes halves the window in which
-        # the console is handing its storage to the socket.
+        # the wire is the expensive part here: the assets are 1,230,814 B raw
+        # and 609,268 B gzipped, and halving the bytes halves the window in
+        # which the console is handing its storage to the socket.
         # Raw stays the fallback: `dist/` keeps both, because a plain static
         # host (moybyte.com, tools/serve.py) sets no Content-Encoding, and a
         # browser handed gzip bytes without that header sees garbage.
         #
-        # STORAGE WINS OVER THE IMAGE, and that order is the decision. A copy
-        # on the board is an explicit human action -- tools/p4_push_web.py, a
-        # card reader -- and if the baked copy took precedence that dev loop
-        # would die and a baked bundle would be a bundle nobody could iterate
-        # on. The image's job is the GUARANTEE: a board that has never been
-        # pushed to still serves a console, and it is the one its firmware was
-        # built from. (Which also means a HALF-pushed bundle is a mixed one --
-        # push them all or none; p4_push_web does.)
-        #
-        # The PROBE must go through `_with_sd` too, not just the body: on the
-        # T-Deck `web_dir` is on the card sharing the panel's SPI host, and this
-        # runs at the frame tail where a painted frame has just kicked a flush
-        # the core-0 feeder is still shipping. A bare `os.stat` there is an
-        # sdspi transaction concurrent with band queueing from the other core --
-        # the Cache/MMU panic modmoy_lcd.c's SD SESSION GUARD exists for. A miss
-        # costs the same directory read as a hit, so a board serving the BAKED
-        # bundle is not exempt either.
-        full = self.web_dir + "/" + name
-        pushed = self._with_sd(lambda: _pushed_copy(full))
-        if pushed is not None:
-            path, size, encoding = pushed
-            return FileResponse(path, size, ASSETS[name], encoding=encoding)
+        # ONE source: the bundle .incbin'ed into this image. There is no
+        # storage override to probe, which is both the point (a stale copy can
+        # no longer shadow a good one) and a saving -- the probe used to take
+        # the storage gate on every asset request, and on the T-Deck that is a
+        # card sharing the panel's SPI host, stat'ed at the frame tail while
+        # the core-0 feeder may still be shipping bands.
         blob = _baked(name + ".gz")
         if blob is not None:
             return BlobResponse(blob, ASSETS[name], encoding="gzip")
         blob = _baked(name)
         if blob is not None:
             return BlobResponse(blob, ASSETS[name])
-        # Nothing on storage and nothing in the image -- a firmware built
-        # without a web bundle (build.sh says so loudly at build time). Name
-        # the directory AND the reason, because the failure is a setup step and
-        # not a bug, and a bare 404 in a browser tells the owner nothing.
+        # Nothing in the image -- a firmware built without a web bundle
+        # (build.sh says so loudly at build time). Name the reason, because
+        # the failure is a setup step and not a bug, and a bare 404 in a
+        # browser tells the owner nothing.
         return http_response(
-            404, "no web bundle in this firmware and none at %s -- build "
-                 "firmware/web_runner/dist and reflash, or copy it there"
-                 % self.web_dir, "text/plain; charset=utf-8")
+            404, "this firmware has no web console baked in -- build "
+                 "firmware/web_runner/dist and reflash",
+            "text/plain; charset=utf-8")
 
     def _sync(self, body):
         """Apply one push batch into the store (moy_sync.apply_ops -- the same
@@ -1175,7 +1125,7 @@ def ensure_online(wifi, autoconnect=None, wait_ms=12000, step_ms=250):
     return st[2]                       # the STA IP: what the row displays
 
 
-def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
+def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
                  port=None, pin=None):
     """The WebHost every board injects -- built once, here.
 
@@ -1188,9 +1138,9 @@ def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
     console the first time.
 
     Constructed, NOT started: __init__ binds no socket, so injecting this costs
-    nothing until a kid turns the row on. The two things that genuinely differ
-    per board are the arguments -- the web directory (/sd/web vs /moy/web) and
-    the SD gate (the T-Deck's store is on a shared-SPI card; the P4 has none).
+    nothing until a kid turns the row on. What genuinely differs per board is
+    the store and its SD gate (the T-Deck's store is on a shared-SPI card; the
+    P4 has none); the console bundle is the same baked one everywhere.
 
     The #197 wiring -- the pairing pin and PLAY ON DEVICE -- is here for that
     same reason and NOT in three board files. An explicit `pin=` still wins (a
@@ -1205,7 +1155,7 @@ def make_webhost(ws, carts_root, web_dir, autoconnect=None, with_sd=None,
     the injection that was written once instead of three times, which is the
     whole lesson of `ensure_online`'s docstring above.
     """
-    return WebHost(carts_root, web_dir, port=port, with_sd=with_sd,
+    return WebHost(carts_root, port=port, with_sd=with_sd,
                    ensure_online=lambda: ensure_online(
                        getattr(ws, "wifi", None), autoconnect),
                    pin=pin,

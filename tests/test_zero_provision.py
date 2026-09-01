@@ -97,17 +97,13 @@ def test_the_module_push_is_opt_in_and_undoable():
         "zero_host no longer reports pushed copies shadowing the image")
 
 
-def test_the_web_bundle_push_is_an_override_of_a_baked_bundle():
-    """`moy_web` rides this board's image since it became a build target, so
-    pushing `dist/` is now the override and not the source. The asset SET stays
-    derived from `moy_webhost.ASSETS` either way -- that is the hand-list that
-    already broke this board once."""
-    assert "moy_webhost.ASSETS" in SCRIPT or "moy_webhost\nprint" in SCRIPT
-    assert "import moy_webhost" in SCRIPT
-    assert "--web" in SCRIPT, "the bundle push is not opt-in"
+def test_the_browser_console_rides_this_boards_image():
+    """The console this board serves comes out of its own firmware and nowhere
+    else -- there is no copy on storage to push, and provisioning must not
+    grow one back."""
     assert "moy_web" in board_config.native_modules(ZERO, ROOT), (
-        "the Zero stopped baking the browser console into its image -- which "
-        "is the drift baking it was introduced to end")
+        "the Zero stopped baking the browser console into its image")
+    assert "/moy/web" not in SCRIPT, "provisioning re-grew a storage bundle"
 
 
 def test_provisioning_mints_a_pin_when_the_board_has_none():

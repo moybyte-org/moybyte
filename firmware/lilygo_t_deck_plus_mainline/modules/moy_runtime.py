@@ -334,12 +334,11 @@ def run_desktop(fps_cap=60):
     # the LCD DMA flush needs, which is why boot does NOT autoconnect. Turning
     # the row on takes that risk knowingly, exactly as UPDATE ONLINE does.
     try:
-        from moy_webhost import make_webhost, SD_WEB_DIR, INTERNAL_WEB_DIR
-        # Both arguments follow the store for the same reason: the push-a-bundle
-        # override belongs on the media the board is actually using, and the SD
-        # gate is only a gate when SD is the bus.
+        from moy_webhost import make_webhost
+        # carts_root follows the store, and the SD gate is only a gate when SD
+        # is the bus. The web bundle does not follow anything -- it rides the
+        # firmware image.
         ws.webhost = make_webhost(ws, carts_root,
-                                  SD_WEB_DIR if on_sd else INTERNAL_WEB_DIR,
                                   autoconnect=autoconnect_wifi,
                                   with_sd=_store_session)
     except Exception as exc:  # noqa: BLE001

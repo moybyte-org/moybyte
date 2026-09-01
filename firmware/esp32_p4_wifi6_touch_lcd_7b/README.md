@@ -141,9 +141,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   staged the same way: it is the **browser console baked into the image**
   (~573KB of pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
   `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
-  a flashed board always serves a console current with its own firmware. A copy
-  pushed to `/moy/web` still WINS — `make p4-web-push` stays the sub-minute dev
-  loop — and `moy_webhost.start()` prints which of the two it is serving.
+  a flashed board always serves a console current with its own firmware
+  (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
   - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the

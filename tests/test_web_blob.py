@@ -275,10 +275,9 @@ def test_an_unchanged_bundle_does_not_touch_the_file(tmp_path):
 
 
 def test_a_bundle_older_than_the_console_says_so(tmp_path):
-    """The staleness baking CANNOT fix. `p4_push_web` compares dist against the
-    board, so a dist that is itself behind `runtime/` pushes -- and now bakes --
-    a stale console and reports success. That is the original bug wearing the
-    fix's clothes, so the build says it out loud."""
+    """The staleness baking CANNOT fix. Baking makes a board's console current
+    with its own firmware, but a dist that is itself behind `runtime/` bakes a
+    stale console and reports success -- so the build says it out loud."""
     d = _dist(tmp_path)
     assets, _ = gwb.collect(str(d))
     root = tmp_path / "root"

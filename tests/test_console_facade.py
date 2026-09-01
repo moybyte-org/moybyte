@@ -47,9 +47,9 @@ FORWARDS = {
         "park_web_console": "park",          # layers.py's contract comment
         "stop_web_console": "stop",          # the Guition on-glass suite (serial)
         "unpark_web_console": "unpark",      # tests
-        "webhost_serving": "serving",        # settings_layer, tools/p4_push_web
-        "webhost_label": "label",            # settings_layer, tools/p4_push_web
-        "toggle_webhost": "toggle",          # settings_layer, dev_channel, p4_push_web
+        "webhost_serving": "serving",        # settings_layer, tools/push_cart_wifi
+        "webhost_label": "label",            # settings_layer, tools/push_cart_wifi
+        "toggle_webhost": "toggle",          # settings_layer, dev_channel, push_cart_wifi
     },
     # Landing B. The dict itself needed no forward at all -- `ws.system` is a
     # plain alias of `prefs.settings` and SystemStore loads it IN PLACE, so

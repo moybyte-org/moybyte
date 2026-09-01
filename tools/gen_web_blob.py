@@ -224,11 +224,10 @@ def watched_sources(root=ROOT):
 def stale_sources(assets, root=ROOT, limit=3):
     """Console sources NEWER than the bundle about to be baked in.
 
-    The staleness baking cannot fix. `p4_push_web.py` compares dist against the
-    BOARD, so a dist that is itself behind `runtime/` pushes -- and now bakes --
-    a stale console while reporting success. The image then serves a browser
-    console older than the firmware it is part of, which is the original bug
-    wearing the fix's clothes.
+    The staleness baking cannot fix. Baking makes a board's console current
+    with its own firmware, but a dist that is itself behind `runtime/` bakes a
+    stale console while reporting success -- and the image then serves a
+    browser console older than the firmware it is part of.
 
     A warning, never fatal: mtimes are a heuristic (a checkout reorders them, a
     touched file means nothing), and a build that refuses on a heuristic is a
