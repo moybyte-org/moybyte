@@ -1,14 +1,20 @@
-# Ray Test -- a flat-shaded raycaster that measures the #167 3D verbs.
+# Ray Test -- a textured raycaster that measures the #167 3D verbs.
 #
 # The point of this cart is a RATIO: the ray march runs here in Python, one
-# iteration per screen column, and each wall is one rect(). It used to pack the
+# iteration per screen column, and each wall is one sspr(). It used to pack the
 # whole frame's walls into a span buffer and issue ONE rect_batch, on the belief
 # that the MP->C crossing was what made software 3D affordable. Measured on glass
-# 2026-08-14 (plan 6.10): it is not. A rect() call is ~3us of dispatch, so 160 of
+# 2026-08-14 (plan 6.10): it is not. A draw call is ~3us of dispatch, so 160 of
 # them are ~0.5ms of a 20ms frame, and the batch verbs were deleted -- they cost
 # every kid a second vocabulary (Lua could not call them at all) to buy that.
 # ray_lua.moy is now this cart line for line, which is what makes the pair a
 # language measurement instead of two different programs.
+#
+# The level is map.moymap and the walls are sprites.moygfx, so both are editable:
+# a cell holds the sheet tile its wall is built from, and mget() is the only
+# thing the ray march asks about the world. A wall's SIDE-ON face is the tile one
+# sheet row below its front face (tile 1 lit -> tile 17 dim), which is the
+# two-tone shading that reads as 3D.
 #
 # The ceiling and floor are TWO BIG RECTS, not per-column spans. Painting each
 # pixel exactly once (a ceiling/wall/floor span per column) sounds better and
@@ -25,29 +31,6 @@
 #
 # No trig is needed anywhere: turning rotates the direction/plane vectors by a
 # FIXED angle, so the only constants required are one cos/sin pair.
-
-MAP = (
-    "1111111111111111",
-    "1..............1",
-    "1..2222....33..1",
-    "1..2...........1",
-    "1..2........3..1",
-    "1..2222.....3..1",
-    "1..............1",
-    "1....444.......1",
-    "1....4.4.......1",
-    "1....4.4...22..1",
-    "1..............1",
-    "1..33..........1",
-    "1..33....444...1",
-    "1..............1",
-    "1..............1",
-    "1111111111111111",
-)
-
-# MOY64 indices per wall digit: (facing you, side-on). The two-tone shading is
-# what reads as 3D without a single texture.
-WALL = {"1": (8, 2), "2": (12, 1), "3": (11, 3), "4": (9, 4)}
 
 CEIL = 1                     # dark_blue
 FLOOR = 5                    # dark_grey
@@ -135,9 +118,9 @@ def _update(dt):
         mx = -dx * sp
         my = -dy * sp
     if mx or my:                 # slide along walls instead of sticking to them
-        if MAP[int(py)][int(px + mx)] == ".":
+        if mget(int(px + mx), int(py)) < 0:
             px = px + mx
-        if MAP[int(py + my)][int(px)] == ".":
+        if mget(int(px), int(py + my)) < 0:
             py = py + my
 
 
@@ -146,9 +129,10 @@ def _cast():
 
     Textbook DDA: step whole map cells along the ray until one is solid, then
     take the PERPENDICULAR distance (not the ray length) so the walls come out
-    flat instead of fish-eyed.
+    flat instead of fish-eyed. mget() is -1 on an empty cell, so "did I hit
+    something" and "which tile do I draw" are the same read.
 
-    The rect() is inside this loop, not collected and issued afterwards, so
+    The sspr() is inside this loop, not collected and issued afterwards, so
     `bench == 1` (geometry only) is exactly this function with the draw skipped --
     the same arrangement ray_lua.moy uses.
     """
@@ -179,7 +163,7 @@ def _cast():
             sidey = (mapy + 1.0 - py) * ddy
 
         side = 0
-        cell = "1"
+        cell = -1
         for _ in range(64):      # bounded: the map is walled, but never loop forever
             if sidex < sidey:
                 sidex = sidex + ddx
@@ -189,8 +173,8 @@ def _cast():
                 sidey = sidey + ddy
                 mapy = mapy + sy
                 side = 1
-            cell = MAP[mapy][mapx]
-            if cell != ".":
+            cell = mget(mapx, mapy)
+            if cell >= 0:
                 break
 
         if side:
@@ -201,19 +185,30 @@ def _cast():
             dist = 0.02
 
         lh = int(VH / dist)
-        y0 = half - (lh >> 1)
-        if y0 < 0:
-            y0 = 0
-        y1 = half + (lh >> 1)
-        if y1 > VH:
-            y1 = VH
+        top = half - (lh >> 1)   # unclipped: the crop below needs the real extent
 
-        if y1 > y0 and bench == 0:
+        if lh > 0 and cell >= 0 and bench == 0:
+            # Where along the wall face the ray landed picks the texture COLUMN,
+            # and the side picks the row: the dim twin is one sheet row down.
+            if side:
+                hit = px + dist * rdx
+            else:
+                hit = py + dist * rdy
+            u = (cell % 16) * 8 + int((hit - int(hit)) * 8)
+            v = (cell // 16) * 8 + side * 8
             wide = VW - i * step   # the last column may be narrower than `step`
             if wide > step:
                 wide = step
-            lit, dim = WALL[cell]
-            rect(VX + i * step, VY + y0, wide, y1 - y0, dim if side else lit)
+            # A slice taller than the view is CROPPED, not squashed into what
+            # fits: walking into a wall magnifies its texture, never shrinks it.
+            if lh > VH:
+                v0 = (-top * 8) // lh
+                v1 = ((VH - top) * 8 + lh - 1) // lh
+                if v1 > 8:
+                    v1 = 8
+                sspr(u, v + v0, 1, v1 - v0, VX + i * step, VY, wide, VH)
+            else:
+                sspr(u, v, 1, 8, VX + i * step, VY + top, wide, lh)
 
 
 # -- the tri() half: a spinning flat-shaded tetrahedron ---------------------
@@ -259,7 +254,7 @@ def _draw():
         rect(VX, VY, VW, VH, 0)
         _draw_tetra()
     elif bench == 1:
-        _cast()                  # geometry only: _cast skips its own rect()
+        _cast()                  # geometry only: _cast skips its own sspr()
     elif bench == 2:
         half = VH >> 1           # background only: the two wide rects
         rect(VX, VY, VW, half, CEIL)
@@ -272,7 +267,7 @@ def _draw():
         half = VH >> 1
         rect(VX, VY, VW, half, CEIL)          # two WIDE sequential fills beat
         rect(VX, VY + half, VW, VH - half, FLOOR)   # per-column strips (see top)
-        _cast()                  # each wall is one rect(), drawn as it is found
+        _cast()                  # each wall is one sspr(), drawn as it is found
 
     frames = frames + 1
     now = time()

@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 9,
   "title": "Sky Run",
   "type": "game",
   "runtime": "python",
@@ -10,12 +10,13 @@
   "canvas": "320x240",
   "permissions": [
     "graphics",
-    "input"
+    "input",
+    "audio"
   ],
   "safe_to_share": true,
   "config": {
     "speed": 130,
-    "hero": "red",
+    "hero": 0,
     "autorun": 0
   },
   "edit": [
@@ -33,11 +34,14 @@
       "label": "HERO",
       "type": "choice",
       "choices": [
-        "red",
-        "orange",
-        "blue",
-        "green"
+        0,
+        1
       ],
+      "tiles": [
+        0,
+        3
+      ],
+      "display": "sprite-tiles",
       "card": "HERO IS {value}"
     },
     {
@@ -56,5 +60,10 @@
       "card": "AUTORUN {value}"
     }
   ],
+  "assets": {
+    "scenes": [
+      "main"
+    ]
+  },
   "fps": 60
 }

@@ -6,33 +6,21 @@
 # AUTOPLAY (in "Make it mine") is OFF by default -- YOU climb. Flip it on to watch
 # a little auto-pilot clear the level (attract mode). Pure indexed canvas + btn.
 
-TS = 16          # tile size in pixels (one map cell, drawn at scale 2 over 8x8 tiles)
-GROUND = 2       # sprite-sheet tile id for a solid block (baked into sprites.moygfx)
-# The solid terrain now lives in the cart's TILEMAP (map.moymap), drawn in ONE native
+TS = 8           # tile size in pixels -- one map cell, drawn 1:1 from an 8x8 tile
+# Keep TS at 8: the Map and Scene editors lay the tilemap out on an 8px grid and
+# place actors at raw world pixels, so a cart that draws its map at any other
+# cell size shows its actors sliding off the terrain in the Scene tab.
+#
+# The solid terrain lives in the cart's TILEMAP (map.moymap), drawn in ONE native
 # map() call instead of ~381 per-frame rect/spr draws (#32) -- and collision reads
-# it back with mget() instead of scanning a string grid. The NON-tile placements --
-# C coin, G goal, S spawn -- now live in the cart's SCENE (scenes/main.moyscene,
-# #85), read via scene() in _init; this LEVEL string is kept as the readable
-# fallback if the scene is missing. EVERY row is exactly 20 cols x 13 rows -> the
-# 320x240 canvas (top HUD aside). The terrain is a solid staircase climbing right
-# from the spawn to a plateau with the goal; a coin sits one tile above each tread.
-LEVEL = [
-    "                    ",
-    "                    ",
-    "                 C G",
-    "              C ####",
-    "            C ######",
-    "          C ########",
-    "        C ##########",
-    "      C ############",
-    "    C ##############",
-    "  C ################",
-    " SC#################",
-    "####################",
-    "####################",
-]
-MW = 20          # tilemap width in cells (matches map.moymap)
-MH = 13          # tilemap height in cells
+# it back with mget(). Every solid cell is sheet tile 7, the ground brick. The
+# NON-tile placements -- coin, goal, spawn -- live in the cart's SCENE
+# (scenes/main.moyscene, #85), read via scene() in _init. The map is 40 cols x
+# 26 rows -> the 320x240 canvas (top HUD aside).
+MW = 40          # tilemap width in cells (matches map.moymap)
+MH = 26          # tilemap height in cells
+COIN = 3         # sheet tiles: the coin spins between COIN and COIN + 1
+FLAG = 5         # sheet tiles: goal flag, FLAG dark / FLAG + 1 armed
 
 PW = 12
 PH = 14
@@ -70,8 +58,7 @@ def _hero_tile():
 
 
 def _solid(tx, ty):
-    # Collision reads the tilemap (mget) instead of scanning the LEVEL string: a
-    # non-empty cell (>= 0) is solid ground. Above the top and below the bottom is
+    # Collision reads the tilemap: a non-empty cell (>= 0) is solid ground. Above the top and below the bottom is
     # open air (so jumps clear the ceiling and a fall drops off-screen); the left
     # and right edges are walls so the player can't walk out of the level.
     if ty < 0 or ty >= MH:
@@ -87,8 +74,7 @@ def _init():
     coins = []
     # The coins/goal/spawn are PLACED ACTORS (#85): scenes/main.moyscene holds one
     # tagged row per placement (world-space pixels), read once here -- change the
-    # level by moving actors, not by editing code. The LEVEL string below stays as
-    # the readable fallback for a cart copy that lost its scene.
+    # level by moving actors, not by editing code.
     for a in scene():
         if a.tag == "coin":
             coins.append([a.x // TS, a.y // TS, False])
@@ -96,16 +82,6 @@ def _init():
             goal = (a.x // TS, a.y // TS)
         elif a.tag == "spawn":
             spawn = (a.x // TS, a.y // TS)
-    if not coins:
-        for ty in range(len(LEVEL)):
-            for tx in range(len(LEVEL[ty])):
-                ch = LEVEL[ty][tx]
-                if ch == "C":
-                    coins.append([tx, ty, False])
-                elif ch == "G":
-                    goal = (tx, ty)
-                elif ch == "S":
-                    spawn = (tx, ty)
     px = spawn[0] * TS
     py = spawn[1] * TS
     vx = 0.0
@@ -133,7 +109,7 @@ def _build_layer():
         lay = make_layer(W, H)         # allocate once per run (repaints reuse it)
     _lay_sky = cfg("sky", "dark_blue")
     lay.cls(col(_lay_sky))
-    lay.map(0, 0, MW, MH, 0, 0, -1, 2)
+    lay.map(0, 0, MW, MH, 0, 0, -1)
 
 
 def _respawn():
@@ -252,13 +228,13 @@ def _update(dt):
             on_ground = True
         vy = 0.0
     # fall off the bottom -> respawn
-    if py > len(LEVEL) * TS + 40:
+    if py > MH * TS + 40:
         _respawn()
     # collect coins
     for c in coins:
         if not c[2]:
-            cx = c[0] * TS + TS // 2
-            cy = c[1] * TS + TS // 2
+            cx = c[0] * TS + 8            # center of the 8px coin drawn at 2x
+            cy = c[1] * TS + 8
             if abs((px + PW / 2) - cx) < 12 and abs((py + PH / 2) - cy) < 12:
                 c[2] = True
                 got += 1
@@ -278,7 +254,7 @@ def _draw():
         # collect flash: a 1-2 frame white pop -- keep the immediate path so the
         # whole sky really flashes (the layer below is the normal frame).
         cls(col("white"))
-        map(0, 0, MW, MH, 0, 0, -1, 2)
+        map(0, 0, MW, MH, 0, 0, -1)
     else:
         if cfg("sky", "dark_blue") != _lay_sky:
             _build_layer()             # "Make it mine" sky change -> repaint once
@@ -286,26 +262,15 @@ def _draw():
         # (#66 PERF HABIT, see _build_layer). No cls() needed: the opaque layer
         # stamp erases last frame's sprites for free.
         draw_layer(lay, 0, 0)
-    # coins (a bobbing pulse so they read as collectible)
+    # coins (a two-frame spin so they read as collectible)
     for c in coins:
         if not c[2]:
-            cx = c[0] * TS + TS // 2
-            cy = c[1] * TS + TS // 2
-            r = 4 + (1 if int(t * 6) % 2 == 0 else 0)
-            circ(cx, cy, r, col("yellow"))
-            circb(cx, cy, r, col("orange"))
+            spr(COIN + (int(t * 6) % 2), c[0] * TS, c[1] * TS, 0, 2)
     # particles
     for p in sparks:
         pix(int(p[0]), int(p[1]), col(p[5]))
     # goal flag (green once every coin is collected)
-    gx = goal[0] * TS
-    gy = goal[1] * TS
-    lit = _all_taken()
-    fc = "green" if lit else "red"
-    rect(gx + 6, gy - 2, 2, TS + 2, col("white"))
-    rect(gx + 8, gy, 8, 6, col(fc))
-    if lit:                                   # a little shimmer when armed
-        pix(gx + 12, gy - 4, col("yellow"))
+    spr(FLAG + (1 if _all_taken() else 0), goal[0] * TS, goal[1] * TS, 0, 2)
     # player: an editable 8x8 hero tile at 2x (16px), centered on the PWxPH box
     spr(_hero_tile(), int(px) + PW // 2 - 8, int(py) + PH - 16, 0, 2)
     # HUD

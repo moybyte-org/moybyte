@@ -65,37 +65,21 @@ _MV_Y0 = 32
 # live cell size; there is no fixed _MV_CELL/_MV_COLS/_MV_ROWS/_MV_AREA any more.
 _MV_AVAIL_W = 192      # usable map-view width  (14 .. 206)
 _MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
-# TIC-80-style zoom: a small ascending list of cell sizes in px. Zoom only goes IN
-# from the default (bigger cells -> fewer cells -> more detail), so a tile is only
-# ever UPscaled (no sub-8px downscaling). The DEFAULT (index 0, most zoomed-OUT) is
-# computed -- not hardcoded -- as the largest cell that still shows the whole map of
-# both shipped games with NO panning: brick_siege is 15x15 and platformer is 20x13,
-# so the default must fit >= 20 columns AND >= 15 rows in the available rectangle.
-_MV_FIT_COLS = 20      # widest shipped map (platformer)
-_MV_FIT_ROWS = 15      # tallest shipped map (brick_siege)
-
-
-def _mv_default_cell(avail_w=_MV_AVAIL_W, avail_h=_MV_AVAIL_H):
-    """The largest cell size (px) that still fits the whole shipped maps with no
-    panning: >= _MV_FIT_COLS columns AND >= _MV_FIT_ROWS rows in the available
-    rectangle. Computed rather than hardcoded so the fit guarantee is provable.
-    With the base 192x164 area this is 9px (192//9 = 21 cols, 164//9 = 18 rows);
-    MapLayout (#39 step 3) passes the reflowed rectangle so a bigger view fits the
-    whole map at a bigger cell."""
-    cell = 4
-    best = cell
-    while cell <= 40:
-        if avail_w // cell >= _MV_FIT_COLS and avail_h // cell >= _MV_FIT_ROWS:
-            best = cell
-        cell += 1
-    return best
-
-
-# Zoom levels, ascending: index 0 is the fit-both default; the rest zoom IN. The
-# zoomed-in sizes are multiples of the 8px tile (16/24/32) so each tile UPSCALES to
-# fill its cell exactly (scale = cell // 8 = 2/3/4) -- crisp pixel art, no floating
-# 8px tile in a big box.
-_MV_ZOOMS = [_mv_default_cell(), 16, 24, 32]
+# TIC-80-style zoom: a small ascending list of CELL SIZES in px. Every rung is a
+# multiple of the 8px tile, so a tile UPSCALES to fill its cell exactly (scale =
+# cell // 8) -- crisp pixel art, never a floating 8px tile in a bigger box, and
+# never a downscale (`scale = max(1, cell // TILE)` cannot shrink one; issue #215
+# covers the sub-8px overview rung that would lift that).
+#
+# The cell size is the MAP FIELD SIZE and zoom is what changes it. It deliberately
+# does NOT adapt to the map or to the screen: a wider view then shows MORE OF THE
+# LEVEL at the same field size, which is what the extra pixels are for.
+#
+# It used to compute a cell that fit a fixed 20x15 target instead, and that inverted
+# on the desktop tier -- the P4's 1024x600 picked a 29px cell and showed 26x15, FEWER
+# rows than the 320x240 T-Deck on eight times the pixels, because the extra space went
+# into bigger cells rather than more map.
+_MV_ZOOMS = [8, 16, 24, 32]
 # ZOOM control: a small button in the map editor that cycles the zoom level. Sits
 # in the empty CENTER of the pan d-pad (between UP/DOWN/LEFT/RIGHT) -- a natural,
 # TIC-80-ish spot that overlaps nothing (palette PREV/NEXT end at y 140; the d-pad
@@ -229,8 +213,7 @@ class MapLayout(LayoutBase):
         self.mv_y0 = py + 16 * fs
         self.mv_avail_w = rc_x - self.mv_x0
         self.mv_avail_h = row_y - self.mv_y0 - 2 * fs
-        fit = _mv_default_cell(self.mv_avail_w, self.mv_avail_h)
-        self.zooms = (fit,) + tuple(z for z in (16, 24, 32, 48, 64) if z > fit)
+        self.zooms = tuple(_MV_ZOOMS) + (48, 64)
         # Pan d-pad cluster, bottom-anchored just above the button row.
         pan_dn_y = row_y - 16 * fs
         pan_mid_y = row_y - 34 * fs

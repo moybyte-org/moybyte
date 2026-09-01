@@ -7,10 +7,11 @@
 # short visible reload, no explosion. There are no lives and no game over,
 # ever. Every 10 finds earns a little fanfare.
 #
-# The letter-tanks patrol a Battle-City-style maze -- random mirrored wall
-# segments, different every arena, with the outer lane always open -- on
-# their own (no player driving), lane-snapped to the 16px grid like the
-# classic, treads and barrel turned the way they actually move and shoot.
+# The letter-tanks patrol a Battle-City-style maze -- the opening arena is the
+# one drawn in the Map editor, every rebuild after it is random mirrored wall
+# segments, and the outer lane is always open -- on their own (no player
+# driving), lane-snapped to the 16px grid like the classic, treads and barrel
+# turned the way they actually move and shoot.
 # Their pot-shots chew through the bricks, and a tank that runs into a wall
 # blasts it open and drives on through -- pure background spectacle, never
 # aimed at each other or at the player's own shot. The maze rebuilds itself
@@ -32,9 +33,11 @@
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 # A 5x7 dot-matrix glyph per uppercase letter ('#' = ink, '.' = transparent),
-# baked into an Image the first time it's needed (see _glyph). Authoring all
-# 26 now -- not just the default starting batch -- is what lets the LETTERS
-# stepper honestly go all the way to Z later with no more art work.
+# baked into an Image the first time it's needed (see _glyph). The letters stay
+# HERE, in code, rather than in sprites.moygfx: the trace bonus READS them --
+# _trace_cell and _ink_total walk the ink cells to score the kid's strokes --
+# and a cart cannot read its own sheet back (there is no sget verb), so a sheet
+# copy could only ever be a second table to hand-sync against this one.
 GLYPH_ROWS = {
     "A": [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
     "B": ["####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."],
@@ -66,36 +69,23 @@ GLYPH_ROWS = {
 GLYPH_W = 5
 GLYPH_H = 7
 
-# Tank bodies ('B') + tread rails ('T'), baked with two placeholder colors so
-# _draw_tank can pal()-remap the hull per tank/state while the treads stay a
-# fixed steel tone. Two orientations: treads on the sides when driving
-# vertically, on top and bottom when driving horizontally -- plus a barrel
-# rect drawn toward the actual facing, so the pot-shots visibly come out of
-# the gun. Drawn at scale 1 -- small enough to fit a single maze corridor.
-TANK_V_ROWS = [
-    "TT..........TT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TTBBBBBBBBBBTT",
-    "TT..........TT",
-]
-TANK_H_ROWS = [
-    "..TTTTTTTTTT..",
-    "..TTTTTTTTTT..",
-    "BBBBBBBBBBBBBB",
-    "BBBBBBBBBBBBBB",
-    "BBBBBBBBBBBBBB",
-    "BBBBBBBBBBBBBB",
-    "BBBBBBBBBBBBBB",
-    "BBBBBBBBBBBBBB",
-    "..TTTTTTTTTT..",
-    "..TTTTTTTTTT..",
-]
+# The tank, brick, turret and star ARE sheet tiles -- open the cart in Paint and
+# redraw any of them. The three that change colour are painted in one placeholder
+# ink that pal() remaps for the draw; the engine keys its baked-sprite cache on
+# the pal STATE (#72), so each tint bakes once and stays a cached blit.
+TILE_BRICK = 1
+TILE_CANNON = 2
+TILE_STAR = 3
+TILE_TANK_V = 16          # 2x2 spans, 14x10 of them painted
+TILE_TANK_H = 18
+TANK_BODY_INK = 11        # green -- the treads' dark_grey is never remapped
+CANNON_INK = 6            # light_grey
+BRICK_INK = 9             # orange, MOODS[0]'s brick, so mood 0 needs no remap
+
+# Two hull orientations: treads on the sides when driving vertically, on top
+# and bottom when driving horizontally -- plus a barrel rect drawn toward the
+# actual facing, so the pot-shots visibly come out of the gun. Drawn at scale 1
+# -- small enough to fit a single maze corridor.
 TANK_IMG_W = 14
 TANK_IMG_H = 10
 TANK_SCALE = 1
@@ -104,15 +94,9 @@ TANK_DRAW_H = TANK_IMG_H * TANK_SCALE
 TANK_HALF = 7    # collision half-extent against the maze walls
 TANK_R = 10      # tap/key selection hit-test radius (a bit generous vs. the sprite)
 
-# The player's turret BASE -- the barrel isn't baked into the sprite anymore:
-# it's drawn as a thick line along the live `aim` vector, so the turret can
-# visibly swivel toward the picked tank before it fires.
-CANNON_ROWS = [
-    ".BBBBBB.",
-    "BBBBBBBB",
-    "BBBBBBBB",
-    ".BBBBBB.",
-]
+# The player's turret BASE -- the barrel is not part of the sprite: it's drawn
+# as a thick line along the live `aim` vector, so the turret can visibly swivel
+# toward the picked tank before it fires.
 CANNON_IMG_W = 8
 CANNON_IMG_H = 4
 CANNON_SCALE = 3
@@ -123,22 +107,12 @@ AIM_LOCK = 0.995         # fire when dot(aim, target) crosses this (~5 degrees)
 
 BODY_COLORS = ["green", "blue", "orange", "indigo", "pink"]
 
-# A classic two-row offset brick tile (mortar left transparent so the floor
-# color shows through as the gap lines) -- the Battle-City-style destructible
-# "squares" the tanks patrol between and shoot through.
-BRICK_ROWS = [
-    "BBBB.BBB",
-    "BBBB.BBB",
-    "BBBB.BBB",
-    "........",
-    "BB.BBBB.",
-    "BB.BBBB.",
-    "BB.BBBB.",
-    "........",
-]
-BRICK_SRC = 8
+# The maze IS the cart's tilemap: cells (0..GRID_COLS-1, 0..GRID_ROWS-1) hold
+# TILE_BRICK where a brick stands and are empty where a tank can drive, so
+# mget/mset are the collision map and one map() call paints the whole arena. A
+# 16px Battle-City cell is one 8px sheet tile at MAP_SCALE.
 CELL = 16
-BRICK_SCALE = CELL // BRICK_SRC
+MAP_SCALE = CELL // 8
 GRID_COLS = 20
 GRID_ROWS = 10
 # The console always overlays its 18px system bar on a running cart (#46), so
@@ -185,7 +159,17 @@ TANK_BULLET_SPEED = 130.0
 # Each letter gets its own fixed note (not a random chime) so, over many
 # plays, the sound itself becomes a second, subtle way to recognize a letter.
 LETTER_FREQ = [196.0 * (2 ** (i / 12.0)) for i in range(26)]
-WRONG_FREQ = 110.0
+
+# sounds.json holds the fixed-pitch effects (edit them in the Music editor). The
+# beeps that survive are the ones whose PITCH is the message -- a letter's own
+# note, the trace chirp climbing with progress -- which an sfx cannot bend.
+SFX_WRONG = 0
+SFX_AIM = 1
+SFX_UNDO = 2
+SFX_BOSS = 3
+SFX_RECORD = 4
+SFX_CHEER = 5
+SFX_SAVED = 6
 
 COOLDOWN = 0.5
 BULLET_TIME = 0.18
@@ -211,7 +195,6 @@ BOSS_HALF = 13
 RECORD_MIN_STREAK = 3
 RECORD_TIMEOUT = 25.0    # no dead ends for a small kid: auto-saves and returns
 
-STAR_ROWS = ["..#..", ".###.", "#####", ".###.", "..#.."]
 TRACE_DURATION = 10.0    # drawing takes longer than tapping; finishing ends it early
 TRACE_GREAT = 1.2        # the last stretch of the bonus is the GREAT! cheer
 TRACE_SCALE = 14         # guide glyph scale: 70x98px -- finger-sized cells to trace
@@ -219,7 +202,6 @@ TRACE_SCALE = 14         # guide glyph scale: 70x98px -- finger-sized cells to t
 CANNON_X = 160
 CANNON_Y = 224
 
-walls = set()          # {(row, col)} standing bricks
 tanks = []             # each: [x, y, vx, vy, letter, flinch_t, retarget_t, color_idx, fx, fy, fire_t]
 tank_bullets = []      # ambient shots: [x, y, vx, vy]
 wanted = "A"
@@ -253,26 +235,19 @@ trace_covered = set()  # glyph ink cells the strokes have touched (progress)
 trace_was_held = False
 trace_done = False
 
-# Sprite caches, keyed by EVERYTHING that changes the pixels -- letter, ink
-# color, scale, orientation. "Make it fast" rule this cart models: never wrap
-# spr() in pal() on the play path. pal() invalidates the engine's baked sprite
-# cache, so every draw re-bakes the sprite pixel by pixel (that alone cost this
-# cart most of its frame budget); baking a tinted copy ONCE per color and
-# reusing it keeps every frame a cheap cached blit. Scale is in the key because
-# the engine caches one baked scale per Image -- drawing one Image at two
-# scales every frame would re-bake it twice a frame.
-_glyph_cache = {}      # (letter, ink, scale) -> Image
-_tank_cache = {}       # (horizontal, body, scale) -> Image (treads baked dark)
-_cannon_imgs = [None, None]   # [ready, reloading]
-_brick_cache = {}      # brick color -> Image
-_star_img = None
-
 # The floor + standing bricks live in a full-screen #54 layer: one window-copy
-# per frame instead of cls + ~54 brick sprites (draw-call count is the device
+# per frame instead of a cls + map() of the arena (draw-call count is the device
 # fps bottleneck, and per-sprite pixels are the web view's bandwidth hog). The
 # layer is redrawn only when a brick actually changes (_bg_dirty).
 _bg = None
 _bg_dirty = True
+
+# Glyph cache, keyed by EVERYTHING that changes the pixels -- letter, ink color,
+# scale. Letters are the one thing drawn many times a frame in several inks, so
+# they stay PRE-TINTED: a pal() sandwich per letter would break the sprite batch
+# that often. Scale is in the key because the engine caches one baked scale per
+# Image, so drawing one Image at two scales would re-bake it twice a frame.
+_glyph_cache = {}      # (letter, ink, scale) -> Image
 
 # HUD text cache: [found_str, for_lifetime, best_str, for_best, for_initials]
 _hud_strs = ["", -1, "", -1, ""]
@@ -291,37 +266,14 @@ def _draw_glyph(letter, x, y, ink, scale=1):
     spr(_glyph(letter, ink, scale), x, y, scale)
 
 
-def _tank_sprite(horizontal, body, scale):
-    key = (horizontal, body, scale)
-    img = _tank_cache.get(key)
-    if img is None:
-        rows = TANK_H_ROWS if horizontal else TANK_V_ROWS
-        img = image(rows, {"B": body, "T": col("dark_grey")})
-        _tank_cache[key] = img
-    return img
-
-
-def _cannon_sprite(reloading):
-    i = 1 if reloading else 0
-    if _cannon_imgs[i] is None:
-        ink = col("dark_grey") if reloading else col("light_grey")
-        _cannon_imgs[i] = image(CANNON_ROWS, {"B": ink})
-    return _cannon_imgs[i]
-
-
-def _brick_sprite(ink):
-    img = _brick_cache.get(ink)
-    if img is None:
-        img = image(BRICK_ROWS, {"B": ink})
-        _brick_cache[ink] = img
-    return img
-
-
-def _star_sprite():
-    global _star_img
-    if _star_img is None:
-        _star_img = image(STAR_ROWS, {"#": col("yellow")})
-    return _star_img
+def _draw_hull(horizontal, x, y, body, scale):
+    tile = TILE_TANK_H if horizontal else TILE_TANK_V
+    if body == TANK_BODY_INK:
+        spr(tile, x, y, 0, scale, 0, 2, 2)
+        return
+    pal(TANK_BODY_INK, body)
+    spr(tile, x, y, 0, scale, 0, 2, 2)
+    pal()
 
 
 def _brick_color():
@@ -353,14 +305,21 @@ def _pick_letter(exclude):
     return choices[int(rnd(len(choices)))]
 
 
+def _clear_maze():
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            mset(c, r, -1)
+
+
 def _build_maze():
     # A Battle-City-style maze: random short wall SEGMENTS built on the left
     # half and mirrored to the right, so every arena looks designed (symmetry)
     # yet is different each time. The outer ring of cells always stays open --
     # a patrol lane, so tanks can circle even a dense maze. Inner pockets are
-    # fine: a walled-in tank blasts its own way out (see _move_tanks).
+    # fine: a walled-in tank blasts its own way out (see _move_tanks). The
+    # arena the cart OPENS on is not built here: it's the one in the Map editor.
     global _bg_dirty
-    walls.clear()
+    _clear_maze()
     for _i in range(14):
         r = 1 + int(rnd(GRID_ROWS - 2))
         c = 1 + int(rnd(GRID_COLS // 2 - 1))
@@ -369,24 +328,27 @@ def _build_maze():
             rr = r + (0 if horiz else k)
             cc = c + (k if horiz else 0)
             if 1 <= rr < GRID_ROWS - 1 and 1 <= cc < GRID_COLS // 2:
-                walls.add((rr, cc))
-                walls.add((rr, GRID_COLS - 1 - cc))
+                mset(cc, rr, TILE_BRICK)
+                mset(GRID_COLS - 1 - cc, rr, TILE_BRICK)
     _bg_dirty = True
 
 
 def _redraw_bg():
-    # Repaint the background layer from scratch (floor + every standing brick)
-    # in the current arena MOOD's colors. Full repaints keep the layer's
-    # recorded stream one clean batch (that's what the web view re-ships), and
-    # they only happen when a brick changes or the mood advances.
+    # Repaint the background layer from scratch (floor + the whole arena) in the
+    # current MOOD's colors. ONE map() call over the tilemap keeps the layer's
+    # recorded stream a single clean batch (that's what the web view re-ships),
+    # and it only runs when a brick changes or the mood advances.
     global _bg, _bg_dirty
     floor, brick = MOODS[mood_idx % len(MOODS)]
     if _bg is None:
         _bg = make_layer(W, H)
     _bg.cls(col(floor))
-    img = _brick_sprite(col(brick))   # pre-tinted per mood (no pal on the layer)
-    for (r, c) in walls:
-        _bg.spr(img, c * CELL, GRID_Y0 + r * CELL, BRICK_SCALE)
+    ink = col(brick)
+    if ink != BRICK_INK:
+        _bg.pal(BRICK_INK, ink)
+    _bg.map(0, 0, GRID_COLS, GRID_ROWS, 0, GRID_Y0, 0, MAP_SCALE)
+    if ink != BRICK_INK:
+        _bg.pal()
     _bg_dirty = False
 
 
@@ -407,16 +369,14 @@ def _refresh_arena():
         r1 = int((t[1] + half - GRID_Y0) // CELL)
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
-                walls.discard((r, c))
+                mset(c, r, -1)
     tank_bullets[:] = []
 
 
 def _solid(x, y):
     if x < 0 or x >= W or y < GRID_Y0 or y >= GRID_Y0 + GRID_ROWS * CELL:
         return True
-    c = int(x // CELL)
-    r = int((y - GRID_Y0) // CELL)
-    return (r, c) in walls
+    return mget(int(x // CELL), int((y - GRID_Y0) // CELL)) >= 0
 
 
 def _lane_x(x):
@@ -432,7 +392,7 @@ def _open_spot():
     for _try in range(60):
         c = int(rnd(GRID_COLS))
         r = int(rnd(GRID_ROWS))
-        if (r, c) not in walls:
+        if mget(c, r) < 0:
             return c * CELL + CELL / 2.0, GRID_Y0 + r * CELL + CELL / 2.0
     return W / 2.0, GRID_Y0 + (GRID_ROWS * CELL) / 2.0
 
@@ -474,6 +434,7 @@ def _init():
     global rings, rising, fx_text, melody, freeze_t, hint_t, wanted_flash_t
     global trace_covered, trace_was_held, trace_done, aiming, aim
     global boss, streak, best_streak, initials, rec_letters, rec_t, mood_idx
+    global _bg_dirty
     # TYPING GAME: ask the console for the text keyboard. Without this the
     # device keyboard stays in raw game mode, where only the 9 d-pad-mapped
     # keys produce letters at all -- and q/e got eaten as pause/stop. In text
@@ -481,7 +442,7 @@ def _init():
     # hold-BACKSPACE game exit can't reach us, so we provide our OWN exit: the
     # top-right X button (tap it -> quit()), drawn + handled below.
     textmode(True)
-    _build_maze()
+    _bg_dirty = True          # open on the arena as drawn in the Map editor
     n = int(cfg("tank_count", 4))
     n = max(2, min(8, n))
     tanks = []
@@ -582,8 +543,8 @@ def _update_tank_bullets(dt):
         if _solid(b[0], b[1]):
             c = int(b[0] // CELL)
             r = int((b[1] - GRID_Y0) // CELL)
-            if (r, c) in walls:
-                walls.discard((r, c))
+            if mget(c, r) >= 0:
+                mset(c, r, -1)
                 _bg_dirty = True
                 _burst(b[0], b[1], _brick_color())
             continue  # consumed either way (brick or arena edge)
@@ -751,7 +712,7 @@ def _start_boss():
         if t[4] == letter:
             others = [tk[4] for tk in tanks if tk is not t]
             t[4] = _pick_letter(others + [letter])
-    walls.clear()
+    _clear_maze()
     _bg_dirty = True
     tank_bullets[:] = []
     boss = [W / 2.0, GRID_Y0 + 80.0, 0.0, 0.0, letter, 0.0, 0.0,
@@ -761,9 +722,7 @@ def _start_boss():
     wanted_flash_t = 1.5
     fx_text.append(["BOSS TIME!", W // 2, 96.0, 1.6, col("red")])
     _burst(boss[0], boss[1], col("red"), 10)
-    _play(0.0, 110.0, 0.2)         # dun...
-    _play(0.25, 110.0, 0.2)        # dun...
-    _play(0.5, 220.0, 0.35)        # DUN!
+    sfx(SFX_BOSS)                  # dun... dun... DUN!
 
 
 def _move_boss(dt):
@@ -855,9 +814,7 @@ def _start_record():
     rec_t = RECORD_TIMEOUT
     cooldown_t = 0.0
     _burst(W // 2, 60, col("yellow"), 16)
-    _play(0.0, 523.25, 0.1)
-    _play(0.12, 659.25, 0.1)
-    _play(0.24, 1046.5, 0.25)
+    sfx(SFX_RECORD)
 
 
 def _finish_record():
@@ -873,16 +830,16 @@ def _finish_record():
             pmem(2 + i, 0)
     streak = 0
     mode = "gallery"
-    _play(0.0, 783.99, 0.2)
+    sfx(SFX_SAVED)
 
 
 def _trigger(t):
     global aiming, cooldown_t, streak
     if t[4] == wanted:
         aiming = t                 # swivel first; _update_aim fires when locked
-        beep(240.0, 0.05)          # servo blip: the turret starts turning
+        sfx(SFX_AIM)               # servo blip: the turret starts turning
     else:
-        beep(WRONG_FREQ, 0.12)
+        sfx(SFX_WRONG)
         t[5] = 0.25
         if streak >= RECORD_MIN_STREAK and streak > best_streak:
             _start_record()        # the run just ended -- but it's a RECORD
@@ -971,9 +928,7 @@ def _update_trace(dt):
         # always end on a cheer -- there is no way to fail the bonus
         trace_done = True
         _burst(W // 2, H // 2, col("yellow"), 18)
-        _play(0.0, 523.25, 0.12)
-        _play(0.14, 659.25, 0.12)
-        _play(0.28, 783.99, 0.25)
+        sfx(SFX_CHEER)
     if trace_t <= 0.0:
         mode = "gallery"
         _refresh_arena()  # fresh bricks behind the curtain
@@ -997,7 +952,7 @@ def _update_record(dt):
             elif k == 26:
                 if rec_letters:
                     rec_letters.pop()
-                    beep(196.0, 0.05)
+                    sfx(SFX_UNDO)
             elif rec_letters:
                 _finish_record()
                 return
@@ -1008,7 +963,7 @@ def _update_record(dt):
             return
         if code == 8 and rec_letters:
             rec_letters.pop()
-            beep(196.0, 0.05)
+            sfx(SFX_UNDO)
         elif 32 < code < 127:
             ch = chr(code).upper()
             if ch in ALPHABET and len(rec_letters) < 3:
@@ -1096,8 +1051,7 @@ def _draw_tank(t):
     elif fy:
         by = y + fy * (TANK_HALF + 3)
         rect(x - 1, min(y, by), 3, abs(by - y), col("dark_grey"))
-    spr(_tank_sprite(fx != 0, body, TANK_SCALE),
-        x - TANK_DRAW_W // 2, y - TANK_DRAW_H // 2, TANK_SCALE)
+    _draw_hull(fx != 0, x - TANK_DRAW_W // 2, y - TANK_DRAW_H // 2, body, TANK_SCALE)
     _draw_glyph(t[4], x - GLYPH_W, y - GLYPH_H, col("white"), 2)
 
 
@@ -1114,8 +1068,7 @@ def _draw_boss():
     elif fy:
         by = y + fy * (BOSS_HALF + 6)
         rect(x - 2, min(y, by), 5, abs(by - y), col("dark_grey"))
-    spr(_tank_sprite(fx != 0, body, TANK_SCALE * 2),
-        x - TANK_DRAW_W, y - TANK_DRAW_H, TANK_SCALE * 2)
+    _draw_hull(fx != 0, x - TANK_DRAW_W, y - TANK_DRAW_H, body, TANK_SCALE * 2)
     _draw_glyph(b[4], x - (GLYPH_W * 3) // 2, y - (GLYPH_H * 3) // 2, col("white"), 3)
     for i in range(b[11]):  # hp pips: how many hits are left
         rect(x - 10 + i * 8, y - TANK_DRAW_H - 8, 5, 5, col("yellow"))
@@ -1197,9 +1150,13 @@ def _draw_cannon():
     line(CANNON_X, y, mx, my, bcol)
     line(CANNON_X + 1, y, mx + 1, my, bcol)
     circ(mx, my, 2, bcol)
-    spr(_cannon_sprite(cooldown_t > 0.0),
-        CANNON_X - CANNON_IMG_W * CANNON_SCALE // 2,
-        y - CANNON_IMG_H * CANNON_SCALE // 2, CANNON_SCALE)
+    reloading = cooldown_t > 0.0
+    if reloading:
+        pal(CANNON_INK, col("dark_grey"))
+    spr(TILE_CANNON, CANNON_X - CANNON_IMG_W * CANNON_SCALE // 2,
+        y - CANNON_IMG_H * CANNON_SCALE // 2, 0, CANNON_SCALE)
+    if reloading:
+        pal()
     if firing:
         circ(mx, my, 5, col("yellow"))   # muzzle flash rides the barrel tip
         circ(mx, my, 2, col("white"))
@@ -1222,7 +1179,7 @@ def _draw():
 
     if _bg_dirty:
         _redraw_bg()
-    draw_layer(_bg, 0, 0)  # floor + bricks in one copy (replaces cls + wall sprites)
+    draw_layer(_bg, 0, 0)  # floor + arena in one copy (the map() raster is off-frame)
 
     for b in tank_bullets:
         rect(int(b[0]) - 1, int(b[1]) - 1, 2, 2, col("light_grey"))
@@ -1252,7 +1209,7 @@ def _draw():
     print("FIND", 10, HUD_Y + 10, col("white"), 1)
     _draw_glyph(wanted, 50, HUD_Y, col("white") if flashing else col("yellow"), 4)
     for i in range(min(streak, 8)):  # the streak: one star per correct in a row
-        spr(_star_sprite(), 84 + i * 8, HUD_Y + 11, 1)
+        spr(TILE_STAR, 84 + i * 8, HUD_Y + 11, 0)
     # HUD strings are rebuilt only when the number behind them changes --
     # "Make it fast": building a string every frame is invisible garbage.
     if _hud_strs[1] != lifetime:

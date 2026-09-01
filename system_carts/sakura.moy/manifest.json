@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 10,
+  "version": 11,
   "title": "Sakura",
   "type": "wallpaper",
   "runtime": "python",
@@ -17,6 +17,7 @@
     "breeze": 18,
     "blossom": "pink"
   },
+  "extensions": ["moybyte.images"],
   "edit": [
     { "key": "petal_count", "label": "PETALS", "type": "int", "min": 20, "max": 200, "step": 10, "card": "SHED {value} BLOSSOMS FROM THE TREE" },
     { "key": "fall_speed", "label": "FALL", "type": "int", "min": 10, "max": 70, "step": 5, "display": "gauge", "gauge": { "low": "turtle", "high": "rabbit" }, "card": "PETALS FALL AT {value}" },

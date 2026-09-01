@@ -431,18 +431,20 @@ def test_map_layout_baseline_constants(tmp_path):
 
 
 def test_map_editor_shows_more_cells_on_large_canvas(tmp_path):
-    """At 960x600 the map view rectangle grows (more visible cells at the fit zoom)
-    and the fit-both default cell is recomputed for the bigger view."""
+    """At 960x600 the map view rectangle grows, and the extra pixels buy MORE MAP:
+    the cell is the map field size and does not change with the screen."""
     from runtime import map_editor_ui as M
     from runtime import host_app
     ws = _ws(tmp_path, sys_size=(960, 600))
     drv = host_app.ConsoleDriver(ws)
     ws._open_map()
     lay = ws.map_ui.layout
+    base = M.MapLayout(320, 240, 1)
     assert lay.mv_avail_w > M._MV_AVAIL_W and lay.mv_avail_h > M._MV_AVAIL_H
-    assert lay.zooms[0] > M._MV_ZOOMS[0]           # bigger fit cell on a bigger view
+    assert lay.zooms[0] == base.zooms[0]           # same field size on every tier
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-    assert cols >= M._MV_FIT_COLS and rows >= M._MV_FIT_ROWS
+    assert cols > base.mv_avail_w // base.zooms[0]   # ...so the bigger view shows more
+    assert rows > base.mv_avail_h // base.zooms[0]
     drv.frame(1 / 30)
     buf = drv.rgb888()
     assert len(buf) == 960 * 600 * 3

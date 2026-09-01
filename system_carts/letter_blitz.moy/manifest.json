@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 14,
+  "version": 15,
   "title": "Letter Blitz",
   "type": "game",
   "runtime": "python",

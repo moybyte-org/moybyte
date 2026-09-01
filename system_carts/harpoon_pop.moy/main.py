@@ -8,6 +8,9 @@
 #
 # TOUCH: hold anywhere to walk toward your finger, tap to fire.
 #
+# The arena -- the floor and the two wall columns -- is a TILEMAP, so the Map tab
+# rebuilds the room and the bubbles bounce off whatever you paint.
+#
 # TWO PLAYERS (#65) -- this cart was built for it and it is wired now: when
 # players() reports 2, a second harpooner joins the same arena. Where the second
 # player comes from is not this cart's business -- the T-Deck's own keyboard split
@@ -25,18 +28,31 @@
 # the console play itself (attract mode / the demo GIF path).
 
 # -- arena geometry ----------------------------------------------------------
+# The arena IS the tilemap -- open the Map tab and the floor and the two wall
+# columns are there to move. One 8px cell per square, so a 40x30 map covers the
+# screen exactly; the physics below is MEASURED off it by _measure_arena(), so
+# raising the floor or thickening a wall changes where bubbles bounce.
+TILE = 8
+MAP_W = W // TILE
+MAP_H = H // TILE
 HUD_H = 14                 # top strip: score / level / lives, drawn over the sky
-FLOOR_Y = H - 16           # top of the floor slab
-CEIL_Y = HUD_H + 2         # harpoons vanish (and bubbles arc below) this line
-WALL_L = 3
-WALL_R = W - 3
+CEIL_Y = HUD_H + 2         # harpoons vanish (and the walls start) at this line
 PW = 16                    # player width
 PH = 18                    # player height
+
+# How far _measure_arena() will follow a painted wall in, and the highest row it
+# will accept as a floor -- so a map somebody filled in solid still plays.
+WALL_MAX = 5               # cells
+FLOOR_MIN_ROW = CEIL_Y // TILE + 4
+
+# Remeasured from the map every _init(); these are the shipped level's numbers.
+FLOOR_Y = H - 2 * TILE     # top of the floor slab
 PLAYER_TOP = FLOOR_Y - PH
+WALL_L = TILE
+WALL_R = W - TILE
 
 # -- bubble tuning (indexed by size 0..3; 0 = smallest, pops outright) -------
 RADII = (5, 9, 14, 20)
-BUBBLE_COL = ("pink", "yellow", "orange", "red")
 BOUNCE = (150.0, 175.0, 200.0, 225.0)   # upward speed at a floor bounce -> fixed arc height
 HSPEED = (58.0, 50.0, 44.0, 38.0)       # base horizontal drift (scaled by cfg SPEED)
 POINTS = (30, 20, 15, 10)               # score per pop (smaller = worth more)
@@ -46,9 +62,15 @@ INVULN = 1.3               # seconds of blinking safety after a hit
 WALK = 150.0               # walking speed (px/s)
 OUT = 1e9                  # a dead_t nobody counts down from: out for the round
 
-# The colours that tell two kids apart at a glance.
+# The colours that tell two kids apart at a glance -- the HUD pips and the
+# harpoon tip; the hunter sprites carry the same two liveries.
 BODY = ("green", "indigo")
 TRIM = ("white", "yellow")
+
+# -- sheet art (edit it in the Paint tab) ------------------------------------
+HUNTER = (0, 2)                 # one 16x24 hunter per player colour
+BUBBLE = (5, 8, 12, 64)         # one bubble per size, drawn centred on it
+BUBBLE_SPAN = (2, 3, 4, 6)      # each bubble's tile span
 
 # -- state (module globals ARE the cart namespace, so tests can poke them) ---
 bubbles = []               # each: [x, y, vx, vy, size]
@@ -70,6 +92,28 @@ H_LIVES = 2
 H_INV = 3
 H_DEAD = 4
 H_I = 5
+
+
+def _measure_arena():
+    # Read the level back off the map: the top of the bottom slab is the floor,
+    # and the solid cells flanking the row just above it are the walls. A wiped
+    # map falls back to the screen edges rather than to nonsense.
+    global FLOOR_Y, PLAYER_TOP, WALL_L, WALL_R
+    cx = MAP_W // 2
+    r = MAP_H
+    while r > FLOOR_MIN_ROW and mget(cx, r - 1) >= 0:
+        r -= 1
+    FLOOR_Y = r * TILE
+    PLAYER_TOP = FLOOR_Y - PH
+
+    probe = r - 1
+    lo, hi = 0, MAP_W
+    while lo < WALL_MAX and mget(lo, probe) >= 0:
+        lo += 1
+    while hi > MAP_W - WALL_MAX and mget(hi - 1, probe) >= 0:
+        hi -= 1
+    WALL_L = lo * TILE
+    WALL_R = hi * TILE
 
 
 def _speed_scale():
@@ -108,6 +152,7 @@ def _spawn_level():
 
 def _init():
     background(col("dark_blue"))     # the arena sky, restored by the engine each frame
+    _measure_arena()
     global hunters, score, best, level, clear_t, over, blink
     # ONE hunter per connected player. players() is 1 on a console nobody has
     # joined, so this is the single-player game verbatim; it becomes co-op the
@@ -205,7 +250,7 @@ def _pop(i):
     if score > best:
         best = score
         pmem(0, best)
-    sfx(2)
+    sfx(0)
     del bubbles[i]
     if size > 0:
         cs = size - 1
@@ -228,7 +273,7 @@ def _lose_life(hu):
         return
     hu[H_LIVES] -= 1
     hu[H_ROPE] = None
-    sfx(3)
+    sfx(1)
     if hu[H_LIVES] <= 0:
         hu[H_DEAD] = OUT              # out for the round
         if _playing() == 0:           # ...and the round ends when EVERYBODY is
@@ -350,12 +395,10 @@ def _update(dt):
 
 
 def _bubble(b):
-    x, y, r = int(b[0]), int(b[1]), RADII[b[4]]
-    c = col(BUBBLE_COL[b[4]])
-    circ(x, y, r, c)
-    circb(x, y, r, col("white"))
-    hi = max(1, r // 4)                             # a little glossy highlight
-    circ(x - r // 3, y - r // 3, hi, col("white"))
+    size = b[4]
+    r = RADII[size]
+    span = BUBBLE_SPAN[size]
+    spr(BUBBLE[size], int(b[0]) - r, int(b[1]) - r, 0, 1, 0, span, span)
 
 
 def _hunter(hu):
@@ -364,22 +407,11 @@ def _hunter(hu):
         return
     if hu[H_INV] > 0.0 and int(blink * 12) % 2:
         return
-    i = hu[H_I]
-    body = col(BODY[i])
-    trim = col(TRIM[i])
-    x = int(hu[H_X])
-    rect(x, PLAYER_TOP + 6, PW, PH - 6, body)
-    rect(x + PW // 2 - 2, PLAYER_TOP, 4, 8, col("light_grey"))   # barrel
-    rect(x + 3, PLAYER_TOP + 10, 3, 3, trim)                     # eyes
-    rect(x + PW - 6, PLAYER_TOP + 10, 3, 3, trim)
+    spr(HUNTER[hu[H_I]], int(hu[H_X]), PLAYER_TOP, 0, 1, 0, 2, 3)
 
 
 def _draw():
-    # walls + floor over the declared sky backdrop
-    rect(0, FLOOR_Y, W, H - FLOOR_Y, col("brown"))
-    rect(0, FLOOR_Y, W, 2, col("peach"))
-    rect(0, 0, WALL_L, FLOOR_Y, col("dark_grey"))
-    rect(WALL_R, 0, W - WALL_R, FLOOR_Y, col("dark_grey"))
+    map(0, 0, MAP_W, MAP_H, 0, 0, -1, 1)     # walls + floor over the sky backdrop
 
     for b in bubbles:
         _bubble(b)

@@ -7,7 +7,7 @@
   "main": "main.py",
   "system": true,
   "order": 220,
-  "targets": ["host", "device"],
+  "targets": ["host", "device", "web"],
   "canvas": "320x240",
   "permissions": [
     "graphics",

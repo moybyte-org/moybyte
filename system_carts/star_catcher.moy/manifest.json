@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 6,
+  "version": 7,
   "title": "Star Catcher",
   "type": "game",
   "runtime": "python",

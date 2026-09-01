@@ -21,6 +21,16 @@ def _run(ws, frames, dt=1 / 30):
         ws.frame(dt)
 
 
+def _bricks(ws):
+    """The standing bricks as (row, col). The maze IS the cart's tilemap now, so
+    this reads mget rather than the `walls` set the cart used to keep beside it."""
+    ns = ws.ns
+    return [(r, c)
+            for r in range(ns["GRID_ROWS"])
+            for c in range(ns["GRID_COLS"])
+            if ns["mget"](c, r) >= 0]
+
+
 def _run_until_pop(ws, want, max_frames=40, dt=1 / 30):
     """Step frames until pop_count reaches `want` (the turret aims for a few
     frames, then the bullet flies ~0.18s -- exact frame counts would be
@@ -47,8 +57,12 @@ def test_letter_blitz_folder_present_and_valid():
     src = (d / "main.py").read_text(encoding="utf-8")
     compile(src, str(d / "main.py"), "exec")
     assert "_init" in src and "_update" in src and "_draw" in src
-    # a pure vector + procedural-glyph cart, like beeper.moy -- no sprite sheet
-    assert not (d / "sprites.moygfx").exists()
+    # Its PROPS are sheet tiles (brick / turret / star / the two tank spans), so the
+    # paint editor has something to show. Its 26 LETTERS deliberately are not: the
+    # trace bonus reads which glyph pixels are ink and no verb reads a sheet back
+    # (there is no sget), so a sheet copy would be a second source of truth.
+    assert (d / "sprites.moygfx").is_file()
+    assert "GLYPH_ROWS = {" in src
 
 
 def test_letter_blitz_opens_and_runs_headless(tmp_path):
@@ -237,7 +251,7 @@ def test_letter_blitz_arena_refresh_without_trace(tmp_path):
     _open_cart(ws, "Letter Blitz")
     ws.config["trace_bonus"] = 0
 
-    ws.ns["walls"].clear()  # a fully chewed-up arena
+    ws.ns["_clear_maze"]()  # a fully chewed-up arena
     ws.ns["pop_count"] = 3  # the next pop is the 4th
     ws.ns["tanks"][:] = [[104.0, 104.0, 0.0, 0.0, "A", 0.0, 5.0, 0, 0, 0, 5.0]]
     ws.ns["wanted"] = "A"
@@ -250,10 +264,10 @@ def test_letter_blitz_arena_refresh_without_trace(tmp_path):
     _run_until_pop(ws, 4)
 
     assert ws.ns["mode"] == "gallery"  # no trace screen when it's off
-    assert len(ws.ns["walls"]) > 0     # ...but the bricks came back
+    assert _bricks(ws)                 # ...but the bricks came back
     # Battle-City generator invariant: the outer ring stays an open patrol
     # lane, whatever the random layout inside
-    for (r, c) in ws.ns["walls"]:
+    for (r, c) in _bricks(ws):
         assert 1 <= r <= 8 and 1 <= c <= 18, (r, c)
 
 
@@ -323,7 +337,7 @@ def test_letter_blitz_boss_every_26_finds(tmp_path):
 
     boss = ws.ns["boss"]
     assert boss is not None                  # lifetime hit 26 -> boss time
-    assert len(ws.ns["walls"]) == 0          # the walls came down for it
+    assert not _bricks(ws)                   # the walls came down for it
     assert ws.ns["wanted"] == boss[4]        # the boss letter is the target
     assert boss[11] == 3
 
@@ -342,7 +356,7 @@ def test_letter_blitz_boss_every_26_finds(tmp_path):
             assert ws.ns["boss"] is None     # third hit pops it
 
     assert ws.ns["lifetime"] == 27           # the boss counts as a find
-    assert len(ws.ns["walls"]) > 0           # fresh maze...
+    assert _bricks(ws)                       # fresh maze...
     assert ws.ns["mood_idx"] == mood0 + 1    # ...in the next arena mood
 
 

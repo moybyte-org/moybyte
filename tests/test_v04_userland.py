@@ -505,7 +505,8 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     _open_cart(ws, "Hop Quest")
     assert ws.cart["type"] == "game"
     assert ws.cart.get("map") and not ws.tilemap.is_blank()    # the level is a tilemap
-    assert ws.ns["_solid"](0, 12) and not ws.ns["_solid"](0, 0)  # mget collision works
+    ground_row = ws.ns["MH"] - 1                               # ground is the bottom row
+    assert ws.ns["_solid"](0, ground_row) and not ws.ns["_solid"](0, 0)  # mget collision works
     ws.config["autoplay"] = 1
     ws.apply()
     coins = len(ws.ns["coins"])
@@ -1361,17 +1362,28 @@ def _open_cart_map(tmp_path, cart_name):
 
 
 def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
-    # The DEFAULT (most zoomed-OUT) zoom MUST show the ENTIRE map of both shipped
-    # games with the camera at (0,0) and zero panning: brick_siege is 15x15 and
-    # platformer is 20x13. So the default view must hold >= the map's cols AND rows.
+    # The DEFAULT (most zoomed-OUT) rung is the MAP FIELD SIZE -- one 8px tile per cell,
+    # identical on every tier -- so a wider view shows MORE OF THE LEVEL rather than
+    # bigger cells. A map that fits the view opens whole with the camera at (0,0); a
+    # bigger one pans.
+    #
+    # Expectations are DERIVED rather than listed per cart, because the listed form is
+    # what went stale: it named platformer as the widest shipped map long after
+    # layer_test had shipped at 64x30.
     from runtime import console as C
-    for name, w, h in (("brick_siege", 15, 15), ("platformer", 20, 13)):
+    from runtime.map_editor_ui import _MV_ZOOMS
+
+    fitted = 0
+    for name in ("brick_siege", "ray_test", "letter_blitz", "platformer", "scroll_demo"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
-        assert (ws.tilemap.w, ws.tilemap.h) == (w, h)
-        assert ws.map_ui.map_zoom == 0                          # opens at the fit-both default
+        w, h = ws.tilemap.w, ws.tilemap.h
+        assert ws.map_ui.map_zoom == 0                          # opens at the fit default
         assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)   # cam pinned to origin
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-        assert cols >= w and rows >= h                   # the whole map is on screen
+        assert cell == _MV_ZOOMS[0] >= 8             # the FIELD size, not a fitted cell
+        if cols < w or rows < h:
+            continue                                 # bigger than the view -> it pans
+        fitted += 1
         # Every map cell maps to a pixel inside the visible map-view rectangle, so no
         # cell is off-screen at the default zoom.
         area = ws.map_ui._mv_area()
@@ -1381,6 +1393,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
                 py = y0 + cy * cell + cell // 2
                 assert C._in(px, py, area)
                 assert ws.map_ui._map_cell_at(px, py) == (cx, cy)
+    assert fitted >= 2, "no shipped map exercised the fit guarantee"
 
 
 def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
