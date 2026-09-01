@@ -796,52 +796,74 @@ def _expand_sigils_once(toks):
     return out
 
 
-# The binary bitwise operators, TIGHTEST FIRST. Order is the whole correctness
-# argument: rewriting `<<` before `&` means that by the time `&` is considered,
-# its left operand is a finished call and therefore a primary, so `a << b & c`
-# becomes `band(shl(a,b), c)` and not `a << band(b,c)`.
-_BITOPS = (("<<", "shl"), (">>", "shr"), ("&", "band"), ("~", "bxor"),
-           ("|", "bor"))
+# The bitwise operators. Lua 5.4 refuses them on a non-integral number and p8's
+# 16.16 fixed point allows them, so the OPERANDS are floored -- the operator
+# itself is left exactly where it is, which is what keeps precedence correct
+# without this having to know any.
+_BITOPS = ("<<", ">>", "&", "~", "|")
+
+
+def _already_floored(toks, lo, hi):
+    """Is toks[lo:hi] a literal, or already `flr(...)`?"""
+    core = [t for t in toks[lo:hi] if t[0] != T_WS]
+    if not core:
+        return True
+    if len(core) == 1 and core[0][0] == T_NUM:
+        return True
+    return core[0] == (T_NAME, "flr") and core[1:2] == [(T_OP, "(")]
 
 
 def expand_bitops(toks):
-    """`a & b` -> `band(a, b)`, for operands that are PRIMARIES.
+    """`a & b` -> `flr(a) & flr(b)`.
 
-    Lua 5.4 refuses a bitwise operator on a non-integral float; p8's numbers
-    are 16.16 fixed point and it allows them. `picooffroad` computes
-    `(((i>>4)+time()*2)*4) & 7` for a dither index, and time() makes that a
-    float, so the cart stopped on its title screen.
+    Lua 5.4 raises "number has no integer representation" for a bitwise
+    operator on a non-integral float; p8's numbers are 16.16 fixed point and it
+    allows them. `picooffroad` computes `(((i>>4)+time()*2)*4) & 7` for a
+    dither index and stopped on its title screen.
 
-    Only primary operands are rewritten -- a parenthesised expression, a name
-    or number with its index/call chain, or a unary minus on one. Anything
-    else is left alone rather than guessed at, because getting precedence
-    wrong here would silently compute the wrong number instead of failing.
+    Wrapping the OPERANDS rather than rewriting `a & b` into `band(a, b)` is
+    both simpler and much faster. Simpler because the operator stays put, so
+    precedence needs no thought at all. Faster because `band` is a Lua call
+    whose body makes two more, and measured on Lua 5.4 that is 20.7x the cost
+    of the bare VM instruction against 4.8x for this -- and a cart doing bit
+    work in an inner loop (a software blitter, a bytecode VM) runs this
+    hundreds of thousands of times a frame.
+
+    A literal operand is left alone: it is already an integer, and skipping it
+    is most of the difference between 9.4x and 4.8x.
     """
-    for op, fn in _BITOPS:
-        guard = 0
-        while guard < 64:
-            guard += 1
-            at = -1
-            for i in range(len(toks)):
-                if toks[i][0] != T_OP or toks[i][1] != op:
-                    continue
-                lo = _primary_start(toks, i)
-                if lo < 0:
-                    continue
-                hi = _primary_end(toks, i + 1)
-                if hi < 0:
-                    continue
-                at = i
-                break
-            if at < 0:
-                break
-            lo = _primary_start(toks, at)
-            hi = _primary_end(toks, at + 1)
-            left = toks[lo:_skip_ws_back(toks, at)]
-            right = toks[_skip_ws(toks, at + 1):hi]
-            toks = (toks[:lo] + [(T_NAME, fn), (T_OP, "(")] + left
-                    + [(T_OP, ","), (T_WS, " ")] + right + [(T_OP, ")")]
-                    + toks[hi:])
+    guard = 0
+    while guard < 200:
+        guard += 1
+        done = True
+        for i in range(len(toks)):
+            if toks[i][0] != T_OP or toks[i][1] not in _BITOPS:
+                continue
+            # The two sides are decided INDEPENDENTLY: `a & ~b` has no primary
+            # on the right (a unary operator is not one), and giving up on the
+            # whole operator there left `a` unfloored -- the exact float that
+            # raises.
+            lo = _primary_start(toks, i)
+            hi = _primary_end(toks, i + 1)
+            rs = _skip_ws(toks, i + 1)
+            wrap_r = hi > 0 and not _already_floored(toks, rs, hi)
+            wrap_l = lo >= 0 and not _already_floored(toks, lo,
+                                                      _skip_ws_back(toks, i))
+            if not wrap_r and not wrap_l:
+                continue
+            out = list(toks[:hi]) if hi > 0 else list(toks)
+            if wrap_r:
+                out = (toks[:rs] + [(T_NAME, "flr"), (T_OP, "(")]
+                       + toks[rs:hi] + [(T_OP, ")")])
+            if wrap_l:
+                le = _skip_ws_back(toks, i)
+                out = (out[:lo] + [(T_NAME, "flr"), (T_OP, "(")]
+                       + out[lo:le] + [(T_OP, ")")] + out[le:])
+            toks = (out + toks[hi:]) if hi > 0 else out
+            done = False
+            break
+        if done:
+            return toks
     return toks
 
 
