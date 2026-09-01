@@ -1,0 +1,68 @@
+{
+  "_": "What each corpus cart does today. This file is a RATCHET: tests/test_p8_corpus.py fails when a cart does less, and also when one does more without this being raised. The carts themselves are not in the repo -- see tools/fetch_p8_corpus.py.",
+  "carts": {
+    "bunnysurvivor-9": {
+      "boots": true,
+      "distinct": 113,
+      "responds": true
+    },
+    "celeste_classic_2-5": {
+      "boots": true,
+      "distinct": 113,
+      "responds": true
+    },
+    "crimson_night-5": {
+      "boots": true,
+      "distinct": 76,
+      "responds": true
+    },
+    "dank_tomb-0": {
+      "boots": false,
+      "distinct": 0,
+      "responds": false,
+      "why": "cart logic downstream of stubbed memory: pairs(nil) in its room loader"
+    },
+    "dungeons_and_diagrams-5": {
+      "boots": true,
+      "distinct": 15,
+      "responds": true
+    },
+    "lowmemsky-1": {
+      "boots": true,
+      "distinct": 128,
+      "responds": false
+    },
+    "mossmoss-17": {
+      "boots": true,
+      "distinct": 128,
+      "responds": true
+    },
+    "nimudazus-27": {
+      "boots": false,
+      "distinct": 0,
+      "responds": false,
+      "why": "minified bytecode VM: a for-iterator comes back nil"
+    },
+    "petal_quest-12": {
+      "boots": true,
+      "distinct": 0,
+      "responds": true
+    },
+    "picooffroad-5": {
+      "boots": true,
+      "distinct": 1,
+      "responds": true
+    },
+    "poom_0-9": {
+      "boots": true,
+      "distinct": 0,
+      "responds": false
+    },
+    "terra_1cart-44": {
+      "boots": false,
+      "distinct": 0,
+      "hangs": true,
+      "why": "world generation spins: its scan-for-ground loop never terminates under our stubs (60M mget calls and counting)"
+    }
+  }
+}

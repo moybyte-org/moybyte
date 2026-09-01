@@ -24,6 +24,34 @@ paths:
   one in a job that asked for the suite, so the workflow also refuses a run in
   which nothing ran.
 
+- **The p8 importer has a REAL-CART gate, and it exists because the unit tests
+  could not have found any of this.** Every porter bug of 2026-09-01 — fifteen
+  dialect rules, a 60fps cart whose update never ran, a tap that moved two menu
+  slots — was found by importing a famous cart and LOOKING at it, while the
+  suite stayed green throughout. A cart that never ticks never errors either,
+  so "no exception" is not a measurement.
+  `tests/test_p8_corpus.py` runs twelve well-known BBS carts through the real
+  Player and pins what each one does in `tests/p8_corpus_expected.json`.
+  - **The carts are NOT in the repo** — other people's work, some under
+    licences that forbid redistribution. `tools/fetch_p8_corpus.py` caches them
+    outside the tree and the suite skips without them (`MOYBYTE_P8_CORPUS`).
+    The cart list is chosen to stress DIFFERENT things (a raycaster, a
+    world-gen sim, a minified bytecode VM, two carts with graphics packed into
+    strings); twelve similar carts would have found perhaps three of the
+    fifteen bugs.
+  - **Each cart runs in a CHILD PROCESS with a timeout**, because a cart can
+    HANG: `terra` spins in its own world generation and the console's Lua opens
+    no debug library, so nothing inside the process can interrupt it.
+  - **The ratchet nags in BOTH directions.** A cart doing less fails; a cart
+    doing MORE fails too, asking for the pin to be raised — a ratchet that
+    tightens only when someone remembers is one that never tightens.
+  - **Know what the two numbers prove.** `distinct` (frames that differ)
+    catches "nothing runs" — 1 for a frozen cart, 25+ for a live one — but NOT
+    "playable": a title screen animating off `time()` scores high while the
+    cart's update is dead. `responds` (held-direction pixels differ from
+    not-held) is the strong signal, and it is not fooled by `rnd()`. Both were
+    checked against deliberately dead and deliberately live probe carts.
+
 - **On-glass testing — all three boards have a suite** (#156). Each is gated on
   its own env var and shares one session in file order, leaving the board where
   it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
