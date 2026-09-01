@@ -734,7 +734,27 @@ def _old_decompress(rom, start):
             cnt = (second >> 4) + 2
             for _ in range(cnt):
                 out.append(out[-off])
-    return out.decode("latin-1")
+    return _latin1(out)
+
+
+def _latin1(data):
+    """bytes -> str, one character per byte, codepoint == byte value.
+
+    NOT `data.decode("latin-1")`. MicroPython decodes UTF-8 and only UTF-8: it
+    accepts the codec name, ignores it, and raises UnicodeError -- with an EMPTY
+    message -- on the first byte >= 0x80. It ignores an `errors` argument the
+    same way, so "replace" does not soften it either. This importer runs on that
+    VM in the browser console, so every cart whose code is pxa-compressed or
+    carries a P8SCII glyph failed there and nowhere else, reported as
+    "that cart did not decode ()".
+
+    ONE path on both tiers, deliberately -- not a CPython fast path with a
+    fallback. The bug this replaces was invisible precisely because the host
+    took a branch the browser never could, so the host suite proved nothing
+    about the tier that was broken. `chr` per byte is a few ms on a cart-sized
+    buffer, once per import.
+    """
+    return "".join(chr(b) for b in data)
 
 
 def _p8png_sections(rom):
@@ -769,12 +789,12 @@ def _p8png_sections(rom):
     sections["sfx"] = sfx
     code = rom[0x4300:]
     if code[:4] == b"\x00pxa":
-        lua = _pxa_decompress(rom, 0x4300).decode("latin-1")
+        lua = _latin1(_pxa_decompress(rom, 0x4300))
     elif code[:4] == b":c:\x00":
         lua = _old_decompress(rom, 0x4300)
     else:
         end = code.find(b"\x00")
-        lua = code[:end if end >= 0 else len(code)].decode("latin-1")
+        lua = _latin1(code[:end if end >= 0 else len(code)])
     sections["lua"] = lua.split("\n")
     return sections
 
@@ -793,4 +813,8 @@ def read_p8(path):
         blob = f.read()
     if blob[:8] == b"\x89PNG\r\n\x1a\n":
         return _p8png_sections(_p8png_rom(blob))
-    return parse_p8(blob.decode("utf-8", "replace"))
+    try:
+        text = blob.decode("utf-8")       # a .p8 PICO-8 wrote is valid UTF-8
+    except UnicodeError:
+        text = _latin1(blob)              # damaged, or glyphs stored as raw
+    return parse_p8(text)

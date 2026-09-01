@@ -78,6 +78,19 @@ def problem_with(path, name):
     return None
 
 
+def _why(exc):
+    """`exc` as a sentence fragment that always names something.
+
+    MicroPython raises several builtins with NO message -- UnicodeError is the
+    one that mattered -- and `"%s" % exc` on those is the empty string, so the
+    report read "that cart did not decode ()" and named neither the fault nor
+    the file. A user cannot act on that and neither can a maintainer: it cost a
+    full debugging session to learn that the empty parens meant UnicodeError.
+    Fall back to the type, which is never empty.
+    """
+    return str(exc) or type(exc).__name__
+
+
 def convert(path, name, out_dir):
     """A dropped `.p8` / `.p8.png` at `path` -> a `.moy` folder at `out_dir`.
 
@@ -104,7 +117,7 @@ def convert(path, name, out_dir):
         # back-reference points before the start. The converter raises for
         # those now rather than refusing up front, and a raise that reaches the
         # worker is a dead console, not a message.
-        raise P8Problem("that cart did not decode (%s)" % (exc,))
+        raise P8Problem("that cart did not decode (%s)" % (_why(exc),))
     problem = p8_writer.sections_problem(sections)
     if problem:
         raise P8Problem(problem)
@@ -128,7 +141,7 @@ def import_p8_json(path, name, out_dir):
     except Exception as exc:  # noqa: BLE001 -- a broken cart is not a crash
         _rm(path)
         return json.dumps({"ok": False, "report": [
-            "that cart could not be imported (%s)" % (exc,)]})
+            "that cart could not be imported (%s)" % (_why(exc),)]})
     _rm(path)
     return json.dumps({"ok": True, "title": summary["title"],
                        "report": p8_writer.report_lines(summary)})

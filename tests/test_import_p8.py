@@ -1345,3 +1345,76 @@ def test_a_glyph_works_as_a_value_and_as_a_variable(tmp_path):
     assert lua.get_global("shade") == 0x87, \
         "a non-button glyph carries its own P8SCII code"
     assert lua.get_global("asvar") == 42, "a glyph must work as a variable"
+
+
+# ---------------------------------------------------------------------------
+# The importer also runs on MICROPYTHON -- the browser console converts a
+# dropped cart in wasm, and that is how a cart reaches a Zero. That VM decodes
+# UTF-8 and ONLY UTF-8: it accepts a codec name, ignores it, and raises
+# UnicodeError with an EMPTY message on the first byte >= 0x80. It ignores an
+# `errors` argument the same way. So `.decode("latin-1")` -- correct on CPython
+# and the only decode that keeps a P8SCII glyph byte -- made every pxa-packed
+# cart fail in the browser and nowhere else, reported as "did not decode ()".
+# ---------------------------------------------------------------------------
+
+def test_the_byte_decode_keeps_every_high_byte():
+    """codepoint == byte value, for all 256, which is what latin-1 means and
+    what the glyph mapping downstream depends on."""
+    import p8_import
+    raw = bytes(range(256))
+    got = p8_import._latin1(raw)
+    assert len(got) == 256
+    assert [ord(c) for c in got] == list(range(256))
+
+
+def test_the_importer_asks_for_no_codec_micropython_lacks():
+    """THE PIN. A `.decode()` naming anything but utf-8, or passing an errors
+    argument, works on the host and raises on the browser tier -- the exact
+    shape of a bug that passed every test here while no cart could be imported
+    there. Route byte-wise decodes through `_latin1`.
+
+    Over the AST, not the text: the helper's own docstring quotes the call it
+    exists to replace, and a regex cannot tell prose from code."""
+    import ast
+    tree = ast.parse((ROOT / "tools" / "p8_import.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "decode"):
+            continue
+        assert not node.keywords and len(node.args) <= 1, (
+            "p8_import line %d passes an errors argument to .decode() -- "
+            "MicroPython ignores it and raises anyway" % node.lineno)
+        if node.args:
+            codec = getattr(node.args[0], "value", None)
+            assert codec in ("utf-8", "utf8"), (
+                "p8_import line %d calls .decode(%r) -- MicroPython raises on "
+                "any codec but utf-8; use _latin1()" % (node.lineno, codec))
+
+
+def test_the_decode_runs_on_the_micropython_the_browser_uses(tmp_path):
+    """The check that would actually have caught this, rather than describing
+    it: run p8_import's byte decode on the OTHER VM.
+
+    The static pin above says "do not name a codec"; this says "and the thing
+    you wrote instead works there". The bug shipped because every test ran on
+    CPython, where latin-1 exists -- so the tier that could not import a single
+    cart was the one tier nothing exercised."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from unix_mp import require_unix_mp
+    mp_exe = require_unix_mp(
+        why="Without it the importer's decode is only ever run on CPython, "
+            "which is the tier that was NOT broken.")
+    script = tmp_path / "dec.py"
+    script.write_text(
+        "import sys\n"
+        "sys.path.insert(0, %r)\n" % str(ROOT / "tools") +
+        "import p8_import\n"
+        "got = p8_import._latin1(bytes(range(256)))\n"
+        "print(len(got), min(ord(c) for c in got), max(ord(c) for c in got))\n",
+        encoding="utf-8")
+    import subprocess
+    r = subprocess.run([str(mp_exe), str(script)],
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[:500]
+    assert r.stdout.split() == ["256", "0", "255"], (r.stdout, r.stderr[:300])
