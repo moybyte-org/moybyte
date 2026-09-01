@@ -3,7 +3,7 @@
   "carts": {
     "bunnysurvivor-9": {
       "boots": true,
-      "distinct": 113,
+      "distinct": 117,
       "responds": true
     },
     "celeste_classic_2-5": {
@@ -45,7 +45,7 @@
     },
     "petal_quest-12": {
       "boots": true,
-      "distinct": 0,
+      "distinct": 1,
       "responds": true
     },
     "picooffroad-5": {

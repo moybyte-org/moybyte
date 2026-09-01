@@ -802,6 +802,54 @@ def _expand_sigils_once(toks):
 # without this having to know any.
 _BITOPS = ("<<", ">>", "&", "~", "|")
 
+# Tightest first, and only for the fixed-point CALL rewrite below: turning
+# `a | b` into a call before `&` has been considered would capture `b` alone as
+# the call's operand and quietly change what binds to what.
+_FX_OPS = (("&", "p8_band"), ("~", "p8_bxor"), ("|", "p8_bor"))
+
+
+def _is_fractional_literal(toks, lo, hi):
+    """A numeric literal with a fraction -- `0.07`, `0xffff.fffe`."""
+    core = [t for t in toks[lo:hi] if t[0] != T_WS]
+    return len(core) == 1 and core[0][0] == T_NUM and "." in core[0][1]
+
+
+def expand_fixed_point_bitops(toks):
+    """`x & 0xffff.fffe` -> `p8_band(x, 0xffff.fffe)`, p8's real semantics.
+
+    Only where a fractional literal appears. Everywhere else the cheap
+    operand-flooring below is exact and several times faster, and a mask that
+    is a whole number cannot tell the difference.
+    """
+    for op, fn in _FX_OPS:
+        guard = 0
+        while guard < 64:
+            guard += 1
+            at = -1
+            for i in range(len(toks)):
+                if toks[i][0] != T_OP or toks[i][1] != op:
+                    continue
+                lo = _primary_start(toks, i)
+                hi = _primary_end(toks, i + 1)
+                if lo < 0 or hi < 0:
+                    continue
+                rs = _skip_ws(toks, i + 1)
+                le = _skip_ws_back(toks, i)
+                if _is_fractional_literal(toks, lo, le) or \
+                        _is_fractional_literal(toks, rs, hi):
+                    at = i
+                    break
+            if at < 0:
+                break
+            lo = _primary_start(toks, at)
+            hi = _primary_end(toks, at + 1)
+            left = toks[lo:_skip_ws_back(toks, at)]
+            right = toks[_skip_ws(toks, at + 1):hi]
+            toks = (toks[:lo] + [(T_NAME, fn), (T_OP, "(")] + left
+                    + [(T_OP, ","), (T_WS, " ")] + right + [(T_OP, ")")]
+                    + toks[hi:])
+    return toks
+
 
 def _already_floored(toks, lo, hi):
     """Is toks[lo:hi] a literal, or already `flr(...)`?"""
@@ -1107,6 +1155,7 @@ def p8_lua_to_lua54(lines):
             continue
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
+        toks = expand_fixed_point_bitops(toks)
         toks = expand_bitops(toks)
         toks = if_do_to_then(toks)
         toks = expand_oneline_if(toks)
@@ -1610,12 +1659,44 @@ do
   function run()
     if p8_init then p8_init() end
   end
-  function band(a, b) return flr(a) & flr(b) end
-  function bor(a, b) return flr(a) | flr(b) end
-  function bxor(a, b) return flr(a) ~ flr(b) end
-  function bnot(a) return ~flr(a) end
-  function shl(a, n) return flr(a) << flr(n) end
-  function shr(a, n) return flr(a) >> flr(n) end
+  -- p8's bitwise operators work on the 16.16 FIXED POINT representation, so a
+  -- mask WITH A FRACTION is meaningful: `x & 0xffff.fffe` is idiomatic p8 for
+  -- "drop the lowest fractional bit". Flooring the operands throws exactly
+  -- that away -- `dank_tomb` parses its config through that mask and every
+  -- value came out 0, which is why its rooms were empty tables.
+  --
+  -- These are used only where a FRACTIONAL literal appears, because they cost
+  -- two multiplies and a divide more than the integer form and the integer
+  -- form is exact whenever the mask is a whole number (a whole number's low
+  -- 16 fixed-point bits are zero, so it discards the fraction anyway).
+  -- p8's fixed point is 32 BITS and it WRAPS, so the conversion has to wrap
+  -- too: math.floor returns a FLOAT for anything an int64 cannot hold, and a
+  -- float is exactly what Lua's `&` refuses. Taking it mod 2^32 first keeps
+  -- every value an integer and matches what the hardware would do anyway.
+  local tointeger = math.tointeger
+  local function _fx(v)
+    -- TOTAL on purpose. math.floor still hands back a float for a nan or an
+    -- infinity, and a float is exactly what `&` refuses -- so the conversion
+    -- has to end in an integer or in 0, never in "probably an integer".
+    return tointeger(mfloor(((v or 0) * 65536) % 4294967296)) or 0
+  end
+  local function _unfx(n)
+    if n >= 2147483648 then n = n - 4294967296 end   -- back to signed
+    return n / 65536
+  end
+  function p8_band(a, b) return _unfx(_fx(a) & _fx(b)) end
+  function p8_bor(a, b) return _unfx(_fx(a) | _fx(b)) end
+  function p8_bxor(a, b) return _unfx(_fx(a) ~ _fx(b)) end
+  -- The VERB forms are the fixed-point ones. A cart writing `band(x, mask)`
+  -- rather than `x & mask` means the same thing and gets the same answer;
+  -- these are the explicit spelling, not an inner-loop operator, so the extra
+  -- multiply is not worth trading correctness for.
+  band = p8_band
+  bor = p8_bor
+  bxor = p8_bxor
+  function bnot(a) return _unfx((~_fx(a)) % 4294967296) end
+  function shl(a, n) return _unfx((_fx(a) << flr(n)) % 4294967296) end
+  function shr(a, n) return _unfx(_fx(a) >> flr(n)) end
   function rotl(a, n) n = flr(n) % 32 return ((flr(a) << n) | (flr(a) >> (32 - n))) & 0xffffffff end
   function rotr(a, n) n = flr(n) % 32 return ((flr(a) >> n) | (flr(a) << (32 - n))) & 0xffffffff end
 
@@ -1991,6 +2072,7 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "peek peek2 peek4 poke poke2 poke4 memcpy memset "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
+          "p8_band p8_bor p8_bxor "
           "band bor bxor bnot shl shr rotl rotr").split()
 
 
