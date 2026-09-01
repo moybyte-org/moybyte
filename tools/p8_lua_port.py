@@ -2249,16 +2249,22 @@ def localization_lua(body):
     return "\n".join(lines) + "\n"
 
 
-def build_manifest(title, icon=None):
-    # The spec manifest (SPEC.md 3.1). fps 30 because that IS PICO-8's rate --
-    # the shim paces the p8 lifecycle at a fixed 1/30 dt. "ported_from" is an
-    # unrecognised field; the spec requires hosts to ignore it (3.1).
+def build_manifest(title, icon=None, fps=30):
+    # The spec manifest (SPEC.md 3.1). `fps` is the cart's LOGIC rate, and a p8
+    # cart picks it by which lifecycle it defines: _update60 means 60, _update
+    # means 30. Declaring 30 for every cart was wrong in a way that reached the
+    # host -- `Workstation.frame_cap_fps` reads this field, so a 60fps cart was
+    # capped to a 30Hz loop while the shim still wanted 60Hz logic, which is
+    # two cart ticks inside one console frame. That is exactly the shape of the
+    # doubled btnp edge fixed on 2026-09-01.
+    # "ported_from" is an unrecognised field; the spec requires hosts to ignore
+    # it (3.1).
     man = {
         "format": "moy-1",
         "title": title,
         "version": 1,
         "main": "main.lua",
-        "fps": 30,
+        "fps": fps,
         # SPEC.md 1/3.1: the p8 screen IS the raster. The cart draws native
         # 128x128 pixels and the host scales/letterboxes -- a quarter of the
         # fill the old draw-2x-yourself shim paid.
@@ -2403,7 +2409,9 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
         n_sfx = n_music = 0          # nothing was written, so nothing counted
 
     _write(out_dir, "manifest.json",
-           manifest_text(build_manifest(title, icon_tile(kgfx))))
+           manifest_text(build_manifest(
+               title, icon_tile(kgfx),
+               60 if _defines_function(body, "p8_update60") else 30)))
     written.append("manifest.json")
     return {"files": sorted(written), "sfx": n_sfx, "music": n_music}
 
