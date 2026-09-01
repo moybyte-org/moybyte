@@ -1228,8 +1228,13 @@ do
   function cos(t) return mcos((t or 0) * 6.283185307179586) end
   flr = math.floor
   abs = math.abs
-  min = math.min
-  max = math.max
+  -- p8 coerces nil to 0 in arithmetic, so `min(nil, 5)` is 0 there and an
+  -- error in Lua. `dank_tomb` stops on its first frame otherwise, and the
+  -- message has no line number in it -- the error is raised inside math.min,
+  -- so there is nothing in the cart to point at.
+  local mmin, mmax = math.min, math.max
+  function min(a, b) return mmin(a or 0, b or 0) end
+  function max(a, b) return mmax(a or 0, b or 0) end
   sqrt = math.sqrt
   function atan2(dx, dy) return matan(-(dy or 0), dx or 0) / 6.283185307179586 % 1 end
 
@@ -1632,9 +1637,36 @@ do
   -- works exactly; a cart poking a hardware register gets a register that
   -- remembers what it was told and affects nothing.
   local p8mem = {}
-  local function _mrd(a) return p8mem[a] or 0 end
+  -- The MAP is real memory here, because we have it. p8 lays the map out at
+  -- 0x2000 as one byte per cell (rows 0..31) with rows 32..63 in the half it
+  -- shares with the sheet at 0x1000 -- and a cart that reads its level data
+  -- that way instead of through mget is not doing anything exotic.
+  -- `dank_tomb` peeks 0x2000 for exactly that, got zeroes from the scratch
+  -- table, and indexed a nil room.
+  local function _mrd(a)
+    if a >= 0x2000 and a < 0x3000 then
+      local o = a - 0x2000
+      return mget(o % 128, o // 128) or 0
+    end
+    if a >= 0x1000 and a < 0x2000 then
+      local o = a - 0x1000
+      return mget(o % 128, 32 + o // 128) or 0
+    end
+    return p8mem[a] or 0
+  end
   local function _mwr(a, v)
-    if a >= 0 and a < 0x8000 then p8mem[a] = v & 0xff end
+    v = v & 0xff
+    if a >= 0x2000 and a < 0x3000 then
+      local o = a - 0x2000
+      mset(o % 128, o // 128, v)
+      return
+    end
+    if a >= 0x1000 and a < 0x2000 then
+      local o = a - 0x1000
+      mset(o % 128, 32 + o // 128, v)
+      return
+    end
+    if a >= 0 and a < 0x8000 then p8mem[a] = v end
   end
   function peek(a, n)
     a = fl(a)
