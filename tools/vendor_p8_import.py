@@ -5,7 +5,7 @@
     make vendor-p8-import SPEC=/path/to/moy-spec
     python3 tools/vendor_p8_import.py --check      # what would change, touch nothing
 
-THREE FILES, ONE UPSTREAM.
+TWO FILES, ONE UPSTREAM.
 
 `p8_import.py` is moy-spec's `.p8`/`.p8.png` -> moy asset converter: sheet, SFX
 bank and music tracks. It lives upstream because SPEC.md is what says what the
@@ -69,11 +69,6 @@ SPEC_PROBE = "p8_import.py"
 VENDOR = {
     "p8_import.py": "p8_import.py",
     "p8_lua_port.py": "p8_lua_port.py",
-    # The cart corpus LIST (links only -- no carts). Both repositories gate the
-    # importer against it, and two hand-kept copies of the same twelve names
-    # would drift into two ratchets measuring different things. It rides the
-    # same re-vendor as the code it tests.
-    "p8_corpus.json": "conformance/p8_corpus.json",
 }
 
 
