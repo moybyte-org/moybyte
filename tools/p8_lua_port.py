@@ -1659,36 +1659,18 @@ do
   -- works exactly; a cart poking a hardware register gets a register that
   -- remembers what it was told and affects nothing.
   local p8mem = {}
-  -- The MAP is real memory here, because we have it. p8 lays the map out at
-  -- 0x2000 as one byte per cell (rows 0..31) with rows 32..63 in the half it
-  -- shares with the sheet at 0x1000 -- and a cart that reads its level data
-  -- that way instead of through mget is not doing anything exotic.
-  -- `dank_tomb` peeks 0x2000 for exactly that, got zeroes from the scratch
-  -- table, and indexed a nil room.
-  local function _mrd(a)
-    if a >= 0x2000 and a < 0x3000 then
-      local o = a - 0x2000
-      return mget(o % 128, o // 128) or 0
-    end
-    if a >= 0x1000 and a < 0x2000 then
-      local o = a - 0x1000
-      return mget(o % 128, 32 + o // 128) or 0
-    end
-    return p8mem[a] or 0
-  end
+  -- SCRATCH, and deliberately not mapped to the map or the sheet.
+  --
+  -- Routing 0x2000..0x2fff to the real map was tried on 2026-09-01 and
+  -- REVERTED, measured: it is p8's map region, but a cart that does not use
+  -- the tilemap uses those bytes as free memory, and `picooffroad` does --
+  -- reading real tiles where it expected its own scratch turned its track
+  -- into garbage. It bought nothing either; `dank_tomb`, the cart it was for,
+  -- only moved to a different error. Guessing at memory SEMANTICS from an
+  -- address is what that mapping was, and the address does not carry them.
+  local function _mrd(a) return p8mem[a] or 0 end
   local function _mwr(a, v)
-    v = v & 0xff
-    if a >= 0x2000 and a < 0x3000 then
-      local o = a - 0x2000
-      mset(o % 128, o // 128, v)
-      return
-    end
-    if a >= 0x1000 and a < 0x2000 then
-      local o = a - 0x1000
-      mset(o % 128, 32 + o // 128, v)
-      return
-    end
-    if a >= 0 and a < 0x8000 then p8mem[a] = v end
+    if a >= 0 and a < 0x8000 then p8mem[a] = v & 0xff end
   end
   function peek(a, n)
     a = fl(a)
@@ -1898,11 +1880,15 @@ do
   -- 60fps cart's update never ran at all, so it drew its first frame forever
   -- and answered no input. `bunnysurvivor` is one, and "couldn't send any
   -- input" is exactly what that looks like from the outside.
-  local tick, locked = nil, false
+  -- The RATE is locked once; the FUNCTION is looked up every tick. p8 reads
+  -- `_update` fresh each frame, and a cart may reassign it -- a scene machine
+  -- swapping its update for the next screen is ordinary p8. Caching the
+  -- function on frame one froze any cart that had not defined it yet, or that
+  -- replaced it later, with no error to show for it.
+  local locked = false
   function _update(dt)
-    if not locked then
+    if not locked and (p8_update60 or p8_update) then
       locked = true
-      tick = p8_update60 or p8_update
       if p8_update60 then
         P8_DT = 1 / 60
         EPS = P8_DT * 0.02
@@ -1921,6 +1907,7 @@ do
       for i = 0, 5 do                            -- hold length, in CART ticks
         hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
       end
+      local tick = p8_update60 or p8_update
       if tick then tick() end
       for i = 0, 5 do pending[i] = false end     -- the tick consumed the edges
       ticked = true

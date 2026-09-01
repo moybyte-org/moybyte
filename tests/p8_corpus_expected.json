@@ -55,8 +55,8 @@
     },
     "poom_0-9": {
       "boots": true,
-      "distinct": 0,
-      "responds": false
+      "distinct": 14,
+      "responds": true
     },
     "terra_1cart-44": {
       "boots": false,
