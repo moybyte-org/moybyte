@@ -1741,9 +1741,14 @@ do
   -- mantissa against the 32 a 16.16 value needs. Measured on the real console
   -- (libmoy/build/run_cart, 2026-09-01): `0xffff.fffe` is already 65536.0 by
   -- the time the cart sees it, so the mask a cart wrote does not survive being
-  -- READ, let alone applied. A faithful implementation was written, passed on
-  -- a 64-bit desktop Lua, and returned 0 on the console -- do not re-attempt
-  -- it without changing LUA_FLOAT_TYPE, which is a spec decision.
+  -- READ, let alone applied. Do not re-attempt it without changing
+  -- LUA_FLOAT_TYPE, which is a spec decision and not a porter fix.
+  --
+  -- A faithful implementation WAS written, and what let it look correct is the
+  -- part worth remembering: it was checked in a scratch `lupa` script. lupa is
+  -- 64-bit, every tier this project ships is LUA_32BITS, and lupa was DELETED
+  -- from the host in 2026-08-14 for precisely that reason. The host's own Lua
+  -- would have said no. Do not check numeric semantics on a Lua nobody ships.
   --
   -- The cost is real and bounded: a cart that masks fractional bits (dank_tomb
   -- parses its config that way) reads zeros. Integer masks -- every other cart

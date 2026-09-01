@@ -24,16 +24,26 @@ paths:
   one in a job that asked for the suite, so the workflow also refuses a run in
   which nothing ran.
 
-- **The p8 importer's cart gate lives UPSTREAM, and moybyte's copy is a
-  tier-parity check.** `make -C libmoy p8-carts` in moy-spec runs the corpus
-  through `run_cart` -- the real C console on the real LUA_32BITS VM, which is
-  where the porter lives and where a porter bug should turn red. That VM is not
-  a detail: lua_Number is a SINGLE-PRECISION float there, and a 16.16
-  fixed-point implementation of p8's bitwise operators passed every test here
-  and returned 0 there. `tests/test_p8_corpus.py` runs the same carts through
-  moybyte's Python host instead, so what it proves is that both consoles agree
-  -- "one cart, every tier". Do not justify the split by input: libmoy has a
-  full input API and `run_cart --hold` uses it.
+- **The p8 importer's cart gate lives UPSTREAM; moybyte's copy tests the
+  PLAYER'S PACING and nothing else.** `make -C libmoy p8-carts` in moy-spec
+  runs the corpus through `run_cart`, next to the porter, and measures
+  runs/animates/responds.
+  - **The host is NOT a second console.** `runtime/lua_host` goes through
+    `runtime/lua_binding`, which compiles libmoy's binding over the same
+    vendored Lua 5.4 with the same LUA_32BITS, and libmoy rasterises into the
+    host canvas. lupa was deleted in 2026-08-14 to make that true. So
+    "tier parity" is NOT what `tests/test_p8_corpus.py` proves, and neither is
+    "only the host can feed input" (`run_cart --hold` does).
+  - **What it does prove is TIME.** run_cart calls update once per frame at a
+    fixed 1/30; the Player runs a cart's own rate against the host's, with a
+    catch-up loop and a btnp latch spanning console frames. Two real bugs lived
+    exactly there — a 60fps cart whose update never ran, and a tap that
+    produced two menu edges because two cart ticks fell inside one console
+    frame.
+  - **Do not validate numeric semantics on `lupa`.** It is 64-bit, this project
+    ships LUA_32BITS everywhere, and lupa was deleted for that reason. A
+    fixed-point bitwise implementation was "verified" on it in a scratch script
+    and returned 0 on every real tier.
 
 - **That gate exists because the unit tests could not have found any of this.** Every porter bug of 2026-09-01 — fifteen
   dialect rules, a 60fps cart whose update never ran, a tap that moved two menu

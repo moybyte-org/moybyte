@@ -5,15 +5,23 @@ the same corpus through run_cart, which is the real C console on the real
 LUA_32BITS VM, and measures runs/animates/responds there. That is where a
 porter bug should turn something red, because that is where the porter lives.
 
-What THIS file adds is a second implementation. moybyte's host is a Python
-console -- `runtime/console.py`, `device_canvas`, the Player -- and "one cart,
-every tier" is a project invariant, so a cart that runs under libmoy and not
-here is a real bug in one of them. That is the claim being tested, and it is
-not the same claim as upstream's.
+What THIS file adds is the PLAYER'S FRAME PACING, and that is the whole of it.
 
-(An earlier version of this docstring said the split existed because only the
-host could feed input. That was wrong: libmoy has always had a full input API,
-run_cart just did not use it. It does now.)
+It is not a second console: `runtime/lua_host` runs carts through
+`runtime/lua_binding`, which compiles libmoy's own binding over the same
+vendored Lua 5.4 with the same LUA_32BITS, and libmoy rasterises into this
+canvas. Same VM, same verb table, same raster. Two earlier versions of this
+docstring claimed otherwise -- first that only the host could feed input
+(libmoy has always had an input API; run_cart just did not use it), then that
+this was a second implementation for tier parity (it is not). Both were
+rationalisations of what had already been built.
+
+What run_cart genuinely does not model is TIME. It calls update once per frame
+at a fixed 1/30. The Player runs a cart's own rate against the host's -- a
+60fps cart on a 30fps host, the catch-up loop, and the btnp latch that spans
+console frames -- and that is exactly where two real bugs lived: a 60fps cart
+whose update never ran, and a tap that produced two menu edges because two
+cart ticks fell inside one console frame. Nothing upstream can see either.
 
 Why either exists at all: every porter bug found on 2026-09-01 -- fifteen
 dialect rules, a 60fps cart whose update never ran, a tap that moved two menu
