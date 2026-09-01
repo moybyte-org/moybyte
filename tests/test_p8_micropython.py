@@ -108,6 +108,7 @@ out["title"] = title
 out["report"] = p8_writer.report_lines(summary)
 out["unsupported"] = summary["unsupported"]
 out["differs"] = summary["differs"]
+out["lossy"] = summary["lossy"]
 out["files"] = sorted(__import__("os").listdir("out.moy"))
 f = open("out.moy/manifest.json")
 out["manifest_text"] = f.read()
@@ -187,7 +188,10 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
     assert "imported." in text
     assert "cart's own Lua" in text
     assert "CODE did NOT" not in text
-    assert any("dset" in u for u in got["unsupported"])
+    # dset is ANSWERED now (it persists through the console's save memory), so
+    # it reaches the report as an approximation, not as "not supported".
+    assert got["unsupported"] == []
+    assert any("dset" in u for u in got["lossy"])
     # `differs` is EMPTY, and that is the assertion: as of 2026-08-30 every verb
     # that used to mean something else here graduated to a real shim. The
     # CPython twin (tests/test_import_p8.py) guards the reporting MECHANISM with

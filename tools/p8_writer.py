@@ -93,78 +93,23 @@ P8_CROP = (4, 4)
 # stale "not supported" line behind.
 MISSING = "missing"
 DIFFERS = "differs"
+STUBBED = "stubbed"
 
+# Two kinds, because they mean different things to a kid staring at a cart.
+#
+# MISSING: nothing answers to that name and the cart STOPS -- a Lua "attempt to
+# call a nil value" on the frame that line first runs.
+#
+# STUBBED: the verb answers, and does not mean what PICO-8 means. The cart runs
+# and comes out wrong in a specific way, which is worth saying plainly. Most of
+# this table used to be MISSING; the shim's compatibility layer moved it, and
+# what that bought was measured -- across twelve well-known carts, fillp alone
+# was called by six of them and stopped every one.
 SHIM_GAPS = {
-    # -- raw memory: no equivalent, by design (it is a kids' console) ---------
-    "peek": (MISSING, "peek()/poke() raw memory -- no equivalent by design; "
-                      "rewrite that part with ordinary variables and tables"),
-    "poke": (MISSING, "peek()/poke() raw memory -- no equivalent by design; "
-                      "rewrite that part with ordinary variables and tables"),
-    "memcpy": (MISSING, "memcpy()/memset() raw memory -- no equivalent by "
-                        "design; copy the table instead"),
-    "memset": (MISSING, "memcpy()/memset() raw memory -- no equivalent by "
-                        "design; copy the table instead"),
-    "reload": (MISSING, "reload()/cstore() re-read the cart ROM -- there is no "
-                        "ROM here; the sheet and the map are files"),
-    "cstore": (MISSING, "reload()/cstore() re-read the cart ROM -- there is no "
-                        "ROM here; the sheet and the map are files"),
-    # -- sheet and flag WRITES (the shim's tables are built once, at start) ---
-    "sget": (MISSING, "sget()/sset() read and write sheet pixels -- the port "
-                      "has no sheet-pixel verb; draw with spr() instead"),
-    "sset": (MISSING, "sget()/sset() read and write sheet pixels -- the port "
-                      "has no sheet-pixel verb; draw with spr() instead"),
-    "fset": (MISSING, "fset() writes a sprite flag -- the port bakes __gff__ "
-                      "in as a read-only table, so fget() works and fset() "
-                      "does not; keep changing flags in your own table"),
-    "peek2": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
-                       "memory in 2- and 4-byte words -- no equivalent "
-                       "by design; rewrite that part with ordinary "
-                       "variables and tables"),
-    "peek4": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
-                       "memory in 2- and 4-byte words -- no equivalent "
-                       "by design; rewrite that part with ordinary "
-                       "variables and tables"),
-    "poke2": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
-                       "memory in 2- and 4-byte words -- no equivalent "
-                       "by design; rewrite that part with ordinary "
-                       "variables and tables"),
-    "poke4": (MISSING, "peek2()/peek4()/poke2()/poke4() read and write raw "
-                       "memory in 2- and 4-byte words -- no equivalent "
-                       "by design; rewrite that part with ordinary "
-                       "variables and tables"),
-    "serial": (MISSING, "serial() streams bytes to a p8 hardware port -- "
-                        "no equivalent; there is nothing on the other end"),
-    # -- restarting, stopping and loading a cart --------------------------
-    # run() IS shimmed (it re-runs _init), so it is not here. The rest ask
-    # the CONSOLE to do something, and this console's answer is the launcher.
-    "reboot": (MISSING, "reboot()/load() restart the machine or swap the cart "
-                        "-- the launcher does that here; from inside a cart, "
-                        "reset your own state instead"),
-    "load": (MISSING, "reboot()/load() restart the machine or swap the cart "
-                      "-- the launcher does that here; from inside a cart, "
-                      "reset your own state instead"),
-    "stop": (MISSING, "stop() drops to PICO-8's command line -- there is no "
-                      "command line here; return from _update() instead"),
-    "holdframe": (MISSING, "holdframe() pairs with flip() to hold a frame -- "
-                           "the console calls _draw() for you, so there is "
-                           "no frame to hold"),
-    # -- the developer's console, which a kid's console does not have ------
-    "info": (MISSING, "info() prints cart stats to PICO-8's console -- no "
-                      "console here; print() draws on the screen instead"),
-    "trace": (MISSING, "trace() returns a Lua stack traceback for printh() -- "
-                       "no equivalent; the cart error screen shows the line"),
-    "yield": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                       "PICO-8's coroutines -- the console's Lua does not "
-                       "open the coroutine library, so rewrite that part as "
-                       "a state machine driven from _update()"),
-    "stat": (MISSING, "stat() reads machine counters (time, memory, the mouse) "
-                      "-- no equivalent; the ones with a home are time() and "
-                      "the touch()/key() verbs"),
     # The console's Lua opens base, math, string and table and NOT coroutine
     # (libmoy/moy_lua.c), so these are not renames waiting to happen -- the
-    # name `coroutine` does not exist to rename FROM. This table said they were
-    # "right there" until 2026-08-30, which sent a reader to a shim that fails
-    # while it loads. Opening the library is a one-line spec decision.
+    # name `coroutine` does not exist to rename FROM. Opening the library is a
+    # one-line spec decision.
     "cocreate": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
                           "PICO-8's coroutines -- the console's Lua does not "
                           "open the coroutine library, so rewrite that part as "
@@ -177,30 +122,100 @@ SHIM_GAPS = {
                           "PICO-8's coroutines -- the console's Lua does not "
                           "open the coroutine library, so rewrite that part as "
                           "a state machine driven from _update()"),
-    "flip": (MISSING, "flip() shows the frame and waits -- the console calls "
-                      "_draw() for you, so there is nothing to wait for; a "
-                      "cart that loops on flip() needs its loop turned into "
-                      "_update()"),
-    "cartdata": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- "
-                          "the console's is pmem(); it saves a table"),
-    "extcmd": (MISSING, "extcmd() drives the PICO-8 app itself -- there is no "
-                        "app to drive"),
-    "printh": (MISSING, "printh() prints to a terminal -- there is no terminal "
-                        "behind a cart; draw it with print() instead"),
-    "dget": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
-                      "console's is pmem(); it saves a table"),
-    "dset": (MISSING, "cartdata()/dget()/dset() are PICO-8's save slots -- the "
-                      "console's is pmem(); it saves a table"),
-    # -- draw state the shim does not carry ----------------------------------
-    "fillp": (MISSING, "fillp() sets a dither pattern for the fill verbs -- no "
-                       "equivalent; draw the pattern yourself"),
-    "cursor": (MISSING, "cursor()/color() set where and in what colour print() "
-                        "carries on -- the port's print() takes x, y and the "
-                        "colour every time"),
-    "color": (MISSING, "cursor()/color() set where and in what colour print() "
-                       "carries on -- the port's print() takes x, y and the "
-                       "colour every time"),
+    "yield": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
+                       "PICO-8's coroutines -- the console's Lua does not "
+                       "open the coroutine library, so rewrite that part as "
+                       "a state machine driven from _update()"),
+    "reboot": (MISSING, "reboot()/load() restart the machine or swap the cart "
+                        "-- the launcher does that here; from inside a cart, "
+                        "reset your own state instead"),
+    "load": (MISSING, "reboot()/load() restart the machine or swap the cart "
+                      "-- the launcher does that here; from inside a cart, "
+                      "reset your own state instead"),
+    "stop": (MISSING, "stop() drops to PICO-8's command line -- there is no "
+                      "command line here; return from _update() instead"),
+    "trace": (MISSING, "trace() returns a Lua stack traceback for printh() -- "
+                       "no equivalent; the cart error screen shows the line"),
+    "info": (MISSING, "info() prints cart stats to PICO-8's console -- no "
+                      "console here; print() draws on the screen instead"),
+    "serial": (MISSING, "serial() streams bytes to a p8 hardware port -- "
+                        "no equivalent; there is nothing on the other end"),
 }
+
+SHIM_STUBS = {
+    "peek": (STUBBED, "peek()/poke() read and write 64K of SCRATCH memory -- "
+                      "it is not the console's memory, so a cart keeping its "
+                      "own bookkeeping there works and one poking a hardware "
+                      "register changes nothing"),
+    "poke": (STUBBED, "peek()/poke() read and write 64K of SCRATCH memory -- "
+                      "it is not the console's memory, so a cart keeping its "
+                      "own bookkeeping there works and one poking a hardware "
+                      "register changes nothing"),
+    "peek2": (STUBBED, "peek2()/peek4()/poke2()/poke4() are the 2- and 4-byte "
+                       "forms of the same scratch memory"),
+    "peek4": (STUBBED, "peek2()/peek4()/poke2()/poke4() are the 2- and 4-byte "
+                       "forms of the same scratch memory"),
+    "poke2": (STUBBED, "peek2()/peek4()/poke2()/poke4() are the 2- and 4-byte "
+                       "forms of the same scratch memory"),
+    "poke4": (STUBBED, "peek2()/peek4()/poke2()/poke4() are the 2- and 4-byte "
+                       "forms of the same scratch memory"),
+    "memcpy": (STUBBED, "memcpy()/memset() move bytes inside the scratch "
+                        "memory, so they cannot blit to the screen or the "
+                        "sheet the way a p8 cart may expect"),
+    "memset": (STUBBED, "memcpy()/memset() move bytes inside the scratch "
+                        "memory, so they cannot blit to the screen or the "
+                        "sheet the way a p8 cart may expect"),
+    "fillp": (STUBBED, "fillp() sets a dither pattern for the fill verbs -- "
+                       "the console fills solid, so the pattern is remembered "
+                       "and gradients come out flat"),
+    "sget": (STUBBED, "sget() reads a sheet pixel and the sheet is a FILE "
+                      "here, not memory -- it reads back 0, so collision or "
+                      "effects driven off sheet pixels will be wrong"),
+    "sset": (STUBBED, "sset() writes a sheet pixel; the sheet is a file here, "
+                      "so the write is dropped and spr() keeps drawing the "
+                      "art as imported"),
+    "fset": (STUBBED, "fset() writes a sprite flag; __gff__ is baked in "
+                      "read-only, so fget() works and fset() is dropped"),
+    "stat": (STUBBED, "stat() reads machine counters -- cpu and memory read 0 "
+                      "and the mouse reads nothing, so a cart's debug HUD "
+                      "shows zeroes"),
+    "reload": (STUBBED, "reload()/cstore() re-read the cart ROM -- there is no "
+                        "ROM here, so they do nothing; the sheet and the map "
+                        "are files"),
+    "cstore": (STUBBED, "reload()/cstore() re-read the cart ROM -- there is no "
+                        "ROM here, so they do nothing; the sheet and the map "
+                        "are files"),
+    "printh": (STUBBED, "printh() prints to a terminal and there is none "
+                        "behind a cart, so it is dropped; draw it with print()"),
+    "extcmd": (STUBBED, "extcmd() asks the host for a screenshot or a reset -- "
+                        "no host to ask, so it is dropped"),
+    "flip": (STUBBED, "flip() shows the frame and waits -- the console calls "
+                      "_draw() for you, so it does nothing; a cart that LOOPS "
+                      "on flip() still needs that loop moved into _update()"),
+    "holdframe": (STUBBED, "holdframe() pairs with flip() to hold a frame -- "
+                           "nothing to hold here, so it is dropped"),
+    "cartdata": (STUBBED, "cartdata()/dget()/dset() are the 64 save slots, and "
+                          "these are REAL -- they persist through the "
+                          "console's own save memory"),
+    "dget": (STUBBED, "cartdata()/dget()/dset() are the 64 save slots, and "
+                      "these are REAL -- they persist through the console's "
+                      "own save memory"),
+    "dset": (STUBBED, "cartdata()/dget()/dset() are the 64 save slots, and "
+                      "these are REAL -- they persist through the console's "
+                      "own save memory"),
+}
+
+
+_ALL_GAPS = {}
+
+
+def _rebuild_gap_index():
+    _ALL_GAPS.clear()
+    _ALL_GAPS.update(SHIM_GAPS)
+    _ALL_GAPS.update(SHIM_STUBS)
+
+
+_rebuild_gap_index()
 
 
 def scan_lua_verbs(lua_lines):
@@ -212,7 +227,7 @@ def scan_lua_verbs(lua_lines):
     text = "\n".join(lua_lines)
     n_text = len(text)
     found = {}
-    for tok in SHIM_GAPS:
+    for tok in _ALL_GAPS:
         i = 0
         n = len(tok)
         while True:
@@ -383,15 +398,20 @@ def write_cart(sections, out_dir, title):
             summary["deferred"].append("__label__ (cart label image not imported)")
             break
 
-    # The two gap kinds are reported apart: one stops the cart, the other draws
-    # the wrong thing quietly, which is the one worth reading twice.
+    # The kinds are reported apart because they mean different things: MISSING
+    # stops the cart, STUBBED lets it run and come out wrong in a stated way.
     seen = {}
     for v in gaps:
-        kind, text = SHIM_GAPS[v]
+        kind, text = _ALL_GAPS[v]
         if text in seen:
             continue
         seen[text] = True
-        summary["unsupported" if kind == MISSING else "differs"].append(text)
+        if kind == MISSING:
+            summary["unsupported"].append(text)
+        elif kind == STUBBED:
+            summary["lossy"].append(text)
+        else:
+            summary["differs"].append(text)
 
     return summary
 

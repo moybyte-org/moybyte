@@ -312,32 +312,67 @@ def test_the_report_names_only_the_gaps_this_cart_reaches(tmp_path):
     assert "not supported" not in text and "works differently" not in text
 
 
-def test_the_report_separates_missing_verbs_from_differing_ones(tmp_path):
-    """Two different failures, said differently: a verb of that name EXISTS and
-    does not mean the same thing (draws the wrong picture in silence), against
-    nothing answering to it at all (stops the cart).
+def test_the_report_separates_the_three_kinds_of_gap(tmp_path):
+    """Three different failures, and a kid needs them said differently.
 
-    The fixture's sspr() graduated to the shim on 2026-08-30, so the `differs`
-    side is asserted on the table rather than on that cart -- what must not rot
-    is that BOTH kinds still reach the reader as their own sentence.
+    MISSING stops the cart -- nothing answers to that name. STUBBED lets it run
+    and come out wrong in a stated way. DIFFERS means a verb of that name
+    exists and disagrees.
+
+    `dset` moved from MISSING to STUBBED on 2026-09-01 and is the good case to
+    pin: the report has to stop calling it "not supported" the moment the shim
+    starts answering, or it is telling a kid to rewrite working code.
     """
     p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
     summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))
     assert summary["verbs"] == ["dset"]
-    assert any("dset()" in u for u in summary["unsupported"])
+    assert summary["unsupported"] == [], "dset is answered now, not missing"
+    assert any("dset()" in u for u in summary["lossy"])
+    text = "\n".join(import_p8.report_lines(summary))
+    assert "approximated: cartdata()/dget()/dset()" in text
 
-    # The MECHANISM, not the census. As of 2026-08-30 every `differs` verb has
-    # graduated to the shim, so there is no live one to drive this with -- and
-    # deleting the check because the table happens to be empty is how the
-    # distinction quietly stops working before the next one arrives.
+    # The MECHANISM, not the census: every kind must reach the reader as its
+    # own sentence even when this cart happens not to trip it. Deleting the
+    # check because a table is momentarily empty is how the distinction stops
+    # working before the next entry arrives.
     from p8_writer import report_lines
-    lines = report_lines({"title": "x", "differs": ["sspr() takes flip flags"],
-                          "unsupported": ["dset() is a save slot"]})
+    lines = report_lines({"title": "x",
+                          "differs": ["sspr() takes flip flags"],
+                          "unsupported": ["cocreate() is a coroutine"],
+                          "lossy": ["fillp() sets a dither pattern"]})
     assert any(l.startswith("works differently: ") for l in lines)
     assert any(l.startswith("not supported: ") for l in lines)
-    text = "\n".join(import_p8.report_lines(summary))
-    assert "not supported: cartdata()/dget()/dset()" in text
+    assert any(l.startswith("approximated: ") for l in lines)
 
+
+def test_a_stubbed_verb_is_answered_and_a_missing_one_is_not():
+    """The two tables have to agree with the SHIM, not with each other.
+
+    A name in SHIM_STUBS must be something the port provides -- that is what
+    "stubbed" claims. A name in SHIM_GAPS must be provided by nothing. Getting
+    this backwards ships a kid a "rewrite that part" note about a verb that
+    works, or silence about one that will stop their cart.
+    """
+    import p8_lua_port
+    from p8_writer import SHIM_GAPS, SHIM_STUBS, MISSING, STUBBED
+    from runtime.lua_ext import LIBMOY_VERBS
+
+    provided = set(p8_lua_port.P8_API) | set(LIBMOY_VERBS)
+    for name, (kind, advice) in sorted(SHIM_STUBS.items()):
+        assert kind == STUBBED, name
+        assert name in provided, (
+            "SHIM_STUBS calls %r stubbed, but nothing provides that name -- "
+            "the cart will stop, so it belongs in SHIM_GAPS." % name)
+        assert advice.strip() and name in advice, \
+            "%r's advice should name the verb it is about" % name
+    for name, (kind, advice) in sorted(SHIM_GAPS.items()):
+        if kind == MISSING:
+            assert name not in provided, (
+                "SHIM_GAPS calls %r missing, but the port provides it now -- "
+                "move it to SHIM_STUBS." % name)
+        assert advice.strip() and name in advice, \
+            "%r's advice should name the verb it is about" % name
+    assert not (set(SHIM_GAPS) & set(SHIM_STUBS)), "a verb is in both tables"
 
 def test_every_declared_gap_is_really_a_gap():
     """The table cannot rot into a lie. A name in SHIM_GAPS marked "missing"
