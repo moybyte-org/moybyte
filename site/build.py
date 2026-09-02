@@ -71,12 +71,15 @@ def palette():
     return ["#%02x%02x%02x" % tuple(c) for c in MOY64]
 
 
+# Both tabs name their tier EXPLICITLY. An empty query used to be the handheld
+# console; since the desk became the player's default (#73/#175) it boots the
+# 1024x600 desktop, so a blank `q` here silently made both tabs the same tier.
 TIERS = [
     # id, label, sub-label, query string, aspect ratio
     ("desktop", "Desktop", "1024 &times; 600 &mdash; windowed, with the editors",
      "?desktop=1", "1024 / 600"),
     ("handheld", "Handheld", "320 &times; 240 &mdash; the T-Deck tier",
-     "", "4 / 3"),
+     "?handheld=1", "4 / 3"),
 ]
 
 
