@@ -87,7 +87,8 @@ def test_the_sandbox_is_the_same_ceiling_the_boards_have():
     r = lb.HostLuaRun(bytearray(32 * 32), 32, 32)
     try:
         r.load("function _update(dt) end", "@cart")
-        for name in ("io", "os", "debug", "package", "coroutine", "require",
+        # coroutine left this list on 2026-09-02: SPEC.md 4.1 admits it.
+        for name in ("io", "os", "debug", "package", "require",
                      "dofile", "loadstring", "collectgarbage"):
             probe = "function _update(dt) local x = %s.anything end" % name
             r2 = lb.HostLuaRun(bytearray(32 * 32), 32, 32)

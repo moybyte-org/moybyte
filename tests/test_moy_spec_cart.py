@@ -300,7 +300,7 @@ def test_host_lua_sandbox_matches_the_device_ceiling(tmp_path):
     Path(root).mkdir(parents=True)
     probe = "\n".join(
         'if %s ~= nil then error("%s reachable") end' % (n, n)
-        for n in ("io", "os", "debug", "package", "coroutine",
+        for n in ("io", "os", "debug", "package",       # coroutine: admitted 2026-09-02
                   "utf8", "require", "load", "dofile", "collectgarbage"))
     moy_carts.create("Sandbox", root, src="function _draw()\n" + probe + "\nend\n",
                      type="game", runtime="lua", main="main.lua")
