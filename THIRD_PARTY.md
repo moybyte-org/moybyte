@@ -57,12 +57,14 @@ targets.
   <https://www.lua.org/ftp/lua-5.4.7.tar.gz> (the `src/` directory).
 - **Licence:** MIT. Copyright © 1994–2024 Lua.org, PUC-Rio.
   Full text: [`.../moy_lua/lua/COPYRIGHT`](native/moy_lua/lua/COPYRIGHT).
-- **Modified: yes.** Two changes, both listed in
+- **Modified: yes.** Four changes, all listed in
   [`.../moy_lua/lua/MODIFICATIONS.md`](native/moy_lua/lua/MODIFICATIONS.md):
-  a `#pragma GCC optimize("O2")` block added to 32 `.c` files, and
-  `LUA_32BITS` flipped from `0` to `1` in `luaconf.h`. Nothing else differs
-  from upstream; the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` /
-  `Makefile` are simply not vendored.
+  a `#pragma GCC optimize("O2")` block added to 32 `.c` files, `LUA_32BITS`
+  flipped from `0` to `1` in `luaconf.h`, and two edits to `lobject.c`'s
+  number-to-string conversion (an integral float prints without `.0`, and
+  integers convert without `snprintf`). Nothing else differs from upstream;
+  the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` / `Makefile` are
+  simply not vendored.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
 

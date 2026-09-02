@@ -49,10 +49,40 @@ both target FPUs are single-precision. It is an upstream-provided
 configuration switch, not a code change, but it does change observable number
 behaviour (device integers wrap at 2^31), so it is recorded here.
 
+## 3. `lobject.c`: integers convert to decimal without `snprintf`
+
+`tostringbuff` no longer calls `lua_integer2str` for an integer, and no longer
+calls `lua_number2str` for an integral float that item 0 already prints as bare
+digits. Both go through a hand-rolled `moy_int2str` instead (moybyte #66,
+2026-09-02).
+
+Why: on the S3 one `snprintf` costs 3–4 µs, and a PICO-8 port formats a number
+per tile per frame — `tostr()`, and every table keyed by `x..","..y` — against
+a 33 ms frame.
+
+The output is byte-for-byte what `"%d"` produced. The digits come off the
+**unsigned** negation, so `LUA_MININTEGER` converts without overflowing, and
+the float side takes the fast path only for a non-zero integral value with
+|x| < 1e7 — which is exactly where `%.7g` stops printing plain digits (style
+`f` holds while the decimal exponent is below the precision), and below the
+float32 exact-integer limit. Zero is left to `snprintf` on purpose: `-0.0`
+prints `-0`, and a cast to an integer would lose the sign.
+
+`string.format("%d", …)` is untouched and still goes through `snprintf`, which
+is what lets a cart hold one against the other
+(`tests/test_moycore_pool.py::test_integers_format_exactly_as_snprintf_did`).
+
+**moy-spec's runner copy of Lua should get the same patch**, for the same
+reason item 0 is in both: a cart formatting a number must produce the same
+bytes on the runner as on the board, and item 0's edit is what makes the float
+half of this one correct. Patch it there, in `libmoy/vendor/lua`; do not edit
+moy-spec from this repository.
+
 ## Verifying
 
 ```bash
 curl -O https://www.lua.org/ftp/lua-5.4.7.tar.gz && tar xzf lua-5.4.7.tar.gz
 diff -u lua-5.4.7/src/lvm.c ./lvm.c        # only the pragma block
 diff -u lua-5.4.7/src/luaconf.h ./luaconf.h # only LUA_32BITS
+diff -u lua-5.4.7/src/lobject.c ./lobject.c # the pragma, plus items 0 and 3
 ```

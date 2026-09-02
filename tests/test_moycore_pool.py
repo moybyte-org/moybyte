@@ -1,16 +1,22 @@
-"""The Lua VM's small-object pool (#66).
+"""The Lua VM's small-object pool, and the integer formatting beside it (#66).
 
-Measured on the T-Deck (S3 at 240MHz, the Lua heap in PSRAM through moycore's
-`l_alloc`): one malloc costs about 9us and one free about 2us, because the IDF
-allocator's control structures live in PSRAM -- so a Lua `{}` is 9.7us against
-0.15us for an empty loop iteration, and a two-field constructor 21us. A PICO-8
-port builds a table per vector operation, every tick, and the S3 owes a frame
-every 33ms. The ALLOCATOR was the frame.
+Two levers landed together because they answer the same measurement. On the
+T-Deck (S3 at 240MHz, the Lua heap in PSRAM through moycore's `l_alloc`) one
+malloc costs about 9us and one free about 2us, because the IDF allocator's
+control structures live in PSRAM -- so a Lua `{}` is 9.7us against 0.15us for
+an empty loop iteration -- and one snprintf costs 3-4us. A PICO-8 port builds
+a table per vector operation and formats a number per tile, every tick, and
+the S3 owes a frame every 33ms. The allocator and `%d` WERE the frame.
 
-So `l_alloc` carves 1..256-byte requests out of PSRAM chunks through eight
-size-class free lists (`native/moycore/modmoycore.c`).
+So:
 
-What this file watches, because the pool does not fail loudly:
+  * `l_alloc` carves 1..256-byte requests out of PSRAM chunks through eight
+    size-class free lists (`native/moycore/modmoycore.c`), and
+  * `tostringbuff` converts integers -- and integral floats, which this VM
+    already prints without a fraction -- by hand
+    (`native/moy_lua/lua/lobject.c`, MODIFICATIONS.md item 3).
+
+What this file watches, because neither lever fails loudly:
 
   * THE POOL GIVES EVERYTHING BACK. `alloc_stats()` reads all-zero after
     `close()` -- live bytes, pool bytes, and the chunk count -- so a cart that
@@ -25,6 +31,13 @@ What this file watches, because the pool does not fail loudly:
     must move out to the heap and a block shrinking under it must move in, and
     each move is a copy whose length comes from Lua's realloc contract. A cart
     that only ever allocates small never exercises either.
+  * THE DIGITS ARE THE SAME DIGITS. Lua's own `string.format("%d", v)` still
+    goes through snprintf, so the cart can hold the fast path against the slow
+    one INSIDE the VM; the sweep is then held against Python's `%d` on this
+    side, which is the check that would catch both being wrong together.
+    LUA_MININTEGER is in the sweep because a hand-rolled negation is where it
+    would break, and 1e7 is in it because that is where `%.7g` stops printing
+    plain digits and the fast path must stand down.
 
 Needs the desktop MicroPython with moycore compiled in:
 
@@ -40,6 +53,23 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # alloc_stats() field order, mirrored from mod_alloc_stats.
 SRAM, PSRAM, PEAK, DENIED, POOL_LIVE, POOL_CAP, POOL_CHUNKS = range(7)
+
+# The formatting sweep. One list, formatted in Lua three ways by the driver and
+# in Python once by the assertion.
+SWEEP = [0, 1, -1, 7, 9, 10, 11, 99, 100, 101, 255, 256, 999, 1000, 1001,
+         9999, 10000, 65535, 65536, 99999, 100000, 999999, 1000000,
+         9999999, 10000000, 123456789, 2147483647, -2147483648,
+         -9, -10, -99, -100, -12345, -1000000, -2147483647,
+         -9999999, -10000000, -123456789]
+
+# What the float row must print. `%.7g` with this VM's no-".0" edit: bare
+# digits below 1e7, exponent form at and above it, and a signed zero that a
+# cast to an integer would silently lose.
+FLOAT_SRC = ("3.0, -3.0, 0.0, -0.0, 1.5, -1.5, 0.25, 1e7, -1e7, 9999999.0, "
+             "-9999999.0, 1e8, 1e-5, 2.5, 1000000.0")
+FLOAT_WANT = ["3", "-3", "0", "-0", "1.5", "-1.5", "0.25",
+              "1e+07", "-1e+07", "9999999", "-9999999",
+              "1e+08", "1e-05", "2.5", "1000000"]
 
 DRIVER = r'''
 import moycore
@@ -115,6 +145,36 @@ print("EDGELEN", moycore.get_global("BIGLEN"))
 print("EDGELIVE", moycore.alloc_stats())
 moycore.close()
 print("EDGEAFTER", moycore.alloc_stats())
+
+# ------------------------------------------------------------- the formatter
+# tostring() and `..` take the hand-rolled path; string.format("%d") is still
+# snprintf, so the cart compares them itself and reports any disagreement.
+begin()
+print("FMTEXEC", moycore.exec(r"""
+V = {@SWEEPVALS@}
+BAD = ""
+OUT = ""
+for i = 1, #V do
+  local v = V[i]
+  local a, b, c = tostring(v), v .. "", string.format("%d", v)
+  OUT = OUT .. c .. "\n"
+  if a ~= c or b ~= c then
+    BAD = BAD .. c .. "[" .. a .. "|" .. b .. "] "
+  end
+end
+F = {@FLOATVALS@}
+FOUT = ""
+for i = 1, #F do FOUT = FOUT .. tostring(F[i]) .. "\n" end
+""", "@fmt"))
+print("FMTBAD", repr(moycore.get_global("BAD")))
+print("FMTOUT")
+print(moycore.get_global("OUT"), end="")
+print("FMTEND")
+print("FLTOUT")
+print(moycore.get_global("FOUT"), end="")
+print("FLTEND")
+moycore.close()
+print("FMTAFTER", moycore.alloc_stats())
 '''
 
 _OUT = []
@@ -126,8 +186,16 @@ def _run():
     exe = require_unix_mp(
         "moycore",
         why="Without it nothing checks that the Lua VM's small-object pool "
-            "returns every chunk at close.")
-    p = subprocess.run([exe, "-c", DRIVER], capture_output=True, text=True,
+            "returns every chunk at close, nor that the hand-rolled integer "
+            "formatter still prints what snprintf printed.")
+    # LUA_MININTEGER cannot be written as a literal: 2147483648 does not fit a
+    # 32-bit integer, so Lua reads it as a float and the unary minus keeps it
+    # one. It goes in as arithmetic on a value that does fit.
+    vals = ", ".join("%d - 1" % (v + 1) if v == -2147483648 else str(v)
+                     for v in SWEEP)
+    src = (DRIVER.replace("@SWEEPVALS@", vals)
+                 .replace("@FLOATVALS@", FLOAT_SRC))
+    p = subprocess.run([exe, "-c", src], capture_output=True, text=True,
                        timeout=300)
     assert p.returncode == 0, p.stdout + p.stderr
     _OUT.append(p.stdout)
@@ -139,6 +207,12 @@ def _stats(out, tag):
         if line.startswith(tag + " "):
             return eval(line[len(tag) + 1:])            # a printed tuple
     raise AssertionError("no %s line in:\n%s" % (tag, out))
+
+
+def _block(out, start, end):
+    lines = out.splitlines()
+    i = lines.index(start)
+    return [l for l in lines[i + 1:lines.index(end, i)] if l]
 
 
 def test_the_pool_hands_back_every_chunk_when_the_vm_closes():
@@ -198,3 +272,32 @@ def test_a_block_crossing_the_256_byte_ceiling_moves_and_still_balances():
         "crossing the ceiling left the census unbalanced: %r" % (after,)
 
 
+def test_integers_format_exactly_as_snprintf_did():
+    """`tostring(v)` and `v .. ""` skip snprintf now. They must still produce
+    what `%d` produced -- checked against Lua's own string.format inside the
+    VM, and against Python's %d out here, because the first check alone cannot
+    see the two agreeing on something wrong."""
+    out = _run()
+    assert "FMTEXEC None" in out, out
+    assert "FMTBAD ''" in out, \
+        "tostring/.. disagreed with string.format inside the VM: %s" % out
+
+    got = _block(out, "FMTOUT", "FMTEND")
+    want = ["%d" % v for v in SWEEP]
+    assert got == want, "the fast path changed the digits: %r" % (
+        [(v, g, w) for v, g, w in zip(SWEEP, got, want) if g != w] or got,)
+
+
+def test_an_integral_float_prints_bare_and_1e7_still_falls_back():
+    """SPEC.md 4.2 already prints an integral float without a fraction, so the
+    fast path takes those too -- but only below 1e7, which is where "%.7g"
+    switches to exponent form. The boundary and the signed zero are the two
+    values that would make the shortcut wrong."""
+    out = _run()
+    assert _block(out, "FLTOUT", "FLTEND") == FLOAT_WANT, \
+        "the integral-float fast path changed what a float prints: %r" \
+        % (_block(out, "FLTOUT", "FLTEND"),)
+
+    after = _stats(out, "FMTAFTER")
+    assert after[PSRAM] == 0 and after[POOL_CHUNKS] == 0, \
+        "the formatting run leaked: %r" % (after,)

@@ -358,22 +358,62 @@ int luaO_utf8esc (char *buff, unsigned long x) {
 
 
 /*
+** moy (#66): a decimal conversion with no snprintf in it.
+**
+** Byte-identical to LUA_INTEGER_FMT ("%d" on this 32-bit build) for every
+** lua_Integer including LUA_MININTEGER: the digits come off the UNSIGNED
+** negation, so nothing overflows on the way. Writes the terminator like
+** snprintf does and returns the length, the way lua_integer2str does.
+*/
+static int moy_int2str (char *buff, lua_Integer v) {
+  char rev[MAXNUMBER2STR];
+  LUA_UNSIGNED u = (v < 0) ? 0u - (LUA_UNSIGNED)v : (LUA_UNSIGNED)v;
+  int n = 0, len = 0;
+  do {
+    rev[n++] = (char)('0' + (int)(u % 10));
+    u /= 10;
+  } while (u != 0);
+  if (v < 0)
+    buff[len++] = '-';
+  while (n > 0)
+    buff[len++] = rev[--n];
+  buff[len] = '\0';
+  return len;
+}
+
+
+/*
 ** Convert a number object to a string, adding it to a buffer
 */
 static int tostringbuff (TValue *obj, char *buff) {
   int len;
   lua_assert(ttisnumber(obj));
   if (ttisinteger(obj))
-    len = lua_integer2str(buff, MAXNUMBER2STR, ivalue(obj));
+    /* moy (#66): every integer takes the hand-rolled path. One snprintf costs
+     * 3-4us on the S3 and a p8 port formats a number per tile per frame
+     * (tostr(), a table keyed by x..","..y), which is where the frame went. */
+    len = moy_int2str(buff, ivalue(obj));
   else {
-    len = lua_number2str(buff, MAXNUMBER2STR, fltvalue(obj));
-    /* moy (SPEC.md 4.2): an integral float prints WITHOUT a fraction -- "3",
-     * never "3.0". Upstream appends ".0" here so a float stays recognisable
-     * as one; on a console whose carts mix 3 and 3.0 freely (flr() returns
-     * an integer, x/2 a float) that suffix is a wart in every score display
-     * and a mismatch in every table keyed by `x..","..y`, and PICO-8, whose
-     * carts this console ports, has one kind of number and no suffix. */
-    (void)strspn;
+    lua_Number f = fltvalue(obj);
+    /* moy (#66): the same path for an INTEGRAL float, which the edit below
+     * already prints as bare digits -- so there is nothing for "%.7g" to do
+     * that this cannot do faster. Bounded exactly where %g stops printing
+     * plain digits: style 'f' holds while the decimal exponent is under the
+     * precision (7 here), i.e. below 1e7, and every integral float that small
+     * is exact in a float32. Zero is left to snprintf on purpose, because
+     * -0.0 prints "-0" and a cast to an integer would lose the sign. */
+    if (f != 0 && f > -1e7f && f < 1e7f && l_floor(f) == f)
+      len = moy_int2str(buff, (lua_Integer)f);
+    else {
+      len = lua_number2str(buff, MAXNUMBER2STR, f);
+      /* moy (SPEC.md 4.2): an integral float prints WITHOUT a fraction -- "3",
+       * never "3.0". Upstream appends ".0" here so a float stays recognisable
+       * as one; on a console whose carts mix 3 and 3.0 freely (flr() returns
+       * an integer, x/2 a float) that suffix is a wart in every score display
+       * and a mismatch in every table keyed by `x..","..y`, and PICO-8, whose
+       * carts this console ports, has one kind of number and no suffix. */
+      (void)strspn;
+    }
   }
   return len;
 }
