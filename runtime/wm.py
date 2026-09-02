@@ -322,8 +322,24 @@ class FullscreenStackWM:
     def _view_src(self):
         """The cart view rect the COMPOSITE honors, or None. One source of
         truth for every viewport/blit/tap-mapping site on both tiers (the
-        windowed player window scales the view exactly like fullscreen)."""
-        return getattr(self.ws, "game_view", None)
+        windowed player window scales the view exactly like fullscreen).
+
+        A view is a HINT -- rows the cart can spare so a screen that cannot
+        fit the whole canvas at the next integer scale still gets it -- so it
+        is honored only where it buys a larger scale than the full canvas
+        gets. A 128x120 view on a 320x240 screen turns 1x into 2x and is
+        taken; on a 480x320 screen the full 128x128 already fits at 2x, and
+        cropping eight rows there would lose picture for nothing."""
+        view = getattr(self.ws, "game_view", None)
+        if view is None:
+            return None
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        if sc is gc or not view[2] or not view[3]:
+            return view
+        full = min(sc.w // gc.w, sc.h // gc.h)
+        cropped = min(sc.w // view[2], sc.h // view[3])
+        return view if cropped > full else None
 
     def game_is_fullscreen(self):
         """True when the game viewport IS the screen -- i.e. composite_game
