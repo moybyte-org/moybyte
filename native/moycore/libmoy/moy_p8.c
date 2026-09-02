@@ -127,8 +127,11 @@ static inline void map_write(moy_p8 *p, int row, int col, uint8_t v)
         m->cells[(size_t)row * 128 + (size_t)col] = (uint8_t)(v == 255 ? 255 : v + 1);
 }
 
-/* A PICO-8 colour byte -> a console index: bit 7 is the secret sixteen,
- * which a ported cart's manifest palette carries at 16-31. And back. */
+/* A PICO-8 colour byte -> a console index. The SCREEN palette (0x5f10) may
+ * name the secret sixteen with bit 7, which a ported cart's manifest palette
+ * carries at 16-31; the DRAW palette (0x5f00) is four bits, because PICO-8's
+ * screen memory holds a nibble -- a cart that ORs 0x80 into a draw-palette
+ * entry (dank tomb does, for colour 3) draws the low nibble there. And back. */
 static inline int col_in(uint8_t v)  { return (v & 0x80) ? 16 + (v & 15) : (v & 15); }
 static inline uint8_t col_out(int i) { return (i >= 16 && i < 32) ? (uint8_t)(0x80 | (i - 16)) : (uint8_t)(i & 15); }
 
@@ -146,7 +149,7 @@ static void apply(moy_p8 *p, uint32_t a, uint8_t v)
     } else if (a >= 0x6000 && a < 0x8000) {
         scr_write(p, a, v);
     } else if (a >= 0x5f00 && a < 0x5f10) {
-        moy_pal(c, (int)(a - 0x5f00), col_in(v));
+        moy_pal(c, (int)(a - 0x5f00), v & 15);          /* four bits, as VRAM is */
         moy_palt(c, (int)(a - 0x5f00), (v & 0x10) != 0);
     } else if (a >= 0x5f10 && a < 0x5f20) {
         moy_pal_screen(c, (int)(a - 0x5f10), col_in(v));
@@ -165,7 +168,7 @@ static inline uint8_t rd(const moy_p8 *p, uint32_t a)
     if (a >= 0x6000 && a < 0x8000) return scr_read(p, a);
     if (a >= 0x5f00 && a < 0x5f10) {
         int i = (int)(a - 0x5f00);
-        return (uint8_t)(col_out(c->pal[i]) | (c->palt[i] ? 0x10 : 0));
+        return (uint8_t)((c->pal[i] & 15) | (c->palt[i] ? 0x10 : 0));
     }
     if (a >= 0x5f10 && a < 0x5f20) return col_out(c->spal[a - 0x5f10]);
     if (a >= 0x5f20 && a < 0x5f2c) {
@@ -184,7 +187,7 @@ static inline uint8_t rd(const moy_p8 *p, uint32_t a)
 static int l_poke(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t a = (uint32_t)iarg(L, 1);
+    uint32_t a = (uint32_t)iarg(L, 1) & 0xffffu;   /* p8 wraps addresses */
     uint8_t v = (uint8_t)iarg(L, 2);
     if (a >= MOY_P8_MEM) return 0;
     p->mem[a] = v;
@@ -195,7 +198,7 @@ static int l_poke(lua_State *L)
 static int l_peek(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t a = (uint32_t)iarg(L, 1);
+    uint32_t a = (uint32_t)iarg(L, 1) & 0xffffu;   /* p8 wraps addresses */
     lua_pushinteger(L, a < MOY_P8_MEM ? rd(p, a) : 0);
     return 1;
 }
@@ -228,7 +231,7 @@ static void apply_range(moy_p8 *p, uint32_t d, uint32_t n)
 static int l_memcpy(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t d = (uint32_t)iarg(L, 1), s = (uint32_t)iarg(L, 2);
+    uint32_t d = (uint32_t)iarg(L, 1) & 0xffffu, s = (uint32_t)iarg(L, 2) & 0xffffu;
     int32_t n = iarg(L, 3);
     if (n <= 0 || d >= MOY_P8_MEM || s >= MOY_P8_MEM) return 0;
     if ((uint32_t)n > MOY_P8_MEM - d) n = (int32_t)(MOY_P8_MEM - d);
@@ -242,7 +245,7 @@ static int l_memcpy(lua_State *L)
 static int l_memset(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t d = (uint32_t)iarg(L, 1);
+    uint32_t d = (uint32_t)iarg(L, 1) & 0xffffu;
     uint8_t v = (uint8_t)iarg(L, 2);
     int32_t n = iarg(L, 3);
     if (n <= 0 || d >= MOY_P8_MEM) return 0;
@@ -259,7 +262,7 @@ static int l_memset(lua_State *L)
 static int l_reload(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t d = (uint32_t)iarg(L, 1), s = (uint32_t)iarg(L, 2);
+    uint32_t d = (uint32_t)iarg(L, 1) & 0xffffu, s = (uint32_t)iarg(L, 2) & 0xffffu;
     int32_t n = lua_isnoneornil(L, 3) ? MOY_P8_ROM : iarg(L, 3);
     if (!p->rom || n <= 0 || d >= MOY_P8_MEM || s >= MOY_P8_ROM) return 0;
     if ((uint32_t)n > MOY_P8_MEM - d) n = (int32_t)(MOY_P8_MEM - d);
@@ -272,7 +275,7 @@ static int l_reload(lua_State *L)
 static int l_cstore(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    uint32_t d = (uint32_t)iarg(L, 1), s = (uint32_t)iarg(L, 2);
+    uint32_t d = (uint32_t)iarg(L, 1) & 0xffffu, s = (uint32_t)iarg(L, 2) & 0xffffu;
     int32_t n = lua_isnoneornil(L, 3) ? MOY_P8_ROM : iarg(L, 3);
     if (!p->rom || n <= 0 || d >= MOY_P8_ROM || s >= MOY_P8_MEM) return 0;
     if ((uint32_t)n > MOY_P8_ROM - d) n = (int32_t)(MOY_P8_ROM - d);
@@ -332,43 +335,140 @@ static int btn_glyph(int b)
     }
 }
 
+/* P8SCII control codes (PICO-8 0.2.2+), the subset carts print with: a
+ * byte below 32 is a command, most take one parameter character read as a
+ * base-36 digit ("0"-"9", "a"-"z").
+ *   \0 stop    \* repeat    \# background    \- \| \+ cursor nudges
+ *   \^ special: w wide, t tall, i invert, b border, - off, g home, c clear,
+ *      j jump, s tab width, x y d r params skipped, 1-9 delays ignored
+ *   \a audio (skipped to the next space)   \b backspace   \t tab   \n   \r
+ *   \v decorate (param skipped)   \f foreground   \014 \015 font (ignored)
+ * Wide doubles every column, tall every row -- the 3x5 becomes 6x10 on an
+ * 8x12 cell, which is how a title is set. */
+static int p8_digit(int ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'Z') return ch - 'A' + 10;
+    return 0;
+}
+
+typedef struct {
+    moy_canvas *c;
+    int fg, bg, wide, tall, invert;
+} p8_pen;
+
+static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
+{
+    int xx, yy;
+    for (yy = 0; yy < h; yy++)
+        for (xx = 0; xx < w; xx++)
+            moy_put(pen->c, cx + xx, cy + yy, col);
+}
+
+static void p8_dot(const p8_pen *pen, int cx, int cy, int gx, int gy, int col)
+{
+    int sx = 1 + pen->wide, sy = 1 + pen->tall, xx, yy;
+    for (yy = 0; yy < sy; yy++)
+        for (xx = 0; xx < sx; xx++)
+            moy_put(pen->c, cx + gx * sx + xx, cy + gy * sy + yy, col);
+}
+
+/* One glyph at the pen: returns the advance. */
+static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
+{
+    int sx = 1 + pen->wide, sy = 1 + pen->tall;
+    int fg = pen->fg, bg = pen->bg;
+    int adv, q, r, kk;
+    b = btn_glyph(b);
+    if (b >= 128 && b < 128 + 26) {
+        const uint8_t *rows = P8_WIDE + (b - 128) * 5;
+        int any = 0;
+        for (r = 0; r < 5; r++) any |= rows[r];
+        adv = any ? 8 * sx : 4 * sx;
+        if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
+        else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
+        if (any)
+            for (r = 0; r < 5; r++)
+                for (kk = 0; kk < 7; kk++)
+                    if ((rows[r] >> kk) & 1) p8_dot(pen, cx, cy, kk, r, fg);
+        return adv;
+    }
+    adv = 4 * sx;
+    if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
+    else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
+    if (b >= 32 && b < 128) {
+        unsigned g = P8_GLYPHS[b - 32];
+        for (q = 0; q < 15; q++)
+            if ((g >> q) & 1u) p8_dot(pen, cx, cy, q % 3, q / 3, fg);
+    }
+    return adv;
+}
+
 static int l_p8print(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
-    moy_canvas *c = p->con->canvas;
+    p8_pen pen;
     size_t len = 0, k;
     const char *s;
-    int x, y, col, cx, cy;
+    int x, y, cx, cy, tabw = 16, repeat = 1;
     luaL_tolstring(L, 1, &len);
     s = lua_tolstring(L, -1, &len);
-    x = iarg(L, 2); y = iarg(L, 3); col = iarg(L, 4);
+    x = iarg(L, 2); y = iarg(L, 3);
+    pen.c = p->con->canvas;
+    pen.fg = iarg(L, 4); pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
     cx = x; cy = y;
     for (k = 0; k < len; k++) {
         int b = (unsigned char)s[k];
-        if (b == 10) { cx = x; cy += 6; continue; }
-        b = btn_glyph(b);
-        if (b >= 32 && b < 128) {
-            unsigned g = P8_GLYPHS[b - 32];
-            int q;
-            for (q = 0; q < 15; q++)
-                if ((g >> q) & 1u) moy_put(c, cx + q % 3, cy + q / 3, col);
-            cx += 4;
-        } else if (b >= 128 && b < 128 + 26) {
-            const uint8_t *rows = P8_WIDE + (b - 128) * 5;
-            int r, any = 0;
-            for (r = 0; r < 5; r++) any |= rows[r];
-            if (any) {
-                for (r = 0; r < 5; r++) {
-                    int v = rows[r], kk;
-                    for (kk = 0; kk < 7; kk++)
-                        if ((v >> kk) & 1) moy_put(c, cx + kk, cy + r, col);
+        if (b >= 32 || b >= 128) {
+            int n = repeat, adv = 0;
+            repeat = 1;
+            while (n-- > 0) adv = p8_glyph(&pen, b, cx += adv, cy);
+            cx += adv;
+            continue;
+        }
+        switch (b) {
+        case 0:  k = len; break;
+        case 1:  if (k + 1 < len) repeat = p8_digit((unsigned char)s[++k]); if (repeat < 1) repeat = 1; break;
+        case 2:  if (k + 1 < len) pen.bg = p8_digit((unsigned char)s[++k]) & 15; break;
+        case 3:  if (k + 1 < len) cx += p8_digit((unsigned char)s[++k]) - 16; break;
+        case 4:  if (k + 1 < len) cy += p8_digit((unsigned char)s[++k]) - 16; break;
+        case 5:  if (k + 2 < len) { cx += p8_digit((unsigned char)s[k + 1]) - 16;
+                                     cy += p8_digit((unsigned char)s[k + 2]) - 16; }
+                 k += 2; break;
+        case 6:
+            if (k + 1 >= len) break;
+            switch ((unsigned char)s[++k]) {
+            case 'w': pen.wide = 1; break;
+            case 't': pen.tall = 1; break;
+            case 'i': pen.invert = 1; break;
+            case '-':
+                if (k + 1 >= len) break;
+                switch ((unsigned char)s[++k]) {
+                case 'w': pen.wide = 0; break;
+                case 't': pen.tall = 0; break;
+                case 'i': pen.invert = 0; break;
+                default: break;
                 }
-                cx += 8;
-            } else {
-                cx += 4;
+                break;
+            case 'g': cx = x; cy = y; break;
+            case 'c': if (k + 1 < len) moy_cls(pen.c, p8_digit((unsigned char)s[++k]) & 15); cx = x; cy = y; break;
+            case 'j': if (k + 2 < len) { cx = p8_digit((unsigned char)s[k + 1]) * 4;
+                                         cy = p8_digit((unsigned char)s[k + 2]) * 4; }
+                      k += 2; break;
+            case 's': if (k + 1 < len) tabw = p8_digit((unsigned char)s[++k]); if (tabw < 1) tabw = 16; break;
+            case 'x': case 'y': case 'd': case 'r': k++; break;   /* one param, ignored */
+            default: break;                                       /* b = p 1-9: nothing to do */
             }
-        } else {
-            cx += 4;
+            break;
+        case 7:  while (k + 1 < len && s[k + 1] != ' ') k++; break;
+        case 8:  cx -= 4 * (1 + pen.wide); break;
+        case 9:  cx = x + ((cx - x) / tabw + 1) * tabw; break;
+        case 10: cx = x; cy += 6 * (1 + pen.tall); break;
+        case 11: k++; break;
+        case 12: if (k + 1 < len) pen.fg = p8_digit((unsigned char)s[++k]) & 15; break;
+        case 13: cx = x; break;
+        default: break;                                           /* 14, 15: font switch */
         }
     }
     lua_pop(L, 1);

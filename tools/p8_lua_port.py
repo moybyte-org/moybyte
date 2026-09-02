@@ -1444,8 +1444,15 @@ do
   -- pattern's holes take -- unless the pattern's 0x0.8 bit says they are
   -- transparent. On a host with the console's fillp that is one call per
   -- shape; the older host keeps its transparent-pattern-draws-nothing.
+  -- Drawing writes four bits (PICO-8's screen memory holds a nibble), so a
+  -- draw colour or a draw-palette target is its low nibble whatever else the
+  -- byte carries; only the SCREEN palette can name the secret sixteen, which
+  -- this port ships at 16-31 (scol).
   local function pcol(c)
-    c = fl(c == nil and p8_pen or c)
+    return fl(c == nil and p8_pen or c) & 15
+  end
+  local function scol(c)
+    c = fl(c or 0)
     if c >= 128 then return 16 + (c & 15) end
     return c & 15
   end
@@ -1454,7 +1461,6 @@ do
     if fill_pattern ~= 0 and m_fillp ~= nil then
       m_fillp(fill_pattern, fill_transparent and -1 or ((c >> 4) & 15))
     end
-    if c >= 128 then return 16 + (c & 15) end
     return c & 15
   end
   local function fill_skip()
@@ -1610,38 +1616,93 @@ do
       return m_p8print(s, lx, fl(y), c)
     end
     local cx, cy = lx, fl(y)
-    for i = 1, #s do
+    -- P8SCII control codes, the subset carts print with (moy_p8.c has the
+    -- same list): wide, tall, foreground, background, cursor nudges, repeat,
+    -- tab, backspace, newline. Parameters are one base-36 character.
+    local fg, bg, wide, tall, invert, tabw, rep = c, -1, 1, 1, false, 16, 1
+    local function digit(b)
+      if b >= 48 and b <= 57 then return b - 48 end
+      if b >= 97 and b <= 122 then return b - 87 end
+      if b >= 65 and b <= 90 then return b - 55 end
+      return 0
+    end
+    local function cell(w, h, col)
+      for yy = 0, h - 1 do for xx = 0, w - 1 do m_pix(cx + xx, cy + yy, col) end end
+    end
+    local function dot(gx, gy, col)
+      for yy = 0, tall - 1 do for xx = 0, wide - 1 do
+        m_pix(cx + gx * wide + xx, cy + gy * tall + yy, col)
+      end end
+    end
+    local i, n = 1, #s
+    while i <= n do
       local b = sbyte(s, i)
-      if b == 10 then
-        cx, cy = lx, cy + 6
-      else
+      i = i + 1
+      if b >= 32 then
         b = BTN_GLYPH[b] or b
         local g = P8_GLYPHS[b]
-        if g then
-          if g ~= 0 then
+        local w = P8_WIDE[b]
+        local adv = (w and 8 or 4) * wide
+        for _ = 1, rep do
+          local col = fg
+          if invert then cell(adv, 6 * tall, fg) col = bg < 0 and 0 or bg
+          elseif bg >= 0 then cell(adv, 6 * tall, bg) end
+          if g and g ~= 0 then
             for p = 0, 14 do
-              if (g >> p) & 1 == 1 then m_pix(cx + p % 3, cy + p // 3, c) end
+              if (g >> p) & 1 == 1 then dot(p % 3, p // 3, col) end
             end
-          end
-          cx = cx + 4
-        else
-          -- P8SCII's picture glyphs are DOUBLE WIDE: 7x5 on an 8px advance,
-          -- which is why the advance cannot just be 4 for everything.
-          local w = P8_WIDE[b]
-          if w then
+          elseif w then
             for r = 0, 4 do
               local v = w[r]
               for k = 0, 6 do
-                if (v >> k) & 1 == 1 then m_pix(cx + k, cy + r, c) end
+                if (v >> k) & 1 == 1 then dot(k, r, col) end
               end
             end
-            cx = cx + 8
-          else
-            cx = cx + 4
           end
+          cx = cx + adv
         end
+        rep = 1
+      elseif b == 0 then
+        break
+      elseif b == 1 then rep = digit(sbyte(s, i) or 48) i = i + 1 if rep < 1 then rep = 1 end
+      elseif b == 2 then bg = digit(sbyte(s, i) or 48) & 15 i = i + 1
+      elseif b == 3 then cx = cx + digit(sbyte(s, i) or 48) - 16 i = i + 1
+      elseif b == 4 then cy = cy + digit(sbyte(s, i) or 48) - 16 i = i + 1
+      elseif b == 5 then
+        cx = cx + digit(sbyte(s, i) or 48) - 16
+        cy = cy + digit(sbyte(s, i + 1) or 48) - 16
+        i = i + 2
+      elseif b == 6 then
+        local cmd = sbyte(s, i) or 0
+        i = i + 1
+        if cmd == 119 then wide = 2
+        elseif cmd == 116 then tall = 2
+        elseif cmd == 105 then invert = true
+        elseif cmd == 45 then
+          local off = sbyte(s, i) or 0
+          i = i + 1
+          if off == 119 then wide = 1 elseif off == 116 then tall = 1
+          elseif off == 105 then invert = false end
+        elseif cmd == 103 then cx, cy = lx, fl(y)
+        elseif cmd == 99 then cls(digit(sbyte(s, i) or 48) & 15) i = i + 1 cx, cy = lx, fl(y)
+        elseif cmd == 106 then
+          cx = digit(sbyte(s, i) or 48) * 4
+          cy = digit(sbyte(s, i + 1) or 48) * 4
+          i = i + 2
+        elseif cmd == 115 then tabw = digit(sbyte(s, i) or 48) i = i + 1 if tabw < 1 then tabw = 16 end
+        elseif cmd == 120 or cmd == 121 or cmd == 100 or cmd == 114 then i = i + 1
+        end
+      elseif b == 7 then
+        while i <= n and sbyte(s, i) ~= 32 do i = i + 1 end
+      elseif b == 8 then cx = cx - 4 * wide
+      elseif b == 9 then cx = lx + ((cx - lx) // tabw + 1) * tabw
+      elseif b == 10 then cx, cy = lx, cy + 6 * tall
+      elseif b == 11 then i = i + 1
+      elseif b == 12 then fg = digit(sbyte(s, i) or 48) & 15 i = i + 1
+      elseif b == 13 then cx = lx
       end
     end
+    return cx
   end
 
   local m_pal = pal
@@ -1678,13 +1739,13 @@ do
       local screen = (b == 1)
       for k, v in pairs(a) do
         if type(k) == "number" and type(v) == "number" then
-          if screen then spal_set(fl(k) - shift, pcol(v))
+          if screen then spal_set(fl(k) - shift, scol(v))
           else m_pal(fl(k) - shift, pcol(v)) end
         end
       end
       return
     end
-    if p == 1 then spal_set(fl(a) & 15, pcol(b)) return end
+    if p == 1 then spal_set(fl(a) & 15, scol(b)) return end
     m_pal(fl(a) & 15, pcol(b))
   end
   -- palt(): p8's default is colour 0 transparent; palt(c, t) sets one;
