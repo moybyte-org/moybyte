@@ -750,7 +750,7 @@ static void luaH_newkey (lua_State *L, Table *t, const TValue *key,
 ** If key is 0 or negative, 'res' will have its higher bit on, so that
 ** if cannot be smaller than alimit.
 */
-const TValue *luaH_getint (Table *t, lua_Integer key) {
+const TValue *MOY_HOT luaH_getint (Table *t, lua_Integer key) {
   lua_Unsigned alimit = t->alimit;
   if (l_castS2U(key) - 1u < alimit)  /* 'key' in [1, t->alimit]? */
     return &t->array[key - 1];
@@ -778,7 +778,7 @@ const TValue *luaH_getint (Table *t, lua_Integer key) {
 /*
 ** search function for short strings
 */
-const TValue *luaH_getshortstr (Table *t, TString *key) {
+const TValue *MOY_HOT luaH_getshortstr (Table *t, TString *key) {
   Node *n = hashstr(t, key);
   lua_assert(key->tt == LUA_VSHRSTR);
   for (;;) {  /* check whether 'key' is somewhere in the chain */
@@ -794,7 +794,7 @@ const TValue *luaH_getshortstr (Table *t, TString *key) {
 }
 
 
-const TValue *luaH_getstr (Table *t, TString *key) {
+const TValue *MOY_HOT luaH_getstr (Table *t, TString *key) {
   if (key->tt == LUA_VSHRSTR)
     return luaH_getshortstr(t, key);
   else {  /* for long strings, use generic case */
@@ -808,7 +808,7 @@ const TValue *luaH_getstr (Table *t, TString *key) {
 /*
 ** main search function
 */
-const TValue *luaH_get (Table *t, const TValue *key) {
+const TValue *MOY_HOT luaH_get (Table *t, const TValue *key) {
   switch (ttypetag(key)) {
     case LUA_VSHRSTR: return luaH_getshortstr(t, tsvalue(key));
     case LUA_VNUMINT: return luaH_getint(t, ivalue(key));

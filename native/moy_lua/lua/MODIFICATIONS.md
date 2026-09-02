@@ -78,11 +78,22 @@ bytes on the runner as on the board, and item 0's edit is what makes the float
 half of this one correct. Patch it there, in `libmoy/vendor/lua`; do not edit
 moy-spec from this repository.
 
+## 4. `luaconf.h`, `lvm.c`, `ltable.c`, `ldo.c`: the VM's hot loop lives in IRAM on the Xtensa boards
+
+`MOY_HOT` (luaconf.h) places `luaV_execute`, `luaV_finishOp`, the four
+`luaH_get*` lookups and `luaD_precall`/`luaD_poscall` in `.iram1.moylua` when
+`__XTENSA__` is defined, and is empty elsewhere. On the ESP32-S3 flash and
+PSRAM share one MSPI bus, so an instruction-cache miss in the interpreter loop
+waits behind the cart's own data; measured on the T-Deck (2026-09-02) moss
+moss's 30 ms tick became 27 and dank tomb's 33 ms render 27 for ~11 KB of
+IRAM. `ESP_PLATFORM` is not the guard because MicroPython compiles usermods
+without it; `__XTENSA__` is the compiler's own. The P4 (RISC-V) is untouched.
+
 ## Verifying
 
 ```bash
 curl -O https://www.lua.org/ftp/lua-5.4.7.tar.gz && tar xzf lua-5.4.7.tar.gz
-diff -u lua-5.4.7/src/lvm.c ./lvm.c        # only the pragma block
-diff -u lua-5.4.7/src/luaconf.h ./luaconf.h # only LUA_32BITS
+diff -u lua-5.4.7/src/lvm.c ./lvm.c        # the pragma block, plus item 4
+diff -u lua-5.4.7/src/luaconf.h ./luaconf.h # LUA_32BITS, plus item 4
 diff -u lua-5.4.7/src/lobject.c ./lobject.c # the pragma, plus items 0 and 3
 ```
