@@ -281,9 +281,20 @@ class P4Board:
         #     under the open handle and every read returns nothing forever.
         #     Opening with both HIGH (pyserial's default, what miniterm does)
         #     attaches to the running console cleanly.
-        self.ser.dtr = bool(decl["dtr"]) if dtr is None else dtr
-        self.ser.rts = bool(decl["rts"]) if rts is None else rts
+        want_dtr = bool(decl["dtr"]) if dtr is None else dtr
+        want_rts = bool(decl["rts"]) if rts is None else rts
+        # ORDER, not just state: the kernel raises BOTH lines when the tty
+        # opens, and pyserial then applies dtr before rts. On the CH343 board
+        # lowering DTR while RTS is still raised IS the auto-reset circuit's
+        # EN pulse -- the P4 power-cycled on every open and spent 60s booting
+        # before it could answer (measured 2026-09-02). So open with DTR
+        # raised, let pyserial lower RTS, then lower DTR; both end where the
+        # board declared them and reset() still works from that rest state.
+        self.ser.dtr = True
+        self.ser.rts = want_rts
         self.ser.open()
+        if not want_dtr:
+            self.ser.dtr = False
         self._init_reader(chunk or decl["chunk"])
 
     def _init_reader(self, chunk):
