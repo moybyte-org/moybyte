@@ -324,12 +324,15 @@ class FullscreenStackWM:
         truth for every viewport/blit/tap-mapping site on both tiers (the
         windowed player window scales the view exactly like fullscreen).
 
-        A view is a HINT -- rows the cart can spare so a screen that cannot
-        fit the whole canvas at the next integer scale still gets it -- so it
-        is honored only where it buys a larger scale than the full canvas
-        gets. A 128x120 view on a 320x240 screen turns 1x into 2x and is
-        taken; on a 480x320 screen the full 128x128 already fits at 2x, and
-        cropping eight rows there would lose picture for nothing."""
+        Two kinds of view arrive here. A REGION (a 128x128 view of a 320x240
+        canvas: the rest is void) is always honored -- showing the void
+        instead would waste the screen. A TRIM (the p8 importer's 128x120
+        view of a 128x128 canvas: rows the cart can spare) is a hint for the
+        screen that would otherwise sit at 1x, and is honored only there. On
+        a 480x320 screen the full 128x128 already fits at 2x; on the P4 it
+        fits at 4x, where the 5x a trim buys cost a fifth of the frame (the
+        crisp composite scales with output pixels; measured 2026-09-02) and
+        eight rows of picture. Three quarters of the canvas is the line."""
         view = getattr(self.ws, "game_view", None)
         if view is None:
             return None
@@ -337,9 +340,11 @@ class FullscreenStackWM:
         sc = self.ws.sys_canvas
         if sc is gc or not view[2] or not view[3]:
             return view
+        if view[2] * view[3] * 4 < gc.w * gc.h * 3:
+            return view                              # a region
         full = min(sc.w // gc.w, sc.h // gc.h)
         cropped = min(sc.w // view[2], sc.h // view[3])
-        return view if cropped > full else None
+        return view if full < 2 and cropped > full else None
 
     def game_is_fullscreen(self):
         """True when the game viewport IS the screen -- i.e. composite_game
