@@ -564,16 +564,20 @@ def esp32_with(*regions):
     return Obj(HEAP_DATA=4, idf_heap_info=lambda _cap: regions)
 
 
-def test_luamem_prints_moycores_four_fields_and_says_which_core_it_is(dd):
-    """moycore's alloc_stats stops at four; a short tuple must print a short
-    line rather than index off the end of it."""
-    core = FakeMoycore(True, (2048, 4096, 8192, 5))
+def test_luamem_prints_moycores_seven_fields_and_says_which_core_it_is(dd):
+    """moycore's alloc_stats stops at seven; a short tuple must print a short
+    line rather than index off the end of it. The last three are the
+    small-object pool -- live/capacity and the chunk count -- and the gap
+    between them is PSRAM the VM holds that `psram` alone does not show."""
+    core = FakeMoycore(True, (2048, 4096, 8192, 5, 10240, 32768, 3))
     diag = FakeDiag()
     with modules(moycore=core):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
     f = diag.one("LUAMEM")
     assert (f["sram"], f["psram"], f["peak"]) == ("2.0KB", "4.0KB", "8.0KB")
     assert f["denied"] == "5"
+    assert f["pool"] == "10.0/32.0KB"
+    assert f["ch"] == "3"
     assert f["core"] == "1"
 
 
@@ -599,11 +603,11 @@ def test_luamem_is_silent_when_no_lua_vm_is_holding_anything(dd):
     """`live == 0` means no cart VM. The guard is st[0] + st[1], so a VM living
     entirely in PSRAM still reports."""
     diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (0, 0, 8192, 0))):
+    with modules(moycore=FakeMoycore(True, (0, 0, 8192, 0, 0, 0, 0))):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
     assert diag.lines == []
 
-    with modules(moycore=FakeMoycore(True, (0, 4096, 8192, 0))):
+    with modules(moycore=FakeMoycore(True, (0, 4096, 8192, 0, 0, 32768, 1))):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
     assert diag.line("LUAMEM") is not None
 
@@ -613,7 +617,7 @@ def test_luamem_counts_only_the_INTERNAL_heap_regions(dd):
     `int` is free/largest in KB, and the largest is a MAX across regions, not
     the last one seen."""
     diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0)),
+    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1)),
                  # the biggest block is NOT the last region seen, or a lost
                  # max() reads as agreement
                  esp32=esp32_with((65536, 51200, 61440),
@@ -627,7 +631,7 @@ def test_luamem_still_prints_where_the_heap_probe_is_unavailable(dd):
     """A board with no `esp32` module is not a reason to lose the Lua numbers;
     the census rides along, guarded separately."""
     diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0)),
+    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1)),
                  esp32=None):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
     assert diag.one("LUAMEM")["int"] == "0/0k"
@@ -635,7 +639,7 @@ def test_luamem_still_prints_where_the_heap_probe_is_unavailable(dd):
 
 def test_luamem_is_cart_gated_and_survives_a_runtime_with_no_stats(dd):
     diag = FakeDiag()
-    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0))):
+    with modules(moycore=FakeMoycore(True, (2048, 4096, 8192, 0, 1024, 32768, 1))):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: None))
     dd._diag_luamem(None, Obj(perf_sample=lambda: ("c",)))
     assert diag.lines == []
@@ -650,7 +654,11 @@ def test_a_build_with_no_moycore_at_all_still_asks_the_other_runtime(dd):
     """The `except ImportError` around the moycore probe is what makes the
     fallback reachable on a board that ships one runtime and not the other."""
     diag = FakeDiag()
-    with modules(moycore=None, moy_lua=Obj(alloc_stats=lambda: (1024, 0, 0, 0)),
+    # Seven fields, i.e. the short form: what is under test is that the
+    # ImportError reaches the fallback at all, and the only Lua runtime left in
+    # the tree is moycore's, so its tuple is the one shape to fall back with.
+    with modules(moycore=None,
+                 moy_lua=Obj(alloc_stats=lambda: (1024, 0, 0, 0, 0, 0, 0)),
                  esp32=None):
         dd._diag_luamem(diag, Obj(perf_sample=lambda: ("c",)))
     assert diag.one("LUAMEM")["sram"] == "1.0KB"

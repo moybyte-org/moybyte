@@ -93,13 +93,15 @@ print("PMEM", moycore.pmem_image(pm), pm[0])
 moycore.close()
 print("CLOSED", moycore.active())
 # The SRAM floor knob and the census behind it. Off-board there is one region,
-# so the knob reports the compiled default and the census is None -- but the
-# NAMES have to be there, because the caller (run_desktop) sets the floor
-# unconditionally on both runtimes and a missing name is what left moycore at
-# 48KB on the S3 while moy_lua went to 24.
+# so the knob reports the compiled default -- but the NAMES have to be there,
+# because the caller (run_desktop) sets the floor unconditionally on both
+# runtimes and a missing name is what left moycore at 48KB on the S3 while
+# moy_lua went to 24. The census runs here too, and this is read after close:
+# see tests/test_moycore_pool.py for what it is really guarding.
 print("FLOOR", moycore.set_sram_floor(24), moycore.set_sram_floor(1),
       moycore.set_sram_floor(9999))
-print("CENSUS", moycore.alloc_stats())
+print("CENSUS", len(moycore.alloc_stats()), moycore.alloc_stats()[0],
+      moycore.alloc_stats()[1], moycore.alloc_stats()[6])
 
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
@@ -384,7 +386,10 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # are the compiled default; what is under test is that the NAME is there.
     assert by["FLOOR"][1:] == ["48", "48", "48"], \
         "set_sram_floor missing or not clamping: %s" % out
-    assert by["CENSUS"][1] == "None", out
+    # Seven fields, and the run above is CLOSED: live bytes and the pool's
+    # chunk list must both be back to nothing.
+    assert by["CENSUS"][1:] == ["7", "0", "0", "0"], \
+        "the allocator census did not balance across a closed run: %s" % out
 
     # view/background reached the cart with no trampoline registered for them.
     assert by["VIEW0"][1] == "None", out

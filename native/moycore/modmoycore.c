@@ -93,10 +93,19 @@
 #endif
 #ifdef MOYCORE_PSRAM
 static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
+#endif
+
 // The census the floor is set from: live bytes per region, the peak, and how
 // often the floor sent an allocation to PSRAM. Deliberately four numbers where
 // moy_lua reports sixteen -- the size-class buckets were for CHOOSING the
 // policy and the policy is chosen; these are for confirming it took.
+//
+// Kept on EVERY build, not just the board ones. Off-board there is one region
+// and mc_region calls it region 1, so sram_live and sram_denied read zero --
+// but g_live_total is what proves the small-object pool below gives every byte
+// back at close, and the only place that check can actually RUN is the desktop
+// MicroPython (tests/test_moycore_pool.py). A guard that compiles out on the
+// only tier that runs it is not a guard.
 static size_t g_live_r[2], g_live_total, g_peak;
 static uint32_t g_sram_denied;
 
@@ -109,7 +118,22 @@ static inline int mc_region(const void *p)
     return 1;
 #endif
 }
-#endif
+
+static inline void census_add(const void *p, size_t n)
+{
+    g_live_r[mc_region(p)] += n;
+    g_live_total += n;
+    if (g_live_total > g_peak) g_peak = g_live_total;
+}
+
+// A realloc may have MOVED or released the block already; reading the region of
+// a pointer the allocator has freed is safe, because it is an address-range
+// comparison and not a dereference.
+static inline void census_sub(const void *p, size_t n)
+{
+    g_live_r[mc_region(p)] -= n;
+    g_live_total -= n;
+}
 
 // The snapshot the host refreshes before every tick. Plain int32 slots in a
 // buffer Python owns, so a cart's btn()/time()/touch() are array reads on this
@@ -330,9 +354,9 @@ static void *buf_r(mp_obj_t o, size_t *len)
     return bi.buf;
 }
 
-// The VM's allocator: the system heap, NOT MicroPython's gc heap. That is the
-// point -- a cart's whole Lua world stays outside what MP sweeps, so cart churn
-// cannot lengthen a shell collect.
+// The BIG half of the VM's allocator: the system heap, NOT MicroPython's gc
+// heap. That is the point -- a cart's whole Lua world stays outside what MP
+// sweeps, so cart churn cannot lengthen a shell collect.
 //
 // INTERNAL SRAM FIRST on the boards, which is not a preference but a measured
 // requirement: moy_lua found the all-PSRAM version made the S3's whole _update
@@ -340,22 +364,22 @@ static void *buf_r(mp_obj_t o, size_t *len)
 // cart's TValue arrays) is latency-bound and the S3's PSRAM is a 120MHz OCT
 // bus. Same 48KB headroom floor so the WiFi/DMA pools cannot be starved, and
 // the same PSRAM fallback so a big cart still loads, just slower. Off-board
-// (host, unix pin, wasm) this compiles down to plain realloc.
-static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
+// (host, unix pin, wasm) this is plain realloc.
+//
+// UNCHANGED by the small-object pool below, and deliberately: the structures
+// that measurement was about -- the Lua stack (one StackValue array, over a
+// kilobyte for any real cart), a big table's node array, a Proto's code -- are
+// all far above the pool's 256-byte ceiling and still land in internal SRAM.
+static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 {
-    (void)ud;
-#ifdef MOYCORE_PSRAM
-    if (ptr == NULL) osize = 0;      // lua_Alloc contract: a type tag, not a size
     if (nsize == 0) {
-        if (ptr != NULL) {
-            g_live_r[mc_region(ptr)] -= osize;
-            g_live_total -= osize;
-            free(ptr);
-        }
+        if (ptr != NULL) { census_sub(ptr, osize); free(ptr); }
         return NULL;
     }
-    void *np = NULL;
+    void *np;
+#ifdef MOYCORE_PSRAM
     int tried_sram = 0;
+    np = NULL;
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
             >= nsize + g_sram_floor) {
         tried_sram = 1;
@@ -366,26 +390,218 @@ static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
         np = heap_caps_realloc(ptr, nsize,  // failed internal allocation
                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
+#else
+    np = realloc(ptr, nsize);
+#endif
     if (np != NULL) {
-        // A realloc may MOVE the block between regions, so the old bytes come
-        // off whichever region the old ADDRESS was in and the new bytes go on
-        // wherever the block landed. Reading the region of a pointer realloc
-        // has already released is safe: it is an address-range comparison, not
-        // a dereference.
-        if (ptr != NULL) {
-            g_live_r[mc_region(ptr)] -= osize;
-            g_live_total -= osize;
-        }
-        g_live_r[mc_region(np)] += nsize;
-        g_live_total += nsize;
-        if (g_live_total > g_peak) g_peak = g_live_total;
+        if (ptr != NULL) census_sub(ptr, osize);
+        census_add(np, nsize);
     }
     return np;                       // NULL: Lua runs an emergency GC and retries
-#else
-    (void)osize;                     // no region to account for off-board
-    if (nsize == 0) { free(ptr); return NULL; }
-    return realloc(ptr, nsize);
+}
+
+// -- the small-object pool ---------------------------------------------------
+//
+// MEASURED on the T-Deck (S3 at 240MHz, VM heap in PSRAM, IDF poisoning off):
+// about 9us for one malloc and 2us for one free, because the IDF allocator's
+// own control structures sit in PSRAM. That is what a Lua `{}` costs -- 9.7us
+// against 0.15us for an empty loop iteration and 0.95us for a function call --
+// and a two-field constructor 21us. A PICO-8 port builds a table per vector
+// operation and a string key per tile, every tick, and the S3 owes a frame
+// every 33ms, so on those carts the ALLOCATOR was the frame.
+//
+// Every hot Lua object is small: a TValue is 8 bytes here, a hash Node 16, a
+// Table 32, a short TString 16 + len, and UpVal / CallInfo / LClosure /
+// CClosure all fit inside 100. Eight size classes to 256 bytes cover the churn,
+// each a singly linked free list threaded through the free blocks themselves --
+// pop and push, no search, no coalescing, no per-block header.
+//
+// NO HEADER because Lua's realloc contract hands the size back: when ptr is
+// non-NULL, osize is the size the block was allocated with (it is a type TAG
+// only when ptr is NULL, which l_alloc normalises to 0 first). So a block's
+// class is a function of osize alone -- and that is exactly why the invariant
+// below has to hold absolutely:
+//
+//     a request of 1..256 bytes is ALWAYS a pool block and never anything
+//     else, because the free path has nothing but the size to decide with.
+//
+// Which is why pool exhaustion returns NULL and lets Lua run its emergency GC
+// and retry, rather than falling back to big_realloc: one heap pointer pushed
+// onto a free list would be handed out later as a pool block and then leaked
+// past close, and one pool pointer passed to free() would be worse.
+//
+// WHERE THE MEMORY LIVES. Chunks are PSRAM-only. The free-list HEADS are a
+// static, i.e. internal SRAM, because they are touched on every single alloc
+// and free; the blocks are not, because the 2026-09-02 measurement is that
+// giving the VM more internal SRAM made the tick SLOWER -- the rest of the
+// board (WiFi/DMA pools, the flush bounce, the poller) starves for it. So the
+// pool never competes with the SRAM floor, and big_realloc's SRAM-first policy
+// above is untouched.
+//
+// MOYCORE_POOL=0 compiles the whole thing out, which is the A/B: the P4 has
+// abundant internal SRAM and a different allocator profile, and per-board
+// verdicts do not transfer.
+#ifndef MOYCORE_POOL
+#define MOYCORE_POOL 1
 #endif
+
+#if MOYCORE_POOL
+
+#define POOL_CLASSES 8
+#define POOL_MAX     256
+static const uint16_t POOL_SZ[POOL_CLASSES] = {16, 32, 48, 64, 96, 128, 192, 256};
+
+// One chunk is carved into blocks by a bump cursor; a freed block goes on its
+// class's list and never returns to the chunk. 32KB is ~2000 of the commonest
+// class, and the halving retry below is what keeps the pool working on the S3,
+// whose SPIRAM heap_caps pool is nearly all MicroPython's already.
+#ifndef MOYCORE_POOL_CHUNK
+#define MOYCORE_POOL_CHUNK (32 * 1024)
+#endif
+#define MOYCORE_POOL_CHUNK_MIN (4 * 1024)
+
+typedef struct mc_chunk { struct mc_chunk *next; } mc_chunk;
+
+static void *g_pool_head[POOL_CLASSES];   // a static: internal SRAM on a board
+static mc_chunk *g_chunks;
+static uint8_t *g_carve;
+static size_t g_carve_left;
+static size_t g_pool_live, g_pool_cap;
+static uint32_t g_chunk_n;
+
+// size -> class, or -1 for "not a pool size" (0, or over the ceiling).
+// Arithmetic rather than a lookup table on purpose: this runs on every
+// allocation and a const table on the S3 is a flash read.
+static inline int pool_class(size_t n)
+{
+    if (n == 0 || n > POOL_MAX) return -1;
+    if (n <= 64)  return (int)((n + 15) >> 4) - 1;   //  16  32  48  64
+    if (n <= 128) return (int)((n + 31) >> 5) + 1;   //  96 128
+    return (int)((n + 63) >> 6) + 3;                 // 192 256
+}
+
+static int pool_add_chunk(void)
+{
+    size_t want = MOYCORE_POOL_CHUNK;
+    uint8_t *c;
+    for (;;) {
+#ifdef MOYCORE_PSRAM
+        c = (uint8_t *)heap_caps_malloc(want, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+        c = (uint8_t *)malloc(want);
+#endif
+        if (c != NULL) break;
+        if (want <= MOYCORE_POOL_CHUNK_MIN) return 0;
+        want >>= 1;
+    }
+    ((mc_chunk *)c)->next = g_chunks;
+    g_chunks = (mc_chunk *)c;
+    g_chunk_n++;
+    // 8-aligned: every class size is a multiple of 16, so an 8-aligned base
+    // keeps every block aligned for Lua's L_Umaxalign.
+    uint8_t *base = (uint8_t *)(((uintptr_t)c + sizeof(mc_chunk) + 7u)
+                                & ~(uintptr_t)7);
+    g_carve = base;
+    g_carve_left = want - (size_t)(base - c);
+    g_pool_cap += g_carve_left;      // whatever was left of the previous chunk
+    return 1;                        // is abandoned: at most 255B, once
+}
+
+static void *pool_alloc(int cls)
+{
+    void *b = g_pool_head[cls];
+    if (b != NULL) {
+        g_pool_head[cls] = *(void **)b;
+    } else {
+        size_t sz = POOL_SZ[cls];
+        if (g_carve_left < sz && !pool_add_chunk()) return NULL;
+        b = g_carve;
+        g_carve += sz;
+        g_carve_left -= sz;
+    }
+    g_pool_live += POOL_SZ[cls];
+    return b;
+}
+
+static inline void pool_free(void *p, int cls)
+{
+    *(void **)p = g_pool_head[cls];
+    g_pool_head[cls] = p;
+    g_pool_live -= POOL_SZ[cls];
+}
+
+// Every chunk goes back at close, so nothing survives a run: the pool belongs
+// to one lua_State and l_alloc serves no other caller, so by the time
+// lua_close has returned, every block is back on a free list. mod_close is the
+// only caller besides run_begin's own failure path.
+static void pool_release(void)
+{
+    mc_chunk *c = g_chunks;
+    while (c != NULL) {
+        mc_chunk *next = c->next;
+        free(c);
+        c = next;
+    }
+    g_chunks = NULL;
+    g_chunk_n = 0;
+    g_carve = NULL;
+    g_carve_left = 0;
+    g_pool_live = 0;
+    g_pool_cap = 0;
+    memset(g_pool_head, 0, sizeof(g_pool_head));
+}
+#endif  // MOYCORE_POOL
+
+// The VM's allocator. Small requests come off the pool, everything else off
+// the heap, and a block that crosses the ceiling in either direction is copied
+// -- Lua's contract gives the true old size, so both ends of the move know
+// exactly how many bytes are live.
+static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
+{
+    (void)ud;
+    if (ptr == NULL) osize = 0;      // lua_Alloc contract: a type tag, not a size
+#if MOYCORE_POOL
+    int oc = (ptr != NULL) ? pool_class(osize) : -1;
+    int nc = pool_class(nsize);      // nsize == 0 -> -1, which is the free path
+    if (oc >= 0 && nc >= 0) {
+        if (oc == nc) {              // grow or shrink inside one class
+            census_sub(ptr, osize);  // the BLOCK does not move; the bytes Lua
+            census_add(ptr, nsize);  // asked for did, and the free subtracts
+            return ptr;              // the new number, so re-charge it here
+        }
+        void *np = pool_alloc(nc);
+        if (np == NULL) return NULL;
+        memcpy(np, ptr, nsize < osize ? nsize : osize);
+        pool_free(ptr, oc);
+        census_sub(ptr, osize);
+        census_add(np, nsize);
+        return np;
+    }
+    if (oc >= 0) {                   // leaving the pool: freed, or grown past 256
+        if (nsize == 0) {
+            pool_free(ptr, oc);
+            census_sub(ptr, osize);
+            return NULL;
+        }
+        void *np = big_realloc(NULL, 0, nsize);
+        if (np == NULL) return NULL;
+        memcpy(np, ptr, osize);
+        pool_free(ptr, oc);
+        census_sub(ptr, osize);
+        return np;
+    }
+    if (nc >= 0) {                   // entering it: fresh, or shrunk into range
+        void *np = pool_alloc(nc);
+        if (np == NULL) return NULL;
+        census_add(np, nsize);
+        if (ptr != NULL) {
+            memcpy(np, ptr, nsize);
+            big_realloc(ptr, osize, 0);
+        }
+        return np;
+    }
+#endif
+    return big_realloc(ptr, osize, nsize);
 }
 
 // -- the extension trampoline ------------------------------------------------
@@ -784,6 +1000,9 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
                                     MP_ERROR_TEXT("moycore: no VM"));
     if (moy_lua_open(RUN.L, &RUN.con) != 0) {
         lua_close(RUN.L); RUN.L = NULL;
+#if MOYCORE_POOL
+        pool_release();              // a run that never opened still owns chunks
+#endif
         mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("moycore: sandbox failed"));
     }
     // The p8 shim's helpers, installed before anything the cart can capture.
@@ -947,6 +1166,12 @@ static mp_obj_t mod_close(void)
 {
     if (RUN.L) lua_close(RUN.L);
     RUN.L = NULL;
+#if MOYCORE_POOL
+    // AFTER lua_close, never before: until it returns, the chunks still hold
+    // live Lua objects. Nothing may survive a run -- a cart that churned its
+    // way to twenty chunks must not keep them while the launcher is up.
+    pool_release();
+#endif
     RUN.open = 0;
     RUN.snap = NULL;
     RUN.aq = NULL;
@@ -1028,23 +1253,43 @@ static mp_obj_t mod_set_sram_floor(mp_obj_t kb_obj)
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_set_sram_floor_obj, mod_set_sram_floor);
 
-// alloc_stats() -> (sram_live, psram_live, peak, sram_denied), or None where
-// there is only one region. The four numbers that say whether the SRAM-first
-// policy took: how the cart's heap actually SPLIT, its high-water mark, and how
-// many allocations the floor pushed to PSRAM. Live counters, not a sample --
-// read them while a cart runs.
+// alloc_stats() -> (sram_live, psram_live, peak, sram_denied,
+//                   pool_live, pool_cap, pool_chunks)
+//
+// The first four say whether the SRAM-first policy took: how the cart's heap
+// actually SPLIT, its high-water mark, and how many allocations the floor
+// pushed to PSRAM. They count the bytes LUA ASKED FOR, pool blocks included --
+// a pool block is charged to region 1 because chunks are PSRAM-only.
+//
+// The last three are the pool itself, and they are separate rather than folded
+// in because they measure a different thing: pool_live is the CLASS bytes of
+// the live blocks (so it rounds each request up to its class), pool_cap is the
+// usable bytes across every chunk, and their difference is the pool's slack --
+// free lists, the un-carved tail of the current chunk, and the <=255 bytes each
+// earlier chunk abandoned. So the PSRAM the VM actually holds is
+// (psram_live - pool_live) + pool_cap, and psram_live alone would understate it.
+//
+// Live counters, not a sample -- read them while a cart runs. All seven read
+// zero after close(), which is the leak check tests/test_moycore_pool.py makes.
+//
+// Off-board there is one region and mc_region calls it region 1, so sram_live
+// and sram_denied are always 0 there; the tuple is not None, because the
+// desktop MicroPython is where the pool's accounting is actually tested.
 static mp_obj_t mod_alloc_stats(void)
 {
-#ifdef MOYCORE_PSRAM
-    mp_obj_t items[4];
+    mp_obj_t items[7];
     items[0] = mp_obj_new_int((mp_int_t)g_live_r[0]);
     items[1] = mp_obj_new_int((mp_int_t)g_live_r[1]);
     items[2] = mp_obj_new_int((mp_int_t)g_peak);
     items[3] = mp_obj_new_int((mp_int_t)g_sram_denied);
-    return mp_obj_new_tuple(4, items);
+#if MOYCORE_POOL
+    items[4] = mp_obj_new_int((mp_int_t)g_pool_live);
+    items[5] = mp_obj_new_int((mp_int_t)g_pool_cap);
+    items[6] = mp_obj_new_int((mp_int_t)g_chunk_n);
 #else
-    return mp_const_none;
+    items[4] = items[5] = items[6] = MP_OBJ_NEW_SMALL_INT(0);
 #endif
+    return mp_obj_new_tuple(7, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
 
