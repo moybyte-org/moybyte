@@ -115,13 +115,21 @@ def serial_cfg(board):
     return ser
 
 HELPERS = """
-import binascii, hashlib, os
+import binascii, gc, hashlib, os
 def _wr(path):
-    d = binascii.a2b_base64(''.join(ws._up[k] for k in sorted(ws._up)))
+    # chunk by chunk: joining a 100 KB upload and decoding it in one go needs a
+    # quarter-megabyte transient, and the chunks are freed after, or the next
+    # cart to run is short exactly that much heap
     f = open(path, 'wb')
-    f.write(d)
+    n = 0
+    for k in sorted(ws._up):
+        d = binascii.a2b_base64(ws._up[k])
+        f.write(d)
+        n += len(d)
     f.close()
-    return len(d)
+    ws._up = {}
+    gc.collect()
+    return n
 def _sha(path):
     try:
         return hashlib.sha256(open(path, 'rb').read()).digest().hex()[:12]
