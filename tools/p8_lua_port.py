@@ -2521,7 +2521,15 @@ do
   -- wrong rate is what this replaced: it ran a cart at 75% speed there, and
   -- 53% at 32fps.
   local EPS = P8_DT * 0.02      -- absorbs an integer-ms host period (33 vs 33.33)
+  -- A late frame runs extra ticks to catch up, but only while a tick is
+  -- CHEAP: under half the cart's period, PICO-8's own line for running two
+  -- ticks per draw. A heavier tick cannot be caught up on -- each extra one
+  -- makes the next frame later still, until the frame is nothing but ticks
+  -- (that pinned the heavy carts at 8 fps) -- so past that line a late
+  -- frame slows time instead, as it does on PICO-8.
   local MAX_CATCHUP = 4         -- past this the board genuinely cannot keep up
+  local CHEAP = P8_DT * 500     -- ms
+  local tick_ms = 0             -- what the last tick cost, on the host clock
   local acc = 0
   -- A cart picks its own rate by which one it DEFINES: `_update60` runs the
   -- game at 60, `_update` at 30, and a cart that defines both means the 60 (so
@@ -2552,6 +2560,7 @@ do
       if p8_update60 then
         P8_DT = 1 / 60
         EPS = P8_DT * 0.02
+        CHEAP = P8_DT * 500
       end
     end
     if consumed then
@@ -2566,6 +2575,7 @@ do
     acc = acc + dt
     local n = 0
     while acc >= P8_DT - EPS and n < MAX_CATCHUP do
+      if n > 0 and tick_ms > CHEAP then break end
       acc = acc - P8_DT
       n = n + 1
       for i = 0, 5 do                            -- hold length, in CART ticks
@@ -2575,11 +2585,15 @@ do
         for i = 0, 5 do pending[i] = false end   -- in this frame took the edge
       end
       local tick = p8_update60 or p8_update
-      if tick then tick() end
+      if tick then
+        local t0 = m_time()
+        tick()
+        tick_ms = m_time() - t0
+      end
       consumed = true
       ticked = true
     end
-    if n >= MAX_CATCHUP then acc = 0 end         -- write off what cannot be paid
+    if acc > P8_DT then acc = P8_DT end          -- what cannot be paid is written off
   end
   function _draw()
     if ticked and p8_draw then
