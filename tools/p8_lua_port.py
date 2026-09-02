@@ -1620,6 +1620,9 @@ do
     -- same list): wide, tall, foreground, background, cursor nudges, repeat,
     -- tab, backspace, newline. Parameters are one base-36 character.
     local fg, bg, wide, tall, invert, tabw, rep = c, -1, 1, 1, false, 16, 1
+    local ocol, obits, oonly, ofg = -1, 0, false, false
+    local ODX = {-1, 0, 1, -1, 1, -1, 0, 1}
+    local ODY = {-1, -1, -1, 0, 0, 1, 1, 1}
     local function digit(b)
       if b >= 48 and b <= 57 then return b - 48 end
       if b >= 97 and b <= 122 then return b - 87 end
@@ -1629,10 +1632,34 @@ do
     local function cell(w, h, col)
       for yy = 0, h - 1 do for xx = 0, w - 1 do m_pix(cx + xx, cy + yy, col) end end
     end
-    local function dot(gx, gy, col)
+    local function dot(gx, gy, col, ox, oy)
+      ox, oy = ox or 0, oy or 0
       for yy = 0, tall - 1 do for xx = 0, wide - 1 do
-        m_pix(cx + gx * wide + xx, cy + gy * tall + yy, col)
+        m_pix(cx + ox + gx * wide + xx, cy + oy + gy * tall + yy, col)
       end end
+    end
+    local function walk(g, w, col, outline)
+      local function emit(gx, gy)
+        if outline then
+          for i = 1, 8 do
+            if (obits >> (i - 1)) & 1 == 1 then dot(gx, gy, col, ODX[i], ODY[i]) end
+          end
+        else
+          dot(gx, gy, col)
+        end
+      end
+      if g and g ~= 0 then
+        for p = 0, 14 do
+          if (g >> p) & 1 == 1 then emit(p % 3, p // 3) end
+        end
+      elseif w then
+        for r = 0, 4 do
+          local v = w[r]
+          for k = 0, 6 do
+            if (v >> k) & 1 == 1 then emit(k, r) end
+          end
+        end
+      end
     end
     local i, n = 1, #s
     while i <= n do
@@ -1647,18 +1674,8 @@ do
           local col = fg
           if invert then cell(adv, 6 * tall, fg) col = bg < 0 and 0 or bg
           elseif bg >= 0 then cell(adv, 6 * tall, bg) end
-          if g and g ~= 0 then
-            for p = 0, 14 do
-              if (g >> p) & 1 == 1 then dot(p % 3, p // 3, col) end
-            end
-          elseif w then
-            for r = 0, 4 do
-              local v = w[r]
-              for k = 0, 6 do
-                if (v >> k) & 1 == 1 then dot(k, r, col) end
-              end
-            end
-          end
+          if ocol >= 0 or ofg then walk(g, w, ofg and col or ocol, true) end
+          if not oonly then walk(g, w, col, false) end
           cx = cx + adv
         end
         rep = 1
@@ -1682,7 +1699,18 @@ do
           local off = sbyte(s, i) or 0
           i = i + 1
           if off == 119 then wide = 1 elseif off == 116 then tall = 1
-          elseif off == 105 then invert = false end
+          elseif off == 105 then invert = false
+          elseif off == 111 then ocol, obits, oonly, ofg = -1, 0, false, false
+          elseif off == 35 then bg = -1 end
+        elseif cmd == 111 then                      -- \^o colour + two hex digits
+          local oc = sbyte(s, i) or 48
+          oonly, ofg = false, false
+          if oc == 36 then ofg = true ocol = -1
+          elseif oc == 33 then ofg = true oonly = true ocol = -1
+          else ocol = digit(oc) & 15 end
+          obits = (digit(sbyte(s, i + 1) or 48) << 4) | digit(sbyte(s, i + 2) or 48)
+          i = i + 3
+        elseif cmd == 35 then if bg < 0 then bg = 0 end
         elseif cmd == 103 then cx, cy = lx, fl(y)
         elseif cmd == 99 then cls(digit(sbyte(s, i) or 48) & 15) i = i + 1 cx, cy = lx, fl(y)
         elseif cmd == 106 then

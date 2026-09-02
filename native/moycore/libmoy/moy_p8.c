@@ -149,8 +149,12 @@ static void apply(moy_p8 *p, uint32_t a, uint8_t v)
     } else if (a >= 0x6000 && a < 0x8000) {
         scr_write(p, a, v);
     } else if (a >= 0x5f00 && a < 0x5f10) {
-        moy_pal(c, (int)(a - 0x5f00), v & 15);          /* four bits, as VRAM is */
-        moy_palt(c, (int)(a - 0x5f00), (v & 0x10) != 0);
+        /* Four colour bits, as VRAM is. Transparency is bit 4 (what palt()
+         * writes) OR bit 7: dank tomb marks its sprite key, colour 3, by
+         * ORing 0x80 into every light-level palette it copies here, and
+         * nothing else it does could make that colour transparent. */
+        moy_pal(c, (int)(a - 0x5f00), v & 15);
+        moy_palt(c, (int)(a - 0x5f00), (v & 0x90) != 0);
     } else if (a >= 0x5f10 && a < 0x5f20) {
         moy_pal_screen(c, (int)(a - 0x5f10), col_in(v));
     } else if (a >= 0x5f20 && a < 0x5f2c) {
@@ -356,6 +360,8 @@ static int p8_digit(int ch)
 typedef struct {
     moy_canvas *c;
     int fg, bg, wide, tall, invert;
+    int ocol, obits, oonly;      /* \^o outline: colour (-1 none), 8 neighbour bits, interior skipped */
+    int ouse_fg;                 /* outline in the current colour ("$" / "!") */
 } p8_pen;
 
 static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
@@ -366,42 +372,76 @@ static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
             moy_put(pen->c, cx + xx, cy + yy, col);
 }
 
-static void p8_dot(const p8_pen *pen, int cx, int cy, int gx, int gy, int col)
+
+/* One glyph at the pen: returns the advance.
+ *
+ * Rasterised into a small local bitmap first, so an outline (\^o) can be
+ * painted only where the glyph itself is not: PICO-8 draws the neighbours
+ * and then the interior, and "!" skips the interior, which is only empty if
+ * the outline never covered it. Scaled dots and a 1px outline both fit in
+ * 16x12 with a one-pixel margin all round. */
+#define P8_BW 18
+#define P8_BH 14
+
+static void p8_lit(const p8_pen *pen, int b, uint8_t lit[P8_BH][P8_BW])
 {
-    int sx = 1 + pen->wide, sy = 1 + pen->tall, xx, yy;
-    for (yy = 0; yy < sy; yy++)
-        for (xx = 0; xx < sx; xx++)
-            moy_put(pen->c, cx + gx * sx + xx, cy + gy * sy + yy, col);
+    int sx = 1 + pen->wide, sy = 1 + pen->tall, q, r, kk, xx, yy;
+    memset(lit, 0, P8_BH * P8_BW);
+#define LIT(gx, gy) \
+        for (yy = 0; yy < sy; yy++) for (xx = 0; xx < sx; xx++) \
+            lit[1 + (gy) * sy + yy][1 + (gx) * sx + xx] = 1
+    if (b >= 128 && b < 128 + 26) {
+        const uint8_t *rows = P8_WIDE + (b - 128) * 5;
+        for (r = 0; r < 5; r++)
+            for (kk = 0; kk < 7; kk++)
+                if ((rows[r] >> kk) & 1) { LIT(kk, r); }
+    } else if (b >= 32 && b < 128) {
+        unsigned g = P8_GLYPHS[b - 32];
+        for (q = 0; q < 15; q++)
+            if ((g >> q) & 1u) { LIT(q % 3, q / 3); }
+    }
+#undef LIT
 }
 
-/* One glyph at the pen: returns the advance. */
 static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
 {
+    static const int dx[8] = { -1, 0, 1, -1, 1, -1, 0, 1 };
+    static const int dy[8] = { -1, -1, -1, 0, 0, 1, 1, 1 };
     int sx = 1 + pen->wide, sy = 1 + pen->tall;
     int fg = pen->fg, bg = pen->bg;
-    int adv, q, r, kk;
+    int adv, xx, yy, i;
+    uint8_t lit[P8_BH][P8_BW];
     b = btn_glyph(b);
     if (b >= 128 && b < 128 + 26) {
         const uint8_t *rows = P8_WIDE + (b - 128) * 5;
-        int any = 0;
+        int r, any = 0;
         for (r = 0; r < 5; r++) any |= rows[r];
         adv = any ? 8 * sx : 4 * sx;
-        if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
-        else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
-        if (any)
-            for (r = 0; r < 5; r++)
-                for (kk = 0; kk < 7; kk++)
-                    if ((rows[r] >> kk) & 1) p8_dot(pen, cx, cy, kk, r, fg);
-        return adv;
+    } else {
+        adv = 4 * sx;
     }
-    adv = 4 * sx;
     if (pen->invert) { p8_cell(pen, cx, cy, adv, 6 * sy, fg); fg = bg < 0 ? 0 : bg; }
     else if (bg >= 0) p8_cell(pen, cx, cy, adv, 6 * sy, bg);
-    if (b >= 32 && b < 128) {
-        unsigned g = P8_GLYPHS[b - 32];
-        for (q = 0; q < 15; q++)
-            if ((g >> q) & 1u) p8_dot(pen, cx, cy, q % 3, q / 3, fg);
+    p8_lit(pen, b, lit);
+    if (pen->ocol >= 0 || pen->ouse_fg) {
+        int oc = pen->ouse_fg ? fg : pen->ocol;
+        for (yy = 0; yy < P8_BH; yy++)
+            for (xx = 0; xx < P8_BW; xx++) {
+                if (lit[yy][xx]) continue;
+                for (i = 0; i < 8; i++) {
+                    int ny = yy + dy[i], nx = xx + dx[i];   /* the lit pixel this would neighbour */
+                    if (((pen->obits >> i) & 1) && ny >= 0 && ny < P8_BH && nx >= 0 && nx < P8_BW
+                        && lit[ny][nx]) {
+                        moy_put(pen->c, cx + xx - 1, cy + yy - 1, oc);
+                        break;
+                    }
+                }
+            }
+        if (pen->oonly) return adv;
     }
+    for (yy = 0; yy < P8_BH; yy++)
+        for (xx = 0; xx < P8_BW; xx++)
+            if (lit[yy][xx]) moy_put(pen->c, cx + xx - 1, cy + yy - 1, fg);
     return adv;
 }
 
@@ -417,6 +457,7 @@ static int l_p8print(lua_State *L)
     x = iarg(L, 2); y = iarg(L, 3);
     pen.c = p->con->canvas;
     pen.fg = iarg(L, 4); pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
+    pen.ocol = -1; pen.obits = 0; pen.oonly = 0; pen.ouse_fg = 0;
     cx = x; cy = y;
     for (k = 0; k < len; k++) {
         int b = (unsigned char)s[k];
@@ -448,9 +489,25 @@ static int l_p8print(lua_State *L)
                 case 'w': pen.wide = 0; break;
                 case 't': pen.tall = 0; break;
                 case 'i': pen.invert = 0; break;
+                case 'o': pen.ocol = -1; pen.oonly = 0; pen.obits = 0; pen.ouse_fg = 0; break;
+                case '#': pen.bg = -1; break;
                 default: break;
                 }
                 break;
+            case 'o':                                 /* outline: colour, then two hex digits */
+                if (k + 3 < len) {
+                    int oc = (unsigned char)s[k + 1];
+                    pen.oonly = 0;
+                    if (oc == '$') pen.ocol = -2;         /* the current colour, resolved at draw */
+                    else if (oc == '!') { pen.ocol = -2; pen.oonly = 1; }
+                    else pen.ocol = p8_digit(oc) & 15;
+                    pen.obits = (p8_digit((unsigned char)s[k + 2]) << 4)
+                              | p8_digit((unsigned char)s[k + 3]);
+                    if (pen.ocol == -2) { pen.ocol = -1; pen.ouse_fg = 1; } else pen.ouse_fg = 0;
+                    k += 3;
+                }
+                break;
+            case '#': pen.bg = pen.bg < 0 ? 0 : pen.bg; break;   /* solid background on */
             case 'g': cx = x; cy = y; break;
             case 'c': if (k + 1 < len) moy_cls(pen.c, p8_digit((unsigned char)s[++k]) & 15); cx = x; cy = y; break;
             case 'j': if (k + 2 < len) { cx = p8_digit((unsigned char)s[k + 1]) * 4;
