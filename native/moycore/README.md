@@ -38,7 +38,7 @@ halves, one switch each:
 
 | request | where it comes from |
 |---|---|
-| 1–256 bytes | the **small-object pool**: eight size classes (16/32/48/64/96/128/192/256), a singly linked free list per class, blocks carved from 32KB PSRAM chunks |
+| 1–256 bytes | the **small-object pool**: eight size classes (16/32/48/64/96/128/192/256), each carved out of 8KB PSRAM chunks that serve one class apiece |
 | anything larger | `heap_caps_realloc`, **internal SRAM first** down to the `set_sram_floor` headroom, PSRAM when the floor says no |
 
 The pool exists because on the S3 the IDF allocator costs about **9 µs per
@@ -46,7 +46,7 @@ malloc and 2 µs per free** with its control structures in PSRAM — a Lua `{}` 
 9.7 µs, a two-field constructor 21 µs — and a PICO-8 port builds a table per
 vector operation, every tick, against a 33 ms frame.
 
-Three things about it are load-bearing:
+Four things about it are load-bearing:
 
 - **No per-block header.** Lua's realloc contract hands back the true old size
   whenever `ptr` is non-NULL, so a block's class is a function of `osize`
@@ -56,25 +56,76 @@ Three things about it are load-bearing:
   and lets Lua run its emergency GC and retry, rather than falling back to the
   heap — one heap pointer on a free list would be handed out later as a pool
   block and leaked past close.
-- **Blocks live in PSRAM; the free-list heads are a static, i.e. internal
-  SRAM.** The heads are touched on every alloc and free; the blocks are the
-  VM's, and the 2026-09-02 measurement is that giving the VM more internal SRAM
-  made the tick *slower*, because the rest of the board starves for it. The
-  large path's SRAM-first policy is untouched, and that is where the structures
-  the policy was written for actually live — the Lua stack is one array well
-  over a kilobyte, and so is a big table's node array.
-- **Every chunk goes back at `close()`.** Nothing survives a run; a cart that
-  churned its way to a dozen chunks must not hold them while the launcher is
-  up. `alloc_stats()`'s seven fields read all-zero afterwards except the peak,
-  and `tests/test_moycore_pool.py` is the guard.
+- **One class per chunk, which is what lets a chunk go back.** A chunk is
+  aligned to its own size, so `p & ~(chunk - 1)` is the chunk a block came from
+  in a single AND; the header there holds that class's free list, its bump
+  cursor and a **live count**, so the free that empties a chunk is the free
+  that returns it to the heap — **O(1) worst case**, with no free list to walk,
+  because every entry that could point into the chunk *is* the chunk's own
+  list. Shared chunks cannot do it at any price: one survivor pins the whole
+  chunk, and moss moss's parse burst left 1.47MB held for 0.83MB live with the
+  board sitting on 3KB of free PSRAM. The cost is a floor — a class touched at
+  all holds a chunk, so eight classes hold eight — which is why a chunk is
+  **8KB** and not the 32KB the shared-chunk pool used: 64KB of floor, and 512
+  blocks of the commonest class have to die together to give one back rather
+  than 2048.
+- **One chunk size per run, and one empty chunk kept back.** The halving retry
+  (to 4KB) still runs, but only for the *first* chunk of a run: the mask is
+  what makes the lookup a single AND, and a second size would need a second
+  mask. A later chunk that cannot be had returns NULL, and Lua's emergency GC
+  now genuinely frees chunks before the retry. The one empty chunk the pool
+  keeps — retyped to whatever class asks next — is what stops a loop that
+  allocates and frees one block of an otherwise-full class from paying a malloc
+  *and* a free every iteration.
+- **Blocks live in PSRAM; the per-class current chunk is a static, i.e.
+  internal SRAM.** The free-list heads moved into the chunk header when chunks
+  became per-class, so alloc and free each write one PSRAM word more than they
+  used to; the header's hot fields are its first 32 bytes on purpose, one cache
+  line per active chunk. The blocks stay out of SRAM because the 2026-09-02
+  measurement is that giving the VM more internal SRAM made the tick *slower*,
+  since the rest of the board starves for it. The large path's SRAM-first
+  policy is untouched, and that is where the structures the policy was written
+  for actually live — the Lua stack is one array well over a kilobyte, and so
+  is a big table's node array.
+
+**Every chunk goes back at `close()`** as well, after `lua_close` and never
+before: nothing survives a run, and a cart that churned its way to a hundred
+chunks must not hold them while the launcher is up. `alloc_stats()`'s seven
+fields read all-zero afterwards except the peak.
 
 `alloc_stats()` → `(sram_live, psram_live, peak, sram_denied, pool_live,
 pool_cap, pool_chunks)`. The first four count the bytes **Lua asked for**, pool
 blocks included and charged to PSRAM. The last three are the pool itself:
 `pool_live` is the *class* bytes of the live blocks, `pool_cap` the usable
-bytes across every chunk, and the difference is slack — free lists, the
-un-carved tail, and the ≤255 bytes each earlier chunk abandoned. So the PSRAM
-the VM actually holds is `(psram_live - pool_live) + pool_cap`.
+bytes across every chunk (the kept-back spare included, because it is memory
+the pool holds), and the difference is slack — free lists, un-carved tails, and
+the remainder each chunk's class size leaves. So the PSRAM the VM actually
+holds is `(psram_live - pool_live) + pool_cap`. **`pool_cap` falls when chunks
+go back**, and that is the number to watch: on the burst scenario in
+`tests/test_moycore_pool.py` it peaks at 2.5MB across 316 chunks and settles at
+81KB across 10 once the burst's garbage is collected.
+
+Two verbs serve the pool and nothing else:
+
+- **`gc()`** → the VM's heap in KB after a full, stop-the-world collect. A
+  diagnostic and a test verb, not a frame-loop one — but `load()` runs the same
+  collect itself once `_init` returns, because the parse burst is the run's
+  high-water mark and Lua's incremental collector would otherwise walk it out
+  one step at a time while the frame loop needed the memory. It exists as a
+  verb because SPEC.md 4.1 takes `collectgarbage` away from a cart, so nothing
+  else can ask the VM to settle.
+- **`pool_check()`** → `0`, or a negative code. The invariant the design rests
+  on — a block masks back to the chunk it came from — is invisible from Python
+  and does not fault when it breaks; it decrements a *neighbour's* live count
+  and frees a chunk that is still in use. So the checker walks every chunk,
+  every free list and both sets of links: `-1` no chunk size, `-2` a chunk off
+  its own alignment, `-3` the global list's back-link, `-4` a class out of
+  range, `-5` a live or linked spare, `-6` a free block that masks to another
+  chunk, `-7` one off its class's stride, `-8` a free list longer than the
+  chunk was carved (a cycle, or a double free), `-9` live + free ≠ carved,
+  `-10` room-list membership disagreeing with whether the chunk has room,
+  `-11` a spare that kept its class, `-12` the chunk count, `-13` `pool_cap`,
+  `-14` `pool_live`, `-15` a room list holding another class's chunk.
 
 `-DMOYCORE_POOL=0` compiles the pool out, which is the A/B: the P4 has abundant
 internal SRAM and a different allocator profile, and per-board verdicts do not

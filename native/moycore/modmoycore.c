@@ -412,9 +412,10 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 //
 // Every hot Lua object is small: a TValue is 8 bytes here, a hash Node 16, a
 // Table 32, a short TString 16 + len, and UpVal / CallInfo / LClosure /
-// CClosure all fit inside 100. Eight size classes to 256 bytes cover the churn,
-// each a singly linked free list threaded through the free blocks themselves --
-// pop and push, no search, no coalescing, no per-block header.
+// CClosure all fit inside 100. Eight size classes to 256 bytes cover the
+// churn, carved out of chunks by a bump cursor and recycled through a free
+// list threaded through the free blocks themselves -- pop and push, no search,
+// no coalescing, no per-block header.
 //
 // NO HEADER because Lua's realloc contract hands the size back: when ptr is
 // non-NULL, osize is the size the block was allocated with (it is a type TAG
@@ -430,13 +431,40 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 // onto a free list would be handed out later as a pool block and then leaked
 // past close, and one pool pointer passed to free() would be worse.
 //
-// WHERE THE MEMORY LIVES. Chunks are PSRAM-only. The free-list HEADS are a
-// static, i.e. internal SRAM, because they are touched on every single alloc
-// and free; the blocks are not, because the 2026-09-02 measurement is that
-// giving the VM more internal SRAM made the tick SLOWER -- the rest of the
-// board (WiFi/DMA pools, the flush bounce, the poller) starves for it. So the
-// pool never competes with the SRAM floor, and big_realloc's SRAM-first policy
-// above is untouched.
+// ONE CLASS PER CHUNK, which is what lets a chunk go BACK. A chunk is aligned
+// to its own size, so `p & ~(chunk-1)` is the chunk a block came from in one
+// AND; the header there carries that class's free list, its bump cursor and a
+// LIVE COUNT, so the free that empties a chunk is the free that returns it --
+// O(1) worst case, with no free list to walk, because every entry that could
+// point into the chunk IS the chunk's own list. Shared chunks cannot do that
+// at any price: measured here, moss moss's parse burst left 6.4MB of chunks
+// holding 11KB of live blocks, and one survivor pins the whole chunk.
+//
+// The price is a floor: a class touched at all holds a chunk, so eight classes
+// hold eight chunks. Hence 8KB rather than the 32KB the shared-chunk pool
+// used -- a 64KB floor, and 512 blocks of the commonest class have to die
+// together to give one back instead of 2048.
+//
+// ONE CHUNK SIZE PER RUN. The halving retry still runs, but only for the first
+// chunk: the mask is what makes the lookup a single AND, and a second size
+// would need a second mask. A later chunk that cannot be had returns NULL, and
+// Lua's emergency GC now actually frees chunks before the retry.
+//
+// ONE EMPTY CHUNK IS KEPT BACK, retyped to whatever class asks for the next
+// one. Without it, a loop allocating and freeing one block of a class whose
+// other chunks are full pays a malloc AND a free every iteration; with it that
+// oscillation costs nothing, and two classes oscillating together cost one
+// pair per cycle rather than one per allocation.
+//
+// WHERE THE MEMORY LIVES. Chunks are PSRAM-only, and so are the free-list
+// heads now -- they moved into the chunk header, and what stays in the static
+// (internal SRAM) is the per-class CURRENT CHUNK. The header's hot fields are
+// its first 32 bytes on purpose: one cache line per active chunk, eight lines
+// in the steady state. The blocks stay out of SRAM because the 2026-09-02
+// measurement is that giving the VM more internal SRAM made the tick SLOWER --
+// the rest of the board (WiFi/DMA pools, the flush bounce, the poller) starves
+// for it. So the pool never competes with the SRAM floor, and big_realloc's
+// SRAM-first policy above is untouched.
 //
 // MOYCORE_POOL=0 compiles the whole thing out, which is the A/B: the P4 has
 // abundant internal SRAM and a different allocator profile, and per-board
@@ -451,23 +479,40 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 #define POOL_MAX     256
 static const uint16_t POOL_SZ[POOL_CLASSES] = {16, 32, 48, 64, 96, 128, 192, 256};
 
-// One chunk is carved into blocks by a bump cursor; a freed block goes on its
-// class's list and never returns to the chunk. 32KB is ~2000 of the commonest
-// class, and the halving retry below is what keeps the pool working on the S3,
-// whose SPIRAM heap_caps pool is nearly all MicroPython's already.
 #ifndef MOYCORE_POOL_CHUNK
-#define MOYCORE_POOL_CHUNK (32 * 1024)
+#define MOYCORE_POOL_CHUNK (8 * 1024)
 #endif
 #define MOYCORE_POOL_CHUNK_MIN (4 * 1024)
 
-typedef struct mc_chunk { struct mc_chunk *next; } mc_chunk;
+#if !defined(MOYCORE_PSRAM) && \
+    (defined(__unix__) || defined(__APPLE__) || defined(__EMSCRIPTEN__))
+// Declared here rather than reached through a feature macro: which of
+// _POSIX_C_SOURCE / _DEFAULT_SOURCE stdlib.h wants depends on the port's -std,
+// and the host builds do not agree about it.
+extern int posix_memalign(void **memptr, size_t alignment, size_t size);
+#endif
 
-static void *g_pool_head[POOL_CLASSES];   // a static: internal SRAM on a board
-static mc_chunk *g_chunks;
-static uint8_t *g_carve;
-static size_t g_carve_left;
-static size_t g_pool_live, g_pool_cap;
-static uint32_t g_chunk_n;
+typedef struct mc_chunk {
+    void            *freed;           // this chunk's free blocks, one class
+    uint8_t         *carve;           // the tail nobody has been handed yet
+    uint32_t         carve_left;
+    uint32_t         live;            // handed out and not yet freed
+    uint8_t          cls;             // POOL_CLASSES while it is the spare
+    uint8_t          roomed;          // on g_room[cls]
+    struct mc_chunk *gnext, *gprev;   // every chunk the pool holds
+    struct mc_chunk *rnext, *rprev;   // ...and this class's, those with room
+    void            *raw;             // what the heap returned: see chunk_new
+} mc_chunk;
+
+// Rounded to 16 so every block stays 16-aligned, which every class size is.
+#define POOL_HDR (((sizeof(mc_chunk) + 15u) / 16u) * 16u)
+
+static mc_chunk *g_room[POOL_CLASSES];   // a static: internal SRAM on a board
+static mc_chunk *g_chunks, *g_spare;
+static size_t    g_chunk_sz, g_chunk_usable;
+static uintptr_t g_chunk_mask;
+static size_t    g_pool_live, g_pool_cap;
+static uint32_t  g_chunk_n;
 
 // size -> class, or -1 for "not a pool size" (0, or over the ceiling).
 // Arithmetic rather than a lookup table on purpose: this runs on every
@@ -480,54 +525,147 @@ static inline int pool_class(size_t n)
     return (int)((n + 63) >> 6) + 3;                 // 192 256
 }
 
-static int pool_add_chunk(void)
+// sz is a power of two AND the alignment, because the free path recovers the
+// chunk from a block with one AND. On the boards that is heap_caps_aligned_
+// alloc, whose TLSF trims both the leading gap and the tail back into the heap
+// -- so the alignment costs a bigger search, not a bigger allocation.
+static mc_chunk *chunk_new(size_t sz)
 {
-    size_t want = MOYCORE_POOL_CHUNK;
-    uint8_t *c;
-    for (;;) {
+    void *raw, *base;
 #ifdef MOYCORE_PSRAM
-        c = (uint8_t *)heap_caps_malloc(want, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    raw = heap_caps_aligned_alloc(sz, sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (raw == NULL) return NULL;
+    base = raw;
+#elif defined(__unix__) || defined(__APPLE__) || defined(__EMSCRIPTEN__)
+    if (posix_memalign(&raw, sz, sz) != 0) return NULL;
+    base = raw;
 #else
-        c = (uint8_t *)malloc(want);
+    raw = malloc(sz + sz - 1);        // no aligned allocator: over-allocate,
+    if (raw == NULL) return NULL;     // align by hand, and free the raw pointer
+    base = (void *)(((uintptr_t)raw + sz - 1) & ~(uintptr_t)(sz - 1));
 #endif
-        if (c != NULL) break;
-        if (want <= MOYCORE_POOL_CHUNK_MIN) return 0;
-        want >>= 1;
+    ((mc_chunk *)base)->raw = raw;
+    return (mc_chunk *)base;
+}
+
+static void chunk_free(mc_chunk *c)
+{
+#ifdef MOYCORE_PSRAM
+    heap_caps_free(c->raw);           // aligned or not: TLSF blocks are the same
+#else
+    free(c->raw);
+#endif
+}
+
+static inline void room_link(mc_chunk *c)
+{
+    c->rprev = NULL;
+    c->rnext = g_room[c->cls];
+    if (c->rnext != NULL) c->rnext->rprev = c;
+    g_room[c->cls] = c;
+    c->roomed = 1;
+}
+
+static inline void room_unlink(mc_chunk *c)
+{
+    if (c->rprev != NULL) c->rprev->rnext = c->rnext;
+    else                  g_room[c->cls] = c->rnext;
+    if (c->rnext != NULL) c->rnext->rprev = c->rprev;
+    c->roomed = 0;
+}
+
+static void chunk_reset(mc_chunk *c, int cls)
+{
+    c->cls = (uint8_t)cls;
+    c->freed = NULL;
+    c->carve = (uint8_t *)c + POOL_HDR;
+    c->carve_left = (uint32_t)g_chunk_usable;
+    c->live = 0;
+}
+
+static mc_chunk *pool_add_chunk(int cls)
+{
+    mc_chunk *c = g_spare;
+    if (c != NULL) {
+        g_spare = NULL;              // already on the global list and counted
+    } else {
+        size_t want = g_chunk_sz;
+        if (want == 0) {             // the first chunk of a run picks the size
+            want = MOYCORE_POOL_CHUNK;
+            for (;;) {
+                c = chunk_new(want);
+                if (c != NULL) break;
+                if (want <= MOYCORE_POOL_CHUNK_MIN) return NULL;
+                want >>= 1;
+            }
+            g_chunk_sz = want;
+            g_chunk_mask = ~(uintptr_t)(want - 1);
+            g_chunk_usable = want - POOL_HDR;
+        } else {
+            c = chunk_new(want);
+            if (c == NULL) return NULL;
+        }
+        c->gprev = NULL;
+        c->gnext = g_chunks;
+        if (c->gnext != NULL) c->gnext->gprev = c;
+        g_chunks = c;
+        g_pool_cap += g_chunk_usable;
+        g_chunk_n++;
     }
-    ((mc_chunk *)c)->next = g_chunks;
-    g_chunks = (mc_chunk *)c;
-    g_chunk_n++;
-    // 8-aligned: every class size is a multiple of 16, so an 8-aligned base
-    // keeps every block aligned for Lua's L_Umaxalign.
-    uint8_t *base = (uint8_t *)(((uintptr_t)c + sizeof(mc_chunk) + 7u)
-                                & ~(uintptr_t)7);
-    g_carve = base;
-    g_carve_left = want - (size_t)(base - c);
-    g_pool_cap += g_carve_left;      // whatever was left of the previous chunk
-    return 1;                        // is abandoned: at most 255B, once
+    chunk_reset(c, cls);
+    room_link(c);
+    return c;
+}
+
+// The last block of a chunk went back. Keep one empty chunk as the spare and
+// give the rest to the heap -- pool_cap comes down with them, which is the
+// number the burst-then-steady check watches.
+static void pool_drop(mc_chunk *c)
+{
+    if (c->roomed) room_unlink(c);
+    if (g_spare == NULL) {
+        c->cls = POOL_CLASSES;       // classless until it is handed out again
+        g_spare = c;
+        return;
+    }
+    if (c->gprev != NULL) c->gprev->gnext = c->gnext;
+    else                  g_chunks = c->gnext;
+    if (c->gnext != NULL) c->gnext->gprev = c->gprev;
+    g_pool_cap -= g_chunk_usable;
+    g_chunk_n--;
+    chunk_free(c);
 }
 
 static void *pool_alloc(int cls)
 {
-    void *b = g_pool_head[cls];
-    if (b != NULL) {
-        g_pool_head[cls] = *(void **)b;
-    } else {
-        size_t sz = POOL_SZ[cls];
-        if (g_carve_left < sz && !pool_add_chunk()) return NULL;
-        b = g_carve;
-        g_carve += sz;
-        g_carve_left -= sz;
+    mc_chunk *c = g_room[cls];       // by invariant: NULL, or it has room
+    if (c == NULL) {
+        c = pool_add_chunk(cls);
+        if (c == NULL) return NULL;
     }
-    g_pool_live += POOL_SZ[cls];
+    size_t sz = POOL_SZ[cls];
+    void *b = c->freed;
+    if (b != NULL) {
+        c->freed = *(void **)b;
+    } else {
+        b = c->carve;
+        c->carve += sz;
+        c->carve_left -= (uint32_t)sz;
+    }
+    c->live++;
+    if (c->freed == NULL && c->carve_left < sz) room_unlink(c);
+    g_pool_live += sz;
     return b;
 }
 
 static inline void pool_free(void *p, int cls)
 {
-    *(void **)p = g_pool_head[cls];
-    g_pool_head[cls] = p;
+    mc_chunk *c = (mc_chunk *)((uintptr_t)p & g_chunk_mask);
+    *(void **)p = c->freed;
+    c->freed = p;
     g_pool_live -= POOL_SZ[cls];
+    if (--c->live == 0)   pool_drop(c);
+    else if (!c->roomed)  room_link(c);
 }
 
 // Every chunk goes back at close, so nothing survives a run: the pool belongs
@@ -538,17 +676,62 @@ static void pool_release(void)
 {
     mc_chunk *c = g_chunks;
     while (c != NULL) {
-        mc_chunk *next = c->next;
-        free(c);
+        mc_chunk *next = c->gnext;
+        chunk_free(c);
         c = next;
     }
     g_chunks = NULL;
+    g_spare = NULL;
+    memset(g_room, 0, sizeof(g_room));
     g_chunk_n = 0;
-    g_carve = NULL;
-    g_carve_left = 0;
     g_pool_live = 0;
     g_pool_cap = 0;
-    memset(g_pool_head, 0, sizeof(g_pool_head));
+    g_chunk_sz = 0;
+    g_chunk_usable = 0;
+    g_chunk_mask = 0;
+}
+
+// The invariants the whole design rests on, checked from the outside, because
+// the one that matters most -- a block masks back to its own chunk -- is
+// invisible from Python and silent when it breaks: a wrong mask corrupts
+// another chunk's header instead of faulting. 0 is clean; the codes are the
+// order of the checks and are documented in README.md.
+static int pool_check(void)
+{
+    size_t live = 0, seen = 0;
+    for (mc_chunk *c = g_chunks; c != NULL; c = c->gnext) {
+        if (g_chunk_sz == 0) return -1;
+        if (((uintptr_t)c & (uintptr_t)(g_chunk_sz - 1)) != 0) return -2;
+        if (c->gnext != NULL && c->gnext->gprev != c) return -3;
+        if (c->cls > POOL_CLASSES) return -4;
+        seen++;
+        if (c == g_spare) {
+            if (c->live != 0 || c->roomed) return -5;
+            continue;
+        }
+        if (c->cls >= POOL_CLASSES) return -4;
+        size_t sz = POOL_SZ[c->cls];
+        size_t carved = (g_chunk_usable - c->carve_left) / sz;
+        size_t freed = 0;
+        for (void *b = c->freed; b != NULL; b = *(void **)b) {
+            if ((mc_chunk *)((uintptr_t)b & g_chunk_mask) != c) return -6;
+            if (((uintptr_t)b - ((uintptr_t)c + POOL_HDR)) % sz != 0) return -7;
+            if (++freed > carved) return -8;      // a cycle, or a double free
+        }
+        if (c->live + freed != carved) return -9;
+        // Room is not an opinion: a chunk is on its class's list exactly when
+        // it can serve the next allocation without a new chunk.
+        if (c->roomed != (c->freed != NULL || c->carve_left >= sz)) return -10;
+        live += c->live * sz;
+    }
+    if (g_spare != NULL && g_spare->cls != POOL_CLASSES) return -11;
+    if (seen != g_chunk_n) return -12;
+    if (g_pool_cap != (size_t)g_chunk_n * g_chunk_usable) return -13;
+    if (live != g_pool_live) return -14;
+    for (int cls = 0; cls < POOL_CLASSES; cls++)
+        for (mc_chunk *c = g_room[cls]; c != NULL; c = c->rnext)
+            if (c->cls != cls || !c->roomed) return -15;
+    return 0;
 }
 #endif  // MOYCORE_POOL
 
@@ -1080,9 +1263,34 @@ static mp_obj_t mod_load(mp_obj_t src_obj, mp_obj_t name_obj)
     g_tick_ms = (uint32_t)mp_hal_ticks_ms();
     if (moy_lua_init(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
+    // The parse burst is over, and it is the run's high-water mark: a 130KB
+    // source becomes tokens, short strings and tables that are all garbage by
+    // the time _init returns. Nothing else collects here -- Lua's collector is
+    // incremental and moy_lua_init does not ask -- so the burst would sit in
+    // the pool until the cart's own churn walked it out, one step at a time,
+    // holding chunks the frame loop is about to need. One full collect, once,
+    // before the first frame; on moss moss it is the difference between the
+    // cart loading and `not enough memory`.
+    lua_gc(RUN.L, LUA_GCCOLLECT);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(mod_load_obj, mod_load);
+
+// gc() -> the VM's heap in KB after a FULL collect, or None with no run.
+//
+// A DIAGNOSTIC and a test verb, not a frame-loop one: a full collect is the
+// stop-the-world kind, and the cart's own churn is what the incremental
+// collector is tuned for. It exists because `collectgarbage` is one of the
+// names SPEC.md 4.1 takes AWAY from a cart, so nothing else can ask the VM to
+// settle -- which is exactly what tests/test_moycore_pool.py has to do to see
+// a burst's garbage die and its chunks go back.
+static mp_obj_t mod_gc(void)
+{
+    if (!RUN.open) return mp_const_none;
+    lua_gc(RUN.L, LUA_GCCOLLECT);
+    return mp_obj_new_int(lua_gc(RUN.L, LUA_GCCOUNT));
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_gc_obj, mod_gc);
 
 // tick(dt) -> None on a clean frame, else the error text.
 //
@@ -1293,6 +1501,20 @@ static mp_obj_t mod_alloc_stats(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
 
+// pool_check() -> 0 when the pool's own invariants hold, else a negative code
+// (README.md lists them). A TEST verb: the invariant that a block masks back
+// to the chunk it came from cannot be seen from Python and does not fault when
+// it breaks -- it writes through another chunk's header instead.
+static mp_obj_t mod_pool_check(void)
+{
+#if MOYCORE_POOL
+    return MP_OBJ_NEW_SMALL_INT(pool_check());
+#else
+    return MP_OBJ_NEW_SMALL_INT(0);
+#endif
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_pool_check_obj, mod_pool_check);
+
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
@@ -1305,9 +1527,11 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),       MP_ROM_PTR(&mod_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_gc),          MP_ROM_PTR(&mod_gc_obj) },
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
     { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },
     // The snapshot layout, exported so the Python side cannot drift from it.
