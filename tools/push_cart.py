@@ -329,7 +329,16 @@ def main(argv=None):
             except RuntimeError as exc:
                 sys.exit(str(exc))
         else:
-            b.reset()          # verifies identity once the desk is up
+            # A running desk answers and names itself; a reset is for a silent
+            # board only (its boot banner is the other way to learn who it is).
+            # Resetting unconditionally cost the P4 a 60s boot on every push.
+            if b.pyval("1+1", timeout=20) == 2:
+                try:
+                    b.verify_board()
+                except RuntimeError as exc:
+                    sys.exit(str(exc))
+            else:
+                b.reset()
         # The store the CONSOLE says it uses -- the Guition's is conditional on a
         # TF card being present, so asking beats declaring.
         dest = a.dest or (str(b.pyval("str(ws.carts_root)", timeout=20)).rstrip("/")
