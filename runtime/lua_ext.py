@@ -83,8 +83,11 @@ LIBMOY_VERBS = frozenset((
     "cls", "pix", "line", "rect", "rectb", "circ", "circb", "print",
     "camera", "clip", "pal", "palt", "tri", "trib", "sspr", "tline",
     "spr", "map", "mget", "mset",
+    # 2026-09: fillp, oval/ovalb, sget/sset, fget/fset (SPEC.md 6, 7.1),
+    # libmoy's for Lua carts; the Python tier's twins are moybyte's to grow.
+    "fillp", "oval", "ovalb", "sget", "sset", "fget", "fset",
     # 7 input, 8 audio, 9 misc
-    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "flr", "quit",
+    "btn", "btnp", "players", "time", "pmem", "cfg", "rnd", "srand", "flr", "quit",
     "sfx", "music", "beep", "music_stop", "sound_stop", "volume",
     "touch", "key", "keyp", "textmode",
     # core since the layers promotion

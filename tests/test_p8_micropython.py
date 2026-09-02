@@ -170,8 +170,8 @@ def test_the_whole_import_runs_on_micropython(tmp_path, form):
 
     assert got["sections_problem"] is None
     assert got["title"] == "tiny dash"
-    assert got["files"] == ["main.lua", "manifest.json", "map.moymap",
-                            "sounds.json", "sprites.moygfx"]
+    assert got["files"] == ["flags.moyflags", "main.lua", "manifest.json",
+                            "map.moymap", "sounds.json", "sprites.moygfx"]
     assert got["manifest"]["canvas"] == "128x128"
     assert got["manifest"]["main"] == "main.lua"
     assert got["manifest"]["safe_to_share"] is False

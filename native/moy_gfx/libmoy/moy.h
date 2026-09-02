@@ -112,6 +112,22 @@ typedef struct {
     int      clip_x1, clip_y1;
     uint8_t  pal[MOY_PALETTE];   /* draw-time index remap */
     uint8_t  palt[MOY_PALETTE];  /* per-index sprite transparency */
+    /* SPEC.md 6 / 12.1 screen palette: applied by moy_present when the frame
+     * is shown, never while drawing. spal_identity is kept current so a host
+     * can skip the pass, which is every frame of most carts. */
+    uint8_t  spal[MOY_PALETTE];
+    int      spal_identity;
+    /* SPEC.md 6 fill pattern: 16 bits, row-major from the top-left of a 4x4
+     * cell anchored to the SCREEN, a set bit is a hole. A hole pixel takes
+     * colour fillp_col (through pal, at draw time) when that is >= 0 and is
+     * left alone otherwise. 0 is solid, and the only test on a hot path.
+     *
+     * A host that fills a moy_canvas BY HAND for a kernel call, instead of
+     * through moy_canvas_init, must set these two (0 and -1): every shape
+     * verb reads them, and an uninitialised pattern is a circle full of
+     * holes. That is exactly how the reference console found out. */
+    uint16_t fillp;
+    int      fillp_col;
     /* What a colour index becomes in the buffer, with pal already folded in.
      * The ONE thing the two builds disagree about on the hot path, and it is
      * precomputed: every verb writes store[index], so the per-pixel cost is a
@@ -195,9 +211,30 @@ void moy_camera_reset(moy_canvas *c);
 void moy_clip  (moy_canvas *c, int x, int y, int w, int h);
 void moy_clip_reset(moy_canvas *c);
 void moy_pal   (moy_canvas *c, int c0, int c1);
-void moy_pal_reset(moy_canvas *c);
+void moy_pal_reset(moy_canvas *c);          /* BOTH palettes: pal() with no args */
+void moy_pal_screen(moy_canvas *c, int c0, int c1);   /* pal(c0, c1, 1) */
+void moy_pal_screen_reset(moy_canvas *c);
+
+/* The frame as SHOWN (SPEC.md 6, 12.1): the canvas through the screen
+ * palette, written to `out` (w*h pixels, NOT the canvas itself -- the canvas
+ * must keep its drawn indices for a cart that draws incrementally). Returns
+ * 0 when the screen palette is identity and nothing was written: present the
+ * canvas directly. On the RGB565 build the pixels are resolved back through
+ * the wire table (a shared word resolves to the lower index, like moy_pget),
+ * so a host with a direct-colour canvas pays this pass only on frames that
+ * use the verb. */
+int moy_present(const moy_canvas *c, moy_pixel *out);
 void moy_palt  (moy_canvas *c, int col, int on);
 void moy_palt_reset(moy_canvas *c);
+/* The fill pattern (SPEC.md 6): honoured by line, rect, rectb, circ, circb,
+ * tri, trib, oval and ovalb; never by pix, print, cls, sprites or the map.
+ * `col` < 0 leaves hole pixels untouched. */
+void moy_fillp (moy_canvas *c, int p, int col);
+void moy_fillp_reset(moy_canvas *c);
+/* The ellipse inscribed in the w x h box at x, y -- FILLED, and its outline,
+ * which is the fill's own rim pixel for pixel (one walk produces both). */
+void moy_oval  (moy_canvas *c, int x, int y, int w, int h, int col);
+void moy_ovalb (moy_canvas *c, int x, int y, int w, int h, int col);
 
 /* PROVISIONAL -- SPEC.md 6.1 is unsettled and these are not part of core 0.2. */
 void moy_tri   (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int col);
@@ -207,6 +244,9 @@ void moy_trib  (moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, i
 
 void moy_sheet_init(moy_sheet *s, uint8_t *pix);
 int  moy_sheet_pget(const moy_sheet *s, int x, int y);
+/* SPEC.md 7.1 sset: the index is masked to 0-15, a write off the sheet is
+ * dropped, and the next spr of that tile draws it. */
+void moy_sheet_pset(moy_sheet *s, int x, int y, int c);
 
 /* Tile `n` of 0..511 at x,y. `colorkey` is the transparent index or -1 for
  * opaque; `scale` an integer enlargement; `flip` one of MOY_FLIP_*. A tile id
@@ -226,6 +266,14 @@ void moy_mset(moy_map *m, int x, int y, int tile);      /* negative clears */
 void moy_map_draw(moy_canvas *c, const moy_map *m, const moy_sheet *s,
                   int mx, int my, int w, int h, int sx, int sy,
                   int colorkey, int scale);
+/* SPEC.md 7.2 map(..., layers): with `layers` non-zero a cell draws only when
+ * its tile's flag byte shares a bit with it; `flags` is the MOY_FLAGS-byte
+ * table (NULL: no cell passes). layers == 0 is moy_map_draw. */
+#define MOY_FLAGS 512
+void moy_map_draw_layers(moy_canvas *c, const moy_map *m, const moy_sheet *s,
+                         int mx, int my, int w, int h, int sx, int sy,
+                         int colorkey, int scale, int layers,
+                         const uint8_t *flags);
 
 /* Textured line: exactly moy_line's pixels, sampling the MAP as a virtual
  * texture of m->w*8 x m->h*8 pixels. u, v, du, dv are 16.16 fixed point --
@@ -321,6 +369,10 @@ typedef struct {
     moy_canvas *canvas;
     moy_sheet  *sheet;
     moy_map    *map;
+    /* SPEC.md 3.5 tile flags: MOY_FLAGS bytes, YOURS, or NULL for a host
+     * with none -- then fget reads 0, fset is a no-op and a non-zero map
+     * layer mask draws nothing. */
+    uint8_t    *flags;
     moy_host    host;
     uint32_t    rng;        /* see moy_rnd */
     /* SPEC.md 6, the always-present half. A cart calls view() or background()
@@ -356,6 +408,26 @@ int moy_lua_open(struct lua_State *L, moy_console *con);
 int moy_lua_init  (struct lua_State *L, char *err, size_t errlen);
 int moy_lua_update(struct lua_State *L, float dt, char *err, size_t errlen);
 int moy_lua_draw  (struct lua_State *L, char *err, size_t errlen);
+
+/* -- the PICO-8 machine, for ported carts (src/moy_p8.c, PICO8.md) --------
+ *
+ * OPT-IN and not part of SPEC.md: a host that calls moy_p8_open offers the
+ * `__moy_*` globals the p8 port shim probes for -- a 64 KB memory map with
+ * the sheet, map, flags, palettes, camera/clip and the screen behind their
+ * PICO-8 addresses, the ROM snapshot reload()/cstore() copy from, and the
+ * 3x5 system font. Both buffers are YOURS (libmoy allocates nothing):
+ * MOY_P8_MEM bytes of memory and MOY_P8_ROM of ROM, or NULL for no ROM.
+ * Call it after moy_lua_open and before the cart's source runs; it seeds
+ * memory from the console's assets as they stand. */
+#define MOY_P8_MEM 0x10000
+#define MOY_P8_ROM 0x4300
+typedef struct {
+    moy_console *con;
+    uint8_t *mem;
+    uint8_t *rom;
+} moy_p8;
+int moy_p8_open(struct lua_State *L, moy_console *con, moy_p8 *p8,
+                uint8_t *mem, uint8_t *rom);
 #endif
 
 /* -- palette and font (SPEC.md 2, 6) ------------------------------------- */

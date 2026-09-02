@@ -133,6 +133,13 @@ static inline void mg_canvas(moy_canvas *c, uint16_t *dst, int dw, size_t cap,
     c->clip_x0 = cx0;
     c->clip_y0 = cy0;
     c->clip_x1 = cx1;
+    // The draw state libmoy grew in 2026-09 and every shape kernel reads: a
+    // canvas built here by hand rather than through moy_canvas_init must say
+    // "solid" itself, or the kernel reads a stack pattern and draws holes.
+    // (It did: the semantic pin caught a circle with 383 of them.)
+    c->fillp = 0;
+    c->fillp_col = -1;
+    c->spal_identity = 1;
     c->clip_y1 = cy1;
     /* pal is already folded into `lut` by the Python side (_wire_pal), so
      * store[] IS that table and pal[] stays identity -- libmoy reads store[] on

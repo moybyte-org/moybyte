@@ -28,7 +28,6 @@ MOY_LUA_VM_SRCS := $(filter-out \
 	$(MOY_LUA_MOD_DIR)/lua/loslib.c \
 	$(MOY_LUA_MOD_DIR)/lua/loadlib.c \
 	$(MOY_LUA_MOD_DIR)/lua/ldblib.c \
-	$(MOY_LUA_MOD_DIR)/lua/lcorolib.c \
 	$(MOY_LUA_MOD_DIR)/lua/lutf8lib.c \
 	, $(wildcard $(MOY_LUA_MOD_DIR)/lua/*.c))
 SRC_USERMOD_LIB_C += $(MOY_LUA_VM_SRCS)

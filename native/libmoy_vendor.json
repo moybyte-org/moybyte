@@ -4,17 +4,18 @@
     "native/moy_audio/libmoy/moy_audio.c": "e502649651c6d0dad305ae901abd14be236d2f97e15343aeadd19dffa5a0b302",
     "native/moy_audio/libmoy/moy_audio.h": "cc54bda1648e3159bd0d98701ad8f492efd43b6f1e2304f92ca5032fb578b910",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moy_gfx/libmoy/moy.h": "0d097b1e12ae21fbfc29930778fc4c582b04b4c051b283ed0041415773f5bf36",
-    "native/moy_gfx/libmoy/moy_canvas.c": "3daca6597183de95ec10b216dc6e5b79bbe8aa62a9fa9a33ead666c47753aee4",
+    "native/moy_gfx/libmoy/moy.h": "7a4dcd65bb46e6871239256e2ea1c03086f5b0210de1754a27ef044887870242",
+    "native/moy_gfx/libmoy/moy_canvas.c": "d801c5da594c7f975667768bf923a3914ef060b7b21edda7730c673ba3e34a55",
     "native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
-    "native/moy_gfx/libmoy/moy_pixel.h": "6fbf26844e06f6f5ecd50e80b984e5216be6cb81475255de79f0caf957f77ee6",
-    "native/moy_gfx/libmoy/moy_sprite.c": "b4b89c7ab1614831cc00e9bf3a3d6d4439bd5ac952003376d9f675c6c2416105",
+    "native/moy_gfx/libmoy/moy_pixel.h": "46cf4139a46bbf8f641e8f9ec98982ff21482734d352b196b40b86fd82a17d40",
+    "native/moy_gfx/libmoy/moy_sprite.c": "5d95ef9aeb5d2322511ca58a6223b63af01a5dd0d9fdcb516022be9519c9ec57",
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moycore/libmoy/moy_lua.c": "baefceacd65490d97751eb3f2be70aff5a485f61b1f4fc51dfc2b6e13ac86874"
+    "native/moycore/libmoy/moy_lua.c": "2b0db7cd8b3ed48a01a06b7556c4c1adc46a4601e0c67664256a9077b1a9e93a",
+    "native/moycore/libmoy/moy_p8.c": "35a68db81e7a6bba9f01e40bf8476c113edc5d723e9b7f1c3641aba1cd3cafe4"
   },
   "upstream": {
-    "commit": "09dae1af25de1e7de2574ef89521f81adccb8bb1",
-    "date": "2026-08-31",
+    "commit": "b1f94ee553693d54413e88ac16d393757bef41ae",
+    "date": "2026-09-02",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"
   }

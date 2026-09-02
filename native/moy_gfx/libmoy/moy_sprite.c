@@ -67,6 +67,12 @@ int moy_sheet_pget(const moy_sheet *s, int x, int y)
     return s->pix[y * MOY_SHEET_W + x];
 }
 
+void moy_sheet_pset(moy_sheet *s, int x, int y, int c)
+{
+    if (x < 0 || x >= MOY_SHEET_W || y < 0 || y >= MOY_SHEET_H) return;
+    s->pix[y * MOY_SHEET_W + x] = (uint8_t)(c & 15);
+}
+
 void moy_spr(moy_canvas *c, const moy_sheet *s, int n, int x, int y,
              int colorkey, int scale, int flip)
 {
@@ -319,23 +325,34 @@ void moy_mset(moy_map *m, int x, int y, int tile)
     m->cells[y * m->w + x] = (uint8_t)(tile + 1);
 }
 
-void moy_map_draw(moy_canvas *c, const moy_map *m, const moy_sheet *s,
-                  int mx, int my, int w, int h, int sx, int sy,
-                  int colorkey, int scale)
+void moy_map_draw_layers(moy_canvas *c, const moy_map *m, const moy_sheet *s,
+                         int mx, int my, int w, int h, int sx, int sy,
+                         int colorkey, int scale, int layers,
+                         const uint8_t *flags)
 {
     /* Straight per-cell blit through moy_spr, so camera, clip, pal and palt all
      * apply and a map tile is pixel-identical to the same tile drawn by hand.
      * Empty cells are skipped, leaving whatever was underneath -- which is what
-     * makes a tilemap composable with a background. */
+     * makes a tilemap composable with a background. A layer mask (SPEC.md 7.2)
+     * skips the cells whose tile carries none of its bits. */
     int cy, cx, step;
     if (scale < 1) scale = 1;
+    layers &= 0xFF;
     step = MOY_TILE * scale;
     for (cy = 0; cy < h; cy++) {
         for (cx = 0; cx < w; cx++) {
             int tid = moy_mget(m, mx + cx, my + cy);
             if (tid < 0) continue;
+            if (layers && (!flags || (flags[tid] & layers) == 0)) continue;
             moy_spr(c, s, tid, sx + cx * step, sy + cy * step,
                     colorkey, scale, MOY_FLIP_NONE);
         }
     }
+}
+
+void moy_map_draw(moy_canvas *c, const moy_map *m, const moy_sheet *s,
+                  int mx, int my, int w, int h, int sx, int sy,
+                  int colorkey, int scale)
+{
+    moy_map_draw_layers(c, m, s, mx, my, w, h, sx, sy, colorkey, scale, 0, NULL);
 }

@@ -106,26 +106,8 @@ STUBBED = "stubbed"
 # what that bought was measured -- across twelve well-known carts, fillp alone
 # was called by six of them and stopped every one.
 SHIM_GAPS = {
-    # The console's Lua opens base, math, string and table and NOT coroutine
-    # (libmoy/moy_lua.c), so these are not renames waiting to happen -- the
-    # name `coroutine` does not exist to rename FROM. Opening the library is a
-    # one-line spec decision.
-    "cocreate": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's coroutines -- the console's Lua does not "
-                          "open the coroutine library, so rewrite that part as "
-                          "a state machine driven from _update()"),
-    "coresume": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's coroutines -- the console's Lua does not "
-                          "open the coroutine library, so rewrite that part as "
-                          "a state machine driven from _update()"),
-    "costatus": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                          "PICO-8's coroutines -- the console's Lua does not "
-                          "open the coroutine library, so rewrite that part as "
-                          "a state machine driven from _update()"),
-    "yield": (MISSING, "cocreate()/coresume()/costatus()/yield() are "
-                       "PICO-8's coroutines -- the console's Lua does not "
-                       "open the coroutine library, so rewrite that part as "
-                       "a state machine driven from _update()"),
+    # cocreate/coresume/costatus/yield left this table on 2026-09-02: SPEC.md
+    # 4.1 admits `coroutine`, libmoy opens it, and the shim aliases the four.
     "reboot": (MISSING, "reboot()/load() restart the machine or swap the cart "
                         "-- the launcher does that here; from inside a cart, "
                         "reset your own state instead"),
@@ -329,6 +311,11 @@ def write_cart(sections, out_dir, title):
         "files": files,
         "sfx": wrote["sfx"],
         "music": wrote["music"],
+        # The importer's VERDICT (moy-spec PICO8.md): "runs", "gaps" or
+        # "refused", with the reasons the porter read off the cart's code.
+        # The upstream verdict is decided before the write; here the write
+        # has happened, so a refused cart is the caller's to remove.
+        "verdict": wrote["verdict"],
     }
 
     summary["imported"].append(
@@ -430,6 +417,9 @@ def report_lines(summary):
     because a kid who opens it finds Lua and deserves to know why."""
     out = ['"%s" imported.' % summary.get("title", "cart")]
     out.append("Its code is the cart's own Lua, under a PICO-8 shim.")
+    verdict = summary.get("verdict")
+    if verdict:
+        out.extend(p8_lua_port.verdict_lines(verdict))
     n_sfx = summary.get("sfx") or 0
     n_music = summary.get("music") or 0
     if n_sfx or n_music:

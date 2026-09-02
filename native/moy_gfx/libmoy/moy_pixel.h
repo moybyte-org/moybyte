@@ -36,6 +36,11 @@
 typedef struct {
     moy_pixel *pix;
     int cw, cam_x, cam_y, cx0, cy0, cx1, cy1;
+    /* The fill pattern, for the SHAPE verbs only (SPEC.md 6): pat == 0 is
+     * solid and costs one test; a hole pixel takes `hole` when hole_on. */
+    unsigned pat;
+    int hole_on;
+    moy_pixel hole;
 } moy_ds;
 
 static inline moy_ds moy_ds_of(const moy_canvas *c)
@@ -45,7 +50,55 @@ static inline moy_ds moy_ds_of(const moy_canvas *c)
     d.cam_x = c->cam_x; d.cam_y = c->cam_y;
     d.cx0 = c->clip_x0; d.cy0 = c->clip_y0;
     d.cx1 = c->clip_x1; d.cy1 = c->clip_y1;
+    d.pat = c->fillp;
+    d.hole_on = c->fillp_col >= 0;
+    d.hole = c->store[c->fillp_col & 63];
     return d;
+}
+
+/* Is screen pixel (x, y) a hole of pattern `pat`? Bit 15 is the top-left of
+ * the 4x4 cell, reading order, anchored to the screen. */
+static inline int moy_pat_hole(unsigned pat, int x, int y)
+{
+    return (int)((pat >> (15 - ((y & 3) << 2) - (x & 3))) & 1u);
+}
+
+/* moy_ds_put for the shape verbs: the fill pattern applies. */
+static inline void moy_ds_put_shape(const moy_ds *d, int x, int y, moy_pixel v)
+{
+    x -= d->cam_x;
+    y -= d->cam_y;
+    if (x < d->cx0 || x >= d->cx1 || y < d->cy0 || y >= d->cy1) return;
+    if (d->pat && moy_pat_hole(d->pat, x, y)) {
+        if (!d->hole_on) return;
+        v = d->hole;
+    }
+    d->pix[(size_t)y * (size_t)d->cw + (size_t)x] = v;
+}
+
+static inline void moy_fill(moy_pixel *dst, moy_pixel v, size_t n);
+
+/* An already-clipped SCREEN-space span for a shape verb: n pixels from
+ * (px0, py). Solid is moy_fill; a pattern walks the row. */
+static inline void moy_ds_span(const moy_ds *d, int px0, int py, size_t n, moy_pixel v)
+{
+    moy_pixel *row = d->pix + (size_t)py * (size_t)d->cw + (size_t)px0;
+    if (!d->pat) {
+        moy_fill(row, v, n);
+        return;
+    }
+    {
+        unsigned rowbits = (d->pat >> (12 - ((py & 3) << 2))) & 15u;
+        size_t i;
+        for (i = 0; i < n; i++) {
+            int x = px0 + (int)i;
+            if ((rowbits >> (3 - (x & 3))) & 1u) {
+                if (d->hole_on) row[i] = d->hole;
+            } else {
+                row[i] = v;
+            }
+        }
+    }
 }
 
 static inline void moy_ds_put(const moy_ds *d, int x, int y, moy_pixel v)

@@ -265,7 +265,8 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     import_p8.import_p8(str(p8), str(out))
 
     names = sorted(p.name for p in out.iterdir())
-    assert names == ["main.lua", "manifest.json", "map.moymap",
+    # flags.moyflags since 2026-09: SPEC.md 3.5's sidecar, __gff__ byte for byte.
+    assert names == ["flags.moyflags", "main.lua", "manifest.json", "map.moymap",
                      "sounds.json", "sprites.moygfx"]
     head, first = (out / "map.moymap").read_text(
         encoding="utf-8").split("\n")[:2]

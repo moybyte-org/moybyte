@@ -78,6 +78,7 @@ VENDOR = {
     # API, so this is the established shape and not a new one.
     os.path.join(NATIVE, "moycore", "libmoy"): {
         "moy_lua.c": "libmoy/src/moy_lua.c",
+        "moy_p8.c": "libmoy/src/moy_p8.c",
         "LICENSE": "LICENSE",
     },
 }

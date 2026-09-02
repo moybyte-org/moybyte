@@ -62,7 +62,7 @@ _CFLAGS = native_build.BASE_CFLAGS + [
 # linit.c, whose luaL_openlibs references all of them -- stay out entirely, so
 # there is no reachable implementation to be re-exposed by accident.
 _LUA_SKIP = ("linit.c", "liolib.c", "loslib.c", "loadlib.c", "ldblib.c",
-             "lcorolib.c", "lutf8lib.c", "lua.c", "luac.c", "onelua.c")
+             "lutf8lib.c", "lua.c", "luac.c", "onelua.c")
 
 _RASTER = ("moy.h", "moy_pixel.h", "moy_canvas.c", "moy_sprite.c", "moy_data.c")
 
@@ -90,7 +90,7 @@ def build(verbose=False):
     lua = _lua_names()
     if not lua or not os.path.isfile(os.path.join(_BINDING_DIR, "moy_lua.c")):
         return None
-    names = list(_RASTER) + ["moy_lua.c"] + lua
+    names = list(_RASTER) + ["moy_lua.c", "moy_p8.c"] + lua
     return native_build.build(
         "moyhost_lua", _SHIM, names, _CACHE, cflags=_CFLAGS,
         libmoy_dir=(_LIBMOY, _BINDING_DIR, _LUA),

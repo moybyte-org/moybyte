@@ -1264,6 +1264,11 @@ do
   local m_camera = camera
   local m_rect, m_rectb = rect, rectb
   local m_circ, m_circb = circ, circb
+  -- The 2026-09 core verbs: nil on a host that predates them, and every use
+  -- below is guarded so the cart still runs there.
+  local m_oval, m_ovalb, m_fillp = oval, ovalb, fillp
+  local m_sget, m_sset, m_palt = sget, sset, palt
+  local m_fget, m_fset, m_map = fget, fset, map
   local m_sfx = sfx
   local m_music, m_music_stop = music, music_stop
   -- The data tables (emitted ABOVE the shim) and the stdlib verbs, captured
@@ -1339,7 +1344,14 @@ do
   -- popup draws with color 7+flash%2). The moy engine takes integer indices,
   -- so this shim floors at the boundary.
   local mfloor = math.floor
-  local function fl(v) return mfloor(v or 0) end
+  -- p8 coerces every API number argument: nil is 0, a numeric string is its
+  -- number, and anything else (`pset(x, y, color)` -- the API function, a
+  -- typo for a `colour` parameter, live in `picooffroad`) is 0 rather than
+  -- an error.
+  local function fl(v)
+    if type(v) ~= "number" then v = tonumber(v) or 0 end
+    return mfloor(v)
+  end
 
   -- Declared HERE, above the fill verbs that read it. It was declared beside
   -- fillp() further down, which is after rectfill -- so rectfill closed over
@@ -1347,6 +1359,33 @@ do
   -- code that tested green by doing nothing. A test that filled the screen
   -- and looked at it is what caught that.
   local fill_pattern, fill_transparent = 0, false
+  -- p8's pen: the colour a draw verb uses when the cart passes none, and
+  -- its print cursor.
+  local p8_pen = 6
+  local p8_cx, p8_cy = 0, 0
+
+  -- A p8 COLOUR argument is a byte: the low nibble draws; bit 7 picks the
+  -- secret palette, which this port ships at indices 16-31 (SPEC.md 2.2);
+  -- and, when a fill pattern is set, the high nibble is the colour the
+  -- pattern's holes take -- unless the pattern's 0x0.8 bit says they are
+  -- transparent. On a host with the console's fillp that is one call per
+  -- shape; the older host keeps its transparent-pattern-draws-nothing.
+  local function pcol(c)
+    c = fl(c == nil and p8_pen or c)
+    if c >= 128 then return 16 + (c & 15) end
+    return c & 15
+  end
+  local function shape_col(c)
+    c = fl(c == nil and p8_pen or c)
+    if fill_pattern ~= 0 and m_fillp ~= nil then
+      m_fillp(fill_pattern, fill_transparent and -1 or ((c >> 4) & 15))
+    end
+    if c >= 128 then return 16 + (c & 15) end
+    return c & 15
+  end
+  local function fill_skip()
+    return fill_transparent and (m_fillp == nil or fill_pattern == 0xffff)
+  end
 
   -- Every P8SCII picture character, as a global holding its own code. The
   -- porter renames a glyph in the cart's code to one of these, so a cart that
@@ -1365,8 +1404,9 @@ do
   -- gets them here). p8 angles are TURNS (0..1) and sin is flipped (+y down).
   function sin(t) return -msin((t or 0) * 6.283185307179586) end
   function cos(t) return mcos((t or 0) * 6.283185307179586) end
-  flr = math.floor
-  abs = math.abs
+  local mabs = math.abs
+  function flr(v) return mfloor(v or 0) end
+  function abs(v) return mabs(v or 0) end
   -- p8 coerces nil to 0 in arithmetic, so `min(nil, 5)` is 0 there and an
   -- error in Lua. `dank_tomb` stops on its first frame otherwise, and the
   -- message has no line number in it -- the error is raised inside math.min,
@@ -1385,13 +1425,13 @@ do
     w = w or 1
     h = h or 1
     if w == 1 and h == 1 then
-      m_spr(n, x, y, 0, 1, flip)               -- p8 color 0 is transparent
+      m_spr(n, x, y, -1, 1, flip)              -- transparency is palt state
     else
       for ty = 0, h - 1 do
         for tx = 0, w - 1 do
           local cx = fx and (w - 1 - tx) or tx
           local cy = fy and (h - 1 - ty) or ty
-          m_spr(n + cx + cy * 16, x + tx * 8, y + ty * 8, 0, 1, flip)
+          m_spr(n + cx + cy * 16, x + tx * 8, y + ty * 8, -1, 1, flip)
         end
       end
     end
@@ -1399,23 +1439,27 @@ do
 
   -- p8 rect/circ are OUTLINES and rectangles take the far corner
   function rectfill(x0, y0, x1, y1, c)
-    if fill_transparent then return end
+    if fill_skip() then return end
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
-    m_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, fl(c))
+    m_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, shape_col(c))
   end
   function rect(x0, y0, x1, y1, c)
+    if fill_skip() then return end
     x0 = fl(x0) y0 = fl(y0) x1 = fl(x1) y1 = fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
     if y1 < y0 then y0, y1 = y1, y0 end
-    m_rectb(x0, y0, x1 - x0 + 1, y1 - y0 + 1, fl(c))
+    m_rectb(x0, y0, x1 - x0 + 1, y1 - y0 + 1, shape_col(c))
   end
   function circfill(x, y, r, c)
-    if fill_transparent then return end
-    m_circ(fl(x), fl(y), fl(r), fl(c))
+    if fill_skip() then return end
+    m_circ(fl(x), fl(y), fl(r), shape_col(c))
   end
-  function circ(x, y, r, c) m_circb(fl(x), fl(y), fl(r), fl(c)) end
+  function circ(x, y, r, c)
+    if fill_skip() then return end
+    m_circb(fl(x), fl(y), fl(r), shape_col(c))
+  end
   -- SPEC.md 6 gives `print` fixed 8px glyphs -- TWICE the size p8 meant on a
   -- native 128px raster, and celeste's memorial letters its text at the p8
   -- 4px advance (8px glyphs smear into each other). So the port carries the
@@ -1460,10 +1504,23 @@ do
   local BTN_GLYPH = {[139] = 60, [145] = 62, [148] = 94, [131] = 118,
                      [142] = 65, [151] = 66}
   local sbyte = string.byte
+  local m_p8print = __moy_p8print
   function print(s, x, y, c)
     s = tostring(s)
-    c = c == nil and 7 or fl(c)
+    -- print(s) and print(s, c) take the cursor and advance it a line, as
+    -- PICO-8 does (without its scrolling); the four-argument form is placed.
+    if y == nil then
+      c = x
+      x, y = p8_cx, p8_cy
+      p8_cy = p8_cy + 6
+    end
+    c = pcol(c)
     local lx = fl(x)
+    if m_p8print ~= nil then
+      -- The console draws the PICO-8 font itself (moy_p8.c): one call for the
+      -- string instead of fifteen pix() calls a glyph.
+      return m_p8print(s, lx, fl(y), c)
+    end
     local cx, cy = lx, fl(y)
     for i = 1, #s do
       local b = sbyte(s, i)
@@ -1500,28 +1557,68 @@ do
   end
 
   local m_pal = pal
-  function pal(a, b)
-    if a == nil then m_pal() return end
+  -- p8's pal() with no arguments resets BOTH palettes and the transparency
+  -- (colour 0 transparent, the rest opaque); the console's resets one.
+  local function p8_palt_default()
+    m_palt()
+    m_palt(0, true)
+  end
+  -- The SCREEN palette, pal(c0, c1, 1): p8 keeps it across frames (a cart
+  -- sets its fade once and draws), the console resets draw state every
+  -- frame -- so it is remembered here and re-applied at the top of _draw.
+  local spal, spal_live = {}, false
+  local function spal_set(c0, c1)
+    spal[c0] = c1
+    spal_live = true
+    m_pal(c0, c1, 1)
+  end
+  local function spal_apply()
+    if not spal_live then return end
+    for i = 0, 15 do
+      local v = spal[i]
+      if v ~= nil and v ~= i then m_pal(i, v, 1) end
+    end
+  end
+  function pal(a, b, p)
+    if a == nil then m_pal() spal, spal_live = {}, false p8_palt_default() return end
     if type(a) == "table" then
       -- p8 0.2.0's TABLE form: a whole palette in one call. A table with a
       -- [0] entry keys by colour directly; a plain array maps its i-th entry
       -- onto colour i-1. Carts use it for per-scene recolours, and floor()ing
       -- a table is what stopped two of them on their first frame.
       local shift = (a[0] ~= nil) and 0 or 1
+      local screen = (b == 1)
       for k, v in pairs(a) do
         if type(k) == "number" and type(v) == "number" then
-          m_pal(fl(k) - shift, fl(v))
+          if screen then spal_set(fl(k) - shift, pcol(v))
+          else m_pal(fl(k) - shift, pcol(v)) end
         end
       end
       return
     end
-    m_pal(fl(a), fl(b))
+    if p == 1 then spal_set(fl(a) & 15, pcol(b)) return end
+    m_pal(fl(a) & 15, pcol(b))
   end
-  function pset(x, y, c) m_pix(fl(x), fl(y), fl(c)) end
+  -- palt(): p8's default is colour 0 transparent; palt(c, t) sets one;
+  -- palt(bits) (0.2.0) sets all sixteen from a bitfield, bit 15 = colour 0.
+  -- Transparency is STATE here rather than a colorkey on every spr, so
+  -- `palt(0, false)` really does draw a sprite's black pixels.
+  function palt(c, t)
+    if c == nil then p8_palt_default() return end
+    if t == nil then
+      local bits = fl(c)
+      m_palt()
+      for i = 0, 15 do m_palt(i, (bits >> (15 - i)) & 1 == 1) end
+      return
+    end
+    m_palt(fl(c) & 15, t and true or false)
+  end
+  function pset(x, y, c) m_pix(fl(x), fl(y), pcol(c)) end
   function pget(x, y) return m_pix(fl(x), fl(y)) end
   local m_line = line
   function line(x0, y0, x1, y1, c)
-    m_line(fl(x0), fl(y0), fl(x1), fl(y1), fl(c))
+    if fill_skip() then return end
+    m_line(fl(x0), fl(y0), fl(x1), fl(y1), shape_col(c))
   end
 
   function sfx(n) if n and n >= 0 then m_sfx(fl(n)) end end
@@ -1706,14 +1803,40 @@ do
       prev = dx
     end
   end
-  function oval(x0, y0, x1, y1, col) _oval(x0, y0, x1, y1, col, false) end
-  function ovalfill(x0, y0, x1, y1, col) _oval(x0, y0, x1, y1, col, true) end
+  -- The console's own kernel where it has one (SPEC.md 6, 2026-09); the
+  -- row-by-row Lua above on a host that predates it.
+  local function _oval_box(x0, y0, x1, y1)
+    x0, y0, x1, y1 = fl(x0), fl(y0), fl(x1), fl(y1)
+    if x1 < x0 then x0, x1 = x1, x0 end
+    if y1 < y0 then y0, y1 = y1, y0 end
+    return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+  end
+  function oval(x0, y0, x1, y1, col)
+    if m_ovalb == nil then _oval(x0, y0, x1, y1, col, false) return end
+    if fill_skip() then return end
+    local x, y, w, h = _oval_box(x0, y0, x1, y1)
+    m_ovalb(x, y, w, h, shape_col(col))
+  end
+  function ovalfill(x0, y0, x1, y1, col)
+    if m_oval == nil then _oval(x0, y0, x1, y1, col, true) return end
+    if fill_skip() then return end
+    local x, y, w, h = _oval_box(x0, y0, x1, y1)
+    m_oval(x, y, w, h, shape_col(col))
+  end
 
   -- The rest of PICO-8's surface that is plain Lua or plain arithmetic. None
   -- of these needed a console verb; they were simply never written down, so a
   -- cart calling one crashed with nothing said at import time.
   ceil = math.ceil
   function srand(x) return mrandomseed(flr(x or 0)) end
+  -- COROUTINES: p8's names for Lua's own library, which SPEC.md 4.1 admits
+  -- (2026-09-02). Guarded, because a host on an older binding still nils it,
+  -- and a nil-guarded alias is a nil call at the site instead of at load.
+  if coroutine ~= nil then
+    cocreate, coresume, costatus, yield = coroutine.create, coroutine.resume,
+                                          coroutine.status, coroutine.yield
+    coclose = coroutine.close
+  end
   function deli(t, i)
     if t == nil then return nil end
     if i == nil then i = #t end
@@ -1779,7 +1902,7 @@ do
     local f = 0
     if fx then f = f + 1 end
     if fy then f = f + 2 end
-    m_sspr(sx, sy, sw, sh, dx, dy, dw or sw, dh or sh, 0, f)
+    m_sspr(sx, sy, sw, sh, dx, dy, dw or sw, dh or sh, -1, f)
   end
 
   -- map + flags: the map DATA now ships as map.moymap (the console's own
@@ -1795,36 +1918,64 @@ do
   -- harmless no-op where we cannot. The import report says which is which, so
   -- a cart that comes out looking wrong says so on the way in.
 
-  -- 64K of SCRATCH memory, sparse. It is not the console's memory and cannot
-  -- be: nothing here is mapped to the screen, the sheet or the map. A cart
-  -- using peek/poke for its OWN bookkeeping (most of them, most of the time)
-  -- works exactly; a cart poking a hardware register gets a register that
-  -- remembers what it was told and affects nothing.
-  local p8mem = {}
-  -- SCRATCH, and deliberately not mapped to the map or the sheet.
-  --
-  -- Routing 0x2000..0x2fff to the real map was tried on 2026-09-01 and
-  -- REVERTED, measured: it is p8's map region, but a cart that does not use
-  -- the tilemap uses those bytes as free memory, and `picooffroad` does --
-  -- reading real tiles where it expected its own scratch turned its track
-  -- into garbage. It bought nothing either; `dank_tomb`, the cart it was for,
-  -- only moved to a different error. Guessing at memory SEMANTICS from an
-  -- address is what that mapping was, and the address does not carry them.
-  local function _mrd(a) return p8mem[a] or 0 end
-  local function _mwr(a, v)
-    if a >= 0 and a < 0x8000 then p8mem[a] = v & 0xff end
-  end
-  function peek(a, n)
-    a = fl(a)
-    if n == nil or n <= 1 then return _mrd(a) end
-    local out = {}
-    for i = 0, fl(n) - 1 do out[i + 1] = _mrd(a + i) end
-    return table.unpack(out)
-  end
-  function poke(a, ...)
-    a = fl(a)
-    local n = select("#", ...)
-    for i = 1, n do _mwr(a + i - 1, fl(select(i, ...) or 0)) end
+  -- MEMORY. A host carrying PICO-8's memory map in C (`__moy_poke` and its
+  -- siblings: sheet, map, flags, draw palette, camera/clip and the SCREEN
+  -- behind their PICO-8 addresses) gets every memory verb routed to it, one
+  -- binding call per byte -- ~0.9us on the P4, ~1.5us on the S3 boards,
+  -- against 8-13us for the sparse table below. Without it: 64K of SCRATCH,
+  -- sparse -- a cart's own bookkeeping works exactly, a poke at hardware is
+  -- remembered and affects nothing. (Routing only 0x2000 to the real map
+  -- through THIS table was tried and reverted: `picooffroad` uses the region
+  -- as free memory, and two stores in two encodings is the seam that broke.)
+  local _mrd, _mwr
+  if __moy_poke ~= nil then
+    local cpeek, cpoke = __moy_peek, __moy_poke
+    local cmemcpy, cmemset = __moy_memcpy, __moy_memset
+    _mrd, _mwr = cpeek, cpoke
+    function peek(a, n)
+      if n == nil or n <= 1 then return cpeek(a) end
+      local out = {}
+      for i = 0, fl(n) - 1 do out[i + 1] = cpeek(a + i) end
+      return table.unpack(out)
+    end
+    function poke(a, v, ...)
+      cpoke(a, v or 0)
+      local n = select("#", ...)
+      for i = 1, n do cpoke(a + i, select(i, ...) or 0) end
+    end
+    function memcpy(dst, src, len) cmemcpy(dst, src, len or 0) end
+    function memset(dst, val, len) cmemset(dst, val or 0, len or 0) end
+  else
+    local p8mem = {}
+    _mrd = function(a) return p8mem[a] or 0 end
+    _mwr = function(a, v)
+      if a >= 0 and a < 0x8000 then p8mem[a] = v & 0xff end
+    end
+    function peek(a, n)
+      a = fl(a)
+      if n == nil or n <= 1 then return _mrd(a) end
+      local out = {}
+      for i = 0, fl(n) - 1 do out[i + 1] = _mrd(a + i) end
+      return table.unpack(out)
+    end
+    function poke(a, ...)
+      a = fl(a)
+      local n = select("#", ...)
+      for i = 1, n do _mwr(a + i - 1, fl(select(i, ...) or 0)) end
+    end
+    function memcpy(dst, src, len)
+      dst, src, len = fl(dst), fl(src), fl(len or 0)
+      if dst == src or len <= 0 then return end
+      if dst < src then
+        for i = 0, len - 1 do _mwr(dst + i, _mrd(src + i)) end
+      else
+        for i = len - 1, 0, -1 do _mwr(dst + i, _mrd(src + i)) end
+      end
+    end
+    function memset(dst, val, len)
+      dst, val, len = fl(dst), fl(val or 0), fl(len or 0)
+      for i = 0, len - 1 do _mwr(dst + i, val) end
+    end
   end
   function peek2(a) a = fl(a) local v = _mrd(a) | (_mrd(a + 1) << 8)
     if v >= 0x8000 then v = v - 0x10000 end return v end
@@ -1837,19 +1988,6 @@ do
     local raw = fl((v or 0) * 65536) & 0xffffffff
     _mwr(a, raw & 0xff) _mwr(a+1, (raw>>8) & 0xff)
     _mwr(a+2, (raw>>16) & 0xff) _mwr(a+3, (raw>>24) & 0xff) end
-  function memcpy(dst, src, len)
-    dst, src, len = fl(dst), fl(src), fl(len or 0)
-    if dst == src or len <= 0 then return end
-    if dst < src then
-      for i = 0, len - 1 do _mwr(dst + i, _mrd(src + i)) end
-    else
-      for i = len - 1, 0, -1 do _mwr(dst + i, _mrd(src + i)) end
-    end
-  end
-  function memset(dst, val, len)
-    dst, val, len = fl(dst), fl(val or 0), fl(len or 0)
-    for i = 0, len - 1 do _mwr(dst + i, val) end
-  end
 
   -- SAVE DATA is the one that can be honest all the way down: p8's 64 cartdata
   -- slots and the console's pmem are the same shape, so a cart's progress
@@ -1894,8 +2032,12 @@ do
   -- than the flat fill everything else gets.
   function fillp(p)
     p = p or 0
-    fill_pattern = p
+    if type(p) ~= "number" then p = tonumber(p) or 0 end
+    fill_pattern = mfloor(p) & 0xffff
     fill_transparent = (p % 1) >= 0.5
+    -- The console holds the pattern as draw state; a shape re-applies a live
+    -- one before it draws (shape_col), so only the RESET needs saying now.
+    if fill_pattern == 0 and m_fillp ~= nil then m_fillp() end
   end
 
   -- The SHEET is a file here, not memory. sget reads back 0 rather than
@@ -1923,19 +2065,56 @@ do
     sheet[y + 1] = string.sub(row, 1, x) .. string.sub(HEXD, c + 1, c + 1)
                    .. string.sub(row, x + 2)
   end
-  function fset(n, f, v) end
+  if m_sget ~= nil then
+    -- The console's own sheet verbs (SPEC.md 7.1, 2026-09): what sset writes
+    -- is what spr draws, and the baked copy above is only for older hosts.
+    function sget(x, y) return m_sget(fl(x), fl(y)) end
+    function sset(x, y, c) m_sset(fl(x), fl(y), fl(c == nil and p8_pen or c)) end
+  end
+  if __moy_poke ~= nil then
+    -- The sheet IS memory here (0x0000..0x1fff, two pixels a byte), so an
+    -- sset is what spr() draws next frame -- the approximation above is gone.
+    local cpeek, cpoke = __moy_peek, __moy_poke
+    function sget(x, y)
+      x, y = fl(x), fl(y)
+      if x < 0 or x > 127 or y < 0 or y > 127 then return 0 end
+      local b = cpeek(y * 64 + (x >> 1))
+      if x & 1 == 1 then return b >> 4 end
+      return b & 15
+    end
+    function sset(x, y, c)
+      x, y = fl(x), fl(y)
+      if x < 0 or x > 127 or y < 0 or y > 127 then return end
+      c = fl(c or 6) % 16
+      local a = y * 64 + (x >> 1)
+      local b = cpeek(a)
+      if x & 1 == 1 then cpoke(a, (b & 0x0f) | (c << 4))
+      else cpoke(a, (b & 0xf0) | c) end
+    end
+  end
   -- There is no ROM to re-read, and no terminal behind a cart.
-  function reload(...) end
-  function cstore(...) end
+  if __moy_reload ~= nil then
+    -- The cart ROM is the seeded memory image on a host with the C map, so
+    -- reload() really does bring the art, the map and the flags back (and
+    -- a partial reload(dst, src, len) fetches a slice, which is how a cart
+    -- streams tracks or levels out of its own map data). cstore() writes the
+    -- snapshot only; nothing persists to the cart file.
+    local creload, ccstore = __moy_reload, __moy_cstore
+    function reload(dst, src, len) creload(dst or 0, src or 0, len) end
+    function cstore(dst, src, len) ccstore(dst or 0, src or 0, len) end
+  else
+    function reload(...) end
+    function cstore(...) end
+  end
   function printh(...) end
   function extcmd(...) end
   -- The console calls _draw() for you, so there is nothing to wait for.
   function flip() end
   function holdframe() end
   -- p8's persistent draw colour, and its print cursor.
-  function color(c) p8_pen = fl(c or 6) end
+  function color(c) p8_pen = fl(c or 6) & 0x8f end
   function cursor(x, y, c) p8_cx, p8_cy = fl(x or 0), fl(y or 0)
-    if c ~= nil then p8_pen = fl(c) end end
+    if c ~= nil then p8_pen = fl(c) & 0x8f end end
 
   local m_mget, m_mset = mget, mset
   local p8map = {}
@@ -1964,10 +2143,48 @@ do
     if x < 0 or x > 127 or y < 0 or y > 63 then return 0 end
     return p8map[y * 128 + x + 1]
   end
+  if __moy_poke ~= nil then
+    -- Memory is the truth on a host that has it: a cell poked at 0x2000 (or
+    -- 0x1000, the shared rows) is the cell mget reads and map() draws.
+    local cpeek, cpoke = __moy_peek, __moy_poke
+    local function maddr(x, y)
+      if y < 32 then return 0x2000 + y * 128 + x end
+      return 0x1000 + (y - 32) * 128 + x
+    end
+    function mget(x, y)
+      x, y = mfloor(x or 0), mfloor(y or 0)
+      if x < 0 or x > 127 or y < 0 or y > 63 then return 0 end
+      return cpeek(maddr(x, y))
+    end
+    function mset(x, y, v)
+      x, y = mfloor(x or 0), mfloor(y or 0)
+      if x < 0 or x > 127 or y < 0 or y > 63 then return end
+      cpoke(maddr(x, y), v or 0)
+    end
+  end
   function fget(n, f)
     local v = gff[mfloor(n or 0)] or 0
     if f == nil then return v end
     return (v >> f) & 1 == 1
+  end
+  function fset(n, f, v)
+    n = mfloor(n or 0)
+    if v == nil then gff[n] = mfloor(f or 0) & 0xff return end
+    local bit = 1 << (mfloor(f) & 7)
+    gff[n] = v and ((gff[n] or 0) | bit) or ((gff[n] or 0) & ~bit)
+  end
+  if m_fget ~= nil then
+    -- The console carries the flags (flags.moyflags, SPEC.md 3.5): fget and
+    -- fset are its own, and what fset writes is what map(..., layers) sees.
+    function fget(n, f)
+      n = fl(n)
+      if f == nil then return m_fget(n) end
+      return m_fget(n, fl(f))
+    end
+    function fset(n, f, v)
+      n = fl(n)
+      if v == nil then m_fset(n, fl(f)) else m_fset(n, fl(f), v and true or false) end
+    end
   end
   -- Flag-masked map: ONE native call when the host offers the C walk
   -- (moybyte's __moy_map_masked, #66 M0 -- the flags crossed once in the
@@ -1988,13 +2205,19 @@ do
         and native_map(celx, cely, sx, sy, cw, ch, mask) then
       return
     end
+    if m_fget ~= nil then
+      -- The console's own masked walk (SPEC.md 7.2 layers, 2026-09), in C
+      -- on every libmoy host; the Lua loop below is for one that predates it.
+      m_map(celx, cely, cw, ch, sx, sy, -1, 1, mask)
+      return
+    end
     for cy = 0, ch - 1 do
       local rowb = (cely + cy) * 128
       for cx = 0, cw - 1 do
         local tile = p8map[rowb + celx + cx + 1] or 0
         if tile > 0 and (mask == 0
                          or ((gff[tile] or 0) & mask) ~= 0) then
-          m_spr(tile, sx + cx * 8, sy + cy * 8, 0, 1, 0)
+          m_spr(tile, sx + cx * 8, sy + cy * 8, -1, 1, 0)
         end
       end
     end
@@ -2070,9 +2293,12 @@ do
   end
   function _draw()
     if ticked and p8_draw then
-      -- the console resets camera/clip/pal after every cart frame; re-park the
-      -- p8 camera so a cart that trusts persistent camera state draws at origin
+      -- the console resets camera/clip/pal/palt after every cart frame;
+      -- re-park the p8 camera and restore p8's default transparency (colour
+      -- 0) so a cart that trusts persistent draw state gets PICO-8's.
       camera()
+      p8_palt_default()
+      spal_apply()
       p8_draw()
       ticked = false
     end
@@ -2114,6 +2340,14 @@ def data_tables_lua(sections, want_sheet=False):
              "  -- (moybyte's __moy_map_flags, #66 M0); the Lua table above",
              "  -- stays -- fget reads it either way.",
              "  if __moy_map_flags ~= nil then __moy_map_flags(gff) end",
+             "  -- A host that carries the flags on the console (SPEC.md 3.5)",
+             "  -- but did not read flags.moyflags for this cart gets them",
+             "  -- from here, once; a host that did reads the same bytes.",
+             "  if fset ~= nil then",
+             "    for i = 0, 255 do",
+             "      if __p8_gff[i] ~= 0 then fset(i, __p8_gff[i]) end",
+             "    end",
+             "  end",
              "end",
               ""]
     if want_sheet:
@@ -2140,12 +2374,295 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           # 2026-08-30: the gaps that were only ever a naming difference.
           "t time chr ord tonum split mset sspr "
           "oval ovalfill ceil srand deli unpack pack run "
+          "cocreate coresume costatus yield coclose "
           # 2026-09-01: the compatibility layer -- these answer rather than
           # stopping the cart, and the report calls them approximations.
           "peek peek2 peek4 poke poke2 poke4 memcpy memset "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
           "band bor bxor bnot shl shr rotl rotr").split()
+
+
+# --------------------------------------------------------------------------
+# The import verdict: what a cart will do here, decided from its source
+# --------------------------------------------------------------------------
+#
+# Three answers, in order of how much a person needs to hear them:
+#
+#   "refused"  the cart cannot run on this console -- it loads other carts,
+#              packs its data in 16.16 fixed-point bit tricks, spins on
+#              flip(), or draws in a screen mode there is no screen for.
+#              A host refuses the import and says why, so nothing lands on
+#              a shelf that cannot start.
+#   "gaps"     it runs, and something will look or sound different: a
+#              pause-menu entry, a machine counter reading zero, a sound
+#              synthesised by poking sfx RAM. Import it, badge it, list them.
+#   "runs"     nothing the scan knows about is in the way.
+#
+# Everything here is a pattern over the CONVERTED code, not an execution: a
+# dry run can tell you a cart errored on frame one, and this cannot -- but
+# this runs in a millisecond on every tier, with the cart's own words as the
+# reason. Each rule exists because a corpus cart hit it (PICO8.md's table
+# says which). A rule that matches nothing in the corpus was not added.
+
+def _strip_lua(body):
+    """The code with comments and string CONTENTS gone, so a pattern never
+    fires on prose. Strings keep their quotes (a call shape survives), long
+    brackets and long comments are removed whole.
+
+    Appends SLICES, never characters: this runs on MicroPython in the browser
+    importer, where a list with one entry per byte of a 100 KB cart is the
+    allocation that fails."""
+    out = []
+    i = 0
+    n = len(body)
+    keep = 0                              # start of the slice not yet emitted
+    while i < n:
+        ch = body[i]
+        if ch == "-" and body.startswith("--", i):
+            out.append(body[keep:i])
+            j = i + 2
+            k = j
+            while k < n and body[k] == "=":
+                k += 1
+            if body[j:j + 1] == "[" and body[k:k + 1] == "[":
+                close = "]" + "=" * (k - j - 1) + "]"
+                e = body.find(close, k)
+                i = n if e < 0 else e + len(close)
+            else:
+                e = body.find("\n", j)
+                i = n if e < 0 else e
+            keep = i
+            continue
+        if ch == '"' or ch == "'":
+            out.append(body[keep:i])
+            j = i + 1
+            while j < n and body[j] != ch and body[j] != "\n":
+                if body[j] == "\\":
+                    j += 1
+                j += 1
+            out.append(ch + ch)
+            i = j + 1
+            keep = i
+            continue
+        if ch == "[" and body[i + 1:i + 2] in ("[", "="):
+            k = i + 1
+            while k < n and body[k] == "=":
+                k += 1
+            if body[k:k + 1] == "[":
+                out.append(body[keep:i])
+                close = "]" + "=" * (k - i - 1) + "]"
+                e = body.find(close, k)
+                out.append('""')
+                i = n if e < 0 else e + len(close)
+                keep = i
+                continue
+        i += 1
+    out.append(body[keep:n])
+    return "".join(out)
+
+
+def _call_sites(code, name):
+    """The index just past the `(` of every `name(` call in `code`, at a word
+    boundary and not a method or field (`x:name(`, `t.name(`). Hand-walked
+    like _calls_verb, and for the same reason: this file runs on MicroPython,
+    whose `re` has no lookbehind and no word boundary."""
+    out = []
+    i = 0
+    n = len(name)
+    while True:
+        j = code.find(name, i)
+        if j < 0:
+            return out
+        i = j + n
+        prev = code[j - 1] if j > 0 else " "
+        k = j + n
+        while k < len(code) and code[k] in " \t":
+            k += 1
+        if not (_ident_char(prev) or prev in "._:") and code[k:k + 1] == "(":
+            out.append(k + 1)
+
+
+def _call_args(code, at):
+    """The argument list of the call whose `(` precedes `at`, split at the
+    commas of its own level; the text of each, stripped."""
+    depth = 0
+    args = []
+    start = at
+    i = at
+    while i < len(code):
+        ch = code[i]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                args.append(code[start:i].strip())
+                return args
+            depth -= 1
+        elif ch == "," and depth == 0:
+            args.append(code[start:i].strip())
+            start = i + 1
+        i += 1
+    return args
+
+
+def _num(text):
+    """A numeric literal's value, or None: `0x5f2c`, `24364`."""
+    t = text.strip().lower()
+    try:
+        if t.startswith("0x"):
+            return int(t[2:].split(".")[0], 16)
+        if t and t.replace(".", "", 1).isdigit():
+            return int(float(t))
+    except ValueError:
+        pass
+    return None
+
+
+def _hex_addr_calls(code, verb):
+    """Every first argument of `verb(` that is a number, as an int."""
+    out = []
+    for at in _call_sites(code, verb):
+        args = _call_args(code, at)
+        if args:
+            v = _num(args[0])
+            if v is not None:
+                out.append(v)
+    return out
+
+
+def _shifts_by_16(code):
+    """A `>> 16`, `<< 16`, `shr(x, 16)`, `shl(x, 16)` or `lshr(x, 16)`."""
+    for op in (">>", "<<"):
+        i = 0
+        while True:
+            j = code.find(op, i)
+            if j < 0:
+                break
+            i = j + 2
+            k = i
+            while k < len(code) and code[k] in " \t":
+                k += 1
+            if code[k:k + 2] == "16" and not (code[k + 2:k + 3].isdigit()
+                                             or code[k + 2:k + 3] == "."):
+                return True
+    for fn in ("shr", "shl", "lshr"):
+        for at in _call_sites(code, fn):
+            args = _call_args(code, at)
+            if len(args) >= 2 and args[1] == "16":
+                return True
+    return False
+
+
+_BIT_FNS = ("band", "bor", "bxor", "bnot", "shl", "shr", "lshr", "rotl", "rotr")
+
+
+def _frac_hex_bits(line):
+    """A fractional hex constant on a line that also does bit arithmetic."""
+    if not re.search(r"0x[0-9a-fA-F]*\.[0-9a-fA-F]+", line):
+        return False
+    if "&" in line or "|" in line or "~" in line or "<<" in line or ">>" in line:
+        return True
+    for fn in _BIT_FNS:
+        if _call_sites(line, fn):
+            return True
+    return False
+
+
+def classify_body(body):
+    """-> {"verdict": "runs"|"gaps"|"refused", "reasons": [...]}, from the
+    CONVERTED cart code (what p8_lua_to_lua54 emits). Reasons are the
+    sentences a host shows; the refusing ones come first."""
+    code = _strip_lua(body)
+    lines = code.split("\n")
+    refused = []
+    gaps = []
+
+    # -- will not run --------------------------------------------------------
+    if any(ln.lstrip().startswith("#include") for ln in lines):
+        refused.append("it #includes another file, which does not travel with the cart")
+    # PICO-8's load() swaps carts; a cart's own `board:load()` is not it.
+    if not _defines_function(body, "load") and _call_sites(code, "load"):
+        refused.append("it loads other carts (load) -- a multi-cart game; this console "
+                       "runs one cart at a time")
+    # The 16.16 class. A shift by sixteen is how a cart reads the integer
+    # half of a packed 32-bit value, and it is FATAL when the cart is
+    # unpacking its data that way (celeste 2's px9, nimudazus's bytecode) --
+    # a decoder is a peek2/peek4/ord next to the shifts. Without one it is a
+    # hash or a mask that comes out wrong, which is a gap, not a death.
+    shifts = _shifts_by_16(code)
+    decoder = bool(_call_sites(code, "peek2") or _call_sites(code, "peek4")
+                   or _call_sites(code, "ord"))
+    if shifts and decoder:
+        refused.append("it unpacks its data with 16.16 fixed-point shifts that this "
+                       "console's float numbers cannot reproduce")
+    elif shifts:
+        gaps.append("it shifts numbers by 16 bits, which loses the fixed-point precision "
+                    "PICO-8 has; a hash or a mask may come out wrong")
+    if any(_frac_hex_bits(ln) for ln in lines):
+        gaps.append("it does bit arithmetic on fractional hex constants (0x0.0001 and "
+                    "the like); those bits are lost on floats, so a packed flag may read wrong")
+    has_loop = (_defines_function(body, "p8_update") or _defines_function(body, "p8_update60")
+                or _defines_function(body, "p8_draw"))
+    if _call_sites(code, "flip") and not _defines_function(body, "flip"):
+        if not has_loop:
+            refused.append("it runs its own loop on flip() instead of _update/_draw, "
+                           "and the console owns the frame")
+        else:
+            gaps.append("flip() does nothing here; the console draws each frame itself")
+    for at in _call_sites(code, "poke"):
+        args = _call_args(code, at)
+        if len(args) >= 2 and _num(args[0]) == 0x5f2c:
+            v = _num(args[1])
+            if v is not None and v & 7:
+                refused.append("it switches to a 64x64 or rotated screen mode (poke 0x5f2c) "
+                               "this console has no screen for")
+                break
+
+    # -- runs, with gaps -----------------------------------------------------
+    if _call_sites(code, "menuitem") and not _defines_function(body, "menuitem"):
+        gaps.append("its pause-menu entries (menuitem) are not shown; the console owns the menu")
+    stat_sites = _call_sites(code, "stat")
+    stat_ids = _hex_addr_calls(code, "stat")
+    if stat_sites and not _defines_function(body, "stat") and (
+            len(stat_ids) < len(stat_sites) or any(not 32 <= i <= 36 for i in stat_ids)):
+        gaps.append("stat() reads zero: clock, CPU and audio counters are not measured")
+    regs = []
+    for v in ("poke", "poke2", "poke4", "memcpy", "memset"):
+        regs.extend(_hex_addr_calls(code, v))
+    if any(0x3100 <= a < 0x4300 for a in regs):
+        gaps.append("it writes sound data into sfx/music memory at runtime; the imported "
+                    "sounds play instead")
+    if any(a == 0x5f2d for a in regs) or any(32 <= i <= 36 for i in stat_ids):
+        gaps.append("it reads the mouse; there is no pointer in a PICO-8 port's input")
+    if any(a in (0x5f54, 0x5f55) for a in regs):
+        gaps.append("it remaps the sheet or screen (0x5f54/0x5f55); the remap is remembered, "
+                    "not applied")
+    if any(a in (0x5f5e, 0x5f5f) for a in regs):
+        gaps.append("it uses bitplane masks (0x5f5e); the mask is remembered, not applied")
+    if any(0x5600 <= a < 0x5e00 for a in regs):
+        gaps.append("it installs a custom font (0x5600); text draws in the system font")
+    if any(len(_call_args(code, at)) >= 3 for at in _call_sites(code, "sfx")):
+        gaps.append("sfx() with an offset or length plays the whole sound")
+    if _call_sites(code, "cstore"):
+        gaps.append("cstore() writes a copy in memory; nothing is saved back to the cart file")
+    if _call_sites(code, "serial"):
+        gaps.append("serial() has nothing on the other end")
+    if any(len(a) >= 3 and a[2] == "2"
+           for a in (_call_args(code, at) for at in _call_sites(code, "pal"))):
+        gaps.append("the secondary palette (pal(..., 2)) is treated as the draw palette")
+
+    if refused:
+        return {"verdict": "refused", "reasons": refused + gaps}
+    if gaps:
+        return {"verdict": "gaps", "reasons": gaps}
+    return {"verdict": "runs", "reasons": []}
+
+
+def classify(sections):
+    """The verdict for parsed cart `sections` (p8_import.read_p8), computed
+    BEFORE anything is written, so a host can refuse without a trace."""
+    return classify_body(p8_lua_to_lua54(sections.get("lua", [])))
 
 
 def _calls_verb(body, name):
@@ -2276,6 +2793,11 @@ def build_manifest(title, icon=None, fps=30):
         # paths read the answer instead of inferring it from `ported_from`.
         "safe_to_share": False,
         "ported_from": "pico-8",
+        # SPEC.md 2.2: the cart's own 64-entry table -- PICO-8's sixteen, then
+        # its sixteen SECRET colours at 16-31 (pal(c, 128 + i) in the shim
+        # lands there), then the base sixteen again to fill the table. A
+        # ported cart never reaches past 31.
+        "palette": P8_PALETTE,
     }
     if icon is not None:
         # SPEC.md 3.4: the tiles a launcher shows the cart by. p8 has no icon
@@ -2291,7 +2813,19 @@ def build_manifest(title, icon=None, fps=30):
 # the same cart ported on two tiers differs by field order alone, which is both
 # an unreadable diff and the end of any byte-for-byte check between them.
 MANIFEST_KEYS = ("format", "title", "version", "main", "fps", "canvas",
-                 "input", "safe_to_share", "ported_from", "icon")
+                 "input", "safe_to_share", "ported_from", "palette", "icon")
+
+# PICO-8's palette (its base sixteen are SPEC.md 2's 0-15 byte for byte) and
+# its secret sixteen, as the manifest ships them.
+P8_PALETTE = (
+    "000000 1D2B53 7E2553 008751 AB5236 5F574F C2C3C7 FFF1E8 "
+    "FF004D FFA300 FFEC27 00E436 29ADFF 83769C FF77A8 FFCCAA "
+    "291814 111D35 422136 125359 742F29 49333B A28879 F3EF7D "
+    "BE1250 FF6C24 A8E72E 00B543 065AB5 754665 FF6E59 FF9D81 "
+    "000000 1D2B53 7E2553 008751 AB5236 5F574F C2C3C7 FFF1E8 "
+    "FF004D FFA300 FFEC27 00E436 29ADFF 83769C FF77A8 FFCCAA "
+    "000000 1D2B53 7E2553 008751 AB5236 5F574F C2C3C7 FFF1E8 "
+    "FF004D FFA300 FFEC27 00E436 29ADFF 83769C FF77A8 FFCCAA").split()
 
 
 def manifest_text(man):
@@ -2351,7 +2885,7 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
     """Already-parsed `sections` -> a `.moy` folder at `out_dir`.
 
     Returns the facts only the writer knows: `{"files": [...], "sfx": n,
-    "music": m}`. Takes SECTIONS rather than a path because a console was handed
+    "music": m, "verdict": classify_body(...)}`. Takes SECTIONS rather than a path because a console was handed
     the dropped bytes and has already had to parse them to decide the file was a
     cart at all -- reading it a second time here is 40ms of a `.p8.png` inflate
     spent to learn nothing."""
@@ -2372,9 +2906,11 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
     shim = SHIM.replace("__P8_VH__", str(vh))
     want_sheet = _calls_verb(body, "sget") or _calls_verb(body, "sset")
     # Data tables BEFORE the shim, so the shim captures them as upvalues.
-    main_lua = (header + data_tables_lua(sections, want_sheet) + "\n" + shim
-                + "\n" + localization_lua(body) + body)
-    _write(out_dir, "main.lua", main_lua)
+    # Written as PIECES: joined into one string first, main.lua is ~100 KB
+    # held twice, which is the allocation the browser's MicroPython refused.
+    _write(out_dir, "main.lua",
+           [header, data_tables_lua(sections, want_sheet), "\n", shim, "\n",
+            localization_lua(body), body])
     written.append("main.lua")
 
     # map.moymap -- the console's own tilemap format (cells store tile+1,
@@ -2400,6 +2936,16 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
         _write(out_dir, "sprites.moygfx", kgfx)
         written.append("sprites.moygfx")
 
+    # flags.moyflags (SPEC.md 3.5): __gff__ is its first 256 tiles, byte for
+    # byte, so the console's own fget/fset/map(..., layers) read the real
+    # thing; the Lua table below the shim stays for a host without them.
+    gff = gff_hex(sections)
+    if any(ch != "0" for ch in gff):
+        gff = (gff + "0" * 1024)[:1024]
+        _write(out_dir, "flags.moyflags",
+               "\n".join(gff[i:i + 64] for i in range(0, 1024, 64)) + "\n")
+        written.append("flags.moyflags")
+
     sounds, n_sfx, n_music = sfx_music_to_sounds(
         sections.get("sfx", []), sections.get("music", []))
     if sounds:
@@ -2413,14 +2959,35 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
                title, icon_tile(kgfx),
                60 if _defines_function(body, "p8_update60") else 30)))
     written.append("manifest.json")
-    return {"files": sorted(written), "sfx": n_sfx, "music": n_music}
+    return {"files": sorted(written), "sfx": n_sfx, "music": n_music,
+            "verdict": classify_body(body)}
 
 
-def port(p8_path, out_dir, title=None, crop=(0, 0)):
+def port(p8_path, out_dir, title=None, crop=(0, 0), force=False):
+    """Port a cart file to `out_dir`; returns the writer's summary.
+
+    A REFUSED verdict (classify) writes nothing and raises SystemExit with
+    the reasons, unless `force`: a host that lands such a cart on its shelf
+    lands one that cannot start."""
     sections = read_p8(p8_path)      # text .p8 OR the BBS .p8.png
     title = title or _title_from(sections, p8_path)
-    port_sections(sections, out_dir, title, crop)
-    return out_dir
+    verdict = classify(sections)
+    if verdict["verdict"] == "refused" and not force:
+        raise SystemExit("refused: %s will not run on this console:\n  - %s\n"
+                         "(--force ports it anyway)"
+                         % (title, "\n  - ".join(verdict["reasons"])))
+    summary = port_sections(sections, out_dir, title, crop)
+    summary["out_dir"] = out_dir
+    return summary
+
+
+def verdict_lines(verdict):
+    """The verdict as the lines a host prints or shows beside the cart."""
+    v = verdict["verdict"]
+    if v == "runs":
+        return ["runs: nothing the importer knows about is in the way"]
+    head = ("will not run:" if v == "refused" else "runs with gaps:")
+    return [head] + ["  - " + r for r in verdict["reasons"]]
 
 
 def parse_zoom(argv):
@@ -2456,10 +3023,14 @@ def main(argv):
     if crop != (0, 0):
         args = [a for a in args if "," not in a or not a.replace(",", "").isdigit()]
     if len(args) != 2:
-        print("usage: p8_lua_port.py cart.p8 out_dir [--title NAME] [--zoom [T,B]]")
+        print("usage: p8_lua_port.py cart.p8 out_dir [--title NAME] [--zoom [T,B]]"
+              " [--force]")
         return 2
-    out = port(args[0], args[1], title, crop)
+    summary = port(args[0], args[1], title, crop, force="--force" in argv)
+    out = summary["out_dir"]
     vh = 128 - crop[0] - crop[1]
+    for line in verdict_lines(summary["verdict"]):
+        print("  " + line)
     print("ported ->", out)
     print("  canvas: 128x128 (native p8 pixels -- the host scales)")
     if crop != (0, 0):

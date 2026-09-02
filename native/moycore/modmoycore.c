@@ -529,7 +529,27 @@ static int l_tramp(lua_State *L)
 // each cell against the mask. The shim nil-guards both and keeps its Lua loop,
 // which is what a host without them (lupa) still takes.
 
-static uint8_t g_map_flags[256];
+// MOY_FLAGS wide since 2026-09: libmoy's own fget/fset/map(..., layers)
+// read the console's table (SPEC.md 3.5), and this is that table here.
+static uint8_t g_map_flags[MOY_FLAGS];
+
+// The PICO-8 machine (libmoy moy_p8.c): 64KB of memory and a ROM snapshot,
+// PSRAM-first like every other cart-sized buffer, allocated once and reseeded
+// per run by moy_p8_open. See moy-spec proposals/p8-memory-map.md for what a
+// byte costs and why the map is the truth.
+static moy_p8 g_p8;
+static uint8_t *g_p8mem, *g_p8rom;
+
+static uint8_t *p8_alloc(size_t n)
+{
+#ifdef MOYCORE_PSRAM
+    uint8_t *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    return p;
+#else
+    return malloc(n);
+#endif
+}
 
 static int mc_unhex(int ch)
 {
@@ -740,6 +760,13 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_pushcfunction(RUN.L, l_map_flags);
     lua_setglobal(RUN.L, "__moy_map_flags");
     memset(g_map_flags, 0, sizeof(g_map_flags));
+    RUN.con.flags = g_map_flags;
+    // The PICO-8 machine, opened for every run: the shim probes for it, a
+    // moy cart never sees the globals it does not ask for. No memory means
+    // no machine, and the shim's sparse table -- never a failed run.
+    if (!g_p8mem) g_p8mem = p8_alloc(MOY_P8_MEM);
+    if (!g_p8rom) g_p8rom = p8_alloc(MOY_P8_ROM);
+    if (g_p8mem) moy_p8_open(RUN.L, &RUN.con, &g_p8, g_p8mem, g_p8rom);
 
     RUN.open = 1;
     return mp_const_none;

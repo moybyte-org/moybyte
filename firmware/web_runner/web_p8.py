@@ -121,6 +121,13 @@ def convert(path, name, out_dir):
     problem = p8_writer.sections_problem(sections)
     if problem:
         raise P8Problem(problem)
+    # The importer's verdict (moy-spec PICO8.md), BEFORE the write: a cart
+    # that will not run is refused with its reasons rather than landing on
+    # the shelf as a card that cannot start.
+    verdict = p8_writer.p8_lua_port.classify(sections)
+    if verdict["verdict"] == "refused":
+        raise P8Problem("that cart will not run here: "
+                        + "; ".join(verdict["reasons"]))
     return p8_writer.write_cart(sections, out_dir,
                                 p8_writer.cart_title(sections, name))
 

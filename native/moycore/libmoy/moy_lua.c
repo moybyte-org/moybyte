@@ -11,8 +11,8 @@
  * offered for convenience and is not required.
  *
  * THE SANDBOX IS A CEILING, NOT A SUGGESTION (SPEC.md 4.1). base minus load,
- * loadstring, dofile, require and collectgarbage; math, string and table; and
- * nothing else. io, os, debug, package and coroutine are absent -- and not
+ * loadstring, dofile, require and collectgarbage; math, string, table and
+ * coroutine; and nothing else. io, os, debug and package are absent -- and not
  * merely unregistered here: their SOURCES are not compiled into vendor/lua at
  * all, so there is no reachable implementation to be re-exposed by accident.
  * A host that hands out more accumulates carts that run nowhere else, which
@@ -161,7 +161,8 @@ static int l_clip(lua_State *L)
 static int l_pal(lua_State *L)
 {
     moy_canvas *c = con_of(L)->canvas;
-    if (lua_gettop(L) == 0) moy_pal_reset(c);
+    if (lua_gettop(L) == 0) moy_pal_reset(c);              /* both palettes */
+    else if (argi(L, 3, 0) == 1) moy_pal_screen(c, argi(L, 1, 0), argi(L, 2, 0));
     else moy_pal(c, argi(L, 1, 0), argi(L, 2, 0));
     return 0;
 }
@@ -171,6 +172,28 @@ static int l_palt(lua_State *L)
     moy_canvas *c = con_of(L)->canvas;
     if (lua_gettop(L) == 0) moy_palt_reset(c);
     else moy_palt(c, argi(L, 1, 0), lua_toboolean(L, 2));
+    return 0;
+}
+
+static int l_fillp(lua_State *L)
+{
+    moy_canvas *c = con_of(L)->canvas;
+    if (lua_gettop(L) == 0) moy_fillp_reset(c);
+    else moy_fillp(c, argi(L, 1, 0), argi(L, 2, -1));
+    return 0;
+}
+
+static int l_oval(lua_State *L)
+{
+    moy_oval(con_of(L)->canvas, argi(L, 1, 0), argi(L, 2, 0),
+             argi(L, 3, 0), argi(L, 4, 0), argi(L, 5, 0));
+    return 0;
+}
+
+static int l_ovalb(lua_State *L)
+{
+    moy_ovalb(con_of(L)->canvas, argi(L, 1, 0), argi(L, 2, 0),
+              argi(L, 3, 0), argi(L, 4, 0), argi(L, 5, 0));
     return 0;
 }
 
@@ -232,9 +255,54 @@ static int l_map(lua_State *L)
     int mx, my;
     if (!con->sheet || !con->map) return 0;
     mx = argi(L, 1, 0); my = argi(L, 2, 0);
-    moy_map_draw(con->canvas, con->map, con->sheet, mx, my,
-                 argi(L, 3, con->map->w - mx), argi(L, 4, con->map->h - my),
-                 argi(L, 5, 0), argi(L, 6, 0), argi(L, 7, -1), argi(L, 8, 1));
+    moy_map_draw_layers(con->canvas, con->map, con->sheet, mx, my,
+                        argi(L, 3, con->map->w - mx), argi(L, 4, con->map->h - my),
+                        argi(L, 5, 0), argi(L, 6, 0), argi(L, 7, -1), argi(L, 8, 1),
+                        argi(L, 9, 0), con->flags);
+    return 0;
+}
+
+/* SPEC.md 7.1 tile flags. A host with no table reads 0 and drops writes --
+ * the same truthful degrade as an unpainted sheet. */
+static int l_fget(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    int n = argi(L, 1, -1);
+    int v = (con->flags && n >= 0 && n < MOY_FLAGS) ? con->flags[n] : 0;
+    if (lua_isnoneornil(L, 2)) lua_pushinteger(L, v);
+    else lua_pushboolean(L, (v >> (argi(L, 2, 0) & 7)) & 1);
+    return 1;
+}
+
+static int l_fset(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    int n = argi(L, 1, -1);
+    if (!con->flags || n < 0 || n >= MOY_FLAGS) return 0;
+    if (lua_isnoneornil(L, 3)) {                 /* fset(n, byte) */
+        con->flags[n] = (uint8_t)(argi(L, 2, 0) & 0xFF);
+    } else {                                     /* fset(n, bit, on) */
+        int bit = 1 << (argi(L, 2, 0) & 7);
+        if (lua_toboolean(L, 3)) con->flags[n] = (uint8_t)(con->flags[n] | bit);
+        else con->flags[n] = (uint8_t)(con->flags[n] & ~bit);
+    }
+    return 0;
+}
+
+static int l_sget(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    /* 0 is what an unpainted sheet reads, so "no sheet" needs no second case. */
+    lua_pushinteger(L, con->sheet
+                    ? moy_sheet_pget(con->sheet, argi(L, 1, 0), argi(L, 2, 0)) : 0);
+    return 1;
+}
+
+static int l_sset(lua_State *L)
+{
+    moy_console *con = con_of(L);
+    if (!con->sheet) return 0;
+    moy_sheet_pset(con->sheet, argi(L, 1, 0), argi(L, 2, 0), argi(L, 3, 0));
     return 0;
 }
 
@@ -357,6 +425,16 @@ static int l_rnd(lua_State *L)
     lua_Number n = lua_isnoneornil(L, 1) ? 1.0 : lua_tonumber(L, 1);
     lua_pushnumber(L, (lua_Number)moy_rnd(con_of(L), (float)n));
     return 1;
+}
+
+/* SPEC.md 9: the same seed on the same host replays the same sequence. The
+ * sequence itself is this library's (xorshift32, see moy_rnd) and no other
+ * host's, which is why no conformance scene may call rnd() even seeded. */
+static int l_srand(lua_State *L)
+{
+    lua_Number v = lua_tonumber(L, 1);
+    moy_srand(con_of(L), (uint32_t)(int64_t)v);
+    return 0;
 }
 
 static int l_flr(lua_State *L)
@@ -499,8 +577,9 @@ typedef struct {
 static const luaL_Reg LAYER_VERBS[] = {
     {"cls", l_cls}, {"pix", l_pix}, {"line", l_line}, {"rect", l_rect},
     {"rectb", l_rectb}, {"circ", l_circ}, {"circb", l_circb},
+    {"oval", l_oval}, {"ovalb", l_ovalb},
     {"print", l_print}, {"camera", l_camera}, {"clip", l_clip},
-    {"pal", l_pal}, {"palt", l_palt},
+    {"pal", l_pal}, {"palt", l_palt}, {"fillp", l_fillp},
     {"spr", l_spr}, {"map", l_map},
     {"tri", l_tri}, {"trib", l_trib}, {"sspr", l_sspr}, {"tline", l_tline},
     {NULL, NULL}
@@ -636,12 +715,14 @@ static void open_host_verbs(lua_State *L, moy_console *con)
 static const luaL_Reg VERBS[] = {
     {"cls", l_cls}, {"pix", l_pix}, {"line", l_line}, {"rect", l_rect},
     {"rectb", l_rectb}, {"circ", l_circ}, {"circb", l_circb},
+    {"oval", l_oval}, {"ovalb", l_ovalb},
     {"print", l_print}, {"camera", l_camera}, {"clip", l_clip},
-    {"pal", l_pal}, {"palt", l_palt},
+    {"pal", l_pal}, {"palt", l_palt}, {"fillp", l_fillp},
     {"spr", l_spr}, {"map", l_map}, {"mget", l_mget}, {"mset", l_mset},
+    {"sget", l_sget}, {"sset", l_sset}, {"fget", l_fget}, {"fset", l_fset},
     {"btn", l_btn}, {"btnp", l_btnp}, {"players", l_players},
     {"time", l_time}, {"pmem", l_pmem}, {"cfg", l_cfg},
-    {"rnd", l_rnd}, {"flr", l_flr}, {"quit", l_quit},
+    {"rnd", l_rnd}, {"srand", l_srand}, {"flr", l_flr}, {"quit", l_quit},
     {"sfx", l_sfx}, {"music", l_music}, {"beep", l_beep},
     {"music_stop", l_music_stop}, {"sound_stop", l_sound_stop},
     {"volume", l_volume},
@@ -658,23 +739,25 @@ static const luaL_Reg VERBS[] = {
  * -- see the requiref list below. */
 static const char *const BANNED[] = {
     "load", "loadstring", "dofile", "loadfile", "require", "collectgarbage",
-    "io", "os", "debug", "package", "coroutine", NULL
+    "io", "os", "debug", "package", NULL
 };
 
 /* Exactly SPEC.md 4.1's list, and no luaL_openlibs anywhere near it.
  *
  * This is not a stylistic choice. luaL_openlibs lives in linit.c, which
- * references every standard library including the five the spec forbids -- so
- * calling it would pull io, os, debug, package and coroutine into the binary
- * and leave the sandbox depending on nil-ing them out afterwards. Opening the
- * four permitted libraries by hand means linit.c is not compiled, those five
- * have no reachable implementation, and "absent entirely" is true of the
- * machine code rather than only of the global table. */
+ * references every standard library including the four the spec forbids -- so
+ * calling it would pull io, os, debug and package into the binary and leave
+ * the sandbox depending on nil-ing them out afterwards. Opening the five
+ * permitted libraries by hand means linit.c is not compiled, those four have
+ * no reachable implementation, and "absent entirely" is true of the machine
+ * code rather than only of the global table. coroutine joined the permitted
+ * set on 2026-09-02 (SPEC.md 4.1): pure VM, no reach outside it. */
 static const luaL_Reg SANDBOX_LIBS[] = {
     {LUA_GNAME,      luaopen_base},
     {LUA_MATHLIBNAME, luaopen_math},
     {LUA_STRLIBNAME,  luaopen_string},
     {LUA_TABLIBNAME,  luaopen_table},
+    {LUA_COLIBNAME,   luaopen_coroutine},
     {NULL, NULL}
 };
 
