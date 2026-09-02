@@ -2001,6 +2001,7 @@ do
   -- button, bit i for button i. `squiddy` reads `b=btn()` and then does
   -- arithmetic on it, so returning a boolean stopped the cart on flr(true).
   function btn(i)
+    if type(i) == "string" then i = tonumber(i) end   -- p8 coerces: btn"1"
     if i == nil then
       local m = 0
       for k = 0, 5 do
@@ -2011,6 +2012,7 @@ do
     return m_btn(BTN[i] or "a")
   end
   function btnp(i)
+    if type(i) == "string" then i = tonumber(i) end
     if i == nil then
       local m = 0
       for k = 0, 5 do

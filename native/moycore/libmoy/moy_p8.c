@@ -1531,12 +1531,21 @@ static int p8_btn_index(lua_State *L, int *ok)
 {
     lua_Integer n;
     *ok = 1;
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        /* p8 coerces: the size-coder's `btn"1"` is button 1, and a string
+         * that is no number is the no-argument form. Reading it as button 4
+         * made every direction of low mem sky the O button (2026-09-03). */
+        size_t len;
+        const char *str = lua_tolstring(L, 1, &len);
+        if (lua_stringtonumber(L, str) != len + 1) { *ok = 0; return 0; }
+        lua_replace(L, 1);
+    }
     if (lua_isinteger(L, 1)) n = lua_tointeger(L, 1);
     else if (lua_type(L, 1) == LUA_TNUMBER) {
         if (!lua_numbertointeger(lua_tonumber(L, 1), &n)) return 4;
     } else {
         if (lua_isnoneornil(L, 1)) { *ok = 0; return 0; }
-        return 4;                       /* not a number: BTN[i] is nil -> "a" */
+        return 4;                       /* a table or boolean: BTN[i] is nil -> "a" */
     }
     if (n < 0 || n > 5) return 4;
     return (int)n;
