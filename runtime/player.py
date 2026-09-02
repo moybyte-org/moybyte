@@ -852,7 +852,8 @@ class Player:
                          project.scenes,    # #85: scene()/load_scene() over the cart's scenes
                          tables=project.tables, texts=project.texts,  # #78 interop
                          net=net,           # #65: capability-gated net.* backend
-                         gpio=gpio)         # #9: capability-gated physical pins
+                         gpio=gpio,         # #9: capability-gated physical pins
+                         flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.

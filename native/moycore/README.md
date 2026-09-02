@@ -15,6 +15,7 @@ half: what a *moybyte* console is made of.
 | input, time, pointer | a SNAPSHOT array the frame loop refreshes before the tick — `btn()` sixty times a frame costs zero crossings |
 | audio | a command QUEUE the host drains after the tick, order preserved |
 | pmem | a C array with a dirty flag, the shape the device already defers it to (#66) |
+| tile flags | 512 bytes COPIED in at `run_begin` (SPEC.md 3.5) -- the one buffer here that is not the caller's, because C writes it (`fset`, a poke to `0x3000`, the p8 shim's `__moy_map_flags`) and the caller may hand over a plain `bytes` |
 
 ## What it does NOT compile
 

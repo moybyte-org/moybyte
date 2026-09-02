@@ -806,6 +806,46 @@ def test_map_camera_clip_matches_host():
         _assert_same(host, dev, "map gfx=%s" % gfx)
 
 
+def test_map_layers_matches_host():
+    """SPEC.md 7.2's layer mask through BOTH map lanes.
+
+    The mask is resolved into a masked copy of the region before either lane
+    runs, so this is what pins the two lanes to the same picture: gfx=True
+    rasters that copy through the compiled kernel, gfx=False walks it cell by
+    cell in Python. A filter applied in one lane and not the other would show
+    up nowhere else -- the goldens only replay the trace through the host."""
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        sheet_h = SpriteSheet(16, 32)
+        sheet_d = m.SpriteSheet(16, 32)
+        for sh in (sheet_h, sheet_d):
+            for tile, col in ((1, 8), (2, 11), (3, 14)):
+                for y in range(8):
+                    for x in range(8):
+                        sh.tset(tile, x, y, col)
+        tm_h = TileMap(4, 4)
+        tm_d = TileMap(4, 4)
+        for tm in (tm_h, tm_d):
+            tm.mset(0, 0, 1)
+            tm.mset(1, 0, 2)
+            tm.mset(2, 1, 3)
+            tm.mset(3, 3, 1)
+        flags = bytearray(512)
+        flags[1] = 0x01
+        flags[2] = 0x03
+        flags[3] = 0x02
+        for c, sh, tm in ((host, sheet_h, tm_h), (dev, sheet_d, tm_d)):
+            c.cls(0)
+            c.camera(2, 3)
+            c.clip(4, 4, 50, 40)
+            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 2, 1, flags)
+            c.map(tm, sh, 0, 0, 4, 4, 8, 8, -1, 1, 2, flags)
+            c.map(tm, sh, -1, -1, 6, 6, 0, 30, -1, 1, 3, flags)   # off-map edges
+            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 1, 0x80, flags)   # nothing carries it
+            c.map(tm, sh, 0, 0, 4, 4, 20, 0, -1, 1, 1, None)      # no table at all
+        _assert_same(host, dev, "map layers gfx=%s" % gfx)
+
+
 # --------------------------------------------------------------------------- #
 # scroll engine (#54): pre-render a wider layer, window-copy it to the screen. #
 # --------------------------------------------------------------------------- #

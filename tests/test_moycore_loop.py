@@ -73,7 +73,7 @@ function _draw()
 end
 """
 
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"})
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, pm, {"k": "v"}, None)
 print("START", moycore.load(SRC, "@cart"))
 for f in range(4):
     snap[moycore.SNAP_TIME_MS] = f * 32
@@ -103,7 +103,7 @@ print("CENSUS", moycore.alloc_stats())
 
 # view and background are CORE upstream now, so libmoy answers them and the
 # host READS the result instead of being called -- zero crossings for view.
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 print("VIEW0", moycore.view())
 print("VIEWLOAD", moycore.load(
     "function _init() view(128, 120) background(5) end\n"
@@ -116,7 +116,7 @@ moycore.close()
 
 # The superset rides the same runtime: register a Python-backed verb, then a
 # cart that calls it.
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 seen = []
 moycore.register("make_layer", lambda w, h: (seen.append((w, h)), 7)[1])
 moycore.register("draw_layer", lambda h, x, y: seen.append((h, x, y)))
@@ -149,7 +149,7 @@ NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
       "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
       "image": lambda n: _img if n == "bg" else None,
       "table": lambda n: 77}
-moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 moycore.register("moy_table_verb", NS["table"])
 install_handles(NS, moycore.register)
 print("PRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
@@ -176,7 +176,7 @@ moycore.close()
 # proves it is Bench Lua -- it grows a batch until the batch costs TARGET_MS,
 # measured with time(), so against a frozen clock it doubles forever (on glass:
 # a purple screen and "cls k=32768" climbing).
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 snap[moycore.SNAP_TIME_MS] = 5000
 print("TLOAD", moycore.load(
     "function _update(dt)\n"
@@ -205,7 +205,7 @@ for i in range(len(solid)):
 
 for i in range(len(fb)):
     fb[i] = 0
-moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None, None)
 print("MASKPRESENT", moycore.exec(
     "P = (__moy_map_masked ~= nil) and (__moy_map_flags ~= nil)", "@probe"),
     moycore.get_global("P"))
@@ -233,11 +233,73 @@ print("MASK2", _walk(2))        # gff bit 1: tile 6 only
 print("MASK4", _walk(4))        # nothing carries bit 2
 moycore.close()
 
+# THE CART'S OWN FLAGS (SPEC.md 3.5), the run_begin argument. Everything above
+# seeds the table from Lua (the p8 shim's __moy_map_flags); this is the path a
+# plain moy cart takes -- flags.moyflags -> moy_carts.load -> Project.flags ->
+# run_begin -- and it has three readers that must all see ONE table: libmoy's
+# fget/fset, its map(..., layers), and the PICO-8 machine's 0x3000 mirror.
+#
+# Note the contrast with MASK* above: the p8 shim NEVER draws tile 0, libmoy's
+# own map() does. The strip reuses the same cells (tile 0, tile 5, tile 6, empty).
+FLAGS = bytearray(512)
+for i in range(512):
+    FLAGS[i] = i & 0xff          # p8mem.moy's own convention: tile n -> n & 0xff
+FLAGS[0] = 0x08                  # tile 0 gets a bit of its own; 5 and 6 keep
+                                 # theirs from the rule above (0b101 and 0b110),
+                                 # so bit 2 selects BOTH and bit 4 selects neither
+
+for i in range(len(fb)):
+    fb[i] = 0
+moycore.p8_memory(bytearray(65536), bytearray(0x4300))
+moycore.run_begin(fb, W, H, None, solid, cells, MAPW, MAPH, snap, aq, None, None,
+                  FLAGS)
+print("FLOAD", moycore.load(
+    "function _init()\n"
+    "  G0, G5, G6 = fget(0), fget(5), fget(6)\n"
+    "  B = fget(6, 1)\n"
+    "  OFF = fget(5, 4)\n"
+    "  WIDE = fget(300)\n"          # past PICO-8's 256, inside SPEC.md's 512
+    "  P5, PFF = __moy_peek(0x3005), __moy_peek(0x30ff)\n"
+    "end\n"
+    "function _update(dt) end\n"
+    "function _draw() end\n", "@flags"))
+print("FGET", moycore.get_global("G0"), moycore.get_global("G5"),
+      moycore.get_global("G6"), moycore.get_global("B"),
+      moycore.get_global("OFF"), moycore.get_global("WIDE"))
+# The p8 machine's 0x3000 region -- p8mem.moy's own "flags seeded" check.
+print("P8MEM", moycore.get_global("P5"), moycore.get_global("PFF"))
+
+
+def _layer(mask):
+    moycore.exec("cls(0) map(0, 0, 4, 1, 0, 0, -1, 1, %d)" % mask, "@layer")
+    n = 0
+    for i in range(0, len(fb), 2):
+        if fb[i] or fb[i + 1]:
+            n += 1
+    return n
+
+
+print("LAYER0", _layer(0))      # no mask: tiles 0, 5 and 6 all draw
+print("LAYER1", _layer(1))      # only tile 5 carries bit 0
+print("LAYER2", _layer(2))      # only tile 6 carries bit 1
+print("LAYER4", _layer(4))      # tiles 5 AND 6 carry bit 2
+print("LAYER8", _layer(8))      # only tile 0 carries bit 3
+print("LAYER16", _layer(16))    # nothing carries bit 4
+# fset writes the SAME table map() reads, so the next call draws differently.
+moycore.exec("fset(5, 4, true)", "@fset")
+print("LAYERSET", _layer(16))
+# ...and __moy_map_flags still owns it, so a p8 cart's baked gff wins at boot.
+moycore.exec("__moy_map_flags('00000000000102') F5 = fget(5) F0 = fget(0)",
+             "@shimflags")
+print("SHIM", moycore.get_global("F5"), moycore.get_global("F0"))
+moycore.close()
+moycore.p8_memory(None, None)
+
 # A cart with NO sheet and NO map -- a brand-new project. Every sheet/map verb
 # must survive it, because on this side a NULL deref is a board reset.
 for i in range(len(fb)):
     fb[i] = 0
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 print("BARE", moycore.load(
     "function _update(dt) end\n"
     "function _draw()\n"
@@ -255,7 +317,7 @@ moycore.close()
 
 # A cart that raises must come back as text, with the VM still recoverable.
 BAD = "function _update(dt) error('boom') end\nfunction _draw() end\n"
-moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None)
+moycore.run_begin(fb, W, H, None, None, None, 0, 0, snap, aq, None, None, None)
 print("START2", moycore.load(BAD, "@bad"))
 print("ERR", moycore.tick(0.03125))
 moycore.close()
@@ -380,6 +442,37 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     assert by["MASK2"][1:] == ["(True,", "64)"], out
     assert by["MASK4"][1:] == ["(True,", "0)"], \
         "a mask nothing carries must draw nothing, not everything: %s" % out
+
+    # The CART's own tile flags, handed to run_begin (SPEC.md 3.5). Until this
+    # argument existed `RUN.con.flags` was a table only the p8 shim ever wrote,
+    # so a plain moy cart's flags.moyflags reached nothing at all: fget read 0,
+    # map(..., layers) drew nothing whatever the mask, and the PICO-8 machine
+    # mirrored 256 zero bytes into 0x3000.
+    assert by["FLOAD"][1] == "None", out
+    assert by["FGET"][1:] == ["8", "5", "6", "True", "False", "44"], \
+        "the cart's flags did not reach libmoy's fget: %s" % out
+    # p8mem.moy's own "flags seeded" check, run here: 0x3000 mirrors the
+    # console's table, so tile 5 reads 5 and tile 255 reads 255.
+    assert by["P8MEM"][1:] == ["5", "255"], \
+        "the PICO-8 machine did not seed 0x3000 from the cart's flags: %s" % out
+    # One opaque 8x8 tile per drawn cell = 64 pixels. libmoy's OWN map draws
+    # tile 0 (the p8 shim above is the one that never does), so an unmasked
+    # walk of the same strip draws 3 cells where MASK0 drew 2.
+    assert by["LAYER0"][1] == "192", \
+        "an unmasked map must draw every non-empty cell, tile 0 included: %s" % out
+    assert by["LAYER1"][1] == "64" and by["LAYER2"][1] == "64", out
+    assert by["LAYER4"][1] == "128", \
+        "a mask two tiles share must draw both: %s" % out
+    assert by["LAYER8"][1] == "64", \
+        "tile 0 is a normal tile to map(..., layers): %s" % out
+    assert by["LAYER16"][1] == "0", \
+        "a mask nothing carries must draw nothing: %s" % out
+    assert by["LAYERSET"][1] == "64", \
+        "fset must change what the NEXT map(..., layers) draws: %s" % out
+    # ...and the p8 shim's __moy_map_flags still writes that same table, which
+    # is what keeps a ported PICO-8 cart's baked __gff__ authoritative.
+    assert by["SHIM"][1:] == ["1", "0"], \
+        "__moy_map_flags no longer owns the console's flag table: %s" % out
 
     # A console with no sheet and no map is a legal console (a brand-new
     # project), and every sheet/map verb has to survive it: libmoy took those

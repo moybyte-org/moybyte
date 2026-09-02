@@ -1513,7 +1513,7 @@ def test_paint_image_assets_wired_device_and_carts():
     # The device make_api takes `images` and exposes the image(name) accessor, decoding
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, gpio=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     # _decode_moyimg lives in the unified cart_api since 2026-08-17 (one body
     # for every tier; the MicroPython lane inflates via `deflate`).
     cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
@@ -2252,7 +2252,12 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     assert api["mget"](1, 2) == 5 and tm.mget(1, 2) == 5
     api["map"](0, 0, 3, 3, 0, 0, -1, 2)
     assert mapped and mapped[-1][0] is tm and mapped[-1][1] is sheet
-    assert mapped[-1][2] == (0, 0, 3, 3, 0, 0, -1, 2)
+    # SPEC.md 7.2's layer mask and the flag table ride along on every call; with
+    # no project the table is a private zero one, so a mask draws nothing.
+    assert mapped[-1][2][:8] == (0, 0, 3, 3, 0, 0, -1, 2)
+    assert mapped[-1][2][8] == 0 and len(mapped[-1][2][9]) == 512
+    api["map"](0, 0, 3, 3, 0, 0, -1, 2, 6)
+    assert mapped[-1][2][8] == 6
     # With no tilemap injected, the API stays callable (map() no-ops, mget -> -1).
     api2 = m.make_api(StubCanvas(), StubInput(), {}, sheet)
     assert api2["mget"](0, 0) == -1
@@ -2333,7 +2338,7 @@ def test_device_sprite_storage_wired():
     # make_api now also takes the capability-gated wifi backend LAST (#38).
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, gpio=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     # The sprite store-write moved to Project.commit_sprites (Stage 1b, project.py --
     # also staged onto the device); ws.save_sprites stays as the tested forward.
@@ -2690,7 +2695,7 @@ def test_device_wifi_wired():
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, gpio=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
     # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
     # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at

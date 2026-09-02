@@ -31,6 +31,7 @@ import pytest
 
 from runtime import editors_sheet
 from runtime import host_canvas
+from runtime import moy_carts
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     "spec_conformance")
@@ -56,12 +57,18 @@ def _scene_names():
 
 
 def _build_assets(scene):
-    """The sheet and tilemap the scene draws from -- loaded out of the vendored
-    CART with moybyte's own deserialisers, so this exercises the real asset path
-    rather than a fixture built to match."""
+    """The sheet, tilemap and tile flags the scene draws from -- loaded out of
+    the vendored CART with moybyte's own deserialisers, so this exercises the
+    real asset path rather than a fixture built to match.
+
+    The flags scene is the one that makes this load-bearing: its trace only
+    RESTORES three of the tile flags it filters on (the rest ride in
+    flags.moyflags), so a replayer that started from a zero table would draw a
+    different -- and wrong -- picture without erroring anywhere."""
     cart_dir = os.path.join(HERE, "carts", scene + ".moy")
     sheet = editors_sheet.SpriteSheet(SHEET_COLS, SHEET_ROWS)
     tilemap = editors_sheet.TileMap(20, 15)
+    flags = bytearray(moy_carts.TILE_FLAGS)
     gfx = os.path.join(cart_dir, "sprites.moygfx")
     if os.path.exists(gfx):
         with open(gfx) as fh:
@@ -71,7 +78,11 @@ def _build_assets(scene):
     if os.path.exists(mp):
         with open(mp) as fh:
             tilemap = editors_sheet.TileMap.from_hex(fh.read())
-    return sheet, tilemap
+    ff = os.path.join(cart_dir, moy_carts.FLAGS_NAME)
+    if os.path.exists(ff):
+        with open(ff) as fh:
+            flags = moy_carts.parse_flags(fh.read())
+    return sheet, tilemap, flags
 
 
 def _text_arg(a):
@@ -84,7 +95,7 @@ def _text_arg(a):
     return a
 
 
-def replay(calls, canvas, sheet=None, tilemap=None):
+def replay(calls, canvas, sheet=None, tilemap=None, flags=None):
     """Run a trace against a Canvas. The spec's own replayer, transcribed --
     ~40 lines in any language, which is the point of publishing traces at all.
     Verbs are CART-facing (`spr(n, ...)`), because that is what SPEC.md
@@ -128,8 +139,21 @@ def replay(calls, canvas, sheet=None, tilemap=None):
             canvas.tline(tilemap, sheet, a[0], a[1], a[2], a[3], a[4], a[5],
                          a[6], a[7], a[8])
         elif verb == "map":
+            # 9 args = SPEC.md 7.2's layer mask; 8 is the unfiltered form.
             canvas.map(tilemap, sheet, a[0], a[1], a[2], a[3], a[4], a[5],
-                       a[6], a[7])
+                       a[6], a[7], a[8] if len(a) > 8 else 0, flags)
+        elif verb == "fset":
+            # A flags WRITE, recorded like a draw call because it changes what
+            # the next map(..., layers) draws. The cart-facing twin is
+            # cart_api's fset; this is the trace form of the same two shapes.
+            n = int(a[0])
+            if 0 <= n < len(flags):
+                if len(a) < 3:
+                    flags[n] = int(a[1]) & 0xFF
+                else:
+                    bit = 1 << (int(a[1]) & 7)
+                    flags[n] = ((flags[n] | bit) if a[2]
+                                else (flags[n] & ~bit & 0xFF))
         else:
             raise ValueError("unknown trace verb %r" % (verb,))
 
@@ -187,9 +211,9 @@ def render(scene, canvas=None):
     """Replay one scene and return its index framebuffer as bytes."""
     with open(os.path.join(HERE, "traces", scene + ".json")) as fh:
         calls = json.load(fh)
-    sheet, tilemap = _build_assets(scene)
+    sheet, tilemap, flags = _build_assets(scene)
     c = canvas if canvas is not None else host_canvas.make_canvas(W, H)
-    replay(calls, c, sheet, tilemap)
+    replay(calls, c, sheet, tilemap, flags)
     flush = getattr(c, "flush_batch", None)
     if flush is not None:
         flush()          # the console auto-batches sprites; the goldens do not
@@ -197,12 +221,13 @@ def render(scene, canvas=None):
 
 
 # The scenes moy-spec added on 2026-09-02 for verbs the PYTHON tier does not
-# draw yet -- fillp, oval/ovalb, sset, the screen palette, map(..., layers).
+# draw yet -- fillp, oval/ovalb, sset, the screen palette. `flags` came off this
+# set the day map(..., layers) and fget/fset landed on the Python tier.
 # The Lua tier has every one of them through libmoy (re-vendored the same
 # day); the host canvas and cart_api are moybyte's own next step, and these
 # are strict: the day a twin lands, its scene flips from xfail to a failure
 # that says "remove me from this set".
-PYTHON_TIER_PENDING = {"oval", "fillp", "sheet", "screen_pal", "flags"}
+PYTHON_TIER_PENDING = {"oval", "fillp", "sheet", "screen_pal"}
 
 
 def _scene_params():

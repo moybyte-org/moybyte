@@ -366,6 +366,7 @@ def test_duplicate_carries_every_asset(tmp_path):
     p = Path(cart["path"])
     (p / "sprites.moygfx").write_text("0" * 128 + "\n")
     (p / "map.moymap").write_text("2 1\n0102\n")
+    (p / "flags.moyflags").write_text("0003" + "\n")
     (p / "sounds.json").write_text(json.dumps({"sfx": [], "music": []}))
     (p / "blocks.json").write_text(json.dumps({"blocks": []}))
     for sub, fn, blob in (
@@ -383,11 +384,72 @@ def test_duplicate_carries_every_asset(tmp_path):
     dup = moy_carts.duplicate(src, root)
     assert dup["sprites"] == src["sprites"]
     assert dup["map"] == src["map"]
+    assert dup["flags"] == src["flags"]
     assert dup["sounds"] == src["sounds"]
     assert dup["blocks"] == src["blocks"]
     assert set(dup["images"]) == {"cover"}
     assert set(dup["tables"]) == {"scores"}
     assert set(dup["texts"]) == {"notes"}
+
+
+# -- tile flags (SPEC.md 3.5) --------------------------------------------------
+
+def test_flags_moyflags_loads_and_zero_pads(tmp_path):
+    """A flags file may be SHORT (an author tags the first few tiles and stops)
+    and may be laid out however -- sixteen lines, one line, spaces. Whitespace
+    is not data; length is: the rest of the 512 tiles are zero."""
+    from runtime import moy_carts
+    path = _write_moy1(tmp_path, "flagged", {"format": "moy-1", "title": "F"})
+    Path(path, moy_carts.FLAGS_NAME).write_text("00 01\n03\t80\n")
+    cart = moy_carts.load(path)
+    flags = moy_carts.parse_flags(cart["flags"])
+    assert len(flags) == 512
+    assert list(flags[:5]) == [0x00, 0x01, 0x03, 0x80, 0x00]
+    assert not any(flags[4:])
+
+
+def test_a_cart_with_no_flags_file_reads_as_all_zero(tmp_path):
+    """SPEC.md 3.5: an absent file is all zero. The cart dict says None (the
+    file is not there); the live table exists anyway, so fget()/fset() and
+    map(..., layers) are callable for every cart ever written."""
+    from runtime import moy_carts
+    from runtime.project import Project
+    path = _write_moy1(tmp_path, "plain", {"format": "moy-1", "title": "P"})
+    cart = moy_carts.load(path)
+    assert cart["flags"] is None
+    table = Project.__new__(Project)._build_flags(cart)
+    assert len(table) == 512 and not any(table)
+
+
+def test_a_corrupt_flags_file_degrades_to_zero_rather_than_dropping_the_cart(tmp_path):
+    """Every other asset in load() degrades; this one must too. An odd digit
+    count has no honest alignment, so the parser refuses it -- and the cart
+    still loads, with no flags, instead of vanishing from the gallery."""
+    from runtime import moy_carts
+    from runtime.project import Project
+    path = _write_moy1(tmp_path, "bad", {"format": "moy-1", "title": "B"})
+    Path(path, moy_carts.FLAGS_NAME).write_text("0102030")
+    cart = moy_carts.load(path)
+    assert cart is not None
+    table = Project.__new__(Project)._build_flags(cart)
+    assert not any(table)
+
+
+def test_the_flags_blob_round_trips_through_a_seed(tmp_path):
+    """A baked built-in carries its flags like its sheet and its map, or a
+    seeded device runs the same cart with every tile untagged."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    Path(root).mkdir(parents=True)
+    table = bytearray(512)
+    table[1], table[2], table[511] = 0x01, 0x03, 0xFF
+    moy_carts.seed_builtins([{
+        "title": "Tagged", "type": "game", "version": 1, "cfg": {},
+        "src": "def _draw():\n    pass\n",
+        "flags": moy_carts.flags_to_hex(table),
+    }], root)
+    cart = moy_carts.load(root + "/tagged.moy")
+    assert moy_carts.parse_flags(cart["flags"]) == table
 
 
 def test_duplicate_leaves_behind_saves_and_undo_history(tmp_path):

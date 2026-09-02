@@ -2291,6 +2291,10 @@ class Workstation:
         self.save_status = None
         self.sheet = self._build_sheet()
         self.tilemap = self._build_tilemap()
+        # No ws.flags projection: the legacy property-forward set can only
+        # shrink (tests/test_console_facade.py), so the one reader -- the
+        # Player, building the cart namespace -- goes through self.project.
+        self.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
         self.tables = self.cart.get("tables") or {}    # Sheets docs, table() (#78)
         self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
@@ -2688,6 +2692,9 @@ class Workstation:
 
     def _build_tilemap(self, cart=None):
         return self.project._build_tilemap(cart)
+
+    def _build_flags(self, cart=None):
+        return self.project._build_flags(cart)
 
     def _build_scenes(self, cart=None):
         return self.project._build_scenes(cart)

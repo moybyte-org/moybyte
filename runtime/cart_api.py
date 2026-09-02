@@ -142,7 +142,7 @@ class _Layer:
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, net=None, gpio=None, owner="cart"):
+             texts=None, net=None, gpio=None, flags=None, owner="cart"):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -168,6 +168,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                            # Invalidated when the sheet's gen counter changes (a paint
                            # edit), so a live sprite edit shows fresh art.
     _cache_gen = [None]
+    # SPEC.md 3.5's tile flags, always a table so fget/fset/map(..., layers) are
+    # callable for every cart. `flags` is the project's live 512-byte one; a run
+    # without a project (a bare namespace, a test) gets a private zero table,
+    # which reads exactly as the spec's "an absent file is all zero".
+    tile_flags = flags if flags is not None else bytearray(512)
 
     def cfg(key, default=None):
         return config.get(key, default)
@@ -230,13 +235,21 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # contiguous run into one native blit_batch, flushing on any state break.
         canvas.spr_tile(sheet, int(n), x, y, colorkey, scale, flip)
 
-    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1,
+             layers=0):
         # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
         # the cart's tilemap (top-left cell mx,my) to screen (sx,sy). Tiles are the
         # 8x8 sheet sprites; `scale` enlarges each (so scale=2 => 16px world tiles).
+        # `layers` (SPEC.md 7.2) is a FLAG MASK: non-zero, a cell draws only when
+        # its tile's flag byte shares a bit with it -- the ground with mask 1, the
+        # foreground with mask 2 after the sprites, from one map and one call each.
+        # It filters on the TILE's flags, so tagging a tile once tags every cell
+        # that uses it, and a cart with no flags at all draws nothing under a
+        # non-zero mask.
         if tilemap is None or sheet is None:
             return
-        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale,
+                   layers, tile_flags)
 
     # spr_batch / spans / rect_batch were cart verbs here until 2026-08-14. They are
     # DELETED, not moved: the Bench twins measured the draw paths of the two languages
@@ -274,6 +287,31 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     def mset(x, y, tile):
         if tilemap is not None:
             tilemap.mset(x, y, tile)
+
+    # SPEC.md 3.5/7.1: one flag byte per tile, 512 of them. The table is the
+    # PROJECT's (moy_carts loads flags.moyflags into it) and it is shared with
+    # every layer namespace below, so `fset` from inside a layer's pre-render is
+    # the same write the screen's next map(..., layers) reads. A run with no
+    # project gets a private zero table rather than a None to guard at each verb.
+    def fget(n, b=None):
+        n = int(n)
+        v = tile_flags[n] if 0 <= n < len(tile_flags) else 0
+        if b is None:
+            return v
+        return bool((v >> (int(b) & 7)) & 1)
+
+    def fset(n, b, on=None):
+        # fset(n, byte) writes the whole byte; fset(n, bit, on) sets or clears
+        # one bit of it. Off the sheet is a DROPPED write, not an error -- the
+        # same truthful degrade fget's 0 is.
+        n = int(n)
+        if not (0 <= n < len(tile_flags)):
+            return
+        if on is None:
+            tile_flags[n] = int(b) & 0xFF
+            return
+        bit = 1 << (int(b) & 7)
+        tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
@@ -382,7 +420,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       tables=tables, texts=texts, owner=owner)
+                       tables=tables, texts=texts, flags=tile_flags, owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -534,6 +572,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
+        "fget": fget, "fset": fset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
         "pal": canvas.pal, "palt": canvas.palt,

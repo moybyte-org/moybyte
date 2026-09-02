@@ -50,17 +50,18 @@ class _Tilemap:
         self.cells = bytearray((i * 7) % 40 for i in range(w * h))
 
 
-def _run(canvas, lua, sheet=None, tilemap=None):
+def _run(canvas, lua, sheet=None, tilemap=None, flags=None, globals_=()):
     """Draw `lua` into `canvas` through the binding, as the console would."""
     buf, wire, indexed = lua_host.canvas_target(canvas)
     r = lb.HostLuaRun(buf, canvas.w, canvas.h, sheet, tilemap,
-                      wire=wire, indexed=indexed)
+                      wire=wire, indexed=indexed, flags=flags)
     try:
         assert r.load("function _draw() %s end" % lua, "@cart") is None
         assert r.tick(1 / 30.0) is None
+        read = {n: r.get_global(n) for n in globals_}
     finally:
         r.close()
-    return bytes(buf)
+    return (bytes(buf), read) if globals_ else bytes(buf)
 
 
 def _differing(a, b):
@@ -153,6 +154,53 @@ def test_the_cart_drew_something_in_every_case():
     for name, lua, _py in CASES:
         px = _run(host_canvas.make_canvas(W, H), lua, SHEET, TILEMAP)
         assert any(px), name
+
+
+# SPEC.md 3.5 on the host lane. `hl_set_flags` is the twin of moycore's 13th
+# run_begin argument: without it the host's `host_lua` struct kept a zeroed
+# table nothing ever wrote, so a Lua cart's fget read 0 here and its real flags
+# on a board -- a divergence between two tiers running the SAME C.
+LUA_FLAGS = bytearray(512)
+for _t in range(512):
+    LUA_FLAGS[_t] = 0x01 if _t % 2 else 0x02
+LUA_FLAGS[7] = 0x83
+
+
+def test_the_carts_tile_flags_reach_the_host_lua_lane():
+    _px, g = _run(host_canvas.make_canvas(W, H),
+                  # hl_get_global marshals NUMBERS only, so the two bit reads
+                  # come back as 1/0 rather than as booleans.
+                  "F7 = fget(7) B = fget(7, 7) and 1 or 0 "
+                  "OFF = fget(7, 2) and 1 or 0 "
+                  "fset(9, 0x40) F9 = fget(9) "
+                  "fset(9, 0, true) F9B = fget(9) "
+                  "MISS = fget(600)",
+                  SHEET, TILEMAP, flags=LUA_FLAGS,
+                  globals_=("F7", "B", "OFF", "F9", "F9B", "MISS"))
+    assert g["F7"] == 0x83
+    assert g["B"] == 1 and g["OFF"] == 0
+    assert g["F9"] == 0x40 and g["F9B"] == 0x41
+    assert g["MISS"] == 0            # past the 512-tile sheet reads 0, not junk
+    # The table was COPIED in, so the cart's fset did not reach back here.
+    assert LUA_FLAGS[9] == 0x01
+
+
+def test_map_layers_draws_the_same_pixels_on_both_tiers():
+    """The layer mask, said twice. The Lua side filters inside libmoy's
+    `moy_map_draw_layers`; the Python side masks the region and rasters what is
+    left -- two different mechanisms that must produce one picture."""
+    lua_px = _run(host_canvas.make_canvas(W, H), "cls(0) map(0,0,8,6,3,4,-1,1,1)",
+                  SHEET, TILEMAP, flags=LUA_FLAGS)
+    ref = host_canvas.make_canvas(W, H)
+    ref.cls(0)
+    ref.map(TILEMAP, SHEET, 0, 0, 8, 6, 3, 4, -1, 1, 1, LUA_FLAGS)
+    assert _differing(lua_px, bytes(ref._buf)) == 0
+    # ...and the mask actually removed cells, so this is not two copies of the
+    # unfiltered picture agreeing with each other.
+    plain = host_canvas.make_canvas(W, H)
+    plain.cls(0)
+    plain.map(TILEMAP, SHEET, 0, 0, 8, 6, 3, 4)
+    assert any(lua_px) and _differing(lua_px, bytes(plain._buf)) > 0
 
 
 def test_a_565_canvas_gets_two_byte_words_not_indices():

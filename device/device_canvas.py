@@ -356,6 +356,26 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 _GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
 
 
+class _MaskedRegion:
+    """A w x h cell grid standing in for a tilemap, for ONE map(..., layers)
+    call (SPEC.md 7.2). Enough of TileMap for both map lanes -- the native
+    blit_map reads cells/w/h, the no-kernel fallback calls mget -- and nothing
+    else: it is built and dropped inside the call, so it has no `gen` and never
+    reaches the Fold-2 cache (which keys on identity and would miss forever)."""
+
+    __slots__ = ("cells", "w", "h")
+
+    def __init__(self, cells, w, h):
+        self.cells = cells
+        self.w = w
+        self.h = h
+
+    def mget(self, x, y):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            return self.cells[y * self.w + x] - 1
+        return -1
+
+
 class DeviceCanvas:
     """The kid drawing API. The hot ops (cls/rect/circ/spr) go through the native
     moy_gfx C kernel writing straight into the compositor's RGB565 framebuffer --
@@ -1731,6 +1751,40 @@ class DeviceCanvas:
                 if x1 > x0 and y1 > y0:
                     self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
+    def _mask_region(self, tilemap, mx, my, w, h, layers, flags):
+        # The (w x h) region at (mx, my) as a fresh cell grid with every cell the
+        # layer mask rejects cleared to empty (SPEC.md 7.2). Cells store tile+1,
+        # so 0 is empty and out-of-range reads as empty too -- the same collapse
+        # mget makes. With no flag table at all NO cell passes a non-zero mask,
+        # which is what a cart with no flags.moyflags must draw.
+        if w <= 0 or h <= 0:
+            return bytearray(0)        # a degenerate region: every lane no-ops
+        out = bytearray(w * h)
+        if flags is None:
+            return out
+        cells = tilemap.cells
+        mw = tilemap.w
+        mh = tilemap.h
+        nflags = len(flags)
+        for cy in range(h):
+            ty = my + cy
+            if ty < 0 or ty >= mh:
+                continue
+            row = ty * mw
+            orow = cy * w
+            for cx in range(w):
+                tx = mx + cx
+                if tx < 0 or tx >= mw:
+                    continue
+                v = cells[row + tx]
+                if not v:
+                    continue
+                tid = v - 1
+                if tid >= nflags or not (flags[tid] & layers):
+                    continue
+                out[orow + cx] = v
+        return out
+
     def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
                        colorkey, tile, scale, cx0, cy0, cx1, cy1):
         # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
@@ -1747,7 +1801,7 @@ class DeviceCanvas:
                            cx0, cy0, cx1, cy1)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
-            sx=0, sy=0, colorkey=-1, scale=1):
+            sx=0, sy=0, colorkey=-1, scale=1, layers=0, flags=None):
         # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to screen
         # (sx, sy). Fold 2 (#63): the rasterized region is CACHED in a hidden 565 layer so a
         # subsequent camera-only call keyed-blits it (one blit565) instead of re-walking every
@@ -1771,6 +1825,16 @@ class DeviceCanvas:
         if h is None:
             h = tilemap.h - my
         w = int(w); h = int(h)
+        layers = int(layers) & 0xFF
+        if layers:
+            # SPEC.md 7.2's layer mask, resolved into a MASKED COPY of the region
+            # rather than into the kernel: a cell whose tile carries none of the
+            # mask's bits becomes an empty cell, which every lane below already
+            # skips. That keeps blit_map's signature (and the boards' compiled
+            # moy_gfx) untouched, and it costs one w*h byte walk per call.
+            tilemap = _MaskedRegion(self._mask_region(tilemap, mx, my, w, h,
+                                                      layers, flags), w, h)
+            mx = my = 0
         dsx = int(sx) - self._cam_x
         dsy = int(sy) - self._cam_y
         tile = sheet.TILE
@@ -1779,6 +1843,7 @@ class DeviceCanvas:
             return
         _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
         if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
+                or layers                          # a masked region: see below
                 or not MAP_AUTO_CACHE):            # -> direct raster
             self._blit_map_into(self._buf, self._stride, self._bh, dsx, dsy,
                                 tilemap, sheet, mx, my, w, h, colorkey, tile, scale,

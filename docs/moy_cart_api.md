@@ -192,13 +192,28 @@ editor). Tiles are referenced by integer id.
 | call | does |
 |---|---|
 | `spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1)` | draw sheet tile `n` at `x,y`. `colorkey` = transparent index (`-1` = opaque). `scale` enlarges. `flip`: `0` none, `1` horizontal, `2` vertical, `3` both. `w,h>1` draws a multi-tile sprite (e.g. `w=2,h=2` = 16×16). `n` may also be an `Image` |
-| `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy` |
+| `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1, layers=0)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy`. With `layers` non-zero, only the cells whose **tile's** flags share a bit with it |
 | `mget(x, y)` / `mset(x, y, tile)` | read / write a tilemap cell (tile id; `mget` = `-1` if none) |
+| `fget(n)` / `fget(n, b)` | tile `n`'s flag byte / whether bit `b` (0–7) of it is set. `0` / `False` off the sheet |
+| `fset(n, v)` / `fset(n, b, on)` | write tile `n`'s flag byte / set or clear one bit of it |
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
 | `image(rows, mapping, transparent=".")` | build a small `Image` from ASCII art, e.g. `image(["..##..","..##.."], {"#": 8})` |
 | `Image(w, h, indices, transparent)` | a sprite bitmap object (also `Image.from_ascii(...)`) |
 | `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. *Provisional*, see below |
 | `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. *Provisional*, see below |
+
+### Tile flags, and drawing a level in strata
+
+Every tile has a **flag byte** — eight bits you tag it with once, in the cart's
+`flags.moyflags` file (SPEC.md 3.5), and every cell that uses that tile is tagged
+with it. It is the tile-tagging idiom: *solid*, *spike*, *coin*, *layer 2*.
+
+`fget` reads them (collision: `fget(mget(cx, cy), 0)` asks "is the tile at this
+cell solid?"), `fset` writes them mid-run (a door that opens), and `map(...,
+layers)` filters on them — which is how a level is drawn in strata from ONE map:
+the ground with mask `1`, then the actors, then the foreground with mask `2` on
+top. `layers` of `0` (or absent) is no filter at all, and a cart with no
+`flags.moyflags` has all-zero flags, so a non-zero mask draws nothing there.
 
 ### The 3D verbs are provisional
 

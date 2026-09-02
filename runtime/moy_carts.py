@@ -163,6 +163,40 @@ SHEETS_NAME = "sheets.json"
 # across carts; the import-tile primitive copies tiles between any two sheets.
 SHARED_SHEET_NAME = "shared.moygfx"
 
+# Tile flags (SPEC.md 3.5): the FIFTH asset, one byte per tile for all 512 tiles
+# of the SPEC.md 3.2 sheet, as hex pairs in tile order. The tile-tagging idiom --
+# solid, spike, coin, layer 2 -- read by fget, written by fset and consulted by
+# map(..., layers). A sidecar rather than a manifest field because it is data
+# with the sheet's shape. PICO-8's __gff__ is its first 256 tiles byte for byte.
+FLAGS_NAME = "flags.moyflags"
+TILE_FLAGS = 512
+
+
+def parse_flags(text):
+    """A flags.moyflags blob -> a 512-byte bytearray (SPEC.md 3.5).
+
+    Two hex digits per tile in tile order, whitespace ignored; a SHORT file
+    leaves the remaining tiles zero. The mirror of moy-spec's
+    `moycore.cart.parse_flags` -- an odd digit count or more than 512 pairs is
+    the file being something else, and raises rather than guessing at an
+    alignment.
+    """
+    hexd = "".join(text.split())
+    if len(hexd) % 2 or len(hexd) > TILE_FLAGS * 2:
+        raise ValueError("expected up to %d hex byte pairs, got %d digits"
+                         % (TILE_FLAGS, len(hexd)))
+    out = bytearray(TILE_FLAGS)
+    for i in range(0, len(hexd), 2):
+        out[i // 2] = int(hexd[i:i + 2], 16)
+    return out
+
+
+def flags_to_hex(flags):
+    """The file form: sixteen lines of thirty-two tiles."""
+    return "\n".join(
+        "".join("%02x" % flags[row * 32 + i] for i in range(32))
+        for row in range(16)) + "\n"
+
 
 # The moyimg codec + cover-thumb sidecars and the crash-safe file primitives
 # moved to their own leaf modules (moy_image / moy_fs); imported back + re-exported
@@ -735,6 +769,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
         if tilemap:
             _write(d + "/map.moymap", tilemap)
+        flags = cart.get("flags")                 # tile flags (SPEC.md 3.5), optional
+        if flags:
+            _write(d + "/" + FLAGS_NAME, flags)
         images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
         if images:
             _mkdir(d + "/" + IMAGES_DIR)
@@ -915,7 +952,13 @@ def load(path):
     A corrupt cart (bad manifest.json, missing main.py, or anything else
     unexpected) returns None instead of throwing, so one broken folder can never
     take down the gallery or the boot path. The whole body is also guarded so a
-    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash."""
+    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash.
+
+    Every optional asset is carried in its SERIALISED form -- `sprites`, `map`
+    and `flags` are the file text, `None` when the file is absent -- and the
+    live objects (SpriteSheet / TileMap / the 512-byte flag table) are built
+    from them by `Project`. An absent `flags.moyflags` is `None` here and
+    all-zero there, which is SPEC.md 3.5's own reading of a missing file."""
     try:
         try:
             # _read_recover falls back to manifest.json.bak so a crash mid-save
@@ -955,6 +998,10 @@ def load(path):
             tilemap = _read(path + "/map.moymap")   # TileMap blob (#32), optional
         except OSError:
             tilemap = None
+        try:
+            flags = _read(path + "/" + FLAGS_NAME)  # tile flags (SPEC.md 3.5), optional
+        except OSError:
+            flags = None
         try:
             blocks = json.loads(_read(path + "/blocks.json"))  # block source (#29), optional
         except (OSError, ValueError):
@@ -1024,6 +1071,12 @@ def load(path):
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
+            # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
+            # cart has no such file -- carried in the SERIALISED form like
+            # sprites/map, and turned into the live 512-byte table by
+            # Project._build_flags (absent -> all zero, which is what the spec
+            # says an absent file means).
+            "flags": flags,
             # Block source (#29): the program tree a cart was authored from in the
             # block editor, or None for a code-authored cart. main.py stays the
             # runnable source either way; blocks.json is the editable origin.

@@ -89,7 +89,8 @@ class MoycoreHostRun:
         self._run = HostLuaRun(buf, canvas.w, canvas.h,
                                getattr(project, "sheet", None),
                                getattr(project, "tilemap", None),
-                               wire=wire, indexed=indexed)
+                               wire=wire, indexed=indexed,
+                               flags=getattr(project, "flags", None))
         # The superset, registered on top of libmoy's table before the cart
         # runs -- see the device glue for why this is registration and not a
         # second runtime.

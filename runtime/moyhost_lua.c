@@ -66,7 +66,7 @@ typedef struct {
                                 it, and ctypes arrays are plainer this way */
     int         aq_cap;
     int         has_sheet, has_map;
-    uint8_t     flags[MOY_FLAGS];   /* SPEC.md 3.5, seeded by the p8 shim */
+    uint8_t     flags[MOY_FLAGS];   /* SPEC.md 3.5, seeded by hl_set_flags */
     moy_p8      p8;          /* the PICO-8 machine (libmoy moy_p8.c), opened
                                 at hl_load so it seeds from the assets */
     uint8_t    *p8mem, *p8rom;
@@ -298,6 +298,19 @@ void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
     } else {
         r->con.sheet = NULL;
     }
+}
+
+/* SPEC.md 3.5's tile flags, COPIED into the run rather than borrowed like the
+ * sheet and the map: the table is 512 bytes, C writes it (fset, a poke to
+ * 0x3000) and the caller hands over whatever it has -- a bytes, a bytearray, a
+ * ctypes buffer. A short blob leaves the rest zero, as a short file does; NULL
+ * clears it, which reads exactly as a cart with no flags.moyflags. Call it
+ * BEFORE hl_load, which is where the p8 machine copies the table into 0x3000. */
+void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
+{
+    if (nbytes > MOY_FLAGS) nbytes = MOY_FLAGS;
+    memset(r->flags, 0, sizeof(r->flags));
+    if (flags && nbytes > 0) memcpy(r->flags, flags, (size_t)nbytes);
 }
 
 void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)

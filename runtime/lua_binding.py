@@ -117,6 +117,7 @@ def _lib():
             d.hl_new.restype = _P
             d.hl_set_sheet.argtypes = [_P, _P, _I]
             d.hl_set_map.argtypes = [_P, _P, _I, _I, _I]
+            d.hl_set_flags.argtypes = [_P, _P, _I]
             d.hl_retarget.argtypes = [_P, _P]
             d.hl_load.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_load.restype = _I
@@ -195,7 +196,7 @@ class HostLuaRun:
         return _lib() is not None
 
     def __init__(self, buf, w, h, sheet=None, tilemap=None, wire=None,
-                 indexed=None):
+                 indexed=None, flags=None):
         d = _lib()
         if d is None:
             raise RuntimeError("no host lua binding")
@@ -244,6 +245,12 @@ class HostLuaRun:
             self._map_ref = (ctypes.c_char * len(cells)).from_buffer(cells)
             d.hl_set_map(self._r, ctypes.cast(self._map_ref, _P), len(cells),
                          int(tilemap.w), int(tilemap.h))
+        if flags is not None:
+            # COPIED on the C side (see hl_set_flags), so nothing here has to
+            # outlive the call -- unlike the sheet and map buffers above, which
+            # the run keeps pointing at.
+            blob = bytes(flags)
+            d.hl_set_flags(self._r, ctypes.c_char_p(blob), len(blob))
 
     # The dispatch callback's C signature; kept alive on the instance because
     # ctypes will collect a CFUNCTYPE object the C side is still holding.

@@ -47,8 +47,8 @@ CART_VERBS = (
     # §10 `layers` extension -- a verb that degrades truthfully cannot be an
     # extension). `image` is moybyte's own, still `moybyte.images`.
     "make_layer", "draw_layer", "Image", "image",
-    # Tilemap
-    "map", "mget", "mset",
+    # Tilemap + the tile flags it filters on (SPEC.md 3.5 / 7.2)
+    "map", "mget", "mset", "fget", "fset",
     # Input
     "btn", "btnp", "players", "key", "keyp", "touch", "mouse", "textmode",
     # Audio

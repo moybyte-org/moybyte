@@ -75,6 +75,7 @@ def test_the_base_namespace_keyset_is_pinned():
         "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb",
         "spr", "tri", "trib", "sspr", "tline", "background",
         "_moy_restore_bg", "make_layer", "draw_layer", "map", "mget", "mset",
+        "fget", "fset",
         "print", "touch", "mouse", "clip", "camera", "pal", "palt",
         "btn", "btnp", "players", "key", "keyp", "time", "pmem",
         "textmode", "quit", "view", "cfg", "col",

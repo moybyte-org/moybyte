@@ -270,9 +270,10 @@ class FakeTilemap:
 
 
 class FakeProject:
-    def __init__(self, sheet=None, tilemap=None):
+    def __init__(self, sheet=None, tilemap=None, flags=None):
         self.sheet = sheet
         self.tilemap = tilemap
+        self.flags = flags
 
 
 _UNSET = object()
@@ -574,6 +575,27 @@ def test_the_sheet_and_tilemap_cross_as_the_projects_own_buffers(w):
     assert (w.core.rb("map_w"), w.core.rb("map_h")) == (12, 9)
 
 
+def test_the_cart_tile_flags_cross_to_the_console(w):
+    """SPEC.md 3.5's table, the 13th run_begin argument. Unlike the sheet and
+    the map this one is COPIED on the C side, so what has to be right here is
+    only that the project's 512 bytes are what run_begin is handed -- a glue
+    that passed None instead leaves fget reading 0, map(..., layers) drawing
+    nothing and the PICO-8 machine mirroring zeros into 0x3000, none of which
+    raises anywhere."""
+    flags = bytearray(512)
+    flags[7] = 0x81
+    w.run(ws=FakeWs(project=FakeProject(FakeSheet(), FakeTilemap(), flags)))
+    assert w.core.rb("flags") is flags
+
+
+def test_a_project_with_no_flags_file_passes_none_not_a_stub(w):
+    """`None` is the C's signal to zero its own table. A glue that invented an
+    empty bytearray here would be indistinguishable today and wrong the moment
+    the C learns to tell 'no flags' from 'all zero'."""
+    w.run(ws=FakeWs(project=FakeProject(FakeSheet(), FakeTilemap())))
+    assert w.core.rb("flags") is None
+
+
 def test_a_brand_new_project_has_no_sheet_and_no_map_and_says_so(w):
     """`moy_console` holds both by POINTER and libmoy's binding used to
     segfault on `spr(0,0,0)` in an empty cart -- a board reset with no
@@ -588,6 +610,7 @@ def test_a_workstation_with_no_project_at_all_still_starts(w):
     w.run(ws=FakeWs())
     assert w.core.rb("sheet_pix") is None
     assert w.core.rb("map_cells") is None
+    assert w.core.rb("flags") is None
 
 
 def test_the_cart_config_crosses_from_the_namespace(w):

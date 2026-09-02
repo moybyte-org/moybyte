@@ -234,6 +234,9 @@ def build_carts(system_carts_dir):
         tilemap = os.path.join(base, "map.moymap")        # TileMap blob, optional (#32)
         if os.path.exists(tilemap):
             cart["map"] = _read(tilemap)
+        flags = os.path.join(base, "flags.moyflags")      # tile flags (SPEC.md 3.5)
+        if os.path.exists(flags):
+            cart["flags"] = _read(flags)
         images_dir = os.path.join(base, "images")          # paint-image assets, optional (#63)
         if os.path.isdir(images_dir):
             images = {}

@@ -114,6 +114,7 @@ class Wallpaper:
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
                              sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                              tilemap, Pmem(), None, cart.get("images") or {},
+                             flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if ns.get("_init"):
@@ -411,6 +412,7 @@ class Wallpaper:
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
                                  sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                                  tilemap, Pmem(), None, cart.get("images") or {},
+                                 flags=ws._build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
             finally:

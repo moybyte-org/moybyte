@@ -41,6 +41,14 @@ try:
     from widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+# The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
+# module rather than transcribed: `ws.carts_store` may be absent (a bare test
+# workstation), and a second parser here is exactly the drift the one-body rule
+# forbids.
+try:
+    from moy_carts import TILE_FLAGS, parse_flags as _parse_flags
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_carts import TILE_FLAGS, parse_flags as _parse_flags
 # The #111 op-history core: CONFIG's fine-grained undo lives directly on Project
 # (there is no separate ConfigEditor class the way paint/map/scene/music have one --
 # see _ConfigOps below).
@@ -95,6 +103,7 @@ class Project:
         self.config = None
         self.sheet = None             # SpriteSheet for the open cart (built on open)
         self.tilemap = None           # TileMap for the open cart (built on open, #32)
+        self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
         self.tables = None            # {name: rows} Sheets docs, read via table() (#78)
@@ -172,6 +181,24 @@ class Project:
             except Exception:  # noqa: BLE001
                 pass
         return TileMap()
+
+    def _build_flags(self, cart=None):
+        """Build `cart`'s 512-byte tile-flag table from its flags.moyflags blob
+        (SPEC.md 3.5) (default: the open cart) -- the mirror of _build_tilemap.
+
+        Always a table, never None: an absent or unreadable file is all-zero,
+        which is what the spec says a missing file means, so fget()/fset() and
+        map(..., layers) are callable for every cart. It is MUTABLE and lives
+        for the run: fset writes here and the next map(..., layers) sees it,
+        exactly like a sheet edit reaching the next spr()."""
+        cart = cart if cart is not None else self.cart
+        blob = cart.get("flags") if cart else None
+        if blob:
+            try:
+                return _parse_flags(blob)
+            except Exception:  # noqa: BLE001
+                pass
+        return bytearray(TILE_FLAGS)
 
     def _build_scenes(self, cart=None):
         """Build `cart`'s Scenes (#85) from its scenes/*.moyscene blobs (default: the

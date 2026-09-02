@@ -668,7 +668,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 // -- the module surface ------------------------------------------------------
 
 // run_begin(fb, w, h, wire, sheet_pix, map_cells, map_w, map_h,
-//           snap, audio_q, pmem_bytes, cfg)
+//           snap, audio_q, pmem_bytes, cfg, flags)
 //
 // Builds the console and opens the VM with libmoy's verb table -- and STOPS.
 // The cart is loaded by load() afterwards, because between the two the host
@@ -682,7 +682,7 @@ static MP_DEFINE_CONST_FUN_OBJ_2(mod_register_obj, mod_register);
 // here except the VM.
 static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
 {
-    if (n_args != 12) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 12 args"));
+    if (n_args != 13) mp_raise_TypeError(MP_ERROR_TEXT("run_begin: 13 args"));
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
@@ -739,6 +739,21 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     }
     RUN.cfg = (a[11] == mp_const_none) ? MP_OBJ_NULL : a[11];
 
+    // SPEC.md 3.5 tile flags, COPIED rather than borrowed -- the one buffer
+    // here that is not the caller's. The sheet, the map and the framebuffer
+    // are Python-owned and handed over for the life of the run because they
+    // are large and live in PSRAM; this is 512 bytes, it is written from C
+    // (fset, the p8 shim's __moy_map_flags, a poke to 0x3000) and it must
+    // survive a caller that passes a plain immutable `bytes`. A short blob
+    // leaves the rest zero, exactly as a short flags.moyflags does.
+    memset(g_map_flags, 0, sizeof(g_map_flags));
+    if (a[12] != mp_const_none) {
+        size_t flen = 0;
+        const uint8_t *fp = buf_r(a[12], &flen);
+        if (flen > sizeof(g_map_flags)) flen = sizeof(g_map_flags);
+        memcpy(g_map_flags, fp, flen);
+    }
+
     RUN.con.canvas = &RUN.canvas;
     RUN.con.sheet  = RUN.sheet.pix ? &RUN.sheet : NULL;
     RUN.con.map    = RUN.map.cells ? &RUN.map : NULL;
@@ -778,7 +793,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_setglobal(RUN.L, "__moy_map_masked");
     lua_pushcfunction(RUN.L, l_map_flags);
     lua_setglobal(RUN.L, "__moy_map_flags");
-    memset(g_map_flags, 0, sizeof(g_map_flags));
+    // ONE table: libmoy's fget/fset/map(..., layers) and the p8 shim's masked
+    // walk read the same 512 bytes, seeded above from the cart's file. The
+    // shim's __moy_map_flags(gff) overwrites it at cart boot, which is what a
+    // p8 import wants -- its flags ride in the shim, not in a sidecar.
     RUN.con.flags = g_map_flags;
     // The PICO-8 machine, opened for every run that registered its buffers
     // (p8_memory): the shim probes for it, a moy cart never sees the globals
@@ -789,7 +807,7 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     RUN.open = 1;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 12, 12, mod_run_begin);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_run_begin_obj, 13, 13, mod_run_begin);
 
 // Run one chunk. Shared by exec() and load(); the only difference between them
 // is whether _init follows.

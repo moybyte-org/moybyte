@@ -105,6 +105,11 @@ class MoycoreRun:
         project = getattr(ws, "project", None)
         sheet = getattr(project, "sheet", None) if project is not None else None
         tilemap = getattr(project, "tilemap", None) if project is not None else None
+        # SPEC.md 3.5 tile flags. Unlike the sheet and the map this crosses as a
+        # COPY (run_begin memcpys 512 bytes into the console's own table), so a
+        # cart's fset writes are the C table's, not this bytearray's -- which is
+        # right: they are run state, and nothing persists them.
+        flags = getattr(project, "flags", None) if project is not None else None
 
         # Slot numbers bound ONCE: every one of these was a module attribute
         # lookup per frame in _refresh.
@@ -160,7 +165,7 @@ class MoycoreRun:
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg)
+            self.snap, self.aq, self.pmem_img, cfg, flags)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
