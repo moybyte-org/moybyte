@@ -317,6 +317,7 @@ class Player:
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
+        self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
@@ -406,11 +407,18 @@ class Player:
         displaced. Idempotent; called from every exit path AND at start (so a
         re-run never saves a cart table as 'the default')."""
         if self._cart_palette is not None:
+            # Onto the canvas that was SWAPPED, not whatever ws.canvas is now:
+            # a load failure releases the run canvas before this runs, and a
+            # restore aimed at the system canvas left the native kernels' gate
+            # table (owned by the run canvas) on the cart's palette -- every
+            # native cart after a failed p8 load drew in PICO-8 colours.
+            cv = self._cart_palette_canvas or self.ws.canvas
             try:
-                self.ws.canvas.palette = self._cart_palette
+                cv.palette = self._cart_palette
             except Exception:  # noqa: BLE001 -- restore must never block an exit
                 pass
             self._cart_palette = None
+            self._cart_palette_canvas = None
 
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
@@ -764,6 +772,7 @@ class Player:
                 table = None               # malformed -> keep the default table
             if table is not None:
                 self._cart_palette = ws.canvas.palette
+                self._cart_palette_canvas = ws.canvas
                 ws.canvas.palette = table
         # Stamp the cart-start clock so the cart's time() reads ms since this run
         # began (re-run on apply/run_code/edit-close resets it, like TIC-80).

@@ -188,3 +188,31 @@ def test_rerun_reuses_the_cached_canvas(tmp_path):
     ws.player.release_world()
     ws.open()
     assert ws.canvas is small        # one 128x128 buffer per session, not per run
+
+BAD_SRC = "def _draw(:\n    pass\n"     # a cart that never loads
+
+
+def test_failed_load_restores_the_palette_on_the_swapped_canvas(tmp_path):
+    """A cart palette is applied to the RUN canvas after the bind; a load
+    failure releases that canvas before the exit path restores, and a restore
+    aimed at whatever ws.canvas is by then left the run canvas -- and the native
+    kernels' gate it owns -- on the cart's table. On the T-Deck every native
+    cart after a failed p8 load drew in PICO-8 colours (2026-09-02)."""
+    carts_dir = str(tmp_path / "carts")
+    table = ["%02x%02x%02x" % (i * 4, 255 - i * 4, 7) for i in range(64)]
+    _write_cart(carts_dir, "badpal", BAD_SRC, extra={"palette": table})
+    ws = host_app.build_workstation(carts_dir)
+    drv = host_app.ConsoleDriver(ws)
+    default = list(ws.canvas.palette)
+    ws.launcher.sel = next(i for i, it in enumerate(ws.launcher.items)
+                           if it.get("title") == "badpal")
+    ws.open()
+    for _ in range(2):
+        drv.frame(DT)
+    assert ws.cart_error is not None
+    ws.player.release_world()
+    assert list(ws.canvas.palette) == default
+    small = ws._run_canvas_cache.get((128, 128))
+    assert small is None or list(small.palette) == default
+    assert ws.player._cart_palette is None
+
