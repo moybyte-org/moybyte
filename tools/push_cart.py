@@ -114,36 +114,27 @@ def serial_cfg(board):
         sys.exit("%s/board.toml has no [serial] section" % d)
     return ser
 
+# `_wr` decodes chunk by chunk and frees the upload after the write: joining a
+# 100 KB upload and decoding it in one go needs a quarter-megabyte transient
+# the S3 boards no longer have, and a dictionary that outlives the push left the
+# next cart short exactly that much heap. Keep the helper blob under two upload
+# chunks: test_push_cart installs it through the same chunked path.
 HELPERS = """
 import binascii, gc, hashlib, os
-def _wr(path):
-    # chunk by chunk: joining a 100 KB upload and decoding it in one go needs a
-    # quarter-megabyte transient, and the chunks are freed after, or the next
-    # cart to run is short exactly that much heap
-    f = open(path, 'wb')
-    n = 0
+def _wr(p):
+    f = open(p, 'wb'); n = 0
     for k in sorted(ws._up):
-        d = binascii.a2b_base64(ws._up[k])
-        f.write(d)
-        n += len(d)
-    f.close()
-    ws._up = {}
-    gc.collect()
+        d = binascii.a2b_base64(ws._up[k]); f.write(d); n += len(d)
+    f.close(); ws._up = {}; gc.collect()
     return n
-def _sha(path):
-    try:
-        return hashlib.sha256(open(path, 'rb').read()).digest().hex()[:12]
-    except Exception:
-        return None
-def _mkdir(path):
-    try:
-        os.mkdir(path)
-    except Exception:
-        pass
+def _sha(p):
+    try: return hashlib.sha256(open(p, 'rb').read()).digest().hex()[:12]
+    except Exception: return None
+def _mkdir(p):
+    try: os.mkdir(p)
+    except Exception: pass
     return 1
-ws._g['_wr'] = _wr
-ws._g['_sha'] = _sha
-ws._g['_mkdir'] = _mkdir
+ws._g['_wr'] = _wr; ws._g['_sha'] = _sha; ws._g['_mkdir'] = _mkdir
 """
 
 
