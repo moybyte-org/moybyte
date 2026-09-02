@@ -90,7 +90,27 @@ UI while watching the glass:
 - `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
 - `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
 - `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
+- `recv <n> <window> <path>` — take `n` RAW bytes off stdin into `<path>.new` (see below)
 - `quit` — leave the desktop for the REPL
+
+**`recv` is the one command that stops reading lines**, and this board is the
+one it was sized for. `tools/push_cart.py` uses it to put a cart on the store
+8 bits wide instead of base64 in `py` lines, and everything about its shape is
+this UART: stdin here is a ~256-byte ring fed by an ISR with **no flow
+control**, the same mechanism that makes a 768-char `py` line corrupt, so the
+host may only have one `window` of bytes in flight and must then wait for the
+board's ack — which is written *after* the file write, when nothing is on the
+wire. The window is `[serial] window` in `board.toml` (**4096 here**, four
+times smaller than the USB boards': their USB-Serial/JTAG backpressures for
+real and the window only buys round trips). A byte the ring drops is invisible
+to both ends, so the board simply never completes that window, its idle
+timeout fires after 5s, it removes the `.new` and prints how far it got; a byte
+that arrives *wrong* is caught by the sha256 the board takes by reading the
+file back. The transfer runs with `micropython.kbd_intr(-1)`, because the RX
+ISR compares every arriving byte against the interrupt char and swallows the
+matches. This is the ONLY cart-push transport -- the base64 chunk path was
+deleted 2026-09-02 -- so an image without the command answers `REMOTE ? recv`
+and the tool stops with one line saying to flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
 dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.

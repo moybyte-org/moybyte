@@ -112,6 +112,25 @@ Bring-up smokes: `modules/moybyte_shell.py`'s `MODE` ("panel" / "touch" /
 import moybyte_shell as s; s.MODE = "touch"; s.main()
 ```
 
+## The serial dev channel
+
+One vocabulary, every board (`runtime/dev_channel.py`; the T-Deck's README
+carries the full RX story, which is this board's too -- same S3
+USB-Serial/JTAG, same ISR). What is board-specific here is the cart push:
+`python tools/push_cart.py <cart.moy> --board guition_s3` copies a folder onto
+whichever store the console reports (`ws.carts_root` -- the TF card when one is
+in the slot, the internal VFS when not), and on an image that has the `recv`
+command it goes 8 bits wide instead of base64 inside `py` lines. This board's
+`[serial] window` is **16384**: its USB-Serial/JTAG ISR only drains what the
+stdin ring has room for, so the endpoint stalls and the host blocks -- real
+flow control, unlike the P4, where the ack is the only backpressure and the
+window is 4096 for that reason. The payload lands in a `.new` the host renames
+only once the board's read-back sha256 agrees, and a host that goes quiet
+mid-window is abandoned after 5s with the tmp removed. It is the only push
+transport there is (the base64 chunk path went with it, 2026-09-02), so an
+image from before `recv` answers `REMOTE ? recv` and the tool stops with one
+line naming the firmware as too old.
+
 ## Bring-up log
 
 * 2026-08-20 -- **stage 4 lands: the TF card is the cart store** (owner call

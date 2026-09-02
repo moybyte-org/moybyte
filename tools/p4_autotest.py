@@ -330,7 +330,18 @@ class P4Board:
 
 
     def _pump(self):
-        chunk = self.ser.read(4096)
+        # ASK HOW MUCH IS THERE FIRST. `pyserial.read(n)` loops until it has n
+        # bytes or the port timeout expires -- it does not return early on a
+        # short read -- so `read(4096)` against a board that answered with one
+        # 20-byte line costs the WHOLE 200ms timeout. That is most of the 201ms
+        # a round trip was measured at, and it is paid once per window of a
+        # cart push. `in_waiting` turns the common case into an exact read that
+        # returns at once; read(1) is the wait when nothing has arrived yet.
+        try:
+            avail = min(self.ser.in_waiting, 4096)
+        except Exception:  # noqa: BLE001 -- a fake/closed port: fall back
+            avail = 0
+        chunk = self.ser.read(avail or 1)
         if not chunk:
             return
         self._buf += chunk

@@ -27,6 +27,31 @@ BOARD BITS ARE INJECTED, not imported: `set_backlight` and an `idle`
 (device_boot.IdleBlank). Both may be None, and the commands that need them say
 so rather than raising -- a board without a backlight hook should decline `bl`,
 not traceback into the frame loop.
+
+ONE COMMAND LEAVES THE LINE DISCIPLINE: `recv`. Everything above is a line, and
+a line is the wrong shape for a cartridge -- a 124KB main.lua base64'd into
+768-char `py` lines, each acked before the next and each read a byte per frame,
+took 50-60s per cart on every board (~2KB/s) while the cable underneath carries
+hundreds of KB/s. So `recv <nbytes> <window> <path>` hands the stdin stream to
+`_recv` for exactly nbytes, straight into `<path>.new`, 8 bits wide with no
+base64 -- and it is now the ONLY way a cart reaches a board over serial
+(tools/push_cart.py's chunk path was deleted with it, owner call 2026-09-02),
+so a change here is a change to the only route. Read that method's own comments
+before changing it; the three facts that shaped it are:
+
+  * the payload is NOT read through `sys.stdin`. That stream is TEXT and
+    `stdio_read` maps CR to LF as it goes -- every 0x0D would land as 0x0A.
+    `sys.stdin.buffer` is the same ring with no translation.
+  * a byte equal to the INTERRUPT CHAR never reaches the ring at all: both RX
+    ISRs (esp32's `usb_serial_jtag.c` and `uart.c`) compare each arriving byte
+    against `mp_interrupt_char` and swallow it into a scheduled
+    KeyboardInterrupt -- and TinyUSB's CDC path additionally EMPTIES the ring
+    when it hits one. So the transfer runs with `micropython.kbd_intr(-1)`,
+    exactly as pyexec's raw-paste mode does, restored in a `finally`.
+  * every read is preceded by a poll that already promised a byte. A bulk
+    `read(n)` blocks inside `mp_hal_stdin_rx_chr` with no timeout, so a host
+    that dies mid-window would park the frame loop forever; poll-per-byte is
+    what makes the idle timeout below able to exist at all.
 """
 
 try:                                    # device: ticks is frozen flat
@@ -39,6 +64,11 @@ except ImportError:        # host / test -- no diag ring; print is it
 
     def _diag_log(tag, msg, diag):
         print("Moybyte", tag, msg)
+
+try:                       # device: the interrupt-char switch `recv` needs
+    import micropython as _micropython
+except ImportError:        # host CPython: nothing intercepts a payload byte
+    _micropython = None
 
 # The ONE declaration of the persisted ON/OFF settings (#209 section 7). The
 # serial words below are derived from it -- an entry with a `dev` name IS the
@@ -68,6 +98,37 @@ SERIAL_BYTES_PER_FRAME = 512
 # says so once -- turning a permanent drag on the desktop into one serial line
 # naming the condition. Re-arm by re-entering run_desktop.
 SERIAL_NOISE_LIMIT = 16384
+# `recv`: the largest window this board will accept, i.e. the most bytes a host
+# may have in flight before it must wait for an ack. It is a CEILING on the
+# host's declaration (each board.toml's `[serial] window` carries the value and
+# its reason), not a value anyone should meet: the buffer is allocated for the
+# window, and on a UART board it is also how much the ring has to absorb if the
+# frame loop is preempted mid-window.
+RECV_MAX_WINDOW = 32768
+# No byte for this long inside a window and the transfer is abandoned: the tmp
+# file goes, an error line names how far it got, and the frame loop resumes.
+# A host that is alive but slow refreshes it with every byte, so this is a
+# DEAD-host timeout, not a rate floor -- generous on purpose.
+RECV_IDLE_MS = 5000
+
+
+def _kbd_intr(ch):
+    """Set the interrupt char, where the board has one to set.
+
+    A payload byte equal to it never reaches stdin (both esp32 RX ISRs swallow
+    it, and the CDC path clears the ring as well), so `recv` turns it off for
+    the transfer and back on afterwards. On host CPython there is no ISR in the
+    path and nothing to do; on a build with MICROPY_KBD_EXCEPTION off there is
+    no switch, and `recv` declines rather than transferring 255 of 256 byte
+    values."""
+    if _micropython is not None:
+        _micropython.kbd_intr(ch)
+
+
+# Can this build carry an arbitrary byte on stdin at all? A device that cannot
+# turn the interrupt char off has no 8-bit-clean route, and says so rather than
+# transferring 255 of 256 byte values and leaving the hash to find out.
+RECV_8BIT = _micropython is None or hasattr(_micropython, "kbd_intr")
 
 
 def _toggle_cmd(cmd):
@@ -270,6 +331,10 @@ class DevChannel:
                       the live lockstep match, as JSON. `on`/`off` arm it by
                       hand (the Player only arms it for a multiplayer cart)
       py <code>       eval/exec one line against the LIVE console
+      recv <n> <window> <path>     take n RAW bytes off stdin into <path>.new,
+                      acking every <window> of them; prints the sha256 prefix
+                      of what it wrote. Bare `recv` answers with the caps line
+                      an older image cannot fake (see _recv)
       quit            leave the desktop for the REPL
 
     BOARD BITS ARE INJECTED: `set_backlight`, `idle` (an IdleBlank), `env`
@@ -293,6 +358,7 @@ class DevChannel:
         self.rx = 0             # bytes swallowed -- the "is something injecting?" number
         self.lines = 0          # complete commands dispatched
         self.dropped = 0        # over-long partial lines thrown away
+        self.raw = 0            # bytes taken by `recv`, around the line reader
         self.idle = idle        # an IdleBlank, for `power`; may be None
         self.set_backlight = set_backlight   # board's panel light; may be None
         self.extra = extra or {}             # board-only commands
@@ -302,16 +368,25 @@ class DevChannel:
         self.armed = False
         self._poll = None
         self._stdin = None
+        self._rawin = None      # sys.stdin.buffer: the same ring, 8 bits wide
+        self._ipoll = None      # ipoll where there is one -- see _recv
         try:
             import select
             import sys
             self._stdin = sys.stdin
+            self._rawin = getattr(sys.stdin, "buffer", None)
             self._poll = select.poll()
             # POLLIN and nothing else. A bare register() defaults to RD|WR, and
             # mphalport.c grants POLL_WR unconditionally -- so a bare
             # registration is truthy on EVERY call, forever, which looks exactly
             # like "poll reports stdin always-ready".
             self._poll.register(self._stdin, select.POLLIN)
+            # `recv` polls once PER BYTE, so the allocating `poll()` -- a fresh
+            # list of fresh tuples every call -- would hand a 124KB cart ten
+            # megabytes of garbage and buy a handful of collections in the
+            # middle of a transfer the P4's 260-byte ring cannot pause for.
+            # ipoll reuses one tuple and allocates nothing after the first call.
+            self._ipoll = getattr(self._poll, "ipoll", None) or self._poll.poll
             self.armed = True
         except Exception as exc:  # noqa: BLE001 -- the channel is optional sugar
             print("Moybyte serial channel unavailable:", exc)
@@ -426,8 +501,153 @@ class DevChannel:
         into stdin that are not commands -- UART0's ISR shares this ring buffer,
         so a floating U0RXD (GPIO44, on the expansion header) reads exactly like
         this. That is a fact, printed, instead of a hang to be puzzled over."""
-        _diag_log("SERIAL", "rx=%d lines=%d dropped=%d partial=%d"
-                  % (self.rx, self.lines, self.dropped, len(self.buf)), diag)
+        _diag_log("SERIAL", "rx=%d lines=%d dropped=%d partial=%d raw=%d"
+                  % (self.rx, self.lines, self.dropped, len(self.buf),
+                     self.raw), diag)
+
+    def _recv(self, line, parts):
+        """`recv <nbytes> <window> <path>`: nbytes RAW off stdin into
+        <path>.new, in windows the host may not run ahead of.
+
+        THE WINDOW IS THE ONLY BACKPRESSURE THE P4 HAS. Its stdin is a
+        260-byte ring fed by a UART ISR with no flow control -- a byte that
+        arrives with the ring full is dropped, silently, which is the same
+        mechanism that makes 768-char `py` lines corrupt on that board. So the
+        host writes one window and then WAITS: the ack below is written after
+        the file write, when nothing is in flight, and until the host reads it
+        no further byte is on the wire. USB boards backpressure for real (the
+        USB-Serial/JTAG ISR only drains what the ring has room for, and CDC's
+        stalls the endpoint), so their window is bigger for fewer round trips,
+        not for safety. Both numbers live in board.toml.
+
+        The transcript, which tools/push_cart.py is the reader of record for:
+
+            RECV ready <nbytes> <window> <path>.new     armed; send window 1
+            RECV ack <bytes so far>                     one per window, after
+                                                        the file write
+            RECV done <sha12> <nbytes>                  what landed, hashed
+            RECV ERR <what>                             gave up; tmp removed
+            RECV caps max=<n> idle=<ms>                 bare `recv`: the probe
+
+        `RECV caps` is the whole capability handshake. An image without this
+        command answers `REMOTE ? recv` from the same dispatcher, which is a
+        definite "no" -- and since there is no other upload path left, the host
+        stops there and says the firmware is too old, rather than blasting
+        bytes at a board that is still reading lines.
+
+        Nothing is left half-written: the payload lands in a .new the caller
+        renames only after the hash agrees, and every failure path here removes
+        it before printing why."""
+        raw = self._rawin
+        if raw is None or self._ipoll is None or not RECV_8BIT:
+            print("RECV ERR no 8-bit route on this build (stdin.buffer=%s "
+                  "poll=%s kbd_intr=%s)"
+                  % (raw is not None, self._ipoll is not None, RECV_8BIT))
+            return
+        if len(parts) < 4:
+            print("RECV caps max=%d idle=%d" % (RECV_MAX_WINDOW, RECV_IDLE_MS))
+            return
+        try:
+            total = int(parts[1])
+            window = int(parts[2])
+        except ValueError:
+            print("RECV ERR bad count/window: %s" % line)
+            return
+        if total < 0 or window < 1 or window > RECV_MAX_WINDOW:
+            print("RECV ERR %d bytes / window %d (max %d)"
+                  % (total, window, RECV_MAX_WINDOW))
+            return
+        tmp = line.split(None, 3)[3] + ".new"
+        try:
+            f = open(tmp, "wb")
+        except Exception as exc:  # noqa: BLE001 -- a bad path is an answer
+            print("RECV ERR cannot open %s: %s" % (tmp, exc))
+            return
+        import gc
+        import hashlib
+        # The inner loop allocates NOTHING, so collect before it rather than
+        # during: a collect on the P4 costs more than the ring holds at line
+        # rate, and a dropped byte there is invisible until the final hash.
+        gc.collect()
+        buf = bytearray(window)
+        mv = memoryview(buf)
+        one = bytearray(1)
+        ipoll = self._ipoll
+        rd = raw.readinto
+        # The line reader dispatched this command the instant it saw the
+        # newline, so its partial buffer is empty here by construction -- but a
+        # byte it DID swallow is a byte the payload would never see, so take
+        # them first. They came off the TEXT stream, which maps CR to LF, so
+        # anything real in here is already corrupt; the hash is what says so.
+        pending = self.buf.encode()
+        self.buf = ""
+        got = 0
+        err = None
+        _kbd_intr(-1)
+        print("RECV ready %d %d %s" % (total, window, tmp))
+        try:
+            while got < total:
+                n = total - got
+                if n > window:
+                    n = window
+                i = 0
+                if pending:
+                    i = len(pending)
+                    if i > n:
+                        i = n
+                    buf[0:i] = pending[:i]
+                    pending = pending[i:]
+                while i < n:
+                    ready = False
+                    for _ in ipoll(RECV_IDLE_MS):
+                        ready = True
+                    if not ready:
+                        err = "timeout after %d of %d bytes" % (got + i, total)
+                        break
+                    rd(one)
+                    buf[i] = one[0]
+                    i += 1
+                if err is not None:
+                    break
+                f.write(mv[:n])
+                got += n
+                self.raw += n
+                print("RECV ack %d" % got)
+        except Exception as exc:  # noqa: BLE001 -- a full store must not kill the loop
+            err = "%s: %s" % (type(exc).__name__, exc)
+        finally:
+            _kbd_intr(3)
+            try:
+                f.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if err is None:
+            # Hash the FILE, not the buffer that filled it. `open(p,'wb')` has
+            # reported a byte count on this console for a file that read back
+            # EMPTY (push_cart's header, item 2), and a hash taken from RAM
+            # would agree with the host about a cart that is not on the store.
+            # Read back through the same window buffer -- a whole-file read
+            # would be a 124KB transient on a board that has not got one.
+            sha = hashlib.sha256()
+            try:
+                f = open(tmp, "rb")
+                while True:
+                    k = f.readinto(buf)
+                    if not k:
+                        break
+                    sha.update(mv[:k])
+                f.close()
+            except Exception as exc:  # noqa: BLE001
+                err = "cannot read back %s: %s" % (tmp, exc)
+        if err is not None:
+            try:
+                import os
+                os.remove(tmp)
+            except Exception:  # noqa: BLE001 -- it may never have been created
+                pass
+            print("RECV ERR %s" % err)
+            return
+        print("RECV done %s %d" % (sha.digest().hex()[:12], got))
 
     def run(self, ws, line):
         parts = line.split()
@@ -681,6 +901,11 @@ class DevChannel:
                     print("WEB %s %s" % (url, wh.error or ""))
             except Exception as exc:  # noqa: BLE001
                 print("WEB ERR %s: %s" % (type(exc).__name__, exc))
+            return
+        if cmd == "recv":
+            # The one command that leaves the line discipline: everything after
+            # its newline is payload, not commands. See _recv.
+            self._recv(line, parts)
             return
         if cmd == "py" and len(parts) > 1:
             code = line.split(None, 1)[1]

@@ -391,7 +391,9 @@ built so that both mechanisms are survivable:
   byte consumed, so noise costs a bounded slice of a frame and can never park
   the loop; a partial line past 96 chars is dropped;
 * it **counts what it swallowed**, and the diag tick prints
-  `SERIAL rx=N lines=N dropped=N partial=N`.
+  `SERIAL rx=N lines=N dropped=N partial=N raw=N` (`raw` is what `recv` took
+  around the line reader, so an rx that stopped climbing during a cart push is
+  the transfer working, not the channel dying).
 
 That last line is the experiment. **`rx` climbing on an idle board with
 `lines=0` means something is injecting bytes into stdin** — mechanism 2, and
@@ -424,7 +426,23 @@ Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
 | `gov 0\|1` | the #63 frame governor |
 | `mem` | a forced collect, then the live/free split |
 | `py <code>` | eval/exec one line against the LIVE console (`ws`, `wm`, `pointer` in scope) |
+| `recv <n> <window> <path>` | take `n` RAW bytes off stdin into `<path>.new`, acking every `window` |
 | `quit` | leave the desktop for the REPL, cleanly |
+
+**`recv` leaves the line discipline**, and this board's transport is the easy
+half of it: `tools/push_cart.py` uses it to put a cart on the SD store 8 bits
+wide -- the only way it does so since the base64 chunk push was deleted
+(2026-09-02), so an image without the command is refused rather than served
+slowly. The USB-Serial/JTAG ISR only drains what the stdin ring has room for -- so the endpoint stalls and the HOST
+blocks, which is real flow control and is why `[serial] window` here is
+**16384** against the P4's 4096. The window buys fewer round trips on this
+board; on the P4 it is the only backpressure there is. The parts that are the
+same everywhere: the payload is read from `sys.stdin.buffer` (the TEXT stdin
+rewrites CR as it goes), the transfer runs with `micropython.kbd_intr(-1)`
+because `tud_cdc_rx_cb`/`usb_serial_jtag.c` swallow a byte equal to the
+interrupt char -- and CDC's copy *empties the ring* when it hits one -- the
+board hashes the file by READING IT BACK, and a host that stops mid-window is
+abandoned after 5s with the `.new` removed.
 
 If this works on glass, `tools/p4_autotest.py`'s approach points straight at
 this board and the T-Deck gains the on-glass suite it has never had. If it does

@@ -77,8 +77,11 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   targets are two lines and the CI matrix is one include-row per board. **The serial-console facts
   are board.toml data as well** (`[serial]`, read by `tools/push_cart.py`): the line state at open
   (asserted on the two SoC-USB S3 boards, low on the P4's CH343), whether the board may be reset at
-  all (`attach_only`), and the upload chunk (256 on the P4's UART — its stdin ring has no flow
-  control and 768 corrupts silently, measured 2026-08-19), which is what lets **ONE cart-push tool
+  all (`attach_only`), the `py`-line chunk (256 on the P4's UART — its stdin ring has no flow
+  control and 768 corrupts silently, measured 2026-08-19) and the raw `recv` window (4096 on that
+  same UART, where the board's ack is the ONLY backpressure; 16384 on the USB boards, which
+  backpressure for real, and since 2026-09-02 the cart payload rides `recv` ALONE — an image
+  without it is refused, not served the deleted base64 push), which is what lets **ONE cart-push tool
   serve every board**: `python tools/push_cart.py <cart.moy> --board tdeck|p4|guition_s3` (the names
   are the board files' own `[board] ota` ids, required on purpose — a default would be a silent
   wrong transport) copies a cart folder onto the live console's store, whose path is DISCOVERED from

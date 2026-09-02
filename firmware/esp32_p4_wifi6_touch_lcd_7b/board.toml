@@ -221,6 +221,15 @@ usb         = "1a86:55d3"
 # over-long line is dropped as noise with no error -- only the final hash
 # catches it. USB boards backpressure and keep the default.
 chunk       = 256
+# The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
+# the host may put on the wire before it must wait for the board's ack. THE ACK
+# IS THIS BOARD'S ONLY BACKPRESSURE -- the same 260-byte ring with no flow
+# control that makes 768 corrupt above -- so the window is deliberately the
+# small one: a stall anywhere inside it becomes a named timeout after 4KB
+# rather than after 32, and 4KB is also the buffer the board allocates for it.
+# It is NOT a rate limit; the ack costs one round trip per window and a 124KB
+# cart is 31 of them.
+window      = 4096
 
 [monitor]
 baud = 115200

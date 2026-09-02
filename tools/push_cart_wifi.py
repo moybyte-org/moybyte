@@ -14,15 +14,18 @@ files over WiFi. The board already has WiFi up (the WEB CONSOLE row needs it
 anyway) and pulls at tens of KB/s, so a whole cart takes seconds and this needs
 no firmware support at all.
 
-WHY NOT JUST SERIAL. `tools/push_cart.py` sends a cart down the serial link as
-base64 chunks and is the ordinary route; it works, and its chunk size is tuned
-per board (the P4's UART stdin ring is ~256 bytes with no flow control -- see
-board.toml's [serial]). But it moves roughly 500 B/s, so an 88KB main.lua is
-about three minutes and a whole cart is four to five; the same cart over this
-downloader is under 40 seconds. It is also immune to the failure serial has:
-a multi-second stall (a BLE keyboard scan) overflows the board's receive buffer
-mid-line, the harness resends a chunk the board never heard the start of, and
-the resend lands on the truncated remains as a SyntaxError.
+WHY THIS EXISTED, AND WHAT IS LEFT OF THE REASON. `tools/push_cart.py` used to
+send a cart as base64 inside `py` lines at roughly 500 B/s -- minutes per cart
+-- and that path resent a chunk after a stall, so a multi-second one (a BLE
+keyboard scan) could overflow the board's receive buffer mid-line and land the
+resend on the truncated remains as a SyntaxError. Both facts are gone: that
+push was DELETED on 2026-09-02 and the serial route is now the dev channel's
+raw `recv`, which carries the payload 8 bits wide under a window/ack discipline
+and never resends. Serial is the ordinary route and is no longer the slow one.
+What this still buys is a transfer the console does not stop for: `recv` blocks
+the frame loop until the last byte lands, while the board pulls these files
+over WiFi. It also carries files nothing else does -- an arbitrary --dir to an
+arbitrary --dest.
 
 It is deliberately not a `make` target. It needs a board on a serial port and
 both machines on one network, which is a bench operation, not a build step.
