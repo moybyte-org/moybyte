@@ -534,22 +534,41 @@ static int l_tramp(lua_State *L)
 static uint8_t g_map_flags[MOY_FLAGS];
 
 // The PICO-8 machine (libmoy moy_p8.c): 64KB of memory and a ROM snapshot,
-// PSRAM-first like every other cart-sized buffer, allocated once and reseeded
-// per run by moy_p8_open. See moy-spec proposals/p8-memory-map.md for what a
-// byte costs and why the map is the truth.
+// reseeded per run by moy_p8_open. The buffers are PYTHON-OWNED bytearrays
+// handed over through p8_memory(), like the framebuffer, the sheet and the
+// map -- NOT taken from the ESP heap. The S3 boards' MicroPython heap owns
+// all but ~1.5KB of the PSRAM region, so an 81KB heap_caps_malloc there took
+// the last of Lua's own PSRAM fallback and every Lua cart died with "not
+// enough memory" (2026-09-02, both S3 boards, first flash of this machine).
+// See moy-spec proposals/p8-memory-map.md for what a byte costs.
 static moy_p8 g_p8;
 static uint8_t *g_p8mem, *g_p8rom;
 
-static uint8_t *p8_alloc(size_t n)
+// p8_memory(mem, rom) -- register the machine's buffers (65536 and 0x4300
+// bytes, writable). Rooted in the VM state so the gc keeps them; None clears.
+static mp_obj_t mod_p8_memory(mp_obj_t mem_obj, mp_obj_t rom_obj)
 {
-#ifdef MOYCORE_PSRAM
-    uint8_t *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!p) p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    return p;
-#else
-    return malloc(n);
-#endif
+    g_p8mem = NULL;
+    g_p8rom = NULL;
+    MP_STATE_VM(moycore_p8mem) = MP_OBJ_NULL;
+    MP_STATE_VM(moycore_p8rom) = MP_OBJ_NULL;
+    if (mem_obj != mp_const_none) {
+        size_t n = 0;
+        uint8_t *p = buf_w(mem_obj, &n);
+        if (n < MOY_P8_MEM) mp_raise_ValueError(MP_ERROR_TEXT("p8_memory: mem < 65536"));
+        g_p8mem = p;
+        MP_STATE_VM(moycore_p8mem) = mem_obj;
+    }
+    if (rom_obj != mp_const_none) {
+        size_t n = 0;
+        uint8_t *p = buf_w(rom_obj, &n);
+        if (n < MOY_P8_ROM) mp_raise_ValueError(MP_ERROR_TEXT("p8_memory: rom < 0x4300"));
+        g_p8rom = p;
+        MP_STATE_VM(moycore_p8rom) = rom_obj;
+    }
+    return mp_const_none;
 }
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_p8_memory_obj, mod_p8_memory);
 
 static int mc_unhex(int ch)
 {
@@ -761,11 +780,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     lua_setglobal(RUN.L, "__moy_map_flags");
     memset(g_map_flags, 0, sizeof(g_map_flags));
     RUN.con.flags = g_map_flags;
-    // The PICO-8 machine, opened for every run: the shim probes for it, a
-    // moy cart never sees the globals it does not ask for. No memory means
-    // no machine, and the shim's sparse table -- never a failed run.
-    if (!g_p8mem) g_p8mem = p8_alloc(MOY_P8_MEM);
-    if (!g_p8rom) g_p8rom = p8_alloc(MOY_P8_ROM);
+    // The PICO-8 machine, opened for every run that registered its buffers
+    // (p8_memory): the shim probes for it, a moy cart never sees the globals
+    // it does not ask for. No buffers means no machine and the shim's sparse
+    // table -- never a failed run.
     if (g_p8mem) moy_p8_open(RUN.L, &RUN.con, &g_p8, g_p8mem, g_p8rom);
 
     RUN.open = 1;
@@ -1015,6 +1033,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
 static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__),    MP_OBJ_NEW_QSTR(MP_QSTR_moycore) },
     { MP_ROM_QSTR(MP_QSTR_run_begin),   MP_ROM_PTR(&mod_run_begin_obj) },
+    { MP_ROM_QSTR(MP_QSTR_p8_memory), MP_ROM_PTR(&mod_p8_memory_obj) },
     { MP_ROM_QSTR(MP_QSTR_register),    MP_ROM_PTR(&mod_register_obj) },
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
@@ -1067,3 +1086,6 @@ MP_REGISTER_MODULE(MP_QSTR_moycore, moycore_user_cmodule);
 // the Lua closures reference them only by INDEX, which the collector cannot
 // see. Cleared at close().
 MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_calls);
+// The PICO-8 machine's Python-owned buffers (p8_memory), kept alive here.
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8mem);
+MP_REGISTER_ROOT_POINTER(mp_obj_t moycore_p8rom);

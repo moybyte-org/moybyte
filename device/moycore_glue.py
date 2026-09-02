@@ -76,6 +76,17 @@ except ImportError:
 # back here.
 
 
+_P8_BUFFERS = []
+
+
+def _p8_buffers():
+    """The PICO-8 machine's 64KB memory and 0x4300 ROM snapshot, once."""
+    if not _P8_BUFFERS:
+        _P8_BUFFERS.append(bytearray(65536))
+        _P8_BUFFERS.append(bytearray(0x4300))
+    return _P8_BUFFERS
+
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -138,6 +149,12 @@ class MoycoreRun:
                 wire = None
 
         cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        # The PICO-8 machine's memory (moy-spec libmoy moy_p8.c), from THIS
+        # heap and handed over like the framebuffer -- not from the ESP heap,
+        # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
+        # once; moycore reseeds it per run.
+        if hasattr(_moycore, "p8_memory"):
+            _moycore.p8_memory(*_p8_buffers())
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),

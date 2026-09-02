@@ -2263,6 +2263,13 @@ do
   -- function on frame one froze any cart that had not defined it yet, or that
   -- replaced it later, with no error to show for it.
   local locked = false
+  -- An edge stays visible for the WHOLE cart frame, _draw included: PICO-8's
+  -- btnp() answers the same in _draw as it did in _update, and petal quest's
+  -- title starts from a btnp() inside its draw. So a consumed edge is cleared
+  -- at the top of the NEXT console frame, not the moment the tick returns --
+  -- and an edge latched on a frame with no tick (a host faster than 30Hz)
+  -- still waits for one.
+  local consumed = false
   function _update(dt)
     if not locked and (p8_update60 or p8_update) then
       locked = true
@@ -2270,6 +2277,10 @@ do
         P8_DT = 1 / 60
         EPS = P8_DT * 0.02
       end
+    end
+    if consumed then
+      for i = 0, 5 do pending[i] = false end
+      consumed = false
     end
     for i = 0, 5 do                              -- latch edges EVERY frame
       if m_btnp(BTN[i]) then pending[i] = true end
@@ -2284,9 +2295,12 @@ do
       for i = 0, 5 do                            -- hold length, in CART ticks
         hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
       end
+      if n > 1 then                              -- a catch-up tick: the first
+        for i = 0, 5 do pending[i] = false end   -- in this frame took the edge
+      end
       local tick = p8_update60 or p8_update
       if tick then tick() end
-      for i = 0, 5 do pending[i] = false end     -- the tick consumed the edges
+      consumed = true
       ticked = true
     end
     if n >= MAX_CATCHUP then acc = 0 end         -- write off what cannot be paid

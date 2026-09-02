@@ -44,15 +44,13 @@
 #include "moy.h"
 #include "moy_pixel.h"
 
-#define P8_KEY "moy.p8"
-
-static moy_p8 *p8_of(lua_State *L)
+/* The machine rides each verb as an UPVALUE, not a registry entry: a registry
+ * lookup is a string hash per call, and on the reference console's fast board
+ * that alone was the difference between 0.9 us and 1.8 us a byte -- the very
+ * tax the memory-map proposal measured libmoy's generic binding paying. */
+static inline moy_p8 *p8_of(lua_State *L)
 {
-    moy_p8 *p;
-    lua_getfield(L, LUA_REGISTRYINDEX, P8_KEY);
-    p = (moy_p8 *)lua_touserdata(L, -1);
-    lua_pop(L, 1);
-    return p;
+    return (moy_p8 *)lua_touserdata(L, lua_upvalueindex(1));
 }
 
 static inline int32_t iarg(lua_State *L, int i)
@@ -423,10 +421,9 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
     p->rom = rom;
     seed(p);
     if (rom) memcpy(rom, mem, MOY_P8_ROM);
-    lua_pushlightuserdata(L, p);
-    lua_setfield(L, LUA_REGISTRYINDEX, P8_KEY);
     for (i = 0; i < sizeof T / sizeof T[0]; i++) {
-        lua_pushcfunction(L, T[i].fn);
+        lua_pushlightuserdata(L, p);
+        lua_pushcclosure(L, T[i].fn, 1);
         lua_setglobal(L, T[i].name);
     }
     return 0;
