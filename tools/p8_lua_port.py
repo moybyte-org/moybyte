@@ -421,7 +421,10 @@ _OPS = (
 # compound assignment at all, so every `op=` is expanded by a transform rather
 # than renamed here, and inventing a Lua spelling for one would be a lie the
 # expander then has to undo. `\\=` and `>>>=` normalise only their operator half.
-_OP_MAP = {"!=": "~=", "^^": "~", ">>>": ">>", "\\": "//",
+# `>>>` is NOT normalised here, though Lua's `>>` is what it becomes: the bit
+# operator rewrite gives it its own machine verb (__p8_lshr), and expand_bitops
+# spells any that survives it back to `>>`.
+_OP_MAP = {"!=": "~=", "^^": "~", "\\": "//",
            "\\=": "//=", ">>>=": ">>="}
 
 # `op=` -> the operator to build `x = x <op> (rhs)` with. The keys are what the
@@ -892,11 +895,60 @@ def _expand_sigils_once(toks):
     return out
 
 
-# The bitwise operators. Lua 5.4 refuses them on a non-integral number and p8's
-# 16.16 fixed point allows them, so the OPERANDS are floored -- the operator
-# itself is left exactly where it is, which is what keeps precedence correct
-# without this having to know any.
-_BITOPS = ("<<", ">>", "&", "~", "|")
+# The bitwise operators. p8 spells NINE of them; Lua 5.4 has six, refuses
+# every one on a non-integral number, and has no rotate at all. So each
+# operand is floored -- and the porter used to floor it WHERE IT STOOD, which
+# left the operator in place and precedence untouched but cost a binding call
+# per operand: `flr(a) | flr(b)` is two crossings for one VM instruction, and
+# on dank tomb's lighting those crossings outweighed its whole raster.
+#
+# One call now: `__p8_bor(a, b)`, whose shim body IS `flr(a) | flr(b)`, so a
+# host with nothing behind the name runs exactly what it ran before and a host
+# with moy_p8.c's twin does the floor and the operator in one crossing.
+#
+# The price is that a CALL has to know precedence, which wrapping a primary
+# did not: `a & b * 2` is `a & (b*2)`, and `__p8_band(a, b) * 2` would be a
+# different expression. _PREC is that knowledge, and it is also the fix for
+# two things wrapping-the-primary got wrong -- `a + 1 & b` floored neither
+# side of the `+`, and `#t & 3` became `#flr(t) & 3`.
+_BITOPS = ("<<", ">>", ">>>", "<<>", ">><", "&", "~", "|")
+# p8's rotates have no Lua operator to leave behind, so they are always a call.
+_ROTATES = ("<<>", ">><")
+_BIT_VERB = {"|": "__p8_bor", "&": "__p8_band", "~": "__p8_bxor",
+             "<<": "__p8_shl", ">>": "__p8_shr", ">>>": "__p8_lshr",
+             "<<>": "__p8_rotl", ">><": "__p8_rotr"}
+_BNOT_VERB = "__p8_bnot"
+
+# Lua 5.4's binary precedences. Only the relation to a bit operator's own is
+# read off these, so `or`/`and` are here to STOP an operand and `^`'s
+# right-associativity does not matter -- an operand takes the whole run of
+# tighter operators either way. A token that is not here ends the operand,
+# which is what stops one at a `,`, an `=` or a `then`.
+_PREC = {
+    "or": 1, "and": 2,
+    "<": 3, ">": 3, "<=": 3, ">=": 3, "~=": 3, "==": 3,
+    "|": 4, "~": 5, "&": 6,
+    "<<": 7, ">>": 7, ">>>": 7, "<<>": 7, ">><": 7,
+    "..": 8, "+": 9, "-": 9,
+    "*": 10, "/": 10, "//": 10, "%": 10, "^": 12,
+}
+_UNARY_PREC = 11                  # `-x`, `not x`, `#x`, `~x`; only `^` is tighter
+_PREFIX_OPS = ("-", "#", "~")
+
+# Verbs whose answer is a Lua INTEGER for every argument a cart can pass, so
+# an operand that is one needs no floor at all and the bare VM instruction
+# stands. The 16.16 verbs (`band`, `shl`, ...) are deliberately NOT here:
+# their fractional lane divides the 32-bit image back, so `band(x, 0.5)` is
+# 0.5 and a bit operator on it still has to floor. `peek4` reads a 16.16 word
+# and is out for the same reason, and `fget` only counts with ONE argument --
+# with two it answers a boolean.
+_INT_VERBS = ("peek", "peek2", "mget", "flr", "ceil")
+_P8_BIT_VERBS = tuple(sorted(set(_BIT_VERB.values()))) + (_BNOT_VERB,)
+# The names above are only integers while they are still the SHIM'S. A cart
+# that defines or assigns one of them shadows it, and the rule is off for that
+# name for the whole cart (_shadowed_verbs).
+_SHADOWABLE = _INT_VERBS + ("fget",)
+
 
 def _already_floored(toks, lo, hi):
     """Is toks[lo:hi] a literal, or already `flr(...)`?"""
@@ -904,32 +956,253 @@ def _already_floored(toks, lo, hi):
     if not core:
         return True
     if len(core) == 1 and core[0][0] == T_NUM:
-        # A WHOLE number needs no flooring; a fractional one still does, and
-        # Lua refuses `x & 0xffff.fffe` exactly as it refuses a fractional
-        # variable. That literal is where p8's fixed-point masks live.
-        return "." not in core[0][1]
+        return _int_literal(core[0])
     return core[0] == (T_NAME, "flr") and core[1:2] == [(T_OP, "(")]
 
 
-def expand_bitops(toks):
-    """`a & b` -> `flr(a) & flr(b)`.
+def _int_literal(tok):
+    """A NUMBER token that is a whole integer.
+
+    The lexer has already turned a p8 hex literal into the 16.16 value it
+    names, so `0xffff` arrives as the one token `(-1)` and `0x0.0001` as
+    `(1/65536)`. The second is FRACTIONAL and still needs its floor, which a
+    test for `.` alone cannot see -- and that is where p8's masks live."""
+    if tok[0] != T_NUM:
+        return False
+    return "." not in tok[1] and "/" not in tok[1]
+
+
+def _ends_term(tok):
+    """Can an expression END on this token? A keyword cannot."""
+    kind, text = tok
+    if kind == T_NAME:
+        return text not in _NOT_TERM
+    if kind in (T_NUM, T_STR, T_LONG):
+        return True
+    return kind == T_OP and text in _TERM_ENDERS
+
+
+def _is_prefix(toks, i):
+    """Is toks[i] a UNARY operator here -- nothing terminable in front of it?"""
+    kind, text = toks[i]
+    if kind == T_NAME:
+        return text == "not"
+    if kind != T_OP or text not in _PREFIX_OPS:
+        return False
+    j = _skip_ws_back(toks, i)
+    return j == 0 or not _ends_term(toks[j - 1])
+
+
+def _binop_at(toks, i):
+    """The BINARY operator at toks[i], or None."""
+    kind, text = toks[i]
+    if kind == T_NAME:
+        return text if text in ("and", "or") else None
+    if kind != T_OP or text not in _PREC:
+        return None
+    return None if _is_prefix(toks, i) else text
+
+
+def _bit_operand_end(toks, i, prec):
+    """One past the end of the operand an operator of `prec` takes to its
+    RIGHT, or -1. Everything binding tighter comes along."""
+    n = len(toks)
+    i = _skip_ws(toks, i)
+    while i < n and _is_prefix(toks, i):
+        i = _skip_ws(toks, i + 1)
+    e = _primary_end(toks, i)
+    if e <= i:
+        return -1
+    while True:
+        j = _skip_ws(toks, e)
+        if j >= n:
+            return e
+        op = _binop_at(toks, j)
+        if op is None or _PREC[op] <= prec:
+            return e
+        k = _skip_ws(toks, j + 1)
+        while k < n and _is_prefix(toks, k):
+            k = _skip_ws(toks, k + 1)
+        nxt = _primary_end(toks, k)
+        if nxt <= k:
+            return -1
+        e = nxt
+
+
+def _bit_unit_start(toks, at):
+    """Where the primary ending just before `at` begins, unary prefixes and
+    all, or -1."""
+    s = _primary_start(toks, at)
+    if s < 0:
+        return -1
+    while True:
+        j = _skip_ws_back(toks, s)
+        if j <= 0 or not _is_prefix(toks, j - 1):
+            return s
+        s = j - 1
+
+
+def _bit_operand_start(toks, opi, prec):
+    """Where the operand an operator of `prec` takes to its LEFT begins, or
+    -1. The mirror of _bit_operand_end."""
+    i = opi
+    while True:
+        s = _bit_unit_start(toks, i)
+        if s < 0:
+            return -1
+        j = _skip_ws_back(toks, s)
+        if j <= 0:
+            return s
+        op = _binop_at(toks, j - 1)
+        if op is None or _PREC[op] <= prec:
+            return s
+        i = j - 1
+
+
+def _split_bitops(toks, lo, hi):
+    """toks[lo:hi] cut at its TOP-LEVEL bit operators, or None if it has
+    none. A unary `~` leaves an empty piece in front of itself."""
+    out = []
+    depth = 0
+    start = lo
+    for k in range(lo, hi):
+        kind, text = toks[k]
+        if kind != T_OP:
+            continue
+        if text in "([{":
+            depth += 1
+        elif text in ")]}":
+            depth -= 1
+        elif depth == 0 and text in _BITOPS:
+            out.append((start, k))
+            start = k + 1
+    if not out:
+        return None
+    out.append((start, hi))
+    return out
+
+
+def _whole_call(toks, lo, hi):
+    """toks[lo:hi] read as exactly `NAME ( ... )` -> (name, argument count),
+    or (None, 0)."""
+    if hi - lo < 3 or toks[lo][0] != T_NAME or toks[lo][1] in _NOT_TERM:
+        return None, 0
+    op = _skip_ws(toks, lo + 1)
+    if op >= hi or toks[op] != (T_OP, "(") or _lut_close(toks, op) != hi - 1:
+        return None, 0
+    args = 0 if _skip_ws(toks, op + 1) >= hi - 1 else 1
+    depth = 0
+    for k in range(op + 1, hi - 1):
+        if toks[k][0] != T_OP:
+            continue
+        if toks[k][1] in "([{":
+            depth += 1
+        elif toks[k][1] in ")]}":
+            depth -= 1
+        elif depth == 0 and toks[k][1] == ",":
+            args += 1
+    return toks[lo][1], args
+
+
+def _provably_int(toks, lo, hi, shadow):
+    """Is toks[lo:hi] an INTEGER however it evaluates, with no flr() at all?
+
+    Conservative by construction: anything this cannot NAME refuses, and the
+    operand keeps its coercion. A wrong yes costs a cart the error the
+    flooring exists to prevent -- "number has no integer representation" --
+    so nothing goes in here that is integral only for the arguments a cart
+    happens to pass."""
+    lo, hi = _lut_bare(toks, lo, hi, False)
+    if hi <= lo:
+        return False
+    parts = _split_bitops(toks, lo, hi)
+    if parts is not None:
+        # A bit operator's own answer is an integer, but only while it IS the
+        # bare Lua operator -- which it is only once both its operands are.
+        for a, b in parts:
+            if a < b and not _provably_int(toks, a, b, shadow):
+                return False
+        return True
+    core = [t for t in toks[lo:hi] if t[0] not in (T_WS, T_COMMENT)]
+    while core and core[0] == (T_OP, "-"):
+        core = core[1:]                      # a negated literal is a literal
+    if len(core) == 1:
+        return _int_literal(core[0])
+    if not core:
+        return False
+    if core[0] == (T_OP, "#"):               # Lua's length is an integer
+        return _primary_end(toks, _skip_ws(toks, lo + 1)) == hi
+    name, args = _whole_call(toks, lo, hi)
+    if name is None or name in shadow:
+        return False
+    if name == "fget":
+        return args == 1
+    return name in _INT_VERBS or name in _P8_BIT_VERBS
+
+
+def _floor_operands(toks, i):
+    """The ORIGINAL rule: `flr()` around each operand's PRIMARY, the operator
+    left exactly where it is.
+
+    Still here because it is the one rewrite that cannot move an expression,
+    so it is what an operator whose extents cannot be read falls back to --
+    a string or a table constructor beside a bit operator, which is a cart
+    error either way and not one this should turn into a syntax error."""
+    lo = _primary_start(toks, i)
+    hi = _primary_end(toks, i + 1)
+    rs = _skip_ws(toks, i + 1)
+    wrap_r = hi > 0 and not _already_floored(toks, rs, hi)
+    wrap_l = lo >= 0 and not _already_floored(toks, lo, _skip_ws_back(toks, i))
+    if not wrap_r and not wrap_l:
+        return None
+    out = list(toks[:hi]) if hi > 0 else list(toks)
+    if wrap_r:
+        out = (toks[:rs] + [(T_NAME, "flr"), (T_OP, "(")]
+               + toks[rs:hi] + [(T_OP, ")")])
+    if wrap_l:
+        le = _skip_ws_back(toks, i)
+        out = (out[:lo] + [(T_NAME, "flr"), (T_OP, "(")]
+               + out[lo:le] + [(T_OP, ")")] + out[le:])
+    return (out + toks[hi:]) if hi > 0 else out
+
+
+def _rewrite_bitop(toks, i, shadow):
+    """The bit operator at `i` as ONE machine call, or None when the bare Lua
+    operator already does exactly what p8 meant."""
+    op = toks[i][1]
+    unary = op == "~" and _is_prefix(toks, i)
+    hi = _bit_operand_end(toks, i + 1, _UNARY_PREC if unary else _PREC[op])
+    lo = -1 if unary else _bit_operand_start(toks, i, _PREC[op])
+    if hi < 0 or (not unary and lo < 0):
+        return _floor_operands(toks, i)
+    rs = _skip_ws(toks, i + 1)
+    ok = _provably_int(toks, rs, hi, shadow)
+    if ok and not unary:
+        ok = _provably_int(toks, lo, _skip_ws_back(toks, i), shadow)
+    if ok and op not in _ROTATES:
+        return None
+    if unary:
+        return (toks[:i] + [(T_NAME, _BNOT_VERB), (T_OP, "(")]
+                + toks[rs:hi] + [(T_OP, ")")] + toks[hi:])
+    le = _skip_ws_back(toks, i)
+    return (toks[:lo] + [(T_NAME, _BIT_VERB[op]), (T_OP, "(")]
+            + toks[lo:le] + [(T_OP, ","), (T_WS, " ")]
+            + toks[rs:hi] + [(T_OP, ")")] + toks[hi:])
+
+
+def expand_bitops(toks, shadow=()):
+    """`a & b` -> `__p8_band(a, b)`, unless both operands are already
+    integers and the bare Lua operator will do.
 
     Lua 5.4 raises "number has no integer representation" for a bitwise
-    operator on a non-integral float; p8's numbers are 16.16 fixed point and it
-    allows them. `picooffroad` computes `(((i>>4)+time()*2)*4) & 7` for a
+    operator on a non-integral float; p8's numbers are 16.16 fixed point and
+    it allows them. `picooffroad` computes `(((i>>4)+time()*2)*4) & 7` for a
     dither index and stopped on its title screen.
 
-    Wrapping the OPERANDS rather than rewriting `a & b` into `band(a, b)` is
-    both simpler and much faster. Simpler because the operator stays put, so
-    precedence needs no thought at all. Faster because `band` is a Lua call
-    whose body makes two more, and measured on Lua 5.4 that is 20.7x the cost
-    of the bare VM instruction against 4.8x for this -- and a cart doing bit
-    work in an inner loop (a software blitter, a bytecode VM) runs this
-    hundreds of thousands of times a frame.
-
-    A literal operand is left alone: it is already an integer, and skipping it
-    is most of the difference between 9.4x and 4.8x.
-    """
+    The operand that needs NOTHING is the one worth finding: a byte out of
+    `peek`, a cell out of `mget`, a literal. Both operands provable is the
+    bare VM instruction with no call at all, which is what dank tomb's
+    `peek(...) & 0xf0` comes out as."""
     guard = 0
     while guard < 200:
         guard += 1
@@ -937,32 +1210,85 @@ def expand_bitops(toks):
         for i in range(len(toks)):
             if toks[i][0] != T_OP or toks[i][1] not in _BITOPS:
                 continue
-            # The two sides are decided INDEPENDENTLY: `a & ~b` has no primary
-            # on the right (a unary operator is not one), and giving up on the
-            # whole operator there left `a` unfloored -- the exact float that
-            # raises.
-            lo = _primary_start(toks, i)
-            hi = _primary_end(toks, i + 1)
-            rs = _skip_ws(toks, i + 1)
-            wrap_r = hi > 0 and not _already_floored(toks, rs, hi)
-            wrap_l = lo >= 0 and not _already_floored(toks, lo,
-                                                      _skip_ws_back(toks, i))
-            if not wrap_r and not wrap_l:
+            out = _rewrite_bitop(toks, i, shadow)
+            if out is None:
                 continue
-            out = list(toks[:hi]) if hi > 0 else list(toks)
-            if wrap_r:
-                out = (toks[:rs] + [(T_NAME, "flr"), (T_OP, "(")]
-                       + toks[rs:hi] + [(T_OP, ")")])
-            if wrap_l:
-                le = _skip_ws_back(toks, i)
-                out = (out[:lo] + [(T_NAME, "flr"), (T_OP, "(")]
-                       + out[lo:le] + [(T_OP, ")")] + out[le:])
-            toks = (out + toks[hi:]) if hi > 0 else out
+            toks = out
             done = False
             break
         if done:
-            return toks
+            break
+    # p8's `>>>` is Lua's `>>` (already logical); it is lexed apart only so
+    # the emitted call can carry its own name.
+    if (T_OP, ">>>") in toks:
+        return [(T_OP, ">>") if t == (T_OP, ">>>") else t for t in toks]
     return toks
+
+
+def _shadowed_verbs(code):
+    """The integer-answering verb names this cart has taken for itself.
+
+    `_provably_int` drops an operand's floor because it knows what `peek`
+    returns -- which it does not, if the cart defined its own. Hand-walked
+    (this file runs on MicroPython): a name is the cart's if it is defined as
+    a function, declared local, assigned, bound by a `for`, or named in a
+    parameter list. One false positive costs that name's speedup and nothing
+    else, so the scan leans that way."""
+    shadow = set()
+    for name in _SHADOWABLE:
+        n = len(name)
+        i = 0
+        while True:
+            j = code.find(name, i)
+            if j < 0:
+                break
+            i = j + n
+            if j > 0 and (_ident_char(code[j - 1]) or code[j - 1] in "._:"):
+                continue
+            if j + n < len(code) and _ident_char(code[j + n]):
+                continue
+            k = j
+            while k > 0 and code[k - 1] in " \t\r\n":
+                k -= 1
+            e = k
+            while e > 0 and _ident_char(code[e - 1]):
+                e -= 1
+            if code[e:k] in ("function", "local", "for"):
+                shadow.add(name)
+                break
+            k = j + n
+            while k < len(code) and code[k] in " \t\r\n":
+                k += 1
+            if code[k:k + 1] == "=" and code[k + 1:k + 2] != "=":
+                shadow.add(name)
+                break
+        if name in shadow:
+            continue
+        if _in_parameter_list(code, name):
+            shadow.add(name)
+    return shadow
+
+
+def _in_parameter_list(code, name):
+    """Is `name` a PARAMETER of some function in `code`?"""
+    i = 0
+    while True:
+        j = code.find("function", i)
+        if j < 0:
+            return False
+        i = j + 8
+        if j > 0 and (_ident_char(code[j - 1]) or code[j - 1] in "._:"):
+            continue
+        k = code.find("(", i)
+        if k < 0:
+            return False
+        e = code.find(")", k)
+        if e < 0:
+            return False
+        for part in code[k + 1:e].split(","):
+            if part.strip() == name:
+                return True
+        i = e
 
 
 def _primary_start(toks, opi):
@@ -1234,7 +1560,12 @@ def _compound_wants_more(toks):
         if toks[i][0] == T_OP and toks[i][1] in _COMPOUND:
             if not [t for t in toks[i + 1:] if t[0] not in (T_WS, T_COMMENT)]:
                 return True
-    return False
+    # A line ending on a BIT OPERATOR wants its other operand for the same
+    # reason: no Lua statement ends on one, and the operand a line-at-a-time
+    # rewrite cannot see is one it has to leave a flr() around. dank tomb
+    # breaks its lighting line exactly there.
+    core = [t for t in toks if t[0] not in (T_WS, T_COMMENT)]
+    return bool(core) and core[-1][0] == T_OP and core[-1][1] in _BITOPS
 
 
 # --------------------------------------------------------------------------
@@ -1426,7 +1757,10 @@ def _lut_span_at(toks, i):
     if at < 0 or not _lut_is_var(toks, op + 1, at, var):
         return None
 
-    # `peek ( C | peek ( V ) )`
+    # `peek ( C | peek ( V ) )` -- or `peek ( __p8_bor ( C , peek ( V ) ) )`,
+    # which is the same statement: the porter emits the native `|` as a call
+    # unless both its operands are already integers, and `C` here is a cart
+    # variable that never is.
     lo, hi = _lut_bare(toks, at + 1, close, False)
     got = _lut_args(toks, lo, hi, "peek")
     if got is None:
@@ -1434,7 +1768,13 @@ def _lut_span_at(toks, i):
     lo, hi = _lut_bare(toks, got[0], got[1], False)
     bar = _lut_only(toks, lo, hi, "|")
     if bar < 0:
-        return None
+        got = _lut_args(toks, lo, hi, _BIT_VERB["|"])
+        if got is None:
+            return None
+        lo, hi = got
+        bar = _lut_only(toks, lo, hi, ",")
+        if bar < 0:
+            return None
     c_lo, c_hi = _lut_bare(toks, lo, bar, True)
     r_lo, r_hi = _lut_bare(toks, bar + 1, hi, True)
     got = _lut_args(toks, r_lo, r_hi, "peek")
@@ -1498,6 +1838,10 @@ def fold_lut_span(tok_lines):
 
 
 def p8_lua_to_lua54(lines):
+    # Which integer-answering verbs this cart has taken for itself, decided
+    # once over the whole source: expand_bitops drops an operand's floor on
+    # what `peek` and `mget` return, and a cart with its own is not that cart.
+    shadow = _shadowed_verbs(_strip_lua("\n".join(lines)))
     out = []
     state = None
     pending = ""
@@ -1521,11 +1865,16 @@ def p8_lua_to_lua54(lines):
             continue
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
-        toks = expand_bitops(toks)
+        toks = expand_bitops(toks, shadow)
         toks = expand_idiv(toks)
         toks = if_do_to_then(toks)
         toks = expand_oneline_if(toks)
         toks = expand_compound(toks)
+        # AGAIN, because expand_compound writes bit operators of its own:
+        # `x &= y` becomes `x = x & (y)`, and that `&` needs the same floor
+        # every other one gets. Idempotent -- a second pass over an operator
+        # already decided leaves it alone.
+        toks = expand_bitops(toks, shadow)
         toks = rename_lifecycle(toks)
         out.append(toks)
     # The one transform that reads WHOLE STATEMENTS, so it runs over the
@@ -2425,6 +2774,50 @@ do
     rotl, rotr = __moy_rotl, __moy_rotr
   end
 
+  -- THE NATIVE BIT OPERATORS, which are a different thing from the nine verbs
+  -- above and share nothing with them but their spelling. p8 writes `a|b`,
+  -- `a<<b`, `~a`; Lua 5.4 refuses a bitwise operator on a non-integral float,
+  -- so the porter floors both operands -- and it used to floor them where
+  -- they stood, `flr(a) | flr(b)`, which is TWO binding calls around one VM
+  -- instruction. On dank tomb that was 4,000 calls a frame, more than the
+  -- cart's whole raster.
+  --
+  -- Each body IS that expansion, so a host with nothing behind the name runs
+  -- exactly what the cart ran before; the machine's twin below does the same
+  -- floor and the same operator in one crossing. `flr` is looked up as a
+  -- global here for the same reason the expansion did: it is whichever flr
+  -- the shim ended up with, C or Lua.
+  --
+  -- `__p8_lshr` is p8's `>>>`, which has always been Lua's `>>` (already a
+  -- logical shift); it carries its own name so the machine can too. The two
+  -- rotates are the only ones with no Lua operator behind them at all -- p8's
+  -- `<<>` and `>><`, on the floored 32-bit value.
+  function __p8_bor(a, b) return flr(a) | flr(b) end
+  function __p8_band(a, b) return flr(a) & flr(b) end
+  function __p8_bxor(a, b) return flr(a) ~ flr(b) end
+  function __p8_bnot(a) return ~flr(a) end
+  function __p8_shl(a, b) return flr(a) << flr(b) end
+  function __p8_shr(a, b) return flr(a) >> flr(b) end
+  function __p8_lshr(a, b) return flr(a) >> flr(b) end
+  function __p8_rotl(a, b)
+    local v, n = flr(a), flr(b) % 32
+    return (v << n) | (v >> (32 - n))
+  end
+  function __p8_rotr(a, b)
+    local v, n = flr(a), flr(b) % 32
+    return (v >> n) | (v << (32 - n))
+  end
+  local function p8op(name) return rawget(_G, "__moy_p8_" .. name) end
+  __p8_bor = p8op("bor") or __p8_bor
+  __p8_band = p8op("band") or __p8_band
+  __p8_bxor = p8op("bxor") or __p8_bxor
+  __p8_bnot = p8op("bnot") or __p8_bnot
+  __p8_shl = p8op("shl") or __p8_shl
+  __p8_shr = p8op("shr") or __p8_shr
+  __p8_lshr = p8op("lshr") or __p8_lshr
+  __p8_rotl = p8op("rotl") or __p8_rotl
+  __p8_rotr = p8op("rotr") or __p8_rotr
+
   -- NO COROUTINES, and the reason is worth stating where somebody will next
   -- reach for them: this IS real Lua 5.4, but the console opens only base,
   -- math, string and table (libmoy/moy_lua.c), so `coroutine` is not a global
@@ -3234,7 +3627,8 @@ def _hex_addr_calls(code, verb):
 
 
 def _shifts_by_16(code):
-    """A `>> 16`, `<< 16`, `shr(x, 16)`, `shl(x, 16)` or `lshr(x, 16)`."""
+    """A `>> 16`, `<< 16`, `shr(x, 16)`, `shl(x, 16)` or `lshr(x, 16)` -- and
+    the porter's own spelling of the operator, `__p8_shr(x, 16)`."""
     for op in (">>", "<<"):
         i = 0
         while True:
@@ -3248,7 +3642,8 @@ def _shifts_by_16(code):
             if code[k:k + 2] == "16" and not (code[k + 2:k + 3].isdigit()
                                              or code[k + 2:k + 3] == "."):
                 return True
-    for fn in ("shr", "shl", "lshr"):
+    for fn in ("shr", "shl", "lshr",
+               _BIT_VERB[">>"], _BIT_VERB["<<"], _BIT_VERB[">>>"]):
         for at in _call_sites(code, fn):
             args = _call_args(code, at)
             if len(args) >= 2 and args[1] == "16":
