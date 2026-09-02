@@ -1237,6 +1237,266 @@ def _compound_wants_more(toks):
     return False
 
 
+# --------------------------------------------------------------------------
+# The lookup-table span: one statement shape, folded into one call
+# --------------------------------------------------------------------------
+# `for a = i, j do poke(a, peek(lut | peek(a))) end` is how a p8 cart recolours
+# a run of screen memory through a table -- a light level, a fade, a tinted
+# room. dank tomb lights every visible row of every frame with it: 8,192 bytes
+# a frame at three to five binding calls each, which is its whole render.
+#
+# The fold is `__p8_lut_span(i, j, lut)`, and the shim's Lua body for that name
+# IS this loop, so a host with no C behind it runs exactly what it ran before.
+# A WHOLE-FILE pass rather than a per-line one, because a p8 cart writes the
+# two halves on two lines (dank tomb does) -- and the line COUNT survives: the
+# newlines the match swallowed are put back after the call.
+#
+# ONE shape, matched exactly, and everything else left alone. The fold hoists
+# `lut` out of the loop, so it may only take an expression that cannot change
+# inside one: no call, no literal, no keyword, no mention of the loop variable.
+#
+# The one divergence left, and it is deliberate: over an EMPTY range the loop
+# never evaluates `lut` and the call does, so a `lut` that would RAISE (`t.x`
+# with a nil `t`) raises where it used to be skipped. A field access is worth
+# more than that case is: `lut` is a plain local in every cart seen.
+
+_NL = (T_WS, "\n")
+
+# What a hoisted argument may be built from: names, numbers, fields, indexes
+# and arithmetic. No `:` (a method call), no comparison, no `and`/`or`.
+_LUT_ARG_OPS = ("(", ")", "[", "]", ".", "+", "-", "*", "/", "%", "^", "#")
+
+
+def _lut_arg_ok(toks, lo, hi, var):
+    """May toks[lo:hi] be evaluated ONCE where the loop evaluated it every
+    iteration? A NAME followed by `(`, `{` or a string is a call and refuses;
+    so does the loop variable, whose value is the thing that changes."""
+    depth = 0
+    seen = False
+    for k in range(lo, hi):
+        kind, text = toks[k]
+        if kind == T_WS:
+            continue
+        seen = True
+        if kind == T_NUM:
+            continue
+        if kind == T_NAME:
+            if text == var or text in _NOT_TERM:
+                return False
+            j = _skip_ws(toks, k + 1)
+            if j < hi and (toks[j][0] in (T_STR, T_LONG)
+                           or (toks[j][0] == T_OP and toks[j][1] in ("(", "{"))):
+                return False
+            continue
+        if kind != T_OP or text not in _LUT_ARG_OPS:
+            return False
+        if text in ("(", "["):
+            depth += 1
+        elif text in (")", "]"):
+            depth -= 1
+            if depth < 0:
+                return False
+    return seen and depth == 0
+
+
+def _lut_close(toks, i):
+    """Index of the bracket closing the one at `i`, or -1."""
+    depth = 0
+    for k in range(i, len(toks)):
+        if toks[k][0] != T_OP:
+            continue
+        if toks[k][1] in "([{":
+            depth += 1
+        elif toks[k][1] in ")]}":
+            depth -= 1
+            if depth == 0:
+                return k
+    return -1
+
+
+def _lut_bare(toks, lo, hi, strip_flr):
+    """toks[lo:hi] with its outermost redundant parens -- and, when asked, one
+    whole-span `flr(...)` -- taken off.
+
+    Both wrappers are the PORTER'S OWN: `@(bs|@ls)` arrives here as
+    `peek((flr(bs)|flr(peek(ls))))` once the sigils and the bitop operands have
+    been expanded. A cart that wrote neither is the same statement, so the
+    wrappers are stripped rather than the shape spelled out four times."""
+    while True:
+        lo = _skip_ws(toks, lo)
+        hi = _skip_ws_back(toks, hi)
+        if hi - lo >= 2 and toks[lo] == (T_OP, "(") \
+                and _lut_close(toks, lo) == hi - 1:
+            lo, hi = lo + 1, hi - 1
+            continue
+        if strip_flr and hi - lo >= 3 and toks[lo] == (T_NAME, "flr"):
+            op = _skip_ws(toks, lo + 1)
+            if op < hi and toks[op] == (T_OP, "(") \
+                    and _lut_close(toks, op) == hi - 1:
+                lo, hi = op + 1, hi - 1
+                continue
+        return lo, hi
+
+
+def _lut_only(toks, lo, hi, text):
+    """Index of the ONE top-level `text` in toks[lo:hi], or -1 -- also -1 when
+    there is more than one, because then this is not the shape."""
+    depth = 0
+    at = -1
+    for k in range(lo, hi):
+        if toks[k][0] != T_OP:
+            continue
+        if toks[k][1] in "([{":
+            depth += 1
+        elif toks[k][1] in ")]}":
+            depth -= 1
+        elif depth == 0 and toks[k][1] == text:
+            if at >= 0:
+                return -1
+            at = k
+    return at
+
+
+def _lut_args(toks, lo, hi, name):
+    """toks[lo:hi] read as exactly `name ( ... )` -> the argument span, or
+    None."""
+    if hi - lo < 3 or toks[lo] != (T_NAME, name):
+        return None
+    op = _skip_ws(toks, lo + 1)
+    if op >= hi or toks[op] != (T_OP, "(") or _lut_close(toks, op) != hi - 1:
+        return None
+    return op + 1, hi - 1
+
+
+def _lut_is_var(toks, lo, hi, var):
+    """toks[lo:hi] is the loop variable and nothing else."""
+    lo, hi = _lut_bare(toks, lo, hi, False)
+    return hi - lo == 1 and toks[lo] == (T_NAME, var)
+
+
+def _lut_span_at(toks, i):
+    """`for V = A, B do poke(V, peek(C | peek(V))) end` at `i`, which is a
+    `for` token -> (index past `end`, A, B, C), or None."""
+    n = len(toks)
+    j = _skip_ws(toks, i + 1)
+    if j >= n or toks[j][0] != T_NAME or toks[j][1] in _NOT_TERM:
+        return None
+    var = toks[j][1]
+    j = _skip_ws(toks, j + 1)
+    if j >= n or toks[j] != (T_OP, "="):
+        return None
+
+    # `A , B do`, with the comma and the `do` at depth 0. A third `,step` is
+    # a different statement and is left alone.
+    head = j + 1
+    comma = do = -1
+    depth = 0
+    for k in range(head, n):
+        kind, text = toks[k]
+        if kind == T_OP:
+            if text in "([{":
+                depth += 1
+            elif text in ")]}":
+                depth -= 1
+                if depth < 0:
+                    return None
+            elif text == "," and depth == 0:
+                if comma >= 0:
+                    return None
+                comma = k
+        elif kind == T_NAME and depth == 0 and text in _NOT_TERM:
+            if text != "do":
+                return None
+            do = k
+            break
+    if comma < 0 or do < 0:
+        return None
+
+    # `poke ( V , <value> )`
+    j = _skip_ws(toks, do + 1)
+    if j >= n or toks[j] != (T_NAME, "poke"):
+        return None
+    op = _skip_ws(toks, j + 1)
+    if op >= n or toks[op] != (T_OP, "("):
+        return None
+    close = _lut_close(toks, op)
+    if close < 0:
+        return None
+    at = _lut_only(toks, op + 1, close, ",")
+    if at < 0 or not _lut_is_var(toks, op + 1, at, var):
+        return None
+
+    # `peek ( C | peek ( V ) )`
+    lo, hi = _lut_bare(toks, at + 1, close, False)
+    got = _lut_args(toks, lo, hi, "peek")
+    if got is None:
+        return None
+    lo, hi = _lut_bare(toks, got[0], got[1], False)
+    bar = _lut_only(toks, lo, hi, "|")
+    if bar < 0:
+        return None
+    c_lo, c_hi = _lut_bare(toks, lo, bar, True)
+    r_lo, r_hi = _lut_bare(toks, bar + 1, hi, True)
+    got = _lut_args(toks, r_lo, r_hi, "peek")
+    if got is None or not _lut_is_var(toks, got[0], got[1], var):
+        return None
+
+    j = _skip_ws(toks, close + 1)
+    if j >= n or toks[j] != (T_NAME, "end"):
+        return None
+    a_lo, a_hi = _skip_ws(toks, head), _skip_ws_back(toks, comma)
+    b_lo, b_hi = _skip_ws(toks, comma + 1), _skip_ws_back(toks, do)
+    if not _lut_arg_ok(toks, a_lo, a_hi, var) \
+            or not _lut_arg_ok(toks, b_lo, b_hi, var) \
+            or not _lut_arg_ok(toks, c_lo, c_hi, var):
+        return None
+    for tok in toks[i:j + 1]:
+        if tok[0] == T_COMMENT:
+            return None            # a comment inside it would be dropped
+    return (j + 1, toks[a_lo:a_hi], toks[b_lo:b_hi], toks[c_lo:c_hi])
+
+
+def fold_lut_span(tok_lines):
+    """Every `for V=A,B do poke(V,peek(C|peek(V))) end` in the cart, as a call
+    to `__p8_lut_span(A, B, C)`. Lines in, lines out, one for one."""
+    flat = []
+    for k, toks in enumerate(tok_lines):
+        if k:
+            flat.append(_NL)
+        flat.extend(toks)
+    out = []
+    i = 0
+    hit = False
+    while i < len(flat):
+        if flat[i] == (T_NAME, "for"):
+            found = _lut_span_at(flat, i)
+            if found is not None:
+                end, a, b, c = found
+                out.append((T_NAME, "__p8_lut_span"))
+                out.append((T_OP, "("))
+                out.extend([t for t in a if t != _NL])
+                out.append((T_OP, ","))
+                out.extend([t for t in b if t != _NL])
+                out.append((T_OP, ","))
+                out.extend([t for t in c if t != _NL])
+                out.append((T_OP, ")"))
+                out.extend([t for t in flat[i:end] if t == _NL])
+                i = end
+                hit = True
+                continue
+        out.append(flat[i])
+        i += 1
+    if not hit:
+        return tok_lines
+    lines = [[]]
+    for tok in out:
+        if tok == _NL:
+            lines.append([])
+        else:
+            lines[-1].append(tok)
+    return lines
+
+
 def p8_lua_to_lua54(lines):
     out = []
     state = None
@@ -1252,11 +1512,12 @@ def p8_lua_to_lua54(lines):
         # cart's author would look.
         if state is None and _compound_wants_more(toks):
             pending = line
-            out.append("")
+            out.append([])
             continue
         if _is_empty_music_stub(toks):
-            out.append("-- [port] dropped the cart's empty music() stub "
-                       "(imported __music__ plays instead)")
+            out.append([(T_COMMENT,
+                         "-- [port] dropped the cart's empty music() stub "
+                         "(imported __music__ plays instead)")])
             continue
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
@@ -1266,8 +1527,11 @@ def p8_lua_to_lua54(lines):
         toks = expand_oneline_if(toks)
         toks = expand_compound(toks)
         toks = rename_lifecycle(toks)
-        out.append(render(toks))
-    return "\n".join(out) + "\n"
+        out.append(toks)
+    # The one transform that reads WHOLE STATEMENTS, so it runs over the
+    # converted lines together rather than one at a time.
+    out = fold_lut_span(out)
+    return "\n".join(render(toks) for toks in out) + "\n"
 
 
 # --------------------------------------------------------------------------
@@ -2274,6 +2538,22 @@ do
     peek4, poke4 = __moy_peek4, __moy_poke4
   end
 
+  -- A LOOKUP-TABLE SPAN: a run of memory pushed through a table, which is how
+  -- a cart tints a room or fades a screen. The porter folds the statement
+  -- `for a=i,j do poke(a,peek(lut|peek(a))) end` into a call to this
+  -- (p8_lua_port.fold_lut_span), so a screen's worth of it is one binding call
+  -- instead of 8,192 x 3.
+  --
+  -- The LOOP IS THE REFERENCE, and it is right here: the C answers false for
+  -- anything but three plain integers -- a float bound, a nil, a string -- so
+  -- p8's own coercions are never transcribed twice, and every case the C
+  -- declines runs the Lua the cart was written as.
+  local lut_span = rawget(_G, "__moy_lut_span")
+  function __p8_lut_span(from, to, lut)
+    if lut_span ~= nil and lut_span(from, to, lut) then return end
+    for a = from, to do poke(a, peek(flr(lut) | flr(peek(a)))) end
+  end
+
   -- SAVE DATA is the one that can be honest all the way down: p8's 64 cartdata
   -- slots and the console's pmem are the same shape, so a cart's progress
   -- really does survive being closed.
@@ -2526,6 +2806,55 @@ do
     end
   end
 
+  -- ===================== the console's own p8 verbs ==================
+  -- Where the host carries the PICO-8 machine (moy_p8.c), every draw verb
+  -- above is ONE binding call instead of four to six: the Lua wrapper's work
+  -- was never arithmetic, it was crossings -- fl() on each coordinate, fl()
+  -- again inside pcol(), a fill-pattern check, then the console verb, each
+  -- with a fixed cost the board pays whatever is on the other side. The C
+  -- takes the cart's raw arguments and resolves p8's semantics from the
+  -- machine's own state: the pen at 0x5f25, the cursor at 0x5f26, the fill
+  -- pattern at 0x5f31, the palettes at 0x5f00/0x5f10, the camera and clip the
+  -- console already holds. That is also why those bytes are the STATE now
+  -- rather than the locals above: peek() and poke() of them agree with the
+  -- verbs, which they could not while the truth was a Lua upvalue.
+  --
+  -- Per verb, so a host may offer some and not others, and the Lua above
+  -- stays as the fallback for one that offers none.
+  -- libmoy/test/p8lib.moy holds the two lanes to one answer.
+  local function p8c(name) return rawget(_G, "__moy_p8_" .. name) end
+  pset, pget = p8c("pset") or pset, p8c("pget") or pget
+  line = p8c("line") or line
+  rect, rectfill = p8c("rect") or rect, p8c("rectfill") or rectfill
+  circ, circfill = p8c("circ") or circ, p8c("circfill") or circfill
+  oval, ovalfill = p8c("oval") or oval, p8c("ovalfill") or ovalfill
+  spr, sspr = p8c("spr") or spr, p8c("sspr") or sspr
+  print = p8c("print") or print
+  pal, palt, fillp = p8c("pal") or pal, p8c("palt") or palt, p8c("fillp") or fillp
+  color, cursor = p8c("color") or color, p8c("cursor") or cursor
+  sget, sset = p8c("sget") or sget, p8c("sset") or sset
+  -- btn/btnp and the two latch hooks are one thing: the hold counters and the
+  -- pending edges live in the machine or in the tables above, never half in
+  -- each. The pacing rule is unchanged -- an edge latched once a console
+  -- frame, cleared by the tick that consumes it, repeating after 15 cart
+  -- ticks and then every 4.
+  local p8_in_frame, p8_in_tick
+  if p8c("btn") ~= nil then
+    btn, btnp = p8c("btn"), p8c("btnp")
+    p8_in_frame, p8_in_tick = p8c("input_frame"), p8c("input_tick")
+  end
+  -- The per-frame restore: p8's default transparency and its screen palette,
+  -- which the machine keeps at 0x5f10 rather than in the table above. Tied to
+  -- pal(), because that is what decides which of the two holds the fade.
+  local p8_frame = (pal == p8c("pal")) and p8c("frame") or nil
+  -- camera and map move TOGETHER, and only where the Lua map() is the one in
+  -- play: that loop clips against the shim's own copy of the camera, which a
+  -- C camera() would stop updating. A host with its own native masked map
+  -- (__moy_map_masked) keeps both, and camera() stays the shim's.
+  if native_map == nil and p8c("map") ~= nil and p8c("camera") ~= nil then
+    camera, map = p8c("camera"), p8c("map")
+  end
+
   -- moybyte lifecycle -> the p8 one, paced at PICO-8's fixed 30fps
   --
   -- FALSE to start, because PICO-8 never draws before its first update. On a
@@ -2599,12 +2928,16 @@ do
         CHEAP = P8_DT * 500
       end
     end
-    if consumed then
-      for i = 0, 5 do pending[i] = false end
-      consumed = false
-    end
-    for i = 0, 5 do                              -- latch edges EVERY frame
-      if m_btnp(BTN[i]) then pending[i] = true end
+    if p8_in_frame then                          -- the latch, in C
+      p8_in_frame()
+    else
+      if consumed then
+        for i = 0, 5 do pending[i] = false end
+        consumed = false
+      end
+      for i = 0, 5 do                            -- latch edges EVERY frame
+        if m_btnp(BTN[i]) then pending[i] = true end
+      end
     end
     dt = dt or P8_DT
     if dt > 0.25 then dt = 0.25 end              -- a stall is a pause, not debt
@@ -2614,11 +2947,15 @@ do
       if n > 0 and tick_ms > CHEAP then break end
       acc = acc - P8_DT
       n = n + 1
-      for i = 0, 5 do                            -- hold length, in CART ticks
-        hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
-      end
-      if n > 1 then                              -- a catch-up tick: the first
-        for i = 0, 5 do pending[i] = false end   -- in this frame took the edge
+      if p8_in_tick then
+        p8_in_tick(n > 1)                        -- the hold counters, in C
+      else
+        for i = 0, 5 do                          -- hold length, in CART ticks
+          hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
+        end
+        if n > 1 then                            -- a catch-up tick: the first
+          for i = 0, 5 do pending[i] = false end -- in this frame took the edge
+        end
       end
       local tick = p8_update60 or p8_update
       if tick then
@@ -2639,10 +2976,16 @@ do
     if p8_draw and (ticked or not (p8_update60 or p8_update)) then
       -- the console resets camera/clip/pal/palt after every cart frame;
       -- re-park the p8 camera and restore p8's default transparency (colour
-      -- 0) so a cart that trusts persistent draw state gets PICO-8's.
+      -- 0) so a cart that trusts persistent draw state gets PICO-8's. The
+      -- machine does all three in one call, screen palette included -- which
+      -- it keeps at 0x5f10, so a memcpy fade there survives the frame too.
       camera()
-      p8_palt_default()
-      spal_apply()
+      if p8_frame then
+        p8_frame()
+      else
+        p8_palt_default()
+        spal_apply()
+      end
       p8_draw()
       ticked = false
     end

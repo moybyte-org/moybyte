@@ -427,6 +427,19 @@ typedef struct {
     moy_console *con;
     uint8_t *mem;
     uint8_t *rom;
+    /* The p8 PRINT CURSOR. PICO-8 keeps it at 0x5f26/0x5f27 and so does this
+     * (peek and poke reach it there), but as one BYTE each -- and the port
+     * shim never wrapped it, because it does not scroll the screen the way
+     * PICO-8 does when the cursor runs off the bottom. So the full value
+     * lives here and the bytes are its low half, the same arrangement the
+     * camera already has. */
+    int32_t cur_x, cur_y;
+    /* btn/btnp's latch, in CART ticks (PICO8.md): `hold` is how many ticks a
+     * button has been down, `pending` an edge seen this console frame and not
+     * yet consumed by a tick. Six buttons, p8's own numbering. */
+    uint16_t hold[6];
+    uint8_t pending[6];
+    uint8_t consumed;
 } moy_p8;
 int moy_p8_open(struct lua_State *L, moy_console *con, moy_p8 *p8,
                 uint8_t *mem, uint8_t *rom);

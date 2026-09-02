@@ -17,13 +17,27 @@
  *   0x5f00-0x5f0f  draw palette (bit 4 = transparent, bit 7 = the secret
  *                  sixteen, which a ported cart's palette ships at 16-31)
  *   0x5f10-0x5f1f  screen palette
- *   0x5f20-0x5f2b  clip, then camera, int16 LE
+ *   0x5f20-0x5f23  clip
+ *   0x5f25         pen colour, 0x5f26-0x5f27 the print cursor
+ *   0x5f28-0x5f2b  camera, int16 LE
+ *   0x5f31-0x5f33  fill pattern, then its transparency bit
  *   0x6000-0x7fff  screen, 128x128 4bpp
  *
  * Everything else is plain RAM. The palette, camera and clip bytes READ from
  * the canvas rather than the array, so whichever path wrote them -- pal() or
  * poke() -- peek() answers the truth. Draw state still resets every frame
- * (SPEC.md 6); the shim re-applies what PICO-8 keeps.
+ * (SPEC.md 6); __moy_p8_frame re-applies what PICO-8 keeps.
+ *
+ * THE DRAW VERBS ARE HERE TOO, and that is what the addresses above are for.
+ * A shim draw verb was four to six binding calls -- fl() on each coordinate,
+ * pcol() on the colour, a fill-pattern check, then the console verb -- and a
+ * binding call has a floor of ~1.65us on the reference console's slow boards,
+ * so a p8 `pset` cost five of them where PICO-8 costs one. Each __moy_p8_*
+ * verb below takes the cart's raw arguments and resolves p8's semantics from
+ * the machine: the pen at 0x5f25 when the colour is nil, the fill pattern at
+ * 0x5f31, the draw palette and transparency at 0x5f00, the camera and clip
+ * the console already holds. The state the shim used to keep in Lua locals
+ * moved into those bytes, so peek() and poke() of them agree with the verbs.
  *
  * These are `__moy_*` globals a ported cart's shim probes for nil-safe, not
  * verbs of SPEC.md: a host that opens them is offering a machine, not a
@@ -53,6 +67,14 @@ static inline moy_p8 *p8_of(lua_State *L)
 {
     return (moy_p8 *)lua_touserdata(L, lua_upvalueindex(1));
 }
+
+/* The p8 draw state that used to be Lua locals in the shim, at the addresses
+ * PICO-8 keeps it -- so `poke(0x5f25, 8)` and `color(8)` are one thing. */
+#define P8_PEN   0x5f25u        /* pen colour, the byte color() masks to 0x8f */
+#define P8_CURX  0x5f26u        /* print cursor; the full value is in moy_p8 */
+#define P8_CURY  0x5f27u
+#define P8_FILLP 0x5f31u        /* fill pattern lo, hi, then its transparency */
+#define P8_SPAL  0x5f10u        /* screen palette, kept across frames */
 
 /* uint32 -> the int32 with the same bits, without leaning on the
  * implementation-defined narrowing conversion. */
@@ -208,12 +230,18 @@ static void apply(moy_p8 *p, uint32_t a, uint8_t v)
         moy_palt(c, (int)(a - 0x5f00), (v & 0x90) != 0);
     } else if (a >= 0x5f10 && a < 0x5f20) {
         moy_pal_screen(c, (int)(a - 0x5f10), col_in(v));
-    } else if (a >= 0x5f20 && a < 0x5f2c) {
+    } else if (a >= 0x5f20 && a < 0x5f24) {
         const uint8_t *m = p->mem + 0x5f20;
         c->clip_x0 = m[0]; c->clip_y0 = m[1];
         c->clip_x1 = m[2]; c->clip_y1 = m[3];
-        c->cam_x = (int16_t)(m[8] | (m[9] << 8));
-        c->cam_y = (int16_t)(m[10] | (m[11] << 8));
+    } else if (a >= 0x5f28 && a < 0x5f2c) {
+        const uint8_t *m = p->mem + 0x5f28;
+        c->cam_x = (int16_t)(m[0] | (m[1] << 8));
+        c->cam_y = (int16_t)(m[2] | (m[3] << 8));
+    } else if (a == 0x5f26) {
+        p->cur_x = v;                    /* the cursor's byte half; see moy.h */
+    } else if (a == 0x5f27) {
+        p->cur_y = v;
     }
 }
 
@@ -226,13 +254,17 @@ static inline uint8_t rd(const moy_p8 *p, uint32_t a)
         return (uint8_t)((c->pal[i] & 15) | (c->palt[i] ? 0x10 : 0));
     }
     if (a >= 0x5f10 && a < 0x5f20) return col_out(c->spal[a - 0x5f10]);
-    if (a >= 0x5f20 && a < 0x5f2c) {
-        int i = (int)(a - 0x5f20);
-        int v[12] = { c->clip_x0, c->clip_y0, c->clip_x1, c->clip_y1, 0, 0, 0, 0,
-                      c->cam_x & 255, (c->cam_x >> 8) & 255,
-                      c->cam_y & 255, (c->cam_y >> 8) & 255 };
-        return (uint8_t)v[i];
+    if (a >= 0x5f20 && a < 0x5f24) {
+        int v[4] = { c->clip_x0, c->clip_y0, c->clip_x1, c->clip_y1 };
+        return (uint8_t)v[a - 0x5f20];
     }
+    if (a >= 0x5f28 && a < 0x5f2c) {
+        int v[4] = { c->cam_x & 255, (c->cam_x >> 8) & 255,
+                     c->cam_y & 255, (c->cam_y >> 8) & 255 };
+        return (uint8_t)v[a - 0x5f28];
+    }
+    if (a == 0x5f26) return (uint8_t)p->cur_x;
+    if (a == 0x5f27) return (uint8_t)p->cur_y;
     if (a >= 0x3000 && a < 0x3100 && p->con->flags) return p->con->flags[a - 0x3000];
     return p->mem[a];
 }
@@ -393,6 +425,51 @@ static int l_memset(lua_State *L)
     return 0;
 }
 
+/* __moy_lut_span(from, to, lut): the span a ported cart lights its screen
+ * with -- `for a = from, to do poke(a, peek(lut | peek(a))) end`, a run of
+ * memory pushed through a lookup table. The porter folds that statement into
+ * one call (p8_lua_port.fold_lut_span) because a PICO-8 screen is 8,192 bytes
+ * and the loop spends three to five binding calls on each of them.
+ *
+ * THREE PLAIN INTEGERS OR NOTHING. Lua's numeric `for` coerces its bounds and
+ * `|` refuses a non-integral float, and transcribing either of those here
+ * would be a second copy of rules the shim already owns -- so anything else
+ * returns false and the shim runs the loop this is the image of. Everything
+ * that is here goes through peek_byte/poke_byte, so the address wrap and the
+ * screen window (which reads and writes the canvas, not the array) are the
+ * ones every other verb sees.
+ *
+ * `lut | v` is an ORDINARY integer OR, no 16.16 conversion: the shim's `|` is
+ * the VM's, both operands are already integers by the time it runs, and an
+ * address it lands outside 0x0000-0xffff wraps exactly as peek's would. */
+static int l_lut_span(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_Integer from, to, lut;
+    lua_Unsigned i, n;
+    uint32_t a;
+    if (!lua_isinteger(L, 1) || !lua_isinteger(L, 2) || !lua_isinteger(L, 3)) {
+        lua_pushboolean(L, 0);
+        return 1;
+    }
+    from = lua_tointeger(L, 1);
+    to = lua_tointeger(L, 2);
+    lut = lua_tointeger(L, 3);
+    lua_pushboolean(L, 1);
+    if (to < from) return 1;                          /* p8's empty range */
+    n = (lua_Unsigned)to - (lua_Unsigned)from;
+    /* The address is carried already truncated, and stepping the truncated
+     * one is what the loop does: peek narrows to int32 every iteration, and
+     * consecutive addresses narrow to consecutive int32s. */
+    a = (uint32_t)(int32_t)from;
+    for (i = 0; ; i++, a++) {
+        uint8_t v = peek_byte(p, a);
+        poke_byte(p, a, peek_byte(p, (uint32_t)(int32_t)(lut | (lua_Integer)v)));
+        if (i == n) break;
+    }
+    return 1;
+}
+
 /* reload(dst, src, len): PICO-8 copies from the cart ROM -- the sheet, map,
  * flags and sound data as the cart file holds them -- into RAM. The ROM here
  * is the seeded image, snapshotted before the cart's first write; cstore is
@@ -452,6 +529,15 @@ static double p8_fl_d(lua_State *L, int i)
     f = lua_tonumberx(L, i, &isnum);
     if (!isnum) return 0;
     return floor((double)f);
+}
+
+/* Lua's `//` on integers: a FLOOR, not a truncation, which is a whole cell of
+ * difference for a camera left of the origin. */
+static int32_t p8_floordiv(int32_t m, int32_t n)
+{
+    int32_t q = m / n;
+    if ((m % n) != 0 && ((m < 0) != (n < 0))) q--;
+    return q;
 }
 
 static uint32_t p8_maddr(double x, double y)
@@ -700,21 +786,21 @@ static int p8_glyph(const p8_pen *pen, int b, int cx, int cy)
     return adv;
 }
 
-static int l_p8print(lua_State *L)
+/* The string, at (x, y), in colour `col` -- everything print does once its
+ * arguments are resolved. Split out so the shim's `print` (which resolves the
+ * pen, the cursor and p8's number formatting) is one binding call and not
+ * five: __moy_p8_print below is the whole verb, __moy_p8print the raw one an
+ * older shim calls. */
+static int p8_text(moy_p8 *p, const char *s, size_t len, int x, int y, int col)
 {
-    moy_p8 *p = p8_of(L);
     p8_pen pen;
-    size_t len = 0, k;
-    const char *s;
-    int x, y, cx, cy, tabw = 16, repeat = 1;
-    luaL_tolstring(L, 1, &len);
-    s = lua_tolstring(L, -1, &len);
-    x = iarg(L, 2); y = iarg(L, 3);
+    size_t k;
+    int cx, cy, tabw = 16, repeat = 1;
     pen.c = p->con->canvas;
     pen.ds = moy_ds_of(pen.c);           /* cls is the only thing print calls
                                             that touches the raster, and it
                                             moves neither camera nor clip */
-    pen.fg = iarg(L, 4); pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
+    pen.fg = col; pen.bg = -1; pen.wide = pen.tall = pen.invert = 0;
     pen.ocol = -1; pen.obits = 0; pen.oonly = 0; pen.ouse_fg = 0;
     cx = x; cy = y;
     for (k = 0; k < len; k++) {
@@ -786,8 +872,706 @@ static int l_p8print(lua_State *L)
         default: break;                                           /* 14, 15: font switch */
         }
     }
+    return cx;                           /* PICO-8 0.2: print returns the pen x */
+}
+
+static int l_p8print(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    size_t len = 0;
+    const char *s;
+    int cx;
+    lua_settop(L, 4);            /* the string is PUSHED, so the arguments it
+                                    sits above have to be there already */
+    luaL_tolstring(L, 1, &len);
+    s = lua_tolstring(L, -1, &len);
+    cx = p8_text(p, s, len, iarg(L, 2), iarg(L, 3), iarg(L, 4));
     lua_pop(L, 1);
-    lua_pushinteger(L, cx);              /* PICO-8 0.2: print returns the pen x */
+    lua_pushinteger(L, cx);
+    return 1;
+}
+
+
+/* -- the p8 DRAW verbs ----------------------------------------------------
+ *
+ * Each one is the shim's Lua wrapper (p8_lua_port.py) with the Lua taken
+ * out, and that is the whole point: the wrapper's work was never arithmetic,
+ * it was BINDING CALLS. `pset(x, y, c)` was fl(x), fl(y), fl inside pcol()
+ * and then pix() -- four crossings for one pixel, each with a fixed cost the
+ * board pays whatever is on the other side. Here the coercions, the pen, the
+ * fill pattern and the console verb are one crossing.
+ *
+ * TRANSCRIBED, not reimplemented. fl() is p8's coercing floor (nil is 0, a
+ * numeric string is its number, anything else is 0); a nil colour is the pen
+ * at 0x5f25; a colour is four bits, because PICO-8's screen memory holds a
+ * nibble; the shape verbs re-apply the fill pattern before they draw and the
+ * transparent full pattern draws nothing at all. Where the shim's Lua does
+ * something odd -- sset() defaulting to 6 rather than the pen, sspr() not
+ * flooring at all -- the odd thing is kept, because a cart may reach either
+ * lane and the two must answer alike (libmoy/test/p8lib.moy).
+ *
+ * ONE EDGE IS DELIBERATELY DIFFERENT. A coordinate past a 32-bit integer
+ * (1e30) made the shim's `fl` hand back a float, which the binding then cast
+ * to `int` -- undefined in C, and whatever the CPU did. Here it wraps, by
+ * f2i, like every other address and coordinate in this file.
+ */
+
+static inline int p8_pen_col(const moy_p8 *p) { return p->mem[P8_PEN]; }
+
+static inline unsigned p8_pat(const moy_p8 *p)
+{
+    return (unsigned)p->mem[P8_FILLP] | ((unsigned)p->mem[P8_FILLP + 1] << 8);
+}
+
+static inline int p8_pat_transparent(const moy_p8 *p)
+{
+    return p->mem[P8_FILLP + 2] & 1;
+}
+
+/* fill_skip(): a fully transparent pattern draws nothing, so the shape verbs
+ * return before they touch the canvas. */
+static inline int p8_fill_skip(const moy_p8 *p)
+{
+    return p8_pat_transparent(p) && p8_pat(p) == 0xffffu;
+}
+
+/* pcol(c): the colour a draw verb takes, four bits, the pen when nil. */
+static int p8_pcol(lua_State *L, moy_p8 *p, int i)
+{
+    int32_t v = lua_isnoneornil(L, i) ? (int32_t)p8_pen_col(p) : p8_fl(L, i);
+    return (int)(v & 15);
+}
+
+/* scol(c): the SCREEN palette's, the one place the secret sixteen (shipped at
+ * 16-31 by a ported cart's manifest) can be named. */
+static int p8_scol(lua_State *L, int i)
+{
+    int32_t v = lua_toboolean(L, i) ? p8_fl(L, i) : 0;
+    if (v >= 128) return 16 + (int)(v & 15);
+    return (int)(v & 15);
+}
+
+/* shape_col(c): pcol, plus the fill pattern the SHAPE verbs carry (SPEC.md 6
+ * gives it to those and not to sprites or text). The high nibble of the
+ * colour byte is what a pattern's holes take, unless the pattern's fractional
+ * bit said they are transparent. The reset arm is what a poke at 0x5f31 needs
+ * and the shim's Lua got from fillp() alone. */
+static int p8_shape_col(lua_State *L, moy_p8 *p, int i)
+{
+    int32_t v = lua_isnoneornil(L, i) ? (int32_t)p8_pen_col(p) : p8_fl(L, i);
+    moy_canvas *c = p->con->canvas;
+    unsigned pat = p8_pat(p);
+    if (pat)
+        moy_fillp(c, (int)pat, p8_pat_transparent(p)
+                               ? -1 : (int)(((uint32_t)v >> 4) & 15u));
+    else if (c->fillp)
+        moy_fillp_reset(c);
+    return (int)(v & 15);
+}
+
+/* p8's rectangles take the FAR CORNER; the console's take a size. */
+static void p8_corners(lua_State *L, int32_t *x, int32_t *y,
+                       int32_t *w, int32_t *h)
+{
+    int32_t x0 = p8_fl(L, 1), y0 = p8_fl(L, 2);
+    int32_t x1 = p8_fl(L, 3), y1 = p8_fl(L, 4), t;
+    if (x1 < x0) { t = x0; x0 = x1; x1 = t; }
+    if (y1 < y0) { t = y0; y0 = y1; y1 = t; }
+    *x = x0;
+    *y = y0;
+    *w = u2i((uint32_t)x1 - (uint32_t)x0 + 1u);   /* 32-bit, as the shim's Lua */
+    *h = u2i((uint32_t)y1 - (uint32_t)y0 + 1u);
+}
+
+static int l_p8_pset(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x = p8_fl(L, 1), y = p8_fl(L, 2);
+    moy_pix(p->con->canvas, (int)x, (int)y, p8_pcol(L, p, 3));
+    return 0;
+}
+
+static int l_p8_pget(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x = p8_fl(L, 1), y = p8_fl(L, 2);
+    lua_pushinteger(L, moy_pget(p->con->canvas, (int)x, (int)y));
+    return 1;
+}
+
+/* No "continue from the last endpoint" form: the shim has none either -- p8's
+ * `line(x1, y1)` draws from (x1, y1) to (0, 0) here, because fl(nil) is 0.
+ * That is why 0x5f3c-0x5f3f holds nothing; there is no endpoint to keep. */
+static int l_p8_line(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x0, y0, x1, y1;
+    if (p8_fill_skip(p)) return 0;
+    x0 = p8_fl(L, 1); y0 = p8_fl(L, 2);
+    x1 = p8_fl(L, 3); y1 = p8_fl(L, 4);
+    moy_line(p->con->canvas, (int)x0, (int)y0, (int)x1, (int)y1,
+             p8_shape_col(L, p, 5));
+    return 0;
+}
+
+static int l_p8_rectfill(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, w, h;
+    if (p8_fill_skip(p)) return 0;
+    p8_corners(L, &x, &y, &w, &h);
+    moy_rect(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+             p8_shape_col(L, p, 5));
+    return 0;
+}
+
+static int l_p8_rect(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, w, h;
+    if (p8_fill_skip(p)) return 0;
+    p8_corners(L, &x, &y, &w, &h);
+    moy_rectb(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+              p8_shape_col(L, p, 5));
+    return 0;
+}
+
+static int l_p8_circfill(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, r;
+    if (p8_fill_skip(p)) return 0;
+    x = p8_fl(L, 1); y = p8_fl(L, 2); r = p8_fl(L, 3);
+    moy_circ(p->con->canvas, (int)x, (int)y, (int)r, p8_shape_col(L, p, 4));
+    return 0;
+}
+
+static int l_p8_circ(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, r;
+    if (p8_fill_skip(p)) return 0;
+    x = p8_fl(L, 1); y = p8_fl(L, 2); r = p8_fl(L, 3);
+    moy_circb(p->con->canvas, (int)x, (int)y, (int)r, p8_shape_col(L, p, 4));
+    return 0;
+}
+
+static int l_p8_ovalfill(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, w, h;
+    if (p8_fill_skip(p)) return 0;
+    p8_corners(L, &x, &y, &w, &h);
+    moy_oval(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+             p8_shape_col(L, p, 5));
+    return 0;
+}
+
+static int l_p8_oval(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x, y, w, h;
+    if (p8_fill_skip(p)) return 0;
+    p8_corners(L, &x, &y, &w, &h);
+    moy_ovalb(p->con->canvas, (int)x, (int)y, (int)w, (int)h,
+              p8_shape_col(L, p, 5));
+    return 0;
+}
+
+/* `v or 1` for spr's w/h, which the shim does NOT floor. `is_one` is Lua's
+ * `w == 1`, and a numeric STRING is not equal to 1 there however it converts
+ * for the arithmetic below -- so the two questions are answered separately. */
+static double p8_or1(lua_State *L, int i, int *is_one)
+{
+    int isnum;
+    lua_Number f;
+    if (!lua_toboolean(L, i)) { *is_one = 1; return 1.0; }
+    if (lua_type(L, i) == LUA_TNUMBER) {
+        f = lua_tonumber(L, i);
+        *is_one = (f == (lua_Number)1);
+        return (double)f;
+    }
+    *is_one = 0;
+    f = lua_tonumberx(L, i, &isnum);
+    if (!isnum) {
+        luaL_error(L, "attempt to perform arithmetic on a %s value",
+                   luaL_typename(L, i));
+        return 0;
+    }
+    return (double)f;
+}
+
+/* `for k = 0, v - 1`: Lua floors a float limit onto the integer grid, and a
+ * limit below zero is an empty loop. Clamped at the top because the loop that
+ * would follow is not one anybody survives either way. */
+static int32_t p8_for_limit(double v)
+{
+    double lim = floor(v - 1.0);
+    if (!(lim >= 0)) return -1;                 /* NaN takes this arm too */
+    if (lim > 2147483647.0) return 2147483647;
+    return (int32_t)lim;
+}
+
+static int l_p8_spr(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_console *con = p->con;
+    int fx = lua_toboolean(L, 6), fy = lua_toboolean(L, 7);
+    int flip = (fx ? MOY_FLIP_X : 0) | (fy ? MOY_FLIP_Y : 0);
+    int wone, hone;
+    int32_t n, x, y;
+    double w, h;
+    if (!con->sheet) return 0;
+    n = p8_fl(L, 1); x = p8_fl(L, 2); y = p8_fl(L, 3);
+    w = p8_or1(L, 4, &wone);
+    h = p8_or1(L, 5, &hone);
+    if (wone && hone) {
+        moy_spr(con->canvas, con->sheet, (int)n, (int)x, (int)y, -1, 1, flip);
+        return 0;
+    }
+    {
+        /* The shim's own nested loop: p8 numbers the tiles of a w x h sprite
+         * across the sheet's 16-wide grid, and a flip mirrors WHICH tile goes
+         * where as well as the tile itself. */
+        int32_t tx, ty, wlim = p8_for_limit(w), hlim = p8_for_limit(h);
+        for (ty = 0; ty <= hlim; ty++) {
+            for (tx = 0; tx <= wlim; tx++) {
+                double cx = fx ? (w - 1.0 - (double)tx) : (double)tx;
+                double cy = fy ? (h - 1.0 - (double)ty) : (double)ty;
+                int32_t sx = u2i((uint32_t)x + (uint32_t)(tx * 8));
+                int32_t sy = u2i((uint32_t)y + (uint32_t)(ty * 8));
+                moy_spr(con->canvas, con->sheet,
+                        (int)f2i((lua_Number)((double)n + cx + cy * 16.0)),
+                        (int)sx, (int)sy, -1, 1, flip);
+            }
+        }
+    }
+    return 0;
+}
+
+/* argi()'s coercion, which is what sspr's arguments meet: TRUNCATED toward
+ * zero rather than floored, a non-number is 0, and nil is the default. The
+ * shim floors nothing here, so neither does this. */
+static int32_t p8_trunc(lua_State *L, int i, int32_t dflt)
+{
+    if (lua_isnoneornil(L, i)) return dflt;
+    return f2i(lua_tonumber(L, i));
+}
+
+static int l_p8_sspr(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_console *con = p->con;
+    int32_t sx, sy, sw, sh, dw, dh;
+    int flip;
+    if (!con->sheet) return 0;
+    sx = p8_trunc(L, 1, 0); sy = p8_trunc(L, 2, 0);
+    sw = p8_trunc(L, 3, 0); sh = p8_trunc(L, 4, 0);
+    dw = lua_toboolean(L, 7) ? p8_trunc(L, 7, sw) : sw;   /* dw or sw */
+    dh = lua_toboolean(L, 8) ? p8_trunc(L, 8, sh) : sh;
+    flip = (lua_toboolean(L, 9) ? 1 : 0) + (lua_toboolean(L, 10) ? 2 : 0);
+    moy_sspr(con->canvas, con->sheet, (int)sx, (int)sy, (int)sw, (int)sh,
+             (int)p8_trunc(L, 5, 0), (int)p8_trunc(L, 6, 0),
+             (int)dw, (int)dh, -1, flip);
+    return 0;
+}
+
+/* -- the draw state ------------------------------------------------------ */
+
+static int l_p8_camera(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x = p8_fl(L, 1), y = p8_fl(L, 2);
+    moy_camera(p->con->canvas, (int)x, (int)y);   /* peek reads it back there */
+    return 0;                                     /* p8's returns nothing */
+}
+
+static int l_p8_color(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t v = lua_toboolean(L, 1) ? p8_fl(L, 1) : 6;   /* fl(c or 6) */
+    p->mem[P8_PEN] = (uint8_t)(v & 0x8f);
+    return 0;
+}
+
+static int l_p8_cursor(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    p->cur_x = lua_toboolean(L, 1) ? p8_fl(L, 1) : 0;
+    p->cur_y = lua_toboolean(L, 2) ? p8_fl(L, 2) : 0;
+    if (!lua_isnoneornil(L, 3))
+        p->mem[P8_PEN] = (uint8_t)(p8_fl(L, 3) & 0x8f);
+    return 0;
+}
+
+/* p8's palt default: colour 0 transparent, the rest opaque. */
+static void p8_palt_default(moy_canvas *c)
+{
+    moy_palt_reset(c);
+    moy_palt(c, 0, 1);
+}
+
+/* The SCREEN palette lives in memory (0x5f10) rather than on the canvas,
+ * because the console resets draw state every frame and PICO-8 keeps this one
+ * across them -- a cart sets its fade once and draws. __moy_p8_frame puts it
+ * back at the top of each _draw, so a memcpy fade into 0x5f10 now persists
+ * exactly as pal(c, d, 1) does. */
+static void p8_spal_set(moy_p8 *p, int c0, int c1)
+{
+    p->mem[P8_SPAL + (unsigned)(c0 & 15)] = col_out(c1);
+    moy_pal_screen(p->con->canvas, c0, c1);
+}
+
+static int l_p8_pal(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_canvas *c = p->con->canvas;
+    unsigned i;
+    if (lua_isnoneornil(L, 1)) {              /* pal(): both palettes and palt */
+        moy_pal_reset(c);
+        for (i = 0; i < 16; i++) p->mem[P8_SPAL + i] = (uint8_t)i;
+        p8_palt_default(c);
+        return 0;
+    }
+    if (lua_type(L, 1) == LUA_TTABLE) {
+        /* p8 0.2's TABLE form, a whole palette in one call: a table with a
+         * [0] entry keys by colour, a plain array maps its i-th entry onto
+         * colour i-1. Walked with next(), which is what pairs() hands back. */
+        int shift, screen;
+        lua_geti(L, 1, 0);
+        shift = lua_isnil(L, -1) ? 1 : 0;
+        lua_pop(L, 1);
+        /* `b == 1`: a NUMBER equal to one. The string "1" is not, in Lua. */
+        screen = lua_type(L, 2) == LUA_TNUMBER
+                 && lua_tonumber(L, 2) == (lua_Number)1;
+        lua_pushnil(L);
+        while (lua_next(L, 1) != 0) {
+            /* key at -2, value at -1; both must be NUMBERS, not strings that
+             * look like one -- the shim asks type(), not tonumber(). */
+            if (lua_type(L, -2) == LUA_TNUMBER && lua_type(L, -1) == LUA_TNUMBER) {
+                int32_t k = p8_fl(L, -2) - shift;
+                if (screen) p8_spal_set(p, (int)k, p8_scol(L, -1));
+                else moy_pal(c, (int)k, p8_pcol(L, p, -1));
+            }
+            lua_pop(L, 1);
+        }
+        return 0;
+    }
+    if (lua_type(L, 3) == LUA_TNUMBER && lua_tonumber(L, 3) == (lua_Number)1) {
+        p8_spal_set(p, (int)(p8_fl(L, 1) & 15), p8_scol(L, 2));
+        return 0;
+    }
+    moy_pal(c, (int)(p8_fl(L, 1) & 15), p8_pcol(L, p, 2));
+    return 0;
+}
+
+static int l_p8_palt(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_canvas *c = p->con->canvas;
+    if (lua_isnoneornil(L, 1)) { p8_palt_default(c); return 0; }
+    if (lua_isnoneornil(L, 2)) {          /* palt(bits): all sixteen at once */
+        uint32_t bits = (uint32_t)p8_fl(L, 1);
+        int i;
+        moy_palt_reset(c);
+        for (i = 0; i < 16; i++)
+            moy_palt(c, i, (int)((bits >> (15 - i)) & 1u));
+        return 0;
+    }
+    moy_palt(c, (int)(p8_fl(L, 1) & 15), lua_toboolean(L, 2));
+    return 0;
+}
+
+/* fillp(p): the DITHER PATTERN the shape verbs carry, and its fractional
+ * half-bit, which says the pattern's holes are TRANSPARENT rather than a
+ * second colour. That half matters more than the dithering: carts fade
+ * between scenes by filling the screen with a transparent pattern, and
+ * ignoring it turns every fade into a solid black frame. */
+static int l_p8_fillp(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    lua_Integer pat;
+    int transparent = 0;
+    /* p = p or 0, then tonumber(p) or 0 -- an integer keeps every bit, which
+     * is why this converts on the stack rather than through lua_Number (a
+     * SINGLE-PRECISION float here). */
+    if (!lua_toboolean(L, 1)) {
+        lua_pushinteger(L, 0);
+    } else if (lua_type(L, 1) == LUA_TNUMBER) {
+        lua_pushvalue(L, 1);
+    } else {
+        size_t len = 0;
+        const char *str = lua_type(L, 1) == LUA_TSTRING
+                          ? lua_tolstring(L, 1, &len) : NULL;
+        if (!str || lua_stringtonumber(L, str) != len + 1) lua_pushinteger(L, 0);
+    }
+    if (lua_isinteger(L, -1)) {
+        pat = lua_tointeger(L, -1);           /* an integer has no fraction */
+    } else {
+        lua_Number v = lua_tonumber(L, -1), frac;
+        /* mfloor(p) & 0xffff: a float too big for an integer reaches `&` as a
+         * float in Lua and raises there, so it raises here too. */
+        if (!lua_numbertointeger((lua_Number)l_mathop(floor)(v), &pat))
+            return luaL_error(L, "number has no integer representation");
+        /* (p % 1) >= 0.5, Lua's FLOORED modulo -- fillp(-0.5) IS transparent. */
+        frac = (lua_Number)l_mathop(fmod)(v, (lua_Number)1);
+        if (frac < 0) frac = (lua_Number)(frac + (lua_Number)1);
+        transparent = frac >= (lua_Number)0.5;
+    }
+    lua_pop(L, 1);
+    p->mem[P8_FILLP] = (uint8_t)pat;
+    p->mem[P8_FILLP + 1] = (uint8_t)((uint32_t)(int32_t)pat >> 8);
+    p->mem[P8_FILLP + 2] = (uint8_t)transparent;
+    if (p8_pat(p) == 0) moy_fillp_reset(p->con->canvas);
+    return 0;
+}
+
+/* -- text ---------------------------------------------------------------- */
+
+/* p8str(v): p8 has ONE kind of number and prints 3, never 3.0 -- a cart that
+ * keys a table by `x..","..y` sees the difference. Leaves the string on top. */
+static void p8_tostr(lua_State *L, int i)
+{
+    if (lua_type(L, i) == LUA_TNUMBER && !lua_isinteger(L, i)) {
+        lua_Number f = lua_tonumber(L, i);
+        lua_Integer n;
+        if (f == (lua_Number)l_mathop(floor)(f)
+            && f > -(lua_Number)2147483648.0 && f < (lua_Number)2147483648.0
+            && lua_numbertointeger((lua_Number)l_mathop(floor)(f), &n)) {
+            lua_pushinteger(L, n);
+            luaL_tolstring(L, -1, NULL);
+            lua_remove(L, -2);
+            return;
+        }
+    }
+    luaL_tolstring(L, i, NULL);
+}
+
+static int l_p8_print(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    size_t len = 0;
+    const char *s;
+    int col, cx;
+    int32_t x, y;
+    lua_settop(L, 4);            /* see l_p8print: p8_tostr pushes */
+    p8_tostr(L, 1);
+    s = lua_tolstring(L, -1, &len);
+    if (lua_isnoneornil(L, 3)) {
+        /* print(s) and print(s, c) take the CURSOR and advance it a line, as
+         * PICO-8 does (without its scrolling); the four-argument form is
+         * placed. The colour then comes from what was the x argument. */
+        col = p8_pcol(L, p, 2);
+        x = p->cur_x;
+        y = p->cur_y;
+        p->cur_y = u2i((uint32_t)p->cur_y + 6u);
+    } else {
+        col = p8_pcol(L, p, 4);
+        x = p8_fl(L, 2);
+        y = p8_fl(L, 3);
+    }
+    cx = p8_text(p, s, len, (int)x, (int)y, col);
+    lua_pop(L, 1);
+    lua_pushinteger(L, cx);
+    return 1;
+}
+
+/* -- the sheet ------------------------------------------------------------
+ *
+ * The sheet IS memory here (0x0000-0x1fff, two pixels a byte, low nibble the
+ * left one), so what sset writes is what spr draws. */
+static int l_p8_sget(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x = p8_fl(L, 1), y = p8_fl(L, 2);
+    uint8_t b;
+    if (x < 0 || x > 127 || y < 0 || y > 127) { lua_pushinteger(L, 0); return 1; }
+    b = rd(p, (uint32_t)(y * 64 + (x >> 1)));
+    lua_pushinteger(L, (x & 1) ? (b >> 4) : (b & 15));
+    return 1;
+}
+
+static int l_p8_sset(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int32_t x = p8_fl(L, 1), y = p8_fl(L, 2), c;
+    uint32_t a;
+    uint8_t b;
+    if (x < 0 || x > 127 || y < 0 || y > 127) return 0;
+    /* fl(c or 6) % 16 -- the shim's own default, which is 6 and not the pen. */
+    c = (lua_toboolean(L, 3) ? p8_fl(L, 3) : 6) % 16;
+    if (c < 0) c += 16;                        /* Lua's % is floored */
+    a = (uint32_t)(y * 64 + (x >> 1));
+    b = rd(p, a);
+    poke_byte(p, a, (x & 1) ? (uint8_t)((b & 0x0f) | (c << 4))
+                            : (uint8_t)((b & 0xf0) | c));
+    return 0;
+}
+
+/* -- the map --------------------------------------------------------------
+ *
+ * PICO-8's defaults are the WHOLE map (128 x 64 cells), which is how a room
+ * cart draws its world under a camera -- so the walk is clipped to the 128
+ * pixels the camera shows first, and the default costs the cells on screen
+ * rather than 8,192 a frame. The camera read is the CONSOLE's, which is the
+ * machine's truth: a cart that pokes 0x5f28 moves this too, where the shim's
+ * Lua copy would have gone stale. */
+static int l_p8_map(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_console *con = p->con;
+    int32_t celx, cely, sx, sy, cw, ch, mask, i0, i1, j0, j1;
+    if (!con->sheet || !con->map) return 0;
+    celx = (int32_t)p8_flr_d(L, 1);
+    cely = (int32_t)p8_flr_d(L, 2);
+    sx = (int32_t)p8_flr_d(L, 3);
+    sy = (int32_t)p8_flr_d(L, 4);
+    cw = lua_isnoneornil(L, 5) ? 128 : (int32_t)p8_flr_d(L, 5);
+    ch = lua_isnoneornil(L, 6) ? 64 : (int32_t)p8_flr_d(L, 6);
+    mask = lua_toboolean(L, 7) ? (int32_t)p8_flr_d(L, 7) : 0;
+    i0 = p8_floordiv(con->canvas->cam_x - sx, 8);
+    i1 = p8_floordiv(con->canvas->cam_x + 127 - sx, 8);
+    if (i0 > 0) { celx += i0; sx += i0 * 8; cw -= i0; i1 -= i0; }
+    if (i1 + 1 < cw) cw = i1 + 1;
+    j0 = p8_floordiv(con->canvas->cam_y - sy, 8);
+    j1 = p8_floordiv(con->canvas->cam_y + 127 - sy, 8);
+    if (j0 > 0) { cely += j0; sy += j0 * 8; ch -= j0; j1 -= j0; }
+    if (j1 + 1 < ch) ch = j1 + 1;
+    if (cw <= 0 || ch <= 0) return 0;
+    moy_map_draw_layers(con->canvas, con->map, con->sheet, (int)celx, (int)cely,
+                        (int)cw, (int)ch, (int)sx, (int)sy, -1, 1,
+                        (int)mask, con->flags);
+    return 0;
+}
+
+/* -- the frame ------------------------------------------------------------
+ *
+ * The top of the port's _draw: the console resets pal, palt, camera and clip
+ * after every cart frame (SPEC.md 6) and PICO-8 keeps the transparency and
+ * the screen palette across them, so those go back before the cart draws --
+ * one call rather than the eighteen the shim's Lua made when a fade was live.
+ * The camera is NOT here: the shim re-parks it through camera(), which a host
+ * with its own native map still owns.
+ *
+ * 0x5f10 is where the screen palette survives, and peek() still reads it off
+ * the canvas: the two agree except in the window between the console's frame
+ * reset and this call, which is before any cart code runs. */
+static int l_p8_frame(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_canvas *c = p->con->canvas;
+    int i;
+    p8_palt_default(c);
+    for (i = 0; i < 16; i++) {
+        int v = col_in(p->mem[P8_SPAL + (unsigned)i]);
+        if (v != i) moy_pal_screen(c, i, v);
+    }
+    return 0;
+}
+
+/* -- btn / btnp -----------------------------------------------------------
+ *
+ * PICO-8's rule, and the shim's, moved whole (its comment is the reasoning;
+ * this is the transcription). An edge is LATCHED once per console frame,
+ * because a 30fps cart ticks every other one and an engine edge lasts one; it
+ * is cleared by the tick that consumes it, so one press is one edge at any
+ * pair of rates. Held, btnp repeats after 15 CART ticks and then every 4 --
+ * the cart's clock, not the host's, which is what makes a menu scroll at the
+ * same speed on a fast board and a slow one.
+ *
+ * ONE DELIBERATE DIVERGENCE from fake-08, kept: its predicate fires on tick
+ * 15 AND 16, two edges one tick apart, which is the doubled menu move the
+ * repeat was added alongside fixing. The steady cadence (16, 20, 24, ...) is
+ * the same and the first repeat is one tick later. */
+#define P8_RPT_DELAY 15
+#define P8_RPT_EVERY 4
+
+static int p8_btn_down(moy_console *con, int i)
+{
+    return con->host.btn && con->host.btn(con->host.user, (moy_button)i, 0);
+}
+
+/* Once per CONSOLE frame, before the ticks: drop an edge a tick has already
+ * consumed, then latch whatever the engine reports now. */
+static int l_p8_input_frame(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    moy_console *con = p->con;
+    int i;
+    if (p->consumed) {
+        memset(p->pending, 0, sizeof p->pending);
+        p->consumed = 0;
+    }
+    for (i = 0; i < 6; i++)
+        if (con->host.btnp && con->host.btnp(con->host.user, (moy_button)i, 0))
+            p->pending[i] = 1;
+    return 0;
+}
+
+/* Once per CART tick: the hold counters advance. `catchup` is the shim's
+ * `n > 1` -- a second tick inside one console frame, whose edge the first
+ * already took. */
+static int l_p8_input_tick(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int i;
+    for (i = 0; i < 6; i++) {
+        if (!p8_btn_down(p->con, i)) p->hold[i] = 0;
+        else if (p->hold[i] < 0xffff) p->hold[i]++;
+    }
+    if (lua_toboolean(L, 1)) memset(p->pending, 0, sizeof p->pending);
+    p->consumed = 1;
+    return 0;
+}
+
+/* btn() with NO argument is a different verb: p8 returns a BITFIELD, bit i for
+ * button i, and a cart reads it and does arithmetic on it. An index outside
+ * 0-5 reads button 4, which is what `BTN[i] or "a"` did. */
+static int p8_btn_index(lua_State *L, int *ok)
+{
+    lua_Integer n;
+    *ok = 1;
+    if (lua_isinteger(L, 1)) n = lua_tointeger(L, 1);
+    else if (lua_type(L, 1) == LUA_TNUMBER) {
+        if (!lua_numbertointeger(lua_tonumber(L, 1), &n)) return 4;
+    } else {
+        if (lua_isnoneornil(L, 1)) { *ok = 0; return 0; }
+        return 4;                       /* not a number: BTN[i] is nil -> "a" */
+    }
+    if (n < 0 || n > 5) return 4;
+    return (int)n;
+}
+
+static int l_p8_btn(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int ok, i = p8_btn_index(L, &ok);
+    if (ok) { lua_pushboolean(L, p8_btn_down(p->con, i)); return 1; }
+    {
+        int m = 0, k;
+        for (k = 0; k < 6; k++) if (p8_btn_down(p->con, k)) m |= 1 << k;
+        lua_pushinteger(L, m);
+    }
+    return 1;
+}
+
+static int p8_btnp_of(const moy_p8 *p, int i)
+{
+    unsigned h = p->hold[i];
+    if (p->pending[i]) return 1;
+    return h > P8_RPT_DELAY && (h - P8_RPT_DELAY - 1) % P8_RPT_EVERY == 0;
+}
+
+static int l_p8_btnp(lua_State *L)
+{
+    moy_p8 *p = p8_of(L);
+    int ok, i = p8_btn_index(L, &ok);
+    if (ok) { lua_pushboolean(L, p8_btnp_of(p, i)); return 1; }
+    {
+        int m = 0, k;
+        for (k = 0; k < 6; k++) if (p8_btnp_of(p, k)) m |= 1 << k;
+        lua_pushinteger(L, m);
+    }
     return 1;
 }
 
@@ -1398,6 +2182,11 @@ static void seed(moy_p8 *p)
         p->mem[0x5f10 + a] = (uint8_t)a;
     }
     p->mem[0x5f22] = 128; p->mem[0x5f23] = 128;  /* clip: the whole screen */
+    p->mem[P8_PEN] = 6;                          /* p8's default pen colour */
+    p->cur_x = p->cur_y = 0;
+    memset(p->hold, 0, sizeof p->hold);
+    memset(p->pending, 0, sizeof p->pending);
+    p->consumed = 0;
 }
 
 int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
@@ -1411,8 +2200,27 @@ int moy_p8_open(struct lua_State *Ls, moy_console *con, moy_p8 *p,
         {"__moy_peek4", l_peek4}, {"__moy_poke4", l_poke4},
         {"__moy_reload", l_reload}, {"__moy_cstore", l_cstore},
         {"__moy_p8print", l_p8print},
+        {"__moy_lut_span", l_lut_span},
         {"__moy_mget", l_mget}, {"__moy_mset", l_mset},
         {"__moy_fget", l_p8fget}, {"__moy_fset", l_p8fset},
+        /* The DRAW verbs: p8's semantics resolved in C from the machine's own
+         * state, so a shim draw call is one crossing rather than four. */
+        {"__moy_p8_pset", l_p8_pset}, {"__moy_p8_pget", l_p8_pget},
+        {"__moy_p8_line", l_p8_line},
+        {"__moy_p8_rect", l_p8_rect}, {"__moy_p8_rectfill", l_p8_rectfill},
+        {"__moy_p8_circ", l_p8_circ}, {"__moy_p8_circfill", l_p8_circfill},
+        {"__moy_p8_oval", l_p8_oval}, {"__moy_p8_ovalfill", l_p8_ovalfill},
+        {"__moy_p8_spr", l_p8_spr}, {"__moy_p8_sspr", l_p8_sspr},
+        {"__moy_p8_map", l_p8_map},
+        {"__moy_p8_camera", l_p8_camera}, {"__moy_p8_color", l_p8_color},
+        {"__moy_p8_cursor", l_p8_cursor}, {"__moy_p8_print", l_p8_print},
+        {"__moy_p8_pal", l_p8_pal}, {"__moy_p8_palt", l_p8_palt},
+        {"__moy_p8_fillp", l_p8_fillp},
+        {"__moy_p8_sget", l_p8_sget}, {"__moy_p8_sset", l_p8_sset},
+        {"__moy_p8_frame", l_p8_frame},
+        {"__moy_p8_btn", l_p8_btn}, {"__moy_p8_btnp", l_p8_btnp},
+        {"__moy_p8_input_frame", l_p8_input_frame},
+        {"__moy_p8_input_tick", l_p8_input_tick},
     };
     /* The stdlib half: no machine behind it, so no upvalue to carry. */
     static const struct { const char *name; lua_CFunction fn; } S[] = {
