@@ -241,6 +241,41 @@ already pays an SRAM bounce copy the resolve could ride.
 colour, proven on silicon. That question is closed; the format choice is settled
 on performance, and B is what ships.
 
+## 9. The S3 program (2026-09-02) — verdicts, not numbers
+
+One day, three Opus-driven rounds, the PICO-8 ports as referees (moss moss: a
+30 fps cart whose tick is pure Lua; dank tomb: 60 fps, draw-bound). The
+numbers, the frame anatomy and the per-operation price list live in **#66**
+(rounds 3–5); the roadmap rows above got their verdicts in **#77**. What this
+section keeps is what was DECIDED:
+
+- **The S3 pays for calls and allocations, not raster.** A C verb call floors
+  at ~1.65 µs, a malloc through the IDF heap at ~9 µs (its TLSF metadata sits
+  in PSRAM). So the levers that landed are the ones that delete calls and
+  mallocs: every p8 draw verb one call into the machine, the hot shim paths in
+  C, one call per native bit operator, a small-object pool under `l_alloc`
+  with its free lists in internal SRAM and chunks that go back.
+- **The composite was the console's biggest per-frame cost and the fold
+  removes it** on both S3 boards, at any integer scale, from one shared body
+  (`native/moy_flush/moy_fold.c`). #190's decline was wrong about the shape.
+- **Instruction placement helps, data placement hurts.** The VM loop and its
+  lookups in IRAM: −10 % on the tick (flash and PSRAM share the MSPI bus). More
+  internal SRAM for the VM's DATA: slower — the drivers starve. `-O3` on the
+  VM: still null.
+- **The Python heap must be capped** (§ the S3 memory rule in
+  `.claude/rules/boards.md`): it doubles on demand into the VM's PSRAM.
+- **A cart that fails only on device and only sometimes is the frame cadence
+  the replayer cannot reproduce**, before it is the architecture: dank tomb's
+  "nil position" was the shim drawing before the first update. `run_cart --dt`
+  now reproduces such cadences.
+- **What is left for a 30 fps moss moss on the S3**, in order: the console's
+  ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
+  structural one — running the cart tick on core 0 overlapped with the
+  console's frame (frame ≈ max, not sum; A/B against the shared PSRAM bus
+  before keeping). A Xtensa JIT is gated on the perf counters: a template JIT
+  only pays if retired instructions dominate a tick, and the evidence says
+  memory does.
+
 ## References
 
 - ESP-IDF speed guides: [P4](https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-guides/performance/speed.html), [S3](https://docs.espressif.com/projects/esp-idf/en/release-v5.5/esp32s3/api-guides/performance/speed.html)

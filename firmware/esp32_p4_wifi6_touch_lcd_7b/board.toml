@@ -200,8 +200,12 @@ otadata_size   = "0x2000"
 # LOAD-BEARING -- the same facts tests/test_p4_on_glass.py and
 # tests/test_tdeck_on_glass.py encode by hand, as data instead.
 #
-# The CH343 is an EXTERNAL USB-UART: opening with dtr/rts LOW never glitches the
-# auto-reset circuit, so a reset is explicit and safe here.
+# The CH343 is an EXTERNAL USB-UART with the esptool auto-reset circuit on
+# DTR/RTS. The REST state is both LOW, so a reset is explicit (an RTS pulse)
+# -- but the ORDER of getting there matters: the kernel raises both lines when
+# the tty opens and pyserial lowers DTR before RTS, and RTS-high-DTR-low IS the
+# EN pulse. Every tool attach power-cycled this board until 2026-09-02;
+# P4Board opens with DTR raised, lets RTS drop, then lowers DTR.
 dtr         = false
 rts         = false
 attach_only = false

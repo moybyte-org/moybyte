@@ -194,6 +194,22 @@ README is the authority**; what belongs here is only what bites:
 
 ### Hard device constraints (learned the painful way — respect these)
 
+- **The P4's CH343 port must be opened DTR-raised, RTS dropped first, DTR after.** The kernel
+  raises both lines on open and pyserial lowers DTR before RTS; RTS-high-DTR-low is the auto-reset
+  EN pulse, so a plain open power-cycled the board and cost a 60 s desktop boot per tool attach
+  (measured 2026-09-02, three opens, three POWERON resets). `P4Board` does the right order; a
+  tool that opens the port itself must too. And attach to a running desk — `push_cart` no longer
+  resets a board that answers.
+- **On the S3 boards the Python heap and the C side share one 8 MB PSRAM, and the Python heap
+  grows by DOUBLING and never shrinks.** `MOYBYTE_GC_SPLIT_RESERVE` (each board's mpconfigboard.h,
+  applied by `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it: the biggest corpus cart's
+  VM peaks near 1.9 MB with its pool, and the launcher's boot heap costs ~125 KB per cart on the
+  card (49 carts leave 3.5 MB, 61 leave 1.97 MB). Without the reserve one fragmented Python
+  allocation took every byte and every big cart failed at load until a hard reset. The VM's own
+  allocator (a small-object pool; `native/moycore/README.md`) is why a malloc no longer costs 9 µs
+  there. Do NOT give the VM more internal SRAM: lowering the floor 48 → 16 KB made the tick SLOWER
+  (the drivers starve); the VM's win in internal memory is instruction placement (`MOY_HOT`).
+
 - **SD shares the SPI host with the display, and getting it wrong HANGS the
   board** — gray screen, dead USB, no panic. Three rules, each learned on
   hardware:

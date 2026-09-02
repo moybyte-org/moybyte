@@ -11,6 +11,7 @@ for the rules. Reading it top to bottom is the slow path.
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
 | change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
 | add a cart verb | `docs/moy_cart_api.md`, and SPEC.md in the moy-spec repo | the verb table is a PUBLIC spec; Python and Lua must agree verbatim |
+| change the PICO-8 importer or its Lua shim | `PICO8.md` and `p8_lua_port.py` in the moy-spec repo | `tools/p8_lua_port.py` is VENDORED (`make vendor-p8-import`); the corpus gate `make -C libmoy p8-carts` is the net, and a cart that fails only on a board is usually the frame cadence (`run_cart --dt`) |
 | touch audio | `native/moy_audio/libmoy/UPSTREAM.md` | it is VENDORED — fix it upstream in moy-spec and re-vendor, never here |
 | touch multiplayer | `docs/netplay_v1.md` | the payload is INPUTS, never state; a missing input STALLS, it never extrapolates |
 | touch the browser build | `firmware/web_runner/`, `docs/moycore_direction.md` | two web modes, no crossover; where a page is SERVED from decides where its carts live |
