@@ -48,6 +48,16 @@
 //   hooks (moy_lcd_frame_begin / _queue_band / _frame_end) plus this board's
 //   own SD guard.
 //
+//   THE GAME FOLD IS SHARED TOO: native/moy_flush/moy_fold. A small-canvas cart
+//   frame skips the root composite entirely -- the canvas hands over a snapshot
+//   of the game rectangle and queue_band SYNTHESIZES each band from it (black
+//   outside the viewport, the game rows at integer scale inside) instead of
+//   copying root bands the composite would first have had to write. This board
+//   declined the lever in 2026-08 ("it needs moy_gfx kernels writing into the
+//   bounce slots") and took it in 2026-09 with no kernels involved: the gather
+//   is C in moy_fold, running on the FEEDER. Read moy_fold.h for the one-shot
+//   latch and the fence -- both are cross-core, and neither is negotiable.
+//
 //   Only the FIRST band carries a command (RAMWR); bands 2..N are sent with
 //   lcd_cmd = -1, i.e. no command phase at all. This is what "a full-screen
 //   flush must be a single tx_color" is really about: re-issuing a command
@@ -132,6 +142,7 @@
 
 #include "py/runtime.h"
 #include "py/objarray.h"
+#include "py/objtuple.h"
 #include "py/mphal.h"
 
 #include "driver/gpio.h"
@@ -147,6 +158,7 @@
 // It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
 // yield needs, and the state this file's verbs report on.
 #include "moy_flush.h"
+#include "moy_fold.h"     // the GAME FOLD: the latch, the fence, the gather
 
 // ---- board facts (device/tdeck_*.py)
 #define MOY_LCD_W            320
@@ -357,6 +369,7 @@ static void moy_lcd_free_all(void) {
     s_nfbs = 0;
     // The band state points into buffers that no longer exist.
     moy_flush_reset();
+    moy_fold_reset();
     moy_flush.frame_clean = true;
 }
 
@@ -378,6 +391,7 @@ static mp_obj_t moy_lcd_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
         // bands into a window that no longer describes them.
         moy_flush_drain();
         moy_flush_reset();
+        moy_fold_reset();
         return mp_const_none;
     }
     int nfbs = args[0].u_int;
@@ -573,7 +587,14 @@ static esp_err_t moy_lcd_queue_band(uint8_t *slot, const uint8_t *src, int k,
                                     int y, int rows, bool last) {
     (void)last;
     size_t nbytes = (size_t)rows * MOY_LCD_ROW_BYTES;
-    memcpy(slot, src + (size_t)y * MOY_LCD_ROW_BYTES, nbytes);
+    if (moy_fold.inflight) {
+        // The GAME FOLD: `src` (the root) is not read at all this frame -- the
+        // band is synthesized from the snapshot the canvas armed, which the
+        // fence guarantees stays unwritten until this feed completes.
+        moy_fold_band(slot, MOY_LCD_W, y, rows);
+    } else {
+        memcpy(slot, src + (size_t)y * MOY_LCD_ROW_BYTES, nbytes);
+    }
     return esp_lcd_panel_io_tx_color(s_io, (k == 0) ? CMD_RAMWR : -1,
                                      slot, nbytes);
 }
@@ -583,6 +604,7 @@ static esp_err_t moy_lcd_queue_band(uint8_t *slot, const uint8_t *src, int k,
 // needs one CS assertion), so the window arm takes nothing back.
 static void moy_lcd_frame_end(bool ok) {
     (void)ok;
+    moy_fold_end();
 }
 
 // The board's FULL-frame band count -- what pump_stats() reports. The engine
@@ -609,6 +631,9 @@ static mp_obj_t moy_lcd_kick(size_t n_args, const mp_obj_t *a) {
     // The FEEDER runs the SPI, so an error surfaces one frame late: raise the
     // finished frame's before handing this one over.
     moy_lcd_check(moy_flush_take_err(), "tx_color");
+    // The fold's one-shot latch, consumed with the feeder IDLE (the drain above
+    // is what makes that true) so a band can never read a half-set arm.
+    moy_fold_consume();
     moy_flush_kick(s_fbs[n], MOY_LCD_H);
     if (s_sd_guard) {
         moy_flush_drain();          // SD session live: no overlap (see the guard)
@@ -672,6 +697,7 @@ static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     int n = moy_lcd_fb_index(n_args, a);
     moy_flush_drain();
     (void)moy_flush_take_err();     // show reports its OWN frame's errors
+    moy_fold_consume();
     moy_flush_kick(s_fbs[n], MOY_LCD_H);
     bool ok = moy_flush_drain();
     moy_lcd_check(moy_flush_take_err(), "tx_color");
@@ -681,6 +707,108 @@ static mp_obj_t moy_lcd_show(size_t n_args, const mp_obj_t *a) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_show_obj, 0, 1, moy_lcd_show);
+
+// ---- the GAME FOLD (native/moy_flush/moy_fold.h) ---------------------------
+// The four verbs `banded_panel.FoldingCompositor` reaches, in the shapes
+// moy_axs already exported: this board grew them in 2026-09, and the pair is
+// meant to stay a matched set.
+
+// arm_fold(buf, vw, vh, ox, oy, scale=1) -- register THIS frame's composite as
+// the flush's job. `buf` must stay alive and unwritten until the next
+// fold_fence()/drain, which is exactly the scratch snapshot
+// DeviceCanvas.blit_game hands over. Geometry the synthesis cannot express is
+// REFUSED, and tdeck_panel composites it instead.
+static mp_obj_t moy_lcd_arm_fold(size_t n_args, const mp_obj_t *a) {
+    moy_lcd_require();
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(a[0], &buf, MP_BUFFER_READ);
+    if (!moy_fold_arm((const uint8_t *)buf.buf, buf.len,
+                      mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      (n_args > 5) ? mp_obj_get_int(a[5]) : 1,
+                      MOY_LCD_W, MOY_LCD_H)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_arm_fold_obj, 5, 6, moy_lcd_arm_fold);
+
+// fold_fence() -- block until no in-flight flush still reads the fold source.
+// Two volatile reads on the ordinary cadence; see moy_fold.h for why it waits
+// on the FEED and not on the transfer.
+static mp_obj_t moy_lcd_fold_fence(void) {
+    moy_fold_fence();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_fold_fence_obj, moy_lcd_fold_fence);
+
+// disarm_fold(back_fb) -- an overlay is about to paint the root: perform the
+// SKIPPED composite into framebuffer `back_fb` so the overlay lands on a
+// current picture, and clear the arm. The frame then flushes as a root copy.
+static mp_obj_t moy_lcd_disarm_fold(mp_obj_t back_in) {
+    int n = mp_obj_get_int(back_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    if (!moy_fold_disarm()) {
+        return mp_const_false;
+    }
+    moy_fold_composite(s_fbs[n], MOY_LCD_W, MOY_LCD_H);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_disarm_fold_obj, moy_lcd_disarm_fold);
+
+// fold_stats() -> (frames_folded, armed, inflight). THREE fields, where
+// moy_axs ships four: its fourth counts flushes that shipped the game rect
+// ALONE, which needs a panel whose GRAM keeps the bezels between frames and a
+// per-frame window arm. This one arms the full frame every time, so there is
+// no such number to report -- and a 0 in that slot would read as a windowing
+// that never fires, which is the exact ambiguity `fold=0` cost this repo weeks.
+static mp_obj_t moy_lcd_fold_stats(void) {
+    mp_obj_t t[3] = {
+        mp_obj_new_int_from_uint(moy_fold.frames),
+        moy_fold.armed ? mp_const_true : mp_const_false,
+        moy_fold.inflight ? mp_const_true : mp_const_false,
+    };
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_fold_stats_obj, moy_lcd_fold_stats);
+
+// fold_test(back_fb) -- the eyes-free pixel proof, moy_axs's verb on this
+// panel: with a fold ARMED and framebuffer `back_fb` holding the REFERENCE
+// composite (painted by the caller in Python), synthesize every band BOTH ways
+// -- folded from the game snapshot, copied from the reference -- and count
+// mismatching bytes. 0 = the fold is pixel-identical to the path it replaces.
+// Consumes nothing; the bounce slots are the scratch, so it drains first.
+static mp_obj_t moy_lcd_fold_test(mp_obj_t back_in) {
+    moy_lcd_require();
+    if (!moy_fold.armed) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no fold armed"));
+    }
+    int n = mp_obj_get_int(back_in);
+    if (n < 0 || n >= s_nfbs) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
+    }
+    moy_flush_drain();
+    const uint8_t *ref = s_fbs[n];
+    uint32_t bad = 0;
+    for (int y = 0; y < MOY_LCD_H; y += MOY_LCD_BAND_ROWS) {
+        int rows = (y + MOY_LCD_BAND_ROWS <= MOY_LCD_H)
+                   ? MOY_LCD_BAND_ROWS : (MOY_LCD_H - y);
+        size_t nbytes = (size_t)rows * MOY_LCD_ROW_BYTES;
+        moy_fold_band(moy_flush.bounce[0], MOY_LCD_W, y, rows);
+        memcpy(moy_flush.bounce[1], ref + (size_t)y * MOY_LCD_ROW_BYTES, nbytes);
+        const uint8_t *p0 = moy_flush.bounce[0];
+        const uint8_t *p1 = moy_flush.bounce[1];
+        for (size_t i = 0; i < nbytes; i++) {
+            if (p0[i] != p1[i]) {
+                bad++;
+            }
+        }
+    }
+    return mp_obj_new_int_from_uint(bad);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_fold_test_obj, moy_lcd_fold_test);
 
 // backlight(on) -- active HIGH on GPIO42. Plain on/off; the fork drove PWM duty
 // through LVGL's driver, which nothing in the console ever used for dimming.
@@ -792,6 +920,12 @@ static const mp_rom_map_elem_t moy_lcd_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_pump),       MP_ROM_PTR(&moy_lcd_pump_obj) },
     { MP_ROM_QSTR(MP_QSTR_drain),      MP_ROM_PTR(&moy_lcd_drain_obj) },
     { MP_ROM_QSTR(MP_QSTR_sd_guard),   MP_ROM_PTR(&moy_lcd_sd_guard_obj) },
+    // The GAME FOLD (moy_fold.h), moy_axs's verb set on this panel.
+    { MP_ROM_QSTR(MP_QSTR_arm_fold),   MP_ROM_PTR(&moy_lcd_arm_fold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_fence), MP_ROM_PTR(&moy_lcd_fold_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disarm_fold), MP_ROM_PTR(&moy_lcd_disarm_fold_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_stats), MP_ROM_PTR(&moy_lcd_fold_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_test),  MP_ROM_PTR(&moy_lcd_fold_test_obj) },
     { MP_ROM_QSTR(MP_QSTR_pending),    MP_ROM_PTR(&moy_lcd_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_backlight),  MP_ROM_PTR(&moy_lcd_backlight_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_madctl), MP_ROM_PTR(&moy_lcd_set_madctl_obj) },

@@ -123,13 +123,16 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     `tests/test_staging_closure.py` can still see which board depends on which
     C module**), passes it in, and adds only what is its own — geometry, the
     `ASYNC_FLUSH` revert flag, the module-level `set_backlight()`, the
-    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's fold verbs.
+    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's game window.
     Note what did NOT move: `set_backlight()` as a module function exists for
     callers holding no compositor, so routing it through the class would undo
     its reason to exist, and two two-line copies are cheaper than the
-    indirection. Nor did `fold_supported` become a base-class probe — the
-    T-Deck must carry no such attribute at all, which is how a board says it
-    lacks a lever. Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
+    indirection. Nor did `fold_supported` become a base-class probe — a board
+    without the lever must carry no such attribute at all, which is how a board
+    says it lacks one. **2026-09 amendment:** the T-Deck took the fold, so the
+    verbs moved onto a `FoldingCompositor` rung BETWEEN the base and the two
+    boards — a subclass and not four more base methods, precisely so that
+    absence stays available to the next banded board that cannot synthesize. Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
     44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
     `idle=0 gaps=0` on both, suites 9/9 and 10/10.
 

@@ -22,16 +22,25 @@ THE ARITHMETIC ON THIS GLASS. 320x240x2 = 153,600 B is ~17 ms on this bus, and
   2026-08-21, d9aa73e). A band-size number measured against the timer says
   nothing about this build.
 
-WHAT IS NOT PORTED, deliberately: the #190 flush-bounce scale fold, which
-  SYNTHESISES each band for a small-canvas game instead of copying the root
-  framebuffer -- the Guition subclass's lever. It needs moy_gfx kernels writing
-  into the bounce slots, i.e. the slots exposed back to Python, and it is a
-  separate lever with its own A/B. `fold_supported` is absent here, so
-  `DeviceCanvas.blit_game` takes its ordinary root composite path and the PUMP
-  line prints fold=0. Nothing degrades.
+THE GAME FOLD IS PORTED (2026-09), and the 2026-08 decline it replaces was
+  wrong about the shape rather than the value: it said the fold "needs moy_gfx
+  kernels writing into the bounce slots, i.e. the slots exposed back to
+  Python". It does not. The synthesis is C on the FEEDER --
+  `native/moy_flush/moy_fold`, one body with the Guition's -- and no bounce
+  slot is ever handed to Python. A small-canvas play frame now skips the
+  153,600 B root composite AND the 153,600 B read-back the bands used to do:
+  each band is built straight from the game snapshot, black outside the
+  viewport, the game rows at integer scale inside. `fold_supported` is True
+  here now, `DeviceCanvas.blit_game` arms instead of compositing, and the PUMP
+  line's `fold=` climbs on every quiet play frame.
+
+  What is still the Guition's alone is THE GAME WINDOW: shipping the game rect
+  alone needs a panel whose GRAM keeps the bezels and a per-frame window arm,
+  and this flush arms the full frame every time. So the transfer here is
+  unchanged; what the fold buys is the PSRAM traffic, not the wire.
 """
 
-from banded_panel import BandedCompositor
+from banded_panel import FoldingCompositor
 
 WIDTH = 320
 HEIGHT = 240
@@ -93,7 +102,7 @@ ASYNC_FLUSH = True
 LAYER_COPY_ASYNC = True
 
 
-class TDeckCompositor(BandedCompositor):
+class TDeckCompositor(FoldingCompositor):
     """RGB565 framebuffer(s) in PSRAM, pushed to the ST7789 by moy_lcd."""
 
     def __init__(self, nfbs=2, async_flush=None):
@@ -105,7 +114,7 @@ class TDeckCompositor(BandedCompositor):
 
         if async_flush is None:
             async_flush = ASYNC_FLUSH
-        BandedCompositor.__init__(self, moy_lcd, nfbs, async_flush)
+        FoldingCompositor.__init__(self, moy_lcd, nfbs, async_flush)
 
     # -- board bits ----------------------------------------------------------
 

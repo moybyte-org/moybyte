@@ -2,7 +2,8 @@
 #
 # NOT a MicroPython module -- it registers no qstr and no globals table. It is
 # a support library the board-authored panel modules (the T-Deck's moy_lcd,
-# the Guition's moy_axs) link and call; see moy_flush.h for the split. It
+# the Guition's moy_axs) link and call; see moy_flush.h for the split, and
+# moy_fold.h for the game fold that rides beside it (both boards, one body). It
 # rides the [native.shared] staging anyway, because that is where "which C
 # crosses to which board" is written down (#161), and a board with no banded
 # flush denies it there with a reason (the P4 does -- MIPI-DSI scans a PSRAM
@@ -17,6 +18,7 @@ add_library(usermod_moy_flush INTERFACE)
 
 target_sources(usermod_moy_flush INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/moy_flush.c
+    ${CMAKE_CURRENT_LIST_DIR}/moy_fold.c
 )
 
 target_include_directories(usermod_moy_flush INTERFACE ${CMAKE_CURRENT_LIST_DIR})

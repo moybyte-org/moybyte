@@ -71,8 +71,19 @@ WHAT EACH SUBCLASS OWNS, and why the list is short: its native module (imported
   in its own `__init__` and passed in here, so the staging-closure check can
   still SEE which board depends on which C module), its `WIDTH`/`HEIGHT`, its
   `ASYNC_FLUSH` revert flag, its module-level `set_backlight()`, and its
-  board-only levers -- the T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the
-  Guition's `fold_supported` + the three `*_fold` verbs.
+  board-only levers -- the T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`.
+
+THE GAME FOLD is `FoldingCompositor` below, a second body between this one and
+  the two boards. It was the Guition's alone until 2026-09, when the T-Deck's
+  moy_lcd grew the same verbs over the shared `moy_fold` C -- the same
+  promotion rule the class itself rode (a driver moves into `device/` the day a
+  SECOND board carries the hardware, #206 item 1). It is a SUBCLASS and not
+  four more methods here on purpose: `DeviceCanvas.blit_game`, `_diag_pump` and
+  the dev channel's `state` all probe these names with `getattr`, so a banded
+  board whose panel module cannot synthesize bands must carry NO fold attribute
+  at all -- absence is how a board says it lacks a lever, and a `fold_count` of
+  0 inherited from a shared base is indistinguishable from a fold that never
+  fires.
 """
 
 
@@ -224,3 +235,71 @@ class BandedCompositor:
         what shrinks is the share of it the CPU waits for (bounce_stats, and the
         console's own `flush=`)."""
         return self._lcd.stats()
+
+
+class FoldingCompositor(BandedCompositor):
+    """A banded compositor whose panel module can SYNTHESIZE a folded band.
+
+    THE FOLD (#190 on the T-Deck, its cousin on the Guition; the C is
+    `native/moy_flush/moy_fold.h`). A cart with a small canvas is normally
+    composited into the root framebuffer -- black bezels plus one integer
+    upscale -- and the flush then reads that same root back out of PSRAM to
+    fill its bounce slots. Both passes move the whole screen. With the fold,
+    `DeviceCanvas.blit_game` skips the composite: it snapshots the
+    (view-cropped) game frame into a flush-private scratch and ARMS the fold,
+    and the feeder synthesizes every band straight from that scratch. On a
+    folded frame the root is neither written nor read.
+
+    THE ESCAPE HATCH is the reason this is presentation-invisible rather than a
+    feature: anything that paints the root ABOVE the game (a toast, a notice, a
+    visible cursor) disarms through `console.py`'s frame walk, and the disarm
+    performs the skipped composite into the buffer being drawn -- so those
+    frames cost exactly what every frame cost before.
+    """
+
+    def __init__(self, lcd, nfbs=2, async_flush=True):
+        BandedCompositor.__init__(self, lcd, nfbs, async_flush)
+        # A module without the verbs (an older C than this Python) degrades to
+        # the ordinary root composite rather than raising on the first play
+        # frame; `blit_game` getattrs this and takes its own path.
+        self.fold_supported = hasattr(lcd, "arm_fold")
+
+    @property
+    def fold_count(self):
+        """Flushes FOLDED since boot -- the fold's liveness proof.
+
+        A property, not a cached int: its readers take it as an attribute, and
+        a frozen value is the exact symptom (something disarming every frame)
+        the meter exists to distinguish from a healthy one."""
+        return self._lcd.fold_stats()[0]
+
+    def fold_fence(self):
+        """Block until no in-flight flush still reads the scratch the caller
+        is about to overwrite. Normally two compares in C -- the fold source is
+        read during band SYNTHESIS only, which the feeder finishes early in a
+        flush -- so this is not the drain it looks like."""
+        self._lcd.fold_fence()
+
+    def arm_scale_fold(self, src_buf, vw, vh, ox, oy, scale):
+        """Hand this frame's composite to the flush, or perform it here.
+
+        The C REFUSES geometry its synthesis cannot express (it runs on the
+        feeder with no MP context, so a bad rectangle has to be caught on this
+        side of the handoff). A decline must be invisible one level up, so the
+        fallback is the exact composite `blit_game` skipped."""
+        try:
+            self._lcd.arm_fold(src_buf, vw, vh, ox, oy, scale)
+            return
+        except (ValueError, OSError):
+            pass
+        g = self._gfx
+        if g is None:
+            return
+        fb = self.framebuffer()
+        g.fill(fb, self._w * self._h, 0)
+        g.blit565_scale(fb, self._w, self._h, ox, oy, src_buf, vw, vh, scale)
+
+    def disarm_scale_fold(self):
+        """An overlay is about to paint the root: perform the skipped
+        composite into the buffer being drawn, and drop the arm."""
+        self._lcd.disarm_fold(self._back)

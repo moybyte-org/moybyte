@@ -293,9 +293,11 @@ T-Deck's band feed moved onto THIS board's core-0 feeder -- the promotion ran
 from here outward, which is Phase C's rule doing what it says.
 
 What stays in `guition_panel.py` is what is this board's: the `moy_axs`
-import, WIDTH/HEIGHT, the ASYNC_FLUSH revert flag, `fold_supported` plus the
-three `*_fold` verbs (#190's cousin, which no other board has) and the
-module-level `set_backlight`."""
+import, WIDTH/HEIGHT, the ASYNC_FLUSH revert flag and the module-level
+`set_backlight`. The `*_fold` verbs moved up to `FoldingCompositor` (same
+file) in 2026-09 when the T-Deck grew the same lever over the shared
+`native/moy_flush/moy_fold`; what is still only this board's is the game
+WINDOW, which lives in `moy_axs` and needs a panel whose GRAM persists."""
 
 [[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "axs_touch.py", "gt911.py"]

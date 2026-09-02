@@ -630,12 +630,26 @@ boundary.
 `moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang
 gets attributed to the overlap in a single reflash.
 
-**What is NOT ported, deliberately:** the #190 flush-bounce scale fold, which
-*synthesises* each band for a small-canvas game rather than copying the root
-framebuffer. It needs `moy_gfx` kernels writing into the bounce slots, i.e. the
-slots handed back to Python, and it is a separate lever with its own A/B.
-`fold_supported` is absent, `DeviceCanvas.blit_game` takes its ordinary root
-composite path, and the PUMP line prints `fold=0`. Nothing degrades.
+**The #190 flush-bounce scale fold is BACK, 2026-09**, and the 2026-08 decline
+it replaces was wrong about the shape rather than the value. That entry said
+the fold "needs `moy_gfx` kernels writing into the bounce slots, i.e. the slots
+handed back to Python". It does not: the synthesis is C on the FEEDER —
+`native/moy_flush/moy_fold`, one body with the Guition's — and no bounce slot
+ever crosses into Python. On a small-canvas play frame `blit_game` snapshots
+the game rectangle and ARMS instead of compositing, and `queue_band`
+synthesizes each band from that snapshot (black outside the viewport, the game
+rows at integer scale inside) rather than copying the root. Both the 153,600 B
+composite and the 153,600 B band read-back of the root disappear; `fold=` on
+the PUMP line climbs on every quiet play frame and freezing is the symptom of
+something disarming.
+
+The **game window** is still the Guition's alone — shipping the game rect by
+itself needs a panel whose GRAM keeps the bezels and a per-frame window arm,
+and this flush arms the full frame every time. So the fold buys PSRAM traffic
+here, not wire time. `moy_lcd.fold_test(n)` is the eyes-free proof on glass
+(paint the reference composite into fb `n` with a fold armed; 0 = byte-identical
+to the path it replaced), and `tests/test_flush_fold.py` runs the same claim
+off a board against `moy_fold_composite`.
 
 ---
 

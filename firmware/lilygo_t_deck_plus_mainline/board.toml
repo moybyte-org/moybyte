@@ -346,7 +346,8 @@ band feed off its VM-core pump timer and onto the Guition's core-0 feeder.
 What stays in `tdeck_panel.py` is what is this board's: the `moy_lcd` import,
 WIDTH/HEIGHT, the ASYNC_FLUSH and LAYER_COPY_ASYNC revert flags, `sd_bracket`
 (no other board shares its panel bus with an SD card) and the module-level
-`set_backlight`."""
+`set_backlight`. The GAME FOLD is `FoldingCompositor` in the same shared file
+since 2026-09, over `native/moy_flush/moy_fold`."""
 
 [[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]

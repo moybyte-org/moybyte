@@ -446,8 +446,9 @@ def _diag_pump(diag, comp):
         # live (a small-canvas game frame's bands were SYNTHESIZED, the root
         # composite skipped). Steadily climbing during play = every quiet
         # frame folds; frozen = something disarms each frame.
-        # A board with no fold reports 0 forever and that is CORRECT -- the
-        # T-Deck's `fold_supported` is absent on purpose.
+        # BOTH banded boards have the lever since 2026-09 (moy_fold), so a 0
+        # here now means something disarms -- read it against `fold_supported`,
+        # which is what a board WITHOUT the lever leaves absent.
         fold = getattr(comp, "fold_count", 0)
         diag.log("PUMP",
                  "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "

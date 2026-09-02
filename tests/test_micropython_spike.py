@@ -2897,15 +2897,14 @@ def test_micropython_offline_diag_wiring():
             '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
             in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
-    # fold= is the #190 liveness proof. Behaviour is pinned by
-    # tests/test_banded_panel.py; what a grep can pin is that the definition
-    # exists on the board with the lever and NOT on the one without it.
-    guition_panel = (Path("firmware/guition_jc3248w535/modules")
-                     / "guition_panel.py").read_text(encoding="utf-8")
-    assert "def fold_count(self):" in guition_panel
-    assert "fold_stats()[0]" in guition_panel
-    assert "fold_count" not in _panel_src()[0], (
-        "the T-Deck has no fold; absence is how a board says it lacks a lever")
+    # fold= is the #190 liveness proof, and BOTH banded boards carry it since
+    # 2026-09 (native/moy_flush/moy_fold). Behaviour is pinned by
+    # tests/test_banded_panel.py and the C by tests/test_flush_fold.py; what a
+    # grep can pin is that the meter is defined ONCE, on the shared rung both
+    # boards subclass, and reads the C rather than a cached int.
+    assert "def fold_count(self):" in compositor
+    assert "fold_stats()[0]" in compositor
+    assert "class FoldingCompositor(BandedCompositor):" in compositor
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
     # so the 13-60ms keyboard stalls are sized across a session, not just inside

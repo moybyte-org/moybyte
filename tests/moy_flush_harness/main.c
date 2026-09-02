@@ -42,6 +42,7 @@
 #include "esp_heap_caps.h"
 #include "harness.h"
 #include "moy_flush.h"
+#include "moy_fold.h"
 
 // ---------------------------------------------------------------------------
 // The board double
@@ -174,6 +175,9 @@ static esp_err_t bd_queue_band(uint8_t *slot, const uint8_t *src, int k, int y,
 static void bd_frame_end(bool ok) {
     if (B.end_calls < 8) { B.end_ok[B.end_calls] = ok; }
     B.end_calls++;
+    // Both boards clear the fold's in-flight latch here, and the fence's
+    // termination depends on it: model that, not a simplification of it.
+    moy_fold_end();
     if (B.end_block_us) { h_block_us(B.end_block_us); }
 }
 
@@ -1025,6 +1029,265 @@ static void sc_isr_without_a_feeder(void) {
     CHECK_EQ(moy_flush.done_us, (uint32_t)h_now());
 }
 
+
+// ---------------------------------------------------------------------------
+// The GAME FOLD (native/moy_flush/moy_fold.c)
+//
+// The band synthesis is the half of this program that CAN be checked against
+// an oracle without a panel: a folded band must reassemble, byte for byte,
+// into the composite it replaced -- which is `moy_fold_composite`, the same
+// function the disarm path performs. So every geometry below is checked both
+// ways round, and a fold that is merely plausible fails.
+//
+// The rotated form gets one more layer, because its oracle is a rotation the
+// PANEL owns: the reference here is `ref_rotate`, written from the mapping
+// moy_fold.h states, and moy_axs's on-device `fold_test` is what pins that
+// mapping against the shipped root-copy gather on real glass. Off a board this
+// proves the fold agrees with the composite THROUGH the rotation; on a board
+// fold_test proves the rotation itself.
+// ---------------------------------------------------------------------------
+
+#define FOLD_W       320                  // the T-Deck's logical frame
+#define FOLD_H       240
+#define FOLD_LW      480                  // the Guition's LOGICAL landscape frame
+#define FOLD_LH      320
+#define FOLD_PW      320                  // ...and its PHYSICAL portrait panel
+#define FOLD_PH      480
+#define FOLD_GMAX    (320 * 240)         // the largest game rect any case arms
+
+static uint16_t f_game[FOLD_GMAX];
+static uint16_t f_ref[FOLD_LW * FOLD_LH];      // the composite, logical space
+static uint16_t f_got[FOLD_LW * FOLD_LH];      // bands, reassembled
+static uint16_t f_rot[FOLD_PW * FOLD_PH];      // the composite, rotated
+static uint16_t f_slot[FOLD_LW * MOY_FOLD_MAX_BAND_ROWS];
+
+// A source with no repeats worth speaking of: a wrong row, a wrong column and
+// an off-by-one scale all show up as a mismatch rather than as luck.
+static void fold_fill_game(int vw, int vh) {
+    for (int y = 0; y < vh; y++) {
+        for (int x = 0; x < vw; x++) {
+            f_game[y * vw + x] = (uint16_t)(0x1000u + (unsigned)(y * 61 + x * 7)
+                                            + ((unsigned)(x ^ y) << 5));
+        }
+    }
+}
+
+static void fold_arm_or_fail(int vw, int vh, int ox, int oy, int scale,
+                             int fb_w, int fb_h) {
+    fold_fill_game(vw, vh);
+    if (!moy_fold_arm((const uint8_t *)f_game, sizeof f_game, vw, vh, ox, oy,
+                      scale, fb_w, fb_h)) {
+        h_fail("arm refused %dx%d @(%d,%d) x%d in %dx%d", vw, vh, ox, oy,
+               scale, fb_w, fb_h);
+    }
+}
+
+// P[py][px] = L[px][PH-1-py] (rot 0) / L[PW-1-px][py] (rot 1) -- moy_fold.h.
+static void ref_rotate(uint16_t *dst, const uint16_t *lg, int panel_w,
+                       int panel_h, int rot) {
+    for (int py = 0; py < panel_h; py++) {
+        for (int px = 0; px < panel_w; px++) {
+            int ly = (rot == 0) ? px : (panel_w - 1 - px);
+            int lx = (rot == 0) ? (panel_h - 1 - py) : py;
+            dst[(size_t)py * panel_w + px] = lg[(size_t)ly * panel_h + lx];
+        }
+    }
+}
+
+static void fold_check_linear(int vw, int vh, int ox, int oy, int scale,
+                              int band_rows) {
+    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_W, FOLD_H);
+    moy_fold_composite((uint8_t *)f_ref, FOLD_W, FOLD_H);
+    memset(f_got, 0xC7, sizeof f_got);          // poison: an unwritten band shows
+    for (int y = 0; y < FOLD_H; y += band_rows) {
+        int rows = (y + band_rows <= FOLD_H) ? band_rows : (FOLD_H - y);
+        memset(f_slot, 0x3B, sizeof f_slot);
+        moy_fold_band((uint8_t *)f_slot, FOLD_W, y, rows);
+        memcpy(f_got + (size_t)y * FOLD_W, f_slot,
+               (size_t)rows * FOLD_W * 2);
+    }
+    for (int i = 0; i < FOLD_W * FOLD_H; i++) {
+        if (f_got[i] != f_ref[i]) {
+            h_fail("linear fold %dx%d @(%d,%d) x%d bands=%d: pixel %d "
+                   "(%d,%d) is %04x, the composite has %04x", vw, vh, ox, oy,
+                   scale, band_rows, i, i % FOLD_W, i / FOLD_W, f_got[i],
+                   f_ref[i]);
+        }
+    }
+}
+
+static void fold_check_rot(int vw, int vh, int ox, int oy, int scale, int rot,
+                           int win_x, int win_y, int win_w, int win_h) {
+    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_LW, FOLD_LH);
+    moy_fold_composite((uint8_t *)f_ref, FOLD_LW, FOLD_LH);
+    ref_rotate(f_rot, f_ref, FOLD_PW, FOLD_PH, rot);
+    const moy_fold_rot_t geom = { FOLD_PW, FOLD_PH, rot, win_x, win_y, win_w };
+    const int band_rows = 32;
+    for (int y = 0; y < win_h; y += band_rows) {
+        int rows = (y + band_rows <= win_h) ? band_rows : (win_h - y);
+        memset(f_slot, 0x3B, sizeof f_slot);
+        moy_fold_band_rot((uint8_t *)f_slot, &geom, win_y + y, rows);
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < win_w; c++) {
+                uint16_t got = f_slot[r * win_w + c];
+                uint16_t want = f_rot[(size_t)(win_y + y + r) * FOLD_PW
+                                      + win_x + c];
+                if (got != want) {
+                    h_fail("rot%d fold %dx%d @(%d,%d) x%d win(%d,%d %dx%d): "
+                           "panel (%d,%d) is %04x, the rotated composite has "
+                           "%04x", rot, vw, vh, ox, oy, scale, win_x, win_y,
+                           win_w, win_h, win_x + c, win_y + y + r, got, want);
+                }
+            }
+        }
+    }
+}
+
+static void sc_fold_arm_geometry(void) {
+    fold_fill_game(128, 128);
+    const uint8_t *g = (const uint8_t *)f_game;
+    // Accepted: the two shapes that ship, and the degenerate no-bezel one.
+    CHECK(moy_fold_arm(g, sizeof f_game, 128, 128, 96, 56, 1, 320, 240));
+    CHECK(moy_fold_arm(g, sizeof f_game, 128, 128, 112, 32, 2, 480, 320));
+    CHECK(moy_fold_arm(g, sizeof f_game, 160, 120, 0, 0, 2, 320, 240));
+    // Refused, and each one is an out-of-bounds READ ON THE FEEDER if it is
+    // not caught here -- there is no MP context down there to raise from.
+    CHECK(!moy_fold_arm(NULL, sizeof f_game, 128, 128, 0, 0, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 0, 128, 0, 0, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 0, 0, 0, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, -1, 0, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 0, -1, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 0, 0, 0, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 0, 0,
+                        MOY_FOLD_MAX_SCALE + 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 200, 0, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 0, 150, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 96, 56, 2, 320, 240));
+    // ...and a buffer SHORTER than the geometry it claims (the scratch was
+    // resized under a stale arm).
+    CHECK(!moy_fold_arm(g, (size_t)128 * 128 * 2 - 2, 128, 128, 0, 0, 1,
+                        320, 240));
+    // A REFUSAL LATCHES NOTHING. The caller composites instead, and a live arm
+    // from a previous call must survive intact -- the geometry the bands are
+    // about to read is still the one that was accepted.
+    CHECK(moy_fold_arm(g, sizeof f_game, 128, 128, 96, 56, 1, 320, 240));
+    CHECK(!moy_fold_arm(g, sizeof f_game, 128, 128, 0, 0, 99, 320, 240));
+    CHECK_EQ(moy_fold.armed, true);
+    CHECK_EQ(moy_fold.scale, 1);
+    CHECK_EQ(moy_fold.ox, 96);
+}
+
+static void sc_fold_latch_is_one_shot(void) {
+    fold_arm_or_fail(128, 128, 96, 56, 1, FOLD_W, FOLD_H);
+    CHECK_EQ(moy_fold.frames, 0);
+    CHECK(moy_fold_consume());
+    CHECK_EQ(moy_fold.armed, false);
+    CHECK_EQ(moy_fold.inflight, true);
+    CHECK_EQ(moy_fold.frames, 1);
+    // The next frame is NOT folded unless it is armed again: a latch that
+    // stuck would synthesize a stale snapshot over a chrome frame.
+    CHECK(!moy_fold_consume());
+    CHECK_EQ(moy_fold.inflight, false);
+    CHECK_EQ(moy_fold.frames, 1);
+    // ...and the counter only counts folds, which is the whole of what the
+    // PUMP line's fold= claims.
+    fold_arm_or_fail(128, 128, 96, 56, 1, FOLD_W, FOLD_H);
+    CHECK(moy_fold_consume());
+    CHECK_EQ(moy_fold.frames, 2);
+    moy_fold_end();
+    CHECK_EQ(moy_fold.inflight, false);
+}
+
+static void sc_fold_disarm_performs_the_composite(void) {
+    fold_arm_or_fail(128, 120, 32, 0, 2, FOLD_W, FOLD_H);
+    moy_fold_composite((uint8_t *)f_ref, FOLD_W, FOLD_H);
+    memset(f_got, 0x5A, sizeof f_got);
+    CHECK(moy_fold_disarm());
+    moy_fold_composite((uint8_t *)f_got, FOLD_W, FOLD_H);
+    CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_W * FOLD_H * 2), 0);
+    // Once. A second disarm in the same frame (cursor after toast) must not
+    // repaint over the overlay that has already landed.
+    CHECK(!moy_fold_disarm());
+    CHECK_EQ(moy_fold.armed, false);
+    // A disarmed frame is not folded and is not counted.
+    CHECK(!moy_fold_consume());
+    CHECK_EQ(moy_fold.frames, 0);
+}
+
+static void sc_fold_bands_match_the_composite(void) {
+    // Scale 1, all four bezels -- moss moss on the T-Deck (128x128 @ 96,56).
+    fold_check_linear(128, 128, 96, 56, 1, 32);
+    // Scale 2, pillarbox only -- celeste's 128x120 view at 2x.
+    fold_check_linear(128, 120, 32, 0, 2, 32);
+    // Scale 2, no bezel at all: the fold must not assume there is one.
+    fold_check_linear(160, 120, 0, 0, 2, 32);
+    // An ODD offset at scale 2: the viewport's first row is a REPEAT row of
+    // the game's row 0, so a fold that mapped dy -> gy by anything but a
+    // floor-divide lands a row off here and nowhere else.
+    fold_check_linear(64, 64, 95, 55, 2, 32);
+    // A band size that does not divide the frame (short final band), and one
+    // SMALLER than the scale's row run, which is the case the row-repeat
+    // shortcut inside the synthesis has to get right across a band boundary.
+    fold_check_linear(128, 120, 32, 0, 2, 36);
+    fold_check_linear(128, 120, 32, 0, 2, 1);
+}
+
+static void sc_fold_rot_bands_match_the_composite(void) {
+    // The Guition's stock viewport, scale 1 (320x240 in a 480x320 frame).
+    fold_check_rot(320, 240, 80, 40, 1, 0, 0, 0, FOLD_PW, FOLD_PH);
+    fold_check_rot(320, 240, 80, 40, 1, 1, 0, 0, FOLD_PW, FOLD_PH);
+    // Scale 2 -- the case this port exists for: 128x128 -> 256x256 @(112,32).
+    fold_check_rot(128, 128, 112, 32, 2, 0, 0, 0, FOLD_PW, FOLD_PH);
+    fold_check_rot(128, 128, 112, 32, 2, 1, 0, 0, FOLD_PW, FOLD_PH);
+    // ...and WINDOWED, which is where a scaled fold could plausibly be right
+    // full-screen and wrong on the sub-rect: the game's physical rect, 8-
+    // aligned outward the way moy_axs arms CASET/RASET.
+    fold_check_rot(128, 128, 112, 32, 2, 0, 32, 96, 256, 256);
+    fold_check_rot(128, 128, 112, 32, 2, 1, 32, 128, 256, 256);
+    // A window whose height is not a whole number of bands.
+    fold_check_rot(128, 128, 112, 32, 2, 0, 32, 96, 256, 200);
+}
+
+static void sc_fold_fence_waits_for_the_feed(void) {
+    bd_start(&OPS2);
+    B.synth_us = 0;
+    B.tx_us = 2000;                        // the wire paces the feed
+    fold_arm_or_fail(128, 128, 96, 56, 1, FOLD_W, FOLD_H);
+    CHECK(moy_fold_consume());
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    // The snapshot is read during SYNTHESIS only, so the fence returns once
+    // every band has been FED -- earlier than the drain it replaced, and the
+    // frame is still busy when it does.
+    moy_fold_fence();
+    CHECK_EQ(moy_flush.bnc_next, moy_flush.bnc_total);
+    CHECK((int)moy_flush.done < moy_flush.bnc_total);
+    CHECK_EQ(moy_flush.frame_busy, true);
+    CHECK_EQ(h_gil_depth(), 0);
+    CHECK(h_gil_exits() > 0);
+    CHECK(moy_flush_drain());
+    CHECK_EQ(moy_fold.inflight, false);    // frame_end cleared it
+    // Not in flight -> two compares and out, whatever the engine is doing.
+    int exits = h_gil_exits();
+    moy_fold_fence();
+    CHECK_EQ(h_gil_exits(), exits);
+}
+
+static void sc_fold_reset_keeps_the_meter(void) {
+    fold_arm_or_fail(128, 128, 96, 56, 1, FOLD_W, FOLD_H);
+    CHECK(moy_fold_consume());
+    CHECK_EQ(moy_fold.frames, 1);
+    // A soft reset / free-all drops the latches -- `src` points into a
+    // framebuffer that is about to be handed back to the heap -- but `frames`
+    // is a since-boot meter and outlives it, exactly like moy_flush's.
+    moy_fold_reset();
+    CHECK_EQ(moy_fold.armed, false);
+    CHECK_EQ(moy_fold.inflight, false);
+    CHECK(moy_fold.src == NULL);
+    CHECK_EQ(moy_fold.frames, 1);
+    CHECK(!moy_fold_consume());
+}
+
 // ---------------------------------------------------------------------------
 
 typedef struct {
@@ -1072,6 +1335,18 @@ static const scenario_t SCENARIOS[] = {
     { "stop_failure_keeps_the_bounce", sc_stop_failure_keeps_the_bounce },
     { "reset_leaves_frame_clean", sc_reset_leaves_frame_clean },
     { "isr_without_a_feeder", sc_isr_without_a_feeder },
+    // The GAME FOLD (moy_fold.c). The `fold_` prefix is load-bearing:
+    // tests/test_flush_fold.py owns these and tests/test_moy_flush_c.py
+    // excludes them, so a failure names the subject that broke.
+    { "fold_arm_geometry", sc_fold_arm_geometry },
+    { "fold_latch_is_one_shot", sc_fold_latch_is_one_shot },
+    { "fold_disarm_performs_the_composite",
+      sc_fold_disarm_performs_the_composite },
+    { "fold_bands_match_the_composite", sc_fold_bands_match_the_composite },
+    { "fold_rot_bands_match_the_composite",
+      sc_fold_rot_bands_match_the_composite },
+    { "fold_fence_waits_for_the_feed", sc_fold_fence_waits_for_the_feed },
+    { "fold_reset_keeps_the_meter", sc_fold_reset_keeps_the_meter },
 };
 
 #define N_SCENARIOS ((int)(sizeof SCENARIOS / sizeof SCENARIOS[0]))

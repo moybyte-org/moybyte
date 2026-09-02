@@ -56,10 +56,18 @@ def _cc():
     return os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc")
 
 
+# The engine and the GAME FOLD that rides beside it. moy_fold.c is here for the
+# same reason moy_flush.c is: it runs on the feeder with no MP context, it is one
+# body under both boards, and its band synthesis has an ORACLE off a board (the
+# composite it replaced), which tests/test_flush_fold.py is what exploits.
+ENGINE_SOURCES = ("moy_flush.c", "moy_fold.c")
+
+
 def _inputs():
     """Everything the binary depends on, for the cache key."""
     files = sorted(HARNESS.rglob("*.c")) + sorted(HARNESS.rglob("*.h"))
-    files += [ENGINE / "moy_flush.c", ENGINE / "moy_flush.h"]
+    files += [ENGINE / name for name in ENGINE_SOURCES]
+    files += [ENGINE / "moy_flush.h", ENGINE / "moy_fold.h"]
     return files
 
 
@@ -94,7 +102,8 @@ def build():
                + ["-I", str(HARNESS / "stubs"), "-I", str(HARNESS),
                   "-I", str(ENGINE)]
                + [str(HARNESS / name) for name in SOURCES]
-               + [str(ENGINE / "moy_flush.c"), "-o", tmp])
+               + [str(ENGINE / name) for name in ENGINE_SOURCES]
+               + ["-o", tmp])
         proc = subprocess.run(cmd, capture_output=True, text=True)
     except OSError as exc:               # $CC points at nothing runnable
         return None, "cannot run %s (%s)" % (cc, exc)
@@ -142,7 +151,12 @@ def _scenarios():
 SCENARIOS = _scenarios()
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS)
+# The `fold_` scenarios belong to tests/test_flush_fold.py -- same binary, same
+# process-per-scenario shape, but a different subject, so a failure names it.
+ENGINE_SCENARIOS = [s for s in SCENARIOS if not s.startswith("fold_")]
+
+
+@pytest.mark.parametrize("scenario", ENGINE_SCENARIOS)
 def test_scenario(scenario):
     """One protocol scenario, driven through the real C in its own process."""
     exe = require_harness()
@@ -186,5 +200,5 @@ def test_the_scenarios_cover_the_clauses_the_header_calls_races():
                  "stop_failure_keeps_the_bounce",
                  "failure_counters_are_positional",
                  "slot_pacing_two_slots", "isr_without_a_feeder"):
-        assert name in SCENARIOS, name
-    assert len(SCENARIOS) >= 30
+        assert name in ENGINE_SCENARIOS, name
+    assert len(ENGINE_SCENARIOS) >= 30

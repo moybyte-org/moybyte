@@ -33,7 +33,10 @@
 //   file supplies three hooks (moy_axs_frame_begin / _queue_band / _frame_end).
 //   READ moy_flush.h before touching any of that; what is genuinely this
 //   board's stays here -- the QSPI protocol below, the window arming, the
-//   rotate/fold band synthesis, and the one-DMA-chunk-per-band static assert.
+//   ROTATE band synthesis and the one-DMA-chunk-per-band static assert. The
+//   GAME FOLD went the same way in 2026-09 when the T-Deck took the lever:
+//   its latch, fence and BOTH gathers are native/moy_flush/moy_fold.h, and
+//   what stays here is the game WINDOW this panel's persistent GRAM allows.
 //
 // THE QSPI PROTOCOL (deduced by ESPHome/LovyanGFX from vendor code, verified
 // on this glass by the owner's working ESPHome build):
@@ -119,18 +122,16 @@
 #include "py/objarray.h"
 #include "py/objtuple.h"
 #include "py/mphal.h"
-#include "py/mpthread.h"   // fold_fence releases the GIL while it spins
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
-#include "esp_rom_sys.h"
-#include "esp_timer.h"
 
 // The SHARED banded-flush engine (native/moy_flush, staged per board.toml).
 // It brings the FreeRTOS headers, the traceISR_EXIT_TO_SCHEDULER guard the
 // yield needs, and the state this file's verbs report on.
 #include "moy_flush.h"
+#include "moy_fold.h"     // the GAME FOLD: the latch, the fence, both gathers
 
 // ---- board facts (Guition JC3248W535; pins from the owner's working ESPHome
 // definition -- treat as verified)
@@ -252,17 +253,16 @@ static int s_rot = 0;
 // --- the #190-cousin GAME FOLD (armed by DeviceCanvas.blit_game through
 // guition_panel; see that module's prose). While armed, the flush SYNTHESIZES
 // every band -- black bezels + the game pixels read STRAIGHT from the
-// (scratch-snapshotted) game buffer -- and the root framebuffer is neither
-// written by a composite nor read by the pump. Scale 1 only (the Python glue
-// declines and composites itself otherwise). One-shot: kick() consumes the
-// arm; disarm performs the skipped composite into a caller-named fb.
-static bool s_fold_armed;              // this frame's composite is the flush's job
-static volatile bool s_fold_inflight;  // the in-flight flush reads s_fold_src
-static const uint8_t *s_fold_src;      // game pixels, RGB565 wire order
-static int s_fold_vw, s_fold_vh;       // game geometry (logical px)
-static int s_fold_ox, s_fold_oy;       // viewport origin in the logical frame
-static uint32_t s_fold_frames;         // flushes folded since boot (diag)
-static uint32_t s_fold_win_frames;     // ...of which shipped game-window-only
+// (scratch-snapshotted) game buffer, at any integer scale -- and the root
+// framebuffer is neither written by a composite nor read by the pump.
+//
+// The LATCH, the FENCE and the gather are `moy_fold` (moy_fold.h) since
+// 2026-09; what is this board's is the game WINDOW below, which only a panel
+// with persistent GRAM can have. `_Static_assert` because the rotated gather
+// builds one axis map per band on its stack.
+_Static_assert(MOY_AXS_BAND_ROWS <= MOY_FOLD_MAX_BAND_ROWS,
+               "moy_fold_band_rot's per-band axis map is MOY_FOLD_MAX_BAND_ROWS long");
+static uint32_t s_fold_win_frames;     // folded flushes that shipped game-window-only
 
 // THE GAME WINDOW (owner's insight, 2026-08-19: "it doesn't move double the
 // pixels -- the banding around the game never changes"). The panel's GRAM
@@ -278,39 +278,19 @@ static uint32_t s_fold_win_frames;     // ...of which shipped game-window-only
 static int s_win_x, s_win_y, s_win_w, s_win_h;   // physical rect this flush
 static int s_win_bands;                          // ceil(s_win_h / BAND_ROWS)
 // Whether the bezels currently on the glass belong to this fold geometry
-// (rot + viewport). Set when a FULL folded flush ships; cleared by any
+// (rot + viewport + scale). Set when a FULL folded flush ships; cleared by any
 // non-folded flush, a rot flip, or a geometry change.
 static bool s_bezels_valid;
-static int s_bez_rot, s_bez_ox, s_bez_oy, s_bez_vw, s_bez_vh;
+static int s_bez_rot, s_bez_ox, s_bez_oy, s_bez_vw, s_bez_vh, s_bez_scale;
 
-// Fill a bounce slot with physical band `k` under the GAME FOLD: bezels are
-// black, the game region reads the game buffer directly -- same loop shape as
-// the plain rotate below, with bounds. The root fb is not touched.
+// This panel's half of the fold: the rotation and the window rect. The gather
+// itself is moy_fold_band_rot -- one body with the T-Deck's straight-through
+// form, which is what makes both testable off a board.
 static void moy_axs_fold_band(uint8_t *slot, int k, int rows) {
-    const uint16_t *g = (const uint16_t *)s_fold_src;
-    uint16_t *dst = (uint16_t *)slot;
-    int py0 = s_win_y + k * MOY_AXS_BAND_ROWS;
-    for (int px = s_win_x; px < s_win_x + s_win_w; px++) {
-        // rot 0: ly = px; rot 1: ly = PANEL_W-1-px.
-        int ly = (s_rot == 0) ? px : (MOY_AXS_PANEL_W - 1 - px);
-        uint16_t *d = dst + (px - s_win_x);
-        int gy = ly - s_fold_oy;
-        if (gy < 0 || gy >= s_fold_vh) {
-            for (int r = 0; r < rows; r++) {
-                *d = 0;
-                d += s_win_w;
-            }
-            continue;
-        }
-        const uint16_t *grow = g + (size_t)gy * s_fold_vw;
-        for (int r = 0; r < rows; r++) {
-            int lx = (s_rot == 0) ? (MOY_AXS_PANEL_H - 1 - (py0 + r))
-                                  : (py0 + r);
-            int gx = lx - s_fold_ox;
-            *d = (gx >= 0 && gx < s_fold_vw) ? grow[gx] : 0;
-            d += s_win_w;
-        }
-    }
+    const moy_fold_rot_t geom = {
+        MOY_AXS_PANEL_W, MOY_AXS_PANEL_H, s_rot, s_win_x, s_win_y, s_win_w,
+    };
+    moy_fold_band_rot(slot, &geom, s_win_y + k * MOY_AXS_BAND_ROWS, rows);
 }
 
 // Fill a bounce slot with physical band `k`, rotating from the logical
@@ -392,6 +372,7 @@ static void moy_axs_free_all(void) {
     s_nfbs = 0;
     s_retrieved = 0;
     moy_flush_reset();
+    moy_fold_reset();          // the fold's src was one of the buffers just freed
     moy_flush.frame_clean = true;
 }
 
@@ -452,13 +433,18 @@ static esp_err_t moy_axs_arm_window_acquired(int x, int y, int w, int h) {
 // The fold geometry's physical rect, 8-aligned outward (the AXS draw-rounding;
 // the synthesis paints any alignment sliver black). Writes s_win_*.
 static void moy_axs_set_game_window(void) {
+    // The LOGICAL rect the fold paints -- the game rectangle at its scale, not
+    // the game's own size. (It was the same number until scale > 1 shipped.)
+    const int lw = moy_fold.vw * moy_fold.scale;
+    const int lh = moy_fold.vh * moy_fold.scale;
+    const int lx = moy_fold.ox, ly = moy_fold.oy;
     int px0, pw, py0, ph;
     if (s_rot == 0) {
-        px0 = s_fold_oy;                          pw = s_fold_vh;
-        py0 = MOY_AXS_PANEL_H - s_fold_ox - s_fold_vw;  ph = s_fold_vw;
+        px0 = ly;                                 pw = lh;
+        py0 = MOY_AXS_PANEL_H - lx - lw;          ph = lw;
     } else {
-        px0 = MOY_AXS_PANEL_W - s_fold_oy - s_fold_vh;  pw = s_fold_vh;
-        py0 = s_fold_ox;                          ph = s_fold_vw;
+        px0 = MOY_AXS_PANEL_W - ly - lh;          pw = lh;
+        py0 = lx;                                 ph = lw;
     }
     int px1 = (px0 + pw + 7) & ~7;
     int py1 = (py0 + ph + 7) & ~7;
@@ -518,9 +504,8 @@ static mp_obj_t moy_axs_init(size_t n_args, const mp_obj_t *pos, mp_map_t *kw) {
             s_bus_held = false;
         }
         moy_flush_reset();
+        moy_fold_reset();
         s_retrieved = 0;
-        s_fold_armed = false;
-        s_fold_inflight = false;
         s_bezels_valid = false;
         moy_axs_set_full_window();
         return mp_const_none;
@@ -705,7 +690,7 @@ static esp_err_t moy_axs_queue_band(uint8_t *slot, const uint8_t *src, int k,
                                     int y, int rows, bool last) {
     (void)y;
     moy_axs_retrieve();
-    if (s_fold_inflight) {
+    if (moy_fold.inflight) {
         moy_axs_fold_band(slot, k, rows);
     } else {
         moy_axs_rotate_band(slot, src, k, rows);
@@ -738,7 +723,7 @@ static void moy_axs_frame_end(bool ok) {
         spi_device_release_bus(s_dev);
         s_bus_held = false;
     }
-    s_fold_inflight = false;
+    moy_fold_end();
 }
 
 // MP-side: decide THIS frame's window before handing it to the engine.
@@ -750,19 +735,18 @@ static void moy_axs_frame_end(bool ok) {
 // is always full-screen and invalidates them. Runs with the feeder IDLE (every
 // caller drains first), which is what keeps the fold/bezel history race-free.
 static void moy_axs_decide_window(void) {
-    s_fold_inflight = s_fold_armed;
-    s_fold_armed = false;
     bool windowed = false;
-    if (s_fold_inflight) {
-        s_fold_frames++;
+    if (moy_fold_consume()) {
         if (s_bezels_valid && s_bez_rot == s_rot
-                && s_bez_ox == s_fold_ox && s_bez_oy == s_fold_oy
-                && s_bez_vw == s_fold_vw && s_bez_vh == s_fold_vh) {
+                && s_bez_ox == moy_fold.ox && s_bez_oy == moy_fold.oy
+                && s_bez_vw == moy_fold.vw && s_bez_vh == moy_fold.vh
+                && s_bez_scale == moy_fold.scale) {
             windowed = true;
         } else {
             s_bez_rot = s_rot;
-            s_bez_ox = s_fold_ox; s_bez_oy = s_fold_oy;
-            s_bez_vw = s_fold_vw; s_bez_vh = s_fold_vh;
+            s_bez_ox = moy_fold.ox; s_bez_oy = moy_fold.oy;
+            s_bez_vw = moy_fold.vw; s_bez_vh = moy_fold.vh;
+            s_bez_scale = moy_fold.scale;
             s_bezels_valid = true;      // this full flush lays them
         }
     } else {
@@ -867,88 +851,61 @@ static mp_obj_t moy_axs_madctl(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_madctl_obj, moy_axs_madctl);
 
-// arm_fold(buf, vw, vh, ox, oy) -- register THIS frame's game composite as
-// the flush's job (scale-1 geometry; the Python glue declines others). The
-// buffer must stay alive and unwritten until the next fold_fence()/drain --
-// which is exactly the scratch snapshot DeviceCanvas.blit_game hands over.
+// arm_fold(buf, vw, vh, ox, oy, scale=1) -- register THIS frame's game
+// composite as the flush's job. The buffer must stay alive and unwritten until
+// the next fold_fence()/drain -- which is exactly the scratch snapshot
+// DeviceCanvas.blit_game hands over. Geometry the synthesis cannot express is
+// REFUSED here (moy_fold_arm), and guition_panel composites it instead.
 static mp_obj_t moy_axs_arm_fold(size_t n_args, const mp_obj_t *a) {
-    (void)n_args;
     moy_axs_require();
     mp_buffer_info_t buf;
     mp_get_buffer_raise(a[0], &buf, MP_BUFFER_READ);
-    int vw = mp_obj_get_int(a[1]);
-    int vh = mp_obj_get_int(a[2]);
-    int ox = mp_obj_get_int(a[3]);
-    int oy = mp_obj_get_int(a[4]);
-    if (vw <= 0 || vh <= 0 || ox < 0 || oy < 0
-            || ox + vw > MOY_AXS_W || oy + vh > MOY_AXS_H
-            || buf.len < (size_t)vw * vh * 2) {
+    if (!moy_fold_arm((const uint8_t *)buf.buf, buf.len,
+                      mp_obj_get_int(a[1]), mp_obj_get_int(a[2]),
+                      mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                      (n_args > 5) ? mp_obj_get_int(a[5]) : 1,
+                      MOY_AXS_W, MOY_AXS_H)) {
         mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
     }
-    s_fold_src = (const uint8_t *)buf.buf;
-    s_fold_vw = vw;
-    s_fold_vh = vh;
-    s_fold_ox = ox;
-    s_fold_oy = oy;
-    s_fold_armed = true;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_obj, 5, 5, moy_axs_arm_fold);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_axs_arm_fold_obj, 5, 6, moy_axs_arm_fold);
 
 // fold_fence() -- block until no in-flight flush still reads the fold source
 // (called by blit_game before it overwrites the scratch). A two-compare no-op
 // on the ordinary cadence, a drain only when frames outrun the flush.
 static mp_obj_t moy_axs_fold_fence(void) {
-    // The scratch is read only during band SYNTHESIS, which the FEEDER
-    // finishes within the first few ms of a flush -- so on the ordinary
-    // cadence this is two volatile reads. Waiting for synthesis rather than
-    // transfer is also strictly earlier than the full drain this used to be.
-    if (s_fold_inflight && moy_flush.frame_busy) {
-        int64_t deadline = esp_timer_get_time() + MOY_FLUSH_TIMEOUT_US;
-        MP_THREAD_GIL_EXIT();
-        while (moy_flush.frame_busy
-                && moy_flush.bnc_next < moy_flush.bnc_total
-                && esp_timer_get_time() < deadline) {
-            esp_rom_delay_us(20);
-        }
-        MP_THREAD_GIL_ENTER();
-    }
+    moy_fold_fence();
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_fence_obj, moy_axs_fold_fence);
 
 // disarm_fold(back_fb) -- an overlay is about to paint the root: perform the
-// SKIPPED composite (black bezels + game rows) into framebuffer `back_fb` so
-// the overlay lands on a current picture, and clear the arm. The frame then
-// flushes through the ordinary rotate path.
+// SKIPPED composite (black bezels + the game rect at scale) into framebuffer
+// `back_fb` so the overlay lands on a current picture, and clear the arm. The
+// frame then flushes through the ordinary rotate path.
 static mp_obj_t moy_axs_disarm_fold(mp_obj_t back_in) {
-    if (!s_fold_armed) {
-        return mp_const_false;
-    }
-    s_fold_armed = false;
     int n = mp_obj_get_int(back_in);
     if (n < 0 || n >= s_nfbs) {
         mp_raise_ValueError(MP_ERROR_TEXT("fb index"));
     }
-    uint16_t *fb = (uint16_t *)s_fbs[n];
-    memset(fb, 0, MOY_AXS_FB_BYTES);            // the bezels (black)
-    const uint8_t *g = s_fold_src;
-    for (int gy = 0; gy < s_fold_vh; gy++) {
-        memcpy(fb + (size_t)(s_fold_oy + gy) * MOY_AXS_W + s_fold_ox,
-               g + (size_t)gy * s_fold_vw * 2, (size_t)s_fold_vw * 2);
+    if (!moy_fold_disarm()) {
+        return mp_const_false;
     }
+    moy_fold_composite(s_fbs[n], MOY_AXS_W, MOY_AXS_H);
     return mp_const_true;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(moy_axs_disarm_fold_obj, moy_axs_disarm_fold);
 
 // fold_stats() -> (frames_folded, armed, inflight, windowed) -- the proof:
 // `windowed` climbing 1:1 with `frames_folded` = play frames shipping the
-// game rect alone (the first of a run stays full to lay the bezels).
+// game rect alone (the first of a run stays full to lay the bezels). The
+// fourth field is this panel's alone; moy_lcd ships three and says why.
 static mp_obj_t moy_axs_fold_stats(void) {
     mp_obj_t t[4] = {
-        mp_obj_new_int_from_uint(s_fold_frames),
-        s_fold_armed ? mp_const_true : mp_const_false,
-        s_fold_inflight ? mp_const_true : mp_const_false,
+        mp_obj_new_int_from_uint(moy_fold.frames),
+        moy_fold.armed ? mp_const_true : mp_const_false,
+        moy_fold.inflight ? mp_const_true : mp_const_false,
         mp_obj_new_int_from_uint(s_fold_win_frames),
     };
     return mp_obj_new_tuple(4, t);
@@ -963,7 +920,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(moy_axs_fold_stats_obj, moy_axs_fold_stats);
 // replaces, proven on-device with no glass needed. Consumes nothing.
 static mp_obj_t moy_axs_fold_test(mp_obj_t back_in) {
     moy_axs_require();
-    if (!s_fold_armed) {
+    if (!moy_fold.armed) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("no fold armed"));
     }
     int n = mp_obj_get_int(back_in);
