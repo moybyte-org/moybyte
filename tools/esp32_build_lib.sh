@@ -147,6 +147,28 @@ moybyte_patch_repr_c() {
   fi
 }
 
+# Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
+# on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
+# and the layer pool allocate from, and never gives an area back. On an 8MB
+# S3 board one fragmented Python allocation took every remaining byte of
+# PSRAM and every big cart then failed at load with Lua's "not enough
+# memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
+# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM always stay outside
+# the Python heap; a board that defines nothing reserves nothing. A GUARDED
+# SED on the one-line port hook, like repr_c. Reads MPY_DIR.
+moybyte_patch_gc_split_reserve() {
+  local f="${MPY_DIR}/ports/esp32/gccollect.c"
+  if ! grep -q "MOYBYTE_GC_SPLIT_RESERVE" "${f}"; then
+    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n    size_t psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n    if (psram <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < psram - MOYBYTE_GC_SPLIT_RESERVE ? avail : psram - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
+    sed -i 's|^size_t gc_get_max_new_split(void) {|#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
+    grep -q "psram - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
+      echo "!! gc split reserve patch did not apply -- gccollect.c's gc_get_max_new_split changed shape" >&2
+      exit 1
+    }
+    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of PSRAM (#66)"
+  fi
+}
+
 # PSRAM temperature retune, un-gated by flash vendor (#169). REQUIRED by the
 # 120MHz octal MSPI profile, not optional beside it: IDF only starts the retune
 # for verified flash vendor IDs (0xC8/0x20) and otherwise returns

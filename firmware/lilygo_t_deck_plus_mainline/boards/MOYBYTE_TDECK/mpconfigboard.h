@@ -64,3 +64,9 @@
 // this board's; the mistake was harmless because the pins live in
 // device_audio.py, but it is the kind of thing that gets copied.)
 #define MICROPY_PY_MACHINE_I2S              (1)
+
+// The Python heap may grow on demand (split heap), but never into this much
+// of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
+// The biggest corpus cart's VM peaks near 2MB; the shell boots with ~3.1-3.5MB
+// of PSRAM outside the Python heap. See tools/esp32_build_lib.sh.
+#define MOYBYTE_GC_SPLIT_RESERVE            (2304 * 1024)

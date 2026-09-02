@@ -58,6 +58,7 @@ moybyte_setup_idf esp32s3 \
 # 2a) REPR_C unboxed floats (#66) -- the same chip-class lever the T-Deck
 #     measured; same S3, same boxing cost.
 moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free

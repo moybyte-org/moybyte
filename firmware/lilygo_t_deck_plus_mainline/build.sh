@@ -63,6 +63,7 @@ moybyte_idf_component esp_lcd
 
 # 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured.
 moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).
 #     This is what makes the input POLLER THREAD work: a T-Deck keyboard C3

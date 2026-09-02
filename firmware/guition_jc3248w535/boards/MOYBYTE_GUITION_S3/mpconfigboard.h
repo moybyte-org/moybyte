@@ -34,3 +34,9 @@
 // guard (there SD shares the panel host and machine.SDCard wedges the board);
 // that hazard does not exist on this wiring.
 #define MICROPY_HW_ENABLE_SDCARD            (1)
+
+// The Python heap may grow on demand (split heap), but never into this much
+// of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
+// The biggest corpus cart's VM peaks near 2MB; the shell boots with ~3.1-3.5MB
+// of PSRAM outside the Python heap. See tools/esp32_build_lib.sh.
+#define MOYBYTE_GC_SPLIT_RESERVE            (2304 * 1024)

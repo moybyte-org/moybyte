@@ -128,6 +128,7 @@ moybyte_patch_espnow_ring_race
 #     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
 #     noise on the other. It would not have gotten a vote anyway.
 moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
