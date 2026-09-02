@@ -8,6 +8,12 @@ driver programs and build glue (`lua.c`, `luac.c`, `lua.hpp`, `Makefile`),
 which the embedded VM does not use, **plus** the changes below. Everything
 else is byte-for-byte upstream.
 
+## 0. `lobject.c`: an integral float prints without ".0"
+
+`tostringbuff` no longer appends `.0` to a float that reads as an integer, so
+`tostring(3.0)`, `3.0 .. ""` and `print(6/2)` all give `3` (moy-spec SPEC.md
+4.2, 2026-09-02). The same edit is in moy-spec's `libmoy/vendor/lua`.
+
 ## 1. `#pragma GCC optimize("O2")` — 32 `.c` files
 
 Every compiled translation unit gained this block at the top (after

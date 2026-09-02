@@ -367,10 +367,13 @@ static int tostringbuff (TValue *obj, char *buff) {
     len = lua_integer2str(buff, MAXNUMBER2STR, ivalue(obj));
   else {
     len = lua_number2str(buff, MAXNUMBER2STR, fltvalue(obj));
-    if (buff[strspn(buff, "-0123456789")] == '\0') {  /* looks like an int? */
-      buff[len++] = lua_getlocaledecpoint();
-      buff[len++] = '0';  /* adds '.0' to result */
-    }
+    /* moy (SPEC.md 4.2): an integral float prints WITHOUT a fraction -- "3",
+     * never "3.0". Upstream appends ".0" here so a float stays recognisable
+     * as one; on a console whose carts mix 3 and 3.0 freely (flr() returns
+     * an integer, x/2 a float) that suffix is a wart in every score display
+     * and a mismatch in every table keyed by `x..","..y`, and PICO-8, whose
+     * carts this console ports, has one kind of number and no suffix. */
+    (void)strspn;
   }
   return len;
 }

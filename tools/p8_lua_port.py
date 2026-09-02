@@ -241,7 +241,7 @@ def _read_number(s, i):
                 while k < n and s[k].isdigit():
                     k += 1
                 j = k
-        return j, s[i:j]
+        return j, _hex_literal(s[i:j])
     while j < n and s[j].isdigit():
         j += 1
     if j < n and s[j] == ".":
@@ -254,6 +254,79 @@ def _read_number(s, i):
     # and then a CALL to a function named e4, and reading it as 1.2e5 swallowed
     # the call and left the line unterminated.
     return j, s[i:j]
+
+
+def _hex_literal(text):
+    """A p8 hex literal as the Lua spelling of the NUMBER it names.
+
+    p8 reads `0xIIII.FFFF` as a 32-bit 16.16 bit pattern, sign and all:
+    `0xffff` is -1, `0x8000` is -32768, `0xffff.fffe` is -2/65536 and
+    `0x0.0001` is 1/65536. Lua reads the same text as 65535, 32768, a float
+    that a 24-bit mantissa rounds to 65536, and 0.0000152587890625 -- close
+    enough to print, wrong for every mask a cart builds from them. So the
+    pattern is spelled as the exact number: an integer where there is no
+    fraction, `(N/65536)` where there is -- exact on float32 whenever the
+    pattern has 24 significant bits or fewer, which fraction-packed flags and
+    masks do (dank tomb, dungeons & diagrams). Small non-negative integers
+    keep their text: they are what addresses and colours are written in."""
+    body = text[2:]
+    if "p" in body.lower() or not body:
+        return text
+    whole, _, frac = body.partition(".")
+    try:
+        w = int(whole or "0", 16)
+        f = int((frac + "0000")[:4], 16) if frac else 0
+    except ValueError:
+        return text
+    if not frac and 0 <= w < 0x8000:
+        return text
+    fixed = ((w << 16) | f) & 0xFFFFFFFF
+    if fixed >= 0x80000000:
+        fixed -= 0x100000000
+    if f == 0:
+        return "(%d)" % (fixed >> 16)
+    return "(%d/65536)" % fixed
+
+
+def expand_idiv(toks):
+    """`a \\ b` -> `flr(a / b)`.
+
+    _OP_MAP already spells p8's integer division as Lua's `//`, and the two
+    floor alike -- but Lua's `//` on a float is a FLOAT: `24 // 8` is 3 and
+    `24.0 // 8` is 3.0, which concatenates as "3.0" where p8 prints "3".
+    mossmoss keys its wall registry by `celx..":"..cely`, built once from
+    integer loops and looked up from `x // 8` -- and no wall ever matched, so
+    no moss ever grew. `flr` returns an integer whenever the value has one.
+    p8 has no `//` of its own, so every one here came from a `\\`."""
+    guard = 0
+    while guard < 200:
+        guard += 1
+        done = True
+        for i in range(len(toks)):
+            if toks[i][0] != T_OP or toks[i][1] != "//":
+                continue
+            lo = _primary_start(toks, i)
+            hi = _primary_end(toks, i + 1)
+            if lo < 0 or hi < 0:
+                continue
+            # A length operator binds tighter than `\\`: `#snd\\4` is
+            # `(#snd)\\4`, and wrapping `snd` alone left `#flr(snd/4)` --
+            # a string divided by a number (poom, 2026-09-02).
+            while True:
+                k = _skip_ws_back(toks, lo)
+                if k > 0 and toks[k - 1] == (T_OP, "#"):
+                    lo = k - 1
+                    continue
+                break
+            le = _skip_ws_back(toks, i)
+            rs = _skip_ws(toks, i + 1)
+            toks = (toks[:lo] + [(T_NAME, "flr"), (T_OP, "(")] + toks[lo:le]
+                    + [(T_OP, "/")] + toks[rs:hi] + [(T_OP, ")")] + toks[hi:])
+            done = False
+            break
+        if done:
+            return toks
+    return toks
 
 
 def _long_to_quoted(text):
@@ -1188,6 +1261,7 @@ def p8_lua_to_lua54(lines):
         toks = expand_print_shorthand(toks)
         toks = expand_memory_sigils(toks)
         toks = expand_bitops(toks)
+        toks = expand_idiv(toks)
         toks = if_do_to_then(toks)
         toks = expand_oneline_if(toks)
         toks = expand_compound(toks)
@@ -1386,6 +1460,16 @@ do
   local function fill_skip()
     return fill_transparent and (m_fillp == nil or fill_pattern == 0xffff)
   end
+  -- p8 prints an integral number without a fraction: 3, never 3.0. Lua's
+  -- tostring says "3.0" for a float, and a cart that keys a table by
+  -- `x..":"..y` or prints a score computed with `/` shows the difference.
+  local mtype_ = math.type
+  local function p8str(v)
+    if mtype_(v) == "float" and v == mfloor(v) and v > -2147483648 and v < 2147483648 then
+      return tostring(mfloor(v))
+    end
+    return tostring(v)
+  end
 
   -- Every P8SCII picture character, as a global holding its own code. The
   -- porter renames a glyph in the cart's code to one of these, so a cart that
@@ -1398,7 +1482,11 @@ do
   _p8g139, _p8g145, _p8g148 = 0, 1, 2      -- left, right, up
   _p8g131, _p8g142, _p8g151 = 3, 4, 5      -- down, O, X
 
-  function camera(cx, cy) m_camera(fl(cx), fl(cy)) end
+  local p8_cam_x, p8_cam_y = 0, 0
+  function camera(cx, cy)
+    p8_cam_x, p8_cam_y = fl(cx), fl(cy)
+    m_camera(p8_cam_x, p8_cam_y)
+  end
   -- p8 math over the sandboxed Lua math lib (the moy api only registers
   -- rnd/flr; a python cart gets abs/min/max from python builtins, a lua cart
   -- gets them here). p8 angles are TURNS (0..1) and sin is flipped (+y down).
@@ -1506,7 +1594,7 @@ do
   local sbyte = string.byte
   local m_p8print = __moy_p8print
   function print(s, x, y, c)
-    s = tostring(s)
+    s = p8str(s)
     -- print(s) and print(s, c) take the cursor and advance it a line, as
     -- PICO-8 does (without its scrolling); the four-argument form is placed.
     if y == nil then
@@ -1686,7 +1774,12 @@ do
     end
   end
   sub = string.sub
-  tostr = tostring
+  function tostr(v, hex)
+    if hex and mtype_(v) ~= nil then
+      return string.format("0x%04x.%04x", (fl(v)) & 0xffff, mfloor((v % 1) * 65536))
+    end
+    return p8str(v)
+  end
   function sgn(x) if (x or 0) < 0 then return -1 end return 1 end
   function mid(a, b, c) return max(min(a, b), min(max(a, b), c)) end
   -- rnd(t) on a TABLE returns a random ELEMENT of it (p8 0.2.0), which is not
@@ -1877,12 +1970,79 @@ do
   -- parses its config that way) reads zeros. Integer masks -- every other cart
   -- measured -- are exact, because a whole number's low 16 fixed-point bits
   -- are zero and flooring discards nothing.
-  function band(a, b) return flr(a) & flr(b) end
-  function bnot(a) return ~flr(a) end
-  function shl(a, n) return flr(a) << flr(n) end
-  function shr(a, n) return flr(a) >> flr(n) end
-  function rotl(a, n) n = flr(n) % 32 return ((flr(a) << n) | (flr(a) >> (32 - n))) & 0xffffffff end
-  function rotr(a, n) n = flr(n) % 32 return ((flr(a) >> n) | (flr(a) << (32 - n))) & 0xffffffff end
+  -- PICO-8's numbers are 16.16 fixed point and its bit verbs work on all 32
+  -- bits, fraction included: `band(x, 0xffff.fffe)` drops the lowest
+  -- fractional bit, `rotl(0x0.0001, k)` is a flag mask, `shr(x, 1)` halves
+  -- 12.5 to 6.25. Two integers take the plain path. Anything with a fraction
+  -- is done on the 32-bit fixed image and divided back -- EXACT whenever the
+  -- value fits a float32's 24 bits, which fraction-packed flags and parsed
+  -- decimals do (dank tomb, dungeons & diagrams), and lossy only for a full
+  -- 32-bit packed word, which is the class the importer refuses.
+  local mtype = math.type
+  local function fx(v)
+    if mtype(v) == "integer" then return v << 16 end
+    local r = v * 65536
+    if r >= 2147483648 or r < -2147483648 then
+      -- past 16.16's range, which p8 cannot reach; wrap like it would (the
+      -- low bits are already lost to float32 at this size)
+      r = r - 4294967296 * mfloor(r / 4294967296)
+      if r >= 2147483648 then r = r - 4294967296 end
+    end
+    return mfloor(r)
+  end
+  -- Back from the 32-bit image: an INTEGER when the fraction is clear (p8
+  -- has one kind of number and prints 12, not 12.0 -- a cart that keys a
+  -- table or a string by the result must see the same), a float otherwise.
+  local function unfx(r)
+    if r & 0xffff == 0 then return r // 65536 end
+    return r / 65536
+  end
+  local function is_int(v) return mtype(v) == "integer" end
+  function band(a, b)
+    a, b = a or 0, b or 0
+    if is_int(a) and is_int(b) then return a & b end
+    return unfx(fx(a) & fx(b))
+  end
+  function bor(a, b)
+    a, b = a or 0, b or 0
+    if is_int(a) and is_int(b) then return a | b end
+    return unfx(fx(a) | fx(b))
+  end
+  function bxor(a, b)
+    a, b = a or 0, b or 0
+    if is_int(a) and is_int(b) then return a ~ b end
+    return unfx(fx(a) ~ fx(b))
+  end
+  function bnot(a)
+    a = a or 0
+    if is_int(a) then return ~a end
+    return unfx(~fx(a))
+  end
+  function shl(a, n)
+    a, n = a or 0, flr(n or 0)
+    if is_int(a) then return a << n end
+    return unfx(fx(a) << n)
+  end
+  function shr(a, n)                          -- ARITHMETIC, as PICO-8's is
+    a, n = a or 0, flr(n or 0)
+    if is_int(a) then return a // (1 << n) end
+    return unfx(fx(a) // (1 << n))
+  end
+  function lshr(a, n)
+    a, n = a or 0, flr(n or 0)
+    if is_int(a) then return (a & 0xffffffff) >> n end
+    return unfx((fx(a) & 0xffffffff) >> n)
+  end
+  function rotl(a, n)
+    n = flr(n or 0) % 32
+    local v = fx(a or 0) & 0xffffffff
+    return unfx(((v << n) | (v >> (32 - n))) & 0xffffffff)
+  end
+  function rotr(a, n)
+    n = flr(n or 0) % 32
+    local v = fx(a or 0) & 0xffffffff
+    return unfx(((v >> n) | (v << (32 - n))) & 0xffffffff)
+  end
 
   -- NO COROUTINES, and the reason is worth stating where somebody will next
   -- reach for them: this IS real Lua 5.4, but the console opens only base,
@@ -1945,11 +2105,24 @@ do
     end
     function memcpy(dst, src, len) cmemcpy(dst, src, len or 0) end
     function memset(dst, val, len) cmemset(dst, val or 0, len or 0) end
+    if __p8_map_raw ~= nil then
+      -- The map region as the CART stored it: the console's map dropped
+      -- every cell 255 on the way in (SPEC.md 3.3), so put those bytes back
+      -- and make the ROM snapshot match, before the cart's first frame.
+      local raw, sub, tonum = __p8_map_raw, string.sub, tonumber
+      local fixed = 0
+      for i = 0, 4095 do
+        local v = tonum(sub(raw, i * 2 + 1, i * 2 + 2), 16)
+        if v ~= nil and v ~= cpeek(0x2000 + i) then cpoke(0x2000 + i, v) fixed = fixed + 1 end
+      end
+      if fixed > 0 and __moy_cstore ~= nil then __moy_cstore(0x2000, 0x2000, 0x1000) end
+    end
   else
     local p8mem = {}
     _mrd = function(a) return p8mem[a] or 0 end
     _mwr = function(a, v)
-      if a >= 0 and a < 0x8000 then p8mem[a] = v & 0xff end
+      a = a & 0xffff
+      if a < 0x8000 then p8mem[a] = v & 0xff end
     end
     function peek(a, n)
       a = fl(a)
@@ -2198,9 +2371,23 @@ do
     cely = mfloor(cely or 0)
     sx = mfloor(sx or 0)
     sy = mfloor(sy or 0)
-    cw = mfloor(cw or 16)
-    ch = mfloor(ch or 16)
+    -- PICO-8's defaults are the WHOLE map (128 x 64 cells): `map()` is how a
+    -- room cart draws the world under a camera. (16 x 16 here left every
+    -- room but the first black -- petal quest, 2026-09-02.) The walk is then
+    -- clipped to the 128 x 128 window the camera shows, so the default costs
+    -- the cells on screen and not 8,192 a frame.
+    cw = mfloor(cw or 128)
+    ch = mfloor(ch or 64)
     mask = mask or 0
+    local i0 = (p8_cam_x - sx) // 8
+    local i1 = (p8_cam_x + 127 - sx) // 8
+    if i0 > 0 then celx, sx, cw = celx + i0, sx + i0 * 8, cw - i0 i1 = i1 - i0 end
+    if i1 + 1 < cw then cw = i1 + 1 end
+    local j0 = (p8_cam_y - sy) // 8
+    local j1 = (p8_cam_y + 127 - sy) // 8
+    if j0 > 0 then cely, sy, ch = cely + j0, sy + j0 * 8, ch - j0 j1 = j1 - j0 end
+    if j1 + 1 < ch then ch = j1 + 1 end
+    if cw <= 0 or ch <= 0 then return end
     if native_map ~= nil
         and native_map(celx, cely, sx, sy, cw, ch, mask) then
       return
@@ -2331,7 +2518,7 @@ def music_map_lua(sections):
     return "__music_map = {%s}" % pairs
 
 
-def data_tables_lua(sections, want_sheet=False):
+def data_tables_lua(sections, want_sheet=False, want_map_raw=False):
     """The cart's baked-in data, emitted BEFORE the shim so it can close over
     it as upvalues.
 
@@ -2364,6 +2551,19 @@ def data_tables_lua(sections, want_sheet=False):
              "  end",
              "end",
               ""]
+    if want_map_raw:
+        # SPEC.md 3.3's map cannot hold cell 255 (tile+1 overflows the byte),
+        # so a cart that reads its level data through the memory map would
+        # see those bytes as 0 -- dank tomb keeps nine of them in 4 KB and
+        # could not find its levels. The raw p8 bytes travel here and the shim
+        # pokes the difference in at boot, then stores it to the ROM snapshot
+        # so reload() brings the same bytes back.
+        raw = [(r + "0" * 256)[:256] for r in sections.get("map", [])][:32]
+        while len(raw) < 32:
+            raw.append("0" * 256)
+        lines.append("-- __map__ rows 0-31 as PICO-8 stores them, for the memory map")
+        lines.append('__p8_map_raw = "' + "".join(raw) + '"')
+        lines.append("")
     if want_sheet:
         rows = (gfx_to_kgfx(sections.get("gfx", [])) or "").split("\n")
         rows = [(r + "0" * 128)[:128] for r in rows][:128]
@@ -2394,7 +2594,9 @@ P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "peek peek2 peek4 poke poke2 poke4 memcpy memset "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
-          "band bor bxor bnot shl shr rotl rotr").split()
+          "band bor bxor bnot shl shr lshr rotl rotr").split()
+# Note tostr/print above spell integral floats the p8 way; fx() is the 16.16
+# image behind the bit verbs.
 
 
 # --------------------------------------------------------------------------
@@ -2568,19 +2770,6 @@ def _shifts_by_16(code):
     return False
 
 
-_BIT_FNS = ("band", "bor", "bxor", "bnot", "shl", "shr", "lshr", "rotl", "rotr")
-
-
-def _frac_hex_bits(line):
-    """A fractional hex constant on a line that also does bit arithmetic."""
-    if not re.search(r"0x[0-9a-fA-F]*\.[0-9a-fA-F]+", line):
-        return False
-    if "&" in line or "|" in line or "~" in line or "<<" in line or ">>" in line:
-        return True
-    for fn in _BIT_FNS:
-        if _call_sites(line, fn):
-            return True
-    return False
 
 
 def classify_body(body):
@@ -2613,9 +2802,10 @@ def classify_body(body):
     elif shifts:
         gaps.append("it shifts numbers by 16 bits, which loses the fixed-point precision "
                     "PICO-8 has; a hash or a mask may come out wrong")
-    if any(_frac_hex_bits(ln) for ln in lines):
-        gaps.append("it does bit arithmetic on fractional hex constants (0x0.0001 and "
-                    "the like); those bits are lost on floats, so a packed flag may read wrong")
+    # Fractional hex constants and the bit verbs on them are exact since
+    # 2026-09-02 (the shim works on the 16.16 image, the converter spells the
+    # literal's bit pattern), so they are no longer a gap. What stays out of
+    # reach is a full 32-bit packed word: the shift-by-16 decoder above.
     has_loop = (_defines_function(body, "p8_update") or _defines_function(body, "p8_update60")
                 or _defines_function(body, "p8_draw"))
     if _call_sites(code, "flip") and not _defines_function(body, "flip"):
@@ -2919,12 +3109,14 @@ def port_sections(sections, out_dir, title, crop=(0, 0)):
                          " -- T+B must be 8 or 0, got %d,%d" % tuple(crop))
     shim = SHIM.replace("__P8_VH__", str(vh))
     want_sheet = _calls_verb(body, "sget") or _calls_verb(body, "sset")
+    want_map_raw = any(_calls_verb(body, v) for v in
+                       ("peek", "peek2", "peek4", "memcpy", "reload"))
     # Data tables BEFORE the shim, so the shim captures them as upvalues.
     # Written as PIECES: joined into one string first, main.lua is ~100 KB
     # held twice, which is the allocation the browser's MicroPython refused.
     _write(out_dir, "main.lua",
-           [header, data_tables_lua(sections, want_sheet), "\n", shim, "\n",
-            localization_lua(body), body])
+           [header, data_tables_lua(sections, want_sheet, want_map_raw), "\n",
+            shim, "\n", localization_lua(body), body])
     written.append("main.lua")
 
     # map.moymap -- the console's own tilemap format (cells store tile+1,
