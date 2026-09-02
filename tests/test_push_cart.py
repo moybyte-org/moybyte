@@ -331,10 +331,13 @@ def test_a_corrupt_upload_leaves_the_old_file_in_place(tmp_path):
 
 def test_a_rejected_chunk_stops_the_push_and_names_the_chunk(tmp_path):
     dst = "/moy/carts/demo.moy/main.lua"
-    dev = _FakeConsole(files={dst: b"the cart that still works\n"},
-                       reject_chunk=2)
+    dev = _FakeConsole(files={dst: b"the cart that still works\n"})
     b = _driver(dev)
     _install_helpers(b)
+    # ARMED AFTER the helpers, not at construction: they are a pyexec upload
+    # too, and they outgrew two chunks (db57817), so a rejection armed early
+    # fires on the fixture instead of on the file this test is about.
+    dev.reject_chunk = 2
     src = _cart(tmp_path, {"main.lua": SOURCE}) + "/main.lua"
     with pytest.raises(RuntimeError) as exc:
         push_cart.push_file(b, src, dst)
