@@ -414,8 +414,10 @@ int moy_lua_draw  (struct lua_State *L, char *err, size_t errlen);
  * OPT-IN and not part of SPEC.md: a host that calls moy_p8_open offers the
  * `__moy_*` globals the p8 port shim probes for -- a 64 KB memory map with
  * the sheet, map, flags, palettes, camera/clip and the screen behind their
- * PICO-8 addresses, the ROM snapshot reload()/cstore() copy from, and the
- * 3x5 system font. Both buffers are YOURS (libmoy allocates nothing):
+ * PICO-8 addresses, the ROM snapshot reload()/cstore() copy from, the 3x5
+ * system font, and the shim's own hot verbs (the table walk, the number and
+ * bit verbs, the map and flag reads) so a ported cart does not run them as
+ * Lua closures. Both buffers are YOURS (libmoy allocates nothing):
  * MOY_P8_MEM bytes of memory and MOY_P8_ROM of ROM, or NULL for no ROM.
  * Call it after moy_lua_open and before the cart's source runs; it seeds
  * memory from the console's assets as they stand. */

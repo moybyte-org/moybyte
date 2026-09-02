@@ -1426,6 +1426,11 @@ do
     if type(v) ~= "number" then v = tonumber(v) or 0 end
     return mfloor(v)
   end
+  -- The console's own where it has one (moy_p8.c). fl sits on the argument of
+  -- every draw verb, and in Lua it is a call, an _ENV lookup for type() and a
+  -- second call into floor(). Swapped here rather than at the definitions
+  -- below, which close over the VARIABLE and so follow it.
+  if __moy_fl ~= nil then fl = __moy_fl end
 
   -- Declared HERE, above the fill verbs that read it. It was declared beside
   -- fillp() further down, which is after rectfill -- so rectfill closed over
@@ -1510,6 +1515,16 @@ do
   function max(a, b) return mmax(a or 0, b or 0) end
   sqrt = math.sqrt
   function atan2(dx, dy) return matan(-(dy or 0), dx or 0) / 6.283185307179586 % 1 end
+  function sgn(x) if (x or 0) < 0 then return -1 end return 1 end
+  function mid(a, b, c) return max(min(a, b), min(max(a, b), c)) end
+  -- The console's own where it has them. sqrt and ceil are absent on purpose:
+  -- they are already math.sqrt and math.ceil with no wrapper to remove, and
+  -- so is rnd, which would have to carry math.random's state to move.
+  if __moy_flr ~= nil then
+    flr, abs = __moy_flr, __moy_abs
+    min, max, mid, sgn = __moy_min, __moy_max, __moy_mid, __moy_sgn
+    sin, cos, atan2 = __moy_sin, __moy_cos, __moy_atan2
+  end
 
   function spr(n, x, y, w, h, fx, fy)
     local flip = (fx and 1 or 0) + (fy and 2 or 0)
@@ -1843,6 +1858,20 @@ do
     for i = 1, #t do if t[i] == v then n = n + 1 end end
     return n
   end
+  function deli(t, i)
+    if t == nil then return nil end
+    if i == nil then i = #t end
+    local v = t[i]
+    table.remove(t, i)
+    return v
+  end
+  -- The console's own, where it has them (moy_p8.c). all()'s iterator is the
+  -- one that pays: a Lua closure costs a VM re-entry per element, and it was
+  -- half of one measured cart's Lua time. Same delete tolerance, in C.
+  if __moy_all ~= nil then
+    all, foreach = __moy_all, __moy_foreach
+    add, del, deli, count = __moy_add, __moy_del, __moy_deli, __moy_count
+  end
 
   -- p8 INDEXES STRINGS: `s[i]` is the i-th character, and `#s` its length.
   -- Lua gives strings a metatable whose __index is the string library, so
@@ -1869,8 +1898,6 @@ do
     end
     return p8str(v)
   end
-  function sgn(x) if (x or 0) < 0 then return -1 end return 1 end
-  function mid(a, b, c) return max(min(a, b), min(max(a, b), c)) end
   -- rnd(t) on a TABLE returns a random ELEMENT of it (p8 0.2.0), which is not
   -- a variant of the numeric form -- it is a different verb wearing the same
   -- name, and carts use it for exactly the kind of pick-one that appears in
@@ -1921,6 +1948,7 @@ do
     if type(v) == "number" then return v end
     return tonumber(v)
   end
+  if __moy_tonum ~= nil then tonum = __moy_tonum end
   -- split(s, [sep], [convert]) -- sep defaults to ",", a NUMBER sep cuts fixed
   -- width chunks, and numeric-looking parts become numbers unless told not to.
   function split(s, sep, num)
@@ -2018,13 +2046,6 @@ do
     cocreate, coresume, costatus, yield = coroutine.create, coroutine.resume,
                                           coroutine.status, coroutine.yield
     coclose = coroutine.close
-  end
-  function deli(t, i)
-    if t == nil then return nil end
-    if i == nil then i = #t end
-    local v = t[i]
-    table.remove(t, i)
-    return v
   end
   unpack = table.unpack
   function pack(...) return {n = select("#", ...), ...} end
@@ -2132,6 +2153,13 @@ do
     local v = fx(a or 0) & 0xffffffff
     return unfx(((v >> n) | (v << (32 - n))) & 0xffffffff)
   end
+  -- The console's own where it has them (moy_p8.c): the same fx/unfx, in C,
+  -- so band's four Lua calls and three C ones become one.
+  if __moy_band ~= nil then
+    band, bor, bxor, bnot = __moy_band, __moy_bor, __moy_bxor, __moy_bnot
+    shl, shr, lshr = __moy_shl, __moy_shr, __moy_lshr
+    rotl, rotr = __moy_rotl, __moy_rotr
+  end
 
   -- NO COROUTINES, and the reason is worth stating where somebody will next
   -- reach for them: this IS real Lua 5.4, but the console opens only base,
@@ -2179,21 +2207,12 @@ do
   local _mrd, _mwr
   if __moy_poke ~= nil then
     local cpeek, cpoke = __moy_peek, __moy_poke
-    local cmemcpy, cmemset = __moy_memcpy, __moy_memset
     _mrd, _mwr = cpeek, cpoke
-    function peek(a, n)
-      if n == nil or n <= 1 then return cpeek(a) end
-      local out = {}
-      for i = 0, fl(n) - 1 do out[i + 1] = cpeek(a + i) end
-      return table.unpack(out)
-    end
-    function poke(a, v, ...)
-      cpoke(a, v or 0)
-      local n = select("#", ...)
-      for i = 1, n do cpoke(a + i, select(i, ...) or 0) end
-    end
-    function memcpy(dst, src, len) cmemcpy(dst, src, len or 0) end
-    function memset(dst, val, len) cmemset(dst, val or 0, len or 0) end
+    -- Straight through, no wrapper: the C takes p8's multi-byte forms
+    -- (peek(a, n) returns n results, poke(a, b1, b2, ...) writes a run) and
+    -- reads a missing length as 0, which is all the Lua here ever added.
+    peek, poke = cpeek, cpoke
+    memcpy, memset = __moy_memcpy, __moy_memset
     if __p8_map_raw ~= nil then
       -- The map region as the CART stored it: the console's map dropped
       -- every cell 255 on the way in (SPEC.md 3.3), so put those bytes back
@@ -2250,6 +2269,10 @@ do
     local raw = fl((v or 0) * 65536) & 0xffffffff
     _mwr(a, raw & 0xff) _mwr(a+1, (raw>>8) & 0xff)
     _mwr(a+2, (raw>>16) & 0xff) _mwr(a+3, (raw>>24) & 0xff) end
+  if __moy_peek2 ~= nil then
+    peek2, poke2 = __moy_peek2, __moy_poke2
+    peek4, poke4 = __moy_peek4, __moy_poke4
+  end
 
   -- SAVE DATA is the one that can be honest all the way down: p8's 64 cartdata
   -- slots and the console's pmem are the same shape, so a cart's progress
@@ -2423,6 +2446,9 @@ do
       if x < 0 or x > 127 or y < 0 or y > 63 then return end
       cpoke(maddr(x, y), v or 0)
     end
+    -- The same walk in C, where the host has it: mget is on every collision
+    -- probe and every drawn tile.
+    if __moy_mget ~= nil then mget, mset = __moy_mget, __moy_mset end
   end
   function fget(n, f)
     local v = gff[mfloor(n or 0)] or 0
@@ -2448,6 +2474,7 @@ do
       if v == nil then m_fset(n, fl(f)) else m_fset(n, fl(f), v and true or false) end
     end
   end
+  if __moy_fget ~= nil then fget, fset = __moy_fget, __moy_fset end
   -- Flag-masked map: ONE native call when the host offers the C walk
   -- (moybyte's __moy_map_masked, #66 M0 -- the flags crossed once in the
   -- __gff__ block above; the quads ride the same batch the spr fast path
@@ -2500,7 +2527,16 @@ do
   end
 
   -- moybyte lifecycle -> the p8 one, paced at PICO-8's fixed 30fps
-  local ticked = true
+  --
+  -- FALSE to start, because PICO-8 never draws before its first update. On a
+  -- host whose first console frame arrives in under one cart period -- a
+  -- _update60 cart on a board running at 60, right after load -- a `true`
+  -- here ran _draw with no tick behind it, and a cart that creates state in
+  -- _init and POSITIONS it in the first update drew against the half-built
+  -- thing: dank tomb indexed a nil player position, on every board, four
+  -- runs in five. run_cart's fixed 1/30 always ticks first and never showed
+  -- it (test/p8_first_draw.py runs it at a shorter dt, which does).
+  local ticked = false
   function _init()
     if p8_init then p8_init() end
   end
@@ -2595,8 +2631,12 @@ do
     end
     if acc > P8_DT then acc = P8_DT end          -- what cannot be paid is written off
   end
+  -- A cart with NO update function draws every frame, as PICO-8 does: there
+  -- is no tick for it to wait for. The rate lock in _update decides which
+  -- name a cart uses, and _update always runs first, so both are resolvable
+  -- by the time this reads them.
   function _draw()
-    if ticked and p8_draw then
+    if p8_draw and (ticked or not (p8_update60 or p8_update)) then
       -- the console resets camera/clip/pal/palt after every cart frame;
       -- re-park the p8 camera and restore p8's default transparency (colour
       -- 0) so a cart that trusts persistent draw state gets PICO-8's.
