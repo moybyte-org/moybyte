@@ -107,6 +107,22 @@ def _p8_buffers():
     return _P8_BUFFERS
 
 
+def reserve_p8_memory():
+    """Take the PICO-8 machine's buffers NOW, while the heap is still whole.
+
+    Called from device_boot ahead of the cart-store scan, because that scan is
+    what fragments the heap: after it an S3 has hundreds of KB free and no
+    64KB run of it, and _p8_buffers' first-run allocation fails -- measured on
+    the Guition, where every p8 port then ran without its machine. 81KB held
+    for the whole session is the price of a port running at C speed on every
+    board rather than only on the ones whose heap happened to have room. True
+    when the machine is provisioned; False on a build with no moycore or no
+    room even at boot, in which case first-run allocation stays the fallback."""
+    if _moycore is None or not hasattr(_moycore, "p8_memory"):
+        return False
+    return bool(_p8_buffers())
+
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 

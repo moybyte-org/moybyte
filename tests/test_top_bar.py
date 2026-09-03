@@ -18,6 +18,19 @@ def _ws(tmp_path):
     return host_app.build_workstation(str(tmp_path / "carts"))
 
 
+def _pin_clock(ws, drv):
+    """Freeze the bar's HH:MM and settle one frame, so a zero-redraw assertion
+    is about the CACHE and not about the wall clock. _cart_bar_key folds
+    _clock_text in on purpose (a minute rollover must repaint the bar), which
+    means a test that counts zero re-renders across several frames straddles a
+    real :00 sooner or later -- it did, in CI, on 2026-09-03 (the same rollover
+    the redraw-on-change tests are already isolated for). The settle frame
+    absorbs the one legitimate rebuild the pin itself causes."""
+    ws.bar_layer._clock_text = lambda: "12:00"
+    ws._dirty = True
+    drv.frame(1 / 30)
+
+
 # -- IconSheet (16x16 tiles) ------------------------------------------------
 
 def test_icon_sheet_is_16x16():
@@ -315,6 +328,7 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     """The wifi kind is folded into the bar's cache key, so a connect/disconnect forces
     exactly the strip re-render that shows the new glyph (the #43 cache can't go stale)."""
     ws, drv = _run_a_cart(tmp_path)
+    _pin_clock(ws, drv)
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
@@ -405,6 +419,7 @@ def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
     """A second running-cart frame with no state change must NOT re-render the bar -- it
     blits the cached strip. Witness it by counting _render_cart_bar calls across frames."""
     ws, drv = _run_a_cart(tmp_path)
+    _pin_clock(ws, drv)
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
@@ -514,7 +529,7 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)              # one clean frame: the strip is built + current
+    _pin_clock(ws, drv)            # one clean frame: the strip is built + current
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 

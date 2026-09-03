@@ -187,6 +187,15 @@ class DeviceBoot:
         SESSION, so the only honest question is "did a real session work" --
         which is this call. The boards differ because the buses do.
         """
+        # BEFORE the scan, which is what fragments the heap: the PICO-8
+        # machine's 81KB has to be a contiguous run, and after the store is up
+        # an S3 has none (moycore_glue.reserve_p8_memory carries the numbers).
+        try:
+            from moycore_glue import reserve_p8_memory
+            if reserve_p8_memory():
+                self.say("p8 machine memory reserved")
+        except ImportError:
+            pass                        # a build with no moycore staged
         if root is None:
             root = store.CARTS_DIR
         carts = self._try_store(store, seed, root, session, media)
