@@ -49,9 +49,9 @@ def _load_hashes():
 
 def _scene_names():
     """Every scene in the vendored suite, core ones first. `core` marks the
-    thirteen SPEC.md 6 scenes that count; the provisional ones (6.1's 3D verbs)
-    are run too but reported separately -- 6.1 promotes verbs on evidence, and
-    which implementations carry them IS the evidence."""
+    scenes SPEC.md 11 counts, which since core 0.3 is all of them: 6.1's 3D
+    verbs were reported-but-excluded through 0.2 and were promoted on the
+    evidence of which implementations carry them."""
     return [(s["name"], bool(s.get("core")), s["frame_sha256"])
             for s in _load_hashes()["scenes"]]
 
@@ -220,12 +220,10 @@ def render(scene, canvas=None):
     return _index_frame(c)
 
 
-# The scenes moy-spec added on 2026-09-02 for verbs the PYTHON tier does not
-# draw yet -- fillp, oval/ovalb, sset, the screen palette. `flags` came off this
-# set the day map(..., layers) and fget/fset landed on the Python tier.
-# The Lua tier has every one of them through libmoy (re-vendored the same
-# day); the host canvas and cart_api are moybyte's own next step, and these
-# are strict: the day a twin lands, its scene flips from xfail to a failure
+# moy-spec scenes for verbs the PYTHON tier does not draw yet -- fillp,
+# oval/ovalb, sset, the screen palette. The Lua tier has every one of them
+# through libmoy; the host canvas and cart_api are moybyte's own next step.
+# STRICT xfail: the day a twin lands, its scene flips from xfail to a failure
 # that says "remove me from this set".
 PYTHON_TIER_PENDING = {"oval", "fillp", "sheet", "screen_pal"}
 
@@ -237,8 +235,8 @@ def _scene_params():
         if name in PYTHON_TIER_PENDING:
             marks = (pytest.mark.xfail(
                 strict=True,
-                reason="the Python tier has no %s verbs yet (SPEC.md 2026-09); "
-                       "the Lua tier draws this scene through libmoy" % name),)
+                reason="the Python tier has no %s verbs yet; the Lua tier "
+                       "draws this scene through libmoy" % name),)
         out.append(pytest.param(name, core, golden, id=name, marks=marks))
     return out
 
@@ -266,7 +264,8 @@ def test_every_core_scene_is_present_and_counted():
     lost a scene would pass every remaining one."""
     names = _scene_names()
     core = [n for n, is_core, _ in names if is_core]
-    assert len(core) == 13, "expected SPEC.md's 13 core scenes, found %r" % (core,)
+    # Core 0.3 counts every scene: 6.1's two were reported-but-excluded before.
+    assert len(core) == 15, "expected SPEC.md's 15 core scenes, found %r" % (core,)
     for name, _, _ in names:
         assert os.path.exists(os.path.join(HERE, "traces", name + ".json")), name
         assert os.path.isdir(os.path.join(HERE, "carts", name + ".moy")), name

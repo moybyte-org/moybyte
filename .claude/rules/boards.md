@@ -80,8 +80,8 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
   all (`attach_only`), the `py`-line chunk (256 on the P4's UART — its stdin ring has no flow
   control and 768 corrupts silently, measured 2026-08-19) and the raw `recv` window (4096 on that
   same UART, where the board's ack is the ONLY backpressure; 16384 on the USB boards, which
-  backpressure for real, and since 2026-09-02 the cart payload rides `recv` ALONE — an image
-  without it is refused, not served the deleted base64 push), which is what lets **ONE cart-push tool
+  backpressure for real). The cart payload rides `recv` ALONE — an image without the command is
+  refused rather than pushed some slower way — which is what lets **ONE cart-push tool
   serve every board**: `python tools/push_cart.py <cart.moy> --board tdeck|p4|guition_s3` (the names
   are the board files' own `[board] ota` ids, required on purpose — a default would be a silent
   wrong transport) copies a cart folder onto the live console's store, whose path is DISCOVERED from
@@ -196,19 +196,18 @@ README is the authority**; what belongs here is only what bites:
 
 - **The P4's CH343 port must be opened DTR-raised, RTS dropped first, DTR after.** The kernel
   raises both lines on open and pyserial lowers DTR before RTS; RTS-high-DTR-low is the auto-reset
-  EN pulse, so a plain open power-cycled the board and cost a 60 s desktop boot per tool attach
-  (measured 2026-09-02, three opens, three POWERON resets). `P4Board` does the right order; a
-  tool that opens the port itself must too. And attach to a running desk — `push_cart` no longer
-  resets a board that answers.
+  EN pulse, so a plain open power-cycles the board and costs a 60 s desktop boot per tool attach.
+  `P4Board` does the right order; a tool that opens the port itself must too. And attach to a
+  running desk — `push_cart` does not reset a board that answers.
 - **On the S3 boards the Python heap and the C side share one 8 MB PSRAM, and the Python heap
   grows by DOUBLING and never shrinks.** `MOYBYTE_GC_SPLIT_RESERVE` (each board's mpconfigboard.h,
-  applied by `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it: the biggest corpus cart's
-  VM peaks near 1.9 MB with its pool, and the launcher's boot heap costs ~125 KB per cart on the
-  card (49 carts leave 3.5 MB, 61 leave 1.97 MB). Without the reserve one fragmented Python
-  allocation took every byte and every big cart failed at load until a hard reset. The VM's own
-  allocator (a small-object pool; `native/moycore/README.md`) is why a malloc no longer costs 9 µs
-  there. Do NOT give the VM more internal SRAM: lowering the floor 48 → 16 KB made the tick SLOWER
-  (the drivers starve); the VM's win in internal memory is instruction placement (`MOY_HOT`).
+  applied by `moybyte_patch_gc_split_reserve`) keeps 3 MB outside it, because the VM needs about
+  2 MB for the biggest corpus cart and the launcher's boot heap costs ~125 KB per cart on the
+  card. Without the reserve one fragmented Python allocation takes every byte and every big cart
+  fails at load until a hard reset. Do NOT give the VM more internal SRAM instead: lowering the
+  floor 48 → 16 KB made the tick SLOWER (the drivers starve); the VM's win in internal memory is
+  instruction placement (`MOY_HOT`), and its allocator is a small-object pool
+  (`native/moycore/README.md`).
 
 - **SD shares the SPI host with the display, and getting it wrong HANGS the
   board** — gray screen, dead USB, no panic. Three rules, each learned on
@@ -300,14 +299,12 @@ went: the device tier is **`device/`**, the C modules **`native/`**.
   with it — DMA only from internal SRAM, only the first band carries a command
   (what "a full-screen flush must be a single `tx_color`" really meant), and a band
   must fit one SPI DMA transaction, that last one as a compile-time assert. The
-  #190 flush-bounce scale fold is BACK (2026-09) and is now shared C:
-  `native/moy_flush/moy_fold` carries the latch, the fence and both boards'
-  gathers, so a small-canvas play frame skips the root composite AND the root
-  read-back on either S3. The 2026-08 decline ("it needs `moy_gfx` kernels
-  writing into the bounce slots") was wrong about the shape — the synthesis
-  runs on the FEEDER and no slot crosses into Python. The game WINDOW stays the
-  Guition's: shipping the game rect alone needs a panel whose GRAM keeps the
-  bezels. See `tdeck_panel.py`'s header and `moy_fold.h`.
+  #190 flush-bounce scale fold is shared C: `native/moy_flush/moy_fold` carries
+  the latch, the fence and both boards' gathers, so a small-canvas play frame
+  skips the root composite AND the root read-back on either S3. The synthesis
+  runs on the FEEDER and no bounce slot crosses into Python. The game WINDOW
+  stays the Guition's: shipping the game rect alone needs a panel whose GRAM
+  keeps the bezels. See `tdeck_panel.py`'s header and `moy_fold.h`.
 - `device/moy_ota.py` — OTA firmware updater (#53): `OtaUpdater` flashes a new app image from `/sd/update/*.bin` into the **inactive** OTA slot via `esp32.Partition` (block-erase `writeblocks`), then `set_boot` + `machine.reset`. Phase 3 adds WiFi download — `check_online`/`begin_download`/`download_step` stream a manifest-described `.bin` over a raw socket straight to SD (sha256-verified, never buffering the whole 3MB), reusing the injected `wifi` service. Device-only; `run_desktop` injects it into the shared `Workstation` (which owns all the update-screen pixels), wires the wifi service, and calls `mark_valid()` at a healthy boot to cancel rollback.
 - `device/moy_webserver.py` — the device **socket/HTTP/WebSocket transport core**. Until 2026-08-12 this was the device WEB VIEW (#41/#22, owner-verified once on-glass 2026-08-01, #182) — the streaming browser mirror. **The whole streaming stack was DELETED in the 2026-08 sunset** (`docs/history/moycore_plan_2026-08.md` §3.2, owner decision; `tests/test_streaming_sunset.py` pins the absences): the frame push, `device_webview.py`, the recording `TeeCanvas`, stream mode, the Settings WEB VIEW row, `ws.web_hook`, the host `tools/web_console.py` + its VM deploy recipe, and the decline-the-Tee guards in `moy_lua_glue`. The browser's job belongs to the **wasm head** (`firmware/web_runner`), to be synced per §3.4; mirror-of-glass is an accepted loss (a screenshot verb on the sync RPC was the recorded successor and was DROPPED, owner 2026-08-25 — the browser IS the console, so show-and-tell happens there). What survives here — deliberately, for the §3.4 sync RPC to ride — is the bare transport: non-blocking listener, `parse_request`/`http_response`, the RFC 6455 upgrade + framing (shared `web_view_ws`, the only file of that lineage the boards still freeze), one persistent non-blocking `_WSConn` (cross-iteration read buffer, blocking-budget sends, idle reaper), and a `WebServer` with `handle_http`/`on_text`/`send_text` seams, no consumer wired. **The recording stack is GONE as of stage 4** (2026-08-12): the wasm head rasterizes, so `runtime/web_view.py` and `runtime/web_view_page.py` were deleted outright with the recorder, CommandCanvas, RecordingLayer, ServedState, SurfaceDelta, WsClientState, the wire protocol and the page's JS replayer. Two pieces of that module were never about rasterizing and survive on their own: `runtime/web_input.py` (browser events → InputState/Pointer, which the §3.4 RPC also speaks) and `web_view_ws.py`. `runtime/surface.py` and `wm_windowed`'s `if not self._recording` guards deliberately STAY, unreachable — `docs/surface_model_v1.md` §13 records why, and is the place to argue with it. The XIAO Zero port stood entirely on the deleted stream; the owner re-based it the next day (plan §3.2): the browser runs the wasm head, and the Zero becomes the pocketable cart-store + GPIO peripheral it pairs with (#41 direction, #9 pins) — its rebuild rides the §3.4 track.
 

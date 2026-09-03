@@ -243,11 +243,11 @@ on performance, and B is what ships.
 
 ## 9. The S3 program (2026-09-02) — verdicts, not numbers
 
-One day, three Opus-driven rounds, the PICO-8 ports as referees (moss moss: a
-30 fps cart whose tick is pure Lua; dank tomb: 60 fps, draw-bound). The
-numbers, the frame anatomy and the per-operation price list live in **#66**
-(rounds 3–5); the roadmap rows above got their verdicts in **#77**. What this
-section keeps is what was DECIDED:
+Three rounds with the PICO-8 ports as referees (moss moss: a 30 fps cart whose
+tick is pure Lua; dank tomb: 60 fps, draw-bound). The numbers, the frame anatomy
+and the per-operation price list live in **#66** (rounds 3–5); the roadmap rows
+above got their verdicts in **#77**. What this section keeps is what was
+DECIDED:
 
 - **The S3 pays for calls and allocations, not raster.** A C verb call floors
   at ~1.65 µs, a malloc through the IDF heap at ~9 µs (its TLSF metadata sits
@@ -257,7 +257,7 @@ section keeps is what was DECIDED:
   with its free lists in internal SRAM and chunks that go back.
 - **The composite was the console's biggest per-frame cost and the fold
   removes it** on both S3 boards, at any integer scale, from one shared body
-  (`native/moy_flush/moy_fold.c`). #190's decline was wrong about the shape.
+  (`native/moy_flush/moy_fold.c`).
 - **Instruction placement helps, data placement hurts.** The VM loop and its
   lookups in IRAM: −10 % on the tick (flash and PSRAM share the MSPI bus). More
   internal SRAM for the VM's DATA: slower — the drivers starve. `-O3` on the
@@ -267,7 +267,7 @@ section keeps is what was DECIDED:
 - **A cart that fails only on device and only sometimes is the frame cadence
   the replayer cannot reproduce**, before it is the architecture: dank tomb's
   "nil position" was the shim drawing before the first update. `run_cart --dt`
-  now reproduces such cadences.
+  reproduces such cadences.
 - **What is left for a 30 fps moss moss on the S3**, in order: the console's
   ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
   structural one — running the cart tick on core 0 overlapped with the

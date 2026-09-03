@@ -956,7 +956,7 @@ make firmware-flash-lilygo-micropython PORT=/dev/ttyACM0
 firmware/web_runner/build.sh &amp;&amp; make site</pre>
   <footer>
     <a href="https://github.com/moybyte-org/moybyte">Source</a> &middot;
-    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.2)</a> &middot;
+    <a href="https://github.com/moybyte-org/moy-spec">The cartridge spec (moy core 0.3)</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/blob/master/docs/moy_cart_api.md">Cart API</a> &middot;
     <a href="https://github.com/moybyte-org/moybyte/issues">Issues</a>
     <br><br>

@@ -64,7 +64,7 @@ REBOOTS it, which cost a full boot per scene; the suite went 12min → 4m45).
 **`tests/test_spec_conformance.py` is that gate** (suite vendored under
 `tests/spec_conformance/`, see its UPSTREAM.md). It replays the spec's recorded
 verb traces through the host's canvas (`runtime/host_canvas.py` → `DeviceCanvas`) and hashes each frame against the
-golden — all ten scenes including the provisional 3D ones, in ~0.1s, on every
+golden — every scene in the suite, the 3D verbs included, in ~0.1s, on every
 `make test`. It exists because the suite previously only checked this repo from
 *outside* it (moy-spec's `conformance/parity.py --ref`, and `tools/p4_conformance.py`
 on a board), so `make test` could go green on a raster that no longer drew what

@@ -21,9 +21,9 @@ THE ARITHMETIC ON THIS GLASS. 480x320x2 = 307,200 B is ~15.4 ms at QSPI 40MHz
   mid-frame. The bridge latches per byte and should not care, but "should" is
   what the flag is for.
 
-THE GAME FOLD is `banded_panel.FoldingCompositor` since 2026-09 -- shared with
-  the T-Deck, which took the lever when `moy_fold` made the synthesis C both
-  panels can run. This board's half of it stays in `moy_axs`: the rotate the
+THE GAME FOLD is `banded_panel.FoldingCompositor`, shared with the T-Deck since
+  `moy_fold` made the synthesis C both panels can run. This board's half of it
+  stays in `moy_axs`: the rotate the
   gather runs in, and THE GAME WINDOW (the owner's 2026-08-19 insight -- the
   bezels around the game never change, and this panel's GRAM keeps them, so a
   steady play frame arms CASET/RASET to the game rect and ships that alone).

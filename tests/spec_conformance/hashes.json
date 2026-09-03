@@ -5,7 +5,7 @@
     "w": 320,
     "h": 240
   },
-  "generated_by": "moycore 0.2.0",
+  "generated_by": "moycore 0.3.0",
   "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by the reference console's own rasterizer (conformance/parity.py), by libmoy and the WebAssembly player built from it (the tiebreaker SPEC.md 11 names), and by an ESP32-P4 over serial. Note that ALL FIVE now share moycore's lineage -- the board ran a hand transcription until 2026-08-07 and now calls libmoy too. See conformance/README.md, 'The independent check, and its loss'.",
   "scenes": [
     {
@@ -101,14 +101,14 @@
     },
     {
       "name": "provisional",
-      "core": false,
+      "core": true,
       "calls": 12,
       "frame_sha256": "e2e0a288c374a4c3662e75a418e70d8b7c6608847e42268b479d8460b8d22a3b",
       "note": "SPEC.md 6.1 verbs. NOT part of conformance -- SPEC.md 11\nexcludes 6.1 until its promotion gates clear. Kept so the\ngolden already exists when they do."
     },
     {
       "name": "provisional_tline",
-      "core": false,
+      "core": true,
       "calls": 57,
       "frame_sha256": "2de00b3509055fc3a468fa14fc28542aca79f74e172146431602ffd4962bba42",
       "note": "SPEC.md 6.1 tline: line()'s pixels, texture-stepped\nacross the map in 16.16 fixed point. Excluded like\n`provisional`, and separate so a host with tri/sspr\nbut no tline fails one scene, not both."

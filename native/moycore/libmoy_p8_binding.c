@@ -3,7 +3,7 @@
  * reds an edit), so the pragmas a 32-bit Lua trips live here instead.
  * Opt-in upstream; the console opens it in run_begin for every cart, since
  * the p8 shim probes for it nil-safe and nothing else reaches the globals. */
-/* A/B 2026-09-02, same lever as moy_gfx's kernels, Mem Bench Lua on all
+/* A/B'd with the same lever as moy_gfx's kernels, Mem Bench Lua on all
  * three boards: NULL on the byte verbs (the Lua call is the floor -- P4
  * 1.22 -> 1.19 us, S3 1.95 -> 1.95) and worth it on the bulk verbs (an 8K
  * memcpy P4 2.10 -> 1.63 ms, S3 4.3 -> 4.0), at no cost anywhere. The

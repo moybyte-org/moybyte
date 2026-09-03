@@ -22,22 +22,19 @@ THE ARITHMETIC ON THIS GLASS. 320x240x2 = 153,600 B is ~17 ms on this bus, and
   2026-08-21, d9aa73e). A band-size number measured against the timer says
   nothing about this build.
 
-THE GAME FOLD IS PORTED (2026-09), and the 2026-08 decline it replaces was
-  wrong about the shape rather than the value: it said the fold "needs moy_gfx
-  kernels writing into the bounce slots, i.e. the slots exposed back to
-  Python". It does not. The synthesis is C on the FEEDER --
-  `native/moy_flush/moy_fold`, one body with the Guition's -- and no bounce
-  slot is ever handed to Python. A small-canvas play frame now skips the
-  153,600 B root composite AND the 153,600 B read-back the bands used to do:
-  each band is built straight from the game snapshot, black outside the
-  viewport, the game rows at integer scale inside. `fold_supported` is True
-  here now, `DeviceCanvas.blit_game` arms instead of compositing, and the PUMP
-  line's `fold=` climbs on every quiet play frame.
+THE GAME FOLD IS HERE, and no moy_gfx kernel or Python-visible bounce slot is
+  involved: the synthesis is C on the FEEDER -- `native/moy_flush/moy_fold`,
+  one body with the Guition's. A small-canvas play frame skips the 153,600 B
+  root composite AND the 153,600 B band read-back of the root: each band is
+  built straight from the game snapshot, black outside the viewport, the game
+  rows at integer scale inside. `fold_supported` is True here,
+  `DeviceCanvas.blit_game` arms instead of compositing, and the PUMP line's
+  `fold=` climbs on every quiet play frame.
 
-  What is still the Guition's alone is THE GAME WINDOW: shipping the game rect
-  alone needs a panel whose GRAM keeps the bezels and a per-frame window arm,
-  and this flush arms the full frame every time. So the transfer here is
-  unchanged; what the fold buys is the PSRAM traffic, not the wire.
+  What is the Guition's alone is THE GAME WINDOW: shipping the game rect alone
+  needs a panel whose GRAM keeps the bezels and a per-frame window arm, and this
+  flush arms the full frame every time. So the transfer here is unchanged; what
+  the fold buys is the PSRAM traffic, not the wire.
 """
 
 from banded_panel import FoldingCompositor

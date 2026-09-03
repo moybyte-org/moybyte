@@ -265,7 +265,7 @@ def test_the_map_and_the_flags_come_across_now(tmp_path):
     import_p8.import_p8(str(p8), str(out))
 
     names = sorted(p.name for p in out.iterdir())
-    # flags.moyflags since 2026-09: SPEC.md 3.5's sidecar, __gff__ byte for byte.
+    # flags.moyflags is SPEC.md 3.5's sidecar: __gff__ byte for byte.
     assert names == ["flags.moyflags", "main.lua", "manifest.json", "map.moymap",
                      "sounds.json", "sprites.moygfx"]
     head, first = (out / "map.moymap").read_text(
@@ -320,9 +320,9 @@ def test_the_report_separates_the_three_kinds_of_gap(tmp_path):
     and come out wrong in a stated way. DIFFERS means a verb of that name
     exists and disagrees.
 
-    `dset` moved from MISSING to STUBBED on 2026-09-01 and is the good case to
-    pin: the report has to stop calling it "not supported" the moment the shim
-    starts answering, or it is telling a kid to rewrite working code.
+    `dset` moved from MISSING to STUBBED and is the good case to pin: the report
+    has to stop calling a verb "not supported" the moment the shim starts
+    answering, or it is telling a kid to rewrite working code.
     """
     p8, _png = p8_fixture.write_pair(str(tmp_path), import_p8.parse_p8)
     summary = import_p8.import_p8(p8, str(tmp_path / "out.moy"))

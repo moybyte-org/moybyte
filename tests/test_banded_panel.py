@@ -441,7 +441,7 @@ def board_panel(module_name, native_name, modules_dir, lcd):
 
 class FoldingLcd(FakeLcd):
     """A panel module with the GAME FOLD verbs -- `moy_axs`'s shape, and
-    `moy_lcd`'s too since 2026-09. The `fold_stats` tuples differ in LENGTH
+    `moy_lcd`'s too. The `fold_stats` tuples differ in LENGTH
     between the two (the Guition counts game-windowed flushes; the T-Deck has
     no window to count), which is exactly why the Python only ever reads [0]."""
 
@@ -474,9 +474,8 @@ def test_the_fold_counter_is_LIVE_and_reads_the_C(board, native, modules, cls,
     getattr default silently taken forever is the failure mode -- so this
     asserts both halves: the attribute EXISTS, and it MOVES.
 
-    BOTH boards since 2026-09 (`native/moy_flush/moy_fold`); the T-Deck's
-    2026-08 decline is history and `tdeck_panel`'s docstring says why it was
-    wrong. A board whose module lacks the verbs is covered below."""
+    BOTH boards carry it (`native/moy_flush/moy_fold`). A board whose module
+    lacks the verbs is covered below."""
     lcd = FoldingLcd(folded=5763, stats_len=stats_len)
     with board_panel(board, native, modules, lcd) as mod:
         comp = getattr(mod, cls)()
@@ -502,9 +501,9 @@ def test_the_fold_counter_is_LIVE_and_reads_the_C(board, native, modules, cls,
 ])
 def test_the_arm_passes_the_scale_through_and_falls_back_when_refused(
         board, native, modules, cls):
-    """Scale is the fold's argument, not a case it declines: the Guition's C
-    used to fold scale 1 only and composited everything else on the CPU, which
-    is what a 480x320 board running a 128px cart at 2x paid every frame.
+    """Scale is the fold's argument, not a case it declines: folding scale 1
+    alone would drop a 480x320 board running a 128px cart at 2x onto a full CPU
+    composite every frame.
 
     A REFUSAL still has to be invisible one level up, so a module that raises
     must leave the root holding the composite `blit_game` skipped."""

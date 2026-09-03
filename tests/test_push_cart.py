@@ -3,9 +3,9 @@
 Never imported by anything (#208), and the protocol it drives is the dev
 channel's RAW receive (`recv`, `runtime/dev_channel.py`'s `_recv`): the host
 writes one window of 8-bit payload, waits for the board's ack, and renames the
-`.new` only once the board's read-back sha256 agrees. **The base64 chunk push
-is gone** (owner call 2026-09-02) -- there is one transport, so an image that
-predates `recv` is refused by name rather than served slowly.
+`.new` only once the board's read-back sha256 agrees. **There is no base64
+chunk push** -- one transport, so an image that predates `recv` is refused by
+name rather than served slowly.
 
 The board here is a fake console. It EVALUATES the `py` lines the tool still
 sends -- the already-current hash, the mkdir, the remove/rename -- the way
@@ -488,9 +488,9 @@ def test_an_empty_file_needs_no_window_at_all(tmp_path):
 def test_an_older_image_is_refused_by_name_and_nothing_is_sent(
         monkeypatch, tmp_path):
     """`REMOTE ? recv` is the whole handshake, and it is a DEFINITE no: the
-    dispatcher every board already runs answers it. There is no second
-    transport to fall back to since 2026-09-02, so the run ends there -- with
-    one line saying the firmware is too old, before a byte of cart is sent."""
+    dispatcher every board already runs answers it. There is no second transport
+    to fall back to, so the run ends there -- with one line saying the firmware
+    is too old, before a byte of cart is sent."""
     dev = _FakeConsole(board="tdeck", carts_root="/sd/carts", has_recv=False)
     monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
     cart = _cart(tmp_path, {"main.lua": SOURCE})

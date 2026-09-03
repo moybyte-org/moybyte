@@ -29,15 +29,15 @@
  * (SPEC.md 6); __moy_p8_frame re-applies what PICO-8 keeps.
  *
  * THE DRAW VERBS ARE HERE TOO, and that is what the addresses above are for.
- * A shim draw verb was four to six binding calls -- fl() on each coordinate,
- * pcol() on the colour, a fill-pattern check, then the console verb -- and a
- * binding call has a floor of ~1.65us on the reference console's slow boards,
- * so a p8 `pset` cost five of them where PICO-8 costs one. Each __moy_p8_*
- * verb below takes the cart's raw arguments and resolves p8's semantics from
- * the machine: the pen at 0x5f25 when the colour is nil, the fill pattern at
- * 0x5f31, the draw palette and transparency at 0x5f00, the camera and clip
- * the console already holds. The state the shim used to keep in Lua locals
- * moved into those bytes, so peek() and poke() of them agree with the verbs.
+ * A binding call has a floor of ~1.65us on the reference console's slow
+ * boards, so a p8 `pset` spelled in Lua costs four to six of them (fl() on
+ * each coordinate, pcol() on the colour, a fill-pattern check, then the
+ * console verb) where PICO-8 costs one. Each __moy_p8_* verb below takes the
+ * cart's raw arguments and resolves p8's semantics from the machine instead:
+ * the pen at 0x5f25 when the colour is nil, the fill pattern at 0x5f31, the
+ * draw palette and transparency at 0x5f00, the camera and clip the console
+ * already holds. That state lives in those bytes and not in Lua locals, so
+ * peek() and poke() of them agree with the verbs.
  *
  * These are `__moy_*` globals a ported cart's shim probes for nil-safe, not
  * verbs of SPEC.md: a host that opens them is offering a machine, not a
@@ -61,15 +61,14 @@
 
 /* The machine rides each verb as an UPVALUE, not a registry entry: a registry
  * lookup is a string hash per call, and on the reference console's fast board
- * that alone was the difference between 0.9 us and 1.8 us a byte -- the very
- * tax the memory-map proposal measured libmoy's generic binding paying. */
+ * that alone doubles the cost of a byte. */
 static inline moy_p8 *p8_of(lua_State *L)
 {
     return (moy_p8 *)lua_touserdata(L, lua_upvalueindex(1));
 }
 
-/* The p8 draw state that used to be Lua locals in the shim, at the addresses
- * PICO-8 keeps it -- so `poke(0x5f25, 8)` and `color(8)` are one thing. */
+/* The p8 draw state, at the addresses PICO-8 keeps it -- so `poke(0x5f25, 8)`
+ * and `color(8)` are one thing. */
 #define P8_PEN   0x5f25u        /* pen colour, the byte color() masks to 0x8f */
 #define P8_CURX  0x5f26u        /* print cursor; the full value is in moy_p8 */
 #define P8_CURY  0x5f27u
@@ -283,8 +282,7 @@ static inline uint8_t peek_byte(moy_p8 *p, uint32_t a)
     return rd(p, a & 0xffffu);
 }
 
-/* poke(a, v, b1, b2, ...): p8 0.2 pokes a whole run from one call, and the
- * shim's Lua paid a select() per byte for it. */
+/* poke(a, v, b1, b2, ...): p8 0.2 pokes a whole run from one call. */
 static int l_poke(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
@@ -295,8 +293,7 @@ static int l_poke(lua_State *L)
     return 0;
 }
 
-/* peek(a) and peek(a, n): n bytes as n RESULTS, which is what the shim built
- * a table and unpacked to get. */
+/* peek(a) and peek(a, n): n bytes as n RESULTS. */
 static int l_peek(lua_State *L)
 {
     moy_p8 *p = p8_of(L);
@@ -504,8 +501,7 @@ static int l_cstore(lua_State *L)
  *
  * Memory is the truth on a host with the machine: a cell poked at 0x2000 (or
  * 0x1000, the rows the map shares with the sheet) is the cell mget reads and
- * map() draws. The shim reached it through peek/poke and floored on the way;
- * this is the same walk with the Lua taken out.
+ * map() draws.
  *
  * The coordinates stay DOUBLE until the bound check, because math.floor of a
  * float too big for an integer hands the float back, and such a value is out
@@ -695,9 +691,9 @@ static void p8_cell(const p8_pen *pen, int cx, int cy, int w, int h, int col)
  * dots and a 1px outline both fit in 16x12 with a one-pixel margin all round,
  * which is what puts every shift below in range without a test.
  *
- * The rows are what make the outline affordable. Cell by cell it was 18x14
- * cells each testing eight neighbours -- 94% of this function, and 28% of one
- * cart's entire frame, for a title drawn wide, tall and outlined every frame.
+ * The rows are what make the outline affordable: cell by cell it is 18x14
+ * cells each testing eight neighbours, which for a title drawn wide, tall and
+ * outlined every frame dominates the whole verb.
  * A row's outline is the union of its eight shifted neighbour rows with the
  * glyph's own row taken out, which is eight shifts and an AND. Same pixels: a
  * cell is painted exactly when it is unlit and an active direction finds a
@@ -895,8 +891,8 @@ static int l_p8print(lua_State *L)
 /* -- the p8 DRAW verbs ----------------------------------------------------
  *
  * Each one is the shim's Lua wrapper (p8_lua_port.py) with the Lua taken
- * out, and that is the whole point: the wrapper's work was never arithmetic,
- * it was BINDING CALLS. `pset(x, y, c)` was fl(x), fl(y), fl inside pcol()
+ * out, and that is the whole point: the wrapper's work is not arithmetic, it
+ * is BINDING CALLS. In Lua `pset(x, y, c)` is fl(x), fl(y), fl inside pcol()
  * and then pix() -- four crossings for one pixel, each with a fixed cost the
  * board pays whatever is on the other side. Here the coercions, the pen, the
  * fill pattern and the console verb are one crossing.
@@ -911,8 +907,8 @@ static int l_p8print(lua_State *L)
  * lane and the two must answer alike (libmoy/test/p8lib.moy).
  *
  * ONE EDGE IS DELIBERATELY DIFFERENT. A coordinate past a 32-bit integer
- * (1e30) made the shim's `fl` hand back a float, which the binding then cast
- * to `int` -- undefined in C, and whatever the CPU did. Here it wraps, by
+ * (1e30) makes the shim's `fl` hand back a float, which a binding would cast
+ * to `int` -- undefined in C, and whatever the CPU does. Here it wraps, by
  * f2i, like every other address and coordinate in this file.
  */
 
@@ -1214,8 +1210,8 @@ static void p8_palt_default(moy_canvas *c)
 /* The SCREEN palette lives in memory (0x5f10) rather than on the canvas,
  * because the console resets draw state every frame and PICO-8 keeps this one
  * across them -- a cart sets its fade once and draws. __moy_p8_frame puts it
- * back at the top of each _draw, so a memcpy fade into 0x5f10 now persists
- * exactly as pal(c, d, 1) does. */
+ * back at the top of each _draw, so a memcpy fade into 0x5f10 persists exactly
+ * as pal(c, d, 1) does. */
 static void p8_spal_set(moy_p8 *p, int c0, int c1)
 {
     p->mem[P8_SPAL + (unsigned)(c0 & 15)] = col_out(c1);
@@ -1449,7 +1445,7 @@ static int l_p8_map(lua_State *L)
  * The top of the port's _draw: the console resets pal, palt, camera and clip
  * after every cart frame (SPEC.md 6) and PICO-8 keeps the transparency and
  * the screen palette across them, so those go back before the cart draws --
- * one call rather than the eighteen the shim's Lua made when a fade was live.
+ * one call rather than the eighteen a Lua restore needs when a fade is live.
  * The camera is NOT here: the shim re-parks it through camera(), which a host
  * with its own native map still owns.
  *
@@ -1534,7 +1530,7 @@ static int p8_btn_index(lua_State *L, int *ok)
     if (lua_type(L, 1) == LUA_TSTRING) {
         /* p8 coerces: the size-coder's `btn"1"` is button 1, and a string
          * that is no number is the no-argument form. Reading it as button 4
-         * made every direction of low mem sky the O button (2026-09-03). */
+         * makes every direction of low mem sky the O button. */
         size_t len;
         const char *str = lua_tolstring(L, 1, &len);
         if (lua_stringtonumber(L, str) != len + 1) { *ok = 0; return 0; }
@@ -1589,8 +1585,8 @@ static int l_p8_btnp(lua_State *L)
  * The shim's own Lua again, and the reason it is worth C is not the
  * arithmetic: fl() costs a Lua call, an _ENV lookup for type() and a second
  * call into math.floor, and it sits on the argument of every draw verb. flr()
- * is the same shape and was 13% of dank tomb's Lua time, because the porter
- * emits it around every operand of a native bit operator.
+ * is the same shape and lands around every operand of a native bit operator,
+ * which on a draw-heavy cart makes it a measurable slice of the tick.
  *
  * lua_Number is a SINGLE-PRECISION float on this VM (LUA_32BITS, which
  * SPEC.md 4.2 requires) and lua_Integer a 32-bit int, and the two are not

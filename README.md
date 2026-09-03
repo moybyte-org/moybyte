@@ -26,7 +26,7 @@ Carts draw in 64 indexed colours on a 320×240 surface, the same on every target
 The shell around them is not fixed — it reflows from that handheld screen to a 7″
 1024×600 desktop, all from one implementation.
 
-This repo is the **reference implementation of [moy core 0.2](https://github.com/moybyte-org/moy-spec)**,
+This repo is the **reference implementation of [moy core 0.3](https://github.com/moybyte-org/moy-spec)**,
 the public spec for that cart format and its verb table.
 
 <p align="center">

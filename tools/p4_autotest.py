@@ -287,7 +287,7 @@ class P4Board:
         # opens, and pyserial then applies dtr before rts. On the CH343 board
         # lowering DTR while RTS is still raised IS the auto-reset circuit's
         # EN pulse -- the P4 power-cycled on every open and spent 60s booting
-        # before it could answer (measured 2026-09-02). So open with DTR
+        # before it could answer. So open with DTR
         # raised, let pyserial lower RTS, then lower DTR; both end where the
         # board declared them and reset() still works from that rest state.
         self.ser.dtr = True

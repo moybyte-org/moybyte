@@ -106,8 +106,8 @@ STUBBED = "stubbed"
 # what that bought was measured -- across twelve well-known carts, fillp alone
 # was called by six of them and stopped every one.
 SHIM_GAPS = {
-    # cocreate/coresume/costatus/yield left this table on 2026-09-02: SPEC.md
-    # 4.1 admits `coroutine`, libmoy opens it, and the shim aliases the four.
+    # No cocreate/coresume/costatus/yield here: SPEC.md 4.1 admits `coroutine`,
+    # libmoy opens it, and the shim aliases the four.
     "reboot": (MISSING, "reboot()/load() restart the machine or swap the cart "
                         "-- the launcher does that here; from inside a cart, "
                         "reset your own state instead"),

@@ -63,12 +63,11 @@ Four things about it are load-bearing:
   that returns it to the heap — **O(1) worst case**, with no free list to walk,
   because every entry that could point into the chunk *is* the chunk's own
   list. Shared chunks cannot do it at any price: one survivor pins the whole
-  chunk, and moss moss's parse burst left 1.47MB held for 0.83MB live with the
-  board sitting on 3KB of free PSRAM. The cost is a floor — a class touched at
-  all holds a chunk, so eight classes hold eight — which is why a chunk is
-  **8KB** and not the 32KB the shared-chunk pool used: 64KB of floor, and 512
-  blocks of the commonest class have to die together to give one back rather
-  than 2048.
+  chunk, and a cart's parse burst can leave most of a megabyte held for a third
+  of it live, on a board with kilobytes of free PSRAM. The cost is a floor — a
+  class touched at all holds a chunk, so eight classes hold eight — which is
+  why a chunk is **8KB**: 64KB of floor, and 512 blocks of the commonest class
+  have to die together to give one back.
 - **One chunk size per run, and one empty chunk kept back.** The halving retry
   (to 4KB) still runs, but only for the *first* chunk of a run: the mask is
   what makes the lookup a single AND, and a second size would need a second
@@ -79,11 +78,11 @@ Four things about it are load-bearing:
   *and* a free every iteration.
 - **Blocks live in PSRAM; the per-class current chunk is a static, i.e.
   internal SRAM.** The free-list heads moved into the chunk header when chunks
-  became per-class, so alloc and free each write one PSRAM word more than they
-  used to; the header's hot fields are its first 32 bytes on purpose, one cache
-  line per active chunk. The blocks stay out of SRAM because the 2026-09-02
-  measurement is that giving the VM more internal SRAM made the tick *slower*,
-  since the rest of the board starves for it. The large path's SRAM-first
+  became per-class, so alloc and free each write one PSRAM word more than a
+  static free list would; the header's hot fields are its first 32 bytes on
+  purpose, one cache line per active chunk. The blocks stay out of SRAM because
+  giving the VM more internal SRAM measured *slower* — the rest of the board
+  starves for it. The large path's SRAM-first
   policy is untouched, and that is where the structures the policy was written
   for actually live — the Lua stack is one array well over a kilobyte, and so
   is a big table's node array.
@@ -101,9 +100,8 @@ bytes across every chunk (the kept-back spare included, because it is memory
 the pool holds), and the difference is slack — free lists, un-carved tails, and
 the remainder each chunk's class size leaves. So the PSRAM the VM actually
 holds is `(psram_live - pool_live) + pool_cap`. **`pool_cap` falls when chunks
-go back**, and that is the number to watch: on the burst scenario in
-`tests/test_moycore_pool.py` it peaks at 2.5MB across 316 chunks and settles at
-81KB across 10 once the burst's garbage is collected.
+go back**, and that is the number to watch — `tests/test_moycore_pool.py`'s
+burst scenario is where that fall is asserted.
 
 Two verbs serve the pool and nothing else:
 

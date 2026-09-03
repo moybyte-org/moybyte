@@ -52,11 +52,10 @@
 //   frame skips the root composite entirely -- the canvas hands over a snapshot
 //   of the game rectangle and queue_band SYNTHESIZES each band from it (black
 //   outside the viewport, the game rows at integer scale inside) instead of
-//   copying root bands the composite would first have had to write. This board
-//   declined the lever in 2026-08 ("it needs moy_gfx kernels writing into the
-//   bounce slots") and took it in 2026-09 with no kernels involved: the gather
-//   is C in moy_fold, running on the FEEDER. Read moy_fold.h for the one-shot
-//   latch and the fence -- both are cross-core, and neither is negotiable.
+//   copying root bands the composite would first have had to write. No moy_gfx
+//   kernel and no bounce slot are involved on the Python side: the gather is C
+//   in moy_fold, running on the FEEDER. Read moy_fold.h for the one-shot latch
+//   and the fence -- both are cross-core, and neither is negotiable.
 //
 //   Only the FIRST band carries a command (RAMWR); bands 2..N are sent with
 //   lcd_cmd = -1, i.e. no command phase at all. This is what "a full-screen
@@ -710,8 +709,7 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_show_obj, 0, 1, moy_lcd_show)
 
 // ---- the GAME FOLD (native/moy_flush/moy_fold.h) ---------------------------
 // The four verbs `banded_panel.FoldingCompositor` reaches, in the shapes
-// moy_axs already exported: this board grew them in 2026-09, and the pair is
-// meant to stay a matched set.
+// moy_axs exports: the pair is meant to stay a matched set.
 
 // arm_fold(buf, vw, vh, ox, oy, scale=1) -- register THIS frame's composite as
 // the flush's job. `buf` must stay alive and unwritten until the next
@@ -763,7 +761,8 @@ static MP_DEFINE_CONST_FUN_OBJ_1(moy_lcd_disarm_fold_obj, moy_lcd_disarm_fold);
 // ALONE, which needs a panel whose GRAM keeps the bezels between frames and a
 // per-frame window arm. This one arms the full frame every time, so there is
 // no such number to report -- and a 0 in that slot would read as a windowing
-// that never fires, which is the exact ambiguity `fold=0` cost this repo weeks.
+// that never fires, which is the ambiguity a board without a lever must avoid
+// (report nothing, never 0).
 static mp_obj_t moy_lcd_fold_stats(void) {
     mp_obj_t t[3] = {
         mp_obj_new_int_from_uint(moy_fold.frames),

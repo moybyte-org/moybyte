@@ -330,9 +330,8 @@ class FullscreenStackWM:
         view of a 128x128 canvas: rows the cart can spare) is a hint for the
         screen that would otherwise sit at 1x, and is honored only there. On
         a 480x320 screen the full 128x128 already fits at 2x; on the P4 it
-        fits at 4x, where the 5x a trim buys cost a fifth of the frame (the
-        crisp composite scales with output pixels; measured 2026-09-02) and
-        eight rows of picture. Three quarters of the canvas is the line."""
+        fits at 4x, where the 5x a trim buys costs a fifth of the frame (the
+        crisp composite scales with output pixels) and eight rows of picture. Three quarters of the canvas is the line."""
         view = getattr(self.ws, "game_view", None)
         if view is None:
             return None

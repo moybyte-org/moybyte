@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| vendored at | `424d307` (2026-09-02, branch p8-verbs) |
+| vendored at | `0d8fd92` (2026-09-03, branch p8-verbs) |
 
 SPEC.md §11: *an implementation conforms when it runs the conformance suite and
 produces pixel-identical output.* Moybyte is the reference console, so that is a

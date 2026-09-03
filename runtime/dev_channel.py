@@ -34,10 +34,10 @@ a line is the wrong shape for a cartridge -- a 124KB main.lua base64'd into
 took 50-60s per cart on every board (~2KB/s) while the cable underneath carries
 hundreds of KB/s. So `recv <nbytes> <window> <path>` hands the stdin stream to
 `_recv` for exactly nbytes, straight into `<path>.new`, 8 bits wide with no
-base64 -- and it is now the ONLY way a cart reaches a board over serial
-(tools/push_cart.py's chunk path was deleted with it, owner call 2026-09-02),
-so a change here is a change to the only route. Read that method's own comments
-before changing it; the three facts that shaped it are:
+base64 -- and it is the ONLY way a cart reaches a board over serial, with no
+fallback in `tools/push_cart.py`, so a change here is a change to the only
+route. Read that method's own comments before changing it; the three facts that
+shaped it are:
 
   * the payload is NOT read through `sys.stdin`. That stream is TEXT and
     `stdio_read` maps CR to LF as it goes -- every 0x0D would land as 0x0A.

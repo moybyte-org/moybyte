@@ -7,8 +7,8 @@ slots. Both passes move the whole screen. The fold deletes the first: the
 canvas snapshots the game rectangle into a flush-private scratch and ARMS the
 fold, and the core-0 feeder synthesizes every band straight from that snapshot.
 Shipped on the T-Deck 2026-08-11 (#190, cmp 7.2 -> 1.8 ms on glass), dropped
-when its flush moved to the shared feeder, and taken by BOTH boards in 2026-09
-over `moy_fold` -- with the Guition's scale-2 case, which its C used to decline.
+when its flush moved to the shared feeder, and taken by BOTH boards over
+`moy_fold` -- the Guition's scale-2 case included.
 
 WHY THE C IS THE THING UNDER TEST. The synthesis runs on the FEEDER task: no MP
 context, no GIL, no exceptions, reading a buffer that another core is about to

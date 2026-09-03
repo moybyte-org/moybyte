@@ -24,8 +24,7 @@
 // synthesizes a small-canvas frame straight from a snapshot instead of copying
 // the root at all. It reads a caller-supplied rectangle and writes a bounce
 // slot, so there is no transport in it -- both the straight-through and the
-// rotated gather live there, parameterized by geometry. It moved out of moy_axs
-// in 2026-09, when the T-Deck took the lever and the alternative was a second
+// rotated gather live there, parameterized by geometry, rather than as a second
 // copy of a one-shot latch with a cross-core fence. Read that header before
 // touching either board's queue_band.
 //

@@ -34,9 +34,9 @@
 //   READ moy_flush.h before touching any of that; what is genuinely this
 //   board's stays here -- the QSPI protocol below, the window arming, the
 //   ROTATE band synthesis and the one-DMA-chunk-per-band static assert. The
-//   GAME FOLD went the same way in 2026-09 when the T-Deck took the lever:
-//   its latch, fence and BOTH gathers are native/moy_flush/moy_fold.h, and
-//   what stays here is the game WINDOW this panel's persistent GRAM allows.
+//   GAME FOLD went the same way -- its latch, fence and BOTH gathers are
+//   native/moy_flush/moy_fold.h, and what stays here is the game WINDOW this
+//   panel's persistent GRAM allows.
 //
 // THE QSPI PROTOCOL (deduced by ESPHome/LovyanGFX from vendor code, verified
 // on this glass by the owner's working ESPHome build):
@@ -256,9 +256,9 @@ static int s_rot = 0;
 // (scratch-snapshotted) game buffer, at any integer scale -- and the root
 // framebuffer is neither written by a composite nor read by the pump.
 //
-// The LATCH, the FENCE and the gather are `moy_fold` (moy_fold.h) since
-// 2026-09; what is this board's is the game WINDOW below, which only a panel
-// with persistent GRAM can have. `_Static_assert` because the rotated gather
+// The LATCH, the FENCE and the gather are `moy_fold` (moy_fold.h); what is this
+// board's is the game WINDOW below, which only a panel with persistent GRAM can
+// have. `_Static_assert` because the rotated gather
 // builds one axis map per band on its stack.
 _Static_assert(MOY_AXS_BAND_ROWS <= MOY_FOLD_MAX_BAND_ROWS,
                "moy_fold_band_rot's per-band axis map is MOY_FOLD_MAX_BAND_ROWS long");
@@ -434,7 +434,7 @@ static esp_err_t moy_axs_arm_window_acquired(int x, int y, int w, int h) {
 // the synthesis paints any alignment sliver black). Writes s_win_*.
 static void moy_axs_set_game_window(void) {
     // The LOGICAL rect the fold paints -- the game rectangle at its scale, not
-    // the game's own size. (It was the same number until scale > 1 shipped.)
+    // the game's own size. The two differ only above scale 1.
     const int lw = moy_fold.vw * moy_fold.scale;
     const int lh = moy_fold.vh * moy_fold.scale;
     const int lx = moy_fold.ox, ly = moy_fold.oy;

@@ -12,7 +12,7 @@ else is byte-for-byte upstream.
 
 `tostringbuff` no longer appends `.0` to a float that reads as an integer, so
 `tostring(3.0)`, `3.0 .. ""` and `print(6/2)` all give `3` (moy-spec SPEC.md
-4.2, 2026-09-02). The same edit is in moy-spec's `libmoy/vendor/lua`.
+4.2). The same edit is in moy-spec's `libmoy/vendor/lua`.
 
 ## 1. `#pragma GCC optimize("O2")` — 32 `.c` files
 
@@ -53,8 +53,7 @@ behaviour (device integers wrap at 2^31), so it is recorded here.
 
 `tostringbuff` no longer calls `lua_integer2str` for an integer, and no longer
 calls `lua_number2str` for an integral float that item 0 already prints as bare
-digits. Both go through a hand-rolled `moy_int2str` instead (moybyte #66,
-2026-09-02).
+digits. Both go through a hand-rolled `moy_int2str` instead (#66).
 
 Why: on the S3 one `snprintf` costs 3–4 µs, and a PICO-8 port formats a number
 per tile per frame — `tostr()`, and every table keyed by `x..","..y` — against
@@ -71,12 +70,8 @@ prints `-0`, and a cast to an integer would lose the sign.
 `string.format("%d", …)` is untouched and still goes through `snprintf`, which
 is what lets a cart hold one against the other
 (`tests/test_moycore_pool.py::test_integers_format_exactly_as_snprintf_did`).
-
-**moy-spec's runner copy of Lua should get the same patch**, for the same
-reason item 0 is in both: a cart formatting a number must produce the same
-bytes on the runner as on the board, and item 0's edit is what makes the float
-half of this one correct. Patch it there, in `libmoy/vendor/lua`; do not edit
-moy-spec from this repository.
+Because the output is identical, a Lua that does not carry this patch — moy-spec's
+runner copy does not — still agrees with a board that does.
 
 ## 4. `luaconf.h`, `lvm.c`, `ltable.c`, `ldo.c`: the VM's hot loop lives in IRAM on the Xtensa boards
 
@@ -84,10 +79,10 @@ moy-spec from this repository.
 `luaH_get*` lookups and `luaD_precall`/`luaD_poscall` in `.iram1.moylua` when
 `__XTENSA__` is defined, and is empty elsewhere. On the ESP32-S3 flash and
 PSRAM share one MSPI bus, so an instruction-cache miss in the interpreter loop
-waits behind the cart's own data; measured on the T-Deck (2026-09-02) moss
-moss's 30 ms tick became 27 and dank tomb's 33 ms render 27 for ~11 KB of
-IRAM. `ESP_PLATFORM` is not the guard because MicroPython compiles usermods
-without it; `__XTENSA__` is the compiler's own. The P4 (RISC-V) is untouched.
+waits behind the cart's own data; it buys about a tenth of a cart tick for
+~11 KB of IRAM (#66). `ESP_PLATFORM` is not the guard because MicroPython
+compiles usermods without it; `__XTENSA__` is the compiler's own. The P4
+(RISC-V) is untouched.
 
 ## Verifying
 

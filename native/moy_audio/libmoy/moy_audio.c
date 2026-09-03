@@ -389,9 +389,8 @@ static float tilted(float p, float a)
 
 /* `buzz` and `noiz` are two of SPEC.md 8.1's five per-sfx filters. They do not
  * post-process the wave, they SELECT A DIFFERENT ONE -- every instrument has a
- * harsher twin, and the header of this file used to say it implemented "the
- * non-buzz variants", which was true and was silently half the timbre of any
- * cart written since PICO-8 0.2.4.
+ * harsher twin, so implementing only the non-buzz variants silently drops half
+ * the timbre of any cart written since PICO-8 0.2.4.
  *
  * `p2` is the partner phase (the phaser's 109/110 beat, or the detuned
  * second oscillator's), and `cyc` says which of two cycles the saw's buzz dip

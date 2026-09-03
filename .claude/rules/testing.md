@@ -66,10 +66,9 @@ paths:
     vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/
     `mem`/`bl`/`vol`/`power`/`web`/`py`/`recv`/`quit`. A command a board cannot
     serve DECLINES, and `recv` — the only one that stops reading lines and takes
-    raw bytes — is also the ONLY cart-push transport since 2026-09-02, so a
-    board whose image predates it is refused by `tools/push_cart.py` rather
-    than pushed to slowly. Board extras arrive as a handler dict,
-    `py` scope extras via `env`.
+    raw bytes — is the ONLY cart-push transport, so a board whose image predates
+    it is refused by `tools/push_cart.py` rather than pushed too slowly. Board
+    extras arrive as a handler dict, `py` scope extras via `env`.
     `state` is one-line JSON and assertions read console STATE, not pixels;
     `swipe` goes through the real pointer feed; `py` evals against the live
     console between frames.

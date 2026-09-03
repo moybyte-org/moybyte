@@ -92,6 +92,14 @@ local VERBS = {
       tline(0, (i * 13) % 240, 319, (i * 13) % 240,
             (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
     end },
+  -- APPENDED with the Python twin when moy core 0.3 promoted SPEC.md 6.1.
+  -- oval/ovalb stay OUT until runtime/cart_verbs grows them: libmoy has them,
+  -- the Python tier does not, and a row only one twin can measure is the hole
+  -- this roster exists to avoid.
+  { name = "trib", k0 = 50, fn = function(i)
+      trib((i * 17) % 300, (i * 31) % 230, (i * 59) % 300 + 10,
+           (i * 43) % 230, (i * 23) % 300, ((i * 13) % 230) + 8, 2 + (i & 15))
+    end },
 }
 
 function _init()
@@ -285,7 +293,7 @@ end
 -- reader polling cell 3 never sees a half-written block.
 local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
                   rectb = 6, circb = 7, tri = 8, spr = 9, map = 10,
-                  sspr = 11, tline = 12 }
+                  sspr = 11, tline = 12, trib = 13 }
 local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
                       { "silent", 3 }, { "sound", 4 } }
 

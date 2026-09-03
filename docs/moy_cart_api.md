@@ -176,8 +176,8 @@ Your `_update(dt)` gets the real `dt` either way — movement written as
 | `rectb(x, y, w, h, c)` | rectangle **outline** |
 | `circ(cx, cy, r, c)` | **filled** circle |
 | `circb(cx, cy, r, c)` | circle **outline** |
-| `tri(x1, y1, x2, y2, x3, y3, c)` | **filled** triangle — *provisional*, see below |
-| `trib(x1, y1, x2, y2, x3, y3, c)` | triangle **outline** — *provisional*, see below |
+| `tri(x1, y1, x2, y2, x3, y3, c)` | **filled** triangle — moy core's, see below |
+| `trib(x1, y1, x2, y2, x3, y3, c)` | triangle **outline** — moy core's, see below |
 | `print(s, x, y, c, scale=1)` | text (8×8 petme128 font, pixel-identical host↔device). `scale` is accepted but **ignored** — game text is always 8px (the Settings text-size option scales the SYSTEM UI only, #39). Honours `camera`/`clip`/`pal` like every primitive (native on device, #62) |
 | `camera(x=0, y=0)` | offset all subsequent draws by `-x,-y` (world → screen). No args resets |
 | `clip(x=None, y=None, w=None, h=None)` | clip drawing to a rect. No args resets to full screen |
@@ -215,7 +215,7 @@ the ground with mask `1`, then the actors, then the foreground with mask `2` on
 top. `layers` of `0` (or absent) is no filter at all, and a cart with no
 `flags.moyflags` has all-zero flags, so a non-zero mask draws nothing there.
 
-### The 3D verbs are provisional
+### The 3D verbs
 
 `tri`, `trib`, `sspr` and `tline` are **moy core's**, not moybyte's — their pixels are
 defined by [SPEC.md §6.1 and §7.1](https://github.com/moybyte-org/moy-spec), and moybyte
@@ -224,9 +224,9 @@ conforming console. That is also why the signatures above are terse: **the spec 
 authority on what they draw**, and a fuller restatement here would be a second source of
 truth that drifts.
 
-"Provisional" is the spec's own word (§6.1): membership is settled but the semantics may
-still move, and §11's conformance suite does not yet count them. A cart using them is fine
-— the seed carts do — but they are the one corner of this API that could change under you.
+They were **provisional** through core 0.2 — reported by the conformance suite but not
+counted — and are core as of **0.3**, so §11 counts them and a host that skips them fails
+conformance. Nothing about what they draw changed.
 
 ### The batch verbs are gone (`spr_batch`, `rect_batch`, `spans`)
 

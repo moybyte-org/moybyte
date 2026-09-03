@@ -21,9 +21,9 @@
 // reads a caller-supplied RGB565 rectangle and writes a bounce slot, with no
 // transport in it at all -- so both shapes live here, parameterized by
 // geometry: `moy_fold_band` for a straight-through panel and
-// `moy_fold_band_rot` for a rotated one. That is what let the T-Deck take the
-// lever in 2026-09 without a second copy of the latch, the fence and the
-// scale arithmetic.
+// `moy_fold_band_rot` for a rotated one. That is what lets a second board take
+// the lever without a second copy of the latch, the fence and the scale
+// arithmetic.
 //
 // THE LATCH IS ONE-SHOT, and the ordering is the whole safety argument:
 //

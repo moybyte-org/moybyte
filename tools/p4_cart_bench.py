@@ -41,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # system_carts/bench.moy/main.py; keep the three copies in lock-step.
 PMEM_MAGIC = 45948
 VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
-              "circb", "tri", "spr", "map", "sspr", "tline")
+              "circb", "tri", "spr", "map", "sspr", "tline", "trib")
 PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound")
 
 

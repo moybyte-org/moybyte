@@ -48,22 +48,15 @@ FOUR THINGS THIS GETS RIGHT, each of which cost an attempt:
      is a cart that will not load, and the board is not where you want to
      discover that.
 
-THE T-DECK LINE THAT USED TO BE HERE IS GONE. It said this board "has no
-equivalent and cannot: its USB-CDC RX is dead under the desktop" and that carts
-reach it by SD card. #201 fixed that board's RX (2026-08-16) and a 44KB cart was
-pushed to its SD store over serial on 2026-08-19, twice as fast as the P4.
-
-ONE TRANSPORT: the dev channel's `recv` (runtime/dev_channel.py's header and
-`_recv` are the authority). THE BASE64 CHUNK PUSH IS DELETED, owner call
-2026-09-02 -- payload as `py ws._up.__setitem__(...)` lines moved about 2KB/s on
-every board (a 124KB main.lua grew to 165KB, went out 768 characters at a time,
-256 on the P4, and each line took the console several frames to read a byte at a
-time: fifty to sixty seconds per cart over a cable that carries hundreds of
-KB/s), and keeping it as a fallback would have meant two upload protocols, one
-of them exercised only by boards nobody had flashed. A board whose firmware
-predates `recv` therefore does not get a slower push -- it gets one line saying
-to flash it. What survives on the `py` channel is the small stuff: the
-already-current hash, the mkdir, and the rename.
+ONE TRANSPORT, AND NO FALLBACK: the dev channel's `recv`
+(runtime/dev_channel.py's header and `_recv` are the authority). Carrying the
+payload as base64 in `py` lines instead moves about 2KB/s -- fifty to sixty
+seconds per cart over a cable that does hundreds of KB/s -- and keeping it
+alongside `recv` would mean two upload protocols, one of them exercised only by
+boards nobody had flashed. So a board whose firmware predates `recv` does not
+get a slower push; it gets one line saying to flash it. What survives on the
+`py` channel is the small stuff: the already-current hash, the mkdir, and the
+rename.
 """
 import argparse
 import glob
@@ -177,8 +170,8 @@ def raw_window(b, declared, log=None):
                 # equal to it never reaches stdin, so there is no 8-bit route).
                 sys.exit("this board's firmware has no `recv` and is too old "
                          "for push_cart -- it answered %r. Flash or OTA a "
-                         "current image; the base64 chunk push it is waiting "
-                         "for was deleted 2026-09-02." % line.strip())
+                         "current image; there is no slower push to fall back "
+                         "to." % line.strip())
             if "RECV caps" in line:
                 for tok in line.split():
                     if tok.startswith("max="):
@@ -309,8 +302,8 @@ def main(argv=None):
     board_dir = os.path.join(ROOT, BOARDS[a.board])
     b = P4Board(a.port, log=(print if a.verbose else (lambda s: None)),
                 board_dir=board_dir)
-    # The chunk a `py` line may carry -- now only the helper install's, since
-    # the payload no longer rides `py` at all. Still per board: the P4's UART
+    # The chunk a `py` line may carry -- only the helper install's, since the
+    # payload does not ride `py` at all. Still per board: the P4's UART
     # drops an over-long line as noise with no error (see its board.toml).
     b.CHUNK = int(ser.get("chunk") or P4Board.CHUNK)
     try:

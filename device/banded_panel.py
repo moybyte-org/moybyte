@@ -74,10 +74,9 @@ WHAT EACH SUBCLASS OWNS, and why the list is short: its native module (imported
   board-only levers -- the T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`.
 
 THE GAME FOLD is `FoldingCompositor` below, a second body between this one and
-  the two boards. It was the Guition's alone until 2026-09, when the T-Deck's
-  moy_lcd grew the same verbs over the shared `moy_fold` C -- the same
-  promotion rule the class itself rode (a driver moves into `device/` the day a
-  SECOND board carries the hardware, #206 item 1). It is a SUBCLASS and not
+  the two boards. Both S3 panels carry the verbs over the shared `moy_fold` C,
+  which is the promotion rule the class itself rode (a driver moves into
+  `device/` the day a SECOND board carries the hardware, #206 item 1). It is a SUBCLASS and not
   four more methods here on purpose: `DeviceCanvas.blit_game`, `_diag_pump` and
   the dev channel's `state` all probe these names with `getattr`, so a banded
   board whose panel module cannot synthesize bands must carry NO fold attribute

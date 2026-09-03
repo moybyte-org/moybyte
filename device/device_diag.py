@@ -452,7 +452,7 @@ def _diag_pump(diag, comp):
         # live (a small-canvas game frame's bands were SYNTHESIZED, the root
         # composite skipped). Steadily climbing during play = every quiet
         # frame folds; frozen = something disarms each frame.
-        # BOTH banded boards have the lever since 2026-09 (moy_fold), so a 0
+        # BOTH banded boards have the lever (moy_fold), so a 0
         # here now means something disarms -- read it against `fold_supported`,
         # which is what a board WITHOUT the lever leaves absent.
         fold = getattr(comp, "fold_count", 0)

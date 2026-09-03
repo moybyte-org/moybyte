@@ -728,7 +728,7 @@ static const luaL_Reg VERBS[] = {
     {"volume", l_volume},
     {"touch", l_touch}, {"key", l_key}, {"keyp", l_keyp},
     {"textmode", l_textmode},
-    /* PROVISIONAL -- SPEC.md 6.1, not part of core 0.2. */
+    /* PROVISIONAL -- SPEC.md 6.1, not part of core 0.3. */
     {"tri", l_tri}, {"trib", l_trib}, {"sspr", l_sspr}, {"tline", l_tline},
     {NULL, NULL}
 };
@@ -750,8 +750,8 @@ static const char *const BANNED[] = {
  * the sandbox depending on nil-ing them out afterwards. Opening the five
  * permitted libraries by hand means linit.c is not compiled, those four have
  * no reachable implementation, and "absent entirely" is true of the machine
- * code rather than only of the global table. coroutine joined the permitted
- * set on 2026-09-02 (SPEC.md 4.1): pure VM, no reach outside it. */
+ * code rather than only of the global table. coroutine is permitted (SPEC.md
+ * 4.1): pure VM, no reach outside it. */
 static const luaL_Reg SANDBOX_LIBS[] = {
     {LUA_GNAME,      luaopen_base},
     {LUA_MATHLIBNAME, luaopen_math},

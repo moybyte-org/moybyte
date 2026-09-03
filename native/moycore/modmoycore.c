@@ -408,7 +408,7 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 // against 0.15us for an empty loop iteration and 0.95us for a function call --
 // and a two-field constructor 21us. A PICO-8 port builds a table per vector
 // operation and a string key per tile, every tick, and the S3 owes a frame
-// every 33ms, so on those carts the ALLOCATOR was the frame.
+// every 33ms, so on those carts the ALLOCATOR is the frame.
 //
 // Every hot Lua object is small: a TValue is 8 bytes here, a hash Node 16, a
 // Table 32, a short TString 16 + len, and UpVal / CallInfo / LClosure /
@@ -441,14 +441,13 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 // holding 11KB of live blocks, and one survivor pins the whole chunk.
 //
 // The price is a floor: a class touched at all holds a chunk, so eight classes
-// hold eight chunks. Hence 8KB rather than the 32KB the shared-chunk pool
-// used -- a 64KB floor, and 512 blocks of the commonest class have to die
-// together to give one back instead of 2048.
+// hold eight chunks. Hence 8KB -- a 64KB floor, and 512 blocks of the
+// commonest class have to die together to give one back.
 //
 // ONE CHUNK SIZE PER RUN. The halving retry still runs, but only for the first
 // chunk: the mask is what makes the lookup a single AND, and a second size
 // would need a second mask. A later chunk that cannot be had returns NULL, and
-// Lua's emergency GC now actually frees chunks before the retry.
+// Lua's emergency GC does free chunks before the retry.
 //
 // ONE EMPTY CHUNK IS KEPT BACK, retyped to whatever class asks for the next
 // one. Without it, a loop allocating and freeing one block of a class whose
@@ -457,13 +456,12 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 // pair per cycle rather than one per allocation.
 //
 // WHERE THE MEMORY LIVES. Chunks are PSRAM-only, and so are the free-list
-// heads now -- they moved into the chunk header, and what stays in the static
+// heads -- they live in the chunk header, and what stays in the static
 // (internal SRAM) is the per-class CURRENT CHUNK. The header's hot fields are
 // its first 32 bytes on purpose: one cache line per active chunk, eight lines
-// in the steady state. The blocks stay out of SRAM because the 2026-09-02
-// measurement is that giving the VM more internal SRAM made the tick SLOWER --
-// the rest of the board (WiFi/DMA pools, the flush bounce, the poller) starves
-// for it. So the pool never competes with the SRAM floor, and big_realloc's
+// in the steady state. The blocks stay out of SRAM because giving the VM more
+// internal SRAM measured SLOWER -- the rest of the board (WiFi/DMA pools, the
+// flush bounce, the poller) starves for it. So the pool never competes with the SRAM floor, and big_realloc's
 // SRAM-first policy above is untouched.
 //
 // MOYCORE_POOL=0 compiles the whole thing out, which is the A/B: the P4 has
@@ -928,17 +926,17 @@ static int l_tramp(lua_State *L)
 // each cell against the mask. The shim nil-guards both and keeps its Lua loop,
 // which is what a host without them (lupa) still takes.
 
-// MOY_FLAGS wide since 2026-09: libmoy's own fget/fset/map(..., layers)
-// read the console's table (SPEC.md 3.5), and this is that table here.
+// MOY_FLAGS wide: libmoy's own fget/fset/map(..., layers) read the console's
+// flag table (SPEC.md 3.5), and this is that table here.
 static uint8_t g_map_flags[MOY_FLAGS];
 
 // The PICO-8 machine (libmoy moy_p8.c): 64KB of memory and a ROM snapshot,
 // reseeded per run by moy_p8_open. The buffers are PYTHON-OWNED bytearrays
 // handed over through p8_memory(), like the framebuffer, the sheet and the
 // map -- NOT taken from the ESP heap. The S3 boards' MicroPython heap owns
-// all but ~1.5KB of the PSRAM region, so an 81KB heap_caps_malloc there took
-// the last of Lua's own PSRAM fallback and every Lua cart died with "not
-// enough memory" (2026-09-02, both S3 boards, first flash of this machine).
+// all but ~1.5KB of the PSRAM region, so an 81KB heap_caps_malloc there takes
+// the last of Lua's own PSRAM fallback and every Lua cart dies with "not
+// enough memory" -- seen on both S3 boards.
 // See moy-spec proposals/p8-memory-map.md for what a byte costs.
 static moy_p8 g_p8;
 static uint8_t *g_p8mem, *g_p8rom;

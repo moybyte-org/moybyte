@@ -311,7 +311,7 @@ def expand_idiv(toks):
                 continue
             # A length operator binds tighter than `\\`: `#snd\\4` is
             # `(#snd)\\4`, and wrapping `snd` alone left `#flr(snd/4)` --
-            # a string divided by a number (poom, 2026-09-02).
+            # a string divided by a number (poom).
             while True:
                 k = _skip_ws_back(toks, lo)
                 if k > 0 and toks[k - 1] == (T_OP, "#"):
@@ -896,21 +896,17 @@ def _expand_sigils_once(toks):
 
 
 # The bitwise operators. p8 spells NINE of them; Lua 5.4 has six, refuses
-# every one on a non-integral number, and has no rotate at all. So each
-# operand is floored -- and the porter used to floor it WHERE IT STOOD, which
-# left the operator in place and precedence untouched but cost a binding call
-# per operand: `flr(a) | flr(b)` is two crossings for one VM instruction, and
-# on dank tomb's lighting those crossings outweighed its whole raster.
+# every one on a non-integral number, and has no rotate at all, so each operand
+# must be floored. ONE call per operator does it: `__p8_bor(a, b)`, whose shim
+# body IS `flr(a) | flr(b)`, so a host with nothing behind the name runs plain
+# Lua and one with moy_p8.c's twin does the floor and the operator in a single
+# crossing.
 #
-# One call now: `__p8_bor(a, b)`, whose shim body IS `flr(a) | flr(b)`, so a
-# host with nothing behind the name runs exactly what it ran before and a host
-# with moy_p8.c's twin does the floor and the operator in one crossing.
-#
-# The price is that a CALL has to know precedence, which wrapping a primary
-# did not: `a & b * 2` is `a & (b*2)`, and `__p8_band(a, b) * 2` would be a
-# different expression. _PREC is that knowledge, and it is also the fix for
-# two things wrapping-the-primary got wrong -- `a + 1 & b` floored neither
-# side of the `+`, and `#t & 3` became `#flr(t) & 3`.
+# The price is that a CALL has to know precedence, where a wrapper around each
+# operand does not: `a & b * 2` is `a & (b*2)`, and `__p8_band(a, b) * 2` is a
+# different expression. _PREC is that knowledge, and it is also what keeps
+# `a + 1 & b` flooring both sides of the `+` and `#t & 3` from becoming
+# `#flr(t) & 3`.
 _BITOPS = ("<<", ">>", ">>>", "<<>", ">><", "&", "~", "|")
 # p8's rotates have no Lua operator to leave behind, so they are always a call.
 _ROTATES = ("<<>", ">><")
@@ -1588,8 +1584,8 @@ def _compound_wants_more(toks):
 #
 # The one divergence left, and it is deliberate: over an EMPTY range the loop
 # never evaluates `lut` and the call does, so a `lut` that would RAISE (`t.x`
-# with a nil `t`) raises where it used to be skipped. A field access is worth
-# more than that case is: `lut` is a plain local in every cart seen.
+# with a nil `t`) raises where the loop would have skipped it. A field access
+# is worth more than that case is: `lut` is a plain local in every cart seen.
 
 _NL = (T_WS, "\n")
 
@@ -1930,14 +1926,11 @@ SHIM = r'''-- ============================================================
 -- calls PICO-8 verbs and never knows it moved.
 -- ============================================================
 -- NATIVE RES: the manifest declares "canvas": "128x128" (SPEC.md 1/3.1), so
--- this cart draws REAL p8 pixels 1:1 and the HOST owns all scaling. The old
--- shim drew 2x itself, because asking the host to composite made the zoom
--- appear only on the one tier that implemented `view` -- with the canvas in
--- the manifest every conforming host sizes the raster instead, and the cart
--- fills a QUARTER of the pixels it used to (the biggest speed lever a port
--- has on an interpreter-bound board).
--- ZOOM (--zoom): nothing is cropped from the raster any more -- all 128 rows
--- draw, and pset/pget/camera stay p8-true. The flag became the `view` hint
+-- this cart draws REAL p8 pixels 1:1 and the HOST owns all scaling. Drawing 2x
+-- in the shim instead would quadruple the pixels, which on an
+-- interpreter-bound board is the largest cost a port can carry.
+-- ZOOM (--zoom): nothing is cropped from the raster -- all 128 rows draw, and
+-- pset/pget/camera stay p8-true. The flag became the `view` hint
 -- below: a host with room composites the CENTERED 128x120 at the biggest
 -- integer scale that fits (2x fills a 4:3 screen's 240px height exactly; 5x
 -- fills 600px), and one that presents pixel-for-pixel draws it unscaled. view
@@ -1951,8 +1944,8 @@ do
   local m_camera = camera
   local m_rect, m_rectb = rect, rectb
   local m_circ, m_circb = circ, circb
-  -- The 2026-09 core verbs: nil on a host that predates them, and every use
-  -- below is guarded so the cart still runs there.
+  -- Core verbs a host may predate: nil there, and every use below is guarded
+  -- so the cart still runs.
   local m_oval, m_ovalb, m_fillp = oval, ovalb, fillp
   local m_sget, m_sset, m_palt = sget, sset, palt
   local m_fget, m_fset, m_map = fget, fset, map
@@ -1975,13 +1968,12 @@ do
   -- engine press edge lasts ONE, so reading the engine directly ate half of
   -- all presses.
   --
-  -- And nothing else, because the fallback that used to sit here double-
-  -- counted the other way round: a 60fps cart on a 30fps host runs TWO ticks
-  -- inside one console frame, the first tick cleared the latch, and the second
-  -- still saw the engine's edge -- which is live for that whole frame. One tap
-  -- of left moved two slots in an upgrade menu. The latch is set once per
-  -- console frame and cleared by the tick that consumes it, so one press is
-  -- one edge at any pair of rates.
+  -- And nothing else, because a fallback to the engine double-counts the other
+  -- way round: a 60fps cart on a 30fps host runs TWO ticks inside one console
+  -- frame, the first clears the latch, and the second still sees the engine's
+  -- edge -- which is live for that whole frame. One tap of left moves two slots
+  -- in an upgrade menu. The latch is set once per console frame and cleared by
+  -- the tick that consumes it, so one press is one edge at any pair of rates.
   --
   -- Held, btnp REPEATS: p8 fires again after a 15-tick delay, then every 4.
   -- That is what makes a menu scroll while a cart holds left, and without it
@@ -2628,8 +2620,8 @@ do
       prev = dx
     end
   end
-  -- The console's own kernel where it has one (SPEC.md 6, 2026-09); the
-  -- row-by-row Lua above on a host that predates it.
+  -- The console's own kernel where it has one (SPEC.md 6); the row-by-row Lua
+  -- above on a host that predates it.
   local function _oval_box(x0, y0, x1, y1)
     x0, y0, x1, y1 = fl(x0), fl(y0), fl(x1), fl(y1)
     if x1 < x0 then x0, x1 = x1, x0 end
@@ -2654,9 +2646,9 @@ do
   -- cart calling one crashed with nothing said at import time.
   ceil = math.ceil
   function srand(x) return mrandomseed(flr(x or 0)) end
-  -- COROUTINES: p8's names for Lua's own library, which SPEC.md 4.1 admits
-  -- (2026-09-02). Guarded, because a host on an older binding still nils it,
-  -- and a nil-guarded alias is a nil call at the site instead of at load.
+  -- COROUTINES: p8's names for Lua's own library, which SPEC.md 4.1 admits.
+  -- Guarded, because a host on an older binding still nils it, and a
+  -- nil-guarded alias is a nil call at the site instead of at load.
   if coroutine ~= nil then
     cocreate, coresume, costatus, yield = coroutine.create, coroutine.resume,
                                           coroutine.status, coroutine.yield
@@ -2672,29 +2664,6 @@ do
   function run()
     if p8_init then p8_init() end
   end
-  -- p8's bitwise operators work on its 16.16 FIXED POINT representation, so a
-  -- mask WITH A FRACTION is meaningful there: `x & 0xffff.fffe` is idiomatic
-  -- p8 for "drop the lowest fractional bit". We floor instead, which discards
-  -- the fraction entirely.
-  --
-  -- THAT IS NOT A SHORTCUT, IT IS THE PLATFORM. libmoy builds Lua with
-  -- LUA_32BITS, which makes lua_Number a SINGLE-PRECISION float -- 24 bits of
-  -- mantissa against the 32 a 16.16 value needs. Measured on the real console
-  -- (libmoy/build/run_cart, 2026-09-01): `0xffff.fffe` is already 65536.0 by
-  -- the time the cart sees it, so the mask a cart wrote does not survive being
-  -- READ, let alone applied. Do not re-attempt it without changing
-  -- LUA_FLOAT_TYPE, which is a spec decision and not a porter fix.
-  --
-  -- A faithful implementation WAS written, and what let it look correct is the
-  -- part worth remembering: it was checked in a scratch `lupa` script. lupa is
-  -- 64-bit, every tier this project ships is LUA_32BITS, and lupa was DELETED
-  -- from the host in 2026-08-14 for precisely that reason. The host's own Lua
-  -- would have said no. Do not check numeric semantics on a Lua nobody ships.
-  --
-  -- The cost is real and bounded: a cart that masks fractional bits (dank_tomb
-  -- parses its config that way) reads zeros. Integer masks -- every other cart
-  -- measured -- are exact, because a whole number's low 16 fixed-point bits
-  -- are zero and flooring discards nothing.
   -- PICO-8's numbers are 16.16 fixed point and its bit verbs work on all 32
   -- bits, fraction included: `band(x, 0xffff.fffe)` drops the lowest
   -- fractional bit, `rotl(0x0.0001, k)` is a flag mask, `shr(x, 1)` halves
@@ -2702,7 +2671,9 @@ do
   -- is done on the 32-bit fixed image and divided back -- EXACT whenever the
   -- value fits a float32's 24 bits, which fraction-packed flags and parsed
   -- decimals do (dank tomb, dungeons & diagrams), and lossy only for a full
-  -- 32-bit packed word, which is the class the importer refuses.
+  -- 32-bit packed word, which is the class the importer refuses. lua_Number is
+  -- SINGLE precision here (LUA_32BITS), so never check these semantics against
+  -- a 64-bit Lua -- it will agree where the shipped tiers do not.
   local mtype = math.type
   local function fx(v)
     if mtype(v) == "integer" then return v << 16 end
@@ -2779,16 +2750,13 @@ do
   -- THE NATIVE BIT OPERATORS, which are a different thing from the nine verbs
   -- above and share nothing with them but their spelling. p8 writes `a|b`,
   -- `a<<b`, `~a`; Lua 5.4 refuses a bitwise operator on a non-integral float,
-  -- so the porter floors both operands -- and it used to floor them where
-  -- they stood, `flr(a) | flr(b)`, which is TWO binding calls around one VM
-  -- instruction. On dank tomb that was 4,000 calls a frame, more than the
-  -- cart's whole raster.
+  -- so the porter floors both operands -- in ONE call rather than a wrapper
+  -- around each, which would be two binding calls around one VM instruction.
   --
   -- Each body IS that expansion, so a host with nothing behind the name runs
-  -- exactly what the cart ran before; the machine's twin below does the same
-  -- floor and the same operator in one crossing. `flr` is looked up as a
-  -- global here for the same reason the expansion did: it is whichever flr
-  -- the shim ended up with, C or Lua.
+  -- plain Lua; the machine's twin below does the same floor and the same
+  -- operator in one crossing. `flr` is looked up as a global here on purpose:
+  -- it is whichever flr the shim ended up with, C or Lua.
   --
   -- `__p8_lshr` is p8's `>>>`, which has always been Lua's `>>` (already a
   -- logical shift); it carries its own name so the machine can too. The two
@@ -2846,9 +2814,9 @@ do
   -- from it ONCE at start via the console mget (captured before the p8 mget
   -- shadows it). __gff__ stays baked below the shim (flags have no moy home).
   -- ===================== the compatibility layer =====================
-  -- p8 verbs that reach for a MACHINE this console does not have: raw memory,
-  -- a dither pattern register, machine counters, the cart ROM. Each one was a
-  -- nil-call before -- the cart stopped dead the first frame it ran the line.
+  -- p8 verbs that reach for a MACHINE the console does not have on its own:
+  -- raw memory, machine counters, the cart ROM. Unbound, each is a nil call
+  -- that stops the cart on the first frame it runs the line.
   --
   -- The rule here is: never crash, be honest where we can be, and be a
   -- harmless no-op where we cannot. The import report says which is which, so
@@ -2977,19 +2945,14 @@ do
                                                           -- date parts, the rest
   end
 
-  -- fillp() is a DITHER PATTERN for the fill verbs. The console fills solid,
-  -- so the pattern is remembered and not used: the cart runs and its gradients
-  -- come out flat. Six of twelve measured carts call it, and every one of them
-  -- used to stop dead here.
-  -- fillp() is a DITHER PATTERN for the fill verbs, and the console fills
-  -- solid -- but the pattern's fractional 0.5 bit means "colour 1 is
-  -- TRANSPARENT", and that half we can honour exactly by not drawing.
+  -- fillp() is a DITHER PATTERN for the shape verbs. The console has one
+  -- (SPEC.md 6); on a host that does not, the pattern is remembered and shapes
+  -- come out flat.
   --
-  -- It matters more than the dithering does. Carts fade between scenes by
-  -- setting a transparent pattern and filling the whole screen:
-  -- `picooffroad` does exactly that every transition, and ignoring the
-  -- transparency turned each fade into a solid black screen -- strictly worse
-  -- than the flat fill everything else gets.
+  -- The pattern's fractional 0.5 bit means "colour 1 is TRANSPARENT", and that
+  -- half matters more than the dithering: carts fade between scenes by setting
+  -- a transparent pattern and filling the whole screen (`picooffroad` every
+  -- transition), so ignoring it turns each fade into a solid black screen.
   function fillp(p)
     p = p or 0
     if type(p) ~= "number" then p = tonumber(p) or 0 end
@@ -3000,9 +2963,6 @@ do
     if fill_pattern == 0 and m_fillp ~= nil then m_fillp() end
   end
 
-  -- The SHEET is a file here, not memory. sget reads back 0 rather than
-  -- refusing: a cart doing collision off sheet pixels will be wrong, and one
-  -- doing an effect will just not see it.
   -- The sheet is a FILE here, not memory -- but a cart that reads it back
   -- needs to read what it wrote. `__p8_sheet` is baked in (only for carts
   -- that call these), so sget sees the real art and sset is visible to sget.
@@ -3026,8 +2986,8 @@ do
                    .. string.sub(row, x + 2)
   end
   if m_sget ~= nil then
-    -- The console's own sheet verbs (SPEC.md 7.1, 2026-09): what sset writes
-    -- is what spr draws, and the baked copy above is only for older hosts.
+    -- The console's own sheet verbs (SPEC.md 7.1): what sset writes is what
+    -- spr draws, and the baked copy above is only for older hosts.
     function sget(x, y) return m_sget(fl(x), fl(y)) end
     function sset(x, y, c) m_sset(fl(x), fl(y), fl(c == nil and p8_pen or c)) end
   end
@@ -3163,8 +3123,8 @@ do
     sx = mfloor(sx or 0)
     sy = mfloor(sy or 0)
     -- PICO-8's defaults are the WHOLE map (128 x 64 cells): `map()` is how a
-    -- room cart draws the world under a camera. (16 x 16 here left every
-    -- room but the first black -- petal quest, 2026-09-02.) The walk is then
+    -- room cart draws the world under a camera. (16 x 16 here leaves every
+    -- room but the first black -- petal quest.) The walk is then
     -- clipped to the 128 x 128 window the camera shows, so the default costs
     -- the cells on screen and not 8,192 a frame.
     cw = mfloor(cw or 128)
@@ -3184,8 +3144,8 @@ do
       return
     end
     if m_fget ~= nil then
-      -- The console's own masked walk (SPEC.md 7.2 layers, 2026-09), in C
-      -- on every libmoy host; the Lua loop below is for one that predates it.
+      -- The console's own masked walk (SPEC.md 7.2 layers), in C on every
+      -- libmoy host; the Lua loop below is for one that predates it.
       m_map(celx, cely, cw, ch, sx, sy, -1, 1, mask)
       return
     end
@@ -3277,16 +3237,14 @@ do
   -- The cost, and it is real: where the host rate is not a multiple of 30, the
   -- ticks land on ITS frame grid, so their spacing alternates (at 45fps, gaps
   -- of 22 and 44ms). That is arithmetic, not a scheme to tune away -- a 45fps
-  -- host cannot place 30 evenly spaced ticks per second. Even spacing at the
-  -- wrong rate is what this replaced: it ran a cart at 75% speed there, and
-  -- 53% at 32fps.
+  -- host cannot place 30 evenly spaced ticks per second, and quantizing to an
+  -- even spacing instead runs the cart at the wrong RATE, which is worse.
   local EPS = P8_DT * 0.02      -- absorbs an integer-ms host period (33 vs 33.33)
   -- A late frame runs extra ticks to catch up, but only while a tick is
   -- CHEAP: under half the cart's period, PICO-8's own line for running two
   -- ticks per draw. A heavier tick cannot be caught up on -- each extra one
-  -- makes the next frame later still, until the frame is nothing but ticks
-  -- (that pinned the heavy carts at 8 fps) -- so past that line a late
-  -- frame slows time instead, as it does on PICO-8.
+  -- makes the next frame later still, until the frame is nothing but ticks --
+  -- so past that line a late frame slows time instead, as it does on PICO-8.
   local MAX_CATCHUP = 4         -- past this the board genuinely cannot keep up
   local CHEAP = P8_DT * 500     -- ms
   local tick_ms = 0             -- what the last tick cost, on the host clock
@@ -3297,15 +3255,14 @@ do
   -- own functions are defined below it -- so it is locked on the first frame,
   -- which is also the first moment it can be known.
   --
-  -- Reading only `p8_update` was not a slow cart, it was a DEAD one: a
-  -- 60fps cart's update never ran at all, so it drew its first frame forever
-  -- and answered no input. `bunnysurvivor` is one, and "couldn't send any
-  -- input" is exactly what that looks like from the outside.
+  -- Reading only `p8_update` leaves a 60fps cart DEAD, not slow: its update
+  -- never runs, so it draws its first frame forever and answers no input
+  -- (`bunnysurvivor`).
+  --
   -- The RATE is locked once; the FUNCTION is looked up every tick. p8 reads
   -- `_update` fresh each frame, and a cart may reassign it -- a scene machine
-  -- swapping its update for the next screen is ordinary p8. Caching the
-  -- function on frame one froze any cart that had not defined it yet, or that
-  -- replaced it later, with no error to show for it.
+  -- swapping its update for the next screen is ordinary p8 -- so caching the
+  -- function on frame one freezes any cart that defines it later, silently.
   local locked = false
   -- An edge stays visible for the WHOLE cart frame, _draw included: PICO-8's
   -- btnp() answers the same in _draw as it did in _update, and petal quest's
@@ -3466,12 +3423,12 @@ def data_tables_lua(sections, want_sheet=False, want_map_raw=False):
 P8_API = ("btn btnp camera sin cos flr abs min max sqrt atan2 spr rectfill "
           "rect circfill circ print pal pset pget line sfx music menuitem "
           "add del all foreach count sub tostr sgn mid rnd mget fget map "
-          # 2026-08-30: the gaps that were only ever a naming difference.
+          # The gaps that were only ever a naming difference.
           "t time chr ord tonum split mset sspr "
           "oval ovalfill ceil srand deli unpack pack run "
           "cocreate coresume costatus yield coclose "
-          # 2026-09-01: the compatibility layer -- these answer rather than
-          # stopping the cart, and the report calls them approximations.
+          # The compatibility layer -- these answer rather than stopping the
+          # cart, and the report calls them approximations.
           "peek peek2 peek4 poke poke2 poke4 memcpy memset "
           "cartdata dget dset stat fillp sget sset fset "
           "reload cstore printh extcmd flip holdframe color cursor "
@@ -3685,10 +3642,10 @@ def classify_body(body):
     elif shifts:
         gaps.append("it shifts numbers by 16 bits, which loses the fixed-point precision "
                     "PICO-8 has; a hash or a mask may come out wrong")
-    # Fractional hex constants and the bit verbs on them are exact since
-    # 2026-09-02 (the shim works on the 16.16 image, the converter spells the
-    # literal's bit pattern), so they are no longer a gap. What stays out of
-    # reach is a full 32-bit packed word: the shift-by-16 decoder above.
+    # Fractional hex constants and the bit verbs on them are exact -- the shim
+    # works on the 16.16 image and the converter spells the literal's bit
+    # pattern -- so they are not a gap. What stays out of reach is a full
+    # 32-bit packed word: the shift-by-16 decoder above.
     has_loop = (_defines_function(body, "p8_update") or _defines_function(body, "p8_update60")
                 or _defines_function(body, "p8_draw"))
     if _call_sites(code, "flip") and not _defines_function(body, "flip"):
@@ -3856,11 +3813,10 @@ def localization_lua(body):
 def build_manifest(title, icon=None, fps=30):
     # The spec manifest (SPEC.md 3.1). `fps` is the cart's LOGIC rate, and a p8
     # cart picks it by which lifecycle it defines: _update60 means 60, _update
-    # means 30. Declaring 30 for every cart was wrong in a way that reached the
-    # host -- `Workstation.frame_cap_fps` reads this field, so a 60fps cart was
-    # capped to a 30Hz loop while the shim still wanted 60Hz logic, which is
-    # two cart ticks inside one console frame. That is exactly the shape of the
-    # doubled btnp edge fixed on 2026-09-01.
+    # means 30. It reaches the host -- `Workstation.frame_cap_fps` reads this
+    # field -- so declaring 30 for a 60fps cart caps the loop to 30Hz while the
+    # shim still wants 60Hz logic, i.e. two cart ticks inside one console
+    # frame, which is what doubles a btnp edge.
     # "ported_from" is an unrecognised field; the spec requires hosts to ignore
     # it (3.1).
     man = {
@@ -4084,10 +4040,10 @@ def parse_zoom(argv):
 
     Bare --zoom means 4,4: the 8-row concession that lets a 4:3 host fill its
     height (view(128, 120) composites at 2x = 256x240 there). Nothing is
-    cropped from the RASTER any more -- the rows only leave the picture on
-    hosts that exploit the SPEC.md 6 view hint, and that crop is CENTERED,
-    so T,B survives as CLI shape only; 8,0-style edge protection no longer
-    maps and port() refuses any split that isn't 8 rows total (or none)."""
+    cropped from the RASTER -- the rows only leave the picture on hosts that
+    exploit the SPEC.md 6 view hint, and that crop is CENTERED, so T,B is CLI
+    shape only: an 8,0-style edge protection does not map, and port() refuses
+    any split that isn't 8 rows total (or none)."""
     if "--zoom" not in argv:
         return (0, 0)
     i = argv.index("--zoom")

@@ -129,10 +129,11 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     its reason to exist, and two two-line copies are cheaper than the
     indirection. Nor did `fold_supported` become a base-class probe — a board
     without the lever must carry no such attribute at all, which is how a board
-    says it lacks one. **2026-09 amendment:** the T-Deck took the fold, so the
-    verbs moved onto a `FoldingCompositor` rung BETWEEN the base and the two
+    says it lacks one. **2026-09 amendment:** the T-Deck took the fold too, so
+    the verbs sit on a `FoldingCompositor` rung BETWEEN the base and the two
     boards — a subclass and not four more base methods, precisely so that
-    absence stays available to the next banded board that cannot synthesize. Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
+    absence stays available to the next banded board that cannot synthesize.
+    Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
     44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
     `idle=0 gaps=0` on both, suites 9/9 and 10/10.
 

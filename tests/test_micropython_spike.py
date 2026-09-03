@@ -2897,8 +2897,8 @@ def test_micropython_offline_diag_wiring():
             '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
             in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
-    # fold= is the #190 liveness proof, and BOTH banded boards carry it since
-    # 2026-09 (native/moy_flush/moy_fold). Behaviour is pinned by
+    # fold= is the #190 liveness proof, and BOTH banded boards carry it
+    # (native/moy_flush/moy_fold). Behaviour is pinned by
     # tests/test_banded_panel.py and the C by tests/test_flush_fold.py; what a
     # grep can pin is that the meter is defined ONCE, on the shared rung both
     # boards subclass, and reads the C rather than a cached int.

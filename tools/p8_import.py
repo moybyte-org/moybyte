@@ -194,11 +194,10 @@ def gfx_to_kgfx(gfx_lines):
 #     number them differently). The 8 CUSTOM instruments (waveform 8..15) are
 #     an SFX slot 0..7 used AS an instrument, which the moy model has no way to
 #     say. They still fold onto one builtin wave -- but onto the wave that
-#     slot actually plays, not onto `w & 7`. The low-bits fold was arbitrary
-#     and it was audibly wrong: a cart using custom instrument 6 got `6 & 7`
-#     = p8 waveform 6 = NOISE, so 32 notes of a real cart's music played as
-#     static. The report names the substitution now instead of doing it
-#     silently.
+#     slot actually plays, not onto `w & 7`: that low-bits fold is audibly
+#     wrong, since custom instrument 6 lands on p8 waveform 6 = NOISE and a
+#     cart's music plays as static. The report names the substitution rather
+#     than doing it silently.
 #   * SPEED: PICO-8 "note duration" D is ticks-per-row at 120 ticks/sec, so
 #     speed = 120/D steps/sec exactly (SPEC.md 8.1's speed is not
 #     integer-only; rounding it drifts the row clock). D==0 plays flat out.
@@ -277,10 +276,9 @@ def _sfx_line_to_dict(line, custom=None):
     # ticks-per-note at 120 ticks/sec -> steps/sec, kept exact: a D=32 sfx is
     # 3.75 steps/s, and rounding that to 4 drifts it against the row clock.
     # SPEC.md 8.1's speed is not integer-only.
-    # Byte 0 is "filters + editor flag", and it used to be read as "editor"
-    # and dropped. It is not: PICO-8 0.2.4 packs noiz/buzz/detune/reverb/
-    # dampen into it, and a modern cart uses them on most of its sounds --
-    # one measured 17 reverbs, 14 dampens and 13 detunes across 23 sfx. Bit 0
+    # Byte 0 is "filters + editor flag", and reading it as the editor flag
+    # alone drops five settings: PICO-8 0.2.4 packs noiz/buzz/detune/reverb/
+    # dampen into it, and a modern cart uses them on most of its sounds. Bit 0
     # IS the editor flag and means nothing to playback; the rest carry over
     # verbatim, exactly like the effect nibble.
     filters = _hx(s, 0, 2) & 0xFE

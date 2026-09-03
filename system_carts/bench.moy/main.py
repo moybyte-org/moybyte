@@ -99,12 +99,23 @@ def _verbs():
         tline(0, (i * 13) % 240, 319, (i * 13) % 240,
               (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
 
+    # APPENDED when moy core 0.3 promoted SPEC.md 6.1: `trib` was the one
+    # promoted verb with no measured row anywhere, and a promoted verb owes a
+    # cost. 0.3's other new shape verbs (oval/ovalb) are NOT here and must not
+    # be added until runtime/cart_verbs grows them -- this cart is Python, its
+    # twin is Lua, and libmoy having a verb the Python tier lacks would break
+    # the twin the whole table depends on. `fillp` is not a scene either: it is
+    # draw STATE, so its cost belongs to whichever shape carries the pattern.
+    def v_trib(i):
+        trib((i * 17) % 300, (i * 31) % 230, (i * 59) % 300 + 10,
+             (i * 43) % 230, (i * 23) % 300, ((i * 13) % 230) + 8, 2 + (i & 15))
+
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
             ("tri", v_tri, 50), ("spr", v_spr, 500),
             ("map", v_map, 8), ("sspr", v_sspr, 50),
-            ("tline", v_tline, 50)]
+            ("tline", v_tline, 50), ("trib", v_trib, 50)]
 
 
 def _init():
@@ -392,9 +403,10 @@ def _serial_report():
 #   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
 #   8 + i*3:  verb_id, k, best_ms          (verb ids in _VERB_ID)
 #   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
+#   Verb rows run 8..63 (three cells each), so the roster caps at 18.
 _VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
             "rectb": 6, "circb": 7, "tri": 8, "spr": 9, "map": 10,
-            "sspr": 11, "tline": 12}
+            "sspr": 11, "tline": 12, "trib": 13}
 _PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
                 ("silent", 3), ("sound", 4))
 
