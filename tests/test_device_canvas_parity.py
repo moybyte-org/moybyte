@@ -124,6 +124,7 @@ class _FakeGfx:
     circ = staticmethod(gfx_binding.circ)
     circb = staticmethod(gfx_binding.circb)
     line = staticmethod(gfx_binding.line)
+    shape = staticmethod(gfx_binding.shape)
 
     @staticmethod
     def fill(buf, npix, color):
@@ -539,6 +540,61 @@ def test_baseline_primitives_match():
 
 
 # --------------------------------------------------------------------------- #
+# The shape verbs under a fill pattern, and oval/ovalb.                      #
+# --------------------------------------------------------------------------- #
+def _draw_shapes(c):
+    # Every verb SPEC.md 6 says the pattern reaches, and the two it does not
+    # (pix, print): a fallback that dithered those would pass a hash built only
+    # from shapes.
+    c.cls(1)
+    c.oval(4, 4, 30, 18, 8)
+    c.ovalb(38, 4, 18, 30, 11)
+    c.fillp(0xA5A5)
+    c.rect(4, 26, 20, 12, 12)
+    c.circ(34, 40, 8, 14)
+    c.fillp(0x5A5A, 3)
+    c.rectb(2, 2, 60, 44, 7)
+    c.circb(50, 20, 9, 10)
+    c.line(0, 46, 63, 30, 9)
+    c.tri(10, 40, 30, 46, 16, 30, 15)
+    c.trib(40, 26, 58, 44, 44, 46, 6)
+    c.oval(20, 10, 24, 24, 5)
+    c.ovalb(20, 10, 24, 24, 4)
+    c.pix(1, 1, 7)
+    c.print("ab", 8, 20, 7)
+    c.fillp()
+    c.rect(0, 0, 3, 3, 2)                  # solid again
+
+
+def test_fill_pattern_and_ovals_match():
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        _draw_shapes(host)
+        _draw_shapes(dev)
+        _assert_same(host, dev, "shapes gfx=%s" % gfx)
+
+
+def test_the_fill_pattern_is_screen_anchored_under_a_camera():
+    # The pattern is anchored to the SCREEN (SPEC.md 6), so it is tested AFTER
+    # the camera offset. These two draws land on the same buffer pixels by two
+    # different routes, so screen-anchoring makes them identical -- while a
+    # raster that tested the pattern in world space would put the dither three
+    # columns out of phase and still pass every other case in this file.
+    for gfx in (True, False):
+        _, _, a = _both(gfx)               # both arms the SAME lane, so the
+        _, _, b = _both(gfx)               # camera is the only variable
+        a.cls(1)
+        a.fillp(0x3C69)                    # asymmetric: a phase shift shows
+        a.rect(10, 10, 20, 12, 8)
+        b.cls(1)
+        b.fillp(0x3C69)
+        b.camera(3, 1)
+        b.rect(13, 11, 20, 12, 8)
+        assert _dev_rgb565(a) == _dev_rgb565(b), \
+            "the fill pattern moved with the camera (gfx=%s)" % gfx
+
+
+# --------------------------------------------------------------------------- #
 # camera: a draw offset applied to every primitive.                          #
 # --------------------------------------------------------------------------- #
 def test_camera_offsets_all_primitives():
@@ -804,6 +860,46 @@ def test_map_camera_clip_matches_host():
         _tilemap_scene(host, sheet_h, tm_h)
         _tilemap_scene(dev, sheet_d, tm_d)
         _assert_same(host, dev, "map gfx=%s" % gfx)
+
+
+def test_map_layers_matches_host():
+    """SPEC.md 7.2's layer mask through BOTH map lanes.
+
+    The mask is resolved into a masked copy of the region before either lane
+    runs, so this is what pins the two lanes to the same picture: gfx=True
+    rasters that copy through the compiled kernel, gfx=False walks it cell by
+    cell in Python. A filter applied in one lane and not the other would show
+    up nowhere else -- the goldens only replay the trace through the host."""
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        sheet_h = SpriteSheet(16, 32)
+        sheet_d = m.SpriteSheet(16, 32)
+        for sh in (sheet_h, sheet_d):
+            for tile, col in ((1, 8), (2, 11), (3, 14)):
+                for y in range(8):
+                    for x in range(8):
+                        sh.tset(tile, x, y, col)
+        tm_h = TileMap(4, 4)
+        tm_d = TileMap(4, 4)
+        for tm in (tm_h, tm_d):
+            tm.mset(0, 0, 1)
+            tm.mset(1, 0, 2)
+            tm.mset(2, 1, 3)
+            tm.mset(3, 3, 1)
+        flags = bytearray(512)
+        flags[1] = 0x01
+        flags[2] = 0x03
+        flags[3] = 0x02
+        for c, sh, tm in ((host, sheet_h, tm_h), (dev, sheet_d, tm_d)):
+            c.cls(0)
+            c.camera(2, 3)
+            c.clip(4, 4, 50, 40)
+            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 2, 1, flags)
+            c.map(tm, sh, 0, 0, 4, 4, 8, 8, -1, 1, 2, flags)
+            c.map(tm, sh, -1, -1, 6, 6, 0, 30, -1, 1, 3, flags)   # off-map edges
+            c.map(tm, sh, 0, 0, 4, 4, 0, 0, -1, 1, 0x80, flags)   # nothing carries it
+            c.map(tm, sh, 0, 0, 4, 4, 20, 0, -1, 1, 1, None)      # no table at all
+        _assert_same(host, dev, "map layers gfx=%s" % gfx)
 
 
 # --------------------------------------------------------------------------- #

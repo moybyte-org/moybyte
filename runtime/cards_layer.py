@@ -35,6 +35,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 
 # -- card geometry (single source; console.py imports these back) -------------
@@ -57,11 +63,22 @@ _CARD_SCROLL_DN = (300, 214, 16, 14)    # tap to scroll cards down
 # the "MAKE IT MINE" label (ends ~x234 at scale 2) and the scroll chevrons (y>=44).
 _CARD_INFO_BTN = (278, 21, 36, 14)
 
-_BASE_W = 320
-_BASE_H = 240
+
+# The Config tab draws in its OWN palette (`_tones`), not the theme's, so the
+# toolkit cannot resolve a widget kind against it without help. Same answer as
+# `code_layer._as_theme`: carry the role names the toolkit looks up, each
+# pointing at a role this surface already had. A card row is then an ordinary
+# "row_chrome" -- bright label at rest, the selection wash when it is the one
+# being stepped -- and a skin reaches it (#207).
+def _as_theme(t):
+    """Add the ui-toolkit token aliases to a tone map, in place."""
+    t["chrome_ink"] = t["text"]         # row_chrome REST ink
+    t["hilite"] = t["row"]              # row_chrome ON field
+    t["selection_ink"] = t["sel_text"]  # row_chrome ON ink
+    return t
 
 
-class CardsLayout:
+class CardsLayout(LayoutBase):
     """Responsive "Make it mine" geometry (#39 step 3): the full-width panel, the
     card column + scroll chevrons, the per-display card heights and the picture-cell
     sizes, derived from the SYSTEM canvas size (w, h) + font scale.
@@ -73,11 +90,8 @@ class CardsLayout:
     view band grows) and the cards span its full width."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.body = (0, 18, _BASE_W, _BASE_H - 18)
             self.head_glyph = (8, 22, 14, 14)
@@ -524,20 +538,22 @@ class CardsLayer:
         NAMES = self._NAMES
         # The frozen 320x240 literals hold only in DARK chrome; a light theme
         # variant themes the base tier too (owner ask 2026-07-23).
-        if self.layout._base and not self.ws.light_chrome():
-            return {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
+        if self.layout._base and not self.ws.look.light_chrome():
+            return _as_theme(
+                   {"body": NAMES["dark_purple"], "edge": NAMES["pink"],
                     "head": NAMES["white"], "text": NAMES["light_grey"],
                     "sel_text": NAMES["white"], "row": NAMES["indigo"],
                     "accent": NAMES["yellow"], "track": NAMES["dark_grey"],
                     "knob": NAMES["white"], "cell": NAMES["dark_purple"],
-                    "cell_edge": NAMES["dark_grey"]}
+                    "cell_edge": NAMES["dark_grey"]})
         th = self.ws.theme_colors
-        return {"body": th["surface"], "edge": th["border"],
+        return _as_theme(
+               {"body": th["surface"], "edge": th["border"],
                 "head": th["ink"], "text": th["ink"],
                 "sel_text": th["selection_ink"], "row": th["hilite"],
                 "accent": th["author"], "track": th["ink_dim"],
                 "knob": th["ink"], "cell": th["dim"],
-                "cell_edge": th["ink_dim"]}
+                "cell_edge": th["ink_dim"]})
 
     def _draw_cards(self):
         ws = self.ws
@@ -571,7 +587,6 @@ class CardsLayer:
         i = row["i"]
         x, y, w, h = row["x"], row["y"], row["w"], row["h"]
         sel = (i == self.msel)
-        fg = t["sel_text"] if sel else t["text"]
         disp = row["display"]
         # ONE list row: the selection field (the card's full height, starting a
         # pixel above its text) plus the card's label line, which sits 18px in on
@@ -579,7 +594,7 @@ class CardsLayer:
         # The stepper glyphs and the picture displays below are this card's own
         # CONTENT -- `row` draws the row, not the card.
         _ui.row(cv, t, (x, y - 1 * fs, w, h), self.card_text(i),
-                colors=(t["row"] if sel else None, fg, None), edge=False,
+                kind="row_chrome", on=sel, edge=False,
                 pad=(18 if disp is None else 2) * fs, text_dy=1 * fs, fs=fs)
         if disp is None:                                # today's plain text card
             ws._glyph("minus", (x, y, 14 * fs, 14 * fs), t["accent"], cv)

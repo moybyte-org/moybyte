@@ -34,11 +34,18 @@ class _Slot:
     local player (slot 0) is NOT a _Slot -- the router delegates slot 0 straight to
     the console's own InputState, so the single-player path is untouched."""
 
-    def __init__(self):
+    def __init__(self, auto=True):
         self._held = set()
         self._prev = set()
         self._pressed = set()
         self.connected = True     # a transport clears this on disconnect
+        # auto=False: the transport advances this slot's edges ITSELF, inside
+        # its own per-frame step, and PlayerRouter.begin_frame must leave it
+        # alone. A lockstep session needs that (netplay.LockstepSession._apply):
+        # it writes held and derives the edge in the same breath, mid-tick,
+        # where the router's begin_frame ran earlier in the loop and would
+        # recompute `pressed` against a slot the session had not written yet.
+        self.auto = auto
 
     def set_held(self, name, down):
         # Called by a transport backend as an extra controller's buttons change.
@@ -74,25 +81,32 @@ class PlayerRouter:
         self._slots = {}             # index (>=1) -> _Slot
 
     # -- the cart-facing reads (bound into make_api's btn/btnp/players) ------
+    #
+    # A registered slot wins at EVERY index, slot 0 included. Nothing registers
+    # slot 0 in local play, so this is the old behaviour verbatim -- but a
+    # lockstep match needs it (netplay.LockstepSession): the local kid is global
+    # player 0 on one console and player 1 on the other, and the cart must
+    # address the same character by the same index on both screens. Hardwiring
+    # slot 0 to the local InputState would make that impossible to express.
     def held(self, name, player=0):
+        s = self._slots.get(player)
+        if s is not None:
+            return s.held(name)
         if not player:
             # Slot 0 is the local console. With every source unassigned (the
             # universal case) that IS the union, byte-for-byte as before; once
             # a source carries a player of its own, slot 0 stops including it.
             return self._local.held(name, 0) if self._local_multi() \
                 else self._local.held(name)
-        s = self._slots.get(player)
-        if s is not None:
-            return s.held(name)
         return self._local.held(name, player) if self._local_multi() else False
 
     def pressed(self, name, player=0):
-        if not player:
-            return self._local.pressed(name, 0) if self._local_multi() \
-                else self._local.pressed(name)
         s = self._slots.get(player)
         if s is not None:
             return s.pressed(name)
+        if not player:
+            return self._local.pressed(name, 0) if self._local_multi() \
+                else self._local.pressed(name)
         return self._local.pressed(name, player) if self._local_multi() else False
 
     def _local_multi(self):
@@ -107,6 +121,13 @@ class PlayerRouter:
         assigned to -- the local console's input sources (#26: every producer
         owns a source and carries a player) plus any extra slot a transport
         registered. A cart offers a 2P mode when this is >= 2."""
+        if not self._slots and not self._local_multi():
+            # THE UNIVERSAL CASE, and it must not allocate: a Lua cart asks this
+            # every frame through the moycore snapshot, and the general path
+            # below builds a tuple and a set to answer "one". moycore_glue's own
+            # header records what a per-frame allocation on that path cost the
+            # last time (~1ms on the S3, visible on glass as a Bench FLOOR gap).
+            return 1
         ids = None
         srcp = getattr(self._local, "source_players", None)
         if srcp is not None:
@@ -120,15 +141,46 @@ class PlayerRouter:
                 ids.add(i)
         return len(ids) or 1
 
+    def button_masks(self, order, player):
+        """(held, pressed) bitmasks for one player, in `order`.
+
+        The bulk read the Lua tiers need: moycore takes the frame's buttons as
+        an int snapshot, so asking name by name would put seven Python calls per
+        player back on the path whose whole purpose is to have none. Resolves
+        the same way the single reads do -- a registered slot wins at every
+        index, then the local InputState's per-source players."""
+        s = self._slots.get(player)
+        if s is not None:
+            h = p = 0
+            held, pressed = s._held, s._pressed
+            for i, name in enumerate(order):
+                if name in held:
+                    h |= 1 << i
+                if name in pressed:
+                    p |= 1 << i
+            return h, p
+        bm = getattr(self._local, "button_masks", None)
+        if bm is None:
+            return 0, 0
+        if not player:
+            return bm(order, 0) if self._local_multi() else bm(order)
+        return bm(order, player) if self._local_multi() else (0, 0)
+
     # -- the transport-facing registration (a backend owns these) -----------
-    def add_player(self, index):
-        """Register (or re-connect) extra player `index` (>=1) and return its
-        _Slot for the transport to feed. Idempotent."""
+    def add_player(self, index, auto=True):
+        """Register (or re-connect) player `index` and return its _Slot for the
+        transport to feed. Idempotent.
+
+        `index` may be 0: a lockstep session owns BOTH global slots, because
+        which of them is the local kid differs per console. `auto=False` says
+        the transport advances this slot's press edges itself -- see _Slot."""
         index = int(index)
         s = self._slots.get(index)
         if s is None:
-            s = _Slot()
+            s = _Slot(auto)
             self._slots[index] = s
+        else:
+            s.auto = auto
         s.connected = True
         return s
 
@@ -137,13 +189,18 @@ class PlayerRouter:
         self._slots.pop(int(index), None)
 
     def begin_frame(self):
-        """Advance every extra slot's press-edge for this frame. Called next to
+        """Advance every AUTO slot's press-edge for this frame. Called next to
         the local InputState.begin_frame(). The truthiness guard matters on
         MicroPython: dict.values() allocates a view + iterator PER CALL, which
-        on the single-player path was per-frame churn for an empty loop."""
+        on the single-player path was per-frame churn for an empty loop.
+
+        A non-auto slot is skipped: its transport advances it mid-tick, at the
+        moment it writes held, which is the only order that keeps a lockstep
+        frame's held and pressed describing the same frame."""
         if self._slots:
             for s in self._slots.values():
-                s.begin_frame()
+                if s.auto:
+                    s.begin_frame()
 
 
 class NetService:

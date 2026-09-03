@@ -1,0 +1,33 @@
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "THE BOARD VANISHED. Not an update, not a hand-back -- unplugged, rebooted, off the WiFi. In board mode this page keeps no store of its own by design, so the sweep's unshipped work lives only in this tab, and this is the one disconnect that has to say so. The DETECTION (worker.js counts SYNC_GIVE_UP failed posts) is pinned in the host suite; what only a browser can show is that the panel a person reads actually appears, carries the warning, and is styled as the bad case.",
+   "wait": 3000
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,px:(function(){try{var d=cx.getImageData(0,0,cv.width,cv.height).data,n=0;for(var i=0;i<d.length;i+=4){if(d[i]|d[i+1]|d[i+2])n++;}return n;}catch(e){return -1;}})()})"
+  },
+  {
+   "note": "Nothing is wrong yet, so nothing may be showing. A panel that is visible before anything went wrong is the cry-wolf failure, and it would pass every check below.",
+   "js": "JSON.stringify({at:'quiet',shown:getComputedStyle(document.getElementById('lnk')).display,link:window.__moyLink||null})"
+  },
+  {
+   "js": "window.__moyLinkLost('lost','the console stopped answering','It has not accepted anything for 15 seconds.'); JSON.stringify({at:'fired'})"
+  },
+  {
+   "js": "JSON.stringify({at:'lost',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"
+  },
+  {
+   "note": "THE FIRST REASON WINS. A vanished board is followed by exactly the silence an update looks like; re-labelling the panel afterwards would talk the warning away at the moment it matters most.",
+   "js": "window.__moyLinkLost('expected','updating','the board is restarting'); JSON.stringify({at:'refired'})"
+  },
+  {
+   "js": "JSON.stringify({at:'after',cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent})"
+  },
+  {
+   "shot": "link_lost"
+  }
+ ]
+}

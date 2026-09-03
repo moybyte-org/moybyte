@@ -1,0 +1,347 @@
+#  Moybyte board definition -- Seeed XIAO ESP32-S3 "Zero" (headless)
+#  =================================================================
+#
+#  The re-based Zero (#41, moycore plan 3.2, owner call 2026-08-12): not a
+#  console but the console's pocketable COMPANION. It has no panel, no touch
+#  and no frame loop -- the browser runs the whole console (the wasm head) and
+#  this board is the kid's cart store behind it: `moy_webhost` serving the
+#  bundle + carts.json and applying POST /sync batches onto its own flash.
+#
+#  A REAL BUILD TARGET SINCE 2026-08-29 (owner call), and the reversal is
+#  recorded rather than tidied away, because the shape it replaces explains
+#  this one. What this file said until that day:
+#
+#      "DELIBERATELY NOT A BUILD TARGET. It runs STOCK MicroPython v1.28
+#      (ESP32_GENERIC_S3-SPIRAM_OCT, flashed once -- README.md) with the shared
+#      modules PUSHED as plain files by provision.sh, which is why this file
+#      has no [modules]/[native] staging sections and no build.sh: the module
+#      set is provision.sh's cp list [...] If this board ever earns a frozen
+#      image, it graduates to the ordinary port-kit shape and this file grows
+#      the sections."
+#
+#  That was the right call while the Zero was a spike: a push is a sub-minute
+#  dev loop and an ESP-IDF build is not, and there was nothing to freeze that a
+#  cp could not deliver. What ended it is that the board became a PRODUCT --
+#  the thing a kid's carts actually live on -- and three properties a pushed
+#  tree cannot have started to matter: an image that carries its own browser
+#  console (so the page a board serves cannot drift behind the firmware
+#  serving it), a second app slot (so the board can be updated by anyone who is
+#  not holding a cable), and one declaration of what it runs that the tests can
+#  read. The graduation is exactly the one the paragraph above predicted, so
+#  the sections it named are below.
+#
+#  provision.sh SURVIVES the graduation and changed jobs -- it provisions the
+#  STORE (carts, credentials, the pairing pin) and keeps the push as an
+#  override for the dev loop; it is no longer the module list of record. This
+#  file is. See README.md.
+
+[board]
+name    = "seeed_xiao_esp32s3_zero"
+chip    = "esp32s3"
+ota     = "xiao_zero"       # the board id inside a signed OTA manifest (#53)
+tier    = "headless"
+tier_why = """
+No glass at all: the browser is the display, the store is the product. The
+sync RPC's "natural first host" (moycore plan 3.2) -- everything it serves and
+applies is the shared device tier. That tier is now FROZEN here rather than
+pushed, and the tier is what decides the module sets below: this board stages
+the sync stack and nothing that draws."""
+
+# ---------------------------------------------------------------------------
+
+[modules]
+dest = "modules"
+
+# Same prune contract as the other boards: `modules/` is build output plus the
+# tracked board-authored files, the freeze takes the whole DIRECTORY, and the
+# stager deletes untracked strays it did not just stage. That matters more here
+# than anywhere: this board spent two months being provisioned by `mpremote cp`,
+# so a tree that has ever been used for development is exactly where a stale
+# copy hides.
+prune = true
+keep  = [
+  "carts_data.py",   # the PACKED seed roster (tools/gen_device_carts.py --packed)
+  "_ota_build.py",   # the OTA channel/version/label/board stamp (#53)
+]
+
+[modules.shared]
+source   = "runtime"
+strategy = "allowlist"
+why = """
+THE ONE BOARD THAT ALLOWLISTS `runtime/`, and the reason is the same one that
+keeps `[modules.device]` an allowlist on every board: a denylist is right when
+the source tree's default answer is YES.
+
+For a console board it is. `runtime/` is the console -- the WM, the launcher,
+the editors, the apps -- and a new shared module belongs on a console board
+unless somebody writes down why not, which is #161's whole thesis and the
+reason the other three boards deny by exception.
+
+This board is not a console. It has no glass, runs no carts and constructs no
+Workstation; the default answer for a new `runtime/*.py` here is NO, and a
+denylist would express that as forty denials that all say "there is no
+console", plus a silent bug every time a new shared module appears and nobody
+adds the forty-first. The allowlist below is thirteen names long and each group
+says what the board does with it.
+
+The cost is stated plainly: a new shared module the SYNC STACK starts importing
+does not reach this board by default. `tests/test_staging_closure.py` is what
+catches that -- it derives this board's frozen set from THIS FILE and asserts
+every import of every staged module resolves on this target, which is precisely
+the failure an allowlist has and a denylist does not."""
+
+[[modules.shared.group]]
+files = ["moy_sync.py", "moy_fs.py"]
+why = """
+The 3.4 sync RPC itself: the batch format, the per-file last-writer-wins apply,
+the two roots (carts and the #108 files layer), and the small filesystem
+helpers every one of them writes through. This is the board's reason to exist
+-- `moy_webhost` is a transport in front of these two files."""
+
+[[modules.shared.group]]
+files = ["moy_carts.py", "moy_image.py"]
+why = """
+THE ZERO SUPPORTS ALL FEATURES (owner call 2026-08-25), and this pair is what
+that call bought. `moy_sync.file_kinds()` asks the store module for FILE_KINDS
+and files_root before it will serve GET /files.json or apply a v2 files batch;
+with no store module it answers None, which every caller reads as REFUSE -- so
+without these the kid's drawings simply do not travel, silently. `moy_image` is
+`moy_carts`' own import (thumbnails / the .moyimg codec).
+
+`moy_carts` earned a second job here on 2026-08-30: `seed_packed()`, which
+inflates the PACKED roster this board's build bakes into `carts_data.py` (see
+`[modules] keep`). It is the same `seed_builtins` every console board seeds
+with, one cart at a time behind a decoder, so this board gained a first-boot
+store without gaining a second copy of the seed rules."""
+
+[[modules.shared.group]]
+files = ["moy_journal.py"]
+why = """
+The store-of-record journal. This board TAKES browser pushes, so this board is
+where their undo history has to live -- there is one durable journal per cart,
+where the cart durably lives, which is the owner call the whole sync design
+rests on (see moy_sync's docstring). Verified on this board 2026-08-25: two
+carts pushes left a real journal/ with per-commit snapshots, and
+journal_undo/journal_redo walked the live main.py between two browser-era
+commits."""
+
+[[modules.shared.group]]
+files = ["web_view_ws.py", "ticks.py"]
+why = """
+Leaves the transport imports by name: `moy_webserver` imports `web_view_ws`
+(the RFC 6455 upgrade + framing -- the only file of the deleted streaming
+lineage the boards still freeze) and `ticks` (the wrap-safe ms clock its
+blocking budgets and idle reaper are written against)."""
+
+# What is DECLARED ABSENT rather than merely unlisted -----------------------
+
+[[modules.shared.lazy]]
+module = "blocks"
+why = """
+`moy_carts.save_blocks()` reaches the block compiler through a real
+try/except-ImportError LADDER (`import blocks` / `from runtime import blocks`),
+so the staging-closure suite would call it mandatory and be right to, on any
+board that can reach that function. Its only callers are the block editor's UI
+(`block_editor_ui.save_blocks`) and the Editor app, and this board freezes
+neither -- it has no console at all. Declared here rather than staged because
+`blocks.py` is 95KB of source that would ride BOTH OTA slots to serve a code
+path nothing on this board can call. This is the same decision `provision.sh`
+carried in a comment from 2026-08-25; it moves here because this file is now
+the declaration and a comment in a shell script is not."""
+
+# ---------------------------------------------------------------------------
+
+[modules.device]
+source   = "device"
+strategy = "allowlist"
+why = """
+The second staging source, an allowlist for the same reason it is one on every
+board -- `device/` is the boards' shared device tier and not every board drives
+every piece of it. This board drives four files of it, which is the smallest
+device set in the fleet and is the honest measure of what a headless board is:
+a socket, an HTTP/WS transport, a store host and an updater.
+
+The absences are the whole console: no `device_canvas`/`banded_panel` (nothing
+to draw on), no `device_boot`/`device_api` (no FrameLoop, no cart namespace),
+no touch or input driver (no touch, no keyboard, no trackball), no
+`device_audio`, no `moy_espnow` (no second console to pair with), no
+`moybyte_sd` (no card slot). None of those is a deferral: this board's
+hardware does not have the parts."""
+packages = []
+packages_why = """
+Empty, and it is the only board where it is. `moybyte/` is the boards' real
+InputState plus the T-Deck keyboard matrix and the #69 poller; the other three
+freeze it whole because they all construct an InputState. This board never
+does -- its inputs arrive as HTTP requests."""
+
+[[modules.device.group]]
+files = ["moy_webserver.py", "moy_webhost.py"]
+why = """
+The socket/HTTP/WebSocket transport core plus the "serve the wasm console from
+this board" handler. On the console boards these are one Settings row; here
+they ARE the board. `moy_webhost`'s SECURITY docstring is the authority on the
+pin gate, and `zero_host.ZeroHost` subclasses WebHost to add /gpio -- a
+subclass rather than an edit, because the other boards spend their GPIOs on a
+panel and would be handing out the pins their own screen is drawn through."""
+
+[[modules.device.group]]
+files = ["moy_ota.py"]
+why = """
+The OTA updater (#53), wired for this board 2026-08-29. Board-agnostic by
+construction: the staging directory is a constructor argument (the internal
+VFS here -- there is no SD slot) and the identity comes from the generated
+`_ota_build.py`. What is NOT board-agnostic is the rollback confirm, and this
+board is why `confirm_when_serving` exists beside `confirm_when_healthy`:
+every other board certifies a new image by counting frames it painted, and
+this one paints none. See zero_host.serve()."""
+
+# ---------------------------------------------------------------------------
+
+[flash]
+# Read by tools/board_flash.py (#202 Phase A). S3 bootloader offset 0x0, and
+# the S3 layout's otadata at 0x1D000 -- shared with both console S3 boards on
+# purpose (see the partition CSV), and erased FIRST so a board that has taken
+# an OTA boots the slot the cable flash just wrote rather than the stale one.
+#
+# No `before`: the default reset drives this board into the loader now that it
+# is on USB-Serial/JTAG (2026-08-30), the same way it does the console S3s.
+# Until then it could not be driven there AT ALL -- `machine.bootloader()` is an
+# endless loop on this chip in upstream MicroPython, esptool's reset times out
+# over the OTG interface, the 1200-baud touch is unimplemented, and the attempt
+# WEDGED the CDC. Every flash needed a human holding BOOT. mpconfigboard.h
+# carries that evidence; the BOOT hold remains the recovery, not the routine.
+#
+# `after` stays watchdog_reset, which is PROVEN on this board, rather than
+# following the peripheral to the console boards' hard_reset. hard_reset did
+# nothing here on CDC -- a cable flash left the board sitting in the loader,
+# reading exactly like an image that did not take -- and one change at a time is
+# how that was found out.
+image          = "dist/zero/moybyte_zero.bin"
+offset         = "0x0"
+after          = "watchdog_reset"
+baud           = 460800
+otadata_offset = "0x1d000"
+otadata_size   = "0x2000"
+
+[serial]
+# USB-Serial/JTAG since 2026-08-30, like the console S3 boards -- so this board
+# shows 303a:1001 and NOT the TinyUSB CDC 303a:4001 it used to. mpconfigboard.h
+# carries why: on CDC there was no software path into the ROM loader at all, so
+# every flash needed a human holding BOOT.
+#
+# The line state at open flipped WITH the peripheral, and this is the half that
+# bites. On CDC, DTR had to be ASSERTED or the REPL was silent. On
+# USB-Serial/JTAG the lines are read the other way: opening with both LOW is a
+# CHIP RESET, and both HIGH (pyserial's default) attaches cleanly. Same two
+# values, opposite reasons -- which is why they are data here and not a habit.
+#
+# Resets remain harmless on this board (nothing holds state a reset loses), so
+# still no attach_only -- and unlike the console boards there is no dev channel
+# to answer an identity probe, so tools/device_port.py tells it apart by its USB
+# serial rather than by asking.
+dtr  = true
+rts  = true
+usb  = "303a:1001"
+# THE TIEBREAK, and the one cost of the promotion. Three boards now show
+# 303a:1001, and `find_port` tells same-id boards apart by ASKING them over the
+# dev channel -- which this one does not have. Its USB serial number is stable
+# and `udevadm` prints it, so tools/device_port.py matches on this instead of a
+# round trip.
+#
+# It is the chip's MAC, and it moved WITH the peripheral: TinyUSB reported
+# `b8f862f8973c0000`, USB-Serial/JTAG reports `B8:F8:62:F8:97:3C`. The new form
+# is the better one for this job because it is the SAME string running and in
+# the ROM loader, so a board can be found in either state -- the old one was
+# not, and `make device-port` lost the board exactly when it was sitting in the
+# loader waiting to be flashed.
+#
+# Board-specific by nature: read it off YOUR board with
+#   udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT
+serial_number = "B8:F8:62:F8:97:3C"
+chunk = 768
+attach_only = false
+
+[monitor]
+baud = 115200
+
+# ---------------------------------------------------------------------------
+
+[native]
+dest = "native/.staged"
+
+[native.shared]
+source   = "native"
+strategy = "denylist"
+why = """
+The C-module twin of the Python staging, and the one place this board keeps the
+siblings' DENYLIST shape -- because `native/` really does default to yes: a new
+shared C module is a capability every board that has the hardware should get,
+and the seven denials below are all the same sentence with different nouns.
+
+What crosses is exactly ONE module, `moy_web`, and it is the module that
+justifies this board having an image at all: the browser console rides the
+firmware (a 627,373 B .incbin of the gzipped bundle) so the page a board serves
+cannot drift behind the board serving it. Until 2026-08-29 this board had no
+image, so `moy_webhost`'s baked half was structurally unreachable here and the
+bundle was only ever a copy somebody pushed -- exactly the drift that baking it
+was introduced to end, one board late. A pushed copy still WINS at serve time;
+the image is the guarantee, not the ceiling (.claude/rules/web.md).
+
+Every module below is flash spent TWICE, once per OTA slot, which on 8MB is the
+difference between a table that fits and one that does not."""
+
+[[native.shared.deny]]
+module = "moy_gfx"
+why = """
+The RGB565 draw kernel (fill/fill_rect/blit565/spr_batch and the #167 tri/sspr/
+tline verbs) that `device_canvas` dispatches into. There is no canvas on this
+board and no `device_canvas.py` in its device allowlist -- nothing would ever
+call a verb."""
+
+[[native.shared.deny]]
+module = "moy_alloc"
+why = """
+The DMA-capable allocator the panel backends draw their framebuffers and bounce
+slots from. No panel, no framebuffer, no DMA path: this board's only device
+that moves bulk bytes is the WiFi radio, which allocates through lwIP."""
+
+[[native.shared.deny]]
+module = "moy_flush"
+why = """
+The banded flush engine -- the frame state machine, the core-0 feeder, the two
+internal-SRAM bounce slots and the PUMP meters that moy_lcd and moy_axs link
+against. It registers no MicroPython module and exists only to feed a panel;
+the P4 denies it for the narrower reason that its DSI scans continuously, and
+this board denies it because there is nothing to scan or feed."""
+
+[[native.shared.deny]]
+module = "moy_sd"
+why = """
+The live SD attach (`sdspi_host_init_device` with no bus re-init) that lets a
+card share the panel's SPI host. The XIAO ESP32-S3 has no card slot at all --
+the cart store is the internal VFS partition -- so there is no host to share
+and no card to attach."""
+
+[[native.shared.deny]]
+module = "moy_audio"
+why = """
+The I2S backend + the vendored libmoy synth. No amp, no speaker header, no I2S
+pins on this board, and no cart running here to make a sound: the browser
+console does its own audio through an AudioWorklet, on the machine the kid is
+sitting at."""
+
+[[native.shared.deny]]
+module = "moy_lua"
+why = """
+libmoy's Lua binding -- the #67 auto-native cart tier. Carts run in the
+BROWSER when they are paired with this board; nothing on this flash executes a
+cart in either language, so the interpreter would be dead weight in both OTA
+slots."""
+
+[[native.shared.deny]]
+module = "moycore"
+why = """
+The vendored moy-spec core (the cart runtime the Lua tier and the p8 semantics
+sit on). Same argument as moy_lua and the same size class: it is the single
+largest shared C module, and this board runs no carts. Denying the pair is
+most of what makes two app slots fit in 8MB of flash."""

@@ -13,7 +13,6 @@ the six tracked files in it and the `from ticks import ...` ladder's second rung
 (`runtime.ticks`) is what resolves here.
 """
 
-import ast
 import contextlib
 import importlib.util
 import sys
@@ -132,6 +131,14 @@ class FakeWM:
     _stack = ["home"]
 
 
+class _FakeCarts:
+    """`ws.carts` narrowed to the one member `_remote_state` reads (#209
+    landing C): the roster is a plain attribute on the collaborator now."""
+
+    def __init__(self):
+        self.all = []
+
+
 class FakeWS:
     """The `_remote_state` surface, plus a compositor."""
 
@@ -140,7 +147,7 @@ class FakeWS:
         self.comp = comp
         self.screen = "home"
         self.wifi = None
-        self._all_carts = []
+        self.carts = _FakeCarts()
         self._apps = ()
         self._psave_ms = 0
         self._psave_asleep = False
@@ -503,43 +510,10 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
     assert "pump_err" not in _remote_state(FakeWS(None))
 
 
-def _const_str(node):
-    return node.value if isinstance(node, ast.Constant) \
-        and isinstance(node.value, str) else None
-
-
-def _conversions(fmt):
-    n, i = 0, 0
-    while i < len(fmt):
-        if fmt[i] == "%":
-            if fmt[i + 1:i + 2] == "%":
-                i += 2
-                continue
-            n += 1
-        i += 1
-    return n
-
-
-def test_the_PERF_line_formats_against_the_arguments_it_is_given():
-    """The P4's other route, and one whose breakage is SILENT: the print sits
-    inside `_account`'s guard, so a %-count mismatch costs the whole line and
-    surfaces only as `PERF sample failed` every two seconds."""
-    tree = ast.parse((P4_MODULES / "moy_runtime.py").read_text(encoding="utf-8"))
-    found = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == "print" and len(node.args) == 1):
-            continue
-        arg = node.args[0]
-        if not (isinstance(arg, ast.BinOp) and isinstance(arg.op, ast.Mod)):
-            continue
-        fmt = _const_str(arg.left)
-        if fmt is not None and fmt.startswith("PERF "):
-            assert isinstance(arg.right, ast.Tuple)
-            found.append((fmt, len(arg.right.elts)))
-    for fmt, argc in found:
-        assert _conversions(fmt) == argc, fmt
-    sample = [f for f, _ in found if f.startswith("PERF fps=")]
-    assert len(sample) == 1
-    assert "ppa=%d/%d/%d/%d/%d" in sample[0]
-    assert "fence_ms=" in sample[0] and "gfence_ms=" in sample[0]
+# The PERF line's format, its %-count and its `-`-never-0 marker moved to
+# tests/test_device_boot.py with the sampler itself (#206 item 2): the line is
+# device_boot.PerfSampler now, so those assertions can EXECUTE the emitter
+# instead of parsing a print out of this board's source. What stays a P4
+# question -- that the overlap tuple this file exercises is what the line's
+# ppa=/fence_ms= fields carry -- is pinned there against this board's own
+# declaration.

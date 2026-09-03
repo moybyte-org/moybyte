@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
-"""Per-cart fps on the P4, over the board's own serial dev commands.
+"""Per-cart fps on ANY board, over its own serial dev commands.
 
-    python3 tools/p4_perf.py                       # the default roster
-    python3 tools/p4_perf.py "Brick Siege" Sakura  # named carts
-    python3 tools/p4_perf.py --secs 12 --diag      # longer, with the frame eaters
+    python3 tools/p4_perf.py --board p4                       # the roster
+    python3 tools/p4_perf.py --board tdeck "Brick Siege"      # named carts
+    python3 tools/p4_perf.py --board guition_s3 --secs 12 --diag
+
+--board IS REQUIRED and deliberately has no default (the same argument
+tools/push_cart.py makes): the boards differ in the serial line state at open,
+and opening an S3 with both lines low CHIP-RESETS it -- after which the USB
+device re-enumerates under this handle and every read returns nothing forever,
+which reads exactly like a dead board. Until 2026-08-28 this tool took only
+--port and built the driver on the P4's defaults, so it could not be pointed at
+either S3 board without wrecking the session. The port now resolves from the
+board's own [serial] usb id unless --port says otherwise.
+
+It also could not READ two of the three: the T-Deck's samples went through the
+diag ring, whose `Moybyte <uptime> ` stamp defeated the `startswith("PERF ")`
+filter here, and the Guition printed a different field set from the P4's. There
+is ONE format now (runtime/perf_line.py), written by one body on every board,
+and this parses it with the module that writes it.
 
 The board prints a PERF line every ~2s carrying drawn-fps and the frame budget
 split (draw / flush / logic / render / chrome). This runs each cart, waits for
@@ -16,6 +31,18 @@ chip are themselves frame eaters (#68), so a measurement taken with them on is
 not the shipping number. The fps= field stays valid either way -- it reads
 _frames_drawn, not the EMAs -- so the only thing lost with them off is the
 per-phase ms breakdown, which --diag turns back on when you want it.
+
+A row marked LINKED is NOT that cart's fps. A second console left in the same
+two-player cart forms a real ESP-NOW match, and a linked game draws on the
+shared 30Hz tick by design (#65) -- so Brick Siege reads 30 against the 62 it
+runs solo. Move the other console off the cart and re-measure.
+
+THE BOARD SAYS THAT ITSELF NOW (2026-08-27): every PERF line carries `net=`,
+the lockstep tick rate, or `-` when no session is gating frames -- so this reads
+the samples it already has instead of asking the radio afterwards, which is both
+per-sample and free. A board whose firmware predates the field prints no `net=`
+at all and its rows stay unmarked, which is the honest reading of "this board
+did not say".
 
 Numbers live in issue #66, not here. This tool produces them; it does not
 remember them.
@@ -30,7 +57,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from p4_autotest import P4Board            # noqa: E402
+from p4_autotest import P4Board, board_dirs   # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from runtime.perf_line import parse_perf     # noqa: E402
 
 # The carts worth watching: the historically slowest (Brick Siege), the two Lua
 # twins against their Python originals (the #67 comparison), the 3D-verb carts
@@ -42,24 +72,6 @@ DEFAULT_ROSTER = [
     "Ray Lua",
     "Hop Quest", "Sky Run", "Letter Blitz", "Star Catcher",
 ]
-
-
-def parse_perf(line):
-    """A PERF line -> dict of its fields, or None."""
-    if not line.startswith("PERF "):
-        return None
-    out = {}
-    for tok in line[5:].split():
-        if "=" not in tok:
-            continue
-        k, v = tok.split("=", 1)
-        if k == "fps":
-            v = v.split("/")[0]           # drawn/looped -- drawn is the one
-        try:
-            out[k] = float(v)
-        except ValueError:
-            out[k] = v
-    return out or None
 
 
 def measure(board, title, secs, log):
@@ -78,12 +90,25 @@ def measure(board, title, secs, log):
     samples = [p for p in (parse_perf(l) for l in board.lines[n0:]) if p]
     if not samples:
         return None
+    # fps arrives as (drawn, looped); drawn is the one this reports.
+    fps = [s["fps"][0] for s in samples if s.get("fps")]
+    if not fps:
+        return None
+    # What this run WAS, from the samples themselves: `net=` is a number only
+    # while a lockstep session is gating frames (#65), and `-` when nothing is.
+    # A peer left on the desk in the same two-player cart makes a correct 30
+    # that reads exactly like a regression -- 2026-08-27, a T-Deck parked in
+    # Brick Siege cost a night of paired carve-vs-dev captures. parse_perf
+    # float()s what it can, so a rate arrives as a float and the absent marker
+    # stays the string "-"; a missing key means the firmware predates the field.
+    ticks = [s["net"] for s in samples if isinstance(s.get("net"), float)]
     return {
         "n": len(samples),
-        "fps": statistics.median(s.get("fps", 0) for s in samples),
-        "min": min(s.get("fps", 0) for s in samples),
-        "cart": samples[-1].get("cart", title),
-        "phases": {k: statistics.median(s.get(k, 0) for s in samples)
+        "linked": statistics.median(ticks) if ticks else None,
+        "fps": statistics.median(fps),
+        "min": min(fps),
+        "cart": samples[-1].get("cart") or title,
+        "phases": {k: statistics.median(s.get(k) or 0 for s in samples)
                    for k in ("draw", "flush", "logic", "render", "chrome")},
     }
 
@@ -91,7 +116,12 @@ def measure(board, title, secs, log):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("carts", nargs="*", help="cart titles (default: the roster)")
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--board", required=True, choices=sorted(board_dirs()),
+                    help="which board to drive (its [board] ota id) -- no "
+                         "default: a wrong guess at the line state chip-resets "
+                         "the two S3 parts")
+    ap.add_argument("--port", default=None,
+                    help="override the port resolved from the board's usb id")
     ap.add_argument("--secs", type=float, default=8.0, help="sample window per cart")
     ap.add_argument("--diag", action="store_true",
                     help="leave perf_capture + the FPS chip ON (per-phase ms, "
@@ -101,10 +131,14 @@ def main(argv=None):
 
     log = print if a.verbose else (lambda *x: None)
     roster = a.carts or DEFAULT_ROSTER
-    board = P4Board(a.port, log=(lambda s: log("  | " + s[:120])))
+    board = P4Board(a.port or "auto", board_dir=board_dirs()[a.board],
+                    log=(lambda s: log("  | " + s[:120])))
     try:
         board.drain(0.5)
-        if board.pyval("1", timeout=8.0) != 1:
+        # A board that declares attach_only is ATTACHED to, never reset: the
+        # pulse re-enumerates its USB under this handle and strands it. Where a
+        # reset is safe it is still the way to recover a wedged console.
+        if board.pyval("1", timeout=8.0) != 1 and not board.attach_only:
             board.reset()
         board.cmd("diag %d" % (1 if a.diag else 0), wait_for="REMOTE diag")
         board.drain(0.5)
@@ -112,6 +146,7 @@ def main(argv=None):
               % ("cart", "fps", "worst", "n", "draw/flush/logic/render/chrome ms"
                  if a.diag else ""))
         rows = []
+        linked = False
         for title in roster:
             try:
                 r = measure(board, title, a.secs, log)
@@ -122,13 +157,22 @@ def main(argv=None):
                 print("%-18s  (not on this board)" % title)
                 continue
             p = r["phases"]
-            print("%-18s %6.1f %6.1f %5d   %s"
+            print("%-18s %6.1f %6.1f %5d   %s%s"
                   % (title, r["fps"], r["min"], r["n"],
                      ("%.0f/%.0f/%.0f/%.0f/%.0f"
                       % (p["draw"], p["flush"], p["logic"], p["render"],
-                         p["chrome"])) if a.diag else ""))
+                         p["chrome"])) if a.diag else "",
+                     ("  LINKED (net=%.0f ticks/s)" % r["linked"])
+                     if r["linked"] is not None else ""))
+            linked = linked or r["linked"] is not None
             rows.append((title, r))
         board.pyexec("ws.exit()")
+        if linked:
+            print("\nLINKED: the board's own PERF line reported a lockstep tick "
+                  "rate (net=), so another\nconsole on this desk is in the same "
+                  "two-player cart and that run was a real\nESP-NOW match "
+                  "drawing on the shared tick (#65). That number is the match's,"
+                  "\nnot the cart's -- move the peer off the cart and re-measure.")
         return 0 if rows else 1
     finally:
         board.close()

@@ -9,11 +9,11 @@ and both draw paths call ws.wallpaper.draw(dt).
 Boundary (single source of truth): this component owns only the RENDERING + the
 COMPILED cache -- a chosen wallpaper-type cart compiled into its OWN namespace and run
 (_draw, optionally _update) as the backdrop, or a solid MOY64 fill fallback. The CHOICE
-+ the picker/query API stay on Workstation as the single source: ws.wallpaper_id, plus
-ws.select_wallpaper / cycle_wallpaper / _persist_wallpaper / wallpaper_options /
-wallpaper_carts / _wp_id_for / _wp_cart_by_id (all device/test-pinned). select_wallpaper
-drives this component via clear() + compile(cart); draw() reads ws.wallpaper_id for the
-fill fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
++ the picker/query API are the LOOK's (appearance.py, #209 landing D):
+ws.look.wallpaper_id, plus select_wallpaper / cycle_wallpaper / wallpaper_options /
+wallpaper_carts / wp_id_for / wp_cart_by_id. select_wallpaper drives this component
+via clear() + compile(cart); draw() reads ws.look.wallpaper_id for the fill
+fallback. It reaches the cart-run machinery (build sheet/tilemap, make_api) through
 its self.ws back-ref; the audio/pmem building blocks for the wallpaper's own namespace
 are imported (leaf modules; same bare-or-runtime fallback the other extracted modules
 use). `NAMES` is injected; `_err_text` is duplicated (tiny/pure).
@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 class Wallpaper:
     """The wallpaper backdrop component (#28). Owns the RENDERING (draw) + the compiled
-    wallpaper-cart cache; ws.wallpaper_id + the picker API stay on Workstation."""
+    wallpaper-cart cache; ws.look.wallpaper_id + the picker API are the look's."""
 
     def __init__(self, ws, names):
         self.ws = ws
@@ -47,7 +47,6 @@ class Wallpaper:
         self._wp_update = None
         self._wp_draw = None
         self._wp_cart = None
-        self._wp_images = {}   # captured at compile (the cart re-slims after)
         self._wp_live = True
         # The Appearance monitor's PREVIEW runner: the same cart compiled a
         # second time over an OFFSCREEN host canvas, so the little screen can
@@ -63,25 +62,12 @@ class Wallpaper:
         # Keyed by source stamp, so it survives selection changes and drops
         # stale entries on its own; bounded below.
         self._static_cache = {}
-        # #113 web wire diet: the backdrop composite's ship-once identity. A
-        # STATIC wallpaper repeats the same 320x240 frame every draw, so once
-        # two consecutive frames match it gets a serial name ("wall:N") and
-        # rides /assets ONCE (wire_assets below) -- every later draw is a tiny
-        # ["imgref", ...] instead of ~100KB of inline b64 (the measured
-        # window-drag payload eater). A LIVE wallpaper's frame changes every
-        # draw, so it keeps the inline form (status quo) and never churns the
-        # client's asset cache.
-        self._wire_pix = None          # last composite frame's raw indices
-        self._wire_wh = (0, 0)
-        self._wire_name = None         # set only while the frame is stable
-        self._wire_serial = 0
 
     def clear(self):
         """Drop the compiled wallpaper (back to a solid fill). Called by
-        ws.select_wallpaper before it (re)compiles the new choice."""
+        ws.look.select_wallpaper before it (re)compiles the new choice."""
         self._wp_ns = self._wp_update = self._wp_draw = None
         self._wp_cart = None
-        self._wp_images = {}
         self._wp_restore_bg = None
         self._pv_ns = self._pv_update = self._pv_draw = None
         self._pv_restore = None
@@ -128,19 +114,13 @@ class Wallpaper:
             ns = ws.make_api(ws.canvas, ws.input, dict(cart.get("cfg", {})),
                              sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                              tilemap, Pmem(), None, cart.get("images") or {},
+                             flags=ws._build_flags(cart),   # SPEC.md 3.5 tile flags
                              owner="wallpaper")   # #63: layer loans reclaimed on clear()
             exec(compile(cart["src"], "<wallpaper>", "exec"), ns)
             if ns.get("_init"):
                 ns["_init"]()
             self._wp_ns = ns
             self._wp_cart = cart
-            # Hold the images HERE, not via _wp_cart later: the #66 live-set diet
-            # re-slims a wallpaper cart after this compile, so cart["images"] is
-            # gone by the time a transport asks (sakura's backdrop shipped as an
-            # imgref for a picture /assets never carried -- owner, 2026-07-31).
-            # The namespace already references the same blobs, so this adds a
-            # dict of references, not a copy of the pixels.
-            self._wp_images = dict(cart.get("images") or {})
             self._wp_update = ns.get("_update")
             self._wp_draw = ns.get("_draw")
             self._wp_restore_bg = ns.get("_moy_restore_bg")   # #63 declared background
@@ -183,7 +163,7 @@ class Wallpaper:
         # has a wallpaper cartridge identity for discovery/settings; only its pixels
         # take this direct, resolution-aware path.
         art = getattr(ws, "artwork", None)
-        if art is not None and art.owns_wallpaper(ws.wallpaper_id):
+        if art is not None and art.owns_wallpaper(ws.look.wallpaper_id):
             try:
                 if art.draw_wallpaper(ws.sys_canvas):
                     ws._reset_canvas_state()
@@ -249,7 +229,7 @@ class Wallpaper:
         # Solid fill fallback (also the "fill:<color>" built-ins). Fill the SYSTEM
         # canvas -- the surface the desktop actually shows (#39; the same object as
         # the game canvas on the 320x240 tiers, so byte-identical there).
-        wp = ws.wallpaper_id or "fill:dark_blue"
+        wp = ws.look.wallpaper_id or "fill:dark_blue"
         name = wp[5:] if isinstance(wp, str) and wp.startswith("fill:") else "dark_blue"
         ws.sys_canvas.cls(NAMES.get(name, NAMES["dark_blue"]))
 
@@ -284,25 +264,6 @@ class Wallpaper:
             return gp
         ws.input.game_pointer = (gx, gy, False, bool(getattr(p, "down", False)))
         return gp
-
-    def cart_images(self):
-        """The WALLPAPER cart's own raw images ({name: blob}) -- what its
-        `image("bg")` draws reference. The transports merge these into /assets
-        beside the open cart's `ws.images`, which they are NOT part of: the
-        wallpaper runs in its own namespace, so a recording tier that ships the
-        wallpaper's DRAW COMMANDS (rather than a composited framebuffer) would
-        otherwise emit an imgref for a picture the page never received --
-        sakura's backdrop went missing exactly that way (owner, 2026-07-31)."""
-        return dict(getattr(self, "_wp_images", None) or {})
-
-    def wire_assets(self):
-        """{name: (w, h, index_bytes)} for the backdrop composite's ship-once
-        wire image, or {} while the frame is churning / never composited --
-        merged into /assets beside the shelf covers (Workstation.cover_assets)."""
-        if self._wire_name is None or self._wire_pix is None:
-            return {}
-        w, h = self._wire_wh
-        return {self._wire_name: (w, h, self._wire_pix)}
 
     def draw_preview(self, cv, rect, dt):
         """The Appearance monitor's screen: the chosen wallpaper FIT inside
@@ -358,7 +319,7 @@ class Wallpaper:
         NAMES = self._NAMES
         ws = self.ws
         x, y, w, h = rect
-        wp = ws.wallpaper_id or ""
+        wp = ws.look.wallpaper_id or ""
         if isinstance(wp, str) and wp.startswith("fill:"):
             cv.rect(x, y, w, h, NAMES.get(wp[5:], NAMES["dark_blue"]))
             return
@@ -443,19 +404,20 @@ class Wallpaper:
                     rl("wallpaper_pv")
             # #66 live-set diet: the slimmed cart rehydrates for this compile
             # (src/sheet bake into the preview ns), then re-slims -- the same
-            # dance select_wallpaper does for the backdrop compile.
-            ws._rehydrate_cart(cart)
+            # dance look.select_wallpaper does for the backdrop compile.
+            ws.carts.rehydrate(cart)
             try:
                 sheet = ws._build_sheet(cart)
                 tilemap = ws._build_tilemap(cart)
                 ns = ws.make_api(pv, ws.input, dict(cart.get("cfg", {})),
                                  sheet, _SilentAudio(AudioEngine(AudioBank.default())),
                                  tilemap, Pmem(), None, cart.get("images") or {},
+                                 flags=ws._build_flags(cart),
                                  owner="wallpaper_pv")
                 exec(compile(cart["src"], "<wallpaper-preview>", "exec"), ns)
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
-                    ws._reslim_cart(cart)
+                    ws.carts.reslim(cart)
             if ns.get("_init"):
                 ns["_init"]()
             self._pv_ns = ns
@@ -477,11 +439,11 @@ class Wallpaper:
         if src is None:
             ws = self.ws
             try:
-                ws._rehydrate_cart(cart)
+                ws.carts.rehydrate(cart)
                 src = cart.get("src")
             finally:
                 if cart is not getattr(ws, "_fat_cart", None):
-                    ws._reslim_cart(cart)
+                    ws.carts.reslim(cart)
         return cover_sig(src) if src else None
 
     def _static_preview(self, w, h):
@@ -687,9 +649,9 @@ class Wallpaper:
         upscale that covers the whole desktop, centered and cropped -- a real
         full-bleed backdrop, never a letterboxed rectangle floating in black.
         (Always full-desktop -- never routed through the WM, whose viewport may be
-        a player WINDOW in windowed mode.) On a RECORDING system canvas (the web
-        console) there is no framebuffer to copy into: ship the frame as ONE scaled
-        self-contained b64 img instead (the replayers clip the crop)."""
+        a player WINDOW in windowed mode.) A system canvas with no readable
+        framebuffer has nothing to copy into: draw the frame as ONE scaled spr
+        instead, and let the canvas clip the crop."""
         fb = getattr(gc, "flush_batch", None)
         if fb is not None:
             fb()
@@ -710,25 +672,8 @@ class Wallpaper:
         ox = (sw - gw * scale) // 2                                # <= 0 (crop)
         oy = (sh - gh * scale) // 2
         if sbuf is None:
-            pix = bytes(gbuf)
-            if pix == self._wire_pix:
-                # Stable frame (a static wallpaper): mint/keep the serial name
-                # so the pixels ride /assets once (wire_assets) and this draw
-                # records as one small imgref (#113).
-                if self._wire_name is None:
-                    self._wire_serial += 1
-                    self._wire_name = "wall:%d" % self._wire_serial
-                    self._wire_wh = (gw, gh)
-            else:
-                # Changed frame (first draw / a live wallpaper): inline it and
-                # remember the pixels -- naming a churning frame would refetch
-                # the whole asset set every frame.
-                self._wire_pix = pix
-                self._wire_name = None
-            img = _Blit(gw, gh, pix, -1)
-            img._paint = True              # -> the compact b64 wire form (~2.4x lighter)
-            if self._wire_name is not None:
-                img._name = self._wire_name
+            img = _Blit(gw, gh, bytes(gbuf), -1)
+            img._paint = True              # -> the native blit_indices bake
             sc.spr(img, ox, oy, scale)
             return
         # Raster: expand each source row ONCE, then slice the visible crop into every

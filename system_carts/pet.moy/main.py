@@ -6,6 +6,9 @@
 # AUTOPLAY (in "Make it mine") is OFF by default -- YOU look after it. Flip it on
 # and the pet cares for itself (attract mode). A pet is just another cartridge.
 
+FACE = 3         # sheet tiles: the mood face, FACE happy / +1 flat / +2 sad
+HEART = 6        # sheet tile: the floating care heart
+
 food = 80.0
 joy = 80.0
 t = 0.0
@@ -108,16 +111,7 @@ def _bar(x, y, w, v, c):
 
 def _smiley(cx, cy, mood):
     # a tiny mood face floating above the pet (smile / flat / frown)
-    pix(cx - 4, cy - 2, col("white"))
-    pix(cx + 4, cy - 2, col("white"))
-    if mood > 60:                                 # smile
-        line(cx - 3, cy + 2, cx, cy + 4, col("white"))
-        line(cx, cy + 4, cx + 3, cy + 2, col("white"))
-    elif mood > 25:                               # flat
-        line(cx - 3, cy + 3, cx + 3, cy + 3, col("white"))
-    else:                                         # frown
-        line(cx - 3, cy + 4, cx, cy + 2, col("white"))
-        line(cx, cy + 2, cx + 3, cy + 4, col("white"))
+    spr(FACE + (0 if mood > 60 else (1 if mood > 25 else 2)), cx - 4, cy - 3, 0)
 
 
 def _draw():
@@ -132,11 +126,7 @@ def _draw():
     _smiley(W // 2, py - 8, mood)
     # floating hearts
     for h in hearts:
-        x = int(h[0])
-        y = int(h[1])
-        pix(x - 1, y, col("pink"))
-        pix(x + 1, y, col("pink"))
-        pix(x, y + 1, col("pink"))
+        spr(HEART, int(h[0]) - 2, int(h[1]) - 2, 0)
     # mood word
     if mood > 60:
         word = "HAPPY"

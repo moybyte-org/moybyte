@@ -1,13 +1,13 @@
 {
   "format": "moy-1",
-  "version": 7,
+  "version": 8,
   "title": "Pixel Pet",
   "type": "game",
   "runtime": "python",
   "main": "main.py",
   "system": true,
   "order": 80,
-  "targets": ["host", "device"],
+  "targets": ["host", "device", "web"],
   "canvas": "320x240",
   "permissions": [
     "graphics",

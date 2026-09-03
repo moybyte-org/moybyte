@@ -819,7 +819,7 @@ static void pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
 /*
 ** finish execution of an opcode interrupted by a yield
 */
-void luaV_finishOp (lua_State *L) {
+void MOY_HOT luaV_finishOp (lua_State *L) {
   CallInfo *ci = L->ci;
   StkId base = ci->func.p + 1;
   Instruction inst = *(ci->u.l.savedpc - 1);  /* interrupted instruction */
@@ -1156,7 +1156,7 @@ void luaV_finishOp (lua_State *L) {
 #define vmbreak		break
 
 
-void luaV_execute (lua_State *L, CallInfo *ci) {
+void MOY_HOT luaV_execute (lua_State *L, CallInfo *ci) {
   LClosure *cl;
   TValue *k;
   StkId base;

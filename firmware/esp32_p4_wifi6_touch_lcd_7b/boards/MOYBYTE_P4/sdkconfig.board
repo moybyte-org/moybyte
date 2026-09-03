@@ -50,3 +50,93 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=12288
 # to the previous slot automatically. moy_runtime.run_desktop makes that call
 # once the desktop is up, which is what makes a healthy boot mean "healthy".
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- WiFi: the S3 boards' set, spelled in THIS board's knob namespace -------
+# The two S3 boards took Espressif's "Iperf rank" set on 2026-08-21 (0890249)
+# and this board was recorded there as untouched BY CONSTRUCTION: its WiFi is
+# ESP-Hosted on a C6 over SDIO, so CONFIG_ESP_WIFI_* on the host configures a
+# driver that is not here, and its lwIP window was already 65534. The first
+# half is true and the second half is the trap. There is no WiFi DRIVER on the
+# P4 -- but there is one on the C6, and the host fragment is what configures
+# it, under a different name.
+#
+# esp_wifi_remote's idf_v5.5/Kconfig.wifi.in redefines every CONFIG_ESP_WIFI_*
+# as a PROMPTLESS symbol whose sole default is the matching CONFIG_WIFI_RMT_*.
+# Those RMT values are marshalled to the C6 inside wifi_init_config_t by the
+# ESP-Hosted RPC, and the slave feeds them straight to its own esp_wifi_init
+# (managed_components/espressif__esp_hosted/slave/main/slave_control.c). So the
+# radio's buffers ARE decided here; they are just not spelled ESP_WIFI_*.
+#
+# Which means MicroPython's own sdkconfig.p4_wifi_common has been asking with
+# the wrong name since bring-up. It sets ESP_WIFI_ STATIC_RX_BUFFER_NUM=16 /
+# DYNAMIC_RX=64 / DYNAMIC_TX=64 / RX_BA_WIN=32 / TX_BA_WIN=32, and the
+# generated sdkconfig carried IDF's defaults for every one of them --
+# 10/32/32/6/6 -- on this board AND on a stock ESP32_GENERIC_P4-C6_WIFI build.
+# Nothing reported it, because moybyte_sdkconfig_guard only checks the options
+# a BOARD fragment names, and these were named by an upstream one.
+#
+# That left the console in exactly the half-set state the T-Deck's block warns
+# is worse than none of it: TCP_WND 65534 (lwIP runs on the host, so upstream's
+# window DID take) against an 802.11n reorder window of 6. ~22 segments in
+# flight against a window that holds 6 is drop-and-retransmit, and it is the
+# state the S3 measured 20x SLOWER than stock. This board's one recorded WiFi
+# number is consistent with that and was never explained: the 2026-08-02 OTA
+# download ran at ~55 KB/s here against ~137 KB/s on the T-Deck, on a board
+# with a WiFi 6 radio and 2.5x the TCP window.
+#
+# The values are upstream's own intent, restated in the name Kconfig honours.
+# THE SET IS ATOMIC -- read the T-Deck's block before changing one line of it.
+#
+# The RAM this spends is the C6's, not the console's: the static RX buffers are
+# allocated by the SLAVE's esp_wifi_init, so unlike the S3 the internal-SRAM
+# argument does not apply here and none of it comes out of a running cart's
+# ~31KB. 16-and-not-24 is kept anyway because 16 is the number that was
+# measured; 24 is an untested lever on the C6, not a free upgrade.
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_RX_BA_WIN=32
+CONFIG_WIFI_RMT_TX_BA_WIN=32
+
+# NOT set here, and each is a decision rather than an omission:
+#
+#   CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP -- load-bearing on the S3, where it is
+#   what makes the set RAM-POSITIVE by moving the lwIP buffers out of a 227KB
+#   internal region. This board has ~512KB internal after the L2 carve and no
+#   WiFi driver competing for it, so the pressure it relieves does not exist;
+#   all it would buy is slower buffers. Revisit only with a measured shortage.
+#
+#   CONFIG_WIFI_RMT_*_IRAM_OPT -- the S3 declines the three IRAM options because
+#   there IRAM aliases DRAM and they would cost ~32KB of the SRAM the set is
+#   careful not to spend. Here they are already ON (upstream default) and the
+#   IRAM is the C6's, so the S3's reason to decline does not transfer.
+#
+#   The BLE right-sizing block -- the other half of 0890249, and it does not
+#   belong here. Its two biggest levers are CONFIG_BT_CTRL_*, and this board has
+#   no BLE controller to size: CONFIG_BT_CONTROLLER_DISABLED=y, the controller
+#   is the C6's. What is left is host NimBLE, whose numbers here were raised
+#   DELIBERATELY and on hardware evidence (the two blocks above), and which sits
+#   in ~512KB rather than the Guition's four free bytes. MAX_CONNECTIONS stays
+#   at upstream's 4 on purpose: one BLE keyboard is what is paired today, and a
+#   second one is the only local-2P path this board can have (#65 Phase 1).
+
+# ESP-Hosted's transport mempool goes to PSRAM (espnow-on-p4 track,
+# docs/espnow_p4_2026-08.md; the component bump itself is build.sh step 2c').
+# NOT optional at hosted 2.12: its mempool asks internal SRAM for more than
+# this board has free after the 256KB L2 carve, fails at boot ("E HS_MP:
+# mempool create failed: no mem"), the SDIO driver then reads no registers and
+# the board CRASH-LOOPS on a ~30s period -- observed on glass 2026-08-24. This
+# knob is upstream's own fix and its help text names this target ("preserves
+# scarce internal RAM on targets where GDMA can reach PSRAM through cache
+# (e.g. ESP32-P4)"). Upstream's EHM-250 warns it breaks SDIO TX DMA alignment
+# at a 128B L2 cache line; this board's line is 64B (CACHE_L2_CACHE_LINE_64B
+# above is IDF's default here), so the trigger is absent -- re-check that
+# issue before ever moving the line size.
+CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM=y
+
+# HCI debug logging OFF (upstream's sdkconfig.p4_wifi_common ships it ON).
+# Ruled out as the BT-on-2.12-slave breaker during the 2026-08-24 bisect, and
+# kept off anyway: it is a debug ring buffer in the HCI hot path of a kid's
+# console, and the working reference (hosted's bleprph example) runs without
+# it -- one less delta from the proven arrangement.
+CONFIG_BT_HCI_LOG_DEBUG_EN=n

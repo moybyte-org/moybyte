@@ -23,6 +23,7 @@ MOYCORE_MOD_DIR := $(USERMOD_DIR)
 
 SRC_USERMOD += $(MOYCORE_MOD_DIR)/modmoycore.c
 SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy_binding.c
+SRC_USERMOD_LIB_C += $(MOYCORE_MOD_DIR)/libmoy_p8_binding.c
 
 # MOY_PIXEL_RGB565 changes sizeof(moy_pixel) and therefore the layout of
 # moy_canvas, so it must be identical for every translation unit that sees

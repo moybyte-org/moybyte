@@ -202,9 +202,53 @@ mkdir -p "${STAGE_DIR}/modules"
 # derives the web frozen set from that declaration, same as the boards'.
 "${PY}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 # The runner's own AUTHORED modules -- the analogue of a board's tracked
-# modules/ files, copied by name because the stage dir is rebuilt from scratch.
-cp "${SCRIPT_DIR}/web_boot.py" "${STAGE_DIR}/modules/web_boot.py"
-cp "${SCRIPT_DIR}/web_canvas.py" "${STAGE_DIR}/modules/web_canvas.py"
+# modules/ files, copied BY NAME because the stage dir is rebuilt from scratch.
+#
+# COPIED BY NAME IS THE HAZARD, and it bit: `update_link.py` was written, tested
+# and imported and never added to this list, so `web_boot.update_enable` raised
+# ImportError on every build for as long as the feature existed. It catches and
+# prints, into a WORKER console nobody reads, and the page went on reporting an
+# updater because that message was sent off the back of the board's PROBE
+# answering rather than off the console actually binding one. A headless Zero
+# therefore had no update row at all. tests/test_staging_closure.py now derives
+# this list rather than trusting it.
+for _mod in web_boot web_canvas gpio_link update_link web_p8; do
+  cp "${SCRIPT_DIR}/${_mod}.py" "${STAGE_DIR}/modules/${_mod}.py"
+done
+
+# The PICO-8 importer (#194) -- the ONE thing this build stages out of `tools/`,
+# which board_config's stager knows nothing about (it maps runtime/ and device/).
+# All three files cross UNCHANGED and that is the whole point:
+#
+#   p8_import.py    moy-spec's ASSET converter, VENDORED and hash-pinned
+#                   (tests/test_p8_import_vendor.py). Editing it here -- or
+#                   forking a browser variant of it, in Python or in
+#                   JavaScript -- is the failure vendoring exists to prevent: it
+#                   happened once, and every cart this repo imported came out
+#                   two octaves flat for ten days behind a green `make test`. So
+#                   the browser runs the SAME bytes the desktop does, in this VM.
+#   p8_lua_port.py  moy-spec's LUA PORTER, vendored beside it: the cart's own
+#                   code under a generated PICO-8 shim, plus the `.moy` folder
+#                   itself. This is what makes a dropped cart RUN rather than
+#                   arrive as a porting exercise (owner call, 2026-08-29). It is
+#                   upstream because SPEC.md is what the shim is written
+#                   against, verb for verb.
+#   p8_writer.py    ours: the input guards a frozen opt=3 build needs, the
+#                   `os.path.basename` shim, and the compatibility report --
+#                   shared with tools/import_p8.py (the CLI) for the same
+#                   reason, one level down.
+#
+# Copied rather than symlinked because the freeze takes a DIRECTORY and a
+# dangling link in it is a build that fails at the last step.
+cp "${REPO_ROOT}/tools/p8_import.py" "${STAGE_DIR}/modules/p8_import.py"
+cp "${REPO_ROOT}/tools/p8_lua_port.py" "${STAGE_DIR}/modules/p8_lua_port.py"
+cp "${REPO_ROOT}/tools/p8_writer.py" "${STAGE_DIR}/modules/p8_writer.py"
+
+# `zlib.decompress` over the built-in `deflate`: MicroPython dropped the zlib
+# module in v1.21 and the converter inflates a .p8.png's IDAT with it. Staged
+# from shims/ under the plain name -- see that file's header for why it may not
+# simply sit beside the other authored modules.
+cp "${SCRIPT_DIR}/shims/zlib.py" "${STAGE_DIR}/modules/zlib.py"
 
 
 # palette.py: runtime/palette.py builds its HSV ramp with CPython's colorsys, so
@@ -295,7 +339,11 @@ echo "== generating index.html"
 # measured the slow way, with a board serving a correct console to a browser
 # running the previous worker. Content-addressed so the url changes when, and
 # only when, the worker does.
-MOY_BUILD="$(sha1sum "${SCRIPT_DIR}/worker.js" | cut -c1-12)"
+# Both worker files feed the hash: worker.js IMPORTS moy_store.mjs, so a change
+# confined to the store would otherwise leave the worker url identical and let a
+# browser pair a new worker with a cached store module.
+MOY_BUILD="$(cat "${SCRIPT_DIR}/worker.js" "${SCRIPT_DIR}/moy_store.mjs" \
+  | sha1sum | cut -c1-12)"
 cat "${SCRIPT_DIR}/page_core.html" "${SCRIPT_DIR}/page_tail.js" \
   | sed "s/@MOY_BUILD@/${MOY_BUILD}/" > "${STAGE_DIR}/index.html"
 
@@ -326,7 +374,12 @@ mkdir -p "${DIST_DIR}"
 cp "${STAGE_DIR}/carts.json" "${STAGE_DIR}/index.html" "${DIST_DIR}/"
 # worker.js is a SEPARATE file, not inlined: a module Worker needs its own URL.
 # It owns the VM + the frame loop; the page only replays (#176 smoothness).
-cp "${SCRIPT_DIR}/worker.js" "${DIST_DIR}/"
+# ...and its import of moy_store.mjs (the browser-local store + the .moy zip,
+# #193) carries the same cache buster, because a static import specifier is a
+# url a browser caches as hard as the worker's own.
+sed "s|\"./moy_store.mjs\"|\"./moy_store.mjs?v=${MOY_BUILD}\"|" \
+  "${SCRIPT_DIR}/worker.js" > "${DIST_DIR}/worker.js"
+cp "${SCRIPT_DIR}/moy_store.mjs" "${DIST_DIR}/"
 if [ "${STAGE_ONLY}" = "1" ]; then
   cp "${STAGE_DIR}/modules.json" "${DIST_DIR}/"
 else
@@ -343,7 +396,7 @@ fi
 # that knows to advertise it.
 # -n omits the mtime, so an unchanged asset produces a byte-identical .gz and
 # the push tool's per-file compare stays meaningful.
-for f in index.html worker.js micropython.mjs micropython.wasm; do
+for f in index.html worker.js moy_store.mjs micropython.mjs micropython.wasm; do
   if [ -f "${DIST_DIR}/${f}" ]; then
     gzip -9 -n -c "${DIST_DIR}/${f}" > "${DIST_DIR}/${f}.gz"
   fi

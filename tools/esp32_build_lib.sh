@@ -108,6 +108,23 @@ moybyte_patch_native_code_free() {
   fi
 }
 
+# ESP-NOW ring torn-read race (#7, measured 2026-08-24). modespnow's recv_cb
+# (WiFi task) writes header/peer/msg as three separate ringbuf puts while
+# recvinto waits only for the HEADER -- a reader that catches a record
+# mid-write raises "ESPNow.recv(): buffer error" on a healthy ring and leaves
+# it genuinely desynced (header consumed, body not). A busy irecv(0) drain
+# hits the window about once a second on glass; every hit forces the link's
+# _recover() active-cycle, which costs a packet burst mid-match. The patch
+# waits (bounded, 10ms) for the body the writer commits microseconds later.
+# All three radio boards call this; the wasm build compiles no modespnow.
+# Reads MPY_DIR, REPO_ROOT.
+moybyte_patch_espnow_ring_race() {
+  if ! grep -q "Moybyte espnow_ring_race" "${MPY_DIR}/ports/esp32/modespnow.c"; then
+    echo "== applying espnow ring torn-read patch (#7)"
+    patch -d "${MPY_DIR}" -p1 < "${REPO_ROOT}/patches/esp32_espnow_ring_race.patch"
+  fi
+}
+
 # REPR_C unboxed floats (#66). REPR_A boxes every float RESULT in 16 bytes of
 # heap (~73KB/frame measured in sakura), and the heap-wrap gc collect that
 # follows is a 130-175ms visible hitch. A GUARDED SED rather than a context
@@ -127,6 +144,28 @@ moybyte_patch_repr_c() {
       exit 1
     }
     echo "== patched mpconfigport.h: MICROPY_OBJ_REPR_C (#66)"
+  fi
+}
+
+# Split-heap growth reserve. MicroPython's esp32 port grows the Python heap
+# on demand by DOUBLING it, from the same ESP heap the Lua VM, the panel DMA
+# and the layer pool allocate from, and never gives an area back. On an 8MB
+# S3 board one fragmented Python allocation took every remaining byte of
+# PSRAM and every big cart then failed at load with Lua's "not enough
+# memory" until a hard reset (2026-09-02, #66). The patch caps what a growth
+# may take so MOYBYTE_GC_SPLIT_RESERVE bytes of PSRAM always stay outside
+# the Python heap; a board that defines nothing reserves nothing. A GUARDED
+# SED on the one-line port hook, like repr_c. Reads MPY_DIR.
+moybyte_patch_gc_split_reserve() {
+  local f="${MPY_DIR}/ports/esp32/gccollect.c"
+  if ! grep -q "MOYBYTE_GC_SPLIT_RESERVE" "${f}"; then
+    sed -i 's|^    return heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);|    size_t avail = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);\n    size_t psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);   /* Moybyte: MOYBYTE_GC_SPLIT_RESERVE stays C-side */\n    if (psram <= MOYBYTE_GC_SPLIT_RESERVE) return 0;\n    return avail < psram - MOYBYTE_GC_SPLIT_RESERVE ? avail : psram - MOYBYTE_GC_SPLIT_RESERVE;|' "${f}"
+    sed -i 's|^size_t gc_get_max_new_split(void) {|#ifndef MOYBYTE_GC_SPLIT_RESERVE\n#define MOYBYTE_GC_SPLIT_RESERVE 0\n#endif\nsize_t gc_get_max_new_split(void) {|' "${f}"
+    grep -q "psram - MOYBYTE_GC_SPLIT_RESERVE" "${f}" || {
+      echo "!! gc split reserve patch did not apply -- gccollect.c's gc_get_max_new_split changed shape" >&2
+      exit 1
+    }
+    echo "== patched gccollect.c: split-heap growth keeps MOYBYTE_GC_SPLIT_RESERVE of PSRAM (#66)"
   fi
 }
 

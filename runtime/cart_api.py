@@ -128,8 +128,8 @@ class _Layer:
     line worked on one tier and raised on the other."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "tri", "trib", "sspr", "tline",
-              "spr", "map", "mget", "mset", "print",
+              "tri", "trib", "oval", "ovalb", "fillp", "sspr", "tline",
+              "spr", "map", "mget", "mset", "sget", "sset", "print",
               "camera", "clip", "pal", "palt")
 
     def __init__(self, canvas, ns):
@@ -142,7 +142,7 @@ class _Layer:
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
              pmem=None, wifi=None, images=None, scenes=None, tables=None,
-             texts=None, net=None, owner="cart"):
+             texts=None, net=None, gpio=None, flags=None, owner="cart"):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
     bound to a canvas + InputState + the injected audio/wifi backends.
@@ -155,7 +155,9 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
     passes it ONLY for a cart whose manifest permissions include "network", and
     the `wifi` name enters the namespace iff it is non-None -- a normal kid
     cart gets no network access at all (the base key-set is identical either
-    way). `net` is the same gate for "multiplayer" (#65). `owner` tags layer
+    way). `net` is the same gate for "multiplayer" (#65). `gpio` is the third
+    such gate (#9): physical pins, which only exist where a host with pins is
+    on the other end of the page -- so far the Zero. `owner` tags layer
     loans for the device's #63 leak-fix reclaim; a gc-heap canvas ignores it.
     """
     _img_cache = {}        # name -> decoded paint Image (see image() below), so a
@@ -166,6 +168,11 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                            # Invalidated when the sheet's gen counter changes (a paint
                            # edit), so a live sprite edit shows fresh art.
     _cache_gen = [None]
+    # SPEC.md 3.5's tile flags, always a table so fget/fset/map(..., layers) are
+    # callable for every cart. `flags` is the project's live 512-byte one; a run
+    # without a project (a bare namespace, a test) gets a private zero table,
+    # which reads exactly as the spec's "an absent file is all zero".
+    tile_flags = flags if flags is not None else bytearray(512)
 
     def cfg(key, default=None):
         return config.get(key, default)
@@ -228,13 +235,21 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # contiguous run into one native blit_batch, flushing on any state break.
         canvas.spr_tile(sheet, int(n), x, y, colorkey, scale, flip)
 
-    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1):
+    def map_(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1,
+             layers=0):
         # TIC-80 map(mx, my, w, h, sx, sy, colorkey, scale): blit a w x h region of
         # the cart's tilemap (top-left cell mx,my) to screen (sx,sy). Tiles are the
         # 8x8 sheet sprites; `scale` enlarges each (so scale=2 => 16px world tiles).
+        # `layers` (SPEC.md 7.2) is a FLAG MASK: non-zero, a cell draws only when
+        # its tile's flag byte shares a bit with it -- the ground with mask 1, the
+        # foreground with mask 2 after the sprites, from one map and one call each.
+        # It filters on the TILE's flags, so tagging a tile once tags every cell
+        # that uses it, and a cart with no flags at all draws nothing under a
+        # non-zero mask.
         if tilemap is None or sheet is None:
             return
-        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale)
+        canvas.map(tilemap, sheet, mx, my, w, h, sx, sy, colorkey, scale,
+                   layers, tile_flags)
 
     # spr_batch / spans / rect_batch were cart verbs here until 2026-08-14. They are
     # DELETED, not moved: the Bench twins measured the draw paths of the two languages
@@ -266,12 +281,58 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return
         canvas.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
 
+    def sget(x, y):
+        # SPEC.md 7.1: read one sheet PIXEL as a palette index. Sheet
+        # coordinates, not tile ones -- tile n's top-left is
+        # ((n % 16) * 8, (n // 16) * 8). Off the sheet reads 0.
+        return sheet.pget(int(x), int(y)) if sheet is not None else 0
+
+    def sset(x, y, c):
+        # SPEC.md 7.1: write one sheet pixel; the index is masked to 0-15 and a
+        # write off the sheet is dropped.
+        #
+        # THE FLUSH IS THE WHOLE VERB. spr() does not blit, it QUEUES (#63), so
+        # a run of sprites between two sset calls would coalesce into one
+        # blit_batch and every sprite in it would read the sheet as it stood at
+        # FLUSH time -- an edit appearing on draws made before it. The spec's
+        # `sheet` scene is built to catch exactly that: it draws tile 2, edits
+        # the tile, draws it again, and the two must differ.
+        if sheet is None:
+            return
+        canvas.flush_batch()
+        sheet.pset(int(x), int(y), int(c))
+
     def mget(x, y):
         return tilemap.mget(x, y) if tilemap is not None else -1
 
     def mset(x, y, tile):
         if tilemap is not None:
             tilemap.mset(x, y, tile)
+
+    # SPEC.md 3.5/7.1: one flag byte per tile, 512 of them. The table is the
+    # PROJECT's (moy_carts loads flags.moyflags into it) and it is shared with
+    # every layer namespace below, so `fset` from inside a layer's pre-render is
+    # the same write the screen's next map(..., layers) reads. A run with no
+    # project gets a private zero table rather than a None to guard at each verb.
+    def fget(n, b=None):
+        n = int(n)
+        v = tile_flags[n] if 0 <= n < len(tile_flags) else 0
+        if b is None:
+            return v
+        return bool((v >> (int(b) & 7)) & 1)
+
+    def fset(n, b, on=None):
+        # fset(n, byte) writes the whole byte; fset(n, bit, on) sets or clears
+        # one bit of it. Off the sheet is a DROPPED write, not an error -- the
+        # same truthful degrade fget's 0 is.
+        n = int(n)
+        if not (0 <= n < len(tile_flags)):
+            return
+        if on is None:
+            tile_flags[n] = int(b) & 0xFF
+            return
+        bit = 1 << (int(b) & 7)
+        tile_flags[n] = (tile_flags[n] | bit) if on else (tile_flags[n] & ~bit & 0xFF)
 
     def touch():
         # Pointer (touch glass on a board, mouse on the host) exposed to
@@ -281,6 +342,15 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # cart can track a DRAG (drawing, sliders). Two-domain seam (#39): prefer
         # the game-space pointer publication when the console provides one (a
         # distinct big system canvas), so a cart reads 320x240 viewport coords.
+        # A LINKED MATCH HAS NO POINTER. Only buttons cross the radio, so a
+        # touch read here would move this screen's player and not the other
+        # one's -- a divergence the lockstep exchange cannot see and cannot
+        # heal, which is the same class of bug as drawing from the shared random
+        # stream. Reporting "no pointer" makes a touch-driven cart fall back to
+        # its button path, which is the honest answer while two consoles share
+        # one game.
+        if getattr(input, "netplay_live", False):
+            return None
         gp = getattr(input, "game_pointer", None)
         if gp is not None:
             held = bool(gp[3]) if len(gp) > 3 else False
@@ -371,7 +441,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       tables=tables, texts=texts, owner=owner)
+                       tables=tables, texts=texts, flags=tile_flags, owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -519,10 +589,13 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "tri": canvas.tri, "trib": canvas.trib,
+        "oval": canvas.oval, "ovalb": canvas.ovalb, "fillp": canvas.fillp,
         "sspr": sspr, "tline": tline,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
+        "sget": sget, "sset": sset,
+        "fget": fget, "fset": fset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,
         "pal": canvas.pal, "palt": canvas.palt,
@@ -558,6 +631,22 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
             return fn
 
         ns["on_net"] = on_net
+    # Capability-gated PHYSICAL I/O (#9): pin_write/pin_read, injected only when
+    # the thing serving this page has pins and answered the probe -- today the
+    # Zero, over POST /gpio. Gated the same way and for the same reason as wifi
+    # and net: a verb that cannot work must not have a NAME. A stubbed
+    # `pin_write` that quietly does nothing is the worst of the three answers a
+    # kid can get, because the cart looks right and the LED never lights, and
+    # there is nothing to search for.
+    #
+    # The queue behind these is gpio_link.GpioLink; a write returns as soon as
+    # it is queued and `pin_read` answers from the last batch, so neither verb
+    # can stall a frame on the network. That latency is documented in
+    # docs/moy_cart_api.md, because it is the one thing about them a cart
+    # author has to hold in their head.
+    if gpio is not None:
+        ns["pin_write"] = gpio.write
+        ns["pin_read"] = gpio.read
     # Scene accessors (#85): scene()/scene(name)/load_scene(name) over the cart's
     # placed-actor scenes. Pure DATA (no drawing) -- the logic lives once in the
     # shared widgets.Scenes and make_api just binds its methods. The Player

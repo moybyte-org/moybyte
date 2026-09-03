@@ -1,0 +1,30 @@
+{
+  "format": "moy-1",
+  "version": 3,
+  "title": "Pin Light",
+  "type": "game",
+  "system": true,
+  "order": 360,
+  "runtime": "python",
+  "main": "main.py",
+  "canvas": "320x240",
+  "permissions": [
+    "graphics",
+    "input",
+    "pins"
+  ],
+  "safe_to_share": true,
+  "config": {
+    "pin": 21
+  },
+  "edit": [
+    {
+      "key": "pin",
+      "label": "PIN",
+      "type": "int",
+      "min": 1,
+      "max": 21,
+      "card": "DRIVES PIN {value}"
+    }
+  ]
+}

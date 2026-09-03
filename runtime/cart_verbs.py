@@ -40,15 +40,16 @@ CART_VERBS = (
     "W", "H",
     # Draw + state
     "cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr",
-    "tri", "trib", "sspr", "tline", "print",
+    "tri", "trib", "oval", "ovalb", "fillp", "sspr", "tline", "print",
     "clip", "camera", "pal", "palt", "col", "background", "view",
     # Layers + images. `make_layer`/`draw_layer` are CORE since the
     # 2026-08-19 vendor (SPEC.md 6; upstream b9dbba1 moved them out of the
     # §10 `layers` extension -- a verb that degrades truthfully cannot be an
     # extension). `image` is moybyte's own, still `moybyte.images`.
     "make_layer", "draw_layer", "Image", "image",
-    # Tilemap
-    "map", "mget", "mset",
+    # Tilemap, the sheet pixels, and the tile flags map filters on
+    # (SPEC.md 3.5 / 7.1 / 7.2)
+    "map", "mget", "mset", "sget", "sset", "fget", "fset",
     # Input
     "btn", "btnp", "players", "key", "keyp", "touch", "mouse", "textmode",
     # Audio
@@ -59,6 +60,8 @@ CART_VERBS = (
     "table", "text",
     # Capability-gated: network (#38), multiplayer (#65)
     "wifi", "net", "on_net",
+    # Capability-gated: physical pins (#9), on a host that has them
+    "pin_write", "pin_read",
     # Capability-gated: scenes + the actor world (#85 / #109)
     "scene", "load_scene", "draw_scene",
     "actors", "touching", "move_actor", "move_actor_to", "remove_actor",

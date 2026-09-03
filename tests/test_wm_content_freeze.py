@@ -1,5 +1,5 @@
 """The focused-window CONTENT FREEZE (wm_windowed._content_static -- the first
-slice of the surface-granularity damage model, docs/ui_damage_model_v1.md §5.0).
+slice of the surface-granularity damage model, docs/surface_model_v1.md §14.1).
 
 A painted frame that provably did not change the focused window's content skips
 its re-render and presents the retained win.buf stamp instead (the map tab's

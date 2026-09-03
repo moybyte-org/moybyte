@@ -10,39 +10,35 @@ state the next one expects -- an on-glass tour, not isolated units.
 The device half is the serial dev-command set in
 firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py (`swipe` feeds
 the real pointer path, `state` answers with a JSON snapshot); the driver is
-tools/p4_autotest.P4Board.
+tools/p4_autotest.P4Board. This is the only one of the three suites whose
+board may be RESET -- its `[serial]` block does not declare `attach_only`,
+because the CH343 is an external USB-UART that survives a chip reset. The
+handful of checks it shares with the two fullscreen-tier boards live in
+tests/on_glass.py; everything below that is windowed-desk or OTA is this
+board's alone.
 """
-
-import os
-import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
+import on_glass
+from on_glass import ROOT
 
-PORT = os.environ.get("MOYBYTE_P4_PORT")
-
-pytestmark = pytest.mark.skipif(
-    not PORT, reason="MOYBYTE_P4_PORT not set (needs the P4 on serial)")
+PORT, pytestmark = on_glass.gate("MOYBYTE_P4_PORT", "the P4")
 
 
 @pytest.fixture(scope="module")
 def board():
-    from p4_autotest import P4Board
-    b = P4Board(PORT)
-    b.reset()
-    b.cmd("diag 1")
-    yield b
-    # Leave the board freshly booted on the desk for a human.
-    try:
+    with on_glass.session(
+            PORT,
+            board_dir=ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b") as b:
+        b.cmd("diag 1")            # this suite asserts PERF lines flow
+        yield b
+        # Leave the board freshly booted on the desk for a human -- the one
+        # board this may be done to (see the module docstring).
         b.ser.write(b"\r\x03")
         b.drain(0.5)
         b.ser.write(b"\x04")
         b.drain(1.0)
-    finally:
-        b.close()
 
 
 def test_boots_to_the_desk(board):
@@ -52,9 +48,7 @@ def test_boots_to_the_desk(board):
 
 
 def test_wifi_status_is_readable(board):
-    st = board.state()
-    assert "wifi_err" not in st, st.get("wifi_err")
-    assert st.get("wifi") is None or isinstance(st["wifi"], list)
+    on_glass.wifi_status_is_readable(board)
 
 
 def test_appearance_cart_is_claimed(board):
@@ -71,9 +65,7 @@ def test_appearance_cart_is_claimed(board):
 
 def test_every_system_app_claims_exactly_one_cart(board):
     """The same identity check for every registered app, not just Appearance."""
-    claims = board.state().get("app_claims") or {}
-    assert claims, "no system apps registered on device"
-    assert all(n == 1 for n in claims.values()), claims
+    on_glass.every_app_claims_one_cart(board)
 
 
 def test_open_settings_window(board):
@@ -169,9 +161,15 @@ def test_window_chrome_freezes_during_a_content_scroll(board):
 
 
 def test_perf_lines_flow(board):
-    n0 = len(board.lines)
-    board.drain(4.0)
-    assert board.perf_lines(n0), "no PERF lines while idle"
+    """One format on every board (#206 item 2), plus the columns only this one
+    can fill: the windowed WM's pass split and the async-PPA overlap counters.
+    The module fixture sends `diag 1`, so the wm columns are measured here --
+    with the meters off they read `-`, which is a different answer from 0."""
+    got = on_glass.perf_line_is_the_one_format(board)
+    for name in ("wmr", "wmw", "wms"):
+        assert got[name] is not None, (name, got)
+    assert isinstance(got["ppa"], tuple) and len(got["ppa"]) == 5, got
+    assert got["ppa"][4] == 0, "PPA timeouts must stay 0: %r" % (got["ppa"],)
 
 
 def test_a_drag_touches_no_storage_and_rebuilds_no_cache(board):
@@ -221,25 +219,10 @@ def test_idle_screen_blank_and_wake(board):
     """The #58 power save: the panel blanks after an idle timeout and any input
     wakes it, while the loop, the cart and this very serial channel stay live.
 
-    Retuned to a few seconds for the test, then restored -- the shipped default
-    is 5 minutes. Silence is the actual stimulus here: the assertion is that
-    NOT talking to the board blanks it, so the wait must send nothing.
-    """
-    board.cmd("power 3", wait_for="REMOTE power")
-    board.drain(0.3)
-    board.drain(6.0)                       # say nothing; let the timer expire
-    assert board.state()["psave"][0] is True, "the panel never blanked"
-    # ...and that state query was serial traffic, which counts as activity, so
-    # the panel is already awake again by the following frame.
-    board.drain(0.5)
-    assert board.state()["psave"][0] is False, "input did not wake the panel"
-
-    # `power off` blanks immediately. It arrives ON the serial channel, which is
-    # itself activity -- the explicit blank has to outrank that or it wakes in
-    # the same iteration (it did, before _ps_force).
-    board.cmd("power off", wait_for="REMOTE power")
-    board.drain(1.0)
-    assert board.state()["psave"][0] is True, "`power off` did not blank"
+    The shared body is the blank/wake/`power off` trio every board runs; what
+    is this board's is the tail -- 0 disables the timer outright, which the S3
+    suites do not pin."""
+    on_glass.idle_blank_and_wake(board)
 
     # 0 disables it outright: no blank, however long the silence.
     board.cmd("power 0", wait_for="REMOTE power")
@@ -262,6 +245,56 @@ def test_idle_screen_blank_and_wake(board):
 # The code under test is EXTRACTED from moy_ota.py by ast rather than retyped,
 # so a change there is picked up here instead of drifting; the only edits are
 # mechanical (dedent the methods, drop `self`).
+#
+# NAMING THE PIECES BY HAND WAS THE DRIFT (2026-08-27). `607ba35` promoted the
+# PKCS#1 block compare out of the class into a module-level `verify_sig` so the
+# C6 image's second signature could share it, and this extractor -- which knew
+# about class methods and module-level ASSIGNMENTS -- kept uploading a
+# `_verify_manifest` whose body had left the building. The board said
+# `NameError: name 'verify_sig' isn't defined` once per command; the harness
+# discarded the text and every assertion downstream read `assert None is False`.
+# So the closure is now DERIVED: whatever the extracted code still references,
+# the extractor goes and fetches, and what it cannot fetch it names, here, in
+# milliseconds, instead of on the wire as an absence.
+
+def _free_names(snippet):
+    """Names `snippet` READS that nothing in it (or in builtins) defines."""
+    import ast
+    import builtins
+
+    def params(args):
+        got = {a.arg for a in list(args.posonlyargs) + list(args.args)
+               + list(args.kwonlyargs)}
+        return got | {a.arg for a in (args.vararg, args.kwarg) if a}
+
+    tree = ast.parse(snippet)
+    top = set(dir(builtins))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            top.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            top.add(node.name)
+
+    free = set()
+    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
+        # Bindings first, reads second: ast.walk does not visit a store before
+        # the load it feeds, so a one-pass check would flag ordinary locals.
+        local = params(fn.args)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+                local.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                local.update((a.asname or a.name).split(".")[0]
+                             for a in node.names)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                local.add(node.name)
+            elif isinstance(node, (ast.FunctionDef, ast.Lambda)):
+                local |= params(node.args)
+        free.update(n.id for n in ast.walk(fn)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                    and n.id not in local and n.id not in top)
+    return free
+
 
 def _extract_verifier():
     import ast
@@ -287,9 +320,38 @@ def _extract_verifier():
                         return out.replace("self._", "_")
         raise AssertionError("method vanished from moy_ota: " + name)
 
-    return "\n".join([const("OTA_SCHEME"), const("_SHA256_DER"),
-                      const("OTA_PUBLIC_KEYS"), method("_canonical"),
-                      method("_verify_manifest")])
+    def top_level(name):
+        """A module-level def or assignment the extracted code needs, or None
+        (a stdlib name, or something genuinely missing -- the caller says so)."""
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name == name:
+                return ast.get_source_segment(src, node)
+            if isinstance(node, ast.Assign) and any(
+                    getattr(t, "id", "") == name for t in node.targets):
+                return ast.get_source_segment(src, node)
+        return None
+
+    parts = [const("OTA_SCHEME"), const("_SHA256_DER"), const("OTA_PUBLIC_KEYS"),
+             method("_canonical"), method("_verify_manifest")]
+    have = {"OTA_SCHEME", "_SHA256_DER", "OTA_PUBLIC_KEYS",
+            "_canonical", "_verify_manifest"}
+    for _ in range(8):                      # a chain, not a single hop
+        missing = sorted(_free_names("\n".join(parts)) - have)
+        if not missing:
+            break
+        for name in missing:
+            got = top_level(name)
+            assert got is not None, (
+                "the extracted verifier calls %r, which moy_ota does not define "
+                "at module level -- the device would answer NameError and the "
+                "test would read it as a missing value" % name)
+            parts.append(got)
+            have.add(name)
+    snippet = "\n".join(parts)
+    assert not _free_names(snippet), (
+        "the extracted verifier does not close over its own names: %s"
+        % sorted(_free_names(snippet)))
+    return snippet
 
 
 def _val(board, expr, timeout=30):
@@ -298,8 +360,10 @@ def _val(board, expr, timeout=30):
     The device's `py` handler builds a FRESH env per command, so anything
     pyexec uploaded lives in ws._g and nowhere else -- a bare pyval of a name
     defined up there comes back None (a device NameError), which reads exactly
-    like a failed assertion and is not one."""
-    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout)
+    like a failed assertion and is not one. strict=True is what makes that
+    distinction: a device exception arrives as DeviceError carrying the board's
+    own words, never as a value the caller then asserts against."""
+    return board.pyval("eval(%r, ws._g)" % expr, timeout=timeout, strict=True)
 
 
 SIGNED_MANIFEST = {
@@ -321,9 +385,10 @@ def test_the_shipped_verifier_runs_on_micropython(board):
     manifest = dict(SIGNED_MANIFEST)
     manifest["sig"] = sign_with_test_key(manifest)
 
-    assert board.pyexec(_extract_verifier(), timeout=90), "verifier upload failed"
+    assert board.pyexec(_extract_verifier(), timeout=90), board.last_error
     assert board.pyexec(
-        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest), timeout=90)
+        "KEYS = %r\nMANIFEST = %r\n" % (TEST_KEYS, manifest),
+        timeout=90), board.last_error
 
     # The MicroPython API questions, asked one at a time so a failure names itself.
     assert _val(board, "int(KEYS[0][0], 16).__class__.__name__") == "int"
@@ -344,8 +409,9 @@ def test_verification_is_fast_enough_to_not_think_about(board):
         "t0 = time.ticks_us()\n"
         "for _ in range(5):\n"
         "    _verify_manifest(MANIFEST, KEYS)\n"
-        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n", timeout=60)
-    us = board.pyval("ws._g['VERIFY_US']")
+        "VERIFY_US = time.ticks_diff(time.ticks_us(), t0) // 5\n",
+        timeout=60), board.last_error
+    us = board.pyval("ws._g['VERIFY_US']", strict=True)
     print("\nverify_manifest: %dus (%.1fms)" % (us, us / 1000.0))
     assert 0 < us < 500_000, "verify took %dus -- something got much slower" % us
 
@@ -486,11 +552,14 @@ def test_the_web_console_is_baked_into_this_image(board):
         "this image has NO baked web console (stamp %r) -- it was built with "
         "no firmware/web_runner/dist" % (stamp,))
     count, total = int(stamp.split()[0]), int(stamp.split()[1])
-    assert count == 4, stamp
+    # Self-consistent like the rest of this test: the baked set must be the
+    # image's OWN serve allowlist (moy_webhost.ASSETS), not a count restated
+    # here -- a hand-pinned 4 went stale the day moy_store.mjs joined the set.
+    declared = board.pyval("sorted(__import__('moy_webhost').ASSETS)")
+    assert count == len(declared), (stamp, declared)
     assert total > 400000, "a bundle this small is not the wasm console"
     names = board.pyval("__import__('moy_web').assets()")
-    assert set(names) == {"index.html.gz", "worker.js.gz",
-                          "micropython.mjs.gz", "micropython.wasm.gz"}, names
+    assert set(names) == {n + ".gz" for n in declared}, (names, declared)
     # Each blob read back at its recorded length, starting with the gzip magic.
     # A misplaced symbol still gives plausible lengths -- it is the first bytes
     # that say the pointer landed on the right thing.
@@ -504,15 +573,12 @@ def test_the_web_console_is_baked_into_this_image(board):
         assert size > 0, name
 
 
-def test_the_console_serves_the_image_when_storage_has_none(board):
-    """Storage WINS on purpose (a pushed copy is a human's explicit override),
-    so this asserts the fallback the way the handler sees it -- pointed at a
-    directory that cannot exist. If the real /moy/web has a pushed copy, that
-    is the correct answer for the live host and the reason `start()` prints
-    which source it is using."""
+def test_the_console_is_served_out_of_the_firmware_image(board):
+    """The console this board hands a browser comes out of its own image --
+    the megabyte the page cannot boot without, read straight from flash."""
     assert board.pyexec(
         "import moy_webhost\n"
-        "H = moy_webhost.WebHost('/moy/carts', '/moy/no_such_web')\n"
+        "H = moy_webhost.WebHost('/moy/carts')\n"
         "R = H.handle_http('GET', '/micropython.wasm', b'')\n")
     kind = board.pyval("eval('type(R).__name__', ws._g)")
     assert kind == "BlobResponse", kind
@@ -524,16 +590,17 @@ def test_the_console_serves_the_image_when_storage_has_none(board):
 
 
 def test_a_cart_runs_and_exits(board):
-    """The 2026-08-17 blind-spot closer, same as the T-Deck suite's: a staged
-    regression once broke every cart start while this suite stayed green,
-    because nothing here ran one. Launch, assert it started clean, exit.
+    """The 2026-08-17 blind-spot closer, same as on_glass.cart_runs_and_exits:
+    a staged regression once broke every cart start while this suite stayed
+    green, because nothing here ran one. Launch, assert it started clean, exit.
 
-    tools/p4_perf.py's idiom, exactly: ws.exit() first to clear whatever the
-    tour above left open (Settings + the picker windows -- a `run` from that
-    state opens the cart under the picker's project arrangement, where the
-    first draft's cart-quit exit did not pop), then run, then ws.exit() out.
-    The T-Deck suite's twin keeps the cart-quit path, so the kid-facing quit()
-    flag stays pinned on one board while this one pins the launch itself."""
+    NOT the shared body, deliberately. tools/p4_perf.py's idiom, exactly:
+    ws.exit() first to clear whatever the tour above left open (Settings + the
+    picker windows -- a `run` from that state opens the cart under the picker's
+    project arrangement, where the first draft's cart-quit exit did not pop),
+    then run, then ws.exit() out. The shared body keeps the cart-quit path, so
+    the kid-facing quit() flag stays pinned on the two boards that reach the
+    launcher from a bare stack while this one pins the launch itself."""
     for _ in range(3):                       # close settings/picker leftovers
         board.cmd("py ws.exit()", wait_for="PY")
         board.drain(0.5)

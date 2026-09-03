@@ -1,0 +1,5 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 15000, "steps": [
+  {"note": "a board twin answers GET /sync: one store (the board), row still offered", "wait": 2500},
+  {"js": "document.getElementById('pz').style.display+'|'+document.getElementById('pzs').textContent"},
+  {"js": "window.__moyPersist ? window.__moyPersist.mode+'|'+window.__moyPersist.d : 'none'"}
+]}

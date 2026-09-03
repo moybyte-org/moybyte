@@ -67,15 +67,28 @@ def parse_p8(text):
 
 
 def _title_from(sections, p8_path):
-    """Best-effort cart title: the first non-empty `__lua__` comment line that
-    looks like a name, else the filename stem."""
+    """Best-effort cart title: the cart's HEADER comment, else the filename.
+
+    PICO-8's convention is `-- title` / `-- by author` in the block above the
+    first line of code, and "the block above the first line of code" is the
+    whole rule -- not "the first comment anywhere". A cart with no header at
+    all has its first `--` wherever the author happened to comment something
+    out, and `bunnysurvivor` imported under the title
+
+        print("kb"..stat(0),(playerx)-64,(player
+
+which is a debug line it disabled on line 67. Reading past real code to find
+    a name is how that happens, so this stops there and takes the filename.
+    """
     for line in sections.get("lua", []):
         s = line.strip()
-        # PICO-8 carts conventionally start with `-- title` / `-- by author`.
-        if s.startswith("--"):
-            cand = s[2:].strip()
-            if cand and not cand.lower().startswith(("by ", "by:")):
-                return cand[:40]
+        if not s:
+            continue
+        if not s.startswith("--"):
+            break                       # code: the header block is over
+        cand = s[2:].strip()
+        if cand and not cand.lower().startswith(("by ", "by:")):
+            return cand[:40]
     stem = os.path.basename(p8_path)
     if stem.lower().endswith(".p8"):
         stem = stem[:-3]
@@ -178,9 +191,13 @@ def gfx_to_kgfx(gfx_lines):
 #     key ([pitch, wave, 0]) -- PICO-8 rests do, and a following slide
 #     (eff 1) glides from that key.
 #   * WAVE: all 8 builtin instruments map 1:1 (table below -- the two consoles
-#     number them differently). The 8 CUSTOM instruments (waveform 8..15,
-#     defined in __sfx__ slots 0..7) are still not modelled; we fold them onto
-#     the builtin in the low 3 bits (w & 7).
+#     number them differently). The 8 CUSTOM instruments (waveform 8..15) are
+#     an SFX slot 0..7 used AS an instrument, which the moy model has no way to
+#     say. They still fold onto one builtin wave -- but onto the wave that
+#     slot actually plays, not onto `w & 7`: that low-bits fold is audibly
+#     wrong, since custom instrument 6 lands on p8 waveform 6 = NOISE and a
+#     cart's music plays as static. The report names the substitution rather
+#     than doing it silently.
 #   * SPEED: PICO-8 "note duration" D is ticks-per-row at 120 ticks/sec, so
 #     speed = 120/D steps/sec exactly (SPEC.md 8.1's speed is not
 #     integer-only; rounding it drifts the row clock). D==0 plays flat out.
@@ -215,7 +232,37 @@ def _hx(s, lo, hi):
         return 0
 
 
-def _sfx_line_to_dict(line):
+def custom_instrument_waves(sfx_lines):
+    """The builtin wave each p8 CUSTOM instrument (8..15) folds onto.
+
+    A custom instrument is __sfx__ slot 0..7 played as an instrument. The moy
+    model has one wave per note and no way to name a slot, so the fold has to
+    pick a builtin -- and the honest pick is the wave that slot mostly plays,
+    read off the slot itself. Falls back to the low-bits fold for a slot that
+    is empty or all rests.
+    """
+    waves = {}
+    for k in range(8):
+        if k >= len(sfx_lines):
+            break
+        s = "".join(sfx_lines[k].strip().lower().split())
+        seen = {}
+        notes = s[8:]
+        for i in range(32):
+            chunk = notes[i * 5:i * 5 + 5]
+            if len(chunk) < 5 or chunk[3] not in "1234567":
+                continue                 # a rest says nothing about the timbre
+            instr = int(chunk[2], 16) if chunk[2] in "0123456789abcdef" else 0
+            if instr >= 8:
+                continue                 # a custom instrument defined by one
+            seen[instr] = seen.get(instr, 0) + 1
+        if seen:
+            top = max(seen.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+            waves[8 + k] = _IMPORT_INSTRUMENT_TO_WAVE.get(top, 0)
+    return waves
+
+
+def _sfx_line_to_dict(line, custom=None):
     """One PICO-8 __sfx__ hex line -> a moy SFX dict (or None if all-rest).
 
     The header's LOOP RANGE (bytes 4..8: loop start / loop end) carries over
@@ -229,6 +276,12 @@ def _sfx_line_to_dict(line):
     # ticks-per-note at 120 ticks/sec -> steps/sec, kept exact: a D=32 sfx is
     # 3.75 steps/s, and rounding that to 4 drifts it against the row clock.
     # SPEC.md 8.1's speed is not integer-only.
+    # Byte 0 is "filters + editor flag", and reading it as the editor flag
+    # alone drops five settings: PICO-8 0.2.4 packs noiz/buzz/detune/reverb/
+    # dampen into it, and a modern cart uses them on most of its sounds. Bit 0
+    # IS the editor flag and means nothing to playback; the rest carry over
+    # verbatim, exactly like the effect nibble.
+    filters = _hx(s, 0, 2) & 0xFE
     duration = _hx(s, 2, 4)
     speed = round(120.0 / duration, 4) if duration else 120.0
     loop_s = _hx(s, 4, 6)
@@ -243,7 +296,10 @@ def _sfx_line_to_dict(line):
         instrument = int(chunk[2], 16) if chunk[2] in "0123456789abcdef" else 0
         vol = int(chunk[3], 16) if chunk[3] in "01234567" else 0
         eff = int(chunk[4], 16) if chunk[4] in "01234567" else 0
-        wave = _IMPORT_INSTRUMENT_TO_WAVE.get(instrument & 7, 0)
+        if instrument >= 8 and custom and instrument in custom:
+            wave = custom[instrument]
+        else:
+            wave = _IMPORT_INSTRUMENT_TO_WAVE.get(instrument & 7, 0)
         if vol <= 0:
             # keep the key: a PICO-8 rest is silent but still the origin a
             # following slide (eff 1) glides from
@@ -261,6 +317,8 @@ def _sfx_line_to_dict(line):
         d = {"speed": speed, "loop": True, "steps": steps}
         if loop_s:
             d["loop_start"] = int(loop_s)
+        if filters:
+            d["filters"] = filters
         return d
     if loop_e == 0 and 0 < loop_s < len(steps):
         # p8's length trick: loop start with end 0 = "play this many notes"
@@ -270,7 +328,10 @@ def _sfx_line_to_dict(line):
         steps.pop()
     if not steps:
         return None
-    return {"speed": speed, "loop": False, "steps": steps}
+    d = {"speed": speed, "loop": False, "steps": steps}
+    if filters:
+        d["filters"] = filters
+    return d
 
 
 def _music_line_channels(line):
@@ -416,10 +477,11 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
     up). Music patterns map to moy 1-channel `pattern` lists."""
     sfx = []
     n_real = 0
+    custom = custom_instrument_waves(sfx_lines)
     for i, line in enumerate(sfx_lines):
         if i >= max_sfx:
             break
-        d = _sfx_line_to_dict(line)
+        d = _sfx_line_to_dict(line, custom)
         if d is None:
             # keep the id slot so __music__ references stay aligned
             sfx.append({"speed": 8, "loop": False, "steps": []})
@@ -448,10 +510,147 @@ def sfx_music_to_sounds(sfx_lines, music_lines, max_sfx=64):
 #   0x0000 gfx (2px/byte, low nibble = left)   0x2000 map rows 0-31
 #   0x3000 gff        0x3100 music (4B/pattern, flag bits ride bit7 of ch0-2)
 #   0x3200 sfx (64x68B: 32 2-byte notes + editor/speed/loop)   0x4300 code
-# Code is raw ASCII or the OLD ":c:" compression (pre-0.2.0 carts -- the BBS
-# classics); the newer "\x00pxa" scheme is detected and reported, not decoded.
+# Code is raw ASCII, the OLD ":c:" compression (pre-0.2.0 carts -- the BBS
+# classics), or the "\x00pxa" scheme every PICO-8 >= 0.2.0 writes.
 
 _OLD_LOOKUP = b"#\n 0123456789abcdefghijklmnopqrstuvwxyz!#%(){}[]<>+=/*:;.,~_"
+
+# --- the "\x00pxa" code compression (PICO-8 >= 0.2.0) -----------------------
+#
+# What every modern BBS cart uses, so without it a dropped .p8.png is refused
+# with "save it as text .p8 first" -- which is a fair instruction and a bad
+# answer, since the whole point of dropping a cart is not having PICO-8 open.
+#
+# Implemented from Lexaloffle's own reference (dansanderson/lexaloffle,
+# pxa_compress_snippets.c: `pxa_decompress`), which is the only description
+# precise enough to be worth following -- the wiki gives the header and the
+# three chunk kinds and none of the bit widths.
+#
+#   header   8 bytes, read through the SAME bit reader as the body:
+#            "\x00pxa", then raw_len and comp_len, each 2 bytes MSB-first.
+#   bits     LSB-FIRST within each byte, which is the one thing a reader
+#            written from the prose gets wrong half the time.
+#   CHR      a literal, as an index into a move-to-front table of all 256
+#            bytes: a unary run of 1-bits chooses a widening window, then the
+#            index within it. The byte moves to the front, so a cart's own
+#            alphabet drifts into the cheap end of the table.
+#   REF      a back-reference: a distance, then a chained length. The copy is
+#            byte-at-a-time and MAY overlap itself -- that is how a run is
+#            spelled, so memcpy or a slice is wrong here.
+#   RAW      the 0.2.0j escape: a distance whose encoding is the reserved
+#            value means "plain bytes follow, until a NUL or the end".
+_PXA_TINY_LITERAL_BITS = 4
+_PXA_BLOCK_LEN_CHAIN_BITS = 3
+_PXA_MIN_BLOCK_LEN = 3
+_PXA_BLOCK_DIST_BITS = 5
+
+
+class _PxaBits:
+    """LSB-first bit reader over a bytes-like, with the byte cursor exposed --
+    the decompress loop stops on `comp_len` bytes consumed, not on bits."""
+
+    def __init__(self, buf, pos=0):
+        self.buf = buf
+        self.pos = pos
+        self.bit = 1
+
+    def bit1(self):
+        if self.pos >= len(self.buf):
+            return 0
+        ret = 1 if (self.buf[self.pos] & self.bit) else 0
+        self.bit <<= 1
+        if self.bit == 256:
+            self.bit = 1
+            self.pos += 1
+        return ret
+
+    def val(self, bits):
+        v = 0
+        for i in range(bits):
+            if self.bit1():
+                v |= 1 << i
+        return v
+
+    def chain(self, link_bits, max_bits):
+        """Sum of `link_bits`-wide links, ending at the first non-maximal one.
+        A full link means 'and more follows', so a value is spelled in as many
+        links as it needs -- cheap for the small values that dominate."""
+        top = (1 << link_bits) - 1
+        val = 0
+        read = 0
+        vv = top
+        while vv == top:
+            vv = self.val(link_bits)
+            read += link_bits
+            val += vv
+            if read >= max_bits:
+                break
+        return val
+
+    def num(self):
+        """A back-reference distance. The width is chosen first, in 5-bit steps
+        (15 bits is commonest so it is the 1-bit prefix), then the value. The
+        one reserved combination -- zero in a 10-bit field -- is the RAW-block
+        marker, and is returned as -1."""
+        bits = (3 - self.chain(1, 2)) * _PXA_BLOCK_DIST_BITS
+        val = self.val(bits)
+        if val == 0 and bits == 10:
+            return -1
+        return val
+
+
+def _pxa_decompress(rom, pos=0x4300, max_len=0x10000):
+    """The code section at `pos` -> its bytes. Raises ValueError on a stream
+    that decodes to nonsense rather than returning half a program."""
+    bits = _PxaBits(rom, pos)
+    header = [bits.val(8) for _ in range(8)]
+    raw_len = header[4] * 256 + header[5]
+    comp_len = header[6] * 256 + header[7]
+    # The table starts as identity; every emitted byte moves to the front.
+    table = list(range(256))
+    out = bytearray()
+    end = pos + comp_len
+    while bits.pos < end and len(out) < raw_len and len(out) < max_len:
+        if bits.bit1() == 0:
+            offset = bits.num() + 1
+            if offset == 0:                       # RAW: plain bytes to a NUL
+                while len(out) < raw_len:
+                    b = bits.val(8)
+                    if b == 0:
+                        break
+                    out.append(b)
+                continue
+            if offset > len(out):
+                raise ValueError("pxa: back-reference past the start")
+            length = bits.chain(_PXA_BLOCK_LEN_CHAIN_BITS, 100000) \
+                + _PXA_MIN_BLOCK_LEN
+            # ONE BYTE AT A TIME, and not a slice: a reference may reach into
+            # what this very loop is writing, which is how a repeated run is
+            # spelled. A slice would copy the pre-loop bytes and repeat garbage.
+            start = len(out) - offset
+            for i in range(length):
+                if len(out) >= max_len:
+                    break
+                out.append(out[start + i])
+        else:
+            lpos = 0
+            nbits = 0
+            safety = 0
+            while bits.bit1() == 1 and safety < 16:
+                lpos += 1 << (_PXA_TINY_LITERAL_BITS + nbits)
+                nbits += 1
+                safety += 1
+            nbits += _PXA_TINY_LITERAL_BITS
+            lpos += bits.val(nbits)
+            if lpos > 255:
+                raise ValueError("pxa: literal index %d out of range" % lpos)
+            c = table[lpos]
+            out.append(c)
+            # move-to-front
+            for i in range(lpos, 0, -1):
+                table[i] = table[i - 1]
+            table[0] = c
+    return bytes(out)
 
 
 def _png_scanlines(data):
@@ -533,7 +732,27 @@ def _old_decompress(rom, start):
             cnt = (second >> 4) + 2
             for _ in range(cnt):
                 out.append(out[-off])
-    return out.decode("ascii", "replace")
+    return _latin1(out)
+
+
+def _latin1(data):
+    """bytes -> str, one character per byte, codepoint == byte value.
+
+    NOT `data.decode("latin-1")`. MicroPython decodes UTF-8 and only UTF-8: it
+    accepts the codec name, ignores it, and raises UnicodeError -- with an EMPTY
+    message -- on the first byte >= 0x80. It ignores an `errors` argument the
+    same way, so "replace" does not soften it either. This importer runs on that
+    VM in the browser console, so every cart whose code is pxa-compressed or
+    carries a P8SCII glyph failed there and nowhere else, reported as
+    "that cart did not decode ()".
+
+    ONE path on both tiers, deliberately -- not a CPython fast path with a
+    fallback. The bug this replaces was invisible precisely because the host
+    took a branch the browser never could, so the host suite proved nothing
+    about the tier that was broken. `chr` per byte is a few ms on a cart-sized
+    buffer, once per import.
+    """
+    return "".join(chr(b) for b in data)
 
 
 def _p8png_sections(rom):
@@ -568,15 +787,21 @@ def _p8png_sections(rom):
     sections["sfx"] = sfx
     code = rom[0x4300:]
     if code[:4] == b"\x00pxa":
-        raise SystemExit("this cart uses the newer pxa code compression "
-                         "(PICO-8 >= 0.2.0) -- save it as text .p8 first")
-    if code[:4] == b":c:\x00":
+        lua = _latin1(_pxa_decompress(rom, 0x4300))
+    elif code[:4] == b":c:\x00":
         lua = _old_decompress(rom, 0x4300)
     else:
         end = code.find(b"\x00")
-        lua = code[:end if end >= 0 else len(code)].decode("ascii", "replace")
+        lua = _latin1(code[:end if end >= 0 else len(code)])
     sections["lua"] = lua.split("\n")
     return sections
+
+
+# The cart's code comes out of the ROM as P8SCII, and every byte >= 0x80 is a
+# GLYPH -- the six button symbols among them. `ascii/replace` turned all of
+# them into one U+FFFD, so `btn(<left>)` and `btn(<x>)` decoded to the same
+# text: not "unreadable", WRONG, and identically wrong. latin-1 is the decode
+# that cannot lose a byte; `p8_lua_port` maps the glyphs that mean something.
 
 
 def read_p8(path):
@@ -586,4 +811,8 @@ def read_p8(path):
         blob = f.read()
     if blob[:8] == b"\x89PNG\r\n\x1a\n":
         return _p8png_sections(_p8png_rom(blob))
-    return parse_p8(blob.decode("utf-8", "replace"))
+    try:
+        text = blob.decode("utf-8")       # a .p8 PICO-8 wrote is valid UTF-8
+    except UnicodeError:
+        text = _latin1(blob)              # damaged, or glyphs stored as raw
+    return parse_p8(text)

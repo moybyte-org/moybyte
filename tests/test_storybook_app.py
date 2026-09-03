@@ -108,7 +108,7 @@ def test_hand_edited_code_graduates_the_story_to_read_only(tmp_path):
     # The kid levels up: hand-edit the generated code in the Editor.
     hacked = (Path(cart["path"]) / "main.py").read_text() + "\nSPEED = 99\n"
     ws.carts_store.save_code(cart, hacked)
-    ws._rehydrate_cart(cart)
+    ws.carts.rehydrate(cart)
     app._open_story(cart)
     assert app.read_only
     assert "LEVELED UP" in app.status

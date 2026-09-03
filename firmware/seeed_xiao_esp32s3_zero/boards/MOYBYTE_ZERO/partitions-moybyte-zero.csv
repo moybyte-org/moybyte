@@ -1,0 +1,58 @@
+# Moybyte Zero partition table -- 8MB flash, dual-OTA (#53), authored fresh
+# 2026-08-29 when this board was promoted out of its stock-MicroPython
+# arrangement.
+#
+# WHY THIS IS NOT THE CONSOLE TABLE. The S3 console layout is
+# nvs/otadata/phy + two 5MB app slots + a 6MB vfs, and it needs 16MB. Pointing
+# this board at it does not fail at build time: the BOOTLOADER rejects the
+# table and the board boot loops with no console at all, which on a board with
+# no screen is indistinguishable from a dead one. That was learned here (see
+# README, hardware facts), and it is why every number below is derived rather
+# than inherited.
+#
+# WHAT DOES CARRY OVER is the HEAD of the layout -- nvs 0x14000 (not
+# mainline's 0x6000), so otadata lands at 0x1D000 and the first app slot at
+# 0x20000, exactly as on both console S3 boards. Same reasoning the Guition
+# gave for taking the T-Deck's offsets: one set of numbers to hold in the head,
+# and `tools/board_flash.py` erases otadata from `[flash] otadata_offset`,
+# where a transposed digit between two S3 boards is a real hazard (the T-Deck's
+# 0x1D000 vs the P4's 0xD000 has already been typed wrong once, by hand).
+#
+# THE SLOT SIZE, and what it is sized against.
+#
+#   MEASURED 2026-08-29, this board's first build, on this table (the build
+#   prints exactly this line):
+#     app image   2,158,384 B   (dist/zero/moybyte_zero_app.bin)
+#     slot        2,883,584 B   (0x2C0000)
+#     headroom      725,200 B   (708 KB)
+#
+#   The image is 59% of a console board's (the Guition's was 3,668,096 B the
+#   day before) and the difference is the whole argument for two slots fitting
+#   in 8MB: this one freezes no console -- no wm, no launcher, no editors, no
+#   apps, no seed carts -- and compiles in none of the graphics/audio/Lua C
+#   modules. What it does carry is the same 627,373 B baked web console every
+#   other board carries (native/moy_web), which is 29% of the image and the
+#   single largest thing in it.
+#
+#   708 KB of headroom is 3.5x the #168 warning floor and ~34% of the image, on
+#   a board whose payload is not expected to grow: its frozen set is the sync
+#   stack's import closure, and the web bundle grows with the console rather
+#   than with this board. The alternative sizings were priced: 3MB slots leave
+#   1.87MB of vfs, and this board is a CART STORE -- the seed roster alone is
+#   763KB / 36 folders / 132 files (measured on glass 2026-08-25) before a kid
+#   has made anything. 2.75MB slots keep 2.375MB for the store, which is the
+#   trade this board exists to make.
+#
+# WHAT WOULD FALSIFY IT: the app image crossing ~2.8MB. The build says so on
+# every run (the #168 guard reads THIS FILE's ota_0 size and prints the
+# headroom, and fails the build on an overflow), so the tell arrives before the
+# image does. Changing these offsets afterwards costs every deployed board a
+# full-erase cable flash, so the time to argue with the numbers is now.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x14000,
+otadata,  data, ota,     0x1D000,  0x2000,
+phy_init, data, phy,     0x1F000,  0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x2C0000,
+ota_1,    app,  ota_1,   0x2E0000, 0x2C0000,
+vfs,      data, fat,     0x5A0000, 0x260000,

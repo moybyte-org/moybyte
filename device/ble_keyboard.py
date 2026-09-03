@@ -240,6 +240,21 @@ class BleHidKeyboard:
 
     SCAN_MS = 5000
     RETRY_MS = 5000       # don't keep the shared C6 radio in near-continuous scan
+    # The scan's RADIO DUTY, not its cadence, was the espnow link's biggest
+    # enemy (measured 2026-08-24, #7): interval == window == 30ms is a
+    # CONTINUOUS scan, and with no keyboard connected the 5s-scan/5s-idle
+    # retry loop kept the shared radio deaf HALF the time -- the P4's C6
+    # dropped ~40% of inbound espnow packets at an idle desk (19.2/s received
+    # of 32.5 offered; 29.5/s the moment the scan stopped), which was most of
+    # the P4<->T-Deck lockstep stall rate. Background rescans now scan 30ms in
+    # every 300ms (10% duty, PASSIVE -- reconnect matches the bonded address
+    # from the ADV itself, so scan responses are not needed); an advertising
+    # keyboard is still found in about a second. The PICKER keeps the
+    # continuous ACTIVE scan: user-facing, brief, and it wants names.
+    BG_INTERVAL_US = 300000
+    BG_WINDOW_US = 30000
+    PICKER_INTERVAL_US = 30000
+    PICKER_WINDOW_US = 30000
     CONNECT_TIMEOUT_MS = 12000
     DISCOVERY_TIMEOUT_MS = 15000
 
@@ -254,6 +269,10 @@ class BleHidKeyboard:
         # a host test fake may still be the flat pre-source shape.)
         _src = getattr(input_state, "source", None)
         self.src = _src("ble") if _src is not None else input_state
+        # #65: the player slot this keyboard is MEANT to drive. None = nobody
+        # has asked, so the source is left entirely alone; a number is honoured
+        # only while connected.
+        self._want_player = None
         self.store_path = store_path
         self.ble = ble
         self.available = False
@@ -357,6 +376,16 @@ class BleHidKeyboard:
             try:
                 self.ble.config(rxbuf=512)
             except Exception:
+                pass
+            try:
+                # ESP-Hosted boards only (the P4): since hosted ~2.8 the
+                # co-processor's BT controller is not initialised or enabled
+                # by default -- the HOST does both before NimBLE's first HCI
+                # command (esp-hosted-mcu#212; without it active(True) panics
+                # the interrupt watchdog). Absent module = radio-on-SoC board.
+                import moy_c6
+                moy_c6.bt_up()
+            except ImportError:
                 pass
             self.ble.active(True)
             self.available = True
@@ -529,8 +558,46 @@ class BleHidKeyboard:
 
     # -- per-frame bridge -------------------------------------------------
 
+    def set_player(self, slot):
+        """Which PLAYER this keyboard drives (#65 Phase 1).
+
+        On a board that already HAS a keyboard, a paired Bluetooth one is the
+        natural second controller -- two kids, two real keyboards, one screen,
+        and no radio between consoles. Assigning it a player is the entire
+        mechanism: a source carries a player (#26), and two sources disagreeing
+        IS multiplayer, so players() reports 2 with nothing else wired.
+
+        Stored as an INTENT rather than applied straight through, because a
+        keyboard that is not connected must not hold a player slot: the cart
+        would field a second character nobody could move. _sync_player resolves
+        the intent against the live connection every frame.
+        """
+        self._want_player = int(slot)
+        self._sync_player()
+
+    def _sync_player(self):
+        """Own the player slot only while actually connected. One int compare
+        per frame, on a path that already runs per frame.
+
+        A no-op until somebody ASKS for a slot: managing it unconditionally
+        would stomp a direct `src.player = n` every poll, and that assignment is
+        the documented one-attribute way to make this keyboard a player."""
+        want = self._want_player
+        if want is None:
+            return
+        if self.state != "ready":
+            want = 0
+        src = self.src
+        if getattr(src, "_player", None) == want:
+            return
+        try:
+            src.player = want
+        except AttributeError:      # a pre-source fake: no players for it
+            pass
+
     def poll(self):
         """Apply latest report level-state before InputState.begin_frame()."""
+        self._sync_player()
         logs = self._log_queue
         self._log_queue = []
         for parts in logs:
@@ -688,11 +755,15 @@ class BleHidKeyboard:
                                       self.name, -127)
         self.error = None
         self._set_state("scanning")
+        if picker:
+            iv, win, act = self.PICKER_INTERVAL_US, self.PICKER_WINDOW_US, True
+        else:
+            iv, win, act = self.BG_INTERVAL_US, self.BG_WINDOW_US, False
         try:
             try:
-                self.ble.gap_scan(self.SCAN_MS, 30000, 30000, True)
+                self.ble.gap_scan(self.SCAN_MS, iv, win, act)
             except TypeError:
-                self.ble.gap_scan(self.SCAN_MS, 30000, 30000)
+                self.ble.gap_scan(self.SCAN_MS, iv, win)
             self._log("Moybyte BLE keyboard: scanning%s"
                       % (" for devices" if picker else ""))
             return True

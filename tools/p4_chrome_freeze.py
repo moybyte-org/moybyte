@@ -101,7 +101,8 @@ def main():
 
         for phase in ("settled", "after theme change"):
             if phase != "settled":
-                b.pyexec("ws.set_theme('berry' if ws.theme_name != 'berry' "
+                b.pyexec("ws.look.set_theme('berry' if ws.look.theme_name "
+                         "!= 'berry' "
                          "else 'forest')")
                 b.drain(1.5)
             b.pyexec("ws._strips.clear()\nws._verdict.clear()")

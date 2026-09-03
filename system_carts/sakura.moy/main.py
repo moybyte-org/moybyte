@@ -29,23 +29,15 @@ petals = []         # each: [x, y, fall_speed, sway_phase, sway_amp, shade(0 nea
 base = 0            # the run's blossom sheet column (base tile); each petal draws base + shade
 t = 0.0
 
-# Falling-petal palette by depth: (near, mid, far). Near gets a white glint. These
-# colours are BAKED INTO sprites.moygfx: tile = BLOSSOM_ORDER.index(colour)*3 + shade
-# (shade 0 near / 1 mid / 2 far), the near tile carrying the glint pixel. The petals
-# draw from that sheet via spr(), so if you change a colour here, REGENERATE the
-# sheet to match (12 tiles, painted with these indices, colorkey 0).
-BLOSSOMS = {
-    "pink":  (14, 14, 2),
-    "white": (7, 6, 13),
-    "peach": (15, 9, 4),
-    "mixed": (14, 15, 7),
-}
+# The petal colours live in sprites.moygfx: 12 tiles, one column per blossom
+# choice, three shades deep (0 near / 1 mid / 2 far, the near tile carrying a
+# white glint). Recolour a blossom in the sprite editor -- nothing here to match.
 BLOSSOM_ORDER = ("pink", "white", "peach", "mixed")   # sheet column order (base = i*3)
 
 
 def _blossom_base():
     # A run's blossom colour fixes the sheet column; each petal's tile is base + shade.
-    # Unknown names fall back to pink (base 0), matching BLOSSOMS.get(...) below.
+    # Unknown names fall back to pink (base 0).
     name = cfg("blossom", "pink")
     for i in range(len(BLOSSOM_ORDER)):
         if BLOSSOM_ORDER[i] == name:

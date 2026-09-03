@@ -44,31 +44,9 @@ BOARD_GPS_RX_PIN    44
 BOARD_BOOT_PIN      0
 ```
 
-Local checks:
-
-```bash
-moybyte board-info lilygo_t_deck_plus
-moybyte device-doctor --board lilygo_t_deck_plus
-moybyte lilygo-next
-moybyte device-port
-moybyte export-device examples/tiny_runner.moyproj --board lilygo_t_deck_plus --out /tmp/moybyte_lilygo_t_deck_plus
-```
-
-The export step creates a `.kc8` bundle and `deploy.json`. Firmware scaffolding
-should consume that directory rather than reading arbitrary project files.
-
-After flashing, the first serial smoke test should print the board id, bundled
-project id, non-zero bundle byte count, and a heartbeat. Save monitor output and
-check it with:
-
-```bash
-moybyte firmware-smoke-check /tmp/moybyte_lilygo_serial.log --board lilygo_t_deck_plus --project-id tiny_runner
-```
-
-The smoke firmware now renders a centered 128x128 native `tiny_runner` canvas
-and moves the player rectangle. It polls the keyboard over I2C address `0x55`;
-use `WASD` or `HJKL` to move when the keyboard is detected. Use:
-
-```bash
-make firmware-smoke-lilygo PORT=/dev/ttyACM0
-```
+*(This profile once carried a `moybyte board-info` / `export-device` workflow
+producing `.kc8` bundles, and an Arduino serial-smoke firmware behind
+`make firmware-smoke-lilygo`. All of it went with the `.moyproj` SDK on
+2026-07-31 and the smoke firmware with it; the board is driven by
+`firmware/lilygo_t_deck_plus_mainline/` now. What survives here is the pin
+transcription, which `THIRD_PARTY.md` cites as its source.)*

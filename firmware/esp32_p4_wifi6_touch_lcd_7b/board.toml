@@ -200,11 +200,24 @@ otadata_size   = "0x2000"
 # LOAD-BEARING -- the same facts tests/test_p4_on_glass.py and
 # tests/test_tdeck_on_glass.py encode by hand, as data instead.
 #
-# The CH343 is an EXTERNAL USB-UART: opening with dtr/rts LOW never glitches the
-# auto-reset circuit, so a reset is explicit and safe here.
+# The CH343 is an EXTERNAL USB-UART with the esptool auto-reset circuit on
+# DTR/RTS. The REST state is both LOW, so a reset is explicit (an RTS pulse)
+# -- but the ORDER of getting there matters: the kernel raises both lines when
+# the tty opens and pyserial lowers DTR before RTS, and RTS-high-DTR-low IS the
+# EN pulse. Every tool attach power-cycled this board until 2026-09-02;
+# P4Board opens with DTR raised, lets RTS drop, then lowers DTR.
 dtr         = false
 rts         = false
 attach_only = false
+# The USB device identity, for resolving WHICH /dev/tty* is this board without
+# trusting a remembered port number -- ttyACM numbering shuffles whenever a
+# board resets or replugs, and on 2026-08-24 a whole measurement session ran
+# against the T-Deck believing it was this board (caught only by the boot log
+# growing an SD card and a trackball). The CH343 is the only external USB-UART
+# on this desk, so the id alone resolves it; the definitive check is still the
+# board's own `_ota_build.BOARD` answer, which the harness verifies after
+# attach/reset.
+usb         = "1a86:55d3"
 # 768 CORRUPTS on this board, measured 2026-08-19: a 44KB cart pushed at the
 # harness default failed five times with a DIFFERENT bad hash each attempt and
 # succeeded first try at 256. This UART's stdin is a ~256-byte ring with NO flow
@@ -212,6 +225,15 @@ attach_only = false
 # over-long line is dropped as noise with no error -- only the final hash
 # catches it. USB boards backpressure and keep the default.
 chunk       = 256
+# The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
+# the host may put on the wire before it must wait for the board's ack. THE ACK
+# IS THIS BOARD'S ONLY BACKPRESSURE -- the same 260-byte ring with no flow
+# control that makes 768 corrupt above -- so the window is deliberately the
+# small one: a stall anywhere inside it becomes a named timeout after 4KB
+# rather than after 32, and 4KB is also the buffer the board allocates for it.
+# It is NOT a rate limit; the ack costs one round trip per window and a 124KB
+# cart is 31 of them.
+window      = 4096
 
 [monitor]
 baud = 115200
@@ -328,12 +350,35 @@ files = ["device_wifi.py"]
 why = "The WLAN service the console's Settings WIFI panel and the OTA check ride."
 
 [[modules.device.group]]
+files = ["moy_espnow.py"]
+why = """
+The console's ONE ESP-NOW owner (#7/#65) -- the same file the two S3 boards
+stage, UNCHANGED, which is the whole point of the moy_c6 shim underneath it:
+this board's `espnow` module is MicroPython's stock modespnow.c linked against
+seventeen esp_now_* wrappers that ride ESP-Hosted's custom RPC to the C6,
+where the real radio is (native/moy_c6 + c6_slave/, the plan and every
+on-glass verdict in docs/history/espnow_p4_2026-08.md). Proven on the air
+2026-08-24 before this staging: the P4 receives the T-Deck's live beacons and
+the T-Deck counts the P4's broadcasts. One board-specific fact, already the
+module's own rule: the C6's radio starts with the host's WLAN, so
+link.start()'s wlan.active(True) is load-bearing here, not ceremony."""
+
+[[modules.device.group]]
 files = ["moy_ota.py"]
 why = """
 The OTA updater (#53). Board-agnostic: its staging directory is a constructor
 argument (this console has no SD, so run_desktop passes a path on the internal
 VFS) and its board identity comes from the generated `_ota_build.py`. Verified
 end to end on this board's glass 2026-08-02."""
+
+[[modules.device.group]]
+files = ["moy_c6_update.py"]
+why = """
+The C6 radio's own updater (#7/#58): Settings -> UPGRADE C6 RADIO downloads
+the shimmed slave image the P4 manifest's `c6` block names and streams it to
+the co-processor over SDIO (moy_c6.ota_*). Only this board has a C6, so only
+this board stages it; the Settings row rides `ws.c6_updater is not None` and
+every other board's rows stay frozen."""
 
 [[modules.device.group]]
 files = ["moy_webserver.py", "moy_webhost.py"]

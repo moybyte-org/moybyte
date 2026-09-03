@@ -21,7 +21,6 @@ list(REMOVE_ITEM MOY_LUA_VM_SRCS
     ${CMAKE_CURRENT_LIST_DIR}/lua/loslib.c
     ${CMAKE_CURRENT_LIST_DIR}/lua/loadlib.c
     ${CMAKE_CURRENT_LIST_DIR}/lua/ldblib.c
-    ${CMAKE_CURRENT_LIST_DIR}/lua/lcorolib.c
     ${CMAKE_CURRENT_LIST_DIR}/lua/lutf8lib.c
 )
 

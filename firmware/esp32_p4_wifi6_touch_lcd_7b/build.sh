@@ -31,12 +31,23 @@ moybyte_resolve_build_python
 mkdir -p "${BUILD_DIR}" "${DIST_DIR}" "${MODULES_DIR}"
 
 # ---------------------------------------------------------------------------
-# 1) Toolchain: MicroPython at the pinned tag, and ESP-IDF v5.5.1, reusing the
-#    T-Deck's checkout when it exists (same version, saves a 500MB clone).
+# 1) Toolchain: MicroPython at the pinned tag, and ESP-IDF v5.5.1 -- no
+#    candidates, so this board OWNS the shared checkout: `.build/esp-idf` here
+#    is what the T-Deck and the Guition name rather than clone 600MB again.
+#    (In CI every board is its own runner with no sibling to find, so each
+#    clones its own -- the ownership only means anything on a desk.)
+#
+#    It used to name the T-Deck's checkout first, left over from before the
+#    shared build lib (2026-08-17) pointed the T-Deck's own build here. Nothing
+#    owned that directory afterwards, and BOTH this board's and the Guition's
+#    CMake caches had pinned CMAKE_TOOLCHAIN_FILE into it -- an entry CMake
+#    will not re-point after the first configure. So its eventual removal was a
+#    build break waiting on the calendar, on two boards -- the same stale-cache
+#    class that forced a wipe of the T-Deck's build dir on 2026-08-27.
+#    Deleted 2026-08-27; one owner now, named in one direction only.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
-moybyte_setup_idf esp32p4 \
-  "${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf"
+moybyte_setup_idf esp32p4
 
 # ---------------------------------------------------------------------------
 # 2) The patch ladder -- THIS BOARD'S half of the build. All marker-guarded,
@@ -71,21 +82,53 @@ fi
 moybyte_idf_component esp_lcd
 moybyte_idf_component esp_driver_ppa
 
+# 2c') ESP-Hosted 2.7.0 -> 2.12.12 (the espnow-on-p4 track,
+#      docs/history/espnow_p4_2026-08.md). MicroPython pins the hosted
+#      component at exactly 2.7.0; 2.12.12 carries the custom-RPC seam
+#      (esp_hosted_send_custom_data / register_custom_callback) the P4's
+#      ESP-NOW shim rides, plus the streamed slave-OTA API that updates the C6
+#      from this board over SDIO. esp_wifi_remote 0.15.2 constrains only
+#      >=0.0.6, so the bump is manifest-legal. PROVEN ON GLASS 2026-08-24
+#      against the FACTORY C6 slave before any shim existed: builds clean,
+#      boots clean (with the MEMPOOL_PREFER_SPIRAM fragment line -- without it
+#      the 2.12 transport mempool fails its internal-SRAM allocation at boot
+#      and the board crash-loops), wifi at RX parity (2.9-3.0 MB/s vs 2.7.0's
+#      3.2), BLE up and scanning. The stale per-target lockfile is dropped so
+#      the component manager re-resolves; it pins the new tree on first build.
+MAIN_MANIFEST="${MPY_DIR}/ports/esp32/main/idf_component.yml"
+if grep -q 'version: "2.7.0"' "${MAIN_MANIFEST}"; then
+  echo "== bumping esp_hosted 2.7.0 -> 2.12.12 (espnow-on-p4 track)"
+  sed -i 's/^    version: "2.7.0"$/    version: "2.12.12"/' "${MAIN_MANIFEST}"
+  rm -f "${MPY_DIR}/ports/esp32/lockfiles/dependencies.lock.esp32p4"
+  rm -rf "${MPY_DIR}/ports/esp32/managed_components/espressif__esp_hosted"
+fi
+
 # 2d) Un-static esp_native_code_free_all (#66) -- shared with the T-Deck.
 #     Mainline's ports/esp32/main.c has the identical grow-only
 #     esp_native_code_commit list, and the P4's RV32 native emitter feeds it
 #     (MICROPY_EMIT_RV32=1), so edit->PLAY sessions would hit the same cliff,
 #     just later (bigger internal pool).
 moybyte_patch_native_code_free
+moybyte_patch_espnow_ring_race
 
-# DECLINED moybyte_patch_repr_c -- an OPEN QUESTION rather than a verdict
-# (recorded 2026-08-17 so nobody mistakes the absence for one): the unboxed-
-# floats sed (#66) has never been tried or measured on this board. The S3's case
-# was a measured 130-175ms gc hitch from float boxing; whether the P4's bigger
-# pools and different GC cadence (#67 recorded 19-24ms GC spikes under Python
-# carts) make it worth the same object-layout change is an on-glass A/B someone
-# has to run -- per-board verdicts don't transfer in either direction. Tracked
-# in #58's port list.
+# 2e) REPR_C -- applied 2026-08-24, and NOT for the S3's reason. This stood as
+#     "DECLINED, an open question" for a week because the only argument was
+#     perf (the S3's measured float-boxing gc hitch) and per-board perf
+#     verdicts don't transfer. The espnow lockstep match (#7 Phase E) turned
+#     it into a CORRECTNESS requirement: both consoles in a match run the same
+#     sim from the same inputs, and a 30-bit REPR_C float (the S3s) against a
+#     boxed 32-bit single (this board, until now) diverges the two worlds by
+#     construction -- measured on glass, P4<->T-Deck Brick Siege: tanks
+#     identical, 0/1105 world checksums agreeing, and the same accumulator
+#     printing 0.21666668 on one board and 0.216666668 on the other. FLOAT
+#     WIDTH IS PART OF THE LOCKSTEP CONTRACT: every board that can hold a
+#     link runs REPR_C, and a future board that cannot take REPR_C is a
+#     board that cannot join a match until something re-solves this. The
+#     perf A/B ran the same day, paired on the same tree and flash cycle:
+#     Sky Run 58.0 -> 56.5, Sakura 51.0 -> 51.5 -- ~1.5fps on one cart,
+#     noise on the other. It would not have gotten a vote anyway.
+moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # DECLINED moybyte_patch_psram_retune -- not applicable. That patch relaxes the
 # ESP32-S3 MSPI timing tuner's flash-vendor gate (#169); this is an ESP32-P4 and
@@ -106,9 +149,12 @@ moybyte_patch_native_code_free
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 
-#    carts_data.py is GENERATED from system_carts/ (same as the T-Deck) so the
-#    P4's seed/fallback carts can never drift from the host source of truth.
-"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"
+#    carts_data.py is built from system_carts/ so the seed + embedded-fallback
+#    carts can never drift from the host source of truth. PACKED (2026-08-30):
+#    one raw-deflate blob per cart instead of 732 KB of literal source, because
+#    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
+#    decoder off the roster's FORM, so nothing else in the boot changed.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
 #    The OTA identity stamp (#53). An app image is board-specific in the
 #    strongest way (Xtensa there, RISC-V here), so the manifest url carries the

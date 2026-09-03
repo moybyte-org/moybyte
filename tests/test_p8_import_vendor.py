@@ -1,12 +1,19 @@
-"""The PICO-8 asset converter is still moy-spec's, and it still agrees with the synth.
+"""The PICO-8 import is still moy-spec's, and it still agrees with the synth.
 
-`tools/p8_import.py` is VENDORED from moy-spec (`make vendor-p8-import`). It is
-here rather than reimplemented because SPEC.md is what says what its output
-MEANS -- 8.1 fixes `57 = A4 = 440 Hz`, which is what puts PICO-8's pitch offset
-at 24, and 8.1's keyed rest is what makes a ported slide glide from the right
-note. libmoy's synth implements the far end of that same contract and is
-vendored here too, so the converter and the synth have to come from one
-upstream, not two.
+TWO files are VENDORED from moy-spec (`make vendor-p8-import`), and they travel
+together. `tools/p8_import.py` converts the ASSETS; it is here rather than
+reimplemented because SPEC.md is what says what its output MEANS -- 8.1 fixes
+`57 = A4 = 440 Hz`, which is what puts PICO-8's pitch offset at 24, and 8.1's
+keyed rest is what makes a ported slide glide from the right note. libmoy's
+synth implements the far end of that same contract and is vendored here too, so
+the converter and the synth have to come from one upstream, not two.
+
+`tools/p8_lua_port.py` converts the CODE -- the cart's own Lua under a generated
+PICO-8 compat shim -- and writes the `.moy` folder. Same rule, stronger reason:
+the shim is written against SPEC.md's verb table verb for verb, so a shim
+maintained here would drift from the very thing `.moy` exists to share. It
+joined on 2026-08-29, when the browser's drop stopped emitting a Python porting
+scaffold and started emitting a cart that RUNS.
 
 WHAT WENT WRONG, and why this file exists. `tools/import_p8.py` used to carry
 its own copy of the converter. Upstream worked out that PICO-8's tracker labels
@@ -26,8 +33,11 @@ Four ways the copy stops being a copy, and a test for each:
      so that test is conditional, and only fires when the checkout sits at the
      commit the manifest pins. Upstream having moved on is not drift; it is
      what a pin is for.
-  3. Somebody re-implements a converter verb in `tools/import_p8.py` "just for
-     now", and the file grows a second copy back.
+  3. Somebody re-implements a vendored verb in `tools/import_p8.py` or
+     `tools/p8_writer.py` "just for now", and the file grows a second copy back.
+     Both are checked, against BOTH vendored files: p8_writer is the half the
+     BROWSER also runs (#194), so it is the one most likely to sprout "just a
+     small local fix".
   4. Nobody edits anything, and the two vendored halves simply disagree --
      which is what a wrong pitch offset IS. Checked directly, against no
      checkout and no manifest: p8's A4 must be moy's A4 must be 440 Hz.
@@ -42,7 +52,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(ROOT, "tools")
 MANIFEST = os.path.join(TOOLS, "p8_import_vendor.json")
 VENDORED = os.path.join(TOOLS, "p8_import.py")
+PORTER = os.path.join(TOOLS, "p8_lua_port.py")
 DRIVER = os.path.join(TOOLS, "import_p8.py")
+WRITER = os.path.join(TOOLS, "p8_writer.py")
 LIBMOY_AUDIO = os.path.join(
     ROOT, "native", "moy_audio", "libmoy", "moy_audio.c")
 
@@ -60,8 +72,18 @@ def test_manifest_is_not_empty(manifest):
     check_manifest_not_empty(manifest)
 
 
-def test_vendored_file_matches_the_manifest(manifest):
-    check_files_match(manifest, "moy-spec's p8_import.py", "vendor-p8-import")
+def test_vendored_files_match_the_manifest(manifest):
+    check_files_match(manifest, "moy-spec's p8_import.py + p8_lua_port.py",
+                      "vendor-p8-import")
+
+
+def test_the_manifest_covers_both_vendored_files(manifest):
+    """A second vendored file is only protected once it is IN the manifest --
+    `VENDOR` and the stamp are written by the same run, so the way this goes
+    wrong is somebody adding a file to the copy list and hand-editing the
+    stamp."""
+    import tools.vendor_p8_import as v
+    assert set(manifest["files"]) == {"tools/" + n for n in v.VENDOR}
 
 
 def test_no_drift_from_the_pinned_upstream(manifest):
@@ -92,19 +114,112 @@ def _toplevel_names(path):
     return names
 
 
-def test_the_driver_does_not_redefine_a_converter_name():
-    """`tools/import_p8.py` drives the converter; it never re-grows one.
+@pytest.mark.parametrize("ours", [DRIVER, WRITER])
+@pytest.mark.parametrize("theirs", [VENDORED, PORTER])
+def test_our_half_does_not_redefine_a_vendored_name(ours, theirs):
+    """Our two files DRIVE the vendored ones; neither re-grows one.
 
     A re-implemented verb beside the vendored one is how the duplication came
     back last time -- and it reads as an innocent local fix right up until the
-    two disagree.
+    two disagree. `p8_writer.py` is checked as well as the CLI because it is the
+    half that also runs inside the browser (#194), which is precisely where
+    "just do the PNG bit here, it is only a few lines" is most tempting. And the
+    PORTER is checked as well as the converter, because our writer stopped
+    writing on 2026-08-29 -- the tempting local copy now is a `_mkdirs` or a
+    `manifest` beside the one that already crossed.
     """
-    shared = _toplevel_names(DRIVER) & _toplevel_names(VENDORED)
+    # `main` is not a converter verb, it is what every one of these four files
+    # is called through -- two CLIs cannot avoid colliding on it.
+    shared = (_toplevel_names(ours) & _toplevel_names(theirs)) - {"main"}
     assert not shared, (
-        "tools/import_p8.py defines %s, which tools/p8_import.py already "
-        "defines. Import it from there instead: the vendored converter is the "
-        "one moy-spec's SPEC.md and libmoy's synth are written against."
-        % ", ".join(sorted(shared)))
+        "tools/%s defines %s, which tools/%s already defines. Import it from "
+        "there instead: the vendored files are the ones moy-spec's SPEC.md and "
+        "libmoy's synth are written against."
+        % (os.path.basename(ours), ", ".join(sorted(shared)),
+           os.path.basename(theirs)))
+
+
+def test_the_porter_runs_where_it_has_to():
+    """`p8_lua_port.py` is FROZEN INTO THE BROWSER, so it runs on MicroPython --
+    and MicroPython's `re` is a subset that rejects a lookbehind, a `(?:...)`,
+    an inline `(?m)` and a lookahead at COMPILE time ("regex too complex"). The
+    upstream file used all four in `localization_lua` and `str.isalnum` in three
+    more places; those were fixed UPSTREAM (2026-08-29) rather than shimmed,
+    because neither a regex engine nor a str method can be injected from out
+    here the way `os.path.basename` is.
+
+    This is the cheap static half -- a re-vendor that reintroduces one fails
+    here in milliseconds. tests/test_p8_micropython.py is the half that
+    actually RUNS it, which is what proves the list below is complete.
+    """
+    with open(PORTER, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+
+    def bad(what):
+        raise AssertionError(
+            "tools/p8_lua_port.py uses %s, which MicroPython does not have -- "
+            "and the browser freezes and runs this file. Fix it UPSTREAM in "
+            "moy-spec and re-vendor; a local edit here is a red test one line "
+            "up." % what)
+
+    # Docstrings are skipped deliberately: this file's header NAMES these
+    # constructs to say it must not use them, and a raw substring scan would
+    # red-flag the very sentence that keeps the rule.
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            body = getattr(node, "body", None)
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                docstrings.add(id(body[0].value))
+
+    RE_ONLY = (("(?<", "a lookbehind"), ("(?=", "a lookahead"),
+               ("(?!", "a negative lookahead"),
+               ("(?:", "a non-capturing group"), ("(?m", "an inline flag"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docstrings):
+            for needle, why in RE_ONLY:
+                if needle in node.value:
+                    bad(why + " in a pattern")
+        elif isinstance(node, ast.Attribute):
+            if node.attr == "isalnum":
+                bad("str.isalnum")
+            if (node.attr in ("path", "makedirs")
+                    and isinstance(node.value, ast.Name)
+                    and node.value.id == "os"):
+                bad("os." + node.attr)
+        elif isinstance(node, ast.keyword) and node.arg == "indent":
+            bad("json's indent=")
+
+
+def test_the_converter_reaches_os_for_exactly_one_thing():
+    """`p8_writer._ensure_os_path` supplies the converter with an
+    `os.path.basename` on a tier that has no `os.path` (MicroPython has none,
+    and no way to grow one). That shim is only sufficient while `basename` is
+    the ONLY thing the converter asks `os` for -- a re-vendor that reached for
+    `os.stat` or `os.sep` would make the browser and device import fail on a
+    line nobody changed here.
+    """
+    with open(VENDORED, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    uses = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name) and node.value.id == "os"):
+            uses.add("os." + node.attr)
+        elif (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "os"):
+            uses.add("os.%s.%s" % (node.value.attr, node.attr))
+    assert uses == {"os.path", "os.path.basename"}, (
+        "tools/p8_import.py now reaches os for %s. The MicroPython tiers get "
+        "`os.path.basename` injected by tools/p8_writer._ensure_os_path and "
+        "nothing else -- widen that shim (or take the fix upstream) before this "
+        "converter can run in the browser again." % ", ".join(sorted(uses)))
 
 
 # -- 4. the two vendored halves have to agree on where A4 is -----------------

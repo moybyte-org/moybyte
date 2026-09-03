@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Re-vendor the PICO-8 asset converter from a moy-spec checkout.
+"""Re-vendor the PICO-8 converter and Lua porter from a moy-spec checkout.
 
     make vendor-p8-import                          # ../moy-spec beside this repo
     make vendor-p8-import SPEC=/path/to/moy-spec
     python3 tools/vendor_p8_import.py --check      # what would change, touch nothing
+
+TWO FILES, ONE UPSTREAM.
 
 `p8_import.py` is moy-spec's `.p8`/`.p8.png` -> moy asset converter: sheet, SFX
 bank and music tracks. It lives upstream because SPEC.md is what says what the
@@ -13,6 +15,17 @@ the right note. libmoy's synth implements the other end of that same contract
 (`moy_audio.c`: `p8key = pitch - 24.0f`), and it is vendored here too, so the
 converter and the synth must come from ONE upstream version or they agree by
 luck.
+
+`p8_lua_port.py` is the other half: the same cart's CODE, mechanically converted
+p8-Lua -> Lua 5.4 under a generated PICO-8 compat shim, so an imported cart RUNS
+instead of arriving as a porting exercise (owner call 2026-08-29 -- transcribing
+Lua that is almost identical in Python teaches syntax, not game-making). It is
+upstream for a stronger reason than the converter: SPEC.md is what the shim is
+written AGAINST, verb for verb, and a shim maintained here would drift from the
+verb table the whole point of `.moy` is to share. It is also what emits the
+manifest, the `map.moymap` and the assets now, through the converter's own
+functions -- so the two files re-vendor together or the shim and the bank it
+plays disagree about the same cart.
 
 WHY THIS FILE EXISTS AT ALL. It used to be a hand-copy. Upstream corrected the
 pitch offset (0 -> 24, two octaves) and the copy here never heard about it; this
@@ -27,78 +40,45 @@ WHY NOT FOLD IT INTO tools/vendor_libmoy.py: that script vendors C that gets
 COMPILED into the two boards' firmware, and its test's argument is about audio
 having no pixel-conformance golden. This is a host-side Python tool with its own
 tests. Same upstream, same idea, different consumers -- and one script whose
---check answer means two different things is worse than two small ones.
+--check answer means two different things is worse than two small ones. The
+mechanism they do share -- checkout probe, change report, stamp -- is
+`tools/vendor_common.py`.
 
-WHAT STAYS OURS: `tools/import_p8.py`, the moybyte driver on top -- the CLI, the
-`.moy` folder writer, the guided PICO-8 -> Python port notes (#36). It imports
-the converter from here; it never re-implements a line of it.
+WHAT STAYS OURS: `tools/import_p8.py` (the CLI) and `tools/p8_writer.py` (the
+input guards a frozen opt=3 build needs, the `os.path.basename` shim, and the
+compatibility report). Both DRIVE these two files; neither re-implements a line
+of either, and neither writes a byte of a cart any more.
 """
 
-import argparse
-import hashlib
-import json
 import os
-import shutil
-import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from tools.vendor_common import (copy_if_changed, open_spec, parse_args,  # noqa: E402
+                                 report_changes, sha256, stamp)
+
 TOOLS = os.path.join(ROOT, "tools")
 MANIFEST = os.path.join(TOOLS, "p8_import_vendor.json")
+SPEC_PROBE = "p8_import.py"
 
 # {vendored name: path in moy-spec}. Explicit, like vendor_libmoy.py's table:
 # what we execute should be a decision somebody made, not whatever a glob found.
 VENDOR = {
     "p8_import.py": "p8_import.py",
+    "p8_lua_port.py": "p8_lua_port.py",
 }
 
 
-def sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def git(spec, *args):
-    try:
-        return subprocess.check_output(("git", "-C", spec) + args,
-                                       stderr=subprocess.DEVNULL).decode().strip()
-    except Exception:
-        return None
-
-
-def find_spec(explicit=None):
-    """A moy-spec checkout: --spec, $MOYBYTE_MOY_SPEC, or a sibling."""
-    for cand in (explicit, os.environ.get("MOYBYTE_MOY_SPEC"),
-                 os.path.join(os.path.dirname(ROOT), "moy-spec"),
-                 os.path.join(ROOT, ".moy-spec")):
-        if cand and os.path.isfile(os.path.join(cand, "p8_import.py")):
-            return os.path.abspath(cand)
-    return None
-
-
 def main(argv):
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--spec", help="a moy-spec checkout (default: ../moy-spec)")
-    ap.add_argument("--check", action="store_true",
-                    help="report what would change; write nothing")
-    args = ap.parse_args(argv)
+    args = parse_args(__doc__, argv)
 
-    spec = find_spec(args.spec)
-    if not spec:
-        print("vendor-p8-import: no moy-spec checkout found.\n"
-              "  Looked for ../moy-spec, $MOYBYTE_MOY_SPEC and .moy-spec/.\n"
-              "  Clone it: git clone https://github.com/moybyte-org/moy-spec",
-              file=sys.stderr)
+    found = open_spec("vendor-p8-import", SPEC_PROBE, args.spec)
+    if not found:
         return 2
-
-    commit = git(spec, "rev-parse", "HEAD") or "?"
-    dirty = bool(git(spec, "status", "--porcelain", "--untracked-files=no"))
-    date = git(spec, "log", "-1", "--format=%cs") or "?"
-    print("vendor-p8-import: %s @ %s%s"
-          % (spec, commit[:12], "  (DIRTY)" if dirty else ""))
+    spec, commit, date, dirty = found
 
     changed, missing = [], []
     for name, rel in sorted(VENDOR.items()):
@@ -106,44 +86,16 @@ def main(argv):
         if not os.path.isfile(src):
             missing.append(rel)
             continue
-        if os.path.isfile(dst) and sha256(src) == sha256(dst):
-            continue
-        changed.append(os.path.relpath(dst, ROOT))
-        if not args.check:
-            shutil.copyfile(src, dst)
+        if copy_if_changed(src, dst, args.check):
+            changed.append(os.path.relpath(dst, ROOT))
 
-    if missing:
-        print("  !! not in that checkout: %s" % ", ".join(missing), file=sys.stderr)
-        return 2
+    code = report_changes(changed, missing, args.check)
+    if code is not None:
+        return code
 
-    for path in changed:
-        print("  %s %s" % ("would update" if args.check else "updated", path))
-    if not changed:
-        print("  already up to date")
-
-    if args.check:
-        return 1 if changed else 0
-
-    # The stamp. `dirty` is recorded rather than refused -- converting a cart
-    # against a work-in-progress moy-spec is how a converter change gets tried
-    # before it lands upstream. It just must not be invisible afterwards.
-    manifest = {
-        "upstream": {
-            "repo": "moybyte-org/moy-spec",
-            "commit": commit,
-            "date": date,
-            "dirty": dirty,
-        },
-        "files": {("tools/" + name): sha256(os.path.join(TOOLS, name))
-                  for name in sorted(VENDOR)},
-    }
-    with open(MANIFEST, "w", encoding="utf-8", newline="\n") as f:
-        json.dump(manifest, f, indent=2, sort_keys=True)
-        f.write("\n")
-    print("  stamped %s" % os.path.relpath(MANIFEST, ROOT))
-    if dirty:
-        print("  NOTE: that checkout had uncommitted changes -- this copy "
-              "corresponds to no commit.")
+    stamp(MANIFEST, commit, date, dirty,
+          {("tools/" + name): sha256(os.path.join(TOOLS, name))
+           for name in sorted(VENDOR)})
     return 0
 
 

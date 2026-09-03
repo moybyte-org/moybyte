@@ -166,6 +166,8 @@ static void jp_sfx(jp_t *j, moy_sfx_def *s)
             if (s->speed <= 0.0f) s->speed = 8.0f;
         } else if (jp_key_is(k, klen, "loop")) {
             s->loop = (uint8_t)jp_bool(j);
+        } else if (jp_key_is(k, klen, "filters")) {
+            s->filters = (uint8_t)jp_num(j);
         } else if (jp_key_is(k, klen, "loop_start")) {
             s->loop_start = (uint8_t)jp_num(j);
         } else if (jp_key_is(k, klen, "steps")) {
@@ -362,6 +364,13 @@ static float fabs_f(float x)
     return x < 0.0f ? -x : x;
 }
 
+static int16_t clamp_i16(float x)
+{
+    if (x >= 0.999f) return 32734;
+    if (x <= -0.999f) return -32734;
+    return (int16_t)(x * 32768.0f);
+}
+
 /* SPEC.md 8.3's eight shapes, phase in [0,1). This is PICO-8's synthesis
  * arithmetic, taken from zepto8/fake-08's reverse engineering (their
  * synth.cpp, non-"buzz" variants), because a ported cart's music is composed
@@ -370,24 +379,176 @@ static float fabs_f(float x)
  * play them equal and every square lead shouts down its own accompaniment).
  * Noise is the one stateful shape and lives in voice_sample, where the
  * note's frequency is known. */
-static float wave_sample(moy_voice *v, int wave, float p)
+/* A tilted saw with its corner at `a` -- the shape itself, before the 0.5.
+ * The triangle's buzz variant averages one in, so it is worth a name. */
+static float tilted(float p, float a)
 {
+    return p < a ? 2.0f * p / a - 1.0f
+                 : 2.0f * (1.0f - p) / (1.0f - a) - 1.0f;
+}
+
+/* `buzz` and `noiz` are two of SPEC.md 8.1's five per-sfx filters. They do not
+ * post-process the wave, they SELECT A DIFFERENT ONE -- every instrument has a
+ * harsher twin, so implementing only the non-buzz variants silently drops half
+ * the timbre of any cart written since PICO-8 0.2.4.
+ *
+ * `p2` is the partner phase (the phaser's 109/110 beat, or the detuned
+ * second oscillator's), and `cyc` says which of two cycles the saw's buzz dip
+ * is in -- that one shape loops on a 2x period, so a wrapped phase alone
+ * cannot place it. */
+static float wave_sample(moy_voice *v, int wave, float p, float p2,
+                         int buzz, int noiz, uint8_t cyc)
+{
+    float w;
     switch (wave) {
-    case 0: return p < 0.5f ? 0.25f : -0.25f;                /* square */
-    case 1: return (1.0f - fabs_f(4.0f * p - 2.0f)) * 0.5f;  /* triangle */
-    case 2: return 0.653f * (p < 0.5f ? p : p - 1.0f);       /* saw */
-    case 3: return v->nto;                                   /* noise (held) */
-    case 4: return p < (1.0f / 3.0f) ? 0.25f : -0.25f;       /* pulse */
+    case 0:                                                  /* square */
+        return p < (buzz ? 0.4f : 0.5f) ? 0.25f : -0.25f;
+    case 1:                                                  /* triangle */
+        w = 1.0f - fabs_f(4.0f * p - 2.0f);
+        if (buzz) w = w * 0.75f + tilted(p, 0.875f) * 0.25f;
+        return w * 0.5f;
+    case 2:                                                  /* saw */
+        w = p < 0.5f ? p : p - 1.0f;
+        if (buzz) {
+            /* the dip rides a 2x period: `|fmod(phase, 2) - 1| < 0.5` */
+            int dip = cyc ? (p < 0.5f) : (p > 0.5f);
+            w = w * 0.83f - (dip ? 0.085f : 0.0f);
+        }
+        return 0.653f * w;
+    case 3:                                                  /* noise (held) */
+        w = v->nto;
+        if (noiz) w *= 2.0f * (p < 0.5f ? p : p - 1.0f);
+        return w;
+    case 4:                                                  /* pulse */
+        return p < (buzz ? 0.255f : (1.0f / 3.0f)) ? 0.25f : -0.25f;
     case 5:                                                  /* organ */
-        return (p < 0.5f ? 3.0f - fabs_f(24.0f * p - 6.0f)
-                         : 1.0f - fabs_f(16.0f * p - 12.0f)) / 9.0f;
+        w = p < 0.5f ? 3.0f - fabs_f(24.0f * p - 6.0f)
+                     : 1.0f - fabs_f(16.0f * p - 12.0f);
+        if (buzz) {
+            w = p < 0.5f ? w * 2.0f + 3.0f : w;
+            w = (p < 0.5f && w > -1.875f) ? w * 0.2f - 1.0f : w + 0.5f;
+        }
+        return w / 9.0f;
     case 6:                                                  /* tilted saw */
-        return (p < 0.875f ? 2.0f * p / 0.875f - 1.0f
-                           : 2.0f * (1.0f - p) / 0.125f - 1.0f) * 0.5f;
+        return tilted(p, buzz ? 0.975f : 0.875f) * 0.5f;
     default:                                                 /* phaser */
-        return (2.0f - fabs_f(8.0f * p - 4.0f)
-                + 1.0f - fabs_f(4.0f * v->phase2 - 2.0f)) / 6.0f;
+        w = 2.0f - fabs_f(8.0f * p - 4.0f)
+            + 1.0f - fabs_f(4.0f * p2 - 2.0f);
+        if (buzz) {
+            /* the original triangle carries harmonics 1,3,5,7...; buzz adds
+             * the even ones at 2,6,10 and 4,12,20. Multiplying a WRAPPED
+             * phase by an integer is exact -- the integer part it dropped
+             * would have contributed an integer here too. */
+            float q2 = p * 2.0f + 0.5f, q4 = p * 4.0f;
+            q2 -= (float)(int)q2;
+            q4 -= (float)(int)q4;
+            w += 0.25f - fabs_f(1.0f * q2 - 0.5f);
+            w += 0.125f - fabs_f(0.5f * q4 - 0.25f);
+        }
+        return w / 6.0f;
     }
+}
+
+/* The detuned partner's frequency ratio. PICO-8 picks it per instrument:
+ * a triangle gets a real interval (a fourth or a fifth), everything else a
+ * near-unison beat or a plain octave. Instrument numbers here are MOY's
+ * (0 square, 1 triangle, ... 7 phaser), not PICO-8's. */
+/* Detune skips NOISE: it has no phase to offset, and PICO-8 skips it too. */
+static int n_wave_is_pitched(const moy_sfx_def *s, int step)
+{
+    return s->steps[step].wave != 3;
+}
+
+static float detune_factor(int wave, int d)
+{
+    if (wave == 1) return d == 1 ? 3.0f / 4.0f : 3.0f / 2.0f;
+    if (wave == 5) return d == 1 ? 200.0f / 199.0f : 800.0f / 199.0f;
+    if (wave == 7) return d == 1 ? 49.0f / 50.0f : 400.0f / 199.0f;
+    return d == 1 ? 200.0f / 199.0f : 400.0f / 199.0f;
+}
+
+/* sin/cos for the shelf coefficients, computed ONCE per init and never in the
+ * sample loop. This file links no libm on purpose -- pitch_hz is a table for
+ * the same reason -- and two filter setups do not justify pulling it in. The
+ * argument is w0 = 2*pi*freq/rate, clamped below Nyquist, so a Taylor series
+ * to the 11th order is exact to well past single precision here. */
+static float sin_f(float x)
+{
+    float x2 = x * x;
+    return x * (1.0f + x2 * (-1.0f / 6.0f + x2 * (1.0f / 120.0f
+             + x2 * (-1.0f / 5040.0f + x2 * (1.0f / 362880.0f
+             + x2 * (-1.0f / 39916800.0f))))));
+}
+
+static float cos_f(float x)
+{
+    float x2 = x * x;
+    return 1.0f + x2 * (-0.5f + x2 * (1.0f / 24.0f + x2 * (-1.0f / 720.0f
+             + x2 * (1.0f / 40320.0f + x2 * (-1.0f / 3628800.0f)))));
+}
+
+/* W3C audio-EQ-cookbook high shelf, with q FIXED at 1 -- which is the only q
+ * PICO-8's dampen uses, and it collapses the cookbook's alpha to
+ * sin(w0)/sqrt(2). `A` and `sqrtA` come in as constants for the same reason:
+ * the two gains are -6 dB and -12 dB and never vary, so there is no pow() or
+ * sqrt() to do. (Pleasingly, sqrt(A) for -12 dB IS A for -6 dB.) */
+static void biquad_highshelf(moy_biquad *b, float freq, float A, float sqrtA,
+                             float rate)
+{
+    float w0 = 6.283185307179586f * freq / rate;
+    float cw, alpha, sq, a0, a1, a2, b0, b1, b2;
+    if (w0 > 2.5f) w0 = 2.5f;           /* freq at/over Nyquist: clamp, do
+                                         * not let the series run wild */
+    cw = cos_f(w0);
+    alpha = sin_f(w0) * 0.70710678f;
+    sq = 2.0f * sqrtA * alpha;
+    a0 = (A + 1.0f) - (A - 1.0f) * cw + sq;
+    a1 = 2.0f * ((A - 1.0f) - (A + 1.0f) * cw);
+    a2 = (A + 1.0f) - (A - 1.0f) * cw - sq;
+    b0 = A * ((A + 1.0f) + (A - 1.0f) * cw + sq);
+    b1 = -2.0f * A * ((A - 1.0f) + (A + 1.0f) * cw);
+    b2 = A * ((A + 1.0f) + (A - 1.0f) * cw - sq);
+    b->c1 = b0 / a0; b->c2 = b1 / a0; b->c3 = b2 / a0;
+    b->c4 = a1 / a0; b->c5 = a2 / a0;
+    b->li = b->lli = b->lo = b->llo = 0.0f;
+}
+
+static float biquad_run(moy_biquad *b, float x)
+{
+    float y = b->c1 * x + b->c2 * b->li + b->c3 * b->lli
+            - b->c4 * b->lo - b->c5 * b->llo;
+    b->lli = b->li; b->li = x;
+    b->llo = b->lo; b->lo = y;
+    return y;
+}
+
+/* PICO-8's `reverb` and `dampen`, per CHANNEL and AFTER the note's volume --
+ * they are the only two of the five that are post-processing rather than a
+ * different oscillator.
+ *
+ * Reverb is a plain delay line fed back at half, 16.6 ms or 33.2 ms. Both
+ * rings are written every sample whichever setting is on, so switching
+ * between them mid-note does not start from silence -- that is PICO-8's own
+ * behaviour and it is audible on a cart that alternates.
+ *
+ * Both shelves RUN every sample even when off, so their state is warm the
+ * instant one turns on; only the mix is gated. A biquad started cold on a
+ * signal already in flight thumps. */
+static float voice_post(moy_voice *v, float dry, uint8_t filters)
+{
+    int rb = MOY_A_F_REVERB(filters), dp = MOY_A_F_DAMPEN(filters);
+    float wet = dry, d1, d2;
+    if (rb == 1) wet += (float)v->rv1[v->rvi % v->rvn1] * (0.5f / 32768.0f);
+    else if (rb == 2) wet += (float)v->rv2[v->rvi % v->rvn2] * (0.5f / 32768.0f);
+    v->rv1[v->rvi % v->rvn1] = clamp_i16(wet);
+    v->rv2[v->rvi % v->rvn2] = clamp_i16(wet);
+    v->rvi++;
+    if (v->rvi >= v->rvn1 * v->rvn2) v->rvi = 0;   /* both moduli, no drift */
+    d1 = biquad_run(&v->damp1, wet);
+    if (dp == 1) wet = d1;
+    d2 = biquad_run(&v->damp2, wet);
+    if (dp == 2) wet = d2;
+    return wet;
 }
 
 static float lcg_unit(uint32_t *rng)
@@ -408,6 +569,8 @@ static void voice_start(moy_voice *v, const moy_sfx_def *s, uint8_t owner)
     v->step = 0;
     v->samp = 0;
     v->phase = v->phase2 = 0.0f;
+    v->dphase = v->dphase2 = 0.0f;
+    v->cyc = 0;
     v->amp = 0.0f;
     /* The noise filter state (nfrom/nto) deliberately survives, like the
      * slide origin: PICO-8 keeps its per-channel noise walk running. */
@@ -436,8 +599,15 @@ static float voice_sample(moy_voice *v, float dt, float rate)
     float step_dur, t, u, pitch, vol, g, w, slew;
     float slide_from = -1.0f;           /* origin frequency when eff 1 */
     int idx = v->step, pitch_i;
+    int buzz, noiz, detune;
+    float dt2;                          /* the detune partner's freq ratio */
 
     if (!s || !s->nsteps) return 0.0f;
+    buzz = MOY_A_F_BUZZ(s->filters);
+    noiz = MOY_A_F_NOIZ(s->filters);
+    detune = MOY_A_F_DETUNE(s->filters);
+    dt2 = (detune && n_wave_is_pitched(s, v->step))
+        ? detune_factor(s->steps[v->step].wave, detune) : 0.0f;
     step_dur = 1.0f / s->speed;
     t = (float)v->samp * dt;
     n = &s->steps[idx];
@@ -491,12 +661,20 @@ static float voice_sample(moy_voice *v, float dt, float rate)
         if (slide_from > 0.0f) freq = slide_from + (freq - slide_from) * u;
         if (n->eff == 3) freq *= 1.0f - u;      /* drop: falls linearly to 0 */
         v->phase += freq * dt;
+        if (v->phase >= 1.0f) v->cyc ^= 1;      /* the saw buzz's 2x period */
         v->phase -= (float)(int)v->phase;
         if (n->wave == 7) {                     /* the detuned partner: PICO-8
                                                  * beats at ~109/110, not the
                                                  * folkloric 127/128 */
             v->phase2 += freq * (109.0f / 110.0f) * dt;
             v->phase2 -= (float)(int)v->phase2;
+        }
+        if (dt2 > 0.0f) {                       /* the `detune` filter's own
+                                                 * oscillator, at freq*factor */
+            v->dphase += freq * dt2 * dt;
+            v->dphase -= (float)(int)v->dphase;
+            v->dphase2 += freq * dt2 * (109.0f / 110.0f) * dt;
+            v->dphase2 -= (float)(int)v->dphase2;
         }
         if (n->wave == 3) {
             /* PICO-8's noise: an LCG random walk through a one-pole low-pass
@@ -515,7 +693,16 @@ static float voice_sample(moy_voice *v, float dt, float rate)
     }
     /* On a rest the phase holds and the slew below rides the held level to
      * zero -- that IS the release de-click. */
-    w = wave_sample(v, n->wave, v->phase);
+    w = wave_sample(v, n->wave, v->phase, v->phase2, buzz, noiz, v->cyc);
+    if (dt2 > 0.0f) {
+        /* `detune` is a SECOND oscillator mixed in at half level, not a pitch
+         * offset -- the note keeps its own pitch and gains a partner. Noise is
+         * exempt: it has no phase to detune. Organ's second voice at detune 2
+         * simplifies to a triangle, which is PICO-8's own shortcut. */
+        int dw = (n->wave == 5 && detune == 2) ? 1 : n->wave;
+        w += wave_sample(v, dw, v->dphase, v->dphase2, buzz, noiz, v->cyc)
+           * 0.5f;
+    }
 
     slew = dt / 0.0015f;
     if (v->amp < g) { v->amp += slew; if (v->amp > g) v->amp = g; }
@@ -551,8 +738,22 @@ void moy_audio_init(moy_audio *a, const moy_bank *bank, int sample_rate)
     a->bank = bank;
     a->rate = sample_rate > 0 ? sample_rate : 44100;
     a->master = 7;
-    for (i = 0; i < MOY_A_CHANNELS; i++)
-        a->v[i].prev_pitch = -1.0f;     /* no previous note yet (slide) */
+    for (i = 0; i < MOY_A_CHANNELS; i++) {
+        moy_voice *v = &a->v[i];
+        v->prev_pitch = -1.0f;          /* no previous note yet (slide) */
+        /* The delay lines are quoted in samples at 22050 -- PICO-8's rate --
+         * so at any other rate they are that many SECONDS, re-counted. */
+        v->rvn1 = (MOY_A_REVERB1 * a->rate + 11025) / 22050;
+        v->rvn2 = (MOY_A_REVERB2 * a->rate + 11025) / 22050;
+        if (v->rvn1 < 1) v->rvn1 = 1;
+        if (v->rvn2 < 1) v->rvn2 = 1;
+        if (v->rvn1 > MOY_A_REVERB1) v->rvn1 = MOY_A_REVERB1;
+        if (v->rvn2 > MOY_A_REVERB2) v->rvn2 = MOY_A_REVERB2;
+        biquad_highshelf(&v->damp1, 2400.0f, 0.70794578f, 0.84139514f,
+                         (float)a->rate);
+        biquad_highshelf(&v->damp2, 1000.0f, 0.50118723f, 0.70794578f,
+                         (float)a->rate);
+    }
 }
 
 /* Row channel j plays on voice 3 - j (SPEC.md 8.1). */
@@ -687,9 +888,24 @@ void moy_audio_render(moy_audio *a, int16_t *out, int nframes)
             }
         }
 
-        for (i = 0; i < MOY_A_CHANNELS; i++)
-            if (a->v[i].owner)
-                mix += voice_sample(&a->v[i], dt, rate);
+        for (i = 0; i < MOY_A_CHANNELS; i++) {
+            moy_voice *v = &a->v[i];
+            float dry = v->owner ? voice_sample(v, dt, rate) : 0.0f;
+            uint8_t fx = (v->owner && v->s) ? v->s->filters : 0;
+            if (MOY_A_F_REVERB(fx) || MOY_A_F_DAMPEN(fx)) {
+                v->fxlast = fx;
+                /* EIGHT passes of the long ring, not three: the line feeds
+                 * back at half, so three passes still leaves 12% -- plainly
+                 * audible, and cutting it there chopped the tail off mid-
+                 * decay. Eight lands at -48 dB, under the 16-bit floor. */
+                v->fxtail = v->rvn2 * 8;
+            } else if (v->fxtail > 0) {
+                v->fxtail--;
+            }
+            /* Costs nothing for the carts that use none of this: `fxtail` is
+             * only ever nonzero after a filtered sfx has actually played. */
+            mix += v->fxtail > 0 ? voice_post(v, dry, v->fxlast) : dry;
+        }
 
         if (a->bleft > 0.0f) {          /* beep: square at vol 6 (8.2) */
             float bg = 6.0f / 7.0f;

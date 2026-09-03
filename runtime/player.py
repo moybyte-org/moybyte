@@ -49,6 +49,18 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import _CODE_LH
 
+# #65 Phase 2: the lockstep frame's local-input packer. The BUTTON ORDER comes
+# from cart_api (its one author) and is handed to the session, so netplay.py can
+# stay the import-free leaf players.py is.
+try:
+    from netplay import mask_of as _netplay_mask
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.netplay import mask_of as _netplay_mask
+try:
+    from cart_api import CART_BUTTONS as _NET_BUTTONS
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
+
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
 # (MicroPython on device / unix; never host CPython), every top-level def in a
@@ -305,6 +317,7 @@ class Player:
         self.cart_error = None        # last cart failure text -> on-canvas error panel
         self.crash_line = None        # 1-based cart line of the last runtime crash (#24)
         self._cart_start_ms = 0       # _ticks_ms when the running cart last start()ed
+        self._cart_palette_canvas = None  # the canvas _cart_palette came off
         self._cart_key_prev = 0       # last frame's keyboard byte (key()/keyp() edge)
         self._cart_palette = None     # default table saved while a cart's own
                                       # manifest palette (spec 2.2) is applied
@@ -335,6 +348,11 @@ class Player:
         self._net = None              # #65: the running cart's net.* service, when it
                                       # has the "multiplayer" permission (else None); tick()
                                       # pumps inbound messages to its on_net handler
+        self._netplay = None          # #65 Phase 2: the live two-console lockstep session
+        self._drain_input = None      # pre-tick radio drain, bound by start()
+                                      # (ws.netplay), when this run is a linked match. It
+                                      # OWNS the tick: fixed dt, and a frame the peer's
+                                      # input has not reached does not simulate at all
         self._pmem_last = 0           # #66 deferred pmem: last periodic flush (_ticks_ms)
         self._native_ins = None       # #67 spike: nativize's inserted-line map (crash-line fix)
         # Diagnostics for repeat-run regressions (#66 follow-up): one line on cart
@@ -360,7 +378,7 @@ class Player:
         ws = self.ws
         cv = ws.canvas
         return (cv.w, cv.h,
-                ws._effective_font_scale() if ws.app_full_canvas else 1)
+                ws.look.effective_font_scale() if ws.app_full_canvas else 1)
 
     def _map_crash_line(self, line):
         """Map a crash line reported against the NATIVIZED source back to the
@@ -389,11 +407,18 @@ class Player:
         displaced. Idempotent; called from every exit path AND at start (so a
         re-run never saves a cart table as 'the default')."""
         if self._cart_palette is not None:
+            # Onto the canvas that was SWAPPED, not whatever ws.canvas is now:
+            # a load failure releases the run canvas before this runs, and a
+            # restore aimed at the system canvas left the native kernels' gate
+            # table (owned by the run canvas) on the cart's palette -- every
+            # native cart after a failed p8 load drew in PICO-8 colours.
+            cv = self._cart_palette_canvas or self.ws.canvas
             try:
-                self.ws.canvas.palette = self._cart_palette
+                cv.palette = self._cart_palette
             except Exception:  # noqa: BLE001 -- restore must never block an exit
                 pass
             self._cart_palette = None
+            self._cart_palette_canvas = None
 
     def _close_lua(self):
         """Tear down the previous run's Lua state (#67), if any. Idempotent and
@@ -478,6 +503,36 @@ class Player:
             except Exception:  # noqa: BLE001 -- reset must never block an exit
                 pass
         self._net = None
+        # The match dies with the run: drop the session's player slots so the
+        # console is back to one local player the moment the cart is gone.
+        if self._netplay is not None:
+            try:
+                self._netplay.close()
+            except Exception:  # noqa: BLE001 -- teardown must never block an exit
+                pass
+            self._netplay = None
+            self.ws.netplay = None
+        try:
+            self.ws.input.netplay_live = False
+        except Exception:  # noqa: BLE001
+            pass
+        # ...and the radio goes down with it: nobody to talk to, and power save
+        # back on. UNLESS a session is already arranged for the run about to
+        # start -- which is not a hypothetical: the way a match forms is that the
+        # peer's invite arrives while this console is already playing, sets
+        # ws.netplay, and re-runs the cart from frame zero. The dying run tears
+        # down here on the way through, and stopping the radio then killed the
+        # very session that triggered the restart. On glass that read as the host
+        # stalling at frame 0 forever while the guest played on alone, with
+        # nothing logged anywhere (#65, 2026-08-22). The clause above has already
+        # cleared ws.netplay if the session belonged to THIS run, so what
+        # survives here belongs to the next one.
+        _link = getattr(self.ws, "link", None)
+        if _link is not None and self.ws.netplay is None:
+            try:
+                _link.stop()
+            except Exception:  # noqa: BLE001 -- teardown must never block an exit
+                pass
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
@@ -495,6 +550,57 @@ class Player:
             import gc
             gc.collect()           # off the play path: the run just ended
         except Exception:  # noqa: BLE001
+            pass
+        self._diag_frag()          # #66: the heap the NEXT cart inherits
+
+    def _diag_frag(self, tag="MEMX"):
+        """One line per cart exit: the largest allocatable block and total free
+        on the heap the next cart inherits -- #66's repeat-run fragmentation as
+        a number instead of a feel. MicroPython's GC does not compact, so freed
+        bytes pile into holes and the largest CONTIGUOUS run -- what a layer or
+        the p8 machine's 64KB must fit -- shrinks over a session even while
+        total free does not. Emitted after release_world's collect, so it reads
+        the compact-as-it-gets state, and carries `exit=` (the run counter) so
+        the series over repeated opens IS the degradation curve.
+
+        The block is BINARY-SEARCHED, which #66 line 1125 prescribes for a
+        reason: `mem_free()` reads high on these ports (it folds in a potential
+        PSRAM split), so only a probe that actually allocates is honest. Each
+        trial drops at once and a failing one auto-collects before it raises, so
+        the search perturbs nothing -- and it runs between carts with nothing
+        else live. Off unless measurement mode is on, like every line here."""
+        if not self._diag_enabled():
+            return
+        try:
+            import gc
+            gc.collect()
+            free = gc.mem_free()
+            lo, hi = 0, min(free if free > 0 else (1 << 20), 8 << 20)
+            while hi - lo > 1024:
+                mid = (lo + hi) // 2
+                try:
+                    bytearray(mid)          # unnamed: collectable at once
+                    lo = mid
+                except MemoryError:
+                    hi = mid
+            big = lo
+            # The internal-SRAM pool the p8 machine, the flush bounce and the
+            # framebuffers compete in -- regions under 1MB. Device only; -1 off it.
+            int_free = int_big = -1
+            try:
+                import esp32
+                int_free = int_big = 0
+                for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
+                    if reg[0] < 1024 * 1024:
+                        int_free += reg[1]
+                        if reg[2] > int_big:
+                            int_big = reg[2]
+            except Exception:  # noqa: BLE001 -- host / no esp32: leave -1
+                pass
+            print("Moybyte %d %s exit=%d free=%dk big=%dk int=%dk/%dk"
+                  % (_ticks_ms(), tag, self._run_seq, free // 1024, big // 1024,
+                     int_free // 1024, int_big // 1024))
+        except Exception:  # noqa: BLE001 -- a diag never blocks an exit
             pass
 
     def _diag_enabled(self):
@@ -717,6 +823,7 @@ class Player:
                 table = None               # malformed -> keep the default table
             if table is not None:
                 self._cart_palette = ws.canvas.palette
+                self._cart_palette_canvas = ws.canvas
                 ws.canvas.palette = table
         # Stamp the cart-start clock so the cart's time() reads ms since this run
         # began (re-run on apply/run_code/edit-close resets it, like TIC-80).
@@ -732,15 +839,81 @@ class Player:
         # handler/inbox from a previous run so a fresh run starts clean; make_api
         # injects `net`/`on_net` into the namespace iff the backend is non-None.
         net = ws.net if ws._cart_has_perm("multiplayer") else None
+        # Physical pins (#9), gated HERE with its two siblings rather than in the
+        # tier that happens to supply it. It used to be injected by the browser
+        # tier's own make_api wrapper the moment the serving host answered the pin
+        # probe -- which gave it the CAPABILITY half of the gate (does this
+        # console have pins) and none of the CONSENT half (did this cart ask),
+        # while cart_api's comment claimed it was gated "the same way as wifi and
+        # net". It was not, and the difference stopped being theoretical once a
+        # dropped .p8 could land in a board's own store: a cart nobody wrote
+        # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
+        # never which carts.
+        gpio = ws.gpio if ws._cart_has_perm("pins") else None
         if net is not None:
             net.reset()
         self._net = net
+        # #65 Phase 2: a linked two-console match. THIS is the moment a solo run
+        # becomes one -- before the seed is drawn and before _init runs, so both
+        # consoles' rnd() start from the same place. The guest side has already
+        # been handed a session by its radio (link._on_start), so it just finds
+        # ws.netplay set; the host side offers here and becomes player 0.
+        link = getattr(ws, "link", None)
+        if net is not None and link is not None:
+            # ARM the radio here and nowhere earlier. It is only up while a game
+            # that could use it is running, because disabling power save (which
+            # is what buys the latency tail) costs battery on a handheld, and a
+            # console on a shelf has nobody to talk to. Announcing the cart is
+            # what lets a peer recognise "we are both in the same game".
+            try:
+                link.start()
+                link.announce(cart.get("title") or "", 1)
+                # A DEAD match never survives into the next run (#65). The
+                # link's own give-up paths clear it as they re-run the cart,
+                # but a re-run arriving from anywhere else -- Editor PLAY, the
+                # dev channel's `run`, a kid re-launching from the shelf --
+                # would otherwise adopt a session whose advance() can only
+                # ever stall, and the cart would never simulate again.
+                _np = ws.netplay
+                if _np is not None and getattr(_np, "dead", False):
+                    link.end_match(ws)
+                if ws.netplay is None:
+                    link.offer(ws, cart.get("title") or "")
+            except Exception as exc:  # noqa: BLE001 -- a radio must never block a cart
+                print("Moybyte link failed:", exc)
+        # Gated on the same permission: an unlinked console leaves this None and
+        # the cart runs exactly as a single-player cart does.
+        self._netplay = ws.netplay if net is not None else None
+        # The pre-tick radio drain (see the frame loop below). Bound once: a
+        # linked run drains the link it started with, the way it keeps the
+        # session it started with.
+        self._drain_input = None
+        if self._netplay is not None and link is not None:
+            self._drain_input = getattr(link, "drain_input", None)
+        # The cart api reads this to refuse touch()/mouse() for the duration:
+        # only buttons cross the radio, so a pointer would move one screen's
+        # player and not the other's. Set on the InputState because that is what
+        # make_api is handed.
+        try:
+            ws.input.netplay_live = self._netplay is not None
+        except Exception:  # noqa: BLE001 -- a bare test stub need not carry it
+            pass
+        if self._netplay is not None and self._netplay.config:
+            # The host's tuning wins for the duration of the match. Applied to
+            # the LIVE dict rather than written to the card: it is a property of
+            # this match, not a change to the kid's own copy of the cart.
+            try:
+                project.config.update(self._netplay.config)
+            except Exception as exc:  # noqa: BLE001
+                print("Moybyte link config failed:", exc)
         t2 = _ticks_ms()
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images,
                          project.scenes,    # #85: scene()/load_scene() over the cart's scenes
                          tables=project.tables, texts=project.texts,  # #78 interop
-                         net=net)           # #65: capability-gated net.* backend
+                         net=net,           # #65: capability-gated net.* backend
+                         gpio=gpio,         # #9: capability-gated physical pins
+                         flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)
         # Paint is a regular cartridge with one narrow shell capability. Keep it out
         # of the kid API and inject it only into the shipped app identity that asks
         # for the artwork permission; copied/renamed carts do not inherit it.
@@ -1007,6 +1180,49 @@ class Player:
                 # frameskip logic-only frame. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
+                # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
+                # the fixed tick -- a variable dt diverges the two sims on frame
+                # one -- and a frame whose peer input has not arrived does NOT
+                # simulate. It still DRAWS: the screen holds the last agreed
+                # frame instead of freezing, which is what "waiting for player"
+                # looks like on hardware that cannot extrapolate safely.
+                stalled = False
+                np = self._netplay
+                if np is not None:
+                    # Drain the radio BEFORE deciding whether this tick can
+                    # advance: the boards drain in the frame TAIL, so without
+                    # this the peer's input is up to a whole loop frame stale
+                    # by the time advance() looks for it. Measured on glass
+                    # (P4<->T-Deck, 2026-08-24): 8.0% -> 6.4% stalled ticks at
+                    # DELAY=2 from this call alone. Input-priority and
+                    # mid-frame-safe by contract -- see EspNowLink.drain_input.
+                    _di = self._drain_input
+                    if _di is not None:
+                        try:
+                            _di()
+                        except Exception:  # noqa: BLE001 -- radio must not kill a frame
+                            pass
+                    dt = np.dt
+                    # The session owns the CLOCK as well as the order: it ticks
+                    # at its fixed rate, not at whatever the board's frame loop
+                    # manages, or a fixed dt would silently run the game fast.
+                    _nowp = _ticks_ms()
+                    if np.due(_nowp) or np.waiting:
+                        # A STALLED tick retries every loop frame instead of
+                        # waiting out a whole tick: the missing input usually
+                        # lands a few ms after it was first needed, and the
+                        # wait-for-the-next-due schedule made a 5ms miss cost
+                        # 34ms (wait_med, on glass 2026-08-24). due() still
+                        # owns the cadence of healthy ticks.
+                        stalled = not np.advance(
+                            _netplay_mask(ws.input, _NET_BUTTONS), _nowp)
+                    else:
+                        # Between ticks: do not simulate, but KEEP SENDING. The
+                        # frame loop is faster than the lockstep clock, so these
+                        # frames are free redundancy against a radio whose ack
+                        # lies -- and they serve a stalled peer sooner.
+                        stalled = True
+                        np.resend()
                 # MICROSECONDS, not ms (2026-08-14). These three brackets and the
                 # backdrop one above feed DRAWBRK's split, and CHROMEBRK's `other`
                 # is what is left after subtracting them from the frame -- so on a
@@ -1017,7 +1233,7 @@ class Player:
                 # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
                 # at the EMA, so every public number stays in ms.
                 _ts = _ticks_us() if _perf else 0
-                if self._update:
+                if self._update and not stalled:
                     self._update(dt)
                 _tm = _ticks_us() if _perf else 0
                 if render and self._draw:

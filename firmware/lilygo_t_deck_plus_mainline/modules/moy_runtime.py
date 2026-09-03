@@ -29,8 +29,13 @@ from console import Pointer, Workstation, wire_workstation_core, _cursor_delta
 # OTA verdict + rollback confirm, the frame cadence and its pacing debt -- live
 # there. Everything below that is not one of those is hardware.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
-from carts_data import CARTS          # generated from system_carts/ at build time
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
 from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
                          sram_census)
 from device_wifi import make_wifi, autoconnect_wifi
@@ -38,7 +43,7 @@ from device_input import TrackBall, Touch
 from device_audio import make_audio
 from device_canvas import DeviceCanvas, _LayerComp
 from device_api import make_api
-from device_diag import (_diag_flush, _diag_perf_sample, _diag_hitch,
+from device_diag import (_diag_flush, _diag_hitch,
                          _diag_drawbrk, _diag_draw2, _diag_loop, _diag_i2cstat, _diag_webhost,
                          _diag_pump, HITCH_MS)
 
@@ -81,6 +86,19 @@ POWER_SAVE_MS = 300000          # 5 minutes; 0 disables
 # interrogate once the desktop owns the loop, so the trace IS the diagnostic --
 # and it only fires on commits, never per frame.
 SD_TRACE = True
+
+# WHERE THE STORE LIVES WHEN THERE IS NO CARD. This board's carts normally live
+# on the TF card (moy_carts.CARTS_DIR, /sd/moybyte/carts) -- but a T-Deck with
+# an empty slot used to boot to the EMBEDDED carts with a None root, which
+# `wire_workstation_core` turns into can_manage=False: a read-only console, no
+# saving, no editing, no importing, and the only explanation one serial line on
+# a board whose USB-CDC RX is dead under the desktop. These are the same paths
+# the P4 has always used for the same reason, and a card put in later is picked
+# up on the next boot -- ONE store per boot, decided before anything is written,
+# because two live stores is the arrangement where a kid's save goes to the one
+# they are not looking at.
+FLASH_CARTS_ROOT = "/moy/carts"
+FLASH_UPDATE_DIR = "/moy/update"
 
 
 def run_desktop(fps_cap=60):
@@ -176,7 +194,14 @@ def run_desktop(fps_cap=60):
     # seed+scan; `with_sd_live` attaches once and keeps the card resident.
     carts, carts_root = boot.load_carts(moy_carts, CARTS,
                                         session=_sd_session,
-                                        media="SD")
+                                        media="SD",
+                                        fallback_root=FLASH_CARTS_ROOT)
+    # Did the card actually take the store? Everything below that exists ONLY
+    # because SD shares the panel's SPI host -- the session bracket and the OTA
+    # staging dir -- has to follow the store, or a card-less board brackets the
+    # panel for a bus it is not using and stages its update onto a card that is
+    # not there.
+    on_sd = carts_root is not None and carts_root.startswith("/sd")
     sram_census("carts")
     boot.note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
@@ -225,12 +250,22 @@ def run_desktop(fps_cap=60):
             print("SD < op %dms" % _ticks_diff(_ticks_ms(), _t))
             _sd_traced[0] = True
 
+    def _direct(fn):
+        """The no-card store lifecycle: just call it. Internal flash shares no
+        bus with the panel, so there is nothing to drain and nothing to mount --
+        and routing it through the SD bracket would fail every write."""
+        return fn()
+
+    _store_session = _with_sd_synced if on_sd else _direct
+
     def _before_slim(_ws):
         # Set BEFORE slim_carts so the store can reload what the diet drops.
-        _ws._with_sd = _with_sd_synced
+        _ws._with_sd = _store_session
         try:
             import moy_ota
-            _ws.updater = moy_ota.OtaUpdater(_with_sd_synced)
+            _ws.updater = moy_ota.OtaUpdater(
+                _store_session,
+                update_dir=None if on_sd else FLASH_UPDATE_DIR)
         except Exception as exc:  # noqa: BLE001
             print("Moybyte: OTA updater unavailable:", exc)
 
@@ -242,6 +277,21 @@ def run_desktop(fps_cap=60):
                           make_audio=make_audio,
                           lua_runtime=lua_runtime, before_slim=_before_slim,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+
+    # THE RADIO LINK (#7/#65 Phase 2): the console's one ESP-NOW owner. Built
+    # here, INERT until a cart with the "multiplayer" permission runs -- the
+    # radio is only started by ws.link_arm(), because pm=PM_NONE costs battery
+    # and a console sitting on its shelf has nobody to talk to. Two kids each
+    # open the same game and the consoles find each other; there is no pairing
+    # screen and no code to type, because being in the same room IS the
+    # agreement (the doctrine the OTA design already set for the SD card).
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="tdeck", name=ws.system.get("name", "tdeck"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte T-Deck link unavailable:", exc)
+        ws.link = None
 
     # BLE HID keyboard (#26): a SECOND, optional input source on this board.
     # On the P4 and the Guition a paired BLE keyboard is the only keyboard and
@@ -284,10 +334,13 @@ def run_desktop(fps_cap=60):
     # the LCD DMA flush needs, which is why boot does NOT autoconnect. Turning
     # the row on takes that risk knowingly, exactly as UPDATE ONLINE does.
     try:
-        from moy_webhost import make_webhost, SD_WEB_DIR
-        ws.webhost = make_webhost(ws, carts_root, SD_WEB_DIR,
+        from moy_webhost import make_webhost
+        # carts_root follows the store, and the SD gate is only a gate when SD
+        # is the bus. The web bundle does not follow anything -- it rides the
+        # firmware image.
+        ws.webhost = make_webhost(ws, carts_root,
                                   autoconnect=autoconnect_wifi,
-                                  with_sd=_with_sd_synced)
+                                  with_sd=_store_session)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte: web console unavailable:", exc)
 
@@ -362,6 +415,30 @@ def run_desktop(fps_cap=60):
     _t = {"kbd": 0, "inp": 0, "sb": 0, "diag": 0, "sd": 0, "web": 0}
     _ble = getattr(ws, "ble_keyboard", None)   # optional second keyboard (#26)
     boot.start_frames(ws)
+
+    def _perf_emit(line):
+        """TWO SINKS, ONE LINE (#206 item 2).
+
+        PRINTED like every other board -- until 2026-08-28 this board's samples
+        went only through the diag ring, whose `Moybyte <uptime> ` stamp made
+        `tools/p4_perf.py` (which filters on `PERF `) drop every one of them, so
+        the board whose fps needed measuring was invisible to the tool that
+        measures it. And through the ring as well, uptime-stamped, because this
+        board's serial RX was dead for months and the SD log is why anything was
+        known about it at all -- the ring is what survives a hang.
+
+        Ringed WITHOUT the live echo: `diag.log` would print it a second time.
+        """
+        print(line)
+        if diag is not None:
+            try:
+                diag.ring("PERF", line[5:])
+            except Exception:  # noqa: BLE001 -- a diag never breaks a frame
+                pass
+
+    # No overlap counters and no windowed WM on this board, so those columns
+    # print `-`: absence, never a zero that a broken lever would also print.
+    _perf = PerfSampler(ws, emit=_perf_emit)
 
     def _poll_inputs(now):
         """Every input source on this board: the #69 poller (with its death
@@ -475,7 +552,9 @@ def run_desktop(fps_cap=60):
                 diag.ECHO_LIVE = _live
             except Exception:  # noqa: BLE001
                 pass
-            _diag_perf_sample(diag, ws)
+            # The PERF sample is NOT here any more (#206 item 2): it rides the
+            # shared FrameLoop.account hook with the other two boards, on the
+            # 2s cadence they use, so all three emit one format from one body.
             _diag_drawbrk(diag, ws)
             # DRAWBRK says how much of the frame is `render`; this says WHICH
             # native op render is: `layer=` is the draw_layer window copy (what
@@ -518,7 +597,17 @@ def run_desktop(fps_cap=60):
         # frame".
         _t["web"] = poll_webhost(ws)
 
+        # The radio, once per frame. At 30Hz an input frame carries ~2 messages
+        # and the ring holds hundreds, so a per-frame slice is comfortable --
+        # and draining on the frame loop is what keeps ESP-NOW off a thread
+        # fighting the panel flush for the VM core. No-op while the link is
+        # inert, which is every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
+
     def _account(now, elapsed, sleep_ms):
+        _perf.account(now, elapsed, sleep_ms)
         if diag is not None and elapsed >= HITCH_MS:
             _diag_hitch(diag, ws, comp, elapsed, _t["kbd"], _t["inp"], _t["sb"],
                         loop.t_ws, _t["diag"], _t["sd"], _t["web"],

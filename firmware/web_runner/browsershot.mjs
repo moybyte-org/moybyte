@@ -12,6 +12,8 @@
 // Same scenario vocabulary as pageshot.mjs where it makes sense --
 //   {"wait":ms} {"shot":"name"} {"click":[x,y]} {"move":[x,y]}
 //   {"drag":[x0,y0,x1,y1,steps]} {"key":"a"} {"js":"..."} {"note":"..."}
+//   {"file":"path|$ENVVAR","as":"__name"}   local bytes -> window.__name
+//                                           (an ArrayBuffer, for the drop paths)
 // -- with coordinates in CANVAS pixels (the page's own 1024x600-style space);
 // they are mapped through the canvas's on-screen rect for you.
 //
@@ -53,11 +55,24 @@ const PORT = server.address().port;
 const ORIGIN = BASE || `http://127.0.0.1:${PORT}`;
 
 // -- headless chrome + CDP ---------------------------------------------------
-const profile = join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
+// MOY_PROFILE pins the Chrome profile across invocations. The default name is
+// per-port and therefore per-RUN, which is right for a screenshot but wrong for
+// anything that must survive a reload: the browser-local cart store (#193) lives
+// in the profile, so proving persistence needs two runs to share one.
+const profile = process.env.MOY_PROFILE
+    || join(process.env.TMPDIR || "/tmp", "moy-browsershot-" + PORT);
+// MOY_CHROME_FLAGS appends launch flags, for environments the defaults do not
+// fit. CI sets `--no-sandbox`: Ubuntu 24.04 restricts unprivileged user
+// namespaces under AppArmor, and where that bites, Chrome's zygote dies before
+// it ever prints a debug port -- which reads here as "chrome did not report a
+// debug port" and would be a red run about the runner, not about the console.
+// The page under test is served from 127.0.0.1 out of our own dist/, so the
+// sandbox is not what is keeping anything out.
+const EXTRA = (process.env.MOY_CHROME_FLAGS || "").split(/\s+/).filter(Boolean);
 const chrome = spawn(CHROME, [
     "--headless=new", "--remote-debugging-port=0", "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-gpu",
-    "--window-size=1280,800", "--hide-scrollbars", "about:blank",
+    "--window-size=1280,800", "--hide-scrollbars", ...EXTRA, "about:blank",
 ], { stdio: ["ignore", "ignore", "pipe"] });
 
 const wsUrl = await new Promise((ok, err) => {
@@ -183,9 +198,44 @@ for (const step of scenario.steps || []) {
             await sleep(step.settle ?? 300);
         }
         if (step.key != null) {
-            await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: String(step.key), key: String(step.key) });
-            await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: String(step.key) });
+            // CDP takes `text` only for printable chars; a NAMED key (Enter,
+            // ArrowDown, ...) must go as rawKeyDown with its virtual keycode
+            // or the call is refused with "Invalid 'text' parameter".
+            const k = String(step.key);
+            const VK = { Enter: 13, Backspace: 8, Escape: 27, Tab: 9,
+                         ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+            if (k.length === 1) {
+                await cdp("Input.dispatchKeyEvent", { type: "keyDown", text: k, key: k });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k });
+            } else {
+                const vk = VK[k] || 0;
+                await cdp("Input.dispatchKeyEvent", { type: "rawKeyDown", key: k, code: k, windowsVirtualKeyCode: vk });
+                await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: k, windowsVirtualKeyCode: vk });
+            }
             await sleep(150);
+        }
+        // {"file": path, "as": "__name"} -- a LOCAL file's bytes as an
+        // ArrayBuffer on window. The drop paths (#193's .moy zips, #194's
+        // PICO-8 carts) take real bytes and nothing else, and a base64 blob
+        // pasted into a scenario would be a fixture nobody could regenerate.
+        // `$NAME` resolves from the environment, so a test can point one
+        // scenario at a file it just built in a tmpdir.
+        if (step.file) {
+            const p = step.file.startsWith("$")
+                ? (process.env[step.file.slice(1)] || "")
+                : resolve(HERE, step.file);
+            if (!p) throw new Error("no path for " + step.file);
+            const b64 = readFileSync(p).toString("base64");
+            const as = step.as || "__file";
+            // ...and its NAME beside it, because a drop carries one and half of
+            // what the p8 import does with a file is decided by its suffix.
+            await evaluate(`window[${JSON.stringify(as)}] =`
+                + ` Uint8Array.from(atob(${JSON.stringify(b64)}),`
+                + ` c => c.charCodeAt(0)).buffer,`
+                + ` window[${JSON.stringify(as + "Name")}] =`
+                + ` ${JSON.stringify(p.split("/").pop())},`
+                + ` "loaded ${b64.length}b64"`);
+            console.log("   file ->", p);
         }
         if (step.js) console.log("   js ->", JSON.stringify(await evaluate(step.js)));
         if (step.shot) await shot(step.shot);

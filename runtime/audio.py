@@ -141,7 +141,8 @@ class SFX:
     (#170, PICO-8 numbering, FX_*); a step without one serializes 3-element so
     pre-#170 banks stay byte-identical on disk."""
 
-    def __init__(self, steps=None, speed=8, loop=False, loop_start=0):
+    def __init__(self, steps=None, speed=8, loop=False, loop_start=0,
+                 filters=0):
         # normalize each step to a [pitch, wave, vol(, eff)] list of ints
         self.steps = [self._norm(s) for s in (steps or [])]
         # FRACTIONAL speeds are legal, exactly as libmoy declares them
@@ -163,6 +164,14 @@ class SFX:
         # 0..end once, then repeat loop_start..end). 0 = loop the whole list,
         # which is the pre-#170 behaviour, so old banks are untouched.
         self.loop_start = max(0, int(loop_start))
+        # PICO-8's per-sfx FILTER byte, carried verbatim the way `eff` is:
+        # noiz 0x2, buzz 0x4, then detune/reverb/dampen as base-3 digits at
+        # /8, /24 and /72. 0 is the dry sound, so every bank written before
+        # this is unchanged. libmoy's moy_audio.h holds the accessors.
+        try:
+            self.filters = _clampi(int(filters), 0, 255)
+        except (TypeError, ValueError):
+            self.filters = 0
 
     @staticmethod
     def _norm(s):
@@ -180,13 +189,15 @@ class SFX:
              "steps": [list(s) for s in self.steps]}
         if self.loop_start:
             d["loop_start"] = self.loop_start
+        if self.filters:
+            d["filters"] = self.filters
         return d
 
     @classmethod
     def from_dict(cls, d):
         d = d or {}
         return cls(d.get("steps"), d.get("speed", 8), d.get("loop", False),
-                   d.get("loop_start", 0))
+                   d.get("loop_start", 0), d.get("filters", 0))
 
 
 class MusicTrack:

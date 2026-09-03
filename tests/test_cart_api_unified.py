@@ -73,8 +73,10 @@ def test_the_base_namespace_keyset_is_pinned():
     ns = cart_api.make_api(_Canvas(), _In(), {})
     assert set(ns) == {
         "W", "H", "cls", "pix", "line", "rect", "rectb", "circ", "circb",
-        "spr", "tri", "trib", "sspr", "tline", "background",
+        "spr", "tri", "trib", "oval", "ovalb", "fillp",
+        "sspr", "tline", "background",
         "_moy_restore_bg", "make_layer", "draw_layer", "map", "mget", "mset",
+        "sget", "sset", "fget", "fset",
         "print", "touch", "mouse", "clip", "camera", "pal", "palt",
         "btn", "btnp", "players", "key", "keyp", "time", "pmem",
         "textmode", "quit", "view", "cfg", "col",

@@ -69,7 +69,7 @@ def _fb_text(s):
 
 # #186 moy_buf: an image whose .pix already lives OFF the gc heap (a cover --
 # memoryview pix) gets its RGB565 bakes off-heap too, so the whole cover stops
-# taxing the GC mark phase. The owner (console._free_cover_img) frees pix and
+# taxing the GC mark phase. The owner (CoverCache._free_img) frees pix and
 # bakes together at eviction. Everything else (sheet tiles, paint images,
 # wallpaper blits) keeps gc bytearrays -- their owners drop them implicitly
 # (sheet gen bumps, cart ns teardown) and an explicit free there would leak.
@@ -254,6 +254,76 @@ _PAL_IDENTITY = bytes(range(64))
 _PALT_OPAQUE = bytes(64)
 
 
+# mg_shape's `kind`, mirroring the enum in native/moy_gfx/moy_gfx_kernels.h.
+_MG_LINE, _MG_RECT, _MG_RECTB = 0, 1, 2
+_MG_CIRC, _MG_CIRCB, _MG_TRI, _MG_TRIB = 3, 4, 5, 6
+_MG_OVAL, _MG_OVALB = 7, 8
+
+
+def ellipse(x0, y0, x1, y1, put, span):
+    """The ellipse inscribed in the box (x0, y0)-(x1, y1), corners inclusive.
+
+    Zingl's integer midpoint walk, transcribed from libmoy's moy_oval so the
+    no-kernel lane draws the same pixels the C does: four quadrant points per
+    step, no division and no float, which is what makes the spec's `oval`
+    golden enforceable across hosts. `put` emits the OUTLINE; `span` emits one
+    inclusive row (xa, xb, y) the first time the walk reaches it -- x only moves
+    inward, so the first visit is the widest. The tail loop finishes the tips of
+    ellipses too flat for the main walk to reach."""
+    a = abs(x1 - x0)
+    b = abs(y1 - y0)
+    b1 = b & 1
+    dx = 4 * (1 - a) * b * b
+    dy = 4 * (b1 + 1) * a * a
+    err = dx + dy + b1 * a * a
+    if x0 > x1:
+        x0 = x1
+        x1 += a
+    if y0 > y1:
+        y0 = y1
+    y0 += (b + 1) // 2
+    y1 = y0 - b1
+    a = 8 * a * a
+    b1 = 8 * b * b
+    last = None
+    while True:
+        if span is not None:
+            if last != y0:
+                span(x0, x1, y0)
+                if y1 != y0:
+                    span(x0, x1, y1)
+                last = y0
+        else:
+            put(x1, y0)
+            put(x0, y0)
+            put(x0, y1)
+            put(x1, y1)
+        e2 = 2 * err
+        if e2 <= dy:
+            y0 += 1
+            y1 -= 1
+            dy += a
+            err += dy
+        if e2 >= dx or 2 * err > dy:
+            x0 += 1
+            x1 -= 1
+            dx += b1
+            err += dx
+        if x0 > x1:
+            break
+    while y0 - y1 <= b:
+        if span is not None:
+            span(x0 - 1, x1 + 1, y0)
+            span(x0 - 1, x1 + 1, y1)
+        else:
+            put(x0 - 1, y0)
+            put(x1 + 1, y0)
+            put(x0 - 1, y1)
+            put(x1 + 1, y1)
+        y0 += 1
+        y1 -= 1
+
+
 def tri_spans(x1, y1, x2, y2, x3, y3):
     """The horizontal spans covering a filled triangle, packed flat as
     (x, y, w, 1, 0) quints for fill_rects (#167). Pure integer scanline walk --
@@ -354,6 +424,26 @@ except ImportError:  # pragma: no cover - host tree: the package-relative lane
 # (test_no_undefined_names) caught it on the next staged build; the suites
 # grew a run-a-cart test the same day so the glass can catch its own.
 _GATE_SEQ = [0]     # spr_gate token counter (#63): unique per gate, int16-safe, never 0.
+
+
+class _MaskedRegion:
+    """A w x h cell grid standing in for a tilemap, for ONE map(..., layers)
+    call (SPEC.md 7.2). Enough of TileMap for both map lanes -- the native
+    blit_map reads cells/w/h, the no-kernel fallback calls mget -- and nothing
+    else: it is built and dropped inside the call, so it has no `gen` and never
+    reaches the Fold-2 cache (which keys on identity and would miss forever)."""
+
+    __slots__ = ("cells", "w", "h")
+
+    def __init__(self, cells, w, h):
+        self.cells = cells
+        self.w = w
+        self.h = h
+
+    def mget(self, x, y):
+        if 0 <= x < self.w and 0 <= y < self.h:
+            return self.cells[y * self.w + x] - 1
+        return -1
 
 
 class DeviceCanvas:
@@ -540,6 +630,10 @@ class DeviceCanvas:
         # accepted, and PAL565[8] stayed 0xf809. Cart palettes worked on the host
         # and were inert on every other tier.
         self._wire = _PAL565_WIRE_BUF
+        # What _wire composes over: the stock table or a cart palette. _wire
+        # itself is rebound to a private copy while a SCREEN palette is set
+        # (pal(c0, c1, 1), see there) and back to this when it resets.
+        self._wire_base = _PAL565_WIRE_BUF
         self._palette = None           # None = the stock MOY64 table
         # Folded into _pal_state_id so a palette swap invalidates every bake
         # keyed on _palgen. Identity normally ids as 0; without this, a cart
@@ -550,6 +644,15 @@ class DeviceCanvas:
         self._wire_pal_gen = -1
         self._gate_state = None
         self._gate_pal = None
+        # SPEC.md 6's fill pattern: 0 is solid (the state every frame starts in)
+        # and -1 leaves a hole pixel untouched. Read by the nine shape verbs and
+        # by nothing else -- see fillp().
+        self._fillp = 0
+        self._fillp_col = -1
+        # SPEC.md 6 / 12.1's SCREEN palette: a second remap COMPOSED after the
+        # draw palette into _wire, so every draw site resolves through it for
+        # nothing. None while identity, which is every frame of most carts.
+        self._spal = None
         # VIEWPORT (#155) -- host twin: runtime/canvas.py Canvas.set_viewport.
         # w/h are the LOGICAL surface a caller draws on (0,0 based); _stride/_bh
         # are the real buffer, _ox/_oy where the surface sits inside it. Equal on
@@ -650,6 +753,8 @@ class DeviceCanvas:
         # IN PLACE, and only when a pal()/palt() actually touched them (_pal_dirty) --
         # a cart that never remaps pays two int compares. _palgen returns to 0 exactly
         # as before (0 == identity map: the cached sprite RGB fast path keys on it).
+        if self._spal is not None:        # SPEC.md 6: BOTH palettes reset
+            self._unfold_screen()
         if self._pal_dirty:
             self._pal_dirty = False
             if self._pal_map is None:
@@ -666,6 +771,8 @@ class DeviceCanvas:
             gp = self._gate_pal           # gate table mirrors _pal_map: identity now
             if gp is not None:
                 gp[:] = self._wire  # C memcpy, not the 64-iteration rebuild
+        self._fillp = 0                   # SPEC.md 6: a frame starts solid
+        self._fillp_col = -1
         self._sync_gate_state()
 
     def camera(self, x=0, y=0):
@@ -710,6 +817,13 @@ class DeviceCanvas:
         # bake, never a wrong pixel.)
         pd = self._pal_delta
         td = self._palt_delta
+        sp = self._spal
+        if sp is not None:
+            # A screen palette is more state the bakes depend on, so it joins
+            # the content key -- content, not an epoch bump, so a fade that
+            # returns to a table it used before reuses those bakes.
+            key = bytes(self._pal_map) + bytes(self._palt) + bytes(sp)
+            return self._pal_state_lookup(key)
         if pd == 0 and td == 0:
             return self._pal_epoch      # 0 on the stock palette (the common case)
         if td == 0 and pd == 1 and self._pal_single >= 0:
@@ -719,6 +833,9 @@ class DeviceCanvas:
             key = 0x20000 + self._palt_single
         else:
             key = bytes(self._pal_map) + bytes(self._palt)
+        return self._pal_state_lookup(key)
+
+    def _pal_state_lookup(self, key):
         ids = self._pal_state_ids
         if ids is None:
             ids = self._pal_state_ids = {}
@@ -731,7 +848,30 @@ class DeviceCanvas:
             ids[key] = i
         return i
 
-    def pal(self, c0=None, c1=None):
+    def pal(self, c0=None, c1=None, p=0):
+        # p == 1 is the SCREEN palette (SPEC.md 6, 12.1): a second remap
+        # composed AFTER the draw palette, for pixels drawn from here on. It is
+        # folded into _wire -- a private copy of the base table with entry c0
+        # re-pointed -- so _col, the gate table, blit_indices and the batch all
+        # resolve through it with no per-pixel cost and no new code path. It is
+        # NOT applied to pixels already on the canvas: that pass measured half
+        # a frame on every board (#218), which is why the spec composes.
+        if p == 1 and c0 is not None:
+            self.flush_batch()         # queued sprites belong to the OLD table (#63)
+            sp = self._spal
+            if sp is None:
+                sp = self._spal = bytearray(_PAL_IDENTITY)
+                self._wire = array("H", self._wire_base)
+            c = int(c0) & 63
+            v = int(c1) & 63
+            sp[c] = v
+            self._wire[c] = self._wire_base[v]
+            self._palgen = self._pal_state_id()   # spal is part of the key
+            self._wire_pal_gen = -1
+            if self._gate_pal is not None:
+                self._sync_gate_pal()
+            self._pal_dirty = True
+            return
         # The gate's RGB565 table is maintained INCREMENTALLY here (one poke per
         # remap, one slice-copy per real reset) instead of the 64-iteration
         # rebuild _sync_gate_pal does: the celeste shim calls pal() reset every
@@ -744,6 +884,8 @@ class DeviceCanvas:
         pm = self._pal_map
         gp = self._gate_pal
         if c0 is None:
+            if self._spal is not None:  # SPEC.md 6: no args resets BOTH
+                self._unfold_screen()
             if self._pal_delta:
                 pm[:] = _PAL_IDENTITY
                 self._pal_delta = 0
@@ -771,6 +913,16 @@ class DeviceCanvas:
                 # delta/single unchanged, the id below keys on the new value.
         self._palgen = self._pal_state_id()   # content id: re-seen tints reuse bakes
         self._pal_dirty = True              # #75: the next reset_state must restore
+
+    def _unfold_screen(self):
+        # Back to the base table (stock or a cart palette). The gate table
+        # mirrors _wire[pal_map] and is rebuilt from it; the fill_spans LUT is
+        # keyed on _palgen and re-derives on its next use.
+        self._spal = None
+        self._wire = self._wire_base
+        self._wire_pal_gen = -1
+        if self._gate_pal is not None:
+            self._sync_gate_pal()
 
     def palt(self, c=None, on=None):
         self.flush_batch()             # queued sprites belong to the OLD palt (#63)
@@ -978,7 +1130,12 @@ class DeviceCanvas:
             # Match the wire order this build writes -- the T-Deck stores
             # byte-swapped so its flush can skip a per-frame CPU swap.
             wire[i] = w if canonical else (((w & 0xFF) << 8) | (w >> 8)) & 0xFFFF
-        self._wire = wire
+        self._wire_base = wire
+        sp = self._spal
+        if sp is None:
+            self._wire = wire
+        else:
+            self._wire = array("H", [wire[sp[i]] for i in range(64)])
         self._palette = [tuple(c) for c in table]
         # A new table means every pal-state id learned under the old one is a
         # different colour now. Retire them and move the epoch forward so no id
@@ -1094,12 +1251,16 @@ class DeviceCanvas:
             # `pix(x, y)` mean two different things on the two tiers, and a cart
             # that branched on it could never be pixel-conformant (SPEC.md 11).
             # Unknown words (a native blit's own colour) read as 0, matching the
-            # host's out-of-bounds answer.
+            # host's out-of-bounds answer. Under a screen palette this is the
+            # index the pixel LANDED as -- spal[pal[c]] -- which is what libmoy's
+            # pget answers too, since both palettes compose at draw time.
             return _PAL565_INDEX.get(self._fb.pixel(x, y), 0)
         if self._clip_x0 <= x < self._clip_x1 and self._clip_y0 <= y < self._clip_y1:
             self._fb.pixel(x, y, self._col(c))
 
     def line(self, x1, y1, x2, y2, c):
+        if self._fillp:
+            return self._shape(_MG_LINE, x1, y1, x2, y2, 0, 0, c)
         # Bresenham through _put so camera+clip+pal apply (matches the host rasterizer
         # pixel-for-pixel; framebuf.line can't clip to an arbitrary rect).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
@@ -1135,6 +1296,8 @@ class DeviceCanvas:
                 err += dx; y0 += sy
 
     def rect(self, x, y, w, h, c):
+        if self._fillp:
+            return self._shape(_MG_RECT, x, y, w, h, 0, 0, c)
         # TIC-80 rect = FILLED rectangle. HOT PATH (see _fill): the batch break is
         # inlined to the array-header test so an already-empty batch costs a load
         # instead of a method call, and _col is inlined for the same reason.
@@ -1144,6 +1307,8 @@ class DeviceCanvas:
                    self._wire[self._pal_map[c & 63]])
 
     def rectb(self, x, y, w, h, c):
+        if self._fillp:
+            return self._shape(_MG_RECTB, x, y, w, h, 0, 0, c)
         # TIC-80 rectb = rectangle outline (4 clipped fills, like the host).
         if self._batch_arr[0] > 4:
             self.flush_batch()         # #63: a non-spr primitive breaks the batch
@@ -1303,6 +1468,8 @@ class DeviceCanvas:
         return self._wire_pal_arr
 
     def circ(self, cx, cy, r, c):
+        if self._fillp:
+            return self._shape(_MG_CIRC, cx, cy, r, 0, 0, 0, c)
         # TIC-80 circ = FILLED circle. Native (#43): one moy_gfx.circ call rasterizes
         # the scanline spans in C (was 2r+1 MP->C _fill calls); else the Python path.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
@@ -1334,6 +1501,8 @@ class DeviceCanvas:
             self._fill(cx - span, cy + dy, 2 * span + 1, 1, col)
 
     def circb(self, cx, cy, r, c):
+        if self._fillp:
+            return self._shape(_MG_CIRCB, cx, cy, r, 0, 0, 0, c)
         # TIC-80 circb = circle outline. Native (#43): one moy_gfx.circb call runs the
         # Bresenham midpoint circle in C (was ~8r MP->C _put calls); else Python.
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
@@ -1356,6 +1525,8 @@ class DeviceCanvas:
                 err -= 2 * x + 1
 
     def tri(self, x1, y1, x2, y2, x3, y3, c):
+        if self._fillp:
+            return self._shape(_MG_TRI, x1, y1, x2, y2, x3, y3, c)
         # TIC-80 tri = FILLED triangle (#167 shape B). Native: ONE moy_gfx.tri
         # call walks the scanlines AND fills them in C -- the Python tri_spans
         # walk was 7.5ms/op for a bench-sized triangle on the S3 (#66), and the
@@ -1386,11 +1557,176 @@ class DeviceCanvas:
             self.fill_rects(array("h", spans), len(spans) // 5, 0, 0, int(c) & 63)
 
     def trib(self, x1, y1, x2, y2, x3, y3, c):
+        if self._fillp:
+            return self._shape(_MG_TRIB, x1, y1, x2, y2, x3, y3, c)
         # TIC-80 trib = triangle outline (three lines, like rectb's four fills).
         self.flush_batch()             # #63: a non-spr primitive breaks the batch
         self.line(x1, y1, x2, y2, c)
         self.line(x2, y2, x3, y3, c)
         self.line(x3, y3, x1, y1, c)
+
+    def oval(self, x, y, w, h, c):
+        # SPEC.md 6: the FILLED ellipse inscribed in the w x h box at (x, y).
+        # Zero or negative w/h draw nothing; 1x1 is a single pixel.
+        self._shape(_MG_OVAL, x, y, w, h, 0, 0, c)
+
+    def ovalb(self, x, y, w, h, c):
+        # The ellipse OUTLINE -- oval()'s own rim, pixel for pixel, because one
+        # walk produces both. That is why they are not a fill plus a stroke.
+        self._shape(_MG_OVALB, x, y, w, h, 0, 0, c)
+
+    def fillp(self, p=None, c=None):
+        # SPEC.md 6: a 4x4 dither for the nine SHAPE verbs. `p` is sixteen bits
+        # read row by row from the top-left, bit 15 first; a SET bit is a hole,
+        # and a hole takes colour `c` or is left untouched when `c` is absent or
+        # negative. No args resets to solid.
+        #
+        # Anchored to the SCREEN, not the camera, so a dithered shape holds
+        # still while the camera moves over it -- and so two shapes that overlap
+        # interleave rather than fight.
+        #
+        # NO flush_batch, unlike its pal/palt neighbours: sprites do not honour
+        # the pattern, and every shape verb flushes on its own way in, so a
+        # queued run cannot be caught by this state changing under it.
+        if p is None:
+            self._fillp = 0
+            self._fillp_col = -1
+            return
+        self._fillp = int(p) & 0xFFFF
+        self._fillp_col = -1 if c is None or int(c) < 0 else int(c) & 63
+
+    def _shape(self, kind, a0, a1, a2, a3, a4, a5, c):
+        # The nine shape verbs' patterned lane, plus oval/ovalb always: ONE
+        # native call (mg_shape, see its note in moy_gfx_kernels.h) instead of a
+        # patterned twin of each verb, so a solid draw stays exactly the call it
+        # was. getattr because a board on older firmware has moy_gfx without it.
+        self.flush_batch()             # #63: a non-spr primitive breaks the batch
+        col = self._col(c)
+        gfx = self._gfx
+        sh = None if gfx is None else getattr(gfx, "shape", None)
+        if sh is None:
+            self._shape_py(kind, a0, a1, a2, a3, a4, a5, col)
+            return
+        hole = self._fillp_col
+        sh(self._buf, self._stride, self._bh, kind,
+           int(a0), int(a1), int(a2), int(a3), int(a4), int(a5),
+           col, self._fillp,
+           -1 if hole < 0 else self._wire[self._pal_map[hole]],
+           self._cam_x, self._cam_y,
+           self._clip_x0, self._clip_y0, self._clip_x1, self._clip_y1)
+
+    def _put_shape(self, x, y, col):
+        # _put under the fill pattern. The pattern is tested in BUFFER space,
+        # after the camera offset, which is what "anchored to the screen" means
+        # and is where libmoy's moy_ds_put_shape tests it too.
+        x -= self._cam_x
+        y -= self._cam_y
+        if not (self._clip_x0 <= x < self._clip_x1
+                and self._clip_y0 <= y < self._clip_y1):
+            return
+        if (self._fillp >> (15 - ((y & 3) << 2) - (x & 3))) & 1:
+            hole = self._fillp_col
+            if hole < 0:
+                return
+            col = self._wire[self._pal_map[hole]]
+        self._fb.pixel(x, y, col)
+
+    def _span_shape(self, xa, xb, y, col):
+        # One inclusive row, pattern-tested per pixel. The kernel walks a row of
+        # pattern bits instead; this lane exists for a board with no moy_gfx.
+        put = self._put_shape
+        for x in range(xa, xb + 1):
+            put(x, y, col)
+
+    def _shape_py(self, kind, a0, a1, a2, a3, a4, a5, col):
+        # mg_shape with no kernel under it. Geometry duplicated from the solid
+        # verbs above rather than shared with them, so their hot bodies keep no
+        # branch for a state this lane exists to handle.
+        put = self._put_shape
+        span = self._span_shape
+        if kind == _MG_OVAL or kind == _MG_OVALB:
+            x = int(a0); y = int(a1); w = int(a2); h = int(a3)
+            if w <= 0 or h <= 0:
+                return
+            if kind == _MG_OVAL:
+                ellipse(x, y, x + w - 1, y + h - 1, None,
+                        lambda xa, xb, yy: span(xa, xb, yy, col))
+                return
+            ellipse(x, y, x + w - 1, y + h - 1,
+                    lambda px, py: put(px, py, col), None)
+            return
+        if kind == _MG_RECT or kind == _MG_RECTB:
+            x = int(a0); y = int(a1); w = int(a2); h = int(a3)
+            if w <= 0 or h <= 0:
+                return
+            if kind == _MG_RECT:
+                for yy in range(y, y + h):
+                    span(x, x + w - 1, yy, col)
+                return
+            span(x, x + w - 1, y, col)              # four one-pixel rects, as
+            span(x, x + w - 1, y + h - 1, col)      # moy_rectb draws them
+            for yy in range(y, y + h):
+                put(x, yy, col)
+                put(x + w - 1, yy, col)
+            return
+        if kind == _MG_CIRC:
+            cx = int(a0); cy = int(a1); r = int(a2)
+            if r < 0:
+                return
+            sp = 0
+            for dy in range(-r, r + 1):
+                t = r * r - dy * dy
+                while (sp + 1) * (sp + 1) <= t:
+                    sp += 1
+                while sp > 0 and sp * sp > t:
+                    sp -= 1
+                span(cx - sp, cx + sp, cy + dy, col)
+            return
+        if kind == _MG_CIRCB:
+            cx = int(a0); cy = int(a1); r = int(a2)
+            if r < 0:
+                return
+            x = r; y = 0; err = 0
+            while x >= y:
+                for px, py in ((x, y), (y, x), (-y, x), (-x, y),
+                               (-x, -y), (-y, -x), (y, -x), (x, -y)):
+                    put(cx + px, cy + py, col)
+                y += 1
+                if err <= 0:
+                    err += 2 * y + 1
+                else:
+                    x -= 1
+                    err -= 2 * x + 1
+            return
+        if kind == _MG_TRI:
+            q = tri_spans(a0, a1, a2, a3, a4, a5)
+            for i in range(0, len(q), 5):
+                span(q[i], q[i] + q[i + 2] - 1, q[i + 1], col)
+            return
+        if kind == _MG_TRIB:
+            self._line_py(a0, a1, a2, a3, col)
+            self._line_py(a2, a3, a4, a5, col)
+            self._line_py(a4, a5, a0, a1, col)
+            return
+        self._line_py(a0, a1, a2, a3, col)          # _MG_LINE
+
+    def _line_py(self, x1, y1, x2, y2, col):
+        # Bresenham through _put_shape, the same walk line()'s own fallback runs.
+        x0 = int(x1); y0 = int(y1); xe = int(x2); ye = int(y2)
+        put = self._put_shape
+        dx = abs(xe - x0); dy = -abs(ye - y0)
+        sx = 1 if x0 < xe else -1
+        sy = 1 if y0 < ye else -1
+        err = dx + dy
+        while True:
+            put(x0, y0, col)
+            if x0 == xe and y0 == ye:
+                break
+            e2 = 2 * err
+            if e2 >= dy:
+                err += dy; x0 += sx
+            if e2 <= dx:
+                err += dx; y0 += sy
 
     def sspr(self, sheet, sx, sy, sw, sh, dx, dy, dw=None, dh=None,
              colorkey=-1, flip=0):
@@ -1731,6 +2067,40 @@ class DeviceCanvas:
                 if x1 > x0 and y1 > y0:
                     self._fb.fill_rect(x0, y0, x1 - x0, y1 - y0, col)
 
+    def _mask_region(self, tilemap, mx, my, w, h, layers, flags):
+        # The (w x h) region at (mx, my) as a fresh cell grid with every cell the
+        # layer mask rejects cleared to empty (SPEC.md 7.2). Cells store tile+1,
+        # so 0 is empty and out-of-range reads as empty too -- the same collapse
+        # mget makes. With no flag table at all NO cell passes a non-zero mask,
+        # which is what a cart with no flags.moyflags must draw.
+        if w <= 0 or h <= 0:
+            return bytearray(0)        # a degenerate region: every lane no-ops
+        out = bytearray(w * h)
+        if flags is None:
+            return out
+        cells = tilemap.cells
+        mw = tilemap.w
+        mh = tilemap.h
+        nflags = len(flags)
+        for cy in range(h):
+            ty = my + cy
+            if ty < 0 or ty >= mh:
+                continue
+            row = ty * mw
+            orow = cy * w
+            for cx in range(w):
+                tx = mx + cx
+                if tx < 0 or tx >= mw:
+                    continue
+                v = cells[row + tx]
+                if not v:
+                    continue
+                tid = v - 1
+                if tid >= nflags or not (flags[tid] & layers):
+                    continue
+                out[orow + cx] = v
+        return out
+
     def _blit_map_into(self, dst, dw, dh, dsx, dsy, tilemap, sheet, mx, my, w, h,
                        colorkey, tile, scale, cx0, cy0, cx1, cy1):
         # One native moy_gfx.blit_map into `dst` -- the framebuffer (a direct draw) or a
@@ -1747,7 +2117,7 @@ class DeviceCanvas:
                            cx0, cy0, cx1, cy1)
 
     def map(self, tilemap, sheet, mx=0, my=0, w=None, h=None,
-            sx=0, sy=0, colorkey=-1, scale=1):
+            sx=0, sy=0, colorkey=-1, scale=1, layers=0, flags=None):
         # TIC-80 map(): blit a w x h cell region of the tilemap over `sheet` to screen
         # (sx, sy). Fold 2 (#63): the rasterized region is CACHED in a hidden 565 layer so a
         # subsequent camera-only call keyed-blits it (one blit565) instead of re-walking every
@@ -1771,6 +2141,16 @@ class DeviceCanvas:
         if h is None:
             h = tilemap.h - my
         w = int(w); h = int(h)
+        layers = int(layers) & 0xFF
+        if layers:
+            # SPEC.md 7.2's layer mask, resolved into a MASKED COPY of the region
+            # rather than into the kernel: a cell whose tile carries none of the
+            # mask's bits becomes an empty cell, which every lane below already
+            # skips. That keeps blit_map's signature (and the boards' compiled
+            # moy_gfx) untouched, and it costs one w*h byte walk per call.
+            tilemap = _MaskedRegion(self._mask_region(tilemap, mx, my, w, h,
+                                                      layers, flags), w, h)
+            mx = my = 0
         dsx = int(sx) - self._cam_x
         dsy = int(sy) - self._cam_y
         tile = sheet.TILE
@@ -1779,6 +2159,7 @@ class DeviceCanvas:
             return
         _t0 = _ticks_us()              # #66 DRAW2: the whole map path (raster or composite)
         if (self._nocache or self._palgen != 0     # layer / active palette / revert knob
+                or layers                          # a masked region: see below
                 or not MAP_AUTO_CACHE):            # -> direct raster
             self._blit_map_into(self._buf, self._stride, self._bh, dsx, dsy,
                                 tilemap, sheet, mx, my, w, h, colorkey, tile, scale,

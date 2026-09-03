@@ -5,8 +5,8 @@
     "w": 320,
     "h": 240
   },
-  "generated_by": "moycore 0.1.0",
-  "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by two other implementations: the reference console's own rasterizer (conformance/parity.py) and the shipped WebAssembly player's JavaScript replayer (conformance/player.mjs), the tiebreaker SPEC.md 11 names.",
+  "generated_by": "moycore 0.3.0",
+  "provenance": "Rendered by moycore. Confirmed pixel-identical on all core scenes by the reference console's own rasterizer (conformance/parity.py), by libmoy and the WebAssembly player built from it (the tiebreaker SPEC.md 11 names), and by an ESP32-P4 over serial. Note that ALL FIVE now share moycore's lineage -- the board ran a hand transcription until 2026-08-07 and now calls libmoy too. See conformance/README.md, 'The independent check, and its loss'.",
   "scenes": [
     {
       "name": "primitives",
@@ -65,15 +65,50 @@
       "note": "map() regions, screen offsets, scale, colorkey, camera, clip,\nand a region starting outside the map."
     },
     {
+      "name": "oval",
+      "core": true,
+      "calls": 35,
+      "frame_sha256": "5425bb3b68088057a0bd89729c26ef0d643c4d960cbfc505d4e2be2f6b34d6b5",
+      "note": "oval and ovalb (SPEC.md 6): round, wide, tall and flat boxes, the\n1x1/2x2/3x3 sizes, zero and negative sizes, edges, camera, clip\nand pal, and the outline drawn over its own fill."
+    },
+    {
+      "name": "fillp",
+      "core": true,
+      "calls": 48,
+      "frame_sha256": "a2ac89ec6d266e7efab1df172384ec5393f1bb5b0919647eb904b823b5bbe605",
+      "note": "The fill pattern (SPEC.md 6): a set bit is a hole, a hole takes\nthe second colour or nothing, the pattern is anchored to the\nSCREEN through camera and clip, every shape verb honours it and\npix, print, sprites and the map do not."
+    },
+    {
+      "name": "sheet",
+      "core": true,
+      "calls": 50,
+      "frame_sha256": "54b7e9f9008e7d760f75abaac04644667613899439c3ac1e4d7d46fc3d29ebae",
+      "note": "sset (SPEC.md 7.1): a sheet write is what spr, sspr and map draw\nnext; the index is masked to 0-15; writes off the sheet are\ndropped."
+    },
+    {
+      "name": "screen_pal",
+      "core": true,
+      "calls": 28,
+      "frame_sha256": "ed2dd255b66a37d3abfcdb8f2b925a70bf68e0137eecdd1159b16c3dd2060711",
+      "note": "The screen palette (SPEC.md 6, 12.1): pal(c0, c1, 1) composes\nafter the draw palette for pixels drawn from then on, and a\npixel already on the canvas does not move; pal() resets both."
+    },
+    {
+      "name": "flags",
+      "core": true,
+      "calls": 20,
+      "frame_sha256": "c71888eea693eb43fa1c399f36478d422af26ac49d01af4215566936e7b8a169",
+      "note": "Tile flags (SPEC.md 3.5, 7.1, 7.2): map(..., layers) draws only\nthe cells whose tile shares a flag bit with the mask; fset\nchanges that on the next map(); a mask against no flags draws\nnothing. The scene restores what it edits first."
+    },
+    {
       "name": "provisional",
-      "core": false,
+      "core": true,
       "calls": 12,
       "frame_sha256": "e2e0a288c374a4c3662e75a418e70d8b7c6608847e42268b479d8460b8d22a3b",
       "note": "SPEC.md 6.1 verbs. NOT part of conformance -- SPEC.md 11\nexcludes 6.1 until its promotion gates clear. Kept so the\ngolden already exists when they do."
     },
     {
       "name": "provisional_tline",
-      "core": false,
+      "core": true,
       "calls": 57,
       "frame_sha256": "2de00b3509055fc3a468fa14fc28542aca79f74e172146431602ffd4962bba42",
       "note": "SPEC.md 6.1 tline: line()'s pixels, texture-stepped\nacross the map in 16.16 fixed point. Excluded like\n`provisional`, and separate so a host with tri/sspr\nbut no tline fails one scene, not both."

@@ -60,9 +60,11 @@ except ImportError:  # pragma: no cover - host package lane
 try:
     from chrome import _ticks_ms, _ticks_diff
     from ticks import _sleep_ms
+    from perf_line import FAILED as PERF_FAILED, format_perf
 except ImportError:  # pragma: no cover - host package lane
     from runtime.chrome import _ticks_ms, _ticks_diff
     from runtime.ticks import _sleep_ms
+    from runtime.perf_line import FAILED as PERF_FAILED, format_perf
 
 
 class DeviceBoot:
@@ -157,7 +159,8 @@ class DeviceBoot:
 
     # -- the steps -----------------------------------------------------------
 
-    def load_carts(self, store, seed, root=None, session=None, media="SD"):
+    def load_carts(self, store, seed, root=None, session=None, media="SD",
+                   fallback_root=None, fallback_media="flash"):
         """Seed + scan the cart store, falling back to the embedded carts.
 
         Returns `(carts, carts_root)`; a None root means "management disabled",
@@ -168,23 +171,61 @@ class DeviceBoot:
         must bracket the whole seed+scan), on the P4 nothing at all, because the
         store is internal flash and races no one. `media` is the word that
         appears in the serial lines ("SD" / "flash").
+
+        `fallback_root` is the SECOND STORE to try before giving up, and it is
+        what keeps a card-less board WRITABLE. Without it a T-Deck with no card
+        in the slot booted to the embedded carts with a None root, i.e. a
+        read-only console: every cart visible, none editable, nothing saveable,
+        and the only explanation a single serial line nobody was attached to
+        read. The retry runs with NO session, because a board only ever needs a
+        lifecycle wrapper for the bus it just failed on -- internal flash races
+        nobody on any board here.
+
+        Why a retry rather than a probe: on this hardware there is nothing to
+        probe. The Guition mounts its card once at boot and asks the mount, but
+        the T-Deck's card shares the panel's SPI host and is mounted PER
+        SESSION, so the only honest question is "did a real session work" --
+        which is this call. The boards differ because the buses do.
         """
+        # BEFORE the scan, which is what fragments the heap: the PICO-8
+        # machine's 81KB has to be a contiguous run, and after the store is up
+        # an S3 has none (moycore_glue.reserve_p8_memory carries the numbers).
+        try:
+            from moycore_glue import reserve_p8_memory
+            if reserve_p8_memory():
+                self.say("p8 machine memory reserved")
+        except ImportError:
+            pass                        # a build with no moycore staged
         if root is None:
             root = store.CARTS_DIR
+        carts = self._try_store(store, seed, root, session, media)
+        if carts:
+            return carts, root
+        if fallback_root is not None and fallback_root != root:
+            carts = self._try_store(store, seed, fallback_root, None,
+                                    fallback_media)
+            if carts:
+                return carts, fallback_root
+        self.say("using built-in carts")
+        return store.embedded_floor(seed), None
+
+    def _try_store(self, store, seed, root, session, media):
+        """One store attempt: seed it, scan it, say what happened. [] on any
+        failure OR an empty scan -- the caller decides whether another store is
+        left to try."""
         try:
             def _seed_and_scan():
                 store.ensure_dirs(root)
-                store.seed_builtins(seed, root, progress=self.seed_progress)
+                store.seed_any(seed, root, progress=self.seed_progress)
                 return store.scan(root)
 
             carts = _seed_and_scan() if session is None else session(_seed_and_scan)
             if carts:
                 self.say("loaded %d carts from %s" % (len(carts), media))
-                return carts, root
+                return carts
         except Exception as exc:  # noqa: BLE001 -- any store failure degrades
             self.say("%s carts unavailable: %s" % (media, exc))
-        self.say("using built-in carts")
-        return [dict(c) for c in seed], None
+        return []
 
     def lua_runtime(self, ws, log=None):
         """The #67 Lua cart runtime, and a line saying whether it is in this image.
@@ -524,7 +565,15 @@ def poll_webhost(ws):
     for a single-threaded board. Never breaks a frame. Returns elapsed ms
     (0 when idle/absent) so the T-Deck's HITCH line can carry web=."""
     wh = getattr(ws, "webhost", None)
-    if wh is None or not getattr(wh, "serving", False):
+    if wh is None:
+        return 0
+    # `closing` as well as `serving`: a host saying goodbye (moy_webhost.stop's
+    # grace window) has already gone `serving = False` so the Settings row and
+    # the glass follow the kid's tap at once, and its socket outlives that by a
+    # few seconds purely to tell the browser this was deliberate. Polling only
+    # on `serving` would leave nobody to answer, which is the bug the window
+    # exists to fix.
+    if not (getattr(wh, "serving", False) or getattr(wh, "closing", None)):
         return 0
     t0 = _ticks_ms()
     try:
@@ -532,6 +581,120 @@ def poll_webhost(ws):
     except Exception as exc:  # noqa: BLE001 -- never break a frame
         print("WEB ERR %s: %s" % (type(exc).__name__, exc))
     return _ticks_diff(_ticks_ms(), t0)
+
+
+class PerfSampler:
+    """The serial PERF line, ONE body, every board (#206 item 2).
+
+    WHY. The line's shape is a contract two host tools parse, and it had THREE
+    producers with three different shapes: the P4's, the Guition's copy of it
+    (which said so in its own comment), and the T-Deck's, which went through the
+    offline diag ring in a fourth field order entirely. `runtime/perf_line.py`
+    owns the format; this owns the MEASUREMENT, and `FrameLoop.account` -- which
+    runs after pace and exists for frame accounting -- is where both copies
+    already sat.
+
+    ONE FIELD SET, FROM ONE ACCOUNTING PATH (owner call 2026-08-28). Every value
+    below is read here, once, for every board: the loop's own frame/busy/drawn
+    accumulators and the shared Workstation meters. A board does not choose its
+    fields; it either HAS a lever or it does not, and one it does not have
+    prints `-`. The only per-board argument is `overlap`, because the async-PPA
+    counters exist on exactly one compositor:
+
+      overlap  the P4's `comp.overlap_stats` -- a cumulative 7-tuple. Passed
+               RAW: the delta, the index-to-field mapping and the us->ms divisor
+               are the FORMAT's business and live here, so a second board with
+               an overlap engine hands over the same shape and says nothing
+               about layout. None (the S3 boards) leaves ppa/fence_ms/gfence_ms
+               reading `-`.
+
+    The windowed WM columns need no argument at all: `wm_windowed` stamps
+    `_pf_wm_*` on the Workstation and a board that does not stage it never has
+    them, so `getattr(..., None)` IS the capability probe. Same for the
+    launcher's `_pf_home`. A board with no lever reports None, never 0 -- the
+    2026-08-22 doctrine, which `fold=0` cost weeks by breaking.
+
+    Every read is inside the guard and OUTSIDE the frame `try`: this hook runs
+    after pace, so while these reads were bare a rename in the shared
+    `runtime/console.py` dropped the P4 to the REPL about two seconds after boot
+    -- a measurement killing the loop it measures. A failure PRINTS, and the
+    timer resets either way, so a broken sample cannot become a per-frame retry
+    flooding the serial it is measured over.
+
+    `emit` is the sink. The P4 and the Guition print; the T-Deck prints AND
+    rings the same line for its offline SD log, because that board's serial was
+    unreadable for months and the ring is why anything was known about it.
+
+    The boot-time arm (`ws.perf_capture = bool(getattr(ws, "diag_live",
+    False))`) stays in each board's `run_desktop`: it is a service assignment on
+    the boot path, which is what `tests/test_board_service_parity.py` reads. The
+    LIVE re-sync is here, so flipping Settings -> PERF DIAG needs no reboot.
+    """
+
+    def __init__(self, ws, overlap=None, period_ms=2000, emit=print):
+        self.ws = ws
+        self._overlap = overlap
+        self._period = period_ms
+        self._emit = emit
+        # Whole seconds per sample: fps= and the loop count are RATES.
+        self._secs = max(1, period_ms // 1000)
+        self._at = _ticks_ms() + period_ms
+        self._n = 0
+        self._busy = 0
+        self._drawn = 0
+        self._ov = overlap() if overlap is not None else None
+
+    def account(self, now, elapsed, sleep_ms):
+        """The `FrameLoop.account` hook: accumulate, and emit once a period."""
+        self._n += 1
+        self._busy += elapsed
+        if _ticks_diff(_ticks_ms(), self._at) < 0:
+            return
+        ws = self.ws
+        drawn = getattr(ws, "_frames_drawn", 0)
+        try:
+            live = bool(getattr(ws, "diag_live", False))
+            if ws.perf_capture != live:
+                ws.perf_capture = live
+            cart = getattr(ws, "cart", None)
+            v = {"cart": cart.get("title") if cart else None,
+                 "fps": ((drawn - self._drawn) // self._secs,
+                         self._n // self._secs),
+                 "busy": self._busy // (self._n or 1),
+                 "draw": getattr(ws, "_draw_ms", 0),
+                 "flush": getattr(ws, "_flush_ms", 0),
+                 "logic": getattr(ws, "_upd_ms", 0),
+                 "render": getattr(ws, "_cart_ms", 0),
+                 "chrome": getattr(ws, "_chrome_ms", 0),
+                 # No windowed WM on this board, or the deep meters are off:
+                 # either way nothing measured them, which is not a zero.
+                 "wmr": getattr(ws, "_pf_wm_restore", None),
+                 "wmw": getattr(ws, "_pf_wm_windows", None),
+                 "wms": getattr(ws, "_pf_wm_stamp", None),
+                 "home": getattr(ws, "_pf_home", None)}
+            if self._overlap is not None:
+                # DELTAS over this sample (the counters are cumulative), and
+                # gfence_ms otherwise hides entirely: the game fence runs inside
+                # FrameLoop's UNTIMED present() hook, so it lands in busy= and
+                # in no phase meter. The timeout count must stay 0.
+                cur = self._overlap()
+                d = [a - b for a, b in zip(cur, self._ov)]
+                self._ov = cur
+                v["ppa"] = (d[0], d[1], d[2], d[4], d[6])
+                v["fence_ms"] = d[3] / 1000.0
+                v["gfence_ms"] = d[5] / 1000.0
+            # LAST, and BARE where every field beside it is a getattr: perf_net
+            # CONSUMES its window, and `-` is a legitimate reading here, so a
+            # getattr default would let a renamed meter forge "no match"
+            # forever. A rename costs the whole line and says so.
+            v["net"] = ws.perf_net()
+            self._emit(format_perf(v))
+        except Exception as exc:  # noqa: BLE001 -- a diag never kills the loop
+            self._emit(PERF_FAILED % (type(exc).__name__, exc))
+        self._at = _ticks_ms() + self._period
+        self._n = 0
+        self._busy = 0
+        self._drawn = drawn
 
 
 class FrameLoop:

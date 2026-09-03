@@ -27,7 +27,7 @@ OTA_PORT ?= 8000
 # dir (the systemd host, tools/moybyte-ota.service) so the device pulls stable or beta.
 OTA_ROOT ?= $(HOME)/.moybyte-ota
 
-.PHONY: check-venv firmware-build-guition-s3 firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install p4-web-push p4-web-stale release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
+.PHONY: check-venv device-port firmware-build-guition-s3 firmware-build-zero firmware-build-lilygo-micropython firmware-build-p4 firmware-build-tdeck-mainline firmware-flash-lilygo-micropython firmware-flash-lilygo-micropython-full firmware-flash-lilygo-micropython-full-erase firmware-flash-lilygo-micropython-no-reset firmware-flash-guition-s3 firmware-flash-p4 firmware-flash-tdeck-mainline firmware-flash-zero firmware-monitor-guition-s3 firmware-monitor-lilygo-micropython firmware-monitor-zero firmware-monitor-p4 firmware-monitor-tdeck-mainline firmware-run-lilygo-micropython ota-host ota-keygen ota-manifest ota-publish-stable ota-publish-unstable ota-serve ota-serve-install release setup site site-firmware site-gifs site-hero sync-issues test vendor-libmoy vendor-p8-import
 
 # A PLAIN venv on purpose. Two flags used to live here and both hid bugs on every
 # machine but the maintainer's:
@@ -75,7 +75,8 @@ VENV_TARGETS := test \
                 site-gifs site-hero sync-issues release ota-keygen \
                 ota-manifest ota-serve ota-publish-unstable \
                 ota-publish-stable ota-host ota-serve-install firmware-flash-p4 \
-                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3
+                firmware-monitor-p4 firmware-flash-guition-s3 firmware-monitor-guition-s3 \
+                firmware-flash-zero firmware-monitor-zero
 $(VENV_TARGETS): check-venv
 
 # Flashing/monitoring needs a board on a serial port, and the T-Deck images need the
@@ -113,7 +114,30 @@ JOBS ?= auto
 PYTEST_ENV = env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 PYTEST_FLAGS = $(if $(filter-out 0,$(JOBS)),-p xdist -n $(JOBS),)
 
+# The desktop MicroPython is REFRESHED here, not assumed. Six suites drive the
+# real native modules through that binary, and one of them -- test_web_blob's
+# `test_the_native_module_serves_the_bytes_it_baked` -- reads the LIVE tree: it
+# hashes whatever `firmware/web_runner/dist` last produced against what the
+# binary baked. So every web-runner build left the previously-built binary
+# stale and that check red until somebody remembered `make unix-micropython`
+# by hand, which cost four separate red gates in one night on #209.
+#
+# It is the same philosophy as the target's own "no cache -- a cache MISS that
+# skips the check is the bug", one level up: the cheapest honest answer is to
+# always run it. 0.4s warm (blob regen + a no-op sub-make), ~15s on a tree that
+# has never built one.
+#
+# BEST EFFORT, and that is deliberate: a machine with no C toolchain must still
+# be able to run `make test` exactly as before. The failure belongs to the
+# SUITES, which already know the difference -- tests/unix_mp.py warns locally
+# and FAILS under CI/MOYBYTE_REQUIRE_UNIX_MP -- and a hard failure here would
+# take the whole host suite away from a machine that only ever wanted it.
 test:
+	@$(MAKE) --no-print-directory unix-micropython || { \
+	  echo ""; \
+	  echo "  ^^ could not refresh the desktop MicroPython. Running the suite"; \
+	  echo "     anyway -- the checks that need it say so themselves."; \
+	  echo ""; }
 	$(PYTEST_ENV) $(PYTHON) -m pytest $(PYTEST_FLAGS)
 
 # ---------------------------------------------------------------------------
@@ -329,6 +353,12 @@ ota-keygen:
 release:
 	$(PYTHON) tools/release.py $(if $(NAME),--name "$(NAME)") $(if $(NOTES),--notes "$(NOTES)") $(if $(PUSH),--push)
 
+# The answer the PORT hint points at. Every attached port, which board each one
+# is, and the exact command to paste -- resolved by tools/p4_autotest.find_port,
+# which probes the two S3 twins apart rather than guessing between them.
+device-port:  ## which serial port is which board
+	@$(PYTHON) tools/device_port.py
+
 firmware-flash-lilygo-micropython:
 	$(REQUIRE_PORT)
 	$(REQUIRE_IDF)
@@ -390,48 +420,12 @@ firmware-flash-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_ESPTOOL)
 	$(PYTHON) tools/board_flash.py flash firmware/esp32_p4_wifi6_touch_lcd_7b --port $(PORT)
-	@$(MAKE) --no-print-directory p4-web-push PORT=$(PORT) WEB_PUSH_OPTIONAL=1
 
-# The web console the BOARD serves (`/moy/web`, reached over WiFi) RIDES THE
-# FIRMWARE IMAGE now (moy_web / tools/gen_web_blob.py): baking it was ruled out
-# while the bundle was ~1.13MB against ~1.04MB of headroom, and pre-gzipping it
-# (572,693 B) made it fit both slots. So a flashed board always serves a console
-# current with its own firmware, and this push is the OVERRIDE -- storage wins
-# over the image, which is what keeps the sub-minute dev loop alive without a
-# reflash. (When baking was decided the T-Deck could not be pushed to at all --
-# that board's serial RX was dead under the desktop until #201 fixed it on
-# 2026-08-16 -- so the image was the only way it could ever be current. It is
-# still the guarantee; this push is still the override.) The flash target still
-# pushes (optional -- a board with no WiFi must not fail a cable flash), and
-# `p4-web-stale` is the check you can run on its
-# own. p4_push_web.py compares byte-for-byte per file, so a re-push is
-# idempotent and cheap; running it is the verification.
-p4-web-push:
-	$(REQUIRE_PORT)
-	@if [ ! -f firmware/web_runner/dist/micropython.wasm ]; then \
-	  echo "no firmware/web_runner/dist -- build it with firmware/web_runner/build.sh"; \
-	  [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; \
-	else \
-	  $(MAKE) --no-print-directory p4-web-stale; \
-	  $(PYTHON) tools/p4_push_web.py --port $(PORT) \
-	    || { echo "web-console push FAILED (board on WiFi? bundle unchanged on the board)"; \
-	         [ -n "$(WEB_PUSH_OPTIONAL)" ] || exit 1; }; \
-	fi
-
-# Is the built bundle older than the console sources it was built from? This is
-# the staleness the push cannot detect -- p4_push_web only compares dist against
-# the BOARD, so a dist that is itself behind `runtime/` pushes a stale bundle and
-# reports "all files match".
-p4-web-stale:
-	@newer=$$(find runtime firmware/web_runner -name '*.py' -newer firmware/web_runner/dist/micropython.wasm 2>/dev/null | head -5); \
-	if [ -n "$$newer" ]; then \
-	  echo "WARNING: firmware/web_runner/dist is OLDER than console sources, e.g."; \
-	  echo "$$newer" | sed 's/^/    /'; \
-	  echo "  rebuild it (firmware/web_runner/build.sh) or you will push a stale console."; \
-	else \
-	  echo "web bundle is newer than every runtime/ and web_runner/ source."; \
-	fi
-
+# The web console the board serves RIDES THE FIRMWARE IMAGE (moy_web /
+# tools/gen_web_blob.py): baking it was ruled out while the bundle was ~1.13MB
+# against ~1.04MB of headroom, and pre-gzipping it made it fit both slots. It
+# is the only source, so a flashed board serves a console current with its own
+# firmware and a reflash is how that console changes.
 firmware-monitor-p4:
 	$(REQUIRE_PORT)
 	$(REQUIRE_PYSERIAL)
@@ -454,9 +448,32 @@ firmware-monitor-guition-s3:
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/guition_jc3248w535 --port $(PORT)
 
-# T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
-# CLICK is GPIO0: hold the trackball in while powering the board on, then
-# release, to reach the ROM loader when an image wedges the USB device.
+# Zero -- Seeed XIAO ESP32-S3 (#41), a build target since 2026-08-29. Headless,
+# so there is nothing to look at after a flash: `make firmware-monitor-zero` is
+# how you read the boot line, the paired url and every `ZERO ota:` transition.
+#
+# THE MIGRATION FLASH IS A STORE WIPE. This board's new table puts vfs at
+# 0x5A0000; the stock MicroPython table it is replacing put it far lower, so the
+# old filesystem is not where the new image looks and comes up freshly
+# formatted. Re-run provision.sh afterwards -- see the board README.
+
+firmware-build-zero:
+	firmware/seeed_xiao_esp32s3_zero/build.sh
+
+firmware-flash-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_ESPTOOL)
+	$(PYTHON) tools/board_flash.py flash firmware/seeed_xiao_esp32s3_zero --port $(PORT)
+
+firmware-monitor-zero:
+	$(REQUIRE_PORT)
+	$(REQUIRE_PYSERIAL)
+	$(PYTHON) tools/board_flash.py monitor firmware/seeed_xiao_esp32s3_zero --port $(PORT)
+
+# T-Deck recovery note: the flash target reaches the ROM loader on its own
+# (board.toml `before = "usb_reset"`), so this is only for a board so wedged
+# that esptool cannot connect at all. There is NO BOOT BUTTON on a T-Deck --
+# the trackball CLICK is GPIO0, so hold it in while powering the board on.
 # (The build/flash/monitor targets live above, under their canonical
 # firmware-*-tdeck-mainline names; the image + otadata offsets are the MPY_*
 # variables at the top of this file.)

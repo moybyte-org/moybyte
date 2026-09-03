@@ -1,5 +1,5 @@
 """Stage 7 (docs/history/shell_ux_technical_plan_v1.md Section 3): the durable undo/redo WALK
-driven through the console -- ws.undo()/ws.redo() restore the live file, rebuild the
+driven through the console -- ws.history.undo()/ws.history.redo() restore the live file, rebuild the
 affected editor, and re-run the cart; plus the code-editor keyboard-shortcut UI trigger
 (Ctrl+Z / Ctrl+Y). A durable step = one COMMIT (not one keystroke); finer, in-session
 undo stays in the editor's RAM.
@@ -42,22 +42,22 @@ def test_undo_redo_walk_through_the_console(tmp_path):
     assert (Path(path) / "main.py").read_text() == V2
 
     # undo: the live file + the editor buffer both revert to V1
-    assert ws.undo() is True
+    assert ws.history.undo() is True
     assert (Path(path) / "main.py").read_text() == V1
     assert ws.editor.text() == V1          # the editor was rebuilt over the restored file
     assert ws.cart["src"] == V1            # and the live cart data too
 
     # undo again is at the floor (V1 = the first durable commit; V0 is only in-RAM)
-    assert ws.undo() is False
+    assert ws.history.undo() is False
     assert (Path(path) / "main.py").read_text() == V1
 
     # redo steps forward to V2
-    assert ws.redo() is True
+    assert ws.history.redo() is True
     assert (Path(path) / "main.py").read_text() == V2
     assert ws.editor.text() == V2
 
     # redo at the top is a no-op
-    assert ws.redo() is False
+    assert ws.history.redo() is False
 
 
 def test_new_commit_after_undo_truncates_redo(tmp_path):
@@ -66,13 +66,13 @@ def test_new_commit_after_undo_truncates_redo(tmp_path):
     path = ws.cart["path"]
     _open_code_and_commit(ws, V1)
     _open_code_and_commit(ws, V2)
-    assert ws.undo() is True and (Path(path) / "main.py").read_text() == V1
+    assert ws.history.undo() is True and (Path(path) / "main.py").read_text() == V1
 
     v3 = "def _draw():\n    cls(3)  # three\n"
     _open_code_and_commit(ws, v3)          # a NEW commit while rewound
     assert (Path(path) / "main.py").read_text() == v3
-    assert ws.redo() is False              # V2 was truncated -- nothing ahead
-    assert ws.undo() is True and (Path(path) / "main.py").read_text() == V1
+    assert ws.history.redo() is False              # V2 was truncated -- nothing ahead
+    assert ws.history.undo() is True and (Path(path) / "main.py").read_text() == V1
 
 
 def test_undo_redo_keyboard_shortcut_in_code_editor(tmp_path):
@@ -112,5 +112,5 @@ def test_control_bytes_never_corrupt_the_buffer(tmp_path):
 def test_undo_no_journal_is_a_safe_noop(tmp_path):
     # A cart never committed (no journal) -> undo/redo just return False, no crash.
     ws = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(0)\n")
-    assert ws.undo() is False
-    assert ws.redo() is False
+    assert ws.history.undo() is False
+    assert ws.history.redo() is False

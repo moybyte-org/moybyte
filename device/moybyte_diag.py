@@ -343,34 +343,29 @@ def dump_previous_to_serial():
         pass
 
 
-# --- perf sampling helper ---------------------------------------------------
+# --- the offline sink ---------------------------------------------------------
 
-def format_perf(cart, fps, flush_ms, draw_ms):
-    """Format a structured perf sample line:
-        PERF cart=<name> fps=<n> flush=<ms> draw=<ms>
-    Numbers are rounded to ints. Pure (host-testable). The cart name is sanitised
-    to a single token (spaces -> '_') so the line stays cleanly parseable."""
+def ring(tag, msg):
+    """Append one line to the RAM ring WITHOUT the live echo.
+
+    `log` does both, which is right for a line this module composes. It is
+    wrong for one composed elsewhere and already printed by its own emitter --
+    the PERF sample since #206 item 2, which every board now prints in one
+    shared format (runtime/perf_line.py) and which this board additionally
+    persists, because its serial RX was dead for months and the SD log is why
+    anything was known about it. Routing that through `log` would put the same
+    sample on the wire twice.
+
+    THE FORMATTING THAT USED TO LIVE HERE IS GONE. `format_perf`/`log_perf`
+    wrote a fourth field order under the same `PERF ` name -- and stamped it
+    with this ring's `Moybyte <uptime> ` prefix, which is exactly what made
+    `tools/p4_perf.py` (filtering on `startswith("PERF ")`) silently discard
+    every T-Deck sample it ever saw. The stamp stays for the offline log and
+    the readers strip it (`perf_line.parse_perf`); the format does not come
+    back."""
+    if not ENABLED:
+        return
     try:
-        name = str(cart) if cart is not None else "?"
+        _ring.append(format_line(tag, msg))
     except Exception:
-        name = "?"
-    name = name.replace(" ", "_").replace("\n", "_").replace("\r", "_")
-    if not name:
-        name = "?"
-    return "PERF cart=%s fps=%d flush=%d draw=%d" % (
-        name, _round_int(fps), _round_int(flush_ms), _round_int(draw_ms))
-
-
-def _round_int(v):
-    try:
-        return int(v + 0.5)
-    except Exception:
-        try:
-            return int(v)
-        except Exception:
-            return 0
-
-
-def log_perf(cart, fps, flush_ms, draw_ms):
-    """Append a PERF sample to the ring (the offline-readable per-cart timing)."""
-    log("PERF", format_perf(cart, fps, flush_ms, draw_ms)[5:])
+        pass

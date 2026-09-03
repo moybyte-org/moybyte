@@ -58,8 +58,19 @@ IMAGE_MAGIC = 0xE9          # first byte of an ESP32 app image (esp_image_header
 #       input polling, timers and compositing on either board; long enough that a
 #       crash in the ordinary run of things lands inside it, short enough that
 #       nobody power-cycles before it.
+#   HEALTHY_SERVES -- the HEADLESS twin of the pair above (the Zero, 2026-08-29).
+#       That board paints nothing ever, so a paint threshold there is not a weak
+#       gate, it is an unreachable one: every update would roll back. What plays
+#       the part of "something reached the glass" is the only externally visible
+#       thing this board does -- its store host is up and listening on a joined
+#       network -- and the part of HEALTHY_LOOPS is played by surviving this many
+#       poll iterations afterwards. 300 rather than 120 because that loop's duty
+#       cycle is a 10ms sleep, so 120 would be ~1.2s; 300 is ~3s, inside the same
+#       "a crash in the ordinary run of things lands here" window the frame-loop
+#       number was chosen for.
 HEALTHY_PAINTS = 1
 HEALTHY_LOOPS = 120
+HEALTHY_SERVES = 300
 PENDING_NAME = "pending.json"   # written beside the image at finish(), read at boot
 # How long ensure_online() waits for the link AFTER the autoconnect attempt. See
 # its docstring: a saved network on the P4 came up 1.5s after connect() had
@@ -180,6 +191,10 @@ _SHA256_DER = b"\x30\x31\x30\x0d\x06\x09\x60\x86\x48\x01\x65" \
               b"\x03\x04\x02\x01\x05\x00\x04\x20"
 
 DOWNLOAD_NAME = "firmware.bin"   # WiFi downloads land here (then the Phase-2 install runs)
+# What `download_finish` returns instead of a path when the bytes went STRAIGHT
+# INTO THE INACTIVE SLOT (begin_download(to_slot=True)). There is no file to
+# hand back, and the install phase has nothing left to do but activate.
+SLOT_STAGED = "<slot>"
 DL_CHUNK = 16384                 # bytes streamed (and written to SD in ONE op) per frame.
                                  # The per-frame cost (panel flush + SD sync + repaint) is
                                  # FIXED, so a bigger block amortizes it: 4K/frame crawled
@@ -351,6 +366,42 @@ class OtaUpdater:
         self._loops += 1
         if frames_drawn < HEALTHY_PAINTS or self._loops < HEALTHY_LOOPS:
             return False
+        return self._confirm()
+
+    def confirm_when_serving(self, serving):
+        """The same confirm, for a board with no glass (the Zero, #41).
+
+        `confirm_when_healthy` asks two questions -- did anything reach the
+        display, and did the loop keep running -- and on a headless board the
+        first one has no answer. Answering it with a constant would certify
+        every image unconditionally; leaving it at zero would roll every image
+        back. So the caller supplies the evidence its own hardware can give:
+        `serving` is True while the store host is up and listening on a joined
+        network, which is the only thing about this board a human outside it
+        could ever observe. The loop half is unchanged in spirit and counted
+        here, one call per poll iteration (HEALTHY_SERVES).
+
+        Deliberately NOT a `frames_drawn=1` call into the method above: that
+        would put a lie in the argument list, and the next reader would have to
+        work out that a board with no panel was claiming a painted frame.
+        Returns True the one iteration it confirms."""
+        if self.confirmed:
+            return False
+        if not serving:
+            # Not a countdown pause: an image whose host never comes up is
+            # exactly the image the bootloader should take back, so the counter
+            # only advances while the thing being certified is working.
+            self._loops = 0
+            return False
+        self._loops += 1
+        if self._loops < HEALTHY_SERVES:
+            return False
+        return self._confirm()
+
+    def _confirm(self):
+        """Mark the running image valid and retire the pending marker. Both
+        confirm gates above end here, so "what confirming DOES" is one body and
+        only "when is it honest" differs per board."""
         self.confirmed = True
         ok = self.mark_valid()
         # The pending marker is cleared HERE and not where it was read, so that an
@@ -701,36 +752,7 @@ class OtaUpdater:
         block that a valid signature must decrypt to and compare it entire. Parsing
         the padding is where the classic signature forgeries live, and there is
         nothing in it worth parsing."""
-        sig = manifest.get("sig")
-        keys = OTA_PUBLIC_KEYS if keys is None else keys
-        if not sig or not keys:
-            return False
-        try:
-            s = int(sig, 16)
-        except (TypeError, ValueError):
-            return False
-
-        import hashlib
-
-        digest = hashlib.sha256(self._canonical(manifest)).digest()
-        for mod_hex, exp in keys:
-            try:
-                n = int(mod_hex, 16)
-            except (TypeError, ValueError):
-                continue
-            # From the hex, not n.bit_length(): MicroPython has no bit_length.
-            k = (len(mod_hex) + 1) // 2
-            if not 0 < s < n:
-                continue
-            tail = _SHA256_DER + digest
-            want = b"\x00\x01" + b"\xff" * (k - len(tail) - 3) + b"\x00" + tail
-            try:
-                got = pow(s, exp, n).to_bytes(k, "big")
-            except (OverflowError, ValueError):
-                continue
-            if got == want:
-                return True
-        return False
+        return verify_sig(self._canonical(manifest), manifest.get("sig"), keys)
 
     def _require_signature(self, from_card):
         """Whether an unsigned manifest may be installed.
@@ -801,6 +823,10 @@ class OtaUpdater:
         _log("check_online channel=%r running=%s/%s" % (
             channel, FIRMWARE_CHANNEL, FIRMWARE_VERSION))
         url, from_card = self._manifest_source(channel)
+        # Remembered for the manifest's OTHER consumers (the C6 updater rides
+        # the same fetch): where the url came from decides whether an unsigned
+        # block is acceptable, exactly as it does for the app image.
+        self.from_card = from_card
         _log("manifest_url ->", url, "(from card)" if from_card else "(baked)")
         if not url:
             self.error = "no manifest url"
@@ -866,9 +892,27 @@ class OtaUpdater:
             _log("manifest fetch/parse FAILED:", self.error)
             return None
 
-    def begin_download(self, manifest):
-        """Open the socket + SD file for the manifest's image. Raises on a bad URL or
-        non-200 response; sets dl_total/dl_done for the progress bar."""
+    def begin_download(self, manifest, to_slot=False):
+        """Open the socket and the sink for the manifest's image. Raises on a bad
+        URL or non-200 response; sets dl_total/dl_done for the progress bar.
+
+        `to_slot` streams the bytes DIRECTLY INTO THE INACTIVE APP SLOT instead
+        of a staging file, and it is not an optimisation -- on the Zero it is the
+        difference between working and not. That board's whole filesystem is
+        2.38MB with ~180KB free, and the image is 2.27MB: staging it could not
+        fit on an EMPTY volume, and the real symptom was `OSError 28` (ENOSPC)
+        184KB into the transfer. Meanwhile the inactive slot is 2.75MB and empty,
+        which is what it is for.
+
+        It is better everywhere else too -- half the flash writes and roughly
+        half the wall time, since the staged path writes every byte twice.
+
+        WHAT IT DOES NOT CHANGE is the two-act consent. Writing an INACTIVE slot
+        changes nothing a board runs; the running slot is untouched either way,
+        and what the second consent gates is `finish()` -- the `set_boot` that
+        makes the new image bootable. The act being gated moved from "write the
+        bytes" to "point the bootloader at them", which is the one that matters.
+        """
         self.error = None
         self.dl_done = 0
         url = manifest.get("url")
@@ -895,17 +939,41 @@ class OtaUpdater:
         self._hash = hashlib.sha256()
         self._sock = sock
 
-        def _open():
-            import os
+        if to_slot:
+            import esp32
 
-            try:
-                os.mkdir(self.update_dir)
-            except OSError:
-                pass
-            return open(self.update_dir + "/" + DOWNLOAD_NAME, "wb")
+            part = esp32.Partition(esp32.Partition.RUNNING).get_next_update()
+            slot_size = part.info()[3]
+            if self.dl_total and self.dl_total > slot_size:
+                try:
+                    sock.close()
+                except Exception:              # noqa: BLE001
+                    pass
+                self._sock = None
+                raise ValueError("image %dK > slot %dK"
+                                 % (self.dl_total // 1024, slot_size // 1024))
+            # `_part`/`_block`/`done` are the SAME fields the file-fed install
+            # writes through, so `finish()` needs no idea where the bytes came
+            # from -- it reads _part, calls set_boot, and arms the pending marker.
+            self._part = part
+            self._block = 0
+            self.done = 0
+            self._dl_buf = bytearray(BLOCK)
+            self._dl_fill = 0
+            self._dl_f = None
+            self.path = SLOT_STAGED
+        else:
+            def _open():
+                import os
 
-        self._dl_f = self._with_sd(_open)
-        self.path = self.update_dir + "/" + DOWNLOAD_NAME
+                try:
+                    os.mkdir(self.update_dir)
+                except OSError:
+                    pass
+                return open(self.update_dir + "/" + DOWNLOAD_NAME, "wb")
+
+            self._dl_f = self._with_sd(_open)
+            self.path = self.update_dir + "/" + DOWNLOAD_NAME
         if rest:                               # body bytes already read with the headers
             self._consume(rest)
 
@@ -915,7 +983,11 @@ class OtaUpdater:
         so the console repaints the bar between steps. Filling a whole block per frame
         (vs the old 4K) is the speed lever -- the per-frame flush/sync/repaint cost is
         fixed, so more bytes per frame divides it down."""
-        if self._sock is None or self._dl_f is None:
+        # A sink is a file OR the inactive slot -- `_dl_f is None` alone used to
+        # mean "nothing open", and after the slot sink landed it also meant
+        # "streaming to flash", so this returned False on the first step and the
+        # transfer ended at 0 bytes with a size mismatch.
+        if self._sock is None or (self._dl_f is None and self._part is None):
             return False
         buf = bytearray()
         try:
@@ -948,22 +1020,66 @@ class OtaUpdater:
         return True
 
     def _consume(self, chunk):
+        """Hash the bytes and put them in whichever sink begin_download opened."""
         self._hash.update(chunk)
+        if self._dl_f is None and self._part is not None:
+            self._to_slot(chunk)
+        else:
+            def _w():
+                self._dl_f.write(chunk)
 
-        def _w():
-            self._dl_f.write(chunk)
-
-        self._with_sd(_w)
+            self._with_sd(_w)
         self.dl_done += len(chunk)
 
+    def _to_slot(self, chunk):
+        """Append into the block buffer, flushing every full 4K page into the
+        inactive slot. Partition writes are BLOCK-aligned and writeblocks erases
+        the page it writes, so the buffer exists to turn an arbitrary socket read
+        into whole pages; the final partial one is padded in download_finish."""
+        buf, mv = self._dl_buf, memoryview(self._dl_buf)
+        pos, n = 0, len(chunk)
+        while pos < n:
+            take = BLOCK - self._dl_fill
+            if take > n - pos:
+                take = n - pos
+            buf[self._dl_fill:self._dl_fill + take] = chunk[pos:pos + take]
+            self._dl_fill += take
+            pos += take
+            if self._dl_fill == BLOCK:
+                self._part.writeblocks(self._block, mv)
+                self._block += 1
+                self.done += BLOCK
+                self._dl_fill = 0
+
     def download_finish(self):
-        """Close the stream and verify size + sha256. Returns the .bin path on success,
-        else None with self.error set (and the bad file is left for the kid to inspect)."""
+        """Close the stream and verify size + sha256. Returns the .bin path on
+        success (or SLOT_STAGED when the bytes went straight into the slot),
+        else None with self.error set.
+
+        THE TAIL BLOCK is flushed here, before any verification, and it has to
+        be: a partition write is 4K-aligned, so the last page of an image that
+        is not a multiple of 4K sits in the buffer until now. It is padded with
+        0xFF -- what erased flash reads as -- exactly as the file-fed install
+        pads its final short read.
+        """
+        if self._dl_f is None and self._part is not None and self._dl_fill:
+            try:
+                for j in range(self._dl_fill, BLOCK):
+                    self._dl_buf[j] = 0xFF
+                self._part.writeblocks(self._block, memoryview(self._dl_buf))
+                self._block += 1
+                self.done += self._dl_fill
+                self._dl_fill = 0
+            except Exception as exc:           # noqa: BLE001
+                self.error = _short(exc)
+                _log("download_finish tail write FAILED:", self.error)
+                self._dl_close()
+                return self._slot_failed()
         self._dl_close()
         if self.dl_total and self.dl_done != self.dl_total:
             self.error = "size %d/%d" % (self.dl_done, self.dl_total)
             _log("download_finish SIZE MISMATCH:", self.error)
-            return None
+            return self._slot_failed()
         if self._dl_sha:
             try:
                 import binascii
@@ -972,17 +1088,41 @@ class OtaUpdater:
             except Exception as exc:
                 self.error = _short(exc)
                 _log("download_finish hash err:", self.error)
-                return None
+                return self._slot_failed()
             if got != self._dl_sha:
                 self.error = "sha256 mismatch"
                 _log("download_finish SHA MISMATCH got=%s want=%s" % (
                     got[:12], self._dl_sha[:12]))
-                return None
+                return self._slot_failed()
         _log("download_finish OK bytes=%d ->" % self.dl_done, self.path)
         return self.path
 
+    def _slot_failed(self):
+        """Every failing exit from download_finish comes through here.
+
+        DROPPING `_part` IS THE POINT. `finish()` activates whatever partition
+        handle it finds, and a download that failed verification has left a
+        PARTIAL image in the slot -- so a later finish(), from a retry or a
+        stray request, would set_boot an image we just proved was wrong. The
+        bootloader's rollback would catch it, but a guard that relies on the
+        last line of defence is not a guard. Returns None, so callers read it
+        as the failure it is.
+        """
+        self._part = None
+        self._block = 0
+        self.done = 0
+        self._dl_fill = 0
+        return None
+
+    def staged_in_slot(self):
+        """Did the last download land in the slot rather than a file? The install
+        phase reads this to know it has nothing to write and only has to
+        activate."""
+        return self.path == SLOT_STAGED and self._part is not None
+
     def download_cancel(self):
         self._dl_close()
+        self._slot_failed()          # a cancelled stream leaves a partial slot too
         self.dl_done = 0
         self.dl_total = 0
 
@@ -1170,3 +1310,41 @@ def _log(*a):
         print("Moybyte OTA:", *a)
     except Exception:
         pass
+
+
+def verify_sig(payload, sig, keys=None):
+    """True when `sig` (hex) validly signs `payload` under a baked key.
+
+    Module-level so the manifest's OTHER signed blocks -- the C6 image's
+    c6_sig (device/moy_c6_update.py) -- verify through the SAME arithmetic as
+    the manifest's own signature instead of a second copy of the PKCS#1 block
+    compare (whole-block, never a padding parser -- see _verify_manifest)."""
+    keys = OTA_PUBLIC_KEYS if keys is None else keys
+    if not sig or not keys:
+        return False
+    try:
+        s = int(sig, 16)
+    except (TypeError, ValueError):
+        return False
+
+    import hashlib
+
+    digest = hashlib.sha256(payload).digest()
+    for mod_hex, exp in keys:
+        try:
+            n = int(mod_hex, 16)
+        except (TypeError, ValueError):
+            continue
+        # From the hex, not n.bit_length(): MicroPython has no bit_length.
+        k = (len(mod_hex) + 1) // 2
+        if not 0 < s < n:
+            continue
+        tail = _SHA256_DER + digest
+        want = b"\x00\x01" + b"\xff" * (k - len(tail) - 3) + b"\x00" + tail
+        try:
+            got = pow(s, exp, n).to_bytes(k, "big")
+        except (OverflowError, ValueError):
+            continue
+        if got == want:
+            return True
+    return False

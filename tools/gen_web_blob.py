@@ -11,8 +11,8 @@ under the desktop (CLAUDE.md, hard constraints), so its bundle went on by card
 reader or not at all.
 
 So the image carries one. This emits a C translation unit that `.incbin`s the
-PRE-GZIPPED assets (the four in `moy_webhost.ASSETS`, 572,693 B against
-1,155,953 B raw -- raw does not fit the T-Deck's slot at all) and exposes them
+PRE-GZIPPED assets (every one in `moy_webhost.ASSETS` -- 609,268 B against
+1,230,814 B raw; raw does not fit the T-Deck's slot at all) and exposes them
 as a table the `moy_web` native module hands out as memoryviews. Storage still
 WINS at serve time; see `moy_webhost._asset`.
 
@@ -224,11 +224,10 @@ def watched_sources(root=ROOT):
 def stale_sources(assets, root=ROOT, limit=3):
     """Console sources NEWER than the bundle about to be baked in.
 
-    The staleness baking cannot fix. `p4_push_web.py` compares dist against the
-    BOARD, so a dist that is itself behind `runtime/` pushes -- and now bakes --
-    a stale console while reporting success. The image then serves a browser
-    console older than the firmware it is part of, which is the original bug
-    wearing the fix's clothes.
+    The staleness baking cannot fix. Baking makes a board's console current
+    with its own firmware, but a dist that is itself behind `runtime/` bakes a
+    stale console while reporting success -- and the image then serves a
+    browser console older than the firmware it is part of.
 
     A warning, never fatal: mtimes are a heuristic (a checkout reorders them, a
     touched file means nothing), and a build that refuses on a heuristic is a

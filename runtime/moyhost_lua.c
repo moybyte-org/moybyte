@@ -66,6 +66,10 @@ typedef struct {
                                 it, and ctypes arrays are plainer this way */
     int         aq_cap;
     int         has_sheet, has_map;
+    uint8_t     flags[MOY_FLAGS];   /* SPEC.md 3.5, seeded by hl_set_flags */
+    moy_p8      p8;          /* the PICO-8 machine (libmoy moy_p8.c), opened
+                                at hl_load so it seeds from the assets */
+    uint8_t    *p8mem, *p8rom;
     uint8_t    *idx;         /* the transitional INDEX buffer, or NULL when the
                                 caller's canvas is already RGB565 */
     moy_pixel  *shadow;      /* the 565 buffer libmoy draws into when it is */
@@ -262,6 +266,7 @@ host_lua *hl_new(void *pix, int nbytes, int w, int h, int indexed,
     r->snap = snap; r->aq = aq; r->aq_cap = aq_cap;
     if (aq && aq_cap > 0) aq[0] = 0;
     r->con.canvas = &r->canvas;
+    r->con.flags = r->flags;
     moy_host *hs = &r->con.host;
     hs->user = NULL;
     hs->btn = h_btn; hs->btnp = h_btnp; hs->players = h_players;
@@ -293,6 +298,19 @@ void hl_set_sheet(host_lua *r, uint8_t *pix, int nbytes)
     } else {
         r->con.sheet = NULL;
     }
+}
+
+/* SPEC.md 3.5's tile flags, COPIED into the run rather than borrowed like the
+ * sheet and the map: the table is 512 bytes, C writes it (fset, a poke to
+ * 0x3000) and the caller hands over whatever it has -- a bytes, a bytearray, a
+ * ctypes buffer. A short blob leaves the rest zero, as a short file does; NULL
+ * clears it, which reads exactly as a cart with no flags.moyflags. Call it
+ * BEFORE hl_load, which is where the p8 machine copies the table into 0x3000. */
+void hl_set_flags(host_lua *r, const uint8_t *flags, int nbytes)
+{
+    if (nbytes > MOY_FLAGS) nbytes = MOY_FLAGS;
+    memset(r->flags, 0, sizeof(r->flags));
+    if (flags && nbytes > 0) memcpy(r->flags, flags, (size_t)nbytes);
 }
 
 void hl_set_map(host_lua *r, uint8_t *cells, int nbytes, int w, int h)
@@ -337,6 +355,12 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
 int hl_load(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {
+    /* The PICO-8 machine: opened here rather than in hl_new because it seeds
+     * memory from the sheet and map, which hl_set_sheet/hl_set_map supply in
+     * between. Lazily allocated, freed with the run; no memory, no machine. */
+    if (!r->p8mem) r->p8mem = (uint8_t *)malloc(MOY_P8_MEM);
+    if (!r->p8rom) r->p8rom = (uint8_t *)malloc(MOY_P8_ROM);
+    if (r->p8mem) moy_p8_open(r->L, &r->con, &r->p8, r->p8mem, r->p8rom);
     int rc;
     /* The chunk and _init are both allowed to draw (a title screen a cart never
      * repaints is the standing case), so they get the same bridge a frame gets
@@ -435,6 +459,7 @@ int hl_get_view(host_lua *r, int *w, int *h)
 
 void hl_free(host_lua *r)
 {
+    if (r) { free(r->p8mem); free(r->p8rom); }
     if (!r) return;
     if (r->L) lua_close(r->L);
     if (CUR == r) CUR = NULL;

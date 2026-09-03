@@ -33,10 +33,14 @@ static moy_pixel moy_wire_of(const moy_canvas *c, int i)
 #endif
 }
 
+/* store[i] = what index i lands as, with BOTH palettes folded in (SPEC.md 6):
+ * the draw remap, then the screen remap composed after it. One table, so a
+ * pixel costs one lookup whether a cart set neither palette or both. */
 static void moy_store_rebuild(moy_canvas *c)
 {
     int i;
-    for (i = 0; i < MOY_PALETTE; i++) c->store[i] = moy_wire_of(c, c->pal[i]);
+    for (i = 0; i < MOY_PALETTE; i++)
+        c->store[i] = moy_wire_of(c, c->spal[c->pal[i]]);
 }
 
 void moy_canvas_init(moy_canvas *c, moy_pixel *pix, int w, int h)
@@ -71,12 +75,15 @@ void moy_canvas_wire(moy_canvas *c, const uint16_t tab[MOY_PALETTE])
 void moy_reset_state(moy_canvas *c)
 {
     int i;
+    c->fillp = 0;
+    c->fillp_col = -1;
     c->cam_x = c->cam_y = 0;
     c->clip_x0 = c->clip_y0 = 0;
     c->clip_x1 = c->w;
     c->clip_y1 = c->h;
     for (i = 0; i < MOY_PALETTE; i++) {
         c->pal[i] = (uint8_t)i;
+        c->spal[i] = (uint8_t)i;
         c->palt[i] = 0;
     }
     moy_store_rebuild(c);
@@ -107,19 +114,51 @@ void moy_clip_reset(moy_canvas *c)
 void moy_pal(moy_canvas *c, int c0, int c1)
 {
     c->pal[c0 & 63] = (uint8_t)(c1 & 63);
-    c->store[c0 & 63] = moy_wire_of(c, c1);   /* O(1): only this entry moved */
+    c->store[c0 & 63] = moy_wire_of(c, c->spal[c1 & 63]);  /* O(1): one entry */
 }
 
 void moy_pal_reset(moy_canvas *c)
 {
     int i;
-    for (i = 0; i < MOY_PALETTE; i++) c->pal[i] = (uint8_t)i;
+    for (i = 0; i < MOY_PALETTE; i++) {
+        c->pal[i] = (uint8_t)i;        /* pal() resets BOTH (SPEC.md 6) */
+        c->spal[i] = (uint8_t)i;
+    }
+    moy_store_rebuild(c);
+}
+
+void moy_pal_screen(moy_canvas *c, int c0, int c1)
+{
+    /* Every pal[i] that lands on c0 moves, so the whole table is rebuilt --
+     * 64 entries, per CALL, which a fade makes sixteen times a frame and a
+     * held palette once. The per-pixel pass this replaced cost half a frame
+     * on the reference console's boards (SPEC.md 12.1). */
+    c->spal[c0 & 63] = (uint8_t)(c1 & 63);
+    moy_store_rebuild(c);
+}
+
+void moy_pal_screen_reset(moy_canvas *c)
+{
+    int i;
+    for (i = 0; i < MOY_PALETTE; i++) c->spal[i] = (uint8_t)i;
     moy_store_rebuild(c);
 }
 
 void moy_palt(moy_canvas *c, int col, int on) { c->palt[col & 63] = on ? 1 : 0; }
 
 void moy_palt_reset(moy_canvas *c) { memset(c->palt, 0, MOY_PALETTE); }
+
+void moy_fillp(moy_canvas *c, int p, int col)
+{
+    c->fillp = (uint16_t)(p & 0xFFFF);
+    c->fillp_col = col < 0 ? -1 : (col & 63);
+}
+
+void moy_fillp_reset(moy_canvas *c)
+{
+    c->fillp = 0;
+    c->fillp_col = -1;
+}
 
 /* ------------------------------------------------------------- primitives */
 
@@ -216,6 +255,13 @@ void moy_rect(moy_canvas *c, int x, int y, int w, int h, int col)
     if (x1 <= x0 || y1 <= y0) return;
     ci = c->store[col & 63];
     n = x1 - x0;
+    if (c->fillp) {
+        /* The patterned rect: one moy_ds_span per row. Off the solid path
+         * entirely, so the alignment work below stays what it was. */
+        moy_ds d = moy_ds_of(c);
+        for (yy = y0; yy < y1; yy++) moy_ds_span(&d, x0, yy, (size_t)n, ci);
+        return;
+    }
     {
         /* Alignment is decided ONCE. Every row starts at the same 4-byte phase
          * -- the stride does not change between them -- so the per-row test
@@ -274,6 +320,21 @@ void moy_line(moy_canvas *c, int x0, int y0, int x1, int y1, int col)
     int cx0 = c->clip_x0, cy0 = c->clip_y0, cx1 = c->clip_x1, cy1 = c->clip_y1;
     moy_pixel *pix = c->pix;
     int lo, hi, a, b;
+
+    if (c->fillp) {
+        /* PATTERNED: the plain walk through the shape put, which tests the
+         * pattern per pixel. A fourth path so the three below stay exactly
+         * what they were for the solid case. */
+        moy_ds d = moy_ds_of(c);
+        for (;;) {
+            moy_ds_put_shape(&d, x0, y0, v);
+            if (x0 == x1 && y0 == y1) break;
+            e2 = 2 * err;
+            if (e2 >= dy) { err += dy; x0 += sx; }
+            if (e2 <= dx) { err += dx; y0 += sy; }
+        }
+        return;
+    }
 
     /* AXIS-ALIGNED. Bresenham degenerates on these: with dy == 0 only x can
      * advance, with dx == 0 only y can, so the pixel SET is exactly a run and
@@ -349,9 +410,9 @@ void moy_circ(moy_canvas *c, int cx, int cy, int r, int col)
      * Identical pixels -- same clamp, same moy_fill -- measured 1.1x faster on
      * an ESP32-P4 through a host that had hand-written the direct form. */
     moy_pixel v = c->store[col & 63];
-    moy_pixel *pix = c->pix;
-    int cam_x = c->cam_x, cam_y = c->cam_y, cw = c->w;
-    int cx0 = c->clip_x0, cy0 = c->clip_y0, cx1 = c->clip_x1, cy1 = c->clip_y1;
+    moy_ds d = moy_ds_of(c);
+    int cam_x = d.cam_x, cam_y = d.cam_y;
+    int cx0 = d.cx0, cy0 = d.cy0, cx1 = d.cx1, cy1 = d.cy1;
     if (r < 0) return;
     for (dy = -r; dy <= r; dy++) {
         int t = r * r - dy * dy;
@@ -364,9 +425,7 @@ void moy_circ(moy_canvas *c, int cx, int cy, int r, int col)
         px1 = cx + span + 1 - cam_x;
         if (px0 < cx0) px0 = cx0;
         if (px1 > cx1) px1 = cx1;
-        if (px1 > px0)
-            moy_fill(pix + (size_t)py * (size_t)cw + (size_t)px0, v,
-                     (size_t)(px1 - px0));
+        if (px1 > px0) moy_ds_span(&d, px0, py, (size_t)(px1 - px0), v);
     }
 }
 
@@ -379,14 +438,14 @@ void moy_circb(moy_canvas *c, int cx, int cy, int r, int col)
     moy_ds d = moy_ds_of(c);
     moy_pixel v = c->store[col & 63];
     while (x >= y) {
-        moy_ds_put(&d, cx + x, cy + y, v);
-        moy_ds_put(&d, cx + y, cy + x, v);
-        moy_ds_put(&d, cx - y, cy + x, v);
-        moy_ds_put(&d, cx - x, cy + y, v);
-        moy_ds_put(&d, cx - x, cy - y, v);
-        moy_ds_put(&d, cx - y, cy - x, v);
-        moy_ds_put(&d, cx + y, cy - x, v);
-        moy_ds_put(&d, cx + x, cy - y, v);
+        moy_ds_put_shape(&d, cx + x, cy + y, v);
+        moy_ds_put_shape(&d, cx + y, cy + x, v);
+        moy_ds_put_shape(&d, cx - y, cy + x, v);
+        moy_ds_put_shape(&d, cx - x, cy + y, v);
+        moy_ds_put_shape(&d, cx - x, cy - y, v);
+        moy_ds_put_shape(&d, cx - y, cy - x, v);
+        moy_ds_put_shape(&d, cx + y, cy - x, v);
+        moy_ds_put_shape(&d, cx + x, cy - y, v);
         y += 1;
         if (err <= 0) {
             err += 2 * y + 1;
@@ -405,9 +464,9 @@ void moy_tri(moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int 
     moy_edge ea, etop, ebot;
     /* Read once, then written through for the whole triangle -- see moy_ds. */
     moy_pixel v = c->store[col & 63];
-    moy_pixel *pix = c->pix;
-    int cam_x = c->cam_x, cam_y = c->cam_y, cw = c->w;
-    int cx0 = c->clip_x0, cy0 = c->clip_y0, cx1 = c->clip_x1, cy1 = c->clip_y1;
+    moy_ds d = moy_ds_of(c);
+    int cam_x = d.cam_x, cam_y = d.cam_y;
+    int cx0 = d.cx0, cy0 = d.cy0, cx1 = d.cx1, cy1 = d.cy1;
     /* sort by y */
     if (y1 > y2) { t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
     if (y1 > y3) { t = x1; x1 = x3; x3 = t; t = y1; y1 = y3; y3 = t; }
@@ -440,9 +499,7 @@ void moy_tri(moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int 
             if (py >= cy0 && py < cy1) {
                 if (px0 < cx0) px0 = cx0;
                 if (px1 > cx1) px1 = cx1;
-                if (px1 > px0)
-                    moy_fill(pix + (size_t)py * (size_t)cw + (size_t)px0, v,
-                             (size_t)(px1 - px0));
+                if (px1 > px0) moy_ds_span(&d, px0, py, (size_t)(px1 - px0), v);
             }
         }
         moy_edge_step(&ea);
@@ -456,6 +513,79 @@ void moy_trib(moy_canvas *c, int x1, int y1, int x2, int y2, int x3, int y3, int
     moy_line(c, x1, y1, x2, y2, col);
     moy_line(c, x2, y2, x3, y3, col);
     moy_line(c, x3, y3, x1, y1, col);
+}
+
+/* The ellipse inscribed in the box (x0, y0)-(x1, y1), corners inclusive:
+ * Zingl's integer midpoint walk, transcribed from moycore's ellipse() --
+ * four quadrant pixels a step, no division, no float, so every host performs
+ * identical arithmetic. `fill` emits one inclusive row the FIRST time the walk
+ * reaches it (x only moves inward, so that visit is the widest); otherwise the
+ * outline pixels. 64-bit terms: the error grows as 8*a*a*b for a box the size
+ * of the canvas, which is fine in 32 bits but not by a margin worth keeping. */
+static void moy_ellipse(moy_canvas *c, int x0, int y0, int x1, int y1, int col,
+                        int fill)
+{
+    long long a = x1 > x0 ? x1 - x0 : x0 - x1;
+    long long b = y1 > y0 ? y1 - y0 : y0 - y1;
+    long long b1 = b & 1;
+    long long dx = 4 * (1 - a) * b * b;
+    long long dy = 4 * (b1 + 1) * a * a;
+    long long err = dx + dy + b1 * a * a, e2;
+    long long lx0 = x0, ly0 = y0, lx1 = x1, ly1 = y1, last = -1;
+    int have_last = 0;
+    moy_ds d = moy_ds_of(c);
+    moy_pixel v = c->store[col & 63];
+    if (lx0 > lx1) { lx0 = lx1; lx1 += a; }
+    if (ly0 > ly1) ly0 = ly1;
+    ly0 += (b + 1) / 2;
+    ly1 = ly0 - b1;
+    a = 8 * a * a;
+    b1 = 8 * b * b;
+    for (;;) {
+        if (fill) {
+            if (!have_last || last != ly0) {
+                moy_rect(c, (int)lx0, (int)ly0, (int)(lx1 - lx0 + 1), 1, col);
+                if (ly1 != ly0)
+                    moy_rect(c, (int)lx0, (int)ly1, (int)(lx1 - lx0 + 1), 1, col);
+                last = ly0;
+                have_last = 1;
+            }
+        } else {
+            moy_ds_put_shape(&d, (int)lx1, (int)ly0, v);
+            moy_ds_put_shape(&d, (int)lx0, (int)ly0, v);
+            moy_ds_put_shape(&d, (int)lx0, (int)ly1, v);
+            moy_ds_put_shape(&d, (int)lx1, (int)ly1, v);
+        }
+        e2 = 2 * err;
+        if (e2 <= dy) { ly0++; ly1--; dy += a; err += dy; }
+        if (e2 >= dx || 2 * err > dy) { lx0++; lx1--; dx += b1; err += dx; }
+        if (lx0 > lx1) break;
+    }
+    while (ly0 - ly1 <= b) {            /* flat ellipses: finish the tips */
+        if (fill) {
+            moy_rect(c, (int)lx0 - 1, (int)ly0, (int)(lx1 - lx0 + 3), 1, col);
+            moy_rect(c, (int)lx0 - 1, (int)ly1, (int)(lx1 - lx0 + 3), 1, col);
+        } else {
+            moy_ds_put_shape(&d, (int)lx0 - 1, (int)ly0, v);
+            moy_ds_put_shape(&d, (int)lx1 + 1, (int)ly0, v);
+            moy_ds_put_shape(&d, (int)lx0 - 1, (int)ly1, v);
+            moy_ds_put_shape(&d, (int)lx1 + 1, (int)ly1, v);
+        }
+        ly0++;
+        ly1--;
+    }
+}
+
+void moy_oval(moy_canvas *c, int x, int y, int w, int h, int col)
+{
+    if (w <= 0 || h <= 0) return;
+    moy_ellipse(c, x, y, x + w - 1, y + h - 1, col, 1);
+}
+
+void moy_ovalb(moy_canvas *c, int x, int y, int w, int h, int col)
+{
+    if (w <= 0 || h <= 0) return;
+    moy_ellipse(c, x, y, x + w - 1, y + h - 1, col, 0);
 }
 
 /* -------------------------------------------------------------- readout -- */

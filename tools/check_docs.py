@@ -74,6 +74,26 @@ PATH_RE = re.compile(
     r"`(\+?)([A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+"
     r"\.(?:py|md|c|h|lua|json|sh|cmake|mk|yml|jsonl|service|patch|txt))`")
 
+# The same check for a filename with NO directory in it -- `moy.py`, `lupa.py`,
+# `canvas.py`. PATH_RE requires a slash, and that gap is exactly how a batch of
+# stale references survived until 2026-08-28: `moy.py` was named as a live
+# command four months after it was deleted, because nothing here could see a
+# name without a directory. A bare name cannot be rooted, so it resolves
+# against every BASENAME in the tree -- if no tracked file is called that, the
+# document is naming something that does not exist. Restricted to `.py`: a
+# bare `.c`/`.h` is almost always upstream MicroPython or ESP-IDF, which lives
+# in the untracked .build/ clones and cannot be resolved here.
+# Generated at build time -- real on a built tree, absent in a clean checkout.
+GENERATED_RE = re.compile(r"^(_ota_build|carts_data|app_decls)\.py$")
+
+# "deleted", "removed", "gone"... -- the vocabulary of a removal note.
+BURIED_RE = re.compile(
+    r"\b(delet|remov|retir|gone|no longer|used to|gits? histor|gitignor"
+    r"|superseded|promoted|until |were all still|the fork's)", re.I)
+
+BARE_RE = re.compile(
+    r"`(\+?)([A-Za-z0-9_-]{3,}\.py)`")
+
 # Where a relative path in a document may be rooted. The two board directories
 # are here because CLAUDE.md says `native/moy_gfx/...` and `modules/moy_ota.py`
 # throughout -- shorthand for "inside the firmware tree being discussed", which
@@ -96,9 +116,7 @@ NOT_OURS = (
     "modules/_ota_build.py", "native/.staged/",  # generated at build time
     "dist/", ".build/",
     "ports/celeste.moy",     # gitignored: CC BY-NC-SA, never committed
-    # The .moyproj SDK, deleted 2026-07-31. Several documents name its files on
-    # purpose, to say they are gone; git history has them.
-    "moybyte/", "moybyte_cli/", "moybyte_sim/", "moybyte_blocks/",
+    "p8_lua_port.py",        # lives in the moy-spec repo, not here
     # The streaming web view, deleted 2026-08-12 (moycore plan 3.2 sunset), and
     # the recording stack that outlived it by a day (stage 4: the wasm head
     # rasterizes, so the recorder + the page's JS replayer went too). The plan,
@@ -122,9 +140,23 @@ def _candidates(rel, p):
     return out
 
 
+_BASENAMES = []
+
+
+def _basenames():
+    """Every tracked file's basename, for resolving a name with no directory."""
+    if not _BASENAMES:
+        out = subprocess.run(["git", "ls-files"], cwd=ROOT,
+                             capture_output=True, text=True)
+        _BASENAMES.append({os.path.basename(l) for l in
+                           out.stdout.splitlines() if l})
+    return _BASENAMES[0]
+
+
 def check_paths():
     for rel in docs():
-        for i, line in enumerate(read(rel).splitlines(), 1):
+        lines = read(rel).splitlines()
+        for i, line in enumerate(lines, 1):
             for m in PATH_RE.finditer(line):
                 planned, p = m.group(1), m.group(2)
                 if any(t in p for t in NOT_OURS) or "*" in p or "..." in p:
@@ -159,6 +191,25 @@ def check_paths():
                     continue
                 PROBLEMS.append("%s:%d references %s, which is not in the tree"
                                 % (rel, i, p))
+            # A removal note wraps, and in either direction: the names sit on
+            # one line and "was removed" on the next, or the qualifier trails a
+            # sentence or two later. So the window is the line plus a couple
+            # each side rather than the line alone.
+            context = " ".join(lines[max(0, i - 3):i + 2])
+            for m in BARE_RE.finditer(line):
+                planned, name = m.group(1), m.group(2)
+                if planned or any(t in name for t in NOT_OURS):
+                    continue
+                if name in _basenames() or GENERATED_RE.search(name):
+                    continue
+                # A document naming a file in order to say it is GONE is doing
+                # its job -- that is the passing mention a removal is supposed
+                # to get. Only an unqualified reference is a stale claim.
+                if BURIED_RE.search(context):
+                    continue
+                PROBLEMS.append(
+                    "%s:%d names %s as if it exists; no file in the tree is "
+                    "called that" % (rel, i, name))
 
 
 # --- 2. the duplication ratchet ----------------------------------------------
@@ -169,14 +220,14 @@ def check_paths():
 
 SHINGLE = 10
 DUP_BUDGET = {
-    ("CLAUDE.md", "docs/shell_ux_v1.md"): 31,
-    ("CLAUDE.md", "runtime/README.md"): 27,
-    ("CLAUDE.md", "moybyte_console_plan_2026-07.md"): 18,
-    ("CLAUDE.md",
-     "native/moy_audio/libmoy/UPSTREAM.md"): 16,
-    ("CLAUDE.md", "firmware/esp32_p4_wifi6_touch_lcd_7b/README.md"): 11,
-    ("CLAUDE.md", "firmware/lilygo_t_deck_plus_mainline/README.md"): 10,
+    # These pairs used to be CLAUDE.md's. The prose moved into path-scoped rules
+    # on 2026-08-29, so the pins moved with it -- and every one came DOWN,
+    # because the root no longer restates what the rule now owns.
     ("CLAUDE.md", "docs/perf_native_gap_v1.md"): 5,
+    (".claude/rules/shell.md", "docs/shell_ux_v1.md"): 7,
+    (".claude/rules/rendering.md", "moybyte_console_plan_2026-07.md"): 6,
+    (".claude/rules/carts.md",
+     "native/moy_audio/libmoy/UPSTREAM.md"): 16,
     ("docs/moy_cart_api.md", "runtime/README.md"): 14,
     ("CONTRIBUTING.md", "README.md"): 12,
     ("LICENSE.md", "README.md"): 7,

@@ -20,9 +20,13 @@ the panel is this board's own (`guition_panel.GuitionCompositor` over
 
 from console import Pointer, Workstation, wire_workstation_core
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
-from carts_data import CARTS   # build-time generated from system_carts/
-from device_util import _ticks_ms, _ticks_diff
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
 from device_api import make_api
 from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
 from device_wifi import autoconnect_wifi, make_wifi
@@ -161,6 +165,22 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+
+    # THE RADIO LINK (#7/#65 Phase 2): the console's one ESP-NOW owner. Built
+    # here, INERT until a cart with the "multiplayer" permission runs -- the
+    # radio is only started by ws.link_arm(), because pm=PM_NONE costs battery
+    # and a console sitting on its shelf has nobody to talk to. Two kids each
+    # open the same game and the consoles find each other; there is no pairing
+    # screen and no code to type, because being in the same room IS the
+    # agreement (the doctrine the OTA design already set for the SD card).
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="guition_s3",
+                            name=ws.system.get("name", "guition_s3"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte Guition link unavailable:", exc)
+        ws.link = None
     # OTA (#53), the P4 arrangement: no SD, image stages on the internal VFS,
     # with_sd is a plain call-through.
     try:
@@ -178,8 +198,8 @@ def run_desktop(fps_cap=60):
     # WEB CONSOLE: the wasm console baked into this image (native/.staged/
     # moy_web), served from the board. Constructed, not started.
     try:
-        from moy_webhost import make_webhost, INTERNAL_WEB_DIR
-        ws.webhost = make_webhost(ws, carts_root, INTERNAL_WEB_DIR,
+        from moy_webhost import make_webhost
+        ws.webhost = make_webhost(ws, carts_root,
                                   autoconnect=autoconnect_wifi)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte Guition: web console unavailable:", exc)
@@ -231,10 +251,14 @@ def run_desktop(fps_cap=60):
     pump = FramePump(boot, _ota, fps_cap)
     if serial is not None:
         serial.env["pump"] = pump
-    # Perf sampler -- the P4's PERF line, verbatim shape (tools/p4_perf.py
-    # parses it); the meters follow Settings -> PERF DIAG live.
+    # Perf sampler -- device_boot.PerfSampler over runtime/perf_line.py, the ONE
+    # body and ONE format every board emits (#206 item 2; this was a hand copy
+    # of the P4's, and said so, until 2026-08-28). The meters follow Settings ->
+    # PERF DIAG live. Nothing per-board is passed: this is a fullscreen tier
+    # with no windowed WM and a panel with no PPA, so those columns print `-`
+    # rather than a zero indistinguishable from a broken lever.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0}
+    _perf = PerfSampler(ws)
 
     def _poll_inputs(now):
         """This board's input sources: the BLE keyboard's async notifications
@@ -277,36 +301,19 @@ def run_desktop(fps_cap=60):
                 pass
         poll_webhost(ws)
 
-    def _account(now, elapsed, sleep_ms):
-        _pf["n"] += 1
-        _pf["busy"] += elapsed
-        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
-            _drawn = getattr(ws, "_frames_drawn", 0)
-            # Guarded like the P4's: a diag never kills the loop it measures.
-            try:
-                _live = bool(getattr(ws, "diag_live", False))
-                if ws.perf_capture != _live:
-                    ws.perf_capture = _live
-                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                      "render=%.0f chrome=%.0f cart=%s"
-                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
-                         _pf["busy"] // (_pf["n"] or 1),
-                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
-                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
-                         getattr(ws, "_chrome_ms", 0),
-                         (getattr(ws, "cart", None) or {}).get("title", "-")))
-            except Exception as _pf_exc:  # noqa: BLE001
-                print("PERF sample failed: %s: %s"
-                      % (type(_pf_exc).__name__, _pf_exc))
-            _pf["at"] = _ticks_ms() + 2000
-            _pf["n"] = 0
-            _pf["busy"] = 0
-            _pf["drawn"] = _drawn
+        # The radio, once per frame. At 30Hz an input frame carries ~2 messages
+        # and the ring holds hundreds, so a per-frame slice is comfortable --
+        # and draining on the frame loop is what keeps ESP-NOW off a thread
+        # fighting the panel flush for the VM core. No-op while the link is
+        # inert, which is every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
 
     # The shared frame loop (#202 Phase B): the invariant order lives ONCE in
     # device_boot.FrameLoop; every hook above is this board's hardware.
     loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
-                     present=_present, tail=_tail, account=_account,
+                     present=_present, tail=_tail, account=_perf.account,
                      frame_error=_frame_error,
                      set_backlight=set_backlight, lit=boot.lit)
     if loop.run() == "quit":

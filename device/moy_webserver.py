@@ -2,7 +2,7 @@
 #
 # This file used to be the device web view (#41/#22) -- the streaming browser
 # mirror that pushed the console's draw commands over a WebSocket. That whole
-# feature DIED in the 2026-08 streaming sunset (docs/moycore_plan_2026-08.md
+# feature DIED in the 2026-08 streaming sunset (docs/history/moycore_plan_2026-08.md
 # 3.2, owner decision): the frame push, the DrawRecorder wiring, the TeeCanvas
 # lane, stream mode and the Settings WEB VIEW row are deleted; the browser's
 # job moved to the wasm head (firmware/web_runner), synced per plan 3.4.
@@ -52,7 +52,26 @@ ws_encode = _ws.ws_encode
 ws_decode = _ws.ws_decode
 
 
-DEFAULT_PORT = 8080
+# PORT 80, the one a browser assumes (owner decision, 2026-08-29 -- it was 8080
+# from the start, as a bare constant with no argument behind it).
+#
+# Nothing here ever needed the high port. The privileged-port rule that makes
+# 8080 the reflex is a Unix-root thing; MicroPython/lwIP on a board has no such
+# restriction, and the host dev twin does not use 8080 either
+# (firmware/web_runner/serve.py defaults to 8321), so 8080 was only ever the
+# on-board default and nothing depended on it.
+#
+# What it cost is five characters of an address a KID has to carry from a
+# 320x240 panel to a phone. `http://<ip>:8080/?pin=NNNN` is 35 characters, which
+# moy_qr encodes as a 29-module version-3 symbol; dropping the port makes it 30,
+# a 25-module version 2 -- meaningfully bigger modules in the same rect. The
+# Settings row fits the address without falling back to lying about it, and
+# `moybyte-zero.local` typed bare in a browser resolves only on 80, on the one
+# board with no screen to show a kid the address.
+#
+# NOT a hard-coded 80 anywhere else: `url()` omits the port only when the port
+# IS 80, so `WebHost(port=8321)` still renders `:8321` and stays reachable.
+DEFAULT_PORT = 80
 
 # Consider the WebSocket client DEAD (and drop it) if we haven't seen any read
 # activity for this long. A live client answers pings / sends input; this reaps
@@ -96,10 +115,16 @@ WS_MAX_BUFFER = 16384
 
 
 def parse_request(raw):
-    """Parse a raw HTTP request (bytes or str) into (method, path, content_length,
+    """Parse a raw HTTP request (bytes or str) into (method, target, content_length,
     header_end). header_end is the index just past the blank line ending the headers (-1 if
-    the headers aren't complete yet). path has its query string stripped. A malformed request
-    returns (None, None, 0, -1)."""
+    the headers aren't complete yet). A malformed request returns (None, None, 0, -1).
+
+    `target` is the REQUEST TARGET VERBATIM, query string and all. It used to be
+    stripped at "?" here, which was the wrong place to do it (2026-08-25): a GET
+    carries its pin as `?pin=NNNN` -- the only place a GET can carry anything --
+    and the transport was discarding the credential before any handler could see
+    it, so gating a read was not expressible. Handlers split it themselves (they
+    always did, defensively) and reach the query through `query_param`."""
     if isinstance(raw, bytes):
         try:
             text = raw.decode("utf-8")
@@ -122,7 +147,7 @@ def parse_request(raw):
     if len(parts) < 2:
         return (None, None, 0, -1)
     method = parts[0]
-    path = parts[1].split("?", 1)[0]
+    path = parts[1]
     clen = 0
     for ln in lines[1:]:
         c = ln.find(":")
@@ -134,14 +159,40 @@ def parse_request(raw):
     return (method, path, clen, sep + nlen)
 
 
+def query_param(target, name):
+    """The value of `name` in a request target's query string, or "".
+
+    Deliberately small: no percent-decoding and no `+` handling, because the ONE
+    thing that rides a query here is a four-digit pin and a decoder is code that
+    can be wrong about a credential. A parameter whose value would need decoding
+    is one this does not serve.
+    """
+    if not target:
+        return ""
+    q = target.split("?", 1)
+    if len(q) < 2:
+        return ""
+    for pair in q[1].split("&"):
+        kv = pair.split("=", 1)
+        if kv[0] == name:
+            return kv[1] if len(kv) > 1 else ""
+    return ""
+
+
 def http_response(status, body, content_type="application/json"):
     """Build a complete HTTP/1.1 response (bytes). `body` may be str or bytes. The server
     closes the connection after each response (Connection: close), which keeps the
     single-request-per-poll model simple and robust to half-open clients."""
     if isinstance(body, str):
         body = body.encode("utf-8")
-    reason = {200: "OK", 400: "Bad Request", 404: "Not Found",
-              500: "Server Error"}.get(status, "OK")
+    # 403/405/501 joined the table on 2026-08-25: all three were already being
+    # SENT (the pin gate, the write-surface refusal, "no runner") and all three
+    # went out reading `HTTP/1.1 403 OK`, because an unknown status fell through
+    # to "OK". Browsers do not care, but a human reading a capture does, and the
+    # page now branches on exactly these.
+    reason = {200: "OK", 400: "Bad Request", 403: "Forbidden",
+              404: "Not Found", 405: "Method Not Allowed",
+              500: "Server Error", 501: "Not Implemented"}.get(status, "OK")
     head = (
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
@@ -232,13 +283,11 @@ class FileResponse(_SizedResponse):
     play, and a whole-file `bytes` would have to come out of PSRAM and be built
     before the first byte reached the wire.
 
-    NOT CACHED, and the reasoning that said otherwise was wrong (fixed
-    2026-08-15). This shipped with `max-age=86400` on the argument that these
-    are build artifacts which "change only when the console is reflashed" --
-    but they change whenever someone pushes a new web build, which is the
-    routine action and the entire point of tools/p4_push_web.py needing NO
-    reflash. The result was a board serving a correct new console to a browser
-    that kept showing yesterday's, for a day, with nothing to indicate why.
+    NOT CACHED. These are build artifacts, but a browser that has cached one
+    holds a console the board is no longer serving, with nothing on either side
+    to indicate why -- and it stays that way for the whole max-age. That
+    failure is silent and lasts a day; the cost of being right is measured
+    below and is 1.5 seconds.
 
     The cost of being right is small and measured: the 1MB wasm streams at
     ~700KB/s off the P4, so a full reload is ~1.5s. `max_age` stays a parameter
@@ -406,7 +455,9 @@ class WebServer:
       * `handle_http(method, path, body)` -- override in a subclass to serve
                                endpoints; return a complete http_response()
                                bytes blob, or None for 404. The base serves 404
-                               for everything.
+                               for everything. `path` is the REQUEST TARGET, so
+                               it may carry a query string: split it for routing
+                               and read it with `query_param`.
       * `send_text(payload)` -- push one WS text frame to the connected client
                                (False when none is connected).
 
@@ -462,7 +513,16 @@ class WebServer:
             self._ws = None
 
     def url(self):
-        return "http://%s:%d/" % (self.ip or "0.0.0.0", self.port)
+        """The address to hand a human. The port is SPELLED unless it is 80.
+
+        Omitting `:80` is what makes the default address short enough to type
+        and small enough to encode (see DEFAULT_PORT); omitting anything else
+        would produce a url a browser sends to the wrong port, so the rule is
+        the port's identity, never "no port was passed"."""
+        host = self.ip or "0.0.0.0"
+        if self.port == 80:
+            return "http://%s/" % host
+        return "http://%s:%d/" % (host, self.port)
 
     def connected(self):
         """True while a WebSocket client is connected and not idle-timed-out."""
@@ -724,7 +784,11 @@ class WebServer:
 
     def handle_http(self, method, path, body):
         """Endpoint seam for the 3.4 sync RPC: return complete http_response()
-        bytes, or None for a 404. The base transport serves nothing."""
+        bytes, or None for a 404. The base transport serves nothing.
+
+        `path` arrives as the request TARGET -- `/carts.json?pin=1234`, not
+        `/carts.json` -- because a GET has nowhere else to carry a credential
+        and the transport must not spend it."""
         return None
 
     def _serve_http(self, conn, method, path, body):

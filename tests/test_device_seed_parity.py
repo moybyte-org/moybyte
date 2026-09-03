@@ -74,7 +74,17 @@ def _load_moy_runtime():
 
 
 def _carts_by_title():
-    return {c["title"]: c for c in _load_moy_runtime().CARTS}
+    """The carts the DEVICE holds, inflated back to dicts.
+
+    Since 2026-08-30 every board freezes the packed roster, so `moy_runtime.CARTS`
+    is `[(title, version, blob)]`. Inflating it here through the real
+    `moy_carts.unpack_seed` means these parity checks now also prove the pack ->
+    freeze -> inflate round trip preserves every cart byte for byte -- the
+    compression cannot quietly lose a sprite sheet without failing this file.
+    """
+    import moy_carts
+    return {c["title"]: c
+            for c in moy_carts.embedded_floor(_load_moy_runtime().CARTS)}
 
 
 def _manifest(folder):
@@ -421,7 +431,7 @@ def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     assert ws._apps, "no system apps registered"
     for app, _text in ws._apps:
-        claimed = [c for c in ws._all_carts if app.is_app(c)]
+        claimed = [c for c in ws.carts.all if app.is_app(c)]
         assert len(claimed) == 1, \
             "%s claims %d carts on the host store" % (app.id, len(claimed))
         cart = dict(claimed[0])

@@ -132,7 +132,12 @@ def test_ota_updater_wired_into_run_desktop_with_rollback_confirm():
     runtime = _device_backend_src()
 
     assert "import moy_ota" in runtime
-    assert "ws.updater = moy_ota.OtaUpdater(_with_sd_synced)" in runtime
+    # The gate and the staging dir both FOLLOW THE STORE (2026-08-30): a T-Deck
+    # with no card keeps a writable store on internal flash, and an updater that
+    # went on bracketing the SD bus and staging onto /sd/update would be aimed
+    # at a card that is not there.
+    assert "ws.updater = moy_ota.OtaUpdater(\n                _store_session," in runtime
+    assert 'update_dir=None if on_sd else FLASH_UPDATE_DIR)' in runtime
     # The rollback confirm is made from the FRAME LOOP, once the console has
     # actually painted -- not on the boot path, where "the desktop was built"
     # would confirm an image that never reaches the glass (#56). See
@@ -152,7 +157,12 @@ def test_console_settings_has_firmware_update_screen():
     # console.py); the queries/config + dispatch stay in console.py.
     update_ui = (Path("runtime") / "update_ui.py").read_text(encoding="utf-8")
 
-    assert "self.updater = None" in console
+    # The seam a board injects into. It is a PROPERTY since 2026-08-30 -- the
+    # setter clears the cached availability answers, because the web console
+    # binds its updater late and Settings had already cached "no updater".
+    # The BEHAVIOUR is pinned in tests/test_web_update.py; this is the routing.
+    assert "self._updater = None" in console
+    assert "@updater.setter" in console
     assert "def _update_available" in console
     assert "def _settings_rows" in settings_layer
     assert '"UPDATE FW"' in settings_layer
@@ -299,7 +309,10 @@ def test_micropython_native_sd_shares_display_spi_host():
     # The SD session is wrapped so it drains any in-flight panel DMA first (the
     # #40 double-buffer SD-vs-panel mutual exclusion), but still delegates to the
     # native live-mount path.
-    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "ws._with_sd = _store_session" in runtime
+    assert "_store_session = _with_sd_synced if on_sd else _direct" in runtime, (
+        "the SD bracket is only a bracket while SD is the store -- a card-less "
+        "board writes to internal flash, which shares no bus with the panel")
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
     # can_manage defaults to "the store root is known" inside the shared
     # console.wire_workstation_core (the runtime hands it carts_root).
@@ -326,10 +339,10 @@ def test_micropython_touch_and_idle_cursor():
     assert "TOUCH_SWAP" in device_input and "TOUCH_FLIP_Y" in device_input
     assert "touch = Touch(canvas.w, canvas.h" in runtime
     # The poll->pointer application is device_boot.apply_touch (2026-08-18).
+    # Only the ROUTING is greppable; the verb's BODY is executed in
+    # test_device_boot.py (#208 rank 5), which is what can tell a placed point
+    # from a transposed one.
     assert "apply_touch(touch, pointer)" in runtime
-    _boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
-    assert "tp = touch.poll()" in _boot
-    assert "pointer.place(tp[0], tp[1])" in _boot
 
     # Cursor auto-hide + the Pointer are a shared support widget now (widgets.py).
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
@@ -626,9 +639,14 @@ def test_kid_mode_gates_diag_frame_eaters():
     # and hushes the live echo; the ring still flushes on cart exit + crash.
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
-    assert '("diag_live", "PERF DIAG", "diag")' in settings_layer
+    # The row + its default + its verb are ONE declaration since #209 section 7
+    # (SETTINGS_TOGGLES); the boot apply loops over it, so what used to be a
+    # literal `self.system.get("diag_live", False)` here is now the registry's
+    # key and default. tests/test_settings_toggles.py is the ratchet on that.
+    assert '("diag_live", "PERF DIAG", False, "set_diag_live", None, None)' \
+        in settings_layer
     assert "def set_diag_live(self, on, persist=True):" in console
-    assert 'self.system.get("diag_live", False)' in console     # persisted + applied
+    assert "self.system.get(key, default)" in console            # persisted + applied
     runtime = ((ROOT / "modules" / "moy_runtime.py").read_text(encoding="utf-8")
                + (DEVICE / "device_api.py").read_text(encoding="utf-8")
                + Path("runtime/cart_api.py").read_text(encoding="utf-8"))
@@ -1344,10 +1362,10 @@ def test_touch_holds_a_held_finger_between_gt911_samples():
     assert "return self._hp.hold()" in inp
     # The sample->pointer application is device_boot.apply_touch since
     # 2026-08-18 (both boards' poll_inputs hooks carried it verbatim); the
-    # board must route through it and the ONE copy must carry the fresh mark.
+    # board must route through it. That the ONE copy carries the fresh mark --
+    # and carries it BEFORE the no-sample bail -- is executed in
+    # test_device_boot.py (#208 rank 5); a substring could not see the order.
     assert "apply_touch(touch, pointer)" in runtime
-    boot = Path("runtime/device_boot.py").read_text(encoding="utf-8")
-    assert "pointer.fresh = getattr(touch, \"fresh\", True)" in boot
 
 
 def test_native_blit_map_wired_for_tilemaps():
@@ -1495,7 +1513,7 @@ def test_paint_image_assets_wired_device_and_carts():
     # The device make_api takes `images` and exposes the image(name) accessor, decoding
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     # _decode_moyimg lives in the unified cart_api since 2026-08-17 (one body
     # for every tier; the MicroPython lane inflates via `deflate`).
     cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
@@ -1787,6 +1805,56 @@ def test_psram_temperature_retune_wired():
         assert "mspi_timing_by_mspi_delay.c" not in build.read_text(
             encoding="utf-8"), ("%s carries its own #169 patch again" % build)
 
+def _idf_candidates(build):
+    """The sibling ESP-IDF checkouts this build.sh offers moybyte_setup_idf."""
+    out = []
+    for line in build.read_text(encoding="utf-8").splitlines():
+        _, sep, rest = line.partition("${REPO_ROOT}/firmware/")
+        if sep and "/.build/esp-idf" in rest:
+            out.append(rest.partition("/.build/esp-idf")[0])
+    return out
+
+
+def test_exactly_one_board_owns_the_esp_idf_checkout():
+    """ESP-IDF v5.5.1 is ~600MB and identical for all three boards, so they
+    share ONE clone: `moybyte_setup_idf` takes a candidate list and falls back
+    to cloning into its own `.build/esp-idf`. That makes the ownership a
+    GRAPH, and the graph is what rots.
+
+    It rotted once. Each board used to clone its own; when the shared build lib
+    landed (2026-08-17) the T-Deck started naming the P4's, which left the
+    T-Deck's own clone an orphan its own build no longer resolved -- while the
+    P4 named it FIRST and the Guition named it first too. Two boards' CMake
+    caches ended up pinning CMAKE_TOOLCHAIN_FILE into a directory nobody
+    owned, and CMake will not re-point that entry after the first configure: the
+    day the orphan was deleted, both builds would have failed on a dead path
+    rather than reconfiguring. (2026-08-27: it was, and they were wiped.)
+
+    So the shape is pinned, not the paths. One owner, every other board names
+    it and nothing else, and the owner names nobody -- a cycle or a second
+    orphan cannot be spelled.
+    """
+    named = {b.parent.name: _idf_candidates(b) for b in _esp32_builds()}
+    for board, cands in named.items():
+        assert len(set(cands)) == len(cands), (
+            "%s lists the same ESP-IDF checkout twice" % board)
+    owners = {c for cands in named.values() for c in cands}
+    assert len(owners) == 1, (
+        "the boards reach for %d ESP-IDF checkouts (%s) -- one of them is "
+        "nobody's, and a CMake cache that pins it cannot be re-pointed"
+        % (len(owners), ", ".join(sorted(owners)) or "none"))
+    owner = owners.pop()
+    assert owner in named, (
+        "%s is named as the shared ESP-IDF owner but builds nothing here"
+        % owner)
+    assert not named[owner], (
+        "%s owns the shared ESP-IDF checkout and also borrows one" % owner)
+    for board, cands in named.items():
+        if board != owner:
+            assert cands == [owner], (
+                "%s reaches past the owner (%s): %s" % (board, owner, cands))
+
+
 def test_gc_diag_is_low_cadence():
     # #63: the forced-collect GC sample costs ~130ms on a cart-sized live set --
     # running it every 3s was a visible periodic hitch. 1-in-10 samples only.
@@ -1992,7 +2060,7 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "TILE = 16" in editors
     assert "_ICON = {" in chrome            # the bar's icon-slot map lives in chrome.py now
     assert "def _icon(self, kind, x, y, cv=None):" in console
-    assert "self.icon_sheet" in console
+    assert "self.look.icon_sheet" in console      # the sheet is the look's (#209 D)
 
     # Storage: load/save the editable theme beside the carts dir (absent = default).
     assert "system_icons" in carts
@@ -2003,7 +2071,7 @@ def test_unified_top_bar_wired_into_device_shell():
     # (the boot loads run inside the shared console.wire_workstation_core).
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
     console_src = (Path("runtime") / "console.py").read_text(encoding="utf-8")
-    assert "ws.load_icon_sheet()" in console_src
+    assert "ws.look.load_icon_sheet()" in console_src
 
 
 def test_icon_theme_editor_wired_into_device_shell():
@@ -2012,6 +2080,7 @@ def test_icon_theme_editor_wired_into_device_shell():
     runtime/console.py + moy_carts.py, so grep the canonical sources for the wiring
     that MUST match the working cart-sprite save path (or the device SD bus hangs)."""
     console = (Path("runtime") / "console.py").read_text(encoding="utf-8")
+    appearance = (Path("runtime") / "appearance.py").read_text(encoding="utf-8")
     settings_layer = (Path("runtime") / "settings_layer.py").read_text(encoding="utf-8")
     paint_layer = (Path("runtime") / "paint_layer.py").read_text(encoding="utf-8")
     carts = (Path("runtime") / "moy_carts.py").read_text(encoding="utf-8")
@@ -2030,18 +2099,19 @@ def test_icon_theme_editor_wired_into_device_shell():
 
     # Save: the theme editor persists via save_system_icons through the SAME _with_sd
     # wrapper the cart sprite save (save_sprites) uses -- on device that's with_sd_live,
-    # the native single-bus path; anything else hangs the panel flush.
-    assert "def save_icons(self):" in console
-    assert "self.carts_store.save_system_icons(hexs, self.carts_root, _ICON_VERSION)" in console
-    assert "self._with_sd(lambda: self.carts_store.save_system_icons(" in console
+    # the native single-bus path; anything else hangs the panel flush. The verb sits
+    # with the sheet it writes (#209 landing E): ws.look, beside set_/load_icon_sheet.
+    assert "def save_icons(self):" in appearance
+    assert "hexs, ws.carts_root, _ICON_VERSION)" in appearance
+    assert "ws._with_sd(lambda: ws.carts_store.save_system_icons(" in appearance
     # Live re-theme: a save re-adopts the sheet so the bar's per-kind image cache (and
     # the device's per-Image RGB565 blit cache) is dropped and rebuilt from new pixels.
-    assert "self.set_icon_sheet(self.icon_sheet)" in console
-    assert "def set_icon_sheet(self, sheet):" in console
+    assert "            self.set_icon_sheet(sheet)\n            ws.ach.note" in appearance
+    assert "def set_icon_sheet(self, sheet):" in appearance
 
     # The same persistence wrapper + can_manage gate the device wires for cart saves
     # already covers the theme save -- with_sd_live is the live SD write path.
-    assert "ws._with_sd = _with_sd_synced" in runtime
+    assert "ws._with_sd = _store_session" in runtime
     assert "return moybyte_sd.with_sd_live(fn)" in runtime
 
 
@@ -2182,7 +2252,12 @@ def test_device_make_api_map_mget_mset(tmp_path=None):
     assert api["mget"](1, 2) == 5 and tm.mget(1, 2) == 5
     api["map"](0, 0, 3, 3, 0, 0, -1, 2)
     assert mapped and mapped[-1][0] is tm and mapped[-1][1] is sheet
-    assert mapped[-1][2] == (0, 0, 3, 3, 0, 0, -1, 2)
+    # SPEC.md 7.2's layer mask and the flag table ride along on every call; with
+    # no project the table is a private zero one, so a mask draws nothing.
+    assert mapped[-1][2][:8] == (0, 0, 3, 3, 0, 0, -1, 2)
+    assert mapped[-1][2][8] == 0 and len(mapped[-1][2][9]) == 512
+    api["map"](0, 0, 3, 3, 0, 0, -1, 2, 6)
+    assert mapped[-1][2][8] == 6
     # With no tilemap injected, the API stays callable (map() no-ops, mget -> -1).
     api2 = m.make_api(StubCanvas(), StubInput(), {}, sheet)
     assert api2["mget"](0, 0) == -1
@@ -2263,7 +2338,7 @@ def test_device_sprite_storage_wired():
     # make_api now also takes the capability-gated wifi backend LAST (#38).
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     # The sprite store-write moved to Project.commit_sprites (Stage 1b, project.py --
     # also staged onto the device); ws.save_sprites stays as the tested forward.
@@ -2620,7 +2695,7 @@ def test_device_wifi_wired():
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
     assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
-    assert "texts=None, net=None, owner=\"cart\"):" in runtime
+    assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
     # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
     # stack is brought up on demand (scan/connect), NEVER at boot -- bringing it up at
@@ -2730,20 +2805,31 @@ def test_micropython_offline_diag_wiring():
     assert 'with_sd = getattr(ws, "_with_sd", None)' in device_diag   # = with_sd_live (in _diag_flush)
     assert "diag.flush_to_sd(with_sd)" in device_diag
 
-    # Perf samples: a structured PERF line sampled every few seconds while a cart
-    # runs (the per-cart frame-timing payload for the offline dump).
-    assert "def format_perf(cart, fps, flush_ms, draw_ms):" in diag
-    assert 'return "PERF cart=%s fps=%d flush=%d draw=%d" % (' in diag
-    assert "_diag_perf_sample(diag, ws)" in runtime
-    assert "ws.perf_sample()" in device_diag
-    # The shared console EXPOSES the numbers host-safely; the device SAMPLES them.
+    # Perf samples: this board persists them for the offline dump, but the LINE
+    # is not composed here any more (#206 item 2). One format for all three
+    # boards (runtime/perf_line.py), measured by one body on the shared
+    # FrameLoop.account hook, printed like every other board AND ringed here --
+    # through `ring`, not `log`, which would put it on the wire twice.
+    assert "def ring(tag, msg):" in diag
+    assert "def format_perf(" not in diag and "def log_perf(" not in diag
+    assert "_diag_perf_sample(" not in runtime
+    assert "def _diag_perf_sample(" not in device_diag
+    assert 'diag.ring("PERF", line[5:])' in runtime
+    # The shared console EXPOSES the numbers host-safely; the sampler READS them.
+    # net= is the #65 lockstep witness -- the shared tick rate a LINKED game
+    # renders at (the console gates every frame the tick is not due for) -- and
+    # `-` when no session gates anything. It comes from perf_net(), NOT from
+    # perf_sample: the meter consumes its window and perf_sample is also the
+    # `is a cart running?` probe every other diag helper here calls.
+    assert "def perf_net(self):" in console
     assert "def perf_sample(self):" in console
+    assert "ws.perf_sample()" in device_diag               # the other helpers' probe
     assert "self.perf_capture = False" in console         # default off -> host identical
     # 2026-08-03: capture is no longer unconditional -- it follows the persisted
     # PERF DIAG toggle (the deep meters cost ~1-1.5ms/frame, a kid-mode tax),
-    # and the 3s diag tick re-syncs it live when the toggle flips.
+    # and the sampler re-syncs it live when the toggle flips.
     assert 'ws.perf_capture = bool(getattr(ws, "diag_live", False))' in runtime
-    assert "ws.perf_capture = _live" in runtime           # the 3s re-sync
+    assert "ws.perf_capture = _live" in runtime           # the 3s diag re-sync
     assert "_perf = self.perf_hud or self.perf_capture" in console
 
     # DRAWBRK (#43 follow-up): the phase split of draw= into cart _update (logic) /
@@ -2811,15 +2897,14 @@ def test_micropython_offline_diag_wiring():
             '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
             in device_diag)
     assert "_diag_pump(diag, comp)" in runtime
-    # fold= is the #190 liveness proof. Behaviour is pinned by
-    # tests/test_banded_panel.py; what a grep can pin is that the definition
-    # exists on the board with the lever and NOT on the one without it.
-    guition_panel = (Path("firmware/guition_jc3248w535/modules")
-                     / "guition_panel.py").read_text(encoding="utf-8")
-    assert "def fold_count(self):" in guition_panel
-    assert "fold_stats()[0]" in guition_panel
-    assert "fold_count" not in _panel_src()[0], (
-        "the T-Deck has no fold; absence is how a board says it lacks a lever")
+    # fold= is the #190 liveness proof, and BOTH banded boards carry it
+    # (native/moy_flush/moy_fold). Behaviour is pinned by
+    # tests/test_banded_panel.py and the C by tests/test_flush_fold.py; what a
+    # grep can pin is that the meter is defined ONCE, on the shared rung both
+    # boards subclass, and reads the C rather than a cached int.
+    assert "def fold_count(self):" in compositor
+    assert "fold_stats()[0]" in compositor
+    assert "class FoldingCompositor(BandedCompositor):" in compositor
 
     # I2CSTAT (#69): per-session kbd/touch I2C latency (max + >5ms/>20ms counts),
     # so the 13-60ms keyboard stalls are sized across a session, not just inside
@@ -3081,7 +3166,10 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     assert 'reg("moy_table_verb", tv)' in host
     assert 'g["moy_table_verb"] = v' not in host
     glue = (DEVICE / "moycore_glue.py").read_text(encoding="utf-8")
-    assert '_moycore.register("moy_table_verb", tv)' in glue
+    # The glue's half is EXECUTED since #208's residue pass --
+    # tests/test_moycore_glue.py::test_the_table_verb_goes_in_under_its_own_name
+    # runs the register loop and asserts the alias goes in and the bare name
+    # does not, which a substring cannot tell apart.
     # ...and the register loop must SKIP the bare name, or it sets the global
     # `table` and clobbers the library before the prelude can graft anything.
     # NOT_REGISTRABLE moved into the shared lua_ext with the prelude it pairs
@@ -3090,48 +3178,6 @@ def test_lua_table_verb_never_clobbers_the_table_library():
     # still be caught here.
     assert "NOT_REGISTRABLE" in glue
     assert '"table",' in ext[ext.index("NOT_REGISTRABLE = frozenset(("):]
-
-
-def test_the_p4_perf_sampler_cannot_kill_the_frame_loop():
-    """A diagnostic must never be able to drop the board to the REPL.
-
-    The P4's 2-second PERF line reads a dozen Workstation internals -- draw /
-    flush / logic / render / chrome timings, the cart title -- and it lives
-    OUTSIDE the frame `try` that catches everything `ws.frame()` can raise. So
-    while those reads were bare attribute access, renaming any one of them in
-    the SHARED runtime/console.py ended the loop about two seconds after boot,
-    with a traceback naming the sampler instead of the rename. The T-Deck's
-    diag helpers (device_diag.py) have always been `try: ... except Exception`
-    for exactly this reason; this is that shape, on the other board.
-    """
-    from pathlib import Path
-
-    src = Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/"
-               "moy_runtime.py").read_text(encoding="utf-8")
-    i = src.index('print("PERF fps=')
-    block = src[src.rindex("if _ticks_diff", 0, i):i]
-    # CODE lines only. The first draft of this pin matched the word `try:`
-    # inside the comment that explains the guard, so deleting the guard left it
-    # green -- a pin that reads the prose about itself is not a pin.
-    code = [l.strip() for l in block.splitlines()
-            if l.strip() and not l.strip().startswith("#")]
-    assert "try:" in code, "the P4 PERF sample must be guarded"
-    tail = src[i:i + 2000]
-    assert "except Exception as _pf_exc:" in tail, \
-        "the P4 PERF sample must catch, so a renamed console attribute is a " \
-        "stale diag line and not a dead console"
-    # The timer state has to be reset OUTSIDE the guard, or a sampler that
-    # raises retries every frame and floods the serial it is measured over.
-    # (#202 Phase B: the sampler is the _account hook now; the reset must
-    # still follow the except, inside the hook.)
-    reset = tail[tail.index("except Exception"):]
-    assert '_pf["at"] = ' in reset
-    # ...and no bare `ws._<timing>` left in the line itself: the guard keeps the
-    # loop alive, getattr keeps the LINE alive (one renamed meter should cost
-    # one field, not the whole sample).
-    for name in ("_draw_ms", "_flush_ms", "_upd_ms", "_cart_ms", "_chrome_ms"):
-        assert "ws." + name not in tail, \
-            "PERF still reads ws.%s bare -- use getattr" % name
 
 
 def test_both_boards_service_the_web_console_every_frame():
@@ -3153,11 +3199,10 @@ def test_both_boards_service_the_web_console_every_frame():
     not for whichever one someone remembers.
     """
     # The drain is ONE helper since 2026-08-18 (device_boot.poll_webhost);
-    # each board's frame tail must still CALL it, and the helper must still
-    # actually poll -- the failure this pins was exactly a tail that stopped
-    # calling.
-    boot = (_REPO / "runtime" / "device_boot.py").read_text(encoding="utf-8")
-    assert "wh.poll()" in boot.partition("def poll_webhost(")[2]
+    # each board's frame tail must still CALL it -- the failure this pins was
+    # exactly a tail that stopped calling. That the helper actually polls, only
+    # while the host is SERVING, and never breaks the frame when the transfer
+    # dies, is executed in test_device_boot.py (#208 rank 5).
     for rel in ("firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
                 "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"):
         src = (_REPO / rel).read_text(encoding="utf-8")

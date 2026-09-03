@@ -135,7 +135,7 @@ def test_picker_hides_claimed_system_apps(tmp_path):
                                     windowed=True)
     titles = [c.get("title") for c in ws.picker.items if c.get("path")]
     claimed = []
-    for cart in ws._all_carts:
+    for cart in ws.carts.all:
         for app, _t in getattr(ws, "_apps", ()):
             if app.is_app(cart):
                 claimed.append(cart.get("title"))
@@ -155,7 +155,7 @@ def test_desk_still_offers_system_apps(tmp_path):
     cost a kid access to Files or Paint."""
     ws = host_app.build_workstation(str(tmp_path / "carts"), sys_size=(1024, 600),
                                     windowed=True)
-    claimed = [c for c in ws._all_carts
+    claimed = [c for c in ws.carts.all
                if any(app.is_app(c) for app, _t in getattr(ws, "_apps", ()))]
     assert claimed
     ids = [row[0] for row in ws.wm._backdrop_layer._icon_catalog()]

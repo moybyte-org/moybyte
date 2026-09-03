@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 5,
+  "version": 6,
   "title": "Tiny Runner",
   "type": "game",
   "runtime": "python",

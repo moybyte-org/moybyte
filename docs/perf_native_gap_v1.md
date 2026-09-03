@@ -200,6 +200,82 @@ the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
 #67). The plain-ESP32 NES emulator is the proof the hardware has the grunt — the
 ceiling is the layers we put on top of it.
 
+## 8. The indexed-canvas A/B (2026-08-05) — the measurement behind RGB565-at-draw
+
+Moved here from CLAUDE.md 2026-08-28, because that file is direction and this is
+the evidence. The DECISION is settled and lives there in one line; what follows
+is what settled it, so nobody re-runs the bench to re-derive it.
+
+libmoy draws into a framebuffer of palette INDICES and resolves colour once,
+later. Moybyte's device canvas resolves at DRAW time and stores RGB565 straight
+into the compositor buffer. "An indexed canvas doesn't fit here" was wrong and is
+recorded as wrong: libmoy renders the CART canvas, which SPEC.md 1 fixes at
+320×240, so the P4's 1024×600 scan-out buffer was never the thing proposed. An
+indexed cart canvas is 76,800 B instead of 153,600 B, every draw writes one byte
+per pixel instead of two, and the conversion kernel already exists
+(`moy_gfx.blit_indices`, #63).
+
+Bench: standalone ESP-IDF at 360MHz / 200MHz PSRAM / `-O2`, four deterministic
+scenes × 20 frames, canvas in SRAM and again in PSRAM. **A** = 8-bit index canvas
+drawn by libmoy's kernels unmodified + one resolve at the stamp. **B** =
+565-at-draw, geometry copied line-for-line from libmoy so only the write differs.
+Ratios are A over B; below 1 = indexed wins.
+
+| ui (100 rects) | ray (320 sspr cols) | mode7 (120 tline rows) | tri (60 tris) | stamp |
+|---|---|---|---|---|
+| **0.73×** | **1.13×** | **1.20×** | **0.85×** | A 2.0ms resolve vs B 0.42ms memcpy (SRAM) / 1.76ms (PSRAM) |
+
+Indexed wins where the kernel is **write-bandwidth-bound** (fills) and loses
+where it is **per-pixel-sample-bound** (sspr, tline) — those loops are dominated
+by sheet addressing and Bresenham, so a narrower store buys nothing while the
+resolve is added on top.
+
+**Two things not to misquote.** The "tline is a wash" reading is from the run
+*before* the reduce-once tline fix (25ms → 8ms), when the soft-modulos hid the
+format entirely. And the stamp comparison flatters A: on the P4 today B's stamp
+is not a memcpy at all but `moy_ppa.blit_async` — hardware, ~free to the CPU, and
+the PPA does not consume indices. The T-Deck is the untested opposite shape; it
+already pays an SRAM bounce copy the resolve could ride.
+
+**Every scene hashed A==B in both placements** — an indexed canvas loses no
+colour, proven on silicon. That question is closed; the format choice is settled
+on performance, and B is what ships.
+
+## 9. The S3 program (2026-09-02) — verdicts, not numbers
+
+Three rounds with the PICO-8 ports as referees (moss moss: a 30 fps cart whose
+tick is pure Lua; dank tomb: 60 fps, draw-bound). The numbers, the frame anatomy
+and the per-operation price list live in **#66** (rounds 3–5); the roadmap rows
+above got their verdicts in **#77**. What this section keeps is what was
+DECIDED:
+
+- **The S3 pays for calls and allocations, not raster.** A C verb call floors
+  at ~1.65 µs, a malloc through the IDF heap at ~9 µs (its TLSF metadata sits
+  in PSRAM). So the levers that landed are the ones that delete calls and
+  mallocs: every p8 draw verb one call into the machine, the hot shim paths in
+  C, one call per native bit operator, a small-object pool under `l_alloc`
+  with its free lists in internal SRAM and chunks that go back.
+- **The composite was the console's biggest per-frame cost and the fold
+  removes it** on both S3 boards, at any integer scale, from one shared body
+  (`native/moy_flush/moy_fold.c`).
+- **Instruction placement helps, data placement hurts.** The VM loop and its
+  lookups in IRAM: −10 % on the tick (flash and PSRAM share the MSPI bus). More
+  internal SRAM for the VM's DATA: slower — the drivers starve. `-O3` on the
+  VM: still null.
+- **The Python heap must be capped** (§ the S3 memory rule in
+  `.claude/rules/boards.md`): it doubles on demand into the VM's PSRAM.
+- **A cart that fails only on device and only sometimes is the frame cadence
+  the replayer cannot reproduce**, before it is the architecture: dank tomb's
+  "nil position" was the shim drawing before the first update. `run_cart --dt`
+  reproduces such cadences.
+- **What is left for a 30 fps moss moss on the S3**, in order: the console's
+  ~10 ms around the tick (fold snapshot, router, input poll: 3–5 ms), then the
+  structural one — running the cart tick on core 0 overlapped with the
+  console's frame (frame ≈ max, not sum; A/B against the shared PSRAM bus
+  before keeping). A Xtensa JIT is gated on the perf counters: a template JIT
+  only pays if retired instructions dominate a tick, and the evidence says
+  memory does.
+
 ## References
 
 - ESP-IDF speed guides: [P4](https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/api-guides/performance/speed.html), [S3](https://docs.espressif.com/projects/esp-idf/en/release-v5.5/esp32s3/api-guides/performance/speed.html)

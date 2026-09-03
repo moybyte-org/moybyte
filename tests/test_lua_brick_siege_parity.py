@@ -49,7 +49,7 @@ def test_brick_siege_lua_runs_under_the_real_player(tmp_path):
     assert ws.player.cart_error is None
     assert ws.player._lua is not None                  # started via the #67 seam
     run = ws.player._lua
-    assert run.get_global_len("players") == 1          # _init built the P1 tank
+    assert run.get_global_len("tanks") == 1            # _init built the P1 tank
     for _ in range(240):                               # 8s: spawns, shots, booms
         ws.frame(1 / 30)
     assert ws.player.cart_error is None

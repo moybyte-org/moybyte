@@ -35,6 +35,36 @@ BOOT_BANNER = "desktop running"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 P4_BOARD_DIR = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
 
+sys.path.insert(0, ROOT)
+from runtime.perf_line import parse_perf                          # noqa: E402
+
+
+def board_dirs(root=ROOT):
+    """Short board name -> its directory, DISCOVERED by globbing board.toml.
+
+    The short name is the board file's own `[board] ota` id -- already inside a
+    signed OTA manifest, so a published identifier rather than a nickname. A
+    board file with no `ota` id is not a flashable board (`firmware/web_runner`
+    is the browser build) and drops out by itself.
+
+    Here rather than in a tool, because every tool that DRIVES a board over
+    serial needs it and a hand-kept dict per tool is the shape this repo keeps
+    paying for: nothing fails when a board is missing from one -- it simply
+    cannot be driven by that tool, and no test notices. (`tools/push_cart.py`
+    still carries its own older copy; folding it into this one is a one-line
+    follow-up.)"""
+    import glob
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import board_config
+    out = {}
+    for path in sorted(glob.glob(os.path.join(root, "firmware", "*",
+                                              "board.toml"))):
+        d = os.path.dirname(path)
+        name = board_config.load(d).get("board", {}).get("ota")
+        if name:
+            out[name] = d
+    return out
+
 
 def declared_serial(board_dir=P4_BOARD_DIR):
     """A board's [serial] block: the line state at open, whether it may be
@@ -50,7 +80,11 @@ def declared_serial(board_dir=P4_BOARD_DIR):
 
     Missing keys fall back to the P4's, because a driver that refuses to start
     is worse than one on a default."""
-    out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None}
+    # `serial_number` is the tiebreak for a board that shares a USB id with
+    # others and cannot be ASKED which it is -- the headless Zero, since it took
+    # the USB-Serial/JTAG promotion and joined the console boards on 303a:1001.
+    out = {"dtr": False, "rts": False, "attach_only": False, "chunk": None,
+           "usb": None, "serial_number": None}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import board_config
@@ -66,17 +100,171 @@ def declared_chunk(board_dir=P4_BOARD_DIR, default=256):
     return int(declared_serial(board_dir)["chunk"] or default)
 
 
+def declared_board_id(board_dir=P4_BOARD_DIR):
+    """The board's `[board] ota` id ("p4"/"tdeck"/"guition_s3") -- the name the
+    board itself answers with (`_ota_build.BOARD`), so it is what identity
+    verification compares against. None if the file declares none."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import board_config
+        return board_config.load(board_dir).get("board", {}).get("ota")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Which /dev/tty* IS this board? ttyACM numbering shuffles whenever a board
+# resets or replugs, and on 2026-08-24 a whole measurement session drove the
+# T-Deck believing it was the P4 -- the port number was remembered from two
+# days earlier. Resolution is two layers, both data:
+#   1. the [serial] usb id (vid:pid) narrows the candidates -- it fully
+#      resolves the P4 (the only CH343), and CANNOT split the two S3s (both
+#      are the SoC's own 303a:1001);
+#   2. the board's own `_ota_build.BOARD` answer settles it -- asked over the
+#      dev channel, which is also what P4Board.verify_board() re-checks after
+#      every attach/reset, so even an explicit --port is caught when it points
+#      at the wrong board.
+# ---------------------------------------------------------------------------
+
+
+def usb_id_of(port, sys_tty="/sys/class/tty"):
+    """The "vid:pid" of the USB device behind a tty, or None (not USB, or not
+    Linux). Walks up from the tty's sysfs node to the first ancestor carrying
+    idVendor/idProduct -- the interface sits one or two levels below them."""
+    node = os.path.realpath(
+        os.path.join(sys_tty, os.path.basename(str(port)), "device"))
+    for _ in range(6):
+        vid = os.path.join(node, "idVendor")
+        pid = os.path.join(node, "idProduct")
+        try:
+            if os.path.exists(vid) and os.path.exists(pid):
+                return "%s:%s" % (open(vid).read().strip().lower(),
+                                  open(pid).read().strip().lower())
+        except OSError:
+            return None
+        nxt = os.path.dirname(node)
+        if nxt == node:
+            break
+        node = nxt
+    return None
+
+
+def serial_ports():
+    """The serial device nodes worth considering, sorted."""
+    import glob
+    return sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
+
+
+def _probe_identity(port, board_dir, log):
+    """Attach to `port` with `board_dir`'s line discipline and ask who it is.
+    Only ever called for attach_only declarations, where an open is side-effect
+    free; opening a CH343 reboots its board, which a resolver must not do to a
+    bystander."""
+    try:
+        b = P4Board(port, board_dir=board_dir)
+    except Exception as exc:  # noqa: BLE001 -- busy/permission -> not this one
+        log("  %s: cannot open (%s)" % (port, exc))
+        return None
+    try:
+        b.drain(0.6)
+        return b.identify(timeout=4.0)
+    finally:
+        b.close()
+
+
+def find_port(board_dir=P4_BOARD_DIR, log=None, ports=None, usb_of=None,
+              prober=None):
+    """Resolve a board directory to the serial port it is plugged into.
+
+    Raises RuntimeError with the full candidate picture on anything short of
+    one confident answer -- a guessed port is exactly the bug this exists to
+    remove. `ports`/`usb_of`/`prober` are injectable for the host tests."""
+    log = log or (lambda s: None)
+    ser = declared_serial(board_dir)
+    want_usb = ser.get("usb")
+    if not want_usb:
+        raise RuntimeError(
+            "%s declares no [serial] usb id -- cannot resolve a port for it"
+            % board_dir)
+    usb_of = usb_of or usb_id_of
+    allp = list(ports) if ports is not None else serial_ports()
+    cands = [p for p in allp if usb_of(p) == want_usb]
+    if not cands:
+        raise RuntimeError(
+            "no serial port matches %s's usb id %s (saw: %s)"
+            % (board_dir, want_usb,
+               ", ".join("%s=%s" % (p, usb_of(p)) for p in allp) or "none"))
+    want_id = declared_board_id(board_dir)
+    if len(cands) == 1:
+        # Unique on the bus -- but NOT necessarily unique by design: both S3s
+        # declare 303a:1001, so with one of them unplugged the survivor
+        # "uniquely" matches the OTHER board's name too. Where asking is free
+        # (attach_only), ask; a mismatch is an answer, and a silent board is
+        # accepted here because verify_board() re-checks downstream.
+        if ser.get("attach_only") and want_id:
+            prober = prober or (lambda q: _probe_identity(q, board_dir, log))
+            got = prober(cands[0])
+            if got is not None and got != want_id:
+                raise RuntimeError(
+                    "the only %s port (%s) answers as %r, not %r -- is that "
+                    "board plugged in?" % (want_usb, cands[0], got, want_id))
+            log("resolved %s -> %s (usb %s, identity %s)"
+                % (board_dir, cands[0], want_usb, got or "unconfirmed"))
+        else:
+            log("resolved %s -> %s (usb %s)" % (board_dir, cands[0], want_usb))
+        return cands[0]
+    # Twins on the bus. Ask each -- but only where an open is side-effect free.
+    if not ser.get("attach_only"):
+        raise RuntimeError(
+            "%d ports share usb id %s (%s) and this board's open is not "
+            "side-effect free, so probing would reboot bystanders -- pass "
+            "--port explicitly" % (len(cands), want_usb, ", ".join(cands)))
+    if not want_id:
+        raise RuntimeError(
+            "%d ports share usb id %s and %s declares no [board] ota id to "
+            "tell them apart" % (len(cands), want_usb, board_dir))
+    prober = prober or (lambda p: _probe_identity(p, board_dir, log))
+    seen = {}
+    for p in cands:
+        seen[p] = prober(p)
+        log("  probed %s -> %s" % (p, seen[p]))
+        if seen[p] == want_id:
+            return p
+    raise RuntimeError(
+        "no candidate answered as %r: %s -- is that board's desktop running?"
+        % (want_id, ", ".join("%s=%s" % kv for kv in seen.items())))
+
+
+class DeviceError(RuntimeError):
+    """The board answered a `py` command with an exception (or with nothing).
+
+    Carries the device's OWN text, so a failure on the far side is reported by
+    the board's words rather than by the absence of a value."""
+
+
 class P4Board:
     """Serial driver for the P4 desktop's dev commands."""
 
     def __init__(self, port, log=None, timeout=0.2, dtr=None, rts=None,
-                 chunk=None, board_dir=None):
+                 chunk=None, board_dir=None, ser=None):
         """`board_dir` supplies dtr/rts/chunk/attach_only from that board's
         [serial] block; explicit arguments still win. Without one the P4's
-        defaults apply -- it is the board this driver was written for."""
-        ser = declared_serial(board_dir or P4_BOARD_DIR)
+        defaults apply -- it is the board this driver was written for.
+
+        `ser` takes an already-open serial-like object instead of opening the
+        port -- how the host tests drive the reply reader (read/write/flush and
+        a `port` name are the whole contract) with no board on the desk."""
+        decl = declared_serial(board_dir or P4_BOARD_DIR)
         self.log = log if log is not None else (lambda s: None)
-        self.attach_only = bool(ser["attach_only"])
+        self.attach_only = bool(decl["attach_only"])
+        self.expect_board = declared_board_id(board_dir or P4_BOARD_DIR)
+        self.last_error = None    # why the last `py` round trip yielded nothing
+        if ser is not None:
+            self.ser = ser
+            self._init_reader(chunk or decl["chunk"])
+            return
+        if port in (None, "auto"):
+            port = find_port(board_dir or P4_BOARD_DIR, log=self.log)
         if serial is None:
             raise RuntimeError(
                 "driving a board needs pyserial: pip install -e '.[device]'")
@@ -93,13 +281,26 @@ class P4Board:
         #     under the open handle and every read returns nothing forever.
         #     Opening with both HIGH (pyserial's default, what miniterm does)
         #     attaches to the running console cleanly.
-        self.ser.dtr = bool(ser["dtr"]) if dtr is None else dtr
-        self.ser.rts = bool(ser["rts"]) if rts is None else rts
+        want_dtr = bool(decl["dtr"]) if dtr is None else dtr
+        want_rts = bool(decl["rts"]) if rts is None else rts
+        # ORDER, not just state: the kernel raises BOTH lines when the tty
+        # opens, and pyserial then applies dtr before rts. On the CH343 board
+        # lowering DTR while RTS is still raised IS the auto-reset circuit's
+        # EN pulse -- the P4 power-cycled on every open and spent 60s booting
+        # before it could answer. So open with DTR
+        # raised, let pyserial lower RTS, then lower DTR; both end where the
+        # board declared them and reset() still works from that rest state.
+        self.ser.dtr = True
+        self.ser.rts = want_rts
         self.ser.open()
+        if not want_dtr:
+            self.ser.dtr = False
+        self._init_reader(chunk or decl["chunk"])
+
+    def _init_reader(self, chunk):
         self._buf = b""
         self.lines = []           # full transcript (PERF lines included)
         # Per instance, because the boards' rings differ (see declared_serial).
-        chunk = chunk or ser["chunk"]
         if chunk:
             self.CHUNK = int(chunk)
 
@@ -140,7 +341,18 @@ class P4Board:
 
 
     def _pump(self):
-        chunk = self.ser.read(4096)
+        # ASK HOW MUCH IS THERE FIRST. `pyserial.read(n)` loops until it has n
+        # bytes or the port timeout expires -- it does not return early on a
+        # short read -- so `read(4096)` against a board that answered with one
+        # 20-byte line costs the WHOLE 200ms timeout. That is most of the 201ms
+        # a round trip was measured at, and it is paid once per window of a
+        # cart push. `in_waiting` turns the common case into an exact read that
+        # returns at once; read(1) is the wait when nothing has arrived yet.
+        try:
+            avail = min(self.ser.in_waiting, 4096)
+        except Exception:  # noqa: BLE001 -- a fake/closed port: fall back
+            avail = 0
+        chunk = self.ser.read(avail or 1)
         if not chunk:
             return
         self._buf += chunk
@@ -214,7 +426,39 @@ class P4Board:
         if line is None:
             raise RuntimeError("P4 did not reach the desktop after reset")
         self.drain(settle)        # splash + first frames
+        self.verify_board()
         return line
+
+    def identify(self, timeout=6.0):
+        """What the board says it IS: its `_ota_build.BOARD` ("p4"/"tdeck"/
+        "guition_s3" -- the same id a signed OTA manifest names). One short
+        line, so it is chunk-safe on every board. None if it does not answer
+        (channel not armed, or a pre-#53-stamp image)."""
+        got = self.pyval('__import__("_ota_build").BOARD', timeout=timeout)
+        return got if isinstance(got, str) else None
+
+    def verify_board(self, strict=True):
+        """Compare the board's own identity against the board_dir this driver
+        was configured for. A POSITIVE mismatch raises -- driving board A with
+        board B's line discipline, chunk size and expectations is precisely the
+        2026-08-24 bug (a session measured the T-Deck as "the P4" after the
+        ttyACM numbers shuffled). A board that does not ANSWER only warns:
+        identity needs a running desk, and half this driver's callers attach to
+        boards in unknown states."""
+        want = self.expect_board
+        if not want:
+            return None
+        got = self.identify()
+        if got is None:
+            self.log("identity unverified: %s did not answer (expected %r)"
+                     % (self.ser.port, want))
+            return None
+        if got != want and strict:
+            raise RuntimeError(
+                "wrong board on %s: it answers as %r, this driver is set up "
+                "for %r -- the ttyACM numbering has probably shuffled "
+                "(port=auto resolves it)" % (self.ser.port, got, want))
+        return got
 
     # -- verbs ------------------------------------------------------------
 
@@ -287,31 +531,66 @@ class P4Board:
     # fallback for a checkout where board.toml cannot be read.
     CHUNK = declared_chunk()          # the P4's; USB boards pass their own
 
-    def pyval(self, expr, timeout=30.0):
+    def _fail(self, why, strict):
+        """Record why a `py` round trip produced no value -- and, when the
+        caller asked, RAISE it.
+
+        The device answers an exception with its own text (`PY ERR NameError:
+        name 'verify_sig' isn't defined`), and until 2026-08-27 this driver
+        discarded it: a device exception, a lost reply and an unparseable value
+        were all the same None. So the far side asserted `None is False`, named
+        nothing, and three OTA tests were misfiled for a fortnight as a flaky
+        upload while the wire said NameError once per command. Three outcomes,
+        three messages."""
+        self.last_error = why
+        self.log("device: " + why)
+        if strict:
+            raise DeviceError(why)
+        return None
+
+    def pyval(self, expr, timeout=30.0, strict=False):
         """Evaluate a short expression on the device; returns the repr'd value
-        (parsed back with eval) or None if the device raised."""
-        line = self.cmd("py " + expr, wait_for="PY", timeout=timeout) or ""
+        (parsed back with eval), or None if the device raised / never answered.
+
+        `strict=True` raises DeviceError carrying the device's own text instead
+        -- use it wherever None is not a legal answer, which is every caller
+        that goes on to assert on the result. Default False because
+        `identify()` and the probe callers read None as "this board did not
+        answer", which is data."""
+        self.last_error = None
+        line = self.cmd("py " + expr, wait_for="PY", timeout=timeout)
+        if line is None:
+            return self._fail("no reply to `py %s` within %gs"
+                              % (expr[:120], timeout), strict)
         if "PY ERR" in line:
-            self.log("device: " + line.strip())
-            return None
+            return self._fail(line.strip(), strict)
         try:
             return eval(line.split("PY ", 1)[1])   # noqa: S307 (our own repr)
-        except Exception:  # noqa: BLE001
-            return None
+        except Exception as exc:  # noqa: BLE001
+            return self._fail("unparseable reply %r (%s)"
+                              % (line[:120], exc), strict)
 
-    def pyexec(self, code, timeout=30.0):
+    def pyexec(self, code, timeout=30.0, strict=False):
         """Run a multi-line snippet on the device (`ws`/`wm`/`pointer` in scope),
-        uploaded in RX-safe chunks. Returns True if it ran clean.
+        uploaded in RX-safe chunks. Returns True if it ran clean, and leaves the
+        reason on `self.last_error` otherwise (`strict=True` raises it).
 
         Snippets share ONE persistent namespace (`ws._g`), so a later upload can
         use names an earlier one defined. The device's `py` handler builds a
         FRESH env per command, which silently broke composed probes: a helper
         defined by upload A referencing a module imported by upload B raised
         NameError once per frame (measured 2026-07-26 -- an empty profile)."""
+        self.last_error = None
         code = code.strip("\n")
         if len(code) <= self.CHUNK and "\n" not in code:
-            line = self.cmd("py " + code, wait_for="PY", timeout=timeout) or ""
-            return "PY ERR" not in line
+            line = self.cmd("py " + code, wait_for="PY", timeout=timeout)
+            if line is None:
+                self._fail("no reply to `py %s`" % code[:120], strict)
+                return False
+            if "PY ERR" in line:
+                self._fail(line.strip(), strict)
+                return False
+            return True
         self.cmd("py setattr(ws, '_up', {}) or 1", wait_for="PY")
         # NB: plain getattr-or, not ws.__dict__.setdefault -- a MicroPython
         # instance __dict__ is not a full dict (no setdefault; raises TypeError).
@@ -325,18 +604,24 @@ class P4Board:
             line = self.cmd("py ws._up.__setitem__(%d, %r) or 1" % (k, part),
                             wait_for="PY", timeout=timeout) or ""
             if "PY ERR" in line:
-                self.log("upload failed: " + line.strip())
+                self._fail("chunk %d rejected: %s" % (k, line.strip()), strict)
                 return False
         line = self.cmd(
             "py exec(''.join(ws._up[k] for k in sorted(ws._up)), ws._g)",
             wait_for="PY", timeout=timeout) or ""
         if "PY ERR" in line:
-            self.log("device: " + line.strip())
+            self._fail(line.strip(), strict)
             return False
         return True
 
     def perf_lines(self, since=0):
-        return [ln for ln in self.lines[since:] if ln.startswith("PERF ")]
+        """Every PERF sample seen since `since`.
+
+        Through `perf_line.parse_perf`, which strips the diag ring's
+        `Moybyte <uptime> ` stamp: this used to be `startswith("PERF ")`, and
+        the T-Deck rings every sample, so that board's samples were silently
+        dropped by both readers from the day it had any (#206 item 2)."""
+        return [ln for ln in self.lines[since:] if parse_perf(ln) is not None]
 
     # -- geometry helpers -------------------------------------------------
 
@@ -419,7 +704,9 @@ def _tour(board):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--port", default="auto",
+                    help="serial port, or 'auto' (default): resolve from the "
+                         "board's [serial] usb id -- ttyACM numbers shuffle")
     ap.add_argument("--verbose", action="store_true",
                     help="echo every serial line")
     args = ap.parse_args()

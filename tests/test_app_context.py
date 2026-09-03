@@ -7,7 +7,7 @@ declares. These tests are the load-bearing half of that: without them `ctx` is
 merely an ergonomics object, and Phase 7's `make_system_api` has no interface to
 filter.
 
-Four families:
+Five families:
 
   * DECLARED NEEDS -- exact in both directions. Every role an app's source names
     must be declared (or it is an AttributeError at runtime), and every role it
@@ -17,11 +17,18 @@ Four families:
     unused.
   * PERF -- zero `property` forwards, and the role hoist actually applied
     (a counter budget with a lower bound first, the test_top_bar.py idiom).
+  * the ROLE VERBS THEMSELVES, driven against a real tmp_path store and checked
+    on the filesystem (#208 rank 4). Everything above is structural: it pins
+    which roles an app holds and says nothing about what a verb DOES, which is
+    how a dozen of them reached three boards with only their `def` line ever
+    executed.
   * the RATCHET -- no `ws.` left in the migrated modules, and `ctx.shell` (the
     escape hatch) has a pinned, shrink-only consumer list.
 """
 
 import ast
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -32,6 +39,9 @@ RUNTIME = ROOT / "runtime"
 from ws_helpers import build_ws as _ws
 
 from runtime import app_context as _ac
+from runtime import chrome as _chrome
+from runtime import moy_carts as _store
+from runtime import system_api as _api
 from runtime.app_decls import APPS
 
 
@@ -233,12 +243,9 @@ def _quiesce_frame(ws):
     and every redraw-gate assertion reads as a failure of whatever changed last."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
-    au = ws.ach_ui
-    au.egg_msg = None
-    au.egg_until = 0
-    au._confetti_until = 0
+    ws._toast_until = 0
+    ws._egg_until = 0
+    ws._confetti_until = 0
     ws.show_achievements = False
     ws.show_fps = False
     ws.perf_hud = False
@@ -406,6 +413,18 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     assert app._save_failed is False
 
 
+def test_the_no_store_sentinel_renders_as_words(tmp_path):
+    """`_persist` branches on IDENTITY, so nothing formats this today -- which
+    is exactly why it has to stay right. The moment a caller renders the pair
+    instead of branching, a kid reads either NO STORAGE or a repr with a memory
+    address in it."""
+    assert str(_ac.NO_STORE) == "NO STORAGE"
+    ws = _ws(tmp_path)
+    ws.carts_store = None
+    _v, err = ws.app_context("demo", ("files",)).files.save("docs", "x", "y")
+    assert "%s" % (err,) == "NO STORAGE"
+
+
 # -- prefs are namespaced, and the shipped key did not move -------------------
 
 def test_prefs_namespace_defaults_to_the_app_id(tmp_path):
@@ -428,6 +447,431 @@ def test_paints_document_pointer_keeps_its_on_disk_key(tmp_path):
     ws.artwork._set_doc_name("hello")
     assert ws.system.get("paint_doc") == "hello"
     assert ws.artwork.doc_name() == "hello"
+
+
+def test_prefs_writes_and_clears_reach_system_json(tmp_path):
+    """The default `persist=True` path -- the one a real app takes, and the one
+    no test drove. Both halves have to reach the FILE: a cleared key that only
+    left the in-RAM dict is back on the next boot."""
+    ws = _ws(tmp_path)
+    prefs = ws.app_context("demo", ("prefs",)).prefs
+    prefs.set("doc", "sketch_1")
+    assert _system_json(ws)["demo_doc"] == "sketch_1"
+    prefs.clear("doc")
+    assert "demo_doc" not in ws.system
+    assert "demo_doc" not in _system_json(ws)
+
+
+# -- the role verbs, EXECUTED against a real store (#208 rank 4) ---------------
+#
+# Everything above this line is structural: it pins WHICH roles an app holds.
+# A statement-level sweep of the whole suite found TEN verbs on this module
+# whose bodies had never executed -- the seven #208 names (`Files.count`,
+# `Files.empty_trash`, `Files.decode_text`, `_RawFiles.empty_trash`,
+# `Carts.save_deck`, `Carts.images`, `Theme.set_variant`) plus `Files.history`,
+# `_RawFiles.history` and `_NoStore.__str__` -- and two branches nothing
+# reached: `Nav.open_app`'s id resolution and `Prefs.clear`'s persist.
+#
+# So each test below drives the verb and asserts what landed on the FILESYSTEM,
+# not what the call returned -- a listing built by the same module that did the
+# write agrees with itself whether or not the bytes moved.
+
+
+def _system_json(ws):
+    """`system.json` as it is ON DISK -- `ws.system` is the live dict every
+    persist verb also mutates, so reading it back proves nothing about the
+    write."""
+    with open(_store.system_store_path(ws.carts_root)) as fh:
+        return json.load(fh)
+
+
+def _trash_dir(ws, kind):
+    return "%s/%s/%s" % (_store.files_root(ws.carts_root), _store.TRASH_DIR, kind)
+
+
+def _kind_ext(kind):
+    return _store.FILE_KINDS[kind][0]
+
+
+def _files(tmp_path):
+    ws = _ws(tmp_path)
+    return ws, ws.app_context("demo", ("files",)).files
+
+
+def _new_cart(carts, title):
+    """A cart of this test's own making. Borrowing `ws.carts.all[0]` makes an
+    assertion about a cart's FOLDER hostage to whichever seed sorts first --
+    one with a deck.json or an images/ dir would read as a role verb that
+    wrote when it should not have."""
+    cart, err = carts.batch(lambda raw: raw.create(title, type="story"))
+    assert err is None, err
+    return cart
+
+
+# -- ctx.files -----------------------------------------------------------------
+
+def test_files_count_is_the_kinds_item_count_not_its_listing(tmp_path):
+    """`count_files` exists so the Files kinds screen never pays `list_files`'
+    per-item stat+sort just for a badge. The role verb therefore has to return
+    the NUMBER, and it has to track the same directory the listing walks -- a
+    badge that disagrees with the screen behind it is the whole failure mode."""
+    ws, files = _files(tmp_path)
+    assert files.count("docs") == (0, None)
+    for name in ("one", "two", "three"):
+        assert files.save("docs", name, _store.encode_text(name))[1] is None
+    n, err = files.count("docs")
+    assert err is None
+    assert n == 3
+    assert n == len(files.list("docs")[0])
+    assert n == len(os.listdir(_store.file_kind_dir("docs", ws.carts_root)))
+    assert files.delete("docs", "two")[1] is None
+    assert files.count("docs") == (2, None)
+    assert files.count("drawings") == (0, None)     # a kind nobody has written
+    assert files.count("nope")[0] is None           # and a kind that is not one
+
+
+def test_empty_trash_destroys_every_trashed_item_on_disk(tmp_path):
+    """The trash is the kid's recovery bin and EMPTY is the one verb that
+    really destroys, so it must clear every KIND rather than the first one it
+    finds -- and the files have to be gone from the filesystem, not merely
+    absent from a listing the same module builds."""
+    ws, files = _files(tmp_path)
+    assert files.save("docs", "note", _store.encode_text("hi"))[1] is None
+    assert files.save("tables", "grid", "{}")[1] is None
+    assert files.delete("docs", "note")[1] is None
+    assert files.delete("tables", "grid")[1] is None
+    listed, err = files.trash_list()
+    assert err is None and sorted(listed) == [("docs", "note"), ("tables", "grid")]
+    dirs = [_trash_dir(ws, k) for k in ("docs", "tables")]
+    assert [os.listdir(d) for d in dirs] == [["note" + _kind_ext("docs")],
+                                             ["grid" + _kind_ext("tables")]]
+    assert files.empty_trash() == (None, None)
+    assert files.trash_list() == ([], None)
+    for d in dirs:
+        assert os.listdir(d) == [], d
+
+
+def test_empty_trash_is_a_WRITE_and_a_read_only_store_keeps_the_trash(tmp_path):
+    """`can_manage` is False wherever the carts are baked into the image.
+    Routing a destroying verb through `_read` would let such a build wipe a bin
+    it has no business touching, and the `(None, NO_STORE)` pair is what tells
+    the app to say CAN'T SAVE HERE instead of reporting an empty trash."""
+    ws, files = _files(tmp_path)
+    files.save("docs", "note", _store.encode_text("hi"))
+    files.delete("docs", "note")
+    ws.can_manage = False
+    assert files.readable() is True and files.ready() is False
+    assert files.empty_trash() == (None, _ac.NO_STORE)
+    assert os.listdir(_trash_dir(ws, "docs")) == ["note" + _kind_ext("docs")]
+    assert files.trash_list()[0] == [("docs", "note")]     # reads still work
+
+
+def test_stamp_passes_the_blob_through_when_there_is_no_store(tmp_path):
+    """The codec verbs promise not to raise, and `stamp` was the one without a
+    store guard -- on a build with no store it raised AttributeError from inside
+    Paint's copy-on-use path, where every neighbouring call degrades quietly.
+
+    It passes the blob THROUGH rather than returning None, matching what
+    `stamp_provenance` already does with a blob it cannot parse: None here would
+    be handed to the save that follows (artwork.py:1134), losing the drawing."""
+    ws, files = _files(tmp_path)
+    blob = _store.encode_moyimg(1, 1, bytearray([0]))
+    ws.carts_store = None
+    assert files.sig(blob) is None                  # the siblings' degradation
+    assert files.stamp(blob, "drawings", "kite", 7) == blob
+    ws.carts_store = _store
+    stamped = files.stamp(blob, "drawings", "kite", files.sig(blob))
+    assert stamped != blob and "drawings/kite" in stamped
+
+
+def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
+    """`batch(fn)` hands `fn` the RAW view -- bare values, exceptions
+    propagating -- so that no verb name ever has two return shapes. `_RawFiles`
+    is a separate class for exactly that, and its bodies are reachable ONLY
+    this way, so nothing else in the suite executes them."""
+    ws, files = _files(tmp_path)
+    files.save("docs", "note", _store.encode_text("hi"))
+    files.history_commit("docs", "note", [["ins", 1]])
+    files.delete("docs", "note")
+    seen, err = files.batch(lambda raw: (raw.count("docs"),
+                                         raw.trash_list(),
+                                         raw.history("docs", "note"),
+                                         raw.empty_trash(),
+                                         raw.trash_list()))
+    assert err is None
+    assert seen == (0, [("docs", "note")], [], None, [])
+    assert os.listdir(_trash_dir(ws, "docs")) == []
+    # RAW means a failure RAISES -- and `batch`'s one try/except is what turns
+    # it back into the module's `(value, err)`.
+    value, err = files.batch(lambda raw: raw.count("nope"))
+    assert value is None and "nope" in str(err) and err is not _ac.NO_STORE
+
+
+def test_decode_text_reads_a_stored_document_and_never_a_bare_string(tmp_path):
+    """A `.moytext` holds a `moytext-v1` blob, not a string. The codec is on the
+    role so a USER APP writes what Writer and Files can read back -- a bare
+    string decodes to nothing, silently, and looks exactly like a save that did
+    not happen."""
+    ws, files = _files(tmp_path)
+    blob = files.encode_text("HELLO\nWORLD")
+    assert files.save("docs", "greeting", blob)[1] is None
+    stored, err = files.load("docs", "greeting")
+    assert err is None and stored == blob
+    assert files.decode_text(stored) == ["HELLO", "WORLD"]
+    assert files.decode_text("HELLO\nWORLD") == []       # the bare-string trap
+    assert files.decode_text(files.encode_text("")) == []
+    assert files.decode_text("") == [] and files.decode_text(None) == []
+    ws.carts_store = None
+    assert files.decode_text(blob) == []                 # no store, no codec
+
+
+def test_the_history_role_reads_back_what_history_commit_wrote(tmp_path):
+    """#111's op-history sidecar, through the role. `history()` is the raw
+    records; `history_ops()` is the window AFTER the last keyframe, which is
+    the seed an `op_history.History` takes -- a reader that confuses the two
+    re-seeds ops the keyframe already accounts for."""
+    ws, files = _files(tmp_path)
+    files.save("docs", "note", _store.encode_text("hi"))
+    assert files.history("docs", "note") == ([], None)    # no sidecar yet
+    assert files.history_commit("docs", "note", [["ins", 1]],
+                                keyframe={"lines": ["hi"]}) == (None, None)
+    assert files.history_commit("docs", "note", [["ins", 2]]) == (None, None)
+    sidecar = "%s/%s/docs/note%s" % (_store.files_root(ws.carts_root),
+                                     _store.HISTORY_DIR, _store.HISTORY_EXT)
+    assert os.path.exists(sidecar)
+    recs, err = files.history("docs", "note")
+    assert err is None
+    assert [r["t"] for r in recs] == ["kf", "seg", "seg"]
+    assert recs[0]["doc"] == {"lines": ["hi"]}
+    assert files.history_ops("docs", "note") == ([["ins", 1], ["ins", 2]], None)
+    files.history_commit("docs", "note", [["ins", 3]], keyframe={"lines": ["ho"]})
+    assert files.history("docs", "note")[0][-3:][0]["t"] == "kf"
+    assert files.history_ops("docs", "note") == ([["ins", 3]], None)
+
+
+# -- ctx.carts -----------------------------------------------------------------
+
+def test_save_deck_writes_the_deck_into_the_carts_own_folder(tmp_path):
+    """Storybook's authoring verb, and the reason `carts` is a role of its own:
+    it writes into a CART, which is executable content."""
+    ws = _ws(tmp_path)
+    carts = ws.app_context("demo", ("carts",)).carts
+    cart = _new_cart(carts, "Deck Test")
+    deck = '{"format": "moydeck-v1", "pages": []}'
+    assert carts.load_deck(cart) == (None, None)          # never a deck before
+    assert carts.save_deck(cart, deck) == (None, None)
+    path = cart["path"] + "/" + _store.DECK_NAME
+    with open(path) as fh:
+        assert fh.read() == deck
+    assert carts.load_deck(cart) == (deck, None)
+    ws.can_manage = False
+    assert carts.save_deck(cart, "{}") == (None, _ac.NO_STORE)
+    with open(path) as fh:
+        assert fh.read() == deck                          # the refusal wrote nothing
+
+
+def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
+    """`moy_carts.load_images` takes the cart's PATH, so the raw verb accepts a
+    path string as well as a cart dict. Both spellings are live -- and the
+    dict branch is the one that would silently return `{}` for every cart if
+    the unwrap were dropped, because a dict is not a path and a missing
+    `images/` dir is not an error."""
+    ws = _ws(tmp_path)
+    carts = ws.app_context("demo", ("carts",)).carts
+    cart = _new_cart(carts, "Art Test")
+    assert carts.images(cart) == ({}, None)               # no images/ dir yet
+    blob = carts.encode_image(1, 1, [0])
+    assert carts.save_image(cart, "star", blob)[1] is None
+    assert carts.save_image(cart, "moon", blob)[1] is None
+    by_cart, err = carts.images(cart)
+    assert err is None
+    assert sorted(by_cart) == ["moon", "star"] and by_cart["star"] == blob
+    assert carts.images(cart["path"]) == (by_cart, None)
+    assert sorted(os.listdir(cart["path"] + "/" + _store.IMAGES_DIR)) == \
+        ["moon" + _store.IMAGE_EXT, "star" + _store.IMAGE_EXT]
+
+
+# -- ctx.theme -----------------------------------------------------------------
+
+def test_set_variant_flips_the_live_tokens_and_persists_them(tmp_path):
+    """The DARK/LIGHT half of the theme (visual_identity_v1 4.3). Three things
+    have to happen together: `light()` -- the gate every surface's light branch
+    reads -- follows; `ws.theme_colors` is REBOUND, because the launcher's cache
+    keys fold `id(ws.theme_colors)` and the rebind IS the invalidation; and the
+    choice reaches system.json or it is gone at the next boot."""
+    ws = _ws(tmp_path)
+    theme = ws.app_context("demo", ("theme",)).theme
+    assert theme.variant() == "dark" and theme.light() is False
+    before = theme.colors()
+    family = theme.name()
+    theme.set_variant("light")
+    assert theme.variant() == "light" and theme.light() is True
+    assert theme.name() == family                    # the FAMILY does not move
+    assert theme.colors() is not before
+    assert ws.system["theme_variant"] == "light"
+    assert _system_json(ws)["theme_variant"] == "light"
+
+
+def test_set_variant_without_persist_leaves_the_stored_choice_alone(tmp_path):
+    ws = _ws(tmp_path)
+    theme = ws.app_context("demo", ("theme",)).theme
+    theme.set_variant("light")
+    theme.set_variant("dark", persist=False)
+    assert theme.variant() == "dark" and theme.light() is False
+    assert _system_json(ws)["theme_variant"] == "light"
+
+
+def test_an_unknown_variant_falls_back_instead_of_sticking(tmp_path):
+    """It must land on the DEFAULT, not keep the current one: the tokens are
+    looked up by this string on every theme swap, and an unknown value stored
+    in system.json would be re-applied at every boot."""
+    ws = _ws(tmp_path)
+    theme = ws.app_context("demo", ("theme",)).theme
+    theme.set_variant("light")
+    theme.set_variant("purple")
+    assert theme.variant() == _chrome.DEFAULT_VARIANT
+    assert _system_json(ws)["theme_variant"] == _chrome.DEFAULT_VARIANT
+
+
+# -- ctx.nav -------------------------------------------------------------------
+
+def test_nav_opens_a_registered_app_by_id_and_refuses_an_unknown_one(tmp_path):
+    """`open_app` resolves by REGISTERED id so an app never holds a reference
+    to another app's class. That branch is also what `system_api` publishes to
+    a `"launch"`-granted cart, whose argument is a string out of a manifest
+    nobody validated -- so the miss has to be False, not a traceback."""
+    ws = _ws(tmp_path)
+    nav = ws.app_context("demo", ("nav",)).nav
+    assert ws.screen == "launcher"
+    assert nav.app("no_such_app") is None
+    assert nav.open_app("no_such_app") is False
+    assert ws.screen == "launcher"
+    assert nav.app("calc") is ws._apps_by_id["calc"]
+    assert nav.open_app("calc") is True
+    assert ws.screen == "calc"
+
+
+# -- the CART-facing narrowing of ctx.files (system_api.ScopedFiles) -----------
+#
+# tests/test_user_apps.py pins the manifest -> grant FILTER (an ungranted name
+# is absent, a scoped grant cannot name another kind). What no test executed is
+# the granted verbs themselves: `ready`/`load`/`save`/`delete`/`rename`/
+# `duplicate`/`load_text` had never run.
+
+def test_the_scoped_handle_acts_on_its_granted_kind_only(tmp_path):
+    """The kind is bound at construction and is never an argument, so every
+    published verb spells ONE kind -- the granted one. Driven here against a
+    real store so the claim is about where bytes landed."""
+    ws, files = _files(tmp_path)
+    scoped = _api.ScopedFiles(files, "docs")
+    assert scoped.ready() is True
+    assert scoped.save_text("note", "HELLO\nWORLD") == ("note", None)
+    assert scoped.load_text("note") == ("HELLO\nWORLD", None)
+    assert scoped.load("note") == (_store.encode_text("HELLO\nWORLD"), None)
+    assert scoped.save("plain", "{}") == ("plain", None)
+    assert scoped.duplicate("note") == ("note_2", None)
+    assert scoped.rename("note_2", "copy") == ("copy", None)
+    assert sorted(scoped.list()[0]) == ["copy", "note", "plain"]
+    assert scoped.delete("copy") == ("copy", None)
+    assert sorted(scoped.list()[0]) == ["note", "plain"]
+    ext = _kind_ext("docs")
+    assert sorted(os.listdir(_store.file_kind_dir("docs", ws.carts_root))) == \
+        ["note" + ext, "plain" + ext]
+    for kind in ("drawings", "tables", "sprites", "music"):
+        assert files.count(kind) == (0, None), kind
+
+
+def test_the_scoped_handle_degrades_to_NO_STORE_rather_than_raising(tmp_path):
+    """A cart written by a kid must not be able to crash on a missing card, and
+    a try/except around every save is not a thing to teach.
+
+    `save_text`'s own `blob is None -> NO_STORE` guard is an EQUIVALENT MUTANT
+    under this (deleting it still yields `(None, NO_STORE)`): `encode_text`
+    returns None only when there is no store, and `save` is gated on the same
+    readiness, so the guard short-circuits a path that already answers the same
+    way. It is kept as a short-circuit, not as behaviour, and no test can tell
+    the difference."""
+    ws, files = _files(tmp_path)
+    scoped = _api.ScopedFiles(files, "docs")
+    ws.carts_store = None
+    assert scoped.ready() is False
+    assert scoped.save_text("note", "hi") == (None, _ac.NO_STORE)
+    assert scoped.load_text("note") == ("", _ac.NO_STORE)
+    for res in (scoped.list(), scoped.load("note"), scoped.save("note", "x"),
+                scoped.delete("note"), scoped.rename("note", "x"),
+                scoped.duplicate("note"), scoped.new_name()):
+        assert res == (None, _ac.NO_STORE)
+
+
+# -- the cart globals `make_system_api` publishes ------------------------------
+#
+# The same sweep found every one of these closures with a `def` line and no
+# body: the ungated `theme()`/`screen()`/`bar_h()`, and the `"appearance"` and
+# `"launch"` grants. test_user_apps.py pins which NAMES appear for which
+# manifest; nothing called them.
+
+def test_the_ungated_verbs_answer_for_every_app_cart(tmp_path):
+    """`ui`/`theme()`/`screen()`/`bar_h()` are published with no permission at
+    all, because they are not capabilities -- they are how an app draws.
+    `bar_h` exists so a cart stops hardcoding 18 (a documented defect in
+    several seed carts), so it has to answer a number where the host passes no
+    strip rather than raise."""
+    ws = _ws(tmp_path)
+    canvas = ws.sys_canvas
+    ns = _api.make_system_api(ws.app_context, {"title": "Plain"},
+                              canvas=canvas, bar_h=lambda: 18)
+    assert ns["ui"] is not None
+    assert ns["screen"]() is canvas
+    assert ns["bar_h"]() == 18
+    assert ns["theme"]() is ws.theme_colors
+    ws.look.set_theme("berry")
+    assert ns["theme"]() is ws.theme_colors      # live tokens, never a snapshot
+    bare = _api.make_system_api(ws.app_context, {"title": "Plain"})
+    assert bare["screen"]() is None and bare["bar_h"]() == 0
+
+
+def test_the_appearance_grant_publishes_a_working_theme_picker(tmp_path):
+    """READING the theme is ungated; CHANGING it is the `"appearance"` grant.
+    The two published functions are bound verbs and not the role, so a granted
+    cart can restyle the console and reach nothing else through them."""
+    ws = _ws(tmp_path)
+    ns = _api.make_system_api(ws.app_context,
+                              {"title": "Skinner", "permissions": ["appearance"]})
+    assert sorted(ns) == ["bar_h", "screen", "set_theme", "theme", "themes", "ui"]
+    # NAMES, one per installed theme -- the round trip the docstring promises,
+    # since `set_theme` takes a name and falls back to DEFAULT_THEME silently on
+    # anything else. Feeding the picker's own output back is the case that used
+    # to always land on "night".
+    assert ns["themes"]() == [n for n, _t in _chrome.THEMES]
+    for name in ns["themes"]():
+        ns["set_theme"](name)
+        assert ws.look.theme_name == name
+    ns["set_theme"]("berry")
+    assert ws.look.theme_name == "berry"
+    assert ns["theme"]() is ws.theme_colors
+    assert _system_json(ws)["theme"] == "berry"
+
+
+def test_the_launch_grant_opens_apps_by_id_and_nothing_else(tmp_path):
+    ws = _ws(tmp_path)
+    ns = _api.make_system_api(ws.app_context,
+                              {"title": "Jumper", "permissions": ["launch"]})
+    assert "open_app" in ns
+    assert "set_theme" not in ns and "files" not in ns and "prefs" not in ns
+    assert ns["open_app"]("no_such_app") is False
+    assert ws.screen == "launcher"
+    assert ns["open_app"]("calc") is True
+    assert ws.screen == "calc"
+
+
+def test_an_untitled_cart_still_gets_a_stable_prefs_namespace():
+    """`app_id_for` keys an app's prefs namespace and its crash-guard strikes.
+    An empty id would put a bare `_scroll` into the shell's own settings dict,
+    beside `theme` and `font_scale`."""
+    assert _api.app_id_for(None) == "app"
+    assert _api.app_id_for({}) == "app"
+    assert _api.app_id_for({"title": ""}) == "app"
+    assert _api.app_id_for({"title": "My Notes!"}) == "my_notes"
 
 
 # -- the LEAVING hook is a host guarantee -------------------------------------
@@ -468,7 +912,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
 
     demo = Demo()
     ws.register_app(demo)
-    ws.open_app(demo, cart=ws._all_carts[0])
+    ws.open_app(demo, cart=ws.carts.all[0])
     assert ws.screen == "leaver"
     ws.go_home()
     assert ws.screen == "launcher"

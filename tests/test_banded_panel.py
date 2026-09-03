@@ -440,18 +440,22 @@ def board_panel(module_name, native_name, modules_dir, lcd):
 
 
 class FoldingLcd(FakeLcd):
-    """`moy_axs`'s shape: the banded verb set plus the #190-cousin game fold."""
+    """A panel module with the GAME FOLD verbs -- `moy_axs`'s shape, and
+    `moy_lcd`'s too. The `fold_stats` tuples differ in LENGTH
+    between the two (the Guition counts game-windowed flushes; the T-Deck has
+    no window to count), which is exactly why the Python only ever reads [0]."""
 
-    def __init__(self, folded=0, **kw):
+    def __init__(self, folded=0, stats_len=4, **kw):
         FakeLcd.__init__(self, **kw)
         self.folded = folded
+        self._stats_len = stats_len
 
     def fold_stats(self):
-        # (frames_folded, armed, inflight, windowed) -- modmoy_axs.c
-        return (self.folded, False, False, 0)
+        # (frames_folded, armed, inflight[, windowed]) -- modmoy_axs.c / modmoy_lcd.c
+        return (self.folded, False, False, 0)[:self._stats_len]
 
-    def arm_fold(self, src, vw, vh, ox, oy):
-        self._log("arm_fold", (vw, vh, ox, oy))
+    def arm_fold(self, src, vw, vh, ox, oy, scale=1):
+        self._log("arm_fold", (vw, vh, ox, oy, scale))
 
     def disarm_fold(self, i):
         self._log("disarm_fold", i)
@@ -460,13 +464,21 @@ class FoldingLcd(FakeLcd):
         self._log("fold_fence")
 
 
-def test_the_guition_fold_counter_is_LIVE_and_reads_the_C():
+@pytest.mark.parametrize("board,native,modules,cls,stats_len", [
+    ("guition_panel", "moy_axs", GUITION_MODULES, "GuitionCompositor", 4),
+    ("tdeck_panel", "moy_lcd", TDECK_MODULES, "TDeckCompositor", 3),
+])
+def test_the_fold_counter_is_LIVE_and_reads_the_C(board, native, modules, cls,
+                                                  stats_len):
     """`device_diag._diag_pump` reads `getattr(comp, "fold_count", 0)`, and a
     getattr default silently taken forever is the failure mode -- so this
-    asserts both halves: the attribute EXISTS, and it MOVES."""
-    lcd = FoldingLcd(folded=5763)
-    with board_panel("guition_panel", "moy_axs", GUITION_MODULES, lcd) as gp:
-        comp = gp.GuitionCompositor()
+    asserts both halves: the attribute EXISTS, and it MOVES.
+
+    BOTH boards carry it (`native/moy_flush/moy_fold`). A board whose module
+    lacks the verbs is covered below."""
+    lcd = FoldingLcd(folded=5763, stats_len=stats_len)
+    with board_panel(board, native, modules, lcd) as mod:
+        comp = getattr(mod, cls)()
         lcd.comp = comp
 
         assert comp.fold_supported is True
@@ -476,24 +488,69 @@ def test_the_guition_fold_counter_is_LIVE_and_reads_the_C():
             "fold_count must read the C every time: a frozen number is exactly "
             "the symptom (something disarming every frame) the meter "
             "distinguishes from a healthy fold")
-
-
-def test_the_tdeck_declares_no_fold_at_all():
-    """The T-Deck has no fold lever and must carry NO fold attribute: absence is
-    how a board says so, and `fold=0` on its PUMP line is only distinguishable
-    from a broken fold because the board that HAS one defines the name."""
-    lcd = FakeLcd()
-    with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, lcd) as tp:
-        comp = tp.TDeckCompositor()
-        lcd.comp = comp
-
-        assert not hasattr(comp, "fold_supported")
-        assert not hasattr(comp, "fold_count")
-        # ...and it inherits the shared frame machine unmodified.
+        # ...and the shared frame machine is inherited unmodified.
         assert comp.bounce_stats() == PUMP
         lcd.calls.clear()
         comp.flush()
         assert lcd.names() == ["drain", "kick"]
+
+
+@pytest.mark.parametrize("board,native,modules,cls", [
+    ("guition_panel", "moy_axs", GUITION_MODULES, "GuitionCompositor"),
+    ("tdeck_panel", "moy_lcd", TDECK_MODULES, "TDeckCompositor"),
+])
+def test_the_arm_passes_the_scale_through_and_falls_back_when_refused(
+        board, native, modules, cls):
+    """Scale is the fold's argument, not a case it declines: folding scale 1
+    alone would drop a 480x320 board running a 128px cart at 2x onto a full CPU
+    composite every frame.
+
+    A REFUSAL still has to be invisible one level up, so a module that raises
+    must leave the root holding the composite `blit_game` skipped."""
+    lcd = FoldingLcd()
+    with board_panel(board, native, modules, lcd) as mod:
+        comp = getattr(mod, cls)()
+        lcd.comp = comp
+        src = FB(9)
+
+        lcd.calls.clear()
+        comp.arm_scale_fold(src, 128, 128, 112, 32, 2)
+        assert lcd.calls == [("arm_fold", (128, 128, 112, 32, 2), 0)]
+
+        # The C refuses geometry its feeder-side synthesis cannot express.
+        def refuse(*_a, **_k):
+            raise ValueError("fold geometry")
+        lcd.arm_fold = refuse
+        gfx = _RecordingGfx()
+        comp._gfx = gfx
+        comp.arm_scale_fold(src, 128, 128, 112, 32, 2)
+        assert gfx.calls[0][0] == "fill"
+        assert gfx.calls[1] == ("blit565_scale", (comp._w, comp._h, 112, 32,
+                                                  128, 128, 2))
+
+
+def test_a_banded_module_without_the_verbs_degrades():
+    """`fold_supported` is probed by `DeviceCanvas.blit_game`; a panel module
+    older than this Python must take the ordinary root composite rather than
+    raising on the first play frame."""
+    lcd = FakeLcd()                     # no arm_fold / fold_stats at all
+    with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, lcd) as tp:
+        comp = tp.TDeckCompositor()
+        lcd.comp = comp
+        assert comp.fold_supported is False
+
+
+class _RecordingGfx:
+    """The two `moy_gfx` kernels the arm's fallback composite uses."""
+
+    def __init__(self):
+        self.calls = []
+
+    def fill(self, buf, npix, col):
+        self.calls.append(("fill", (npix, col)))
+
+    def blit565_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale):
+        self.calls.append(("blit565_scale", (dw, dh, dx, dy, sw, sh, scale)))
 
 
 # -- the consumers: a meter nobody can read is not a meter ---------------------
@@ -598,6 +655,14 @@ class FakeWM:
     _stack = ["home"]
 
 
+class _FakeCarts:
+    """`ws.carts` narrowed to the one member `_remote_state` reads (#209
+    landing C): the roster is a plain attribute on the collaborator now."""
+
+    def __init__(self):
+        self.all = []
+
+
 class FakeWS:
     """The `_remote_state` surface, plus a compositor -- which is what a board
     with no `device_diag` has to read its flush meters through."""
@@ -607,7 +672,7 @@ class FakeWS:
         self.comp = comp
         self.screen = "home"
         self.wifi = None
-        self._all_carts = []
+        self.carts = _FakeCarts()
         self._apps = ()
         self._psave_ms = 0
         self._psave_asleep = False
@@ -653,6 +718,8 @@ def test_the_shared_body_is_what_both_boards_subclass():
     tdeck = (TDECK_MODULES / "tdeck_panel.py").read_text(encoding="utf-8")
     guition = (GUITION_MODULES / "guition_panel.py").read_text(encoding="utf-8")
     for src in (tdeck, guition):
-        assert "from banded_panel import BandedCompositor" in src
-        assert "BandedCompositor.__init__(self," in src
+        # Both boards fold, so both take the FoldingCompositor rung; the base
+        # is what a banded board without the lever would subclass.
+        assert "from banded_panel import FoldingCompositor" in src
+        assert "FoldingCompositor.__init__(self," in src
     assert banded_panel.__file__.endswith("device/banded_panel.py")

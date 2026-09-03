@@ -33,12 +33,18 @@ mkdir -p "${BUILD_DIR}" "${DIST_DIR}"
 
 # ---------------------------------------------------------------------------
 # 1) Toolchain: our OWN MicroPython checkout (sharing one would race the other
-#    boards' sed-patched esp32_common.cmake), ESP-IDF v5.5.1 reused from
-#    whichever sibling has one.
+#    boards' sed-patched esp32_common.cmake), and ESP-IDF v5.5.1 reused from
+#    the P4, which owns the shared checkout (see its build.sh) -- falling back
+#    to a clone of our own, which is what happens on every CI runner.
+#
+#    The T-Deck's checkout used to be the first candidate here and is DELETED:
+#    it was the fork era's own clone, orphaned when the shared build lib
+#    (2026-08-17) pointed the T-Deck's build at the P4's, and this board's
+#    CMake cache had pinned CMAKE_TOOLCHAIN_FILE into it -- an entry CMake will
+#    not re-point after the first configure. Name one owner, in one direction.
 # ---------------------------------------------------------------------------
 moybyte_clone_micropython
 moybyte_setup_idf esp32s3 \
-  "${REPO_ROOT}/firmware/lilygo_t_deck_plus_mainline/.build/esp-idf" \
   "${REPO_ROOT}/firmware/esp32_p4_wifi6_touch_lcd_7b/.build/esp-idf"
 
 # ---------------------------------------------------------------------------
@@ -52,9 +58,11 @@ moybyte_setup_idf esp32s3 \
 # 2a) REPR_C unboxed floats (#66) -- the same chip-class lever the T-Deck
 #     measured; same S3, same boxing cost.
 moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # 2b) Un-static esp_native_code_free_all (#66) -- shared with both siblings.
 moybyte_patch_native_code_free
+moybyte_patch_espnow_ring_race
 
 # 2c) PSRAM temperature retune (#169) -- REQUIRED by the 120MHz MSPI profile in
 #     sdkconfig.board (adopted 2026-08-19).
@@ -68,7 +76,12 @@ moybyte_patch_psram_retune
 moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 
-"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"
+#    carts_data.py is built from system_carts/ so the seed + embedded-fallback
+#    carts can never drift from the host source of truth. PACKED (2026-08-30):
+#    one raw-deflate blob per cart instead of 732 KB of literal source, because
+#    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
+#    decoder off the roster's FORM, so nothing else in the boot changed.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
 #    The OTA identity stamp (#53): a fresh board id -- an OTA payload is an
 #    app-partition image and the manifest is per board.

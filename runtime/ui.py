@@ -237,10 +237,11 @@ def state_token(th, role, fallback=None):
 
 # --- the skin: the LOOK and the NUMBERS, as data ------------------------------
 #
-# Phase 4 (docs/ui_refactor_2026-08.md Section 3; docs/ui_widgets_2026-08.md
-# Section 3.3). Everything a widget draw used to hardcode -- per-state colours,
-# pads, edge weights, strip heights, icon boxes, label alignment -- is two
-# tables here, and a skin is a DELTA over them:
+# Phase 4 (docs/history/ui_refactor_2026-08.md Section 3;
+# docs/history/ui_widgets_2026-08.md Section 3.3). Everything a widget draw
+# used to hardcode -- per-state colours, pads, edge weights, strip heights,
+# icon boxes, label alignment -- is two tables here, and a skin is a DELTA
+# over them:
 #
 #   _SPECS[kind][state] -> a (field, ink, edge) triple of token SPECS, resolved
 #       against one theme ONCE into _FLAT[kind][state], a triple of concrete
@@ -412,6 +413,58 @@ _CELL_BAND_STATES = {
 }
 
 
+# The panel-CHROME rows (#207). `_ROW_STATES` cannot express them and no theme
+# aliasing can bend it into them, for two reasons that compound: its rest field
+# spec is `("panel", 60)`, so a row of that kind ALWAYS paints a field, while a
+# row drawn on chrome paints none until it is selected; and its ink is
+# `_TITLE_INK` in both rest and selected, while these need two different roles.
+# So they are their own kinds, and `row(kind=...)` is how a surface asks for
+# one. Every triple below is transcribed from the hand-built `colors=` argument
+# it replaced -- pinned theme set by theme set in tests/test_skin.py, because
+# `ink_dim` and `chrome_ink_dim` agree on eleven of the twelve sets and differ
+# on machine/dark, which is exactly why "row_list" and "row_menu" are two
+# entries and not one.
+_HILITE = ("hilite", 13)          # NOT _SELECTION: `machine` defines both, apart
+_CHROME_INK = ("chrome_ink", _WHITE)
+_CHROME_DIM = ("chrome_ink_dim", 6)
+_SEL_INK = ("selection_ink", _WHITE)
+
+
+def _chrome_row_states(rest_ink):
+    """A row that paints NO field until it is the selected one. `rest_ink` is
+    the ink family it rests in; the selected look -- the theme's selection wash
+    with the ink that reads on it -- is the same either way, because "selected"
+    is one idea in this shell and it should not have two palettes."""
+    return {
+        REST:     (None, rest_ink, None),
+        HOVER:    (None, rest_ink, _HOVER_CUE),
+        ON:       (_HILITE, _SEL_INK, None),
+        HOT:      (_DANGER, _WHITE, _DIM),
+        PRESSED:  (_PRESS, _PRESS_INK, None),
+        DISABLED: (None, _DIS_INK, None),
+    }
+
+
+# The bright variant: the label IS the content, so it reads at full strength and
+# dims only when the row is unusable (the achievements list -- earned reads,
+# locked greys out; the Config tab's cards).
+_ROW_CHROME_STATES = _chrome_row_states(_CHROME_INK)
+_ROW_CHROME_STATES[DISABLED] = (None, _CHROME_DIM, None)
+
+# A CALL-TO-ACTION row (Storybook's "+ NEW STORY"): a filled invitation that
+# lifts to the accent when it is the selected row, with ink dark enough to read
+# on both -- a literal, because the field is a colour the theme picked and the
+# label has to survive it.
+_ROW_CTA_STATES = {
+    REST:     (_HILITE, _BLACK, _DIM),
+    HOVER:    (_HILITE, _BLACK, _HOVER_CUE),
+    ON:       (_ACCENT, _BLACK, _ACCENT),
+    HOT:      (_DANGER, _WHITE, _DIM),
+    PRESSED:  (_PRESS, _PRESS_INK, _ACCENT),
+    DISABLED: (_HILITE, _DIS_INK, _DIM),
+}
+
+
 def _button_states(bg, ink):
     """One `button` variant's six states. The Open Machine STUDIO vocabulary:
     a filled field with a hard BLACK edge, whose state deltas (accent when on,
@@ -443,6 +496,11 @@ DEFAULT_SPECS = {
     "cell":          _ROW_STATES,
     "cell_band":     _CELL_BAND_STATES,
     "chip":          _CHIP_STATES,
+    # The shell's own row kinds, asked for by name through `row(kind=...)`.
+    "row_menu":      _chrome_row_states(_CHROME_DIM),   # Settings + popup lists
+    "row_list":      _chrome_row_states(_INK_DIM),      # a panel's own lists
+    "row_chrome":    _ROW_CHROME_STATES,                # item lists
+    "row_cta":       _ROW_CTA_STATES,                   # the filled invitation
     "button":        _button_states(("surface", _WHITE), ("ink", _BLACK)),
     "button_play":   _button_states(("play", _WHITE), _WHITE),
     "button_author": _button_states(("author", _WHITE), _BLACK),
@@ -954,8 +1012,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
 # trying to own every picture.
 
 
-def row(cv, th, rect, label, on=False, hot=False, disabled=False, state=None,
-        colors=None, icon_img=None, glyph=None, glyph_draw=None,
+def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
+        state=None, colors=None, icon_img=None, glyph=None, glyph_draw=None,
         value=None, value_ink=None, edge=True, pad=None, text_dy=None,
         hits=None, verb=None, arg=None, fs=None, pad_right=None, scale=1,
         glyph_ink=None, glyph_size=None):
@@ -983,10 +1041,20 @@ def row(cv, th, rect, label, on=False, hot=False, disabled=False, state=None,
                  right column instead of escaping the rect.
       `edge`     draw the resolved edge as a border (Files/Storybook) or not
                  (Settings, the system menu popup). Its WEIGHT is skin metrics.
+      `kind`     which skin entry to resolve against, as `button`'s `kind` is
+                 (there is no name map here: a row's kind IS the catalog key).
+                 The default is the list-row palette every caller had before
+                 this argument existed. The shell's own row kinds are in
+                 `DEFAULT_SPECS` beside it -- "row_menu" and friends, the
+                 panel-CHROME rows that paint NO field until they are selected,
+                 which this kind cannot express because its rest field spec is
+                 always a colour.
       `colors`   an explicit (field, ink, edge) triple, bypassing the skin --
                  the escape hatch for sites whose pixels are frozen off-token
                  (Storybook's literal 7/0 rows, `cards_layer`'s own palette).
-                 `field` None paints no field at all.
+                 `field` None paints no field at all. Reach for `kind` first:
+                 a colour that is a widget STATE belongs in the catalog, and
+                 #207 is the triage that moved ten such sites out of here.
       `glyph_ink`/`glyph_size`  the leading glyph's colour and box, when it is
                  not the label's ink at the skin's box (a bright badge beside
                  quiet text; a 16x16 egg).
@@ -1006,7 +1074,7 @@ def row(cv, th, rect, label, on=False, hot=False, disabled=False, state=None,
         state = hits.state_of(verb, arg)
     st = widget_state(on, hot, disabled, state)
     if colors is None:
-        colors = state_colors(th, "row", st)
+        colors = state_colors(th, kind, st)
     field, ink, edge_c = colors
     m = _METRICS["row"]
     if field is not None:
@@ -1097,10 +1165,11 @@ def cell_art_rect(rect, fs=1, pad=None, caption_h=0):
             max(0, h - pad - caption_h))
 
 
-def cell(cv, th, rect, label=None, on=False, hot=False, disabled=False,
-         state=None, colors=None, band=False, band_fill=None, band_ink=None,
-         pad=None, caption_h=None, icon_img=None, glyph=None, glyph_draw=None,
-         fs=None, text_dx=None, text_dy=None, edge_last=False):
+def cell(cv, th, rect, label=None, kind="cell", on=False, hot=False,
+         disabled=False, state=None, colors=None, band=False, band_fill=None,
+         band_ink=None, pad=None, caption_h=None, icon_img=None, glyph=None,
+         glyph_draw=None, fs=None, text_dx=None, text_dy=None,
+         edge_last=False):
     """One grid cell: [field] [caption] [edge] + a centred icon/glyph, and
     RETURNS the art rect for the caller's own picture.
 
@@ -1134,6 +1203,7 @@ def cell(cv, th, rect, label=None, on=False, hot=False, disabled=False,
                    drawn once `cell` has returned; a caller that needs the
                    frame on top of its picture passes `colors=(f, i, None)`
                    and stamps the border itself.)
+      `kind`       which skin entry to resolve against, as `row`.
       `colors`     an explicit (field, ink, edge) triple, as `row`.
 
     Default draw order is field -> caption -> edge -> icon/glyph, so the
@@ -1147,7 +1217,7 @@ def cell(cv, th, rect, label=None, on=False, hot=False, disabled=False,
     x, y, w, h = rect
     st = widget_state(on, hot, disabled, state)
     if colors is None:
-        colors = state_colors(th, "cell", st)
+        colors = state_colors(th, kind, st)
     field, ink, edge_c = colors
     m = _METRICS["cell"]
     if pad is None:

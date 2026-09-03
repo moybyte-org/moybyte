@@ -291,7 +291,7 @@ def test_without_the_permission_the_files_name_is_ABSENT(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Sneaky", NOTES_SRC, perms=["graphics", "input", "prefs"])
     ws = _ws(tmp_path)
-    cart = next(c for c in ws._all_carts if c["title"] == "Sneaky")
+    cart = next(c for c in ws.carts.all if c["title"] == "Sneaky")
     ws._open_workspace(cart)
     # Player.start directly, because the launcher path throws a failed start
     # straight into the code editor (crash-to-code) and RELEASES the world --
@@ -395,7 +395,7 @@ def test_an_identity_cart_of_a_shipped_app_is_not_a_user_app(tmp_path):
     must not be handed the user-app surface, and it must not take crash
     strikes for a body nobody runs."""
     ws = _ws(tmp_path)
-    calc = next(c for c in ws._all_carts if c["title"] == "Calc")
+    calc = next(c for c in ws.carts.all if c["title"] == "Calc")
     assert ws.is_user_app(calc) is False
     assert ws.cart_broken(calc) is False
 
@@ -468,7 +468,7 @@ def test_a_responsive_app_cart_is_told_when_the_surface_changes(tmp_path):
     _frames(ws)
     seen = ws.player.ns["seen"]
     assert seen == [(800, 480, 2)]
-    ws.set_font_scale(3, persist=False)
+    ws.look.set_font_scale(3, persist=False)
     _frames(ws, 2)
     assert seen[-1] == (800, 480, 3)
     _frames(ws, 3)
@@ -520,7 +520,7 @@ def test_the_desk_world_keeps_a_responsive_cart_on_the_fixed_raster(tmp_path):
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
     ws.open_desk()
     assert ws.windowed_chrome is True
-    cart = next(c for c in ws._all_carts if c["title"] == "Flexy")
+    cart = next(c for c in ws.carts.all if c["title"] == "Flexy")
     ws._open_workspace(cart)
     ws.run(ws.project, ws.launcher_layer)
     assert ws.player.start(ws.project) is True
@@ -594,15 +594,18 @@ def test_the_guard_disables_after_three_unhealed_opens():
     assert g.arm("app") is True
 
 
-def test_the_guard_holds_state_across_a_rebound_store():
-    """`load_system()` REBINDS `ws.system`, so the guard must read the store
-    through a callable. A guard holding the boot-time dict counts strikes into
-    an object nobody persists -- i.e. silently does nothing."""
-    holder = {"system": {}}
-    g = CrashGuard(lambda: holder["system"])
+def test_the_guard_holds_state_across_a_reload():
+    """The guard holds the settings DICT, not a callable that fetches it -- so
+    a reload has to arrive IN that object. `SystemStore.load()` clears and
+    updates in place for exactly this reason (#209 landing B); a load that
+    rebound the name instead would leave the guard counting strikes into an
+    orphan nobody persists, silently."""
+    settings = {}
+    g = CrashGuard(settings)
     g.arm("app")
-    carried = holder["system"][crash_guard.KEY]
-    holder["system"] = {crash_guard.KEY: carried}      # what load_system does
+    carried = settings[crash_guard.KEY]
+    settings.clear()                                   # what SystemStore.load does
+    settings.update({crash_guard.KEY: carried})
     assert g.strikes("app") == 1
 
 
@@ -662,7 +665,7 @@ def test_a_cart_that_raises_on_every_open_is_disabled_after_three(tmp_path):
         assert ws.player.cart_error is not None, i
         assert "always broken" in ws.player.cart_error, ws.player.cart_error
         assert ws.app_guard.strikes("boomy") == i + 1
-    boomy = next(c for c in ws._all_carts if c["title"] == "Boomy")
+    boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
     ws.go_home()
     _open(ws, "Boomy")
@@ -682,7 +685,7 @@ def test_the_strikes_survive_a_reboot(tmp_path):
         assert ws.player.cart_error is not None
     ws = _ws(tmp_path)
     assert ws.app_guard.strikes("boomy") == 3
-    boomy = next(c for c in ws._all_carts if c["title"] == "Boomy")
+    boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
 
 
@@ -696,7 +699,7 @@ def test_a_broken_app_stays_editable_in_the_picker(tmp_path):
         ws.go_home()
         _open(ws, "Boomy")
     ws.go_home()
-    titles = [it.get("title") for it in ws._picker_items(ws._all_carts)]
+    titles = [it.get("title") for it in ws._picker_items(ws.carts.all)]
     assert "Boomy" in titles
 
 
@@ -726,7 +729,7 @@ def test_editing_the_code_forgives_a_struck_out_app(tmp_path):
     for _ in range(3):
         ws.go_home()
         _open(ws, "Boomy")
-    boomy = next(c for c in ws._all_carts if c["title"] == "Boomy")
+    boomy = next(c for c in ws.carts.all if c["title"] == "Boomy")
     assert ws.cart_broken(boomy) is True
 
     # The fourth open is refused -- and lands on the panel whose bar edits it.

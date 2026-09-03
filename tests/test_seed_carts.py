@@ -144,7 +144,7 @@ def test_platformer_falling_off_respawns(tmp_path):
     _open_cart(ws, "Hop Quest")
     spawn = ws.ns["spawn"]
     ts = ws.ns["TS"]
-    ws.ns["py"] = float(len(ws.ns["LEVEL"]) * ts + 200)   # well below the level
+    ws.ns["py"] = float(ws.ns["MH"] * ts + 200)           # well below the level
     ws.input.begin_frame()
     ws.frame(1 / 30)
     assert ws.ns["py"] == float(spawn[1] * ts)            # back at the spawn tile
@@ -153,14 +153,24 @@ def test_platformer_falling_off_respawns(tmp_path):
 def test_platformer_level_rows_are_equal_width():
     # The invisible side walls depend on every row being the same length; ragged
     # rows used to give some rows a wall 1 col closer than others (#19 review).
+    # The level is the TILEMAP now, not a string grid in main.py, so this reads the
+    # blob the Map editor writes and pins it against the cart's OWN MW/MH rather than
+    # a literal here -- re-authoring the level stays free, while a blob that disagrees
+    # with the constants (the shape a resize leaves behind) is caught.
     import re
 
     src = (SYSTEM_CARTS / "platformer.moy" / "main.py").read_text(encoding="utf-8")
-    block = src.split("LEVEL = [", 1)[1].split("]", 1)[0]
-    rows = re.findall(r'"([^"]*)"', block)
-    assert rows, "could not parse the LEVEL map"
+    mw = int(re.search(r"^MW = (\d+)", src, re.M).group(1))
+    mh = int(re.search(r"^MH = (\d+)", src, re.M).group(1))
+    blob = (SYSTEM_CARTS / "platformer.moy" / "map.moymap").read_text(encoding="utf-8")
+    lines = [ln.strip() for ln in blob.split("\n") if ln.strip()]
+    assert lines, "empty map.moymap"
+    assert lines[0].split() == [str(mw), str(mh)], (
+        "map header %r disagrees with main.py MW/MH (%d x %d)" % (lines[0], mw, mh))
+    rows = lines[1:]
+    assert len(rows) == mh, "expected %d rows, got %d" % (mh, len(rows))
     widths = {len(r) for r in rows}
-    assert widths == {20}, "ragged LEVEL rows, widths seen: " + repr(sorted(widths))
+    assert widths == {mw * 2}, "ragged map rows, widths seen: " + repr(sorted(widths))
 
 
 def test_platformer_attract_collects_coins_and_completes(tmp_path):
@@ -227,11 +237,26 @@ def test_tap_red_scores_red_and_penalizes_other(tmp_path):
 # assert the sheet the editor loads is non-empty and the cart still runs.
 
 # Folder -> the sprite tile ids its sprites.moygfx must paint (the editor surface).
+# The first pass converted the HEROES; the 2026-09 pass converted what the hero
+# interacts with -- the collectible, the obstacle and the goal were still circ/rect
+# in code, which is the same defect one rung down.
 CONVERTED_SHEETS = {
-    "pet": (0, 1, 2),            # frog / cat / robot pet faces
-    "tiny_runner": (0, 1),       # two runner heroes
-    "platformer": (0, 1),        # two hop heroes
+    "pet": (0, 1, 2, 3, 6),      # pet faces, then the mood face and the care heart
+    "tiny_runner": (0, 1, 2, 32),   # runner heroes, a cactus, the parallax hill
+    "platformer": (0, 1, 3, 5),  # hop heroes, the coin, the goal flag
+    "star_catcher": (0, 1, 2, 3, 6),   # catchers, star, basket span, life heart
+    "scroll_demo": (0, 3, 6, 32, 34, 38),  # both heroes, coin, tree, cloud, flag
+    "harpoon_pop": (0, 2, 5, 8, 12, 64),   # both hunters, then one tile per bubble size
+    "letter_blitz": (1, 2, 3, 16, 18),     # brick, turret, star, the two tank spans
+    "ray_test": (1, 2, 3, 4),    # one wall texture per map digit; +16 is its dim face
+    "ray_lua": (1, 2, 3, 4),
 }
+# Letter Blitz is the partial case worth stating: its PROPS are sheet tiles above,
+# but its 26 letters deliberately stay GLYPH_ROWS in main.py -- the trace bonus
+# reads which pixels are ink and no verb reads the sheet back (there is no sget),
+# so a sheet copy would be a second source of truth, not an editable one.
+GLYPH_DATA_CARTS = {"letter_blitz": "GLYPH_ROWS"}
+
 # Tap Only Red stays PRIMITIVE on purpose: its bubbles are variable-radius
 # circles whose color IS the gameplay (red vs lure), set per-bubble at spawn --
 # a fixed 8x8 tile can't express that, so it has no sprites.moygfx.
@@ -258,11 +283,30 @@ def test_primitive_cart_has_no_sprite_sheet():
         assert not (SYSTEM_CARTS / (folder + ".moy") / "sprites.moygfx").exists(), folder
 
 
+def test_glyph_data_carts_keep_their_table_in_source():
+    # The one table that must NOT become sheet tiles: the cart reads its pixels as
+    # DATA, and nothing reads the sheet back, so moving it would fork the source.
+    for folder, name in GLYPH_DATA_CARTS.items():
+        src = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
+        assert name + " = {" in src, "%s lost %s" % (folder, name)
+
+
+def test_converted_carts_draw_no_hand_rolled_art():
+    # The pass this ratchet records: the collectible/obstacle/goal art moved out of
+    # main.py, so these carts no longer reach for a primitive where a tile belongs.
+    for folder in ("platformer", "star_catcher", "scroll_demo", "harpoon_pop"):
+        src = (SYSTEM_CARTS / (folder + ".moy") / "main.py").read_text(encoding="utf-8")
+        assert "spr(" in src, folder + " draws no sprites"
+
+
 def test_converted_carts_load_their_sheet_and_run_headless(tmp_path):
     from runtime import host_app
 
     title_for = {"pet": "Pixel Pet", "tiny_runner": "Tiny Runner",
-                 "platformer": "Hop Quest"}
+                 "platformer": "Hop Quest", "star_catcher": "Star Catcher",
+                 "scroll_demo": "Sky Run", "harpoon_pop": "Harpoon Pop",
+                 "letter_blitz": "Letter Blitz", "ray_test": "Ray Test",
+                 "ray_lua": "Ray Lua"}
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     for folder, tiles in CONVERTED_SHEETS.items():
         _open_cart(ws, title_for[folder])
@@ -403,8 +447,9 @@ def test_harpoon_pop_harpoon_pops_and_splits(tmp_path):
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 2]]     # one size-2 bubble, centred
-    ns["px"] = 160.0 - ns["PW"] / 2                      # player directly under it
-    ns["harpoon"] = None
+    hu = ns["hunters"][0]
+    hu[ns["H_X"]] = 160.0 - ns["PW"] / 2                 # player directly under it
+    hu[ns["H_ROPE"]] = None
     ns["score"] = 0
     ws.input.set_held("a", True)                         # fire
     ws.input.begin_frame()
@@ -427,8 +472,9 @@ def test_harpoon_pop_smallest_bubble_pops_outright(tmp_path):
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
     ns["bubbles"][:] = [[160.0, 120.0, 0.0, 0.0, 0]]     # a size-0 bubble
-    ns["px"] = 160.0 - ns["PW"] / 2
-    ns["harpoon"] = None
+    hu = ns["hunters"][0]
+    hu[ns["H_X"]] = 160.0 - ns["PW"] / 2
+    hu[ns["H_ROPE"]] = None
     for _ in range(4):                                   # fire and let it rise
         ws.input.set_held("a", True)
         ws.input.begin_frame()
@@ -450,14 +496,16 @@ def test_harpoon_pop_contact_costs_a_life(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _open_cart(ws, "Harpoon Pop")
     ns = ws.ns
-    ns["lives"] = 3
-    ns["invuln"] = 0.0
-    ns["dead_t"] = 0.0
+    hu = ns["hunters"][0]
+    hu[ns["H_LIVES"]] = 3
+    hu[ns["H_INV"]] = 0.0
+    hu[ns["H_DEAD"]] = 0.0
     ns["over"] = 0.0
-    ns["bubbles"][:] = [[ns["px"] + ns["PW"] / 2, ns["PLAYER_TOP"] + 2, 0.0, 10.0, 1]]
+    ns["bubbles"][:] = [[hu[ns["H_X"]] + ns["PW"] / 2, ns["PLAYER_TOP"] + 2,
+                         0.0, 10.0, 1]]
     ws.input.begin_frame()
     ws.frame(1 / 30)
-    assert ns["lives"] == 2, "touching a bubble must cost a life"
+    assert hu[ns["H_LIVES"]] == 2, "touching a bubble must cost a life"
 
 
 def test_harpoon_pop_high_score_persists(tmp_path):
@@ -529,10 +577,12 @@ def test_harpoon_pop_is_deterministic_from_a_seed(tmp_path):
             tuple(round(v, 9) if isinstance(v, float) else v for v in b)
             for b in ns["bubbles"]
         )
-        return (
-            round(ns["px"], 9), ns["score"], ns["level"], ns["lives"],
-            round(ns["invuln"], 9), bubbles,
+        hunters = tuple(
+            (round(hu[ns["H_X"]], 9), hu[ns["H_LIVES"]],
+             round(hu[ns["H_INV"]], 9), round(hu[ns["H_DEAD"]], 9))
+            for hu in ns["hunters"]
         )
+        return (hunters, ns["score"], ns["level"], bubbles)
 
     a = _play("a")
     b = _play("b")

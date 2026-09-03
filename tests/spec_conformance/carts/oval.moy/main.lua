@@ -1,0 +1,49 @@
+-- oval -- a moy conformance cart. GENERATED; do not edit.
+-- Regenerate with: python3 conformance/build.py
+--
+-- One static frame replaying a recorded verb trace. Compare the frame
+-- your host renders against conformance/golden/oval.png -- SPEC.md 11
+-- calls conformance pixel-identical, so any difference is a bug in one
+-- of the two implementations and the point is to find out which.
+--
+-- oval and ovalb (SPEC.md 6): round, wide, tall and flat boxes, the
+-- 1x1/2x2/3x3 sizes, zero and negative sizes, edges, camera, clip
+-- and pal, and the outline drawn over its own fill.
+
+function _draw()
+  cls(1)
+  oval(8, 8, 40, 40, 8)
+  ovalb(8, 8, 40, 40, 7)
+  oval(56, 8, 60, 24, 11)
+  ovalb(56, 36, 60, 24, 10)
+  oval(124, 8, 24, 60, 12)
+  ovalb(156, 8, 24, 60, 14)
+  oval(190, 8, 60, 3, 9)
+  ovalb(190, 16, 60, 3, 9)
+  oval(190, 24, 3, 40, 15)
+  ovalb(198, 24, 3, 40, 15)
+  oval(210, 30, 1, 1, 7)
+  ovalb(214, 30, 1, 1, 7)
+  oval(218, 30, 2, 2, 7)
+  ovalb(222, 30, 2, 2, 7)
+  oval(226, 30, 3, 3, 7)
+  ovalb(230, 30, 3, 3, 7)
+  oval(234, 30, 0, 10, 8)
+  oval(240, 30, 10, 0, 8)
+  ovalb(246, 30, -5, 5, 8)
+  oval(260, 8, 51, 33, 3)
+  ovalb(260, 44, 51, 33, 3)
+  oval(8, 90, 33, 51, 2)
+  ovalb(48, 90, 33, 51, 2)
+  oval(-20, 180, 80, 50, 4)
+  ovalb(280, 200, 80, 60, 5)
+  camera(-100, -100)
+  clip(110, 110, 60, 40)
+  oval(0, 0, 80, 60, 13)
+  ovalb(0, 0, 80, 60, 7)
+  camera()
+  clip()
+  pal(6, 10)
+  oval(200, 100, 40, 30, 6)
+  pal()
+end

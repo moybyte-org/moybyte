@@ -142,6 +142,81 @@ def test_a_board_that_boots_slowly_still_confirms(tmp_path):
     assert fired.count(True) == 1
 
 
+# -- the same confirm on a board with no glass (the Zero, 2026-08-29) --------
+#
+# `confirm_when_healthy` asks two questions and on a headless board the first
+# one -- did anything reach the display -- has no answer at all. Both wrong ways
+# to force one are catastrophic in opposite directions: answering it with a
+# constant certifies every image unconditionally, and leaving it at zero rolls
+# every image back. So the Zero supplies the evidence its own hardware can give,
+# and these are the tests that the substitution kept the shape of the original.
+
+
+def test_a_headless_board_that_never_serves_is_never_confirmed(tmp_path):
+    """The direct twin of "an image that never paints is never confirmed".
+
+    On this board a dead image is one whose store host never comes up -- the
+    only thing about it a human outside it could ever observe -- and that is
+    exactly the image the bootloader should take back.
+    """
+    mod, u = _updater(tmp_path)
+    for _ in range(mod.HEALTHY_SERVES * 10):
+        assert u.confirm_when_serving(False) is False
+    assert u.marked == 0
+
+
+def test_the_headless_confirm_waits_for_the_loop_to_keep_running(tmp_path):
+    mod, u = _updater(tmp_path)
+    for i in range(mod.HEALTHY_SERVES - 1):
+        assert u.confirm_when_serving(True) is False, "at loop %d" % i
+    assert u.marked == 0
+    assert u.confirm_when_serving(True) is True
+    assert u.marked == 1
+
+
+def test_a_host_that_comes_up_and_falls_over_starts_the_count_again(tmp_path):
+    """Not a pause -- a RESET. A board whose host dies halfway through the
+    window has not demonstrated the thing being certified, and letting it resume
+    its count would confirm an image that serves in bursts."""
+    mod, u = _updater(tmp_path)
+    for _ in range(mod.HEALTHY_SERVES - 1):
+        u.confirm_when_serving(True)
+    assert u.confirm_when_serving(False) is False
+    for i in range(mod.HEALTHY_SERVES - 1):
+        assert u.confirm_when_serving(True) is False, "at loop %d" % i
+    assert u.confirm_when_serving(True) is True
+
+
+def test_the_headless_confirm_fires_once_and_retires_the_marker(tmp_path):
+    """The interlock is shared, not re-implemented: both gates end in one
+    `_confirm()`, so the marker's lifetime -- read at boot, cleared at the
+    CONFIRM -- is identical on a board with no screen."""
+    mod, u = _updater(tmp_path)
+    (tmp_path / "update" / mod.PENDING_NAME).write_text(
+        json.dumps({"slot": "ota_0", "version": 4, "label": "0.7"}),
+        encoding="utf-8")
+    assert u.boot_check()[0] == "ok"
+    assert (tmp_path / "update" / mod.PENDING_NAME).exists()
+    fired = [u.confirm_when_serving(True)
+             for _ in range(mod.HEALTHY_SERVES * 2)]
+    assert fired.count(True) == 1
+    assert u.marked == 1
+    assert not (tmp_path / "update" / mod.PENDING_NAME).exists()
+
+
+def test_the_two_confirm_gates_are_not_the_same_gate(tmp_path):
+    """A headless board must not be able to reach the painted-frame gate by
+    passing it a made-up frame count, and a console board must not reach the
+    serving gate at all -- they are different claims about different hardware.
+    The one thing they DO share is what confirming does."""
+    mod, u = _updater(tmp_path)
+    # The frame gate still refuses a board that paints nothing, however long it
+    # runs -- adding the second gate must not have widened the first.
+    for _ in range(mod.HEALTHY_LOOPS * 2):
+        assert u.confirm_when_healthy(0) is False
+    assert u.marked == 0
+
+
 # -- the pending marker ------------------------------------------------------
 
 def test_finish_records_the_slot_it_pointed_the_bootloader_at(tmp_path):

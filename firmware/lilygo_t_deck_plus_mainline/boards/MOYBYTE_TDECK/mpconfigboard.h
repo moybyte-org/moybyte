@@ -64,3 +64,11 @@
 // this board's; the mistake was harmless because the pins live in
 // device_audio.py, but it is the kind of thing that gets copied.)
 #define MICROPY_PY_MACHINE_I2S              (1)
+
+// The Python heap may grow on demand (split heap), but never into this much
+// of PSRAM: it is the Lua VM's, the panel DMA's and the layer pool's share.
+// The biggest corpus cart's VM peaks near 1.8MB live and the pool that serves
+// it holds up to half that again at its parse-time peak; a card with two
+// dozen carts grows the launcher's heap 1.5MB at boot. 3MB keeps the biggest
+// cart loadable behind that. See tools/esp32_build_lib.sh.
+#define MOYBYTE_GC_SPLIT_RESERVE            (3072 * 1024)

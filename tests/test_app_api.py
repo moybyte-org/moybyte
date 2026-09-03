@@ -223,12 +223,9 @@ def _quiesce_frame(ws):
     recipe): two renders taken a moment apart must differ only by the bar."""
     if ws.pointer is not None:
         ws.pointer.visible = False
-    ws.ach.toast = None
-    ws.ach.toast_until = 0
-    au = ws.ach_ui
-    au.egg_msg = None
-    au.egg_until = 0
-    au._confetti_until = 0
+    ws._toast_until = 0
+    ws._egg_until = 0
+    ws._confetti_until = 0
     ws.show_achievements = False
     ws.show_fps = False
     ws.perf_hud = False
@@ -296,7 +293,7 @@ def _open_app_kind(ws, kind):
         colour = 7 if names is None else 7
         app.draw = lambda dt, cv=ws.sys_canvas, c=colour: cv.cls(c)
         ws.register_app(app)
-        ws.open_app(app, cart=ws._all_carts[0])
+        ws.open_app(app, cart=ws.carts.all[0])
         return app
     app = ws._apps_by_id[kind]
     assert ws.open_app(app), kind + " has no identity cart"

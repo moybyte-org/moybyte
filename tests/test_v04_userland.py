@@ -175,6 +175,130 @@ def test_map_mget_mset_via_make_api():
     assert cv.pix(8, 8) == 11                # tile 3 at cell (1,1), pixel (0,0) -> 8,8
 
 
+def _flag_api(cv, flags):
+    """The cart namespace over a 3x3 map of tiles 1/2/3, each a solid colour."""
+    from runtime import host_app
+    sheet = SpriteSheet(16, 32)
+    for tile, col in ((1, 8), (2, 11), (3, 12)):
+        for y in range(8):
+            for x in range(8):
+                sheet.tset(tile, x, y, col)
+    tm = TileMap(3, 1)
+    tm.mset(0, 0, 1)
+    tm.mset(1, 0, 2)
+    tm.mset(2, 0, 3)
+
+    class _Input:
+        def held(self, n):
+            return False
+
+        def pressed(self, n):
+            return False
+
+    return host_app.make_api(cv, _Input(), {}, sheet, None, tm, flags=flags)
+
+
+def test_fget_and_fset_are_the_projects_own_flag_table():
+    """SPEC.md 7.1's twins. The table is the PROJECT's, so a write here is what
+    the next map(..., layers) filters on -- and both fset shapes (a whole byte,
+    one bit) write the same byte."""
+    flags = bytearray(512)
+    flags[2] = 0x03
+    api = _flag_api(Canvas(40, 40), flags)
+    assert api["fget"](2) == 0x03
+    assert api["fget"](2, 0) is True and api["fget"](2, 2) is False
+    assert api["fget"](9) == 0 and api["fget"](9, 0) is False   # untagged tile
+    api["fset"](5, 0xF0)                       # fset(n, byte)
+    assert flags[5] == 0xF0 and api["fget"](5, 7) is True
+    api["fset"](5, 4, False)                   # fset(n, bit, on)
+    assert flags[5] == 0xE0
+    api["fset"](5, 1, True)
+    assert flags[5] == 0xE2
+
+
+def test_fget_and_fset_degrade_off_the_sheet():
+    """512 tiles, and past them fget reads 0 and fset is dropped -- the same
+    truthful degrade an unpainted sheet gives, not an IndexError inside a kid's
+    game loop."""
+    flags = bytearray(512)
+    api = _flag_api(Canvas(40, 40), flags)
+    assert api["fget"](512) == 0 and api["fget"](-1) == 0
+    assert api["fget"](900, 3) is False
+    api["fset"](512, 0xFF)
+    api["fset"](-1, 0xFF)
+    assert not any(flags)
+
+
+def test_map_layers_filters_on_the_tiles_flags():
+    """SPEC.md 7.2: with a non-zero mask a cell draws only when its TILE's flag
+    byte shares a bit with it. The strip is three solid tiles side by side, so
+    which ones drew is readable one pixel at a time."""
+    flags = bytearray(512)
+    flags[1] = 0x01                       # tile 1: layer 1
+    flags[2] = 0x03                       # tile 2: layers 1 and 2
+    flags[3] = 0x02                       # tile 3: layer 2
+    cv = Canvas(40, 40)
+    api = _flag_api(cv, flags)
+
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1)               # no mask: everything
+    assert (cv.pix(4, 4), cv.pix(12, 4), cv.pix(20, 4)) == (8, 11, 12)
+
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 1)            # layer 1: tiles 1 and 2
+    assert (cv.pix(4, 4), cv.pix(12, 4), cv.pix(20, 4)) == (8, 11, 0)
+
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 2)            # layer 2: tiles 2 and 3
+    assert (cv.pix(4, 4), cv.pix(12, 4), cv.pix(20, 4)) == (0, 11, 12)
+
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 4)            # a bit nothing carries
+    assert (cv.pix(4, 4), cv.pix(12, 4), cv.pix(20, 4)) == (0, 0, 0)
+
+
+def test_map_layers_sees_an_fset_written_this_frame():
+    """The two verbs share ONE table, which is the whole point of `fset` -- a
+    door that opens is a tile that joins the mask mid-run."""
+    flags = bytearray(512)
+    cv = Canvas(40, 40)
+    api = _flag_api(cv, flags)
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 1)     # nothing is tagged yet
+    assert cv.pix(12, 4) == 0
+    api["fset"](2, 0, True)
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 1)
+    assert cv.pix(12, 4) == 11
+
+
+def test_a_cart_with_no_flags_draws_nothing_under_a_mask():
+    """SPEC.md 7.2 says so explicitly, and it is the case every existing cart
+    is in: an all-zero table shares no bit with any non-zero mask."""
+    cv = Canvas(40, 40)
+    api = _flag_api(cv, bytearray(512))
+    cv.cls(0)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 1, 0xFF)
+    assert (cv.pix(4, 4), cv.pix(12, 4), cv.pix(20, 4)) == (0, 0, 0)
+
+
+def test_a_layers_map_still_honours_camera_scale_and_colorkey():
+    """The mask is resolved into a masked REGION before the raster, so every
+    other argument has to behave exactly as it does without one."""
+    flags = bytearray(512)
+    flags[3] = 0x02
+    cv = Canvas(64, 64)
+    api = _flag_api(cv, flags)
+    cv.cls(0)
+    cv.camera(-8, -4)
+    api["map"](0, 0, 3, 1, 0, 0, -1, 2, 2)     # tile 3 only, at 2x, camera-shifted
+    cv.camera()
+    assert cv.pix(4, 4) == 0                   # tiles 1 and 2 masked out
+    # cell 2 at scale 2 starts at x = 2*16 = 32, plus the camera's +8/+4
+    assert cv.pix(40, 8) == 12 and cv.pix(55, 19) == 12
+    assert cv.pix(56, 8) == 0                  # ...and stops where the tile does
+
+
 def test_make_layer_and_draw_layer_via_make_api():
     # #54 scroll engine through the cart-facing api: make_layer() returns a draw
     # target (a wider off-screen layer) carrying the full verb set; draw_layer()
@@ -505,7 +629,8 @@ def test_hop_quest_uses_tilemap_and_still_plays(tmp_path):
     _open_cart(ws, "Hop Quest")
     assert ws.cart["type"] == "game"
     assert ws.cart.get("map") and not ws.tilemap.is_blank()    # the level is a tilemap
-    assert ws.ns["_solid"](0, 12) and not ws.ns["_solid"](0, 0)  # mget collision works
+    ground_row = ws.ns["MH"] - 1                               # ground is the bottom row
+    assert ws.ns["_solid"](0, ground_row) and not ws.ns["_solid"](0, 0)  # mget collision works
     ws.config["autoplay"] = 1
     ws.apply()
     coins = len(ws.ns["coins"])
@@ -1361,17 +1486,28 @@ def _open_cart_map(tmp_path, cart_name):
 
 
 def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
-    # The DEFAULT (most zoomed-OUT) zoom MUST show the ENTIRE map of both shipped
-    # games with the camera at (0,0) and zero panning: brick_siege is 15x15 and
-    # platformer is 20x13. So the default view must hold >= the map's cols AND rows.
+    # The DEFAULT (most zoomed-OUT) rung is the MAP FIELD SIZE -- one 8px tile per cell,
+    # identical on every tier -- so a wider view shows MORE OF THE LEVEL rather than
+    # bigger cells. A map that fits the view opens whole with the camera at (0,0); a
+    # bigger one pans.
+    #
+    # Expectations are DERIVED rather than listed per cart, because the listed form is
+    # what went stale: it named platformer as the widest shipped map long after
+    # layer_test had shipped at 64x30.
     from runtime import console as C
-    for name, w, h in (("brick_siege", 15, 15), ("platformer", 20, 13)):
+    from runtime.map_editor_ui import _MV_ZOOMS
+
+    fitted = 0
+    for name in ("brick_siege", "ray_test", "letter_blitz", "platformer", "scroll_demo"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
-        assert (ws.tilemap.w, ws.tilemap.h) == (w, h)
-        assert ws.map_ui.map_zoom == 0                          # opens at the fit-both default
+        w, h = ws.tilemap.w, ws.tilemap.h
+        assert ws.map_ui.map_zoom == 0                          # opens at the fit default
         assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)   # cam pinned to origin
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-        assert cols >= w and rows >= h                   # the whole map is on screen
+        assert cell == _MV_ZOOMS[0] >= 8             # the FIELD size, not a fitted cell
+        if cols < w or rows < h:
+            continue                                 # bigger than the view -> it pans
+        fitted += 1
         # Every map cell maps to a pixel inside the visible map-view rectangle, so no
         # cell is off-screen at the default zoom.
         area = ws.map_ui._mv_area()
@@ -1381,6 +1517,7 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
                 py = y0 + cy * cell + cell // 2
                 assert C._in(px, py, area)
                 assert ws.map_ui._map_cell_at(px, py) == (cx, cy)
+    assert fitted >= 2, "no shipped map exercised the fit guarantee"
 
 
 def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):

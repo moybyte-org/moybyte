@@ -44,8 +44,8 @@ def test_cover_sig_moves_with_content():
 def _land_cover(ws, cart, w, h, frames=300):
     """Step the per-frame cover budget until the (w, h) cover lands."""
     for _ in range(frames):
-        ws._cover_built = False          # frame() resets this once per frame
-        img = ws._cover_for(cart, w, h)
+        ws.covers._built = False          # frame() resets this once per frame
+        img = ws.covers.cover_for(cart, w, h)
         if img is not None:
             return img
     raise AssertionError("cover never landed")
@@ -53,13 +53,13 @@ def _land_cover(ws, cart, w, h, frames=300):
 
 def _clear_ram_caches(ws):
     # mirror the store re-scan clear
-    ws._cover_cache = {}
-    ws._cover_cache_order = []
-    ws._cover_cache_pixels = 0
-    ws._cover_jobs = {}
-    ws._cover_runs = {}
-    ws._cover_runs_order = []
-    ws._cover_runs_bytes = 0
+    ws.covers._cache = {}
+    ws.covers._order = []
+    ws.covers._pixels = 0
+    ws.covers._jobs = {}
+    ws.covers._runs = {}
+    ws.covers._runs_order = []
+    ws.covers._runs_bytes = 0
 
 
 def test_edited_cover_invalidates_the_thumb(tmp_path):
@@ -75,9 +75,9 @@ def test_edited_cover_invalidates_the_thumb(tmp_path):
     assert img.pix[0] == 9                       # rebuilt from the NEW art
     # ...and the rebuild refreshed the sidecar for the next session
     _clear_ram_caches(ws)
-    ws._cover_built = False
-    img2 = ws._cover_for(cart, 40, 30)
-    assert img2 is not None and img2.pix[0] == 9 and ws._cover_jobs == {}
+    ws.covers._built = False
+    img2 = ws.covers.cover_for(cart, 40, 30)
+    assert img2 is not None and img2.pix[0] == 9 and ws.covers._jobs == {}
 
 
 # -- resize must not re-decode (#155) -------------------------------------------
@@ -96,14 +96,14 @@ def test_a_new_size_re_crops_instead_of_re_decoding(tmp_path):
     cart = _mk_cart_with_cover(tmp_path, value=5)
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     _land_cover(ws, cart, 40, 30)
-    runs = ws._cover_runs_get(cart["path"])
+    runs = ws.covers._runs_get(cart["path"])
     assert runs is not None and runs[0] == 64 and runs[1] == 48, \
         "the parsed runs were not cached"
 
     # A DIFFERENT size, with no sidecar for it: one step, no decode.
     _clear_ram_caches(ws)
-    ws._cover_built = False
-    img = ws._cover_for(cart, 24, 18)
+    ws.covers._built = False
+    img = ws.covers.cover_for(cart, 24, 18)
     assert img is not None, "a new size still needed multiple frames"
     assert len(img.pix) == 24 * 18 and img.pix[0] == 5
 
@@ -118,15 +118,15 @@ def test_an_edited_cover_is_picked_up_after_a_rescan(tmp_path):
     img = _land_cover(ws, cart, 40, 30)
     assert img.pix[0] == 5
     moy_carts.save_image(cart, "cover", _cover_text(64, 48, 9))
-    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))
-    cart = next(c for c in ws._all_carts if c.get("path") == cart["path"])
+    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))
+    cart = next(c for c in ws.carts.all if c.get("path") == cart["path"])
     img = _land_cover(ws, cart, 24, 18)
     assert img.pix[0] == 9, "a re-scan did not drop the cached runs"
 
 
 def test_the_runs_cache_is_bounded(tmp_path):
     """Runs are ~15KB each, so the cache must stay bounded."""
-    from runtime import console, host_app
+    from runtime import cover_cache, host_app
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     carts = []
@@ -138,8 +138,8 @@ def test_the_runs_cache_is_bounded(tmp_path):
     ws = host_app.build_workstation(root)
     for c in carts:
         _land_cover(ws, c, 40, 30, frames=2000)
-    assert ws._cover_runs_bytes <= console._COVER_RUNS_MAX_BYTES
-    assert len(ws._cover_runs) == len(ws._cover_runs_order)
+    assert ws.covers._runs_bytes <= cover_cache._COVER_RUNS_MAX_BYTES
+    assert len(ws.covers._runs) == len(ws.covers._runs_order)
 
 
 def test_native_and_python_crops_are_byte_identical(tmp_path):
@@ -151,7 +151,7 @@ def test_native_and_python_crops_are_byte_identical(tmp_path):
     (On the host there is no moy_gfx, so the fast path is absent and this
     pins the REFERENCE the device kernel was written against; the device half
     is grepped by tests/test_micropython_spike.py.)"""
-    from runtime import console
+    from runtime import cover_cache
     from runtime.console import _ticks_ms
 
     def python_crop(pix, sw, sh, w, h):
@@ -171,7 +171,7 @@ def test_native_and_python_crops_are_byte_identical(tmp_path):
     sw, sh = 64, 48
     pix = bytearray((x * 7 + y * 3) & 63 for y in range(sh) for x in range(sw))
     for (w, h) in ((40, 30), (24, 18), (64, 48), (17, 41), (7, 5), (100, 20)):
-        job = console._CoverJob((sw, sh, b""), w, h, src=pix)
+        job = cover_cache._CoverJob((sw, sh, b""), w, h, src=pix)
         # step() is time-sliced, so drive it to completion (the native path
         # finishes in the first call; the Python loop takes several).
         for _ in range(2000):
@@ -211,16 +211,16 @@ def test_idle_frames_prefetch_cover_runs(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
     ws = host_app.build_workstation(root)
-    covered = [c for c in ws._all_carts if c.get("path") in
+    covered = [c for c in ws.carts.all if c.get("path") in
                [x["path"] for x in carts[:3]]]
     assert covered, "fixture carts missing from the store"
 
     # Armed from boot: idle ticks warm every cart with NO cover draw first.
-    assert ws._cover_seen
+    assert ws.covers._seen
     for _ in range(200):
-        ws._cover_prefetch_tick()
+        ws.covers.prefetch_tick()
     for c in covered:
-        assert ws._cover_runs_get(c["path"]) is not None, c["path"]
+        assert ws.covers._runs_get(c["path"]) is not None, c["path"]
 
 
 def test_rescan_rearms_the_prefetch(tmp_path):
@@ -232,15 +232,15 @@ def test_rescan_rearms_the_prefetch(tmp_path):
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=2)
     ws = host_app.build_workstation(root)
     for _ in range(200):
-        ws._cover_prefetch_tick()
-    assert ws._cover_seen is False          # exhausted: every cart known
-    ws._apply_items(list(ws._all_carts))    # the re-scan path (create/dup/delete)
-    assert ws._cover_seen                   # re-armed...
+        ws.covers.prefetch_tick()
+    assert ws.covers._seen is False          # exhausted: every cart known
+    ws.carts.apply(list(ws.carts.all))    # the re-scan path (create/dup/delete)
+    assert ws.covers._seen                   # re-armed...
     want = carts[0]["path"]
-    assert ws._cover_runs_get(want) is None  # ...and the cache really was cleared
+    assert ws.covers._runs_get(want) is None  # ...and the cache really was cleared
     for _ in range(200):
-        ws._cover_prefetch_tick()
-    assert ws._cover_runs_get(want) is not None   # idle re-warms with no draw
+        ws.covers.prefetch_tick()
+    assert ws.covers._runs_get(want) is not None   # idle re-warms with no draw
 
 
 def test_prefetch_prebuilds_visible_cover_images(tmp_path):
@@ -248,20 +248,20 @@ def test_prefetch_prebuilds_visible_cover_images(tmp_path):
     BUILD the cover images the shelf/picker grids' next full draw requests
     (cover_specs' first screenful) -- on glass the first draw at a new card
     size cost ~10ms per card, charged to the transition's painted frames. The
-    idle builds must not leak a dirty re-arm (_covers_deferred)."""
+    idle builds must not leak a dirty re-arm (covers._deferred)."""
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=3)
     ws = host_app.build_workstation(root)
     for _ in range(400):
-        ws._cover_prefetch_tick()
-    assert ws._cover_seen is False          # runs AND prebuild fully exhausted
-    assert ws._covers_deferred is False     # no repaint re-arm from idle work
-    specs = ws.launcher.cover_specs()[:ws._COVER_PREBUILD_PER_GRID]
+        ws.covers.prefetch_tick()
+    assert ws.covers._seen is False          # runs AND prebuild fully exhausted
+    assert ws.covers._deferred is False     # no repaint re-arm from idle work
+    specs = ws.launcher.cover_specs()[:ws.covers._COVER_PREBUILD_PER_GRID]
     want = [(c.get("path"), w, h) for c, w, h in specs
-            if c.get("path") not in ws._cover_none]
+            if c.get("path") not in ws.covers._none]
     assert want, "no cover-bearing specs in the fixture"
     for key in want:
-        assert key in ws._cover_cache, key
+        assert key in ws.covers._cache, key
 
 
 def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
@@ -269,14 +269,14 @@ def test_prefetch_makes_a_later_build_touch_no_storage(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=3)
     ws = host_app.build_workstation(root)
-    # By PATH: _all_carts also holds the seeded built-ins, most of which have no
+    # By PATH: carts.all also holds the seeded built-ins, most of which have no
     # cover at all, so an index into it is not necessarily a fixture cart.
     want = carts[-1]["path"]
-    target = next(c for c in ws._all_carts if c.get("path") == want)
-    first = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    target = next(c for c in ws.carts.all if c.get("path") == want)
+    first = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
     _land_cover(ws, first, 20, 15)                 # arm
     for _ in range(200):
-        ws._cover_prefetch_tick()
+        ws.covers.prefetch_tick()
 
     reads = []
     orig = ws.carts_store.load_image
@@ -296,14 +296,14 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
     ws = host_app.build_workstation(root)
-    # Land the one fixture cart that HAS a cover, looked up by path -- _all_carts[0]
+    # Land the one fixture cart that HAS a cover, looked up by path -- carts.all[0]
     # is whichever seeded system cart sorts first, which is not a fixture cart and
     # need not have cover art at all.
-    covered = next(c for c in ws._all_carts if c.get("path") == carts[0]["path"])
+    covered = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
     _land_cover(ws, covered, 20, 15)
     for _ in range(200):
-        ws._cover_prefetch_tick()
-    assert ws._cover_seen is False
+        ws.covers.prefetch_tick()
+    assert ws.covers._seen is False
 
 
 def test_cover_blob_read_budget(tmp_path):
@@ -317,7 +317,7 @@ def test_cover_blob_read_budget(tmp_path):
     from runtime import host_app
     root, carts = _mk_carts_with_covers(tmp_path, 4, with_cover=4)
     ws = host_app.build_workstation(root)
-    mine = [c for c in ws._all_carts
+    mine = [c for c in ws.carts.all
             if c.get("path") in [x["path"] for x in carts]]
     ws.costs.clear()
     for size in ((40, 30), (24, 18), (40, 30)):      # includes a RELAYOUT
@@ -369,7 +369,7 @@ def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
 
     ws._with_sd = gate
     ws.carts_store = _Spy(ws.carts_store)
-    for c in [c for c in ws._all_carts
+    for c in [c for c in ws.carts.all
               if c.get("path") in [x["path"] for x in carts]]:
         _land_cover(ws, c, 40, 30)
 

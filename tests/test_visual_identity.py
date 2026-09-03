@@ -65,8 +65,8 @@ def test_machine_theme_is_optional_and_selectable(tmp_path):
     assert th["play"] == 11 and th["author"] == 9 and th["focus"] == 10
     assert th["danger"] == 8
     ws = _ws(tmp_path)
-    ws.set_theme("machine")
-    assert ws.theme_name == "machine"
+    ws.look.set_theme("machine")
+    assert ws.look.theme_name == "machine"
     assert ws.launcher.theme is ws.theme_colors
     # Persisted like any theme choice.
     assert ws.system.get("theme") == "machine"
@@ -117,27 +117,27 @@ def test_dark_variant_is_the_legacy_token_set():
 def test_theme_variant_applies_and_persists(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path)
-    assert ws.theme_variant == "dark"
-    ws.set_theme_variant("light")
-    assert ws.theme_variant == "light"
+    assert ws.look.theme_variant == "dark"
+    ws.look.set_theme_variant("light")
+    assert ws.look.theme_variant == "light"
     assert ws.theme_colors["surface_light"] is True
     assert ws.launcher.theme is ws.theme_colors
     assert ws.system.get("theme_variant") == "light"
     carts = ws.carts_root
     assert moy_carts.load_system(carts).get("theme_variant") == "light"
     # A theme pick keeps the variant; an unknown variant falls back to dark.
-    ws.set_theme("berry")
-    assert ws.theme_variant == "light" and ws.theme_colors["panel"] == 7
-    ws.set_theme_variant("nonsense")
-    assert ws.theme_variant == "dark"
+    ws.look.set_theme("berry")
+    assert ws.look.theme_variant == "light" and ws.theme_colors["panel"] == 7
+    ws.look.set_theme_variant("nonsense")
+    assert ws.look.theme_variant == "dark"
 
 
 def test_variant_survives_reboot(tmp_path):
     ws = _ws(tmp_path)
-    ws.set_theme("forest")
-    ws.set_theme_variant("light")
+    ws.look.set_theme("forest")
+    ws.look.set_theme_variant("light")
     ws2 = _ws(tmp_path)
-    assert ws2.theme_name == "forest" and ws2.theme_variant == "light"
+    assert ws2.look.theme_name == "forest" and ws2.look.theme_variant == "light"
     assert ws2.theme_colors["surface_light"] is True
 
 
@@ -152,7 +152,7 @@ def test_base_tier_editors_follow_light_chrome(tmp_path):
     ws.change_selected()
     t = ws.cards_layer._tones()
     assert t["body"] == NAMES["dark_purple"]        # frozen dark baseline
-    ws.set_theme_variant("light")
+    ws.look.set_theme_variant("light")
     t = ws.cards_layer._tones()
     assert t["body"] == ws.theme_colors["surface"]  # themed on light
     assert t["head"] == ws.theme_colors["ink"] == 0
@@ -169,7 +169,7 @@ def test_bar_icons_get_plateless_light_variants(tmp_path):
     ws = _ws(tmp_path)
     dark = ws._bar_image("wifi")
     assert dark.transparent == -1                   # dark bar: opaque tile
-    ws.set_theme_variant("light")
+    ws.look.set_theme_variant("light")
     light = ws._bar_image("wifi")
     assert light is not dark
     assert light.transparent == 63                  # the plate is keyed out...
@@ -342,7 +342,7 @@ def test_library_shelf_panel_paints_surface(tmp_path):
     """The machine theme's Library panel is the warm-light tool surface (cream)
     over the dark construction field."""
     ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2)
-    ws.set_theme("machine")
+    ws.look.set_theme("machine")
     ws.frame(1 / 30)
     px, py, pw, ph = ws.layout.lib_panel
     th = ws.theme_colors
@@ -357,10 +357,10 @@ def _cover_sync(ws, cart, w, h):
     (the image, or None for a definitive no-cover miss)."""
     key = (cart.get("path"), w, h)
     for _ in range(500):
-        ws._cover_built = False           # what frame() resets each frame
-        ws._cover_for(cart, w, h)
-        if key in ws._cover_cache:
-            return ws._cover_cache[key]
+        ws.covers._built = False           # what frame() resets each frame
+        ws.covers.cover_for(cart, w, h)
+        if key in ws.covers._cache:
+            return ws.covers._cache[key]
     raise AssertionError("cover build never finished")
 
 
@@ -385,7 +385,7 @@ def test_cover_art_contract(tmp_path):
     assert len(img.pix) == 200 * 150
     assert max(img.pix) < 64              # valid MOY64 indices only (Section 12)
     assert img._paint                     # native device + compact web bitmap paths
-    assert ws._cover_for(covered, 200, 150) is img       # memoised
+    assert ws.covers.cover_for(covered, 200, 150) is img       # memoised
     if fallback is not None:
         assert _cover_sync(ws, fallback, 200, 150) is None  # deterministic fallback
 
@@ -402,18 +402,18 @@ def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
     other = next(it for it in ws.launcher.items
                  if it.get("path") and it is not covered)
     key = (covered["path"], 200, 150)
-    ws._cover_built = False
-    ws._cover_for(covered, 200, 150)
+    ws.covers._built = False
+    ws.covers.cover_for(covered, 200, 150)
     # The first ask either finished within its slice or left a job in flight
     # (with the redraw gate re-armed) -- it never blocks the frame open-ended.
-    assert key in ws._cover_cache or key in ws._cover_jobs
-    if key not in ws._cover_cache:
-        assert ws._covers_deferred
+    assert key in ws.covers._cache or key in ws.covers._jobs
+    if key not in ws.covers._cache:
+        assert ws.covers._deferred
         # The frame budget is ONE build slice: a second cart's ask this frame
         # defers without even starting its job.
-        before = dict(ws._cover_jobs)
-        assert ws._cover_for(other, 200, 150) is None
-        assert list(ws._cover_jobs) == list(before)
+        before = dict(ws.covers._jobs)
+        assert ws.covers.cover_for(other, 200, 150) is None
+        assert list(ws.covers._jobs) == list(before)
     img = _cover_sync(ws, covered, 200, 150)
     # Reference: the one-shot decode + centered cover-crop (the pre-slicing
     # implementation, inlined).
@@ -436,7 +436,7 @@ def test_cover_builds_are_time_sliced_and_faithful(tmp_path):
 def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
     """Repeated Make-window resizes must not retain every derived indexed+RGB
     cover forever on the P4 heap."""
-    from runtime import console, moy_carts
+    from runtime import cover_cache, moy_carts
     ws = _ws(tmp_path, sys_size=(1024, 600))
     covered = next(it for it in ws.launcher.items
                    if it.get("path") and
@@ -446,9 +446,9 @@ def test_cover_cache_is_bounded_across_resize_variants(tmp_path):
 
     for i in range(80):
         _cover_sync(ws, covered, 120 + i, 90 + i)
-    assert len(ws._cover_cache) <= console._COVER_CACHE_MAX_ENTRIES
-    assert ws._cover_cache_pixels <= console._COVER_CACHE_MAX_PIXELS
-    assert len(ws._cover_cache_order) == len(ws._cover_cache)
+    assert len(ws.covers._cache) <= cover_cache._COVER_CACHE_MAX_ENTRIES
+    assert ws.covers._pixels <= cover_cache._COVER_CACHE_MAX_PIXELS
+    assert len(ws.covers._order) == len(ws.covers._cache)
 
 
 def test_home_draw_includes_action_row_desktop(tmp_path):

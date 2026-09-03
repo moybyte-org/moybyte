@@ -97,9 +97,14 @@ SERVICES = {
     "ble_keyboard": "an OPTIONAL SECOND keyboard over BLE HID (#26), on a board that already has a physical one",
     "_with_sd": "the storage gate every store op is wrapped in",
     "updater": "the #53 OTA updater behind Settings -> UPDATE FW",
+    "c6_updater": "the C6 radio co-processor's updater behind Settings -> "
+                  "UPGRADE C6 RADIO (#7/#58): downloads the shimmed slave "
+                  "image and streams it over SDIO",
     "webhost": "the #192 board-served web console (Settings -> WEB CONSOLE)",
     "reboot_hook": "the sysmenu Reboot row's real reset",
     "net": "the #65 multiplayer transport behind net.* in a cart",
+    "gpio": "the #9 physical-pin backend behind pin_write/pin_read in a cart",
+    "link": "the #7 ESP-NOW radio: discovery, pairing and the two-console lockstep link",
     "wm": "the presentation tier: windowed desktop vs the fullscreen stack",
     "perf_capture": "per-frame timing measured without drawing the HUD",
 }
@@ -127,11 +132,15 @@ WIRING = {
         "ble_keyboard": INJECTED,
         "_with_sd": INJECTED,
         "updater": INJECTED,
+        "c6_updater": "its radio is the S3's own silicon -- there is no co-processor to update. The row becomes INJECTED the day a board grows a companion radio chip",
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "no #65 transport on this board yet -- the host injects a "
-               "loopback fake for the sim; a real one needs a radio pairing "
-               "story, not a wiring line",
+        "net": INJECTED,
+        "gpio": "no pins to give. This board's GPIOs are spent -- panel, SD,\n"
+                "keyboard, trackball, radio -- and a cart here runs on the board\n"
+                "itself, so there is no wire to reach a peripheral over. The\n"
+                "verbs stay ABSENT rather than stubbed.",
+        "link": INJECTED,
         "wm": "the fullscreen tier (#73). Workstation.__init__ already installs "
               "FullscreenStackWM, and wm_windowed.py is deliberately NOT staged "
               "into this build -- a 320x240 panel has no desktop to window",
@@ -159,9 +168,13 @@ WIRING = {
                     "default IS the correct gate. A wrapper here would be "
                     "ceremony around `fn()`",
         "updater": INJECTED,
+        "c6_updater": INJECTED,
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "same as the T-Deck: no #65 transport on a board yet",
+        "net": INJECTED,
+        "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
+                "the C6, and a cart runs locally. Nothing to expose.",
+        "link": INJECTED,
         "wm": INJECTED,
         "perf_capture": INJECTED,
     },
@@ -188,9 +201,14 @@ WIRING = {
                     "flash and races nothing, so the Workstation's own "
                     "call-through default IS the correct gate",
         "updater": INJECTED,
+        "c6_updater": "same as the T-Deck: this S3's radio is on-die, there "
+                      "is no co-processor to flash",
         "webhost": INJECTED,
         "reboot_hook": INJECTED,
-        "net": "same as the other boards: no #65 transport on a board yet",
+        "net": INJECTED,
+        "gpio": "same as the T-Deck: a smart display spends its pins on the\n"
+                "panel and touch.",
+        "link": INJECTED,
         "wm": "the fullscreen tier, same as the T-Deck: Workstation.__init__ "
               "already installs FullscreenStackWM, and wm_windowed.py is "
               "deliberately not staged into this build",
@@ -216,12 +234,23 @@ WIRING = {
         "updater": "OTA writes an ESP32 app partition (esp32.Partition). There "
                    "is nothing on a host to flash, and Settings hides the row "
                    "when no updater is injected",
+        "c6_updater": "the host has no radio hardware at all; the C6 updater "
+                      "is SDIO plumbing to a co-processor that only the P4 "
+                      "carries, and Settings hides its row the same way",
         "webhost": "the host IS the machine the browser runs on -- serving the "
                    "wasm console to itself has no user. `tools/simulate_desktop"
                    ".py` and firmware/web_runner cover that ground",
         "reboot_hook": "machine.reset() has no host meaning; the shared console "
                        "falls back to go_home() for the sysmenu Reboot row",
         "net": INJECTED,
+        "gpio": "a laptop has no pins. The sim could fake some, and deliberately\n"
+                "does not: a pin_write that quietly does nothing is the worst\n"
+                "answer a cart author can get, because the code looks right and\n"
+                "no light ever moves.",
+        "link": "no radio on a laptop. The sim gets its second player from a router\n"
+                "slot instead (players.PlayerRouter.add_player), which is the same\n"
+                "seam a radio fills -- so a two-player cart is testable here with\n"
+                "no hardware at all",
         "wm": INJECTED,
         "perf_capture": "no serial PERF sampler here. On the host the timing "
                         "meters are driven by the perf HUD and the Settings "
@@ -235,19 +264,39 @@ WIRING = {
         "carts_store": INJECTED,
         "carts_root": INJECTED,
         "can_manage": INJECTED,
-        "wifi": INJECTED,
+        "wifi": "a page has no radio. It wired the SIMULATOR's FakeWifi until\n"
+                "                 2026-08-30 -- four invented access points and a\n"
+                "                 192.168.1.42 -- which is a stand-in on a laptop and a LIE\n"
+                "                 on a board-served page: on the headless Zero this panel is\n"
+                "                 the only WIFI screen that board has, and it offered networks\n"
+                "                 that do not exist. Absent now, like every other capability a\n"
+                "                 tier lacks. A real one would be a bridge to the board's own\n"
+                "                 service, as gpio_link and update_link are.",
         "pointer": INJECTED,
         "keyboard": "browser key events arrive through web_input as InputState, "
                     "not as a device keyboard object with a mode command",
         "ble_keyboard": "a browser cannot pair HID devices for the page --\n                         keys arrive as DOM events through web_input.",
         "_with_sd": "the VFS is in-memory; nothing to gate",
-        "updater": "the page IS the update -- a reload fetches the current "
-                   "build, so there is no image to flash",
+        "updater": "not at BOOT, and not never: web_boot.update_enable binds a\n"
+                   "                 RemoteUpdater over the board's /update endpoint AFTER the\n"
+                   "                 worker's probe answers (#41), so it is out of this scan's\n"
+                   "                 reach by construction -- boot() cannot know yet whether a\n"
+                   "                 board is serving this page. In BOARD mode a headless\n"
+                   "                 console's whole update flow happens here because this page\n"
+                   "                 is that board's only screen; on a STATIC host the probe\n"
+                   "                 never answers and a reload IS the update. Driven end to end\n"
+                   "                 in tests/test_web_update_e2e.py.",
+        "c6_updater": "no radio, no SDIO, no co-processor -- the same absence "
+                      "as the updater row, one level down",
         "webhost": "this build is what a webhost SERVES. A page hosting itself "
                    "is the same circle the host row describes",
         "reboot_hook": "a reload is the browser's reset, and the page owns it",
         "net": "no #65 transport in the browser yet -- the host's LoopbackNet is "
                "a sim fake for a solo desktop and would mean nothing here",
+        "gpio": INJECTED,
+        "link": "a wasm sandbox has no radio, and never will. The browser's "
+                "route to a second player is a controller over the page, not "
+                "ESP-NOW",
         "wm": INJECTED,
         "perf_capture": "no serial sampler; the page's own harness times whole "
                         "frames from outside (pageshot/browsershot)",
@@ -344,7 +393,7 @@ def _boot_assignments(fn):
 
     Nested functions are NOT skipped: the T-Deck's `_with_sd` injection lives in
     `_before_slim`, a closure handed to wire_workstation_core precisely because
-    it must run between the store hookup and slim_carts. That is boot wiring in
+    it must run between the store hookup and the cart diet. That is boot wiring in
     every sense that matters.
     """
     out = {}
@@ -375,8 +424,18 @@ def _wire_supplied(fn, param_map):
                   else getattr(n.func, "id", None))
         if called != fname:
             continue
-        supplied = {order[i] for i in range(len(n.args)) if i < len(order)}
-        supplied |= {k.arg for k in n.keywords if k.arg}
+        # SUPPLIED IS NOT INJECTED. A target that hands this an explicit `None`
+        # is DECLARING the absence -- the tree's own way of saying a tier lacks
+        # a lever ("a board that lacks a lever reports None, never 0") -- and
+        # reading that as a wired service is how the web console's row went on
+        # claiming a WiFi backend after the fake behind it was removed. Only a
+        # value that is not a literal None counts.
+        def _real(node):
+            return not (isinstance(node, ast.Constant) and node.value is None)
+
+        supplied = {order[i] for i in range(len(n.args))
+                    if i < len(order) and _real(n.args[i])}
+        supplied |= {k.arg for k in n.keywords if k.arg and _real(k.value)}
         for attr, param in param_map.items():
             if param in supplied:
                 out.setdefault(attr, n.lineno)
@@ -526,6 +585,11 @@ DRIVEN = {
     # the row appear, and the row is what brings the radio up. The poll is
     # wiring: a bound socket nobody accepts on is a network fault.
     "webhost": ("poll",),
+    # The radio is armed by the RUN of a multiplayer cart, not by the boot: a
+    # link nobody polls hears no beacons and pairs with nobody, and a link
+    # nobody starts is exactly the "present and inert" shape this table exists
+    # to catch. The poll is wiring; the start is the Player's, per cart.
+    "link": ("start", "poll"),
 }
 
 _VERBS = {v for verbs in DRIVEN.values() for v in verbs}
@@ -557,16 +621,22 @@ LIFECYCLE = {
             "a cart"),
         ("ble_keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
     "p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
     "guition": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
     },
 }
 

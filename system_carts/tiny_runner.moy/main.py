@@ -10,12 +10,17 @@ GROUND = 26          # ground height from the bottom
 HERO_X = 40
 HERO_W = 16
 HERO_H = 20
+# A run picks its obstacles from these four: (sheet tile, width, height). Each is
+# a 1x2 tile span drawn at 2x whose painted art is exactly w x h, so the picture
+# IS the collision box.
+CACTI = ((2, 10, 14), (3, 12, 20), (4, 12, 26), (5, 14, 18))
+HILL = 32            # sheet tiles: a 4x2 span, 26x13 of art = a 52x26 hill at 2x
 
 hero_y = 0.0         # offset above the ground (0 = standing)
 vel = 0.0
 score = 0.0
 best = 0
-obs = []             # obstacles: [x, w, h]
+obs = []             # obstacles: [x, w, h, tile]
 spawn_x = 0.0
 t = 0.0
 hero = 0             # the chosen hero sprite tile (0 or 1 -- editable in paint)
@@ -60,8 +65,8 @@ def _init():
 
 def _spawn():
     global spawn_x
-    h = 12 + int(rnd(16))
-    obs.append([spawn_x, 10 + int(rnd(6)), h])
+    c = CACTI[int(rnd(len(CACTI)))]
+    obs.append([spawn_x, c[1], c[2], c[0]])
     spawn_x = W + 40 + rnd(120)
 
 
@@ -161,7 +166,7 @@ def _draw():
     # parallax hills (cheap moving scenery)
     hx = int(-(t * 20) % 120)
     for i in range(-1, W // 120 + 2):
-        circ(hx + i * 120 + 60, gy, 26, col("dark_green"))
+        spr(HILL, hx + i * 120 + 34, gy - 26, 0, 2, 0, 4, 2)
     # ground speckle that scrolls (sells the run speed)
     sx = int(-(t * 120) % 24)
     for i in range(-1, W // 24 + 2):
@@ -171,8 +176,7 @@ def _draw():
         pix(int(p[0]), int(p[1]), col("light_grey"))
     # obstacles (cacti)
     for o in obs:
-        rect(int(o[0]), gy - o[2], o[1], o[2], col("green"))
-        rectb(int(o[0]), gy - o[2], o[1], o[2], col("dark_green"))
+        spr(o[3], int(o[0]), gy - o[2], 0, 2, 0, 1, 2)
     # hero (8x8 tile at 2x = 16px, from the cart sheet); squashed flat on landing
     hsc = 2
     hy = gy - HERO_H - int(hero_y)

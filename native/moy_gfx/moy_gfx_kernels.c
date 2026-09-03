@@ -39,6 +39,35 @@
 
 #include "moy_gfx_kernels.h"
 
+/* ---- the shape verbs under a fill pattern ------------------------------ */
+
+void mg_shape(uint16_t *dst, size_t cap, int dw, int kind,
+              int a0, int a1, int a2, int a3, int a4, int a5,
+              int col, int pat, int hole,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1)
+{
+    moy_canvas c;
+    if (dw <= 0) return;
+    mg_clip(dw, cap, &cx0, &cy0, &cx1, &cy1);
+    mg_canvas_shape(&c, dst, dw, cap, (uint16_t)(col & 0xFFFF), pat, hole,
+                    cam_x, cam_y, cx0, cy0, cx1, cy1);
+    /* Colour index 0 throughout: mg_canvas_shape put the draw colour there and
+     * the hole colour at 1, so libmoy resolves both out of store[] as it does
+     * for any cart. */
+    switch (kind) {
+    case MG_SHAPE_LINE:  moy_line (&c, a0, a1, a2, a3, 0); break;
+    case MG_SHAPE_RECT:  moy_rect (&c, a0, a1, a2, a3, 0); break;
+    case MG_SHAPE_RECTB: moy_rectb(&c, a0, a1, a2, a3, 0); break;
+    case MG_SHAPE_CIRC:  if (a2 >= 0) moy_circ (&c, a0, a1, a2, 0); break;
+    case MG_SHAPE_CIRCB: if (a2 >= 0) moy_circb(&c, a0, a1, a2, 0); break;
+    case MG_SHAPE_TRI:   moy_tri  (&c, a0, a1, a2, a3, a4, a5, 0); break;
+    case MG_SHAPE_TRIB:  moy_trib (&c, a0, a1, a2, a3, a4, a5, 0); break;
+    case MG_SHAPE_OVAL:  moy_oval (&c, a0, a1, a2, a3, 0); break;
+    case MG_SHAPE_OVALB: moy_ovalb(&c, a0, a1, a2, a3, 0); break;
+    default: break;
+    }
+}
+
 /* ---- fill ------------------------------------------------------------- */
 
 void mg_fill(uint16_t *px, size_t cap, int npix, int color)

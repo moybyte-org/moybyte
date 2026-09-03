@@ -1,6 +1,6 @@
 """The Editor tabs draw their widgets through `runtime/ui.py` (Phase 3d).
 
-`docs/ui_refactor_2026-08.md` Section 3, Phase 3b/3c/3d: the hand-rolled row /
+`docs/history/ui_refactor_2026-08.md` Section 3, Phase 3b/3c/3d: the hand-rolled row /
 cell / button draws are transcribed onto the toolkit kinds, and the ratchet is
 that the hand-rolled idiom cannot come back. This module is that ratchet for the
 three surfaces converted in 3d -- Code, Config (cards) and Music.
@@ -60,7 +60,7 @@ class _Counter:
 def _editor(tmp_path, tab, **kw):
     ws = build_ws(tmp_path, **kw)
     open_cart(ws, _EDITOR_CART)
-    ws.open_in_editor(next(c for c in ws._all_carts
+    ws.open_in_editor(next(c for c in ws.carts.all
                            if c.get("title") == _EDITOR_CART))
     ws.set_menu_view(tab)
     return ws

@@ -1,0 +1,21 @@
+{
+ "query": "?handheld=1&dev=1",
+ "boot_ms": 15000,
+ "steps": [
+  {
+   "note": "THE REPORTED CASE (2026-08-30): a page sitting on a console that is then switched off, with the reader having changed NOTHING. Two things were wrong and both are here. The give-up counted failed PUSHES, and an idle page pushes nothing -- so the counter never advanced and the notice took over a minute. And when it came it carried the data-loss warning, telling someone who had changed nothing that their work was at risk.",
+   "wait": 2000
+  },
+  {
+   "js": "JSON.stringify({at:'live',fn:typeof window.__moyStart,link:window.__moyLink||null})"
+  },
+  {
+   "note": "No clicks. No edits. Nothing is polled because nothing is pending -- which is the whole point: only the heartbeat can notice, and 15s of silence is the budget. The harness kills the board during this wait.",
+   "wait": 28000
+  },
+  {
+   "js": "JSON.stringify({at:'gone',shown:getComputedStyle(document.getElementById('lnk')).display,cls:document.getElementById('lnk').className,head:document.getElementById('lnkh').textContent,body:document.getElementById('lnkb').textContent,link:window.__moyLink||null})"
+  },
+  {"shot": "link_vanish_idle"}
+ ]
+}

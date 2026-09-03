@@ -61,6 +61,12 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime import ui as _ui
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 # Music / sound editor (#50): a tracker-style step editor over the cart's AudioBank.
 # Two views: SFX (a vertical column of [note, wave, vol] steps for one effect) and
 # SONG (a column of SFX-id slots making the looping phrase). The cursor picks a
@@ -142,11 +148,7 @@ def _mu_pad_rect(col, row):
     return (x, y, _MU_PAD_W, _MU_PAD_H)
 
 
-_BASE_W = 320
-_BASE_H = 240
-
-
-class MusicLayout:
+class MusicLayout(LayoutBase):
     """Responsive music-editor geometry (#39 step 3): the control row (view toggle /
     object stepper / speed ticks), the scrolling step/slot list, the right-hand edit
     pad and the bottom PLAY/LOOP bar, derived from the SYSTEM canvas size (w, h) +
@@ -159,11 +161,8 @@ class MusicLayout:
     panel shows more steps/slots at once."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         if self._base:
             self.title_y = _MU_TITLE_Y
             self.view_btn = _MU_VIEW
@@ -463,7 +462,7 @@ class MusicEditorUI:
         # Themed on EVERY responsive tier (owner ask 2026-07-23 -- the tokens
         # resolve per theme/variant); only the frozen 320x240 _base branch keeps
         # its byte-identical literals.
-        light = (not lay._base) or ws.light_chrome()
+        light = (not lay._base) or ws.look.light_chrome()
         self._light = light
         ink = th["ink"] if light else NAMES["white"]
         ink_dim = th["ink_dim"] if light else NAMES["light_grey"]
@@ -583,7 +582,7 @@ class MusicEditorUI:
                                       else NAMES["light_grey"]), 1)
             note = _mu_note_name(pitch)
             note_c = (sel_ink if light else NAMES["peach"]) if cur else (
-                NAMES["brown"] if self.ws.light_chrome() else NAMES["peach"])
+                NAMES["brown"] if self.ws.look.light_chrome() else NAMES["peach"])
             cv.print(note, x + 24 * fs, y + 4 * fs, note_c if pitch >= 0 else
                      base_dim, 1)
             cv.print(_MU_WAVE_LABELS[wave & 7], x + 64 * fs, y + 4 * fs, tc, 1)

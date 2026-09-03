@@ -21,7 +21,14 @@ THE ARITHMETIC ON THIS GLASS. 480x320x2 = 307,200 B is ~15.4 ms at QSPI 40MHz
   mid-frame. The bridge latches per byte and should not care, but "should" is
   what the flag is for.
 
-WHAT THIS BOARD HAS AND THE T-DECK DOES NOT: the #190-cousin GAME FOLD, below.
+THE GAME FOLD is `banded_panel.FoldingCompositor`, shared with the T-Deck since
+  `moy_fold` made the synthesis C both panels can run. This board's half of it
+  stays in `moy_axs`: the rotate the
+  gather runs in, and THE GAME WINDOW (the owner's 2026-08-19 insight -- the
+  bezels around the game never change, and this panel's GRAM keeps them, so a
+  steady play frame arms CASET/RASET to the game rect and ships that alone).
+  `fold_stats` therefore has a fourth field here that the T-Deck's does not.
+
 WHAT IT DOES NOT HAVE: the T-Deck's `LAYER_COPY_ASYNC` lever (unmeasured here
   -- a recorded A/B, not a default; device_canvas keeps its own False default
   when no one assigns it) and its `sd_bracket` (nothing else is known to share
@@ -29,7 +36,7 @@ WHAT IT DOES NOT HAVE: the T-Deck's `LAYER_COPY_ASYNC` lever (unmeasured here
   drain and the backlight gate's fence).
 """
 
-from banded_panel import BandedCompositor
+from banded_panel import FoldingCompositor
 
 WIDTH = 480
 HEIGHT = 320
@@ -40,7 +47,7 @@ HEIGHT = 320
 ASYNC_FLUSH = True
 
 
-class GuitionCompositor(BandedCompositor):
+class GuitionCompositor(FoldingCompositor):
     """RGB565 framebuffer(s) in PSRAM, pushed to the AXS15231B by moy_axs."""
 
     def __init__(self, nfbs=2, async_flush=None):
@@ -52,62 +59,7 @@ class GuitionCompositor(BandedCompositor):
 
         if async_flush is None:
             async_flush = ASYNC_FLUSH
-        BandedCompositor.__init__(self, moy_axs, nfbs, async_flush)
-
-        # The #190-cousin GAME FOLD: DeviceCanvas.blit_game probes
-        # `fold_supported` and, instead of compositing the game into the root
-        # fb, hands the (scratch-snapshotted) game frame to arm_scale_fold --
-        # the flush then SYNTHESIZES every band (black bezels + game pixels
-        # read straight from the scratch) and the root is neither written by
-        # a composite nor read by the pump: half the per-frame PSRAM traffic
-        # on a play frame. The shared frame walk disarms when an overlay
-        # paints the root (console.py's _fold_live), and the disarm performs
-        # the skipped composite in C. Scale-1 only in the C; other scales
-        # (cart-declared views) composite here in the fallback below.
-        #
-        # Set on the instance rather than probed in the shared base on purpose:
-        # the T-Deck must have NO such attribute at all (its docstring says so,
-        # and `DeviceCanvas.blit_game` getattrs it), which is the established
-        # way one board says "this board does not have that lever".
-        self.fold_supported = hasattr(moy_axs, "arm_fold")
-
-    # -- the game fold (#190's cousin; see __init__'s note) -------------------
-
-    @property
-    def fold_count(self):
-        """Flushes FOLDED since boot -- the fold's liveness proof.
-
-        A property, not a cached int: its readers take it as an attribute, and a
-        frozen value is the exact symptom (something disarming every frame) the
-        meter exists to distinguish from a healthy one.
-
-        Guition-only on purpose -- the T-Deck must not grow the attribute at
-        all, because absence is how a board says it lacks the lever and is what
-        lets `state`'s `fold` read None there rather than a 0 that looks like a
-        fold which never fires."""
-        return self._lcd.fold_stats()[0]
-
-    def fold_fence(self):
-        self._lcd.fold_fence()
-
-    def arm_scale_fold(self, src_buf, vw, vh, ox, oy, scale):
-        if scale == 1:
-            try:
-                self._lcd.arm_fold(src_buf, vw, vh, ox, oy)
-                return
-            except (ValueError, OSError):
-                pass                    # geometry the C declines: composite below
-        # Fallback: perform the composite blit_game skipped (bezels + scaled
-        # blit into the root), so declining is invisible one level up.
-        g = self._gfx
-        if g is None:
-            return
-        fb = self.framebuffer()
-        g.fill(fb, self._w * self._h, 0)
-        g.blit565_scale(fb, self._w, self._h, ox, oy, src_buf, vw, vh, scale)
-
-    def disarm_scale_fold(self):
-        self._lcd.disarm_fold(self._back)
+        FoldingCompositor.__init__(self, moy_axs, nfbs, async_flush)
 
 
 def set_backlight(on=True):

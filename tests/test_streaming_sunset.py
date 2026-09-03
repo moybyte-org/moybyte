@@ -93,7 +93,7 @@ def test_device_webview_controller_is_gone():
     assert not os.path.exists(os.path.join(TDECK, "modules", "device_webview.py"))
     runtime_src = _read("firmware", "lilygo_t_deck_plus_mainline", "modules", "moy_runtime.py")
     assert "device_webview" not in runtime_src.replace(
-        "# 2026-08 streaming sunset (docs/moycore_plan_2026-08.md 3.2): device_webview.py,", "")
+        "# 2026-08 streaming sunset (docs/history/moycore_plan_2026-08.md 3.2): device_webview.py,", "")
     assert "WebView(" not in runtime_src
     assert "web_hook" not in runtime_src
 

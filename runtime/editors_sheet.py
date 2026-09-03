@@ -269,7 +269,7 @@ class SpriteSheet:
         same blittable `from_hex(text).tile_image(n)` returns (or
         `tile_span_image(n, tw, th)` for a multi-tile icon), and None when the
         sheet carries no art at all -- but WITHOUT materialising the sheet, which
-        `Workstation.slim_carts` would otherwise do once per cart at every boot.
+        `CartManager.slim` would otherwise do once per cart at every boot.
         Only the icon's own rows are decoded; every other line is read by one
         `set` intersection, all `is_blank()` ever asked of it.
 

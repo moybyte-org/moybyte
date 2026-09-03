@@ -1,0 +1,15 @@
+# Moybyte overrides on the stock slave defaults (which come first in
+# SDKCONFIG_DEFAULTS -- see build.sh; anything not named here is the slave
+# project's own decision).
+
+# The 7B wires the C6 to the P4 over SDIO; the slave project's transport
+# choice must match the host's (the host image is built with
+# ESP_HOSTED_ENABLED over SDIO -- MicroPython's sdkconfig.p4_wifi_c6).
+CONFIG_ESP_SDIO_HOST_INTERFACE=y
+
+# The stock slave defaults enable BLE controller sleep. Against this host that
+# is a P4 that PANICS (interrupt WDT on CPU1) the moment NimBLE activates:
+# the controller inits, then sleeps through its first HCI exchange, and the
+# hosted VHCI send path spins waiting -- observed on glass 2026-08-24. The
+# factory slave kept the keyboard alive; sleep off restores that behavior.
+CONFIG_BT_LE_SLEEP_ENABLE=n

@@ -101,6 +101,53 @@ def test_the_device_accepts_what_the_publisher_signs(device):
     assert u.verify_manifest(signed(), TEST_KEYS) is True
 
 
+def _load_c6_update():
+    p = ROOT / "device" / "moy_c6_update.py"
+    spec = importlib.util.spec_from_file_location("moy_c6_update_signing", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+C6_MANIFEST = dict(MANIFEST, c6={
+    "version": 2, "hosted": "2.12.12",
+    "url": "https://example.invalid/c6_network_adapter.bin",
+    "size": 1207264,
+    "sha256": "ab" * 32,
+})
+
+
+def test_the_two_c6_canonical_forms_agree():
+    """Same contract as the manifest's own canonical, for the c6 block: the
+    bytes c6_sig covers are written twice (tools/ota_sign.canonical_c6 and
+    moy_c6_update._canonical_c6) and only this runs them together."""
+    cu = _load_c6_update()
+    for manifest in (C6_MANIFEST,
+                     dict(C6_MANIFEST, board="p4"),
+                     dict(C6_MANIFEST, c6={}),
+                     dict(C6_MANIFEST, c6={"version": None, "size": None})):
+        assert cu.C6Updater._canonical_c6(manifest)             == ota_sign.canonical_c6(manifest)
+
+
+def test_the_c6_signature_round_trips_and_tamper_is_refused():
+    """The c6 block's OWN signature: the app `sig` deliberately covers only
+    the app fields, so without c6_sig a network attacker who cannot touch the
+    signed app entry could still rewrite the c6 block and hand the RADIO
+    co-processor their own firmware."""
+    m = dict(C6_MANIFEST)
+    digest = hashlib.sha256(ota_sign.canonical_c6(m)).digest()
+    block = ota_sign.pkcs1_v15_block(digest, (TEST_N.bit_length() + 7) // 8)
+    sig = "%x" % pow(int.from_bytes(block, "big"), TEST_D, TEST_N)
+    assert ota_sign.verify_c6(m, sig, TEST_N) is True
+    ota_mod = _load_moy_ota()
+    assert ota_mod.verify_sig(
+        _load_c6_update().C6Updater._canonical_c6(m), sig, TEST_KEYS) is True
+    tampered = dict(m, c6=dict(m["c6"], sha256="cd" * 32))
+    assert ota_sign.verify_c6(tampered, sig, TEST_N) is False
+    assert ota_mod.verify_sig(
+        _load_c6_update().C6Updater._canonical_c6(tampered), sig, TEST_KEYS) is False
+
+
 def test_the_two_canonical_forms_agree(device):
     """The signed bytes are written twice -- once in Python, once in MicroPython
     -- and nothing executes them together but this. If they drift, every update
@@ -174,6 +221,24 @@ def test_a_junk_signature_is_refused_without_raising(device, sig):
 def test_an_unsigned_manifest_is_not_a_valid_one(device):
     _m, u = device
     assert u.verify_manifest(MANIFEST, TEST_KEYS) is False
+
+
+@pytest.mark.parametrize("junk", [
+    ("not a modulus", 65537),        # a mistyped constant
+    (None, 65537),                   # a half-edited tuple
+    ("%x" % 3, 65537),               # too small for the PKCS#1 block
+])
+def test_one_unusable_key_does_not_disable_the_others(device, junk):
+    """OTA_PUBLIC_KEYS is a TUPLE so a compromised key can be ROTATED: an image
+    trusted by the old key ships signed by the new one, and for that window an
+    image carries two. A bad entry among them must be skipped, not fatal --
+    losing the loop to one typo would refuse every update on every board
+    carrying that image, with a cable flash as the only way back."""
+    _m, u = device
+    signed_m = signed()
+    assert u.verify_manifest(signed_m, (junk,) + TEST_KEYS) is True
+    assert u.verify_manifest(signed_m, TEST_KEYS + (junk,)) is True
+    assert u.verify_manifest(signed_m, (junk,)) is False
 
 
 # -- when a signature is REQUIRED --------------------------------------------
@@ -346,3 +411,29 @@ def test_the_default_url_carries_the_board(device):
         assert m.default_manifest_url(channel).endswith("/latest-tdeck.json")
         assert m.default_manifest_url(channel, "p4").endswith("/latest-p4.json")
     assert m.default_manifest_url("nonesuch") is None
+
+
+# -- the on-glass extraction (tests/test_p4_on_glass.py) ---------------------
+
+def test_the_on_glass_extraction_still_carries_a_whole_verifier():
+    """The board suite does not retype this verifier, it ast-EXTRACTS it -- and
+    for a fortnight it extracted a `_verify_manifest` whose arithmetic had moved
+    out from under it. `607ba35` promoted the PKCS#1 block compare to a
+    module-level `verify_sig` so the C6 image's second signature could share it;
+    the extractor named its pieces by hand, so the snippet it uploaded called a
+    name it never sent. The board answered `NameError` to every probe, the
+    harness discarded the text, and three tests failed as `assert None is False`
+    -- misfiled as a flaky serial upload because nothing said otherwise.
+
+    The extraction runs HERE now, in CPython, with no board on the desk: the
+    same drift is a named failure on every `make test`."""
+    import test_p4_on_glass
+
+    snippet = test_p4_on_glass._extract_verifier()
+    assert test_p4_on_glass._free_names(snippet) == set(), \
+        "the extracted verifier reads names it does not upload"
+    env = {}
+    exec(compile(snippet, "<moy_ota extract>", "exec"), env)   # noqa: S102
+    assert env["_verify_manifest"](signed(), TEST_KEYS) is True
+    assert env["_verify_manifest"](dict(signed(), size=1), TEST_KEYS) is False
+    assert env["_verify_manifest"](dict(signed(), sig="zz"), TEST_KEYS) is False

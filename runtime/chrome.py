@@ -65,6 +65,12 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.code_layer import (_CODE_LH, _CODE_X0, _CODE_Y0,
                                     _SYM_CELL, _SYM_H, _CODE_SYMBOLS)
 
+try:
+    from layout_base import LayoutBase, BASE_W as _BASE_W, BASE_H as _BASE_H
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.layout_base import (LayoutBase, BASE_W as _BASE_W,
+                                     BASE_H as _BASE_H)
+
 
 try:                                    # device: ticks is frozen flat
     from ticks import _ticks_ms, _ticks_us, _ticks_diff
@@ -149,15 +155,15 @@ _PANEL_FLOOR = 24       # Settings panel bottom inset, in fs-scaled px
 _CURSOR_BASE = 7
 _CURSOR_ACCEL = 2
 
-# Baseline the responsive layout reproduces EXACTLY (#39 graceful degradation).
-_BASE_W = 320
-_BASE_H = 240
+# (_BASE_W/_BASE_H -- the baseline the responsive layout reproduces EXACTLY, #39
+# graceful degradation -- come from the layout_base leaf above; console.py still
+# imports them back from here.)
 _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 # (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
 # composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
 
 
-class Layout:
+class Layout(LayoutBase):
     """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,
     page chevrons, management buttons, and Settings rows derived from
     the SYSTEM canvas size (w, h) + the system font scale (1/2/3) -- instead of the
@@ -175,12 +181,9 @@ class Layout:
     that the SystemCanvas renders at `fs`; chrome heights/margins scale with fs too."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
         self.font_w = _FONT_W * fs
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
 
         # -- status strip (height/position scales with the font) ----------------
         self.status_h = _STATUS_H * fs
@@ -381,7 +384,7 @@ class Layout:
         return (self.clock_x, 0, self.clock_w, self.status_h)
 
 
-class CodeLayout:
+class CodeLayout(LayoutBase):
     """Responsive code-editor geometry (#39 step 2): the top bar (title + run/save/
     close icons), the COLS x ROWS text grid, the caret/gutter, and the bottom symbol
     palette -- all derived from the SYSTEM canvas size (w, h) + font scale, instead
@@ -400,13 +403,10 @@ class CodeLayout:
     the right span."""
 
     def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        self.w = int(w)
-        self.h = int(h)
-        self.fs = max(1, int(font_scale))
+        LayoutBase.__init__(self, w, h, font_scale)
         fs = self.fs
         self.cell = _FONT_W * fs                  # char-cell width (8*fs)
         self.lh = _CODE_LH * fs                   # line height
-        self._base = (self.w == _BASE_W and self.h == _BASE_H and fs == 1)
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
         self.sym_cell = _SYM_CELL * fs
         self.sym_h = _SYM_H * fs

@@ -1,8 +1,8 @@
 """Serial diagnostics for the device desktop loop (extracted from moy_runtime.py).
 
 A set of pure logging functions (#43/#63/#66/#68/#69) the run_desktop loop calls
-between frames when perf capture is on: _diag_flush (ring -> SD), _diag_perf_sample
-(PERF), _diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
+between frames when perf capture is on: _diag_flush (ring -> SD),
+_diag_hitch (HITCH), _diag_drawbrk / _diag_draw2 / _diag_chromebrk (the
 draw-cost splits), _diag_pump (bounce-feed pacing), _diag_i2cstat (#69 kbd/touch
 I2C latency), _diag_calib (interpreter cost model), _diag_gc (the forced-collect
 sample). Every one takes its inputs explicitly (diag / ws / comp / keyboard /
@@ -33,17 +33,10 @@ def _diag_flush(diag, ws):
     return _ticks_diff(_ticks_ms(), t0)
 
 
-def _diag_perf_sample(diag, ws):
-    """Log a PERF sample line from the workstation's current frame numbers, if a
-    cart is actively running. Guarded -> a no-op on any failure."""
-    if diag is None:
-        return
-    try:
-        sample = ws.perf_sample()      # (name, fps, flush_ms, draw_ms) or None
-        if sample is not None:
-            diag.log_perf(sample[0], sample[1], sample[2], sample[3])
-    except Exception:
-        pass
+# The PERF sample is not a diag helper (#206 item 2): it rides
+# device_boot.PerfSampler on the shared FrameLoop.account hook, in the one
+# format every board emits. This board still PERSISTS it -- run_desktop's emit
+# rings the finished line -- but it no longer composes a second one.
 
 
 HITCH_MS = 80
@@ -232,6 +225,11 @@ def _diag_luamem(diag, ws):
     classes are the VM's hot objects: stack segments, table nodes). This is
     the pricing input for any structural SRAM proposal (#66: an indexed SRAM
     canvas would take ~77KB from the same pool the allocator feeds on).
+
+    moycore's line carries the small-object pool too (`pool=live/capKB ch=n`).
+    The gap between those two is the pool's slack -- free lists and un-carved
+    chunk tails -- and it is PSRAM the VM holds that `psram` alone does not
+    show, so a pool that is mostly slack is visible here and nowhere else.
     Guarded; prints only while a lua cart's VM is alive (live bytes > 0)."""
     if diag is None:
         return
@@ -239,11 +237,11 @@ def _diag_luamem(diag, ws):
         if ws.perf_sample() is None:
             return
         # Whichever runtime is holding the cart. moycore reports the same four
-        # leading fields and stops there -- the size-class buckets existed to
-        # CHOOSE the SRAM-first policy, and the policy is chosen; what is left
-        # to watch is whether it took. A short tuple prints a short line rather
-        # than nothing, which is what the old unconditional st[15] would have
-        # done here.
+        # leading fields plus its pool's three and stops there -- the
+        # size-class buckets existed to CHOOSE the SRAM-first policy, and the
+        # policy is chosen; what is left to watch is whether it took. A short
+        # tuple prints a short line rather than nothing, which is what the old
+        # unconditional st[15] would have done here.
         st = None
         try:
             import moycore
@@ -269,11 +267,12 @@ def _diag_luamem(diag, ws):
         except Exception:
             pass
         k = 1024.0
-        if len(st) < 16:                    # moycore's four
+        if len(st) < 16:                    # moycore's seven
             diag.log("LUAMEM",
                      "sram=%.1fKB psram=%.1fKB peak=%.1fKB denied=%d "
-                     "int=%d/%dk core=1"
+                     "pool=%.1f/%.1fKB ch=%d int=%d/%dk core=1"
                      % (st[0] / k, st[1] / k, st[2] / k, st[3],
+                        st[4] / k, st[5] / k, st[6],
                         int_free // 1024, int_big // 1024))
             return
         diag.log("LUAMEM",
@@ -453,8 +452,9 @@ def _diag_pump(diag, comp):
         # live (a small-canvas game frame's bands were SYNTHESIZED, the root
         # composite skipped). Steadily climbing during play = every quiet
         # frame folds; frozen = something disarms each frame.
-        # A board with no fold reports 0 forever and that is CORRECT -- the
-        # T-Deck's `fold_supported` is absent on purpose.
+        # BOTH banded boards have the lever (moy_fold), so a 0
+        # here now means something disarms -- read it against `fold_supported`,
+        # which is what a board WITHOUT the lever leaves absent.
         fold = getattr(comp, "fold_count", 0)
         diag.log("PUMP",
                  "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "

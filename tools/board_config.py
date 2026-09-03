@@ -266,8 +266,44 @@ def _shared(cfg):
 
 
 def denials(board_dir):
-    """{filename: entry} -- every shared module this board refuses, with why."""
+    """{filename: entry} -- every shared module this board refuses, with why.
+
+    Empty on an allowlist board (see `shared_strategy`): there, the reason a
+    module does not cross is that nothing asked for it, and the prose lives on
+    the groups that DO ask.
+    """
     return {e["file"]: e for e in _shared(load(board_dir)).get("deny", [])}
+
+
+def shared_strategy(board_dir):
+    """"denylist" (the console boards) or "allowlist" (the headless Zero).
+
+    WHY BOTH EXIST, since one of them is obviously the house style. A denylist
+    is right when the source tree's default answer is YES: `runtime/` IS the
+    console, so a new shared module belongs on a console board unless somebody
+    writes down why not (#161). The Zero is not a console -- no glass, no
+    carts, no Workstation -- so the default answer there is NO, and a denylist
+    would spell that as forty denials all saying "there is no console" plus a
+    silent miss every time a forty-first module appears. Which shape a board
+    uses is therefore a claim about the board, declared in its own file, and
+    `tests/test_staging_closure.py` is what makes an allowlist safe: it derives
+    the frozen set from the declaration and fails on an import that cannot
+    resolve, which is exactly the failure mode an allowlist has.
+    """
+    return _shared(load(board_dir)).get("strategy", "denylist")
+
+
+def lazy_imports(board_dir):
+    """{module name: entry} -- imports declared UNREACHABLE on this board.
+
+    A ladder like `try: import blocks / except ImportError: from runtime import
+    blocks` is mandatory by construction: neither branch is a fallback, so the
+    closure suite calls the module required. It is required for anything that
+    can REACH the call -- and on a board that freezes no console, nothing can.
+    Declared here, with the reason, rather than staged: the alternative is 95KB
+    of block compiler in both OTA slots for a function with no caller.
+    """
+    return {e["module"]: e for e in _shared(load(board_dir)).get("lazy", [])}
 
 
 def renames(board_dir):
@@ -280,22 +316,28 @@ def renames(board_dir):
 def staged_modules(board_dir, root=ROOT):
     """{destination filename: source Path} -- what a FRESH build stages.
 
-    Shared modules come from the denylist over `runtime/*.py`; device modules
-    come from the per-group allowlist over another board's `modules/` tree
-    (see the board file for why THAT one stays an allowlist).
+    Shared modules come from the denylist over `runtime/*.py` -- or, on a board
+    that declares `strategy = "allowlist"`, from its own `[[modules.shared.
+    group]]` list (see `shared_strategy` for when each is right). Device
+    modules always come from the per-group allowlist over `device/`.
     """
     board_dir, root = Path(board_dir), Path(root)
     cfg = load(board_dir)
     shared = _shared(cfg)
     out = {}
 
-    deny = {e["file"] for e in shared.get("deny", [])}
     ren = {e["file"]: e["as"] for e in shared.get("rename", [])}
     src_dir = root / shared.get("source", "runtime")
-    for p in sorted(src_dir.glob("*.py")):
-        if p.name in deny or p.name == "__init__.py":
-            continue
-        out[ren.get(p.name, p.name)] = p
+    if shared.get("strategy") == "allowlist":
+        for group in shared.get("group", []):
+            for name in group["files"]:
+                out[ren.get(name, name)] = src_dir / name
+    else:
+        deny = {e["file"] for e in shared.get("deny", [])}
+        for p in sorted(src_dir.glob("*.py")):
+            if p.name in deny or p.name == "__init__.py":
+                continue
+            out[ren.get(p.name, p.name)] = p
 
     device = cfg.get("modules", {}).get("device", {})
     if device:
@@ -416,13 +458,19 @@ class Setting:
 
     @property
     def disables(self):
-        """`CONFIG_X=` -- a bool/choice member turned OFF.
+        """`CONFIG_X=` or `CONFIG_X=n` -- a bool/choice member turned OFF.
 
-        NOT checkable in a generated sdkconfig: an unset bool renders as
-        `# CONFIG_X is not set`, but a choice member whose choice is hidden is
-        omitted ENTIRELY, so a grep for either form false-alarms. Disables ride
-        the fragment stamp instead."""
-        return self.value == ""
+        Both are legitimate fragment spellings (ESP-IDF's own defaults files
+        use `=n`; a bare `n` cannot be anything else, a string value would be
+        quoted). NOT checkable in a generated sdkconfig: an unset bool renders
+        as `# CONFIG_X is not set`, but a choice member whose choice is hidden
+        is omitted ENTIRELY, so a grep for either form false-alarms. Disables
+        ride the fragment stamp instead. The `=n` spelling joined 2026-08-25:
+        the P4's `CONFIG_BT_HCI_LOG_DEBUG_EN=n` (98419ff) was treated as a
+        required literal, which the guard then reported inert on every build
+        -- a warning locally, a red X on CI's cold second pass, and nothing
+        wrong on the board."""
+        return self.value in ("", "n")
 
     def __repr__(self):
         return "Setting(%s=%s @%d)" % (self.option, self.value, self.line)

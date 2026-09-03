@@ -40,8 +40,13 @@ from console import Pointer, Workstation, wire_workstation_core
 # board -- this file adds only the P4-only extras: bt/union/cache). What stays
 # here is hardware: the DPI scan-out, the PPA composite, BLE HID.
 from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
-                         OtaHealth, apply_touch, poll_webhost)
-from carts_data import CARTS   # build-time generated from system_carts/
+                         OtaHealth, PerfSampler, apply_touch, poll_webhost)
+# The seed roster, generated from system_carts/ at build time and PACKED
+# (2026-08-30): one raw-deflate blob per cart, inflated ONE AT A TIME by
+# `moy_carts.seed_any`, which reads the roster's form rather than being told.
+# Named CARTS because that is what it is to everything downstream -- the
+# compression is a storage detail of this one import.
+from carts_data import CARTS_Z as CARTS
 from device_util import _ticks_ms, _ticks_diff
 from device_api import make_api
 from device_canvas import DeviceCanvas, SystemCanvas, _LayerComp
@@ -544,6 +549,21 @@ def run_desktop(fps_cap=60):
                           make_wifi(moy_carts, carts_root),
                           lua_runtime=lua_runtime,
                           pointer=pointer, inp=inp, keyboard=keyboard)
+    # THE RADIO LINK (#7/#65 Phase 2 -- Phase E of docs/espnow_p4_2026-08.md):
+    # the console's one ESP-NOW owner, the same module and the same wiring as
+    # the S3 boards. Built here, INERT until a cart with the "multiplayer"
+    # permission runs (ws.link_arm() starts the radio; pm=PM_NONE costs power
+    # and a console on its shelf has nobody to talk to). On this board the
+    # espnow module underneath is the moy_c6 shim to the C6 -- a stock C6
+    # (no shim slave) makes start() fail into an inactive link, never a crash.
+    try:
+        from moy_espnow import make_link
+        ws.link = make_link(board="p4", name=ws.system.get("name", "p4"))
+        ws.net = ws.link.net
+    except Exception as exc:  # noqa: BLE001 -- no radio must never cost a console
+        print("Moybyte P4 link unavailable:", exc)
+        ws.link = None
+
     # OTA firmware update (#53 on this board). The partition table has been
     # OTA-shaped since bring-up (ota_0/ota_1, 4MB each) and update_ui has been
     # frozen in all along; this is the piece that was missing.
@@ -560,6 +580,16 @@ def run_desktop(fps_cap=60):
         ws.updater.set_wifi(ws.wifi, go_online=lambda: autoconnect_wifi(ws.wifi))
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: OTA updater unavailable:", exc)
+    # The C6 radio's own updater (#7/#58): Settings -> UPGRADE C6 RADIO.
+    # Rides ws.updater for the manifest + download, moy_c6.ota_* for the
+    # flash; the backend module's header carries the whole design. Failure
+    # is a missing Settings row, never a boot failure.
+    try:
+        if ws.updater is not None:
+            from moy_c6_update import C6Updater
+            ws.c6_updater = C6Updater(ws.updater)
+    except Exception as exc:  # noqa: BLE001
+        print("Moybyte P4: C6 updater unavailable:", exc)
     try:
         import machine
         ws.reboot_hook = machine.reset
@@ -571,12 +601,12 @@ def run_desktop(fps_cap=60):
     # which is what the row displays: 0.0.0.0 is the one address nobody can type
     # into a browser.
     try:
-        from moy_webhost import make_webhost, INTERNAL_WEB_DIR
+        from moy_webhost import make_webhost
 
         # The link wait that used to be a closure here is moy_webhost.ensure_online
         # now -- it was the same 25 lines the T-Deck needed, and writing it per
         # board is how that board went without the feature entirely.
-        ws.webhost = make_webhost(ws, carts_root, INTERNAL_WEB_DIR,
+        ws.webhost = make_webhost(ws, carts_root,
                                   autoconnect=autoconnect_wifi)
     except Exception as exc:  # noqa: BLE001
         print("Moybyte P4: web console unavailable:", exc)
@@ -597,7 +627,11 @@ def run_desktop(fps_cap=60):
     #   bt status|scan|forget|trace [0|1]  BLE keyboard diagnostics
     #   union 0|1   A/B the dirty-union gesture restore (pairs with `drag`)
     #   cache 0|1   A/B the drag backdrop cache
-    #   crisp 0|1   A/B the CRISP PIXELS composite (non-persisting)
+    # `crisp 0|1` is NOT here: it is a SETTINGS_TOGGLES word, served by the
+    # shared dev channel wherever its capability gate says yes. This board's
+    # identically-behaved extra was shadowed dead the day that landed, and a
+    # dead handler that looks like the live one is how the next reader edits
+    # the wrong body.
     idle = IdleBlank(set_backlight, POWER_SAVE_MS)
     ws._psave_ms = POWER_SAVE_MS   # `state` reports the LIVE timeout
 
@@ -633,13 +667,6 @@ def run_desktop(fps_cap=60):
         ws.wm._backdrop_disabled = not on
         print("REMOTE cache %s" % ("on" if on else "off"))
 
-    def _crisp_cmd(ws, parts, line):
-        # A/B the CRISP PIXELS composite from serial without persisting, so a
-        # measurement session never leaves the board on a non-default mode.
-        on = not (len(parts) == 2 and parts[1] == "0")
-        ws.set_crisp_pixels(on, persist=False)
-        print("REMOTE crisp %s" % ("on" if on else "off"))
-
     try:
         from dev_channel import DevChannel
         # env: what the `py` probe hook can reach beyond ws/wm/pointer --
@@ -647,7 +674,7 @@ def run_desktop(fps_cap=60):
         # on-glass witnesses (pump joins the env right after it is created).
         serial = DevChannel(ws, pointer, set_backlight=set_backlight, idle=idle,
                             extra={"bt": _bt_cmd, "union": _union_cmd,
-                                   "cache": _cache_cmd, "crisp": _crisp_cmd},
+                                   "cache": _cache_cmd},
                             env={"comp": comp, "game": game, "boot": boot})
     except Exception as exc:  # noqa: BLE001 -- remote input is optional sugar
         print("Moybyte P4 serial channel unavailable:", exc)
@@ -675,21 +702,27 @@ def run_desktop(fps_cap=60):
     if serial is not None:
         serial.env["pump"] = pump   # created just above; see the env note
     # Perf sampler (#58 fps-ledger groundwork): serial is free on this board, so
-    # print a PERF line every ~2s -- drawn-fps, average busy loop ms, and the
-    # console's own draw/flush/logic/render/chrome EMAs. Costs two tick reads
-    # per frame; the LINE is unconditional (its fps= field reads _frames_drawn,
-    # so it is valid with the meters off, and tools/p4_perf.py parses it).
+    # a PERF line every ~2s -- drawn-fps, average busy loop ms, the console's
+    # draw/flush/logic/render/chrome EMAs and this board's own WM/PPA columns.
+    # Costs two tick reads per frame; the LINE is unconditional (its fps= field
+    # reads _frames_drawn, so it is valid with the meters off).
     #
-    # The METERS follow Settings -> PERF DIAG, exactly as on the T-Deck
-    # (#68 kid mode: perf_capture arms per-layer walk timing, per-op canvas
-    # timers and the EMA tail -- ~1-1.5ms of every frame there). This line read
-    # an unconditional True until 2026-08-15, so the toggle gated nothing at
-    # boot on this board and the shipping fps could not be measured without
-    # first issuing `diag 0` -- which tools/p4_perf.py already did, its
-    # docstring already claiming "DIAG IS OFF BY DEFAULT".
+    # ONE BODY, ONE FORMAT, THREE BOARDS since #206 item 2: device_boot's
+    # PerfSampler measures and runtime/perf_line.py formats, so nothing about
+    # the shape is decided here. The only per-board argument is the compositor's
+    # cumulative overlap counters, because this is the only board with a PPA;
+    # the windowed-WM columns need no argument at all (wm_windowed stamps them
+    # on the Workstation, and a board that does not stage it prints `-`).
+    #
+    # The METERS follow Settings -> PERF DIAG (#68 kid mode: perf_capture arms
+    # per-layer walk timing, per-op canvas timers and the EMA tail -- ~1-1.5ms
+    # of every frame there). This read an unconditional True until 2026-08-15,
+    # so the toggle gated nothing at boot and the shipping fps could not be
+    # measured without first issuing `diag 0` -- which tools/p4_perf.py already
+    # did, its docstring already claiming "DIAG IS OFF BY DEFAULT". The sampler
+    # re-syncs it live, so flipping the toggle needs no reboot.
     ws.perf_capture = bool(getattr(ws, "diag_live", False))
-    _pf = {"at": _ticks_ms() + 2000, "n": 0, "busy": 0, "drawn": 0,
-           "ov": comp.overlap_stats()}
+    _perf = PerfSampler(ws, overlap=comp.overlap_stats)
 
     def _poll_inputs(now):
         """This board's input sources: the BLE keyboard's async notifications
@@ -722,62 +755,12 @@ def run_desktop(fps_cap=60):
 
     def _tail(now):
         poll_webhost(ws)               # see the helper for why the frame TAIL
-
-    def _account(now, elapsed, sleep_ms):
-        _pf["n"] += 1
-        _pf["busy"] += elapsed
-        if _ticks_diff(_ticks_ms(), _pf["at"]) >= 0:
-            _drawn = getattr(ws, "_frames_drawn", 0)
-            # GUARDED, like every diag helper on the T-Deck. This block reads a
-            # dozen Workstation internals owned by the SHARED runtime/console.py
-            # and sits OUTSIDE the frame try, so while the reads were bare,
-            # renaming one of them there dropped this board to the REPL about
-            # two seconds after boot -- a measurement killing the loop it
-            # measures. PRINTED rather than swallowed (2s cadence, live serial)
-            # so a stale sampler says so; the timer resets either way, so a
-            # broken sample cannot become a per-frame retry.
-            try:
-                # The meters follow Settings -> PERF DIAG live, so flipping it
-                # needs no reboot (T-Deck twin: the 3s diag tick in its tail).
-                _live = bool(getattr(ws, "diag_live", False))
-                if ws.perf_capture != _live:
-                    ws.perf_capture = _live
-                # home(wp/grid/bar): the LAUNCHER frame's section split (stashed
-                # by the shared launcher_layer under perf_capture) -- names
-                # where a slow desktop repaint goes; empty when the last frame
-                # wasn't the home screen.
-                _home = getattr(ws, "_pf_home", None)
-                # The overlap meters as DELTAS over this sample
-                # (comp.overlap_stats is cumulative): ppa= is deferred /
-                # obsolete / reuse-fences / game-fences / PPA timeouts, that
-                # last one must stay 0. gfence_ms otherwise hides -- the game
-                # fence runs inside FrameLoop's UNTIMED present() hook, so it
-                # lands in busy= and in no phase meter.
-                _ov = comp.overlap_stats()
-                _ovd = [a - b for a, b in zip(_ov, _pf["ov"])]
-                _pf["ov"] = _ov
-                print("PERF fps=%d/%d busy=%dms draw=%.0f flush=%.0f logic=%.0f "
-                      "render=%.0f chrome=%.0f wmr=%d wmw=%d wms=%d "
-                      "ppa=%d/%d/%d/%d/%d fence_ms=%.1f gfence_ms=%.1f cart=%s%s"
-                      % ((_drawn - _pf["drawn"]) // 2, _pf["n"] // 2,
-                         _pf["busy"] // (_pf["n"] or 1),
-                         getattr(ws, "_draw_ms", 0), getattr(ws, "_flush_ms", 0),
-                         getattr(ws, "_upd_ms", 0), getattr(ws, "_cart_ms", 0),
-                         getattr(ws, "_chrome_ms", 0),
-                         getattr(ws, "_pf_wm_restore", 0),  # drag backdrop restore ms
-                         getattr(ws, "_pf_wm_windows", 0),  # window-stack pass ms
-                         getattr(ws, "_pf_wm_stamp", 0),    # window content stamp ms
-                         _ovd[0], _ovd[1], _ovd[2], _ovd[4], _ovd[6],
-                         _ovd[3] / 1000.0, _ovd[5] / 1000.0,
-                         (getattr(ws, "cart", None) or {}).get("title", "-"),
-                         (" home(wp=%d grid=%d bar=%d)" % _home) if _home else ""))
-            except Exception as _pf_exc:   # noqa: BLE001 -- a diag never kills the loop
-                print("PERF sample failed: %s: %s"
-                      % (type(_pf_exc).__name__, _pf_exc))
-            _pf["at"] = _ticks_ms() + 2000
-            _pf["n"] = 0
-            _pf["busy"] = 0
-            _pf["drawn"] = _drawn
+        # The radio, once per frame -- same slice as the S3 boards (the module
+        # header carries the numbers). No-op while the link is inert, which is
+        # every frame nobody is playing together.
+        _lk = ws.link
+        if _lk is not None and _lk.active:
+            _lk.poll(ws)
 
     # The shared frame loop (#202 Phase B): the invariant order lives ONCE, in
     # device_boot.FrameLoop -- including the #77/#161 pacing debt via
@@ -785,7 +768,7 @@ def run_desktop(fps_cap=60):
     # composed frame, #45, unless the splash already lit it). Every hook above
     # is this board's own hardware.
     loop = FrameLoop(ws, pump, pointer, _poll_inputs, idle=idle, serial=serial,
-                     present=_present, tail=_tail, account=_account,
+                     present=_present, tail=_tail, account=_perf.account,
                      frame_error=_frame_error,
                      set_backlight=set_backlight, lit=boot.lit)
     loop.run()

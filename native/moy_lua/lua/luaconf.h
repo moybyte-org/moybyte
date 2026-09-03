@@ -128,6 +128,16 @@
 */
 #define LUA_32BITS	1
 
+/* moybyte: the VM's hot loop and the table/call helpers it leans on live in
+** internal instruction RAM on the ESP boards -- flash and PSRAM share one bus
+** there, so an instruction fetch miss waits behind the cart's own data. Empty
+** everywhere else. */
+#if defined(__XTENSA__)
+#define MOY_HOT __attribute__((section(".iram1.moylua")))
+#else
+#define MOY_HOT
+#endif
+
 
 /*
 @@ LUA_C89_NUMBERS ensures that Lua uses the largest types available for

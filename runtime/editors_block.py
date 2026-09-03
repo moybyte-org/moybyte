@@ -98,7 +98,7 @@ class BlockEditor(OpHistoryMixin):
         self._move_src = None     # the block object marked for a cross-parent MOVE
         # #111 phase 4: the outline's in-session undo/redo runs on the SHARED
         # op-history core (op_history.History) over the whole-program before/after
-        # codec, so the #88 bar UNDO/REDO icons (ws.undo()/redo(), routed by
+        # codec, so the #88 bar UNDO/REDO icons (ws.history.undo()/redo(), routed by
         # Project's per-tab history registry) drive the SAME stack as the host
         # Ctrl+Z. Bounded to _BLK_UNDO_MAX RAM steps (an INVERT codec, so the
         # depth ring is sound). In-session only -- blocks saves don't journal
@@ -271,8 +271,9 @@ class BlockEditor(OpHistoryMixin):
         """Close the open pending op into ONE History op = the net before/after
         program pair. A no-op when nothing is pending, or when the edit ended up
         not changing the program. Also the seam the undo/redo verbs (and the bar's
-        ws._seal_active_local) call FIRST, so a just-made, not-yet-sealed edit is
-        undo's first target -- mirrors Writer's burst close + Map's end_edit."""
+        ws.history._seal_active_local) call FIRST, so a just-made, not-yet-sealed
+        edit is undo's first target -- mirrors Writer's burst close + Map's
+        end_edit."""
         before = self._pending_pre
         self._pending_pre = None
         if before is None:
@@ -288,7 +289,7 @@ class BlockEditor(OpHistoryMixin):
                 and self._pending_pre != self.program)
 
     # undo/redo are OpHistoryMixin's over self._hist (#111). The #88 bar
-    # (ws.undo/redo) and the host Ctrl+Z (block_editor_ui) both drive them.
+    # (ws.history.undo/redo) and the host Ctrl+Z (block_editor_ui) both drive them.
 
     def _hist_before(self):
         # Seal any open edit first, so a just-made edit is the step's target.

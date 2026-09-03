@@ -99,12 +99,38 @@ def _verbs():
         tline(0, (i * 13) % 240, 319, (i * 13) % 240,
               (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
 
+    # APPENDED when moy core 0.3 promoted SPEC.md 6.1: a promoted verb owes a
+    # cost, and these three had no measured row anywhere. `fillp` is NOT a
+    # scene: it is draw STATE, so its cost belongs to whichever shape carries
+    # the pattern -- v_oval_p is that row, oval's own geometry under a dither,
+    # so the pair reads as the pattern's price rather than as a fourth shape.
+    def v_trib(i):
+        trib((i * 17) % 300, (i * 31) % 230, (i * 59) % 300 + 10,
+             (i * 43) % 230, (i * 23) % 300, ((i * 13) % 230) + 8, 2 + (i & 15))
+
+    def v_oval(i):
+        oval((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+             2 + (i & 15))
+
+    def v_ovalb(i):
+        ovalb((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+              2 + (i & 15))
+
+    def v_oval_p(i):
+        # Same call as v_oval, under a pattern: the difference IS fillp's cost.
+        fillp(0xA5A5)
+        oval((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+             2 + (i & 15))
+        fillp()
+
     return [("cls", v_cls, 4), ("rect", v_rect, 100), ("circ", v_circ, 100),
             ("line", v_line, 100), ("pix", v_pix, 500), ("print", v_print, 50),
             ("rectb", v_rectb, 100), ("circb", v_circb, 100),
             ("tri", v_tri, 50), ("spr", v_spr, 500),
             ("map", v_map, 8), ("sspr", v_sspr, 50),
-            ("tline", v_tline, 50)]
+            ("tline", v_tline, 50), ("trib", v_trib, 50),
+            ("oval", v_oval, 100), ("ovalb", v_ovalb, 100),
+            ("oval_p", v_oval_p, 100)]
 
 
 def _init():
@@ -392,9 +418,11 @@ def _serial_report():
 #   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
 #   8 + i*3:  verb_id, k, best_ms          (verb ids in _VERB_ID)
 #   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
+#   Verb rows run 8..63 (three cells each), so the roster caps at 18.
 _VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
             "rectb": 6, "circb": 7, "tri": 8, "spr": 9, "map": 10,
-            "sspr": 11, "tline": 12}
+            "sspr": 11, "tline": 12, "trib": 13, "oval": 14, "ovalb": 15,
+            "oval_p": 16}
 _PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
                 ("silent", 3), ("sound", 4))
 

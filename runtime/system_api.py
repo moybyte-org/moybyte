@@ -419,7 +419,11 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
                 import chrome
             except ImportError:  # pragma: no cover - host fallback
                 from runtime import chrome
-            return list(chrome.THEMES)
+            # NAMES, not the (name, tokens) pairs: `set_theme` beside this takes
+            # a name and silently falls back to DEFAULT_THEME on anything else,
+            # so returning pairs made the documented `set_theme(themes()[0])`
+            # always select "night", with nothing reporting it.
+            return [n for n, _tokens in chrome.THEMES]
 
         ns["themes"] = _themes
     if "nav" in roles:

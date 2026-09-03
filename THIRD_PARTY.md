@@ -57,12 +57,14 @@ targets.
   <https://www.lua.org/ftp/lua-5.4.7.tar.gz> (the `src/` directory).
 - **Licence:** MIT. Copyright © 1994–2024 Lua.org, PUC-Rio.
   Full text: [`.../moy_lua/lua/COPYRIGHT`](native/moy_lua/lua/COPYRIGHT).
-- **Modified: yes.** Two changes, both listed in
+- **Modified: yes.** Four changes, all listed in
   [`.../moy_lua/lua/MODIFICATIONS.md`](native/moy_lua/lua/MODIFICATIONS.md):
-  a `#pragma GCC optimize("O2")` block added to 32 `.c` files, and
-  `LUA_32BITS` flipped from `0` to `1` in `luaconf.h`. Nothing else differs
-  from upstream; the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` /
-  `Makefile` are simply not vendored.
+  a `#pragma GCC optimize("O2")` block added to 32 `.c` files, `LUA_32BITS`
+  flipped from `0` to `1` in `luaconf.h`, and two edits to `lobject.c`'s
+  number-to-string conversion (an integral float prints without `.0`, and
+  integers convert without `snprintf`). Nothing else differs from upstream;
+  the tarball's standalone `lua.c` / `luac.c` / `lua.hpp` / `Makefile` are
+  simply not vendored.
 - `modmoy_lua.c` and `micropython.cmake` in the parent directory are Moybyte's
   own bridge code, not Lua's, and are under this repository's licence.
 
@@ -305,10 +307,8 @@ The separate 16×16 top-bar icon art (`_ICON_ART` in the same file, persisted as
 
 `docs/boards/lilygo_t_deck_plus.md` and the constants derived from it in
 `firmware/lilygo_t_deck_plus_mainline/modules/tdeck_panel.py` /
-`tdeck_display.py`. (The transcription originally landed in the `.moyproj`
-SDK's `moybyte_cli/boards.py` as `BOARD_PROFILES`, with its own `sources` list;
-that SDK was deleted on 2026-07-31 and git history has it. The board doc is the
-surviving citation.)
+`tdeck_display.py`. (It first landed in the `.moyproj` SDK, deleted
+2026-07-31; the board doc is the surviving citation.)
 
 GPIO numbers, the I²C keyboard address and the SPI pin map were transcribed
 from LilyGO's own board files —
@@ -512,8 +512,9 @@ repository's.** PICO-8 BBS carts default to CC BY-NC-SA 4.0.
 No ported cart is committed here. `ports/celeste.moy` — *Celeste* (PICO-8,
 2016) by Maddy Thorson & Noel Berry — is used as a Lua-runtime conformance
 test and is gitignored on purpose; `ports/README.md` records its attribution
-and how to regenerate it locally. `moy.py demo` downloads and converts it on
-request, printing the licence notice first. It must not ship in a product
+and how to regenerate it locally. The moy-spec CLI (`moy demo`, or `moy port` on a
+`.p8.png`) downloads and converts it on request, printing the licence notice
+first — this repo's own `moy.py` was deleted 2026-08-25. It must not ship in a product
 image, a seed set, or anything commercial.
 
 Cartridges *you* author are yours; see LICENSE.md.

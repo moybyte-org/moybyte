@@ -80,15 +80,20 @@ cable flash.
 # build (first run clones micropython v1.28.0 into .build/, ~4 min; warm ~40s)
 ./firmware/lilygo_t_deck_plus_mainline/build.sh
 
-# put the board in the ROM loader BY HAND -- see below -- then:
 make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0
 ```
 
-**There is no BOOT button on a T-Deck.** The trackball CLICK is GPIO0: hold the
-trackball pressed in while powering the board on, then release. esptool's
-auto-reset does not sync over this board's native USB, which is why the flash
-target uses `--before no_reset`.
+**The flash needs no hands.** `board.toml`'s `[flash]` declares
+`before = "usb_reset"` -- esptool's USB-Serial/JTAG reset sequence, which drives
+this board into the ROM loader over its own USB. esptool's *default* reset does
+not (it write-times-out against a wedged node); `usb_reset` connected in every
+state tried, measured 2026-08-17.
+
+**There is no BOOT button on a T-Deck**, which is why that matters. The
+trackball CLICK is GPIO0, so holding it in while powering the board on is the
+way into the loader when even `usb_reset` cannot connect -- a last resort, not
+the procedure.
 
 Outputs land in `dist/tdeck_mainline/`:
 
@@ -391,7 +396,9 @@ built so that both mechanisms are survivable:
   byte consumed, so noise costs a bounded slice of a frame and can never park
   the loop; a partial line past 96 chars is dropped;
 * it **counts what it swallowed**, and the diag tick prints
-  `SERIAL rx=N lines=N dropped=N partial=N`.
+  `SERIAL rx=N lines=N dropped=N partial=N raw=N` (`raw` is what `recv` took
+  around the line reader, so an rx that stopped climbing during a cart push is
+  the transfer working, not the channel dying).
 
 That last line is the experiment. **`rx` climbing on an idle board with
 `lines=0` means something is injecting bytes into stdin** — mechanism 2, and
@@ -424,7 +431,23 @@ Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
 | `gov 0\|1` | the #63 frame governor |
 | `mem` | a forced collect, then the live/free split |
 | `py <code>` | eval/exec one line against the LIVE console (`ws`, `wm`, `pointer` in scope) |
+| `recv <n> <window> <path>` | take `n` RAW bytes off stdin into `<path>.new`, acking every `window` |
 | `quit` | leave the desktop for the REPL, cleanly |
+
+**`recv` leaves the line discipline**, and it is the only cart-push transport
+`tools/push_cart.py` has, so an image without the command is refused rather
+than served slowly. On this board it is the easy half: the USB-Serial/JTAG ISR
+only drains what the stdin ring has room for, so the endpoint stalls and the
+HOST blocks -- real flow control, which is why `[serial] window` here is
+**16384** against the P4's 4096, where the board's ack is the only backpressure
+there is.
+
+The parts that are the same on every board: the payload is read from
+`sys.stdin.buffer` (the TEXT stdin rewrites CR as it goes); the transfer runs
+with `micropython.kbd_intr(-1)`, because `tud_cdc_rx_cb`/`usb_serial_jtag.c`
+swallow a byte equal to the interrupt char -- and CDC's copy *empties the ring*
+when it hits one; the board hashes the file by READING IT BACK; and a host that
+stops mid-window is abandoned after 5s with the `.new` removed.
 
 If this works on glass, `tools/p4_autotest.py`'s approach points straight at
 this board and the T-Deck gains the on-glass suite it has never had. If it does
@@ -630,12 +653,23 @@ boundary.
 `moy_lcd.show()` path byte-for-byte, and it is how a tear, a glitch or a hang
 gets attributed to the overlap in a single reflash.
 
-**What is NOT ported, deliberately:** the #190 flush-bounce scale fold, which
-*synthesises* each band for a small-canvas game rather than copying the root
-framebuffer. It needs `moy_gfx` kernels writing into the bounce slots, i.e. the
-slots handed back to Python, and it is a separate lever with its own A/B.
-`fold_supported` is absent, `DeviceCanvas.blit_game` takes its ordinary root
-composite path, and the PUMP line prints `fold=0`. Nothing degrades.
+**The #190 flush-bounce scale fold runs here too**, and its synthesis is C on
+the FEEDER — `native/moy_flush/moy_fold`, one body with the Guition's — so no
+bounce slot ever crosses into Python. On a small-canvas play frame `blit_game`
+snapshots the game rectangle and ARMS instead of compositing, and `queue_band`
+synthesizes each band from that snapshot (black outside the viewport, the game
+rows at integer scale inside) rather than copying the root. Both the 153,600 B
+composite and the 153,600 B band read-back of the root disappear; `fold=` on
+the PUMP line climbs on every quiet play frame, and a `fold=` that stops
+climbing is the symptom of something disarming.
+
+The **game window** is the Guition's alone — shipping the game rect by itself
+needs a panel whose GRAM keeps the bezels and a per-frame window arm, and this
+flush arms the full frame every time. So the fold buys PSRAM traffic here, not
+wire time. `moy_lcd.fold_test(n)` is the eyes-free proof on glass
+(paint the reference composite into fb `n` with a fold armed; 0 = byte-identical
+to the path it replaced), and `tests/test_flush_fold.py` runs the same claim
+off a board against `moy_fold_composite`.
 
 ---
 

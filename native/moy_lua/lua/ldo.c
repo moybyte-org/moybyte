@@ -490,7 +490,7 @@ l_sinline void moveresults (lua_State *L, StkId res, int nres, int wanted) {
 ** info. If function has to close variables, hook must be called after
 ** that.
 */
-void luaD_poscall (lua_State *L, CallInfo *ci, int nres) {
+void MOY_HOT luaD_poscall (lua_State *L, CallInfo *ci, int nres) {
   int wanted = ci->nresults;
   if (l_unlikely(L->hookmask && !hastocloseCfunc(wanted)))
     rethook(L, ci, nres);
@@ -593,7 +593,7 @@ int luaD_pretailcall (lua_State *L, CallInfo *ci, StkId func,
 ** returns NULL, with all the results on the stack, starting at the
 ** original function position.
 */
-CallInfo *luaD_precall (lua_State *L, StkId func, int nresults) {
+CallInfo *MOY_HOT luaD_precall (lua_State *L, StkId func, int nresults) {
  retry:
   switch (ttypetag(s2v(func))) {
     case LUA_VCCL:  /* C closure */

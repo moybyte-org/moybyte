@@ -8,34 +8,16 @@
 -- This drew per column while the Python twin batched, which made the pair two
 -- different programs and its number a ceiling rather than a measurement. Since
 -- 2026-08-14 ray_test.moy is this cart line for line: the batch verbs are gone
--- (plan 6.10 -- 160 rect() upcalls measured under a millisecond, and Lua could
+-- (plan 6.10 -- 160 draw upcalls measured under a millisecond, and Lua could
 -- never call them anyway), so the pair now differs only in language.
+--
+-- The level is map.moymap and the walls are sprites.moygfx -- both editable,
+-- both identical to the Python twin's. A cell holds the sheet tile its wall is
+-- built from, and the side-on face is the tile one sheet row below it.
+--
+-- flr() where the Python twin writes int(): those disagree on a negative
+-- number, and every coordinate here is inside a walled map, so they cannot.
 
-local MAP = {
-  "1111111111111111",
-  "1..............1",
-  "1..2222....33..1",
-  "1..2...........1",
-  "1..2........3..1",
-  "1..2222.....3..1",
-  "1..............1",
-  "1....444.......1",
-  "1....4.4.......1",
-  "1....4.4...22..1",
-  "1..............1",
-  "1..33..........1",
-  "1..33....444...1",
-  "1..............1",
-  "1..............1",
-  "1111111111111111",
-}
-
--- grid[y][x] = 0 for open, else the wall kind 1..4. Built once from the strings
--- so the hot loop indexes numbers instead of doing string work per DDA step.
-local grid = {}
-
-local LIT = {8, 12, 11, 9}     -- facing you
-local DIM = {2, 1, 3, 4}       -- side-on
 local CEIL, FLOOR = 1, 5
 
 local TC, TS = 0.99755, 0.06994   -- one turn step; no trig needed anywhere
@@ -46,15 +28,6 @@ local mode, rc, rs
 local frames, t_mark, fps
 
 function _init()
-  for y = 1, #MAP do
-    local row, g = MAP[y], {}
-    for x = 1, #row do
-      local c = row:byte(x)
-      g[x] = (c == 46) and 0 or (c - 48)     -- '.' is 46, '1'..'4' are 49..52
-    end
-    grid[y] = g
-  end
-
   px, py = 8.5, 11.5
   dx, dy = 0.0, -1.0
   plx, ply = 0.66, 0.0
@@ -71,9 +44,12 @@ function _init()
   VX = (W - VW) // 2
   VY = (H - VH) // 2
 
-  -- bench: run the ray march and draw NOTHING but the HUD, so `render` is pure
-  -- VM throughput. Without it this cart's 160 rect() upcalls and the Python
-  -- twin's single batched call make the two frames incomparable (#167).
+  -- bench splits the frame into its parts so each can be timed alone (#167):
+  --   0 normal  1 the ray march with nothing drawn (pure VM throughput)
+  --   2 the two background rects alone (fill bandwidth)
+  --   3 the same pixels, ceiling via cls -- linear whole-buffer fill against
+  --     strided row fill. cls ignores the viewport, so compare 2 vs 3 at full
+  --     res only.
   bench = cfg("bench", 0)
 
   step = cfg("ray_step", 2)
@@ -113,8 +89,8 @@ function _update(dt)
   if btn("up") then mx, my = dx * sp, dy * sp end
   if btn("down") then mx, my = -dx * sp, -dy * sp end
   if mx ~= 0.0 or my ~= 0.0 then
-    if grid[flr(py) + 1][flr(px + mx) + 1] == 0 then px = px + mx end
-    if grid[flr(py + my) + 1][flr(px) + 1] == 0 then py = py + my end
+    if mget(flr(px + mx), flr(py)) < 0 then px = px + mx end
+    if mget(flr(px), flr(py + my)) < 0 then py = py + my end
   end
 end
 
@@ -136,31 +112,41 @@ local function cast()
     if rdy < 0 then sy, sidey = -1, (py - mapy) * ddy
     else sy, sidey = 1, (mapy + 1.0 - py) * ddy end
 
-    local side, cell = 0, 1
+    local side, cell = 0, -1
     for _ = 1, 64 do
       if sidex < sidey then
         sidex = sidex + ddx; mapx = mapx + sx; side = 0
       else
         sidey = sidey + ddy; mapy = mapy + sy; side = 1
       end
-      cell = grid[mapy + 1][mapx + 1]
-      if cell ~= 0 then break end
+      cell = mget(mapx, mapy)
+      if cell >= 0 then break end
     end
 
     local dist = (side == 1) and (sidey - ddy) or (sidex - ddx)
     if dist < 0.02 then dist = 0.02 end
 
     local lh = flr(VH / dist)
-    local y0 = half - lh // 2
-    if y0 < 0 then y0 = 0 end
-    local y1 = half + lh // 2
-    if y1 > VH then y1 = VH end
+    local top = half - lh // 2   -- unclipped: the crop below needs the real extent
 
-    if y1 > y0 and bench == 0 then
+    if lh > 0 and cell >= 0 and bench == 0 then
+      -- Where along the wall face the ray landed picks the texture COLUMN,
+      -- and the side picks the row: the dim twin is one sheet row down.
+      local hit = (side == 1) and (px + dist * rdx) or (py + dist * rdy)
+      local u = (cell % 16) * 8 + flr((hit - flr(hit)) * 8)
+      local v = (cell // 16) * 8 + side * 8
       local wide = VW - i * step
       if wide > step then wide = step end
-      rect(VX + i * step, VY + y0, wide, y1 - y0,
-           (side == 1) and DIM[cell] or LIT[cell])
+      -- A slice taller than the view is CROPPED, not squashed into what fits:
+      -- walking into a wall magnifies its texture, never shrinks it.
+      if lh > VH then
+        local v0 = (-top * 8) // lh
+        local v1 = ((VH - top) * 8 + lh - 1) // lh
+        if v1 > 8 then v1 = 8 end
+        sspr(u, v + v0, 1, v1 - v0, VX + i * step, VY, wide, VH)
+      else
+        sspr(u, v, 1, 8, VX + i * step, VY + top, wide, lh)
+      end
     end
   end
 end
@@ -203,8 +189,16 @@ function _draw()
   if mode ~= 0 then
     rect(VX, VY, VW, VH, 0)
     draw_tetra()
-  elseif bench ~= 0 then
-    cast()                       -- geometry only: cast() skips its own rect()
+  elseif bench == 1 then
+    cast()                       -- geometry only: cast() skips its own sspr()
+  elseif bench == 2 then
+    local half = VH // 2         -- background only: the two wide rects
+    rect(VX, VY, VW, half, CEIL)
+    rect(VX, VY + half, VW, VH - half, FLOOR)
+  elseif bench == 3 then
+    local half = VH // 2         -- background only, but ceiling via linear cls
+    cls(CEIL)
+    rect(VX, VY + half, VW, VH - half, FLOOR)
   else
     local half = VH // 2
     rect(VX, VY, VW, half, CEIL)
@@ -223,7 +217,7 @@ function _draw()
   if mode ~= 0 then
     print("TRI B=RAYS", VX + 3, VY + 12, 6)
   elseif bench ~= 0 then
-    print(cols .. " RAYS BENCH", VX + 3, VY + 12, 6)
+    print("BENCH " .. bench, VX + 3, VY + 12, 6)
   else
     print(cols .. " RAYS B=TRI", VX + 3, VY + 12, 6)
   end

@@ -20,7 +20,7 @@ board-specific (the SRAM-bounce pump, the DPI ping-pong, GDMA async copies, the
 PPA, PSRAM layer pooling) sits behind a `getattr` probe that finds nothing here.
 
 Why this is fast enough to be worth the deletion, measured before it was built
-(the wasm-raster spike -- docs/moycore_plan_2026-08.md 6 -- re-measured in this
+(the wasm-raster spike -- docs/history/moycore_plan_2026-08.md 6 -- re-measured in this
 VM): a full
 1024x600 clear costs 0.10ms through the C kernel against 4.4ms interpreted, and
 a whole desk repaint 0.06ms against 37ms. The dispatch cost of ~100-150 verb

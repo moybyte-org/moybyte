@@ -90,7 +90,23 @@ UI while watching the glass:
 - `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
 - `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
 - `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
+- `recv <n> <window> <path>` — take `n` RAW bytes off stdin into `<path>.new` (see below)
 - `quit` — leave the desktop for the REPL
+
+**`recv` is the one command that stops reading lines**, and this board is the
+one it was sized for: everything about its shape is this UART. Stdin here is a
+~256-byte ring fed by an ISR with **no flow control** — the same mechanism
+that makes a 768-char `py` line corrupt — so the host may only have one
+`window` of bytes in flight and must then wait for the board's ack, which is
+written *after* the file write, when nothing is on the wire. `[serial] window`
+in `board.toml` is **4096** here, four times smaller than the USB boards',
+whose USB-Serial/JTAG backpressures for real. A byte the ring drops is
+invisible to both ends, so the board simply never completes that window: its
+idle timeout fires after 5s, it removes the `.new` and prints how far it got.
+A byte that arrives *wrong* is caught by the sha256 the board takes by reading
+the file back. The T-Deck's README carries the rest, which is shared. `recv` is
+the ONLY cart-push transport, so an image without the command answers
+`REMOTE ? recv` and the tool stops with one line saying to flash the board.
 
 `moy_runtime.run_touch_calibrate()` (REPL-invokable) draws corner targets and
 dumps raw/mapped GT911 samples for re-calibrating the `p4_input` knobs.
@@ -141,9 +157,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   staged the same way: it is the **browser console baked into the image**
   (~573KB of pre-gzipped `firmware/web_runner/dist`, `.incbin`'d by
   `tools/gen_web_blob.py`, handed out as read-only memoryviews into flash), so
-  a flashed board always serves a console current with its own firmware. A copy
-  pushed to `/moy/web` still WINS — `make p4-web-push` stays the sub-minute dev
-  loop — and `moy_webhost.start()` prints which of the two it is serving.
+  a flashed board always serves a console current with its own firmware
+  (`.claude/rules/web.md` carries the rule and what follows from it).
 - `modules/` — the P4-authored device backend (tracked) + build-staged copies
   (gitignored; see `.gitignore`'s whitelist):
   - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the

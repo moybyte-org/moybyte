@@ -16,6 +16,11 @@ is moybyte disagreeing with the spec about what a verb draws. That is either a
 regression or a spec change to follow, and `hashes.json`'s provenance field is
 what makes it arguable rather than a coin toss.
 
+EVERY SCENE IS DRAWN, with no pending set. Four of them (`oval`, `fillp`,
+`sheet`, `screen_pal`) were strict-xfail while the Python tier had no verbs for
+them; all four now draw, so a scene that stops matching is a regression rather
+than a gap.
+
 WHAT IT DOES NOT REACH. The kernel under this canvas is `runtime/gfx_binding`:
 libmoy compiled RGB565 and reached by ctypes -- the same SOURCE the boards
 compile, but not the same binary, not MicroPython, and not a panel.
@@ -31,6 +36,7 @@ import pytest
 
 from runtime import editors_sheet
 from runtime import host_canvas
+from runtime import moy_carts
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                     "spec_conformance")
@@ -48,20 +54,26 @@ def _load_hashes():
 
 def _scene_names():
     """Every scene in the vendored suite, core ones first. `core` marks the
-    eight SPEC.md 6 scenes that count; the provisional ones (6.1's 3D verbs)
-    are run too but reported separately -- 6.1 promotes verbs on evidence, and
-    which implementations carry them IS the evidence."""
+    scenes SPEC.md 11 counts, which since core 0.3 is all of them: 6.1's 3D
+    verbs were reported-but-excluded through 0.2 and were promoted on the
+    evidence of which implementations carry them."""
     return [(s["name"], bool(s.get("core")), s["frame_sha256"])
             for s in _load_hashes()["scenes"]]
 
 
 def _build_assets(scene):
-    """The sheet and tilemap the scene draws from -- loaded out of the vendored
-    CART with moybyte's own deserialisers, so this exercises the real asset path
-    rather than a fixture built to match."""
+    """The sheet, tilemap and tile flags the scene draws from -- loaded out of
+    the vendored CART with moybyte's own deserialisers, so this exercises the
+    real asset path rather than a fixture built to match.
+
+    The flags scene is the one that makes this load-bearing: its trace only
+    RESTORES three of the tile flags it filters on (the rest ride in
+    flags.moyflags), so a replayer that started from a zero table would draw a
+    different -- and wrong -- picture without erroring anywhere."""
     cart_dir = os.path.join(HERE, "carts", scene + ".moy")
     sheet = editors_sheet.SpriteSheet(SHEET_COLS, SHEET_ROWS)
     tilemap = editors_sheet.TileMap(20, 15)
+    flags = bytearray(moy_carts.TILE_FLAGS)
     gfx = os.path.join(cart_dir, "sprites.moygfx")
     if os.path.exists(gfx):
         with open(gfx) as fh:
@@ -71,7 +83,11 @@ def _build_assets(scene):
     if os.path.exists(mp):
         with open(mp) as fh:
             tilemap = editors_sheet.TileMap.from_hex(fh.read())
-    return sheet, tilemap
+    ff = os.path.join(cart_dir, moy_carts.FLAGS_NAME)
+    if os.path.exists(ff):
+        with open(ff) as fh:
+            flags = moy_carts.parse_flags(fh.read())
+    return sheet, tilemap, flags
 
 
 def _text_arg(a):
@@ -84,7 +100,7 @@ def _text_arg(a):
     return a
 
 
-def replay(calls, canvas, sheet=None, tilemap=None):
+def replay(calls, canvas, sheet=None, tilemap=None, flags=None):
     """Run a trace against a Canvas. The spec's own replayer, transcribed --
     ~40 lines in any language, which is the point of publishing traces at all.
     Verbs are CART-facing (`spr(n, ...)`), because that is what SPEC.md
@@ -119,6 +135,22 @@ def replay(calls, canvas, sheet=None, tilemap=None):
             canvas.pal(*a)
         elif verb == "palt":
             canvas.palt(*a)
+        elif verb == "fillp":
+            canvas.fillp(*a)
+        elif verb == "oval":
+            canvas.oval(a[0], a[1], a[2], a[3], a[4])
+        elif verb == "ovalb":
+            canvas.ovalb(a[0], a[1], a[2], a[3], a[4])
+        elif verb == "sset":
+            # A sheet WRITE, recorded like a draw call because it changes what
+            # the next spr/sspr/map draws. The flush is not decoration: this
+            # canvas QUEUES sprites (#63), so without it the run either side of
+            # the write coalesces into one blit_batch and every sprite in it
+            # reads the sheet as it stood at flush time. cart_api's `sset` does
+            # the same thing for the same reason.
+            if sheet is not None:
+                canvas.flush_batch()
+                sheet.pset(a[0], a[1], a[2])
         elif verb == "spr":
             canvas.spr_tile(sheet, a[0], a[1], a[2], a[3], a[4], a[5])
         elif verb == "sspr":
@@ -128,8 +160,21 @@ def replay(calls, canvas, sheet=None, tilemap=None):
             canvas.tline(tilemap, sheet, a[0], a[1], a[2], a[3], a[4], a[5],
                          a[6], a[7], a[8])
         elif verb == "map":
+            # 9 args = SPEC.md 7.2's layer mask; 8 is the unfiltered form.
             canvas.map(tilemap, sheet, a[0], a[1], a[2], a[3], a[4], a[5],
-                       a[6], a[7])
+                       a[6], a[7], a[8] if len(a) > 8 else 0, flags)
+        elif verb == "fset":
+            # A flags WRITE, recorded like a draw call because it changes what
+            # the next map(..., layers) draws. The cart-facing twin is
+            # cart_api's fset; this is the trace form of the same two shapes.
+            n = int(a[0])
+            if 0 <= n < len(flags):
+                if len(a) < 3:
+                    flags[n] = int(a[1]) & 0xFF
+                else:
+                    bit = 1 << (int(a[1]) & 7)
+                    flags[n] = ((flags[n] | bit) if a[2]
+                                else (flags[n] & ~bit & 0xFF))
         else:
             raise ValueError("unknown trace verb %r" % (verb,))
 
@@ -187,18 +232,18 @@ def render(scene, canvas=None):
     """Replay one scene and return its index framebuffer as bytes."""
     with open(os.path.join(HERE, "traces", scene + ".json")) as fh:
         calls = json.load(fh)
-    sheet, tilemap = _build_assets(scene)
+    sheet, tilemap, flags = _build_assets(scene)
     c = canvas if canvas is not None else host_canvas.make_canvas(W, H)
-    replay(calls, c, sheet, tilemap)
+    replay(calls, c, sheet, tilemap, flags)
     flush = getattr(c, "flush_batch", None)
     if flush is not None:
         flush()          # the console auto-batches sprites; the goldens do not
     return _index_frame(c)
 
 
+
 @pytest.mark.parametrize("scene,core,golden",
-                         _scene_names(),
-                         ids=[s[0] for s in _scene_names()])
+                         [pytest.param(n, c, g, id=n) for n, c, g in _scene_names()])
 def test_scene_is_pixel_identical_to_the_spec_golden(scene, core, golden):
     frame = render(scene)
     assert len(frame) == W * H, (
@@ -221,7 +266,8 @@ def test_every_core_scene_is_present_and_counted():
     lost a scene would pass every remaining one."""
     names = _scene_names()
     core = [n for n, is_core, _ in names if is_core]
-    assert len(core) == 8, "expected SPEC.md's 8 core scenes, found %r" % (core,)
+    # Core 0.3 counts every scene: 6.1's two were reported-but-excluded before.
+    assert len(core) == 15, "expected SPEC.md's 15 core scenes, found %r" % (core,)
     for name, _, _ in names:
         assert os.path.exists(os.path.join(HERE, "traces", name + ".json")), name
         assert os.path.isdir(os.path.join(HERE, "carts", name + ".moy")), name

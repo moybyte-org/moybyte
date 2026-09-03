@@ -76,14 +76,88 @@ background:#7e2553;border:2px solid #c2c3c7;margin-left:min(18px,2vw)}#bb{backgr
 #kbin{position:fixed;top:0;left:0;width:1px;height:1px;padding:0;margin:0;border:0;
 opacity:0;font-size:16px;background:transparent;color:transparent;caret-color:transparent}
 @media (hover:hover) and (pointer:fine){#ctl{display:none}}
+/* Persistence row (#193): where the carts are being kept, plus the .moy escape
+   hatch. Hidden until the worker reports a mode, and hidden for good on a
+   board-served page -- there the console owns the store and a browser-local
+   export/import would only invite the crossover the two modes exist to avoid. */
+#pz{display:none;align-items:center;gap:8px;margin:0 0 6px;max-width:96vw;
+flex-wrap:wrap;justify-content:center;font-size:12px;color:#5f6f9f}
+#pz select,#pz button,#pz .fb{font:12px ui-monospace,Menlo,Consolas,monospace;
+color:#c2c3c7;background:#1d2b53;border:1px solid #29366f;border-radius:4px;padding:3px 7px}
+#pz button,#pz .fb{cursor:pointer}
+#pz .fb:hover,#pz button:hover{border-color:#5f6f9f}
+#pzs.warn{color:#ffa300}
+/* THE LINK SURFACE, and there is exactly one of it. A board stops answering
+   for two very different reasons -- an update or a wasm-mode hand-back (which
+   the person just asked for, and which comes back) versus vanishing (which in
+   BOARD MODE means unsynced work lives only in this tab) -- and the whole
+   point of the panel is which one it says. Two panels would race each other
+   and one would win at the wrong moment, so the reason is a parameter, not a
+   second element. In the page's own flow beside #p8 and never OVERLAYING the
+   canvas: in board mode the console keeps running perfectly well without the
+   board, and a modal over it would be a bigger claim than the news. */
+#lnk{display:none;max-width:min(560px,94vw);margin:8px 0 0;padding:10px 12px;
+border-radius:6px;background:#1d2b53;border:1px solid #29366f;text-align:left;
+font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}
+#lnk.bad{border-color:#ff004d}
+#lnk p{margin:0 0 4px}
+#lnk p.head{color:#fff1e8}
+/* PICO-8 import report (#194). An import that silently ran WRONG is the worst
+   outcome, so what a cart used and what did not come across is shown as prose
+   rather than left to a black screen -- and it sits UNDER the canvas, never
+   over it, because the cart is already running behind this card. */
+#p8{display:none;max-width:min(560px,94vw);margin:8px 0 0;padding:10px 12px;
+border-radius:6px;background:#1d2b53;border:1px solid #29366f;text-align:left;
+font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}
+#p8.bad{border-color:#ff004d}
+#p8 p{margin:0 0 4px}
+#p8 p.head{color:#fff1e8}
+#p8 .act{margin-top:8px;display:flex;gap:8px}
+#p8 button{font:12px ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7;
+background:#29366f;border:1px solid #5f6f9f;border-radius:4px;padding:4px 9px;
+cursor:pointer}
+#p8 button:hover{background:#3d4a8a}
+/* Pin prompt (2026-08-25): a board's whole store is behind its pairing pin, so
+   a page opened without one has to ask. IN THE PAGE and never window.prompt --
+   a native dialog cannot be styled, cannot be screenshotted and cannot be
+   driven by the browser harness, and this is a path that has to be testable.
+   z-index above the play splash (20), which is the other thing that can be up. */
+#pin{position:fixed;inset:0;z-index:30;display:none;align-items:center;
+justify-content:center;background:rgba(11,15,26,.94)}
+#pin .card{width:min(320px,86vw);padding:20px;border-radius:8px;
+background:#1d2b53;border:1px solid #29366f;text-align:center;
+font:14px ui-monospace,Menlo,Consolas,monospace;color:#c2c3c7}
+#pin h2{margin:0 0 6px;font-size:16px;color:#fff1e8}
+#pin p{margin:0 0 14px;font-size:12px;color:#5f6f9f;line-height:1.5}
+#pinm{display:block;margin:0 0 10px;font-size:12px;color:#ffa300;min-height:15px}
+#pinf{width:8ch;padding:8px;text-align:center;letter-spacing:.4em;
+font:20px ui-monospace,Menlo,Consolas,monospace;color:#fff1e8;background:#0b0f1a;
+border:1px solid #5f6f9f;border-radius:4px}
+#pinb{margin-left:8px;padding:9px 16px;cursor:pointer;border-radius:4px;
+font:14px ui-monospace,Menlo,Consolas,monospace;color:#fff1e8;background:#7e2553;
+border:1px solid #c2c3c7}
+#pinb:hover{background:#a03068}
 /* Debug HUD (#41): toggled with the ` key; lightweight live stream stats. */
 #hud{position:fixed;top:6px;left:6px;z-index:9;display:none;padding:6px 8px;border-radius:5px;
 background:rgba(11,15,26,.82);border:1px solid #1d2b53;color:#00e436;font:12px ui-monospace;
 white-space:pre;pointer-events:none}#hud b{color:#ffec27}#hud .w{color:#ff004d}</style></head><body>
 <div id=hud></div>
-<h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a></h1>
+<h1>Moybyte <span id=s>starting...</span> <small style="color:#5f6f9f">(press ` for stats)</small> <a id=tier href="?handheld=1" style="color:#5f6f9f;font-size:11px;text-decoration:none;border-bottom:1px dotted #5f6f9f">small screen?</a> <a id=pod href="#" style="display:none;color:#00e436;font-size:11px;text-decoration:none;border-bottom:1px dotted #00e436">play on device</a></h1>
+<div id=pz><span id=pzs></span>
+<select id=pzc title="cart to export"></select>
+<button id=pze>export .moy</button>
+<label class=fb>import .moy / .p8<input id=pzi type=file accept=".zip,.moy,.p8,.png" style="display:none"></label></div>
+<div id=p8><div id=p8t></div><div class=act><button id=p8e>open in editor</button>
+<button id=p8x>close</button></div></div>
+<div id=lnk><p class=head id=lnkh></p><p id=lnkb></p></div>
 <canvas id=cv width=320 height=240 tabindex=0></canvas>
 <input id=kbin type=text autocapitalize=off autocomplete=off autocorrect=off spellcheck=false>
+<div id=pin><div class=card><h2>this console needs a pin</h2>
+<p>Four digits that come with the console: shown on its WEB CONSOLE screen,
+carried in its QR code, or printed when it was set up.</p>
+<span id=pinm></span>
+<div><input id=pinf type=text inputmode=numeric pattern="[0-9]*" maxlength=4
+autocomplete=off autocorrect=off spellcheck=false aria-label="pairing pin"><button id=pinb>open</button></div></div></div>
 <div id=ctl><div id=joy><div id=th></div></div>
 <div id=mid><span class=b id=kb title="keyboard">&#9000;</span><span class=b id=bh>&#9776;</span></div>
 <div id=ab><span class=b id=bb>B</span><span class=b id=ba>A</span></div></div>

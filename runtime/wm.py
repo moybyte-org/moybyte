@@ -168,19 +168,22 @@ class FullscreenStackWM:
         stacks are reused verbatim. Only small-int ops + boolean reads (no list/tuple
         alloc), so computing it every access is free on the hot path."""
         ws = self.ws
-        au = ws.ach_ui
         sig = 0
         if ws._splash_until is not None:
             sig |= 1
         if ws.show_fps and self._stack[-1] == "desktop":
             sig |= 2
-        if au._confetti_until and _ticks_diff(au._confetti_until, _ticks_ms()) > 0:
+        # The three achievement overlays are flat kernel deadlines the objects
+        # push at event time (#209 landing B) -- plain int reads, no call into
+        # ach/ach_ui from the hot path, one clock read for all three.
+        now = _ticks_ms()
+        if ws._confetti_until and _ticks_diff(ws._confetti_until, now) > 0:
             sig |= 4
         if ws.show_achievements:
             sig |= 8
-        if au._egg_active():
+        if ws._egg_until and _ticks_diff(ws._egg_until, now) > 0:
             sig |= 16
-        if ws.ach.toast_active():
+        if ws._toast_until and _ticks_diff(ws._toast_until, now) > 0:
             sig |= 32
         if ws.sysmenu.open:
             sig |= 64
@@ -319,8 +322,28 @@ class FullscreenStackWM:
     def _view_src(self):
         """The cart view rect the COMPOSITE honors, or None. One source of
         truth for every viewport/blit/tap-mapping site on both tiers (the
-        windowed player window scales the view exactly like fullscreen)."""
-        return getattr(self.ws, "game_view", None)
+        windowed player window scales the view exactly like fullscreen).
+
+        Two kinds of view arrive here. A REGION (a 128x128 view of a 320x240
+        canvas: the rest is void) is always honored -- showing the void
+        instead would waste the screen. A TRIM (the p8 importer's 128x120
+        view of a 128x128 canvas: rows the cart can spare) is a hint for the
+        screen that would otherwise sit at 1x, and is honored only there. On
+        a 480x320 screen the full 128x128 already fits at 2x; on the P4 it
+        fits at 4x, where the 5x a trim buys costs a fifth of the frame (the
+        crisp composite scales with output pixels) and eight rows of picture. Three quarters of the canvas is the line."""
+        view = getattr(self.ws, "game_view", None)
+        if view is None:
+            return None
+        gc = self.ws.canvas
+        sc = self.ws.sys_canvas
+        if sc is gc or not view[2] or not view[3]:
+            return view
+        if view[2] * view[3] * 4 < gc.w * gc.h * 3:
+            return view                              # a region
+        full = min(sc.w // gc.w, sc.h // gc.h)
+        cropped = min(sc.w // view[2], sc.h // view[3])
+        return view if full < 2 and cropped > full else None
 
     def game_is_fullscreen(self):
         """True when the game viewport IS the screen -- i.e. composite_game

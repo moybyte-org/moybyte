@@ -41,6 +41,14 @@ try:
     from widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.widgets import Pmem, Scenes, _SilentAudio, _err_text, _ticks_ms, _ticks_diff
+# The cart FORMAT's own codecs (SPEC.md 3.5 tile flags). Read from the store
+# module rather than transcribed: `ws.carts_store` may be absent (a bare test
+# workstation), and a second parser here is exactly the drift the one-body rule
+# forbids.
+try:
+    from moy_carts import TILE_FLAGS, parse_flags as _parse_flags
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.moy_carts import TILE_FLAGS, parse_flags as _parse_flags
 # The #111 op-history core: CONFIG's fine-grained undo lives directly on Project
 # (there is no separate ConfigEditor class the way paint/map/scene/music have one --
 # see _ConfigOps below).
@@ -95,6 +103,7 @@ class Project:
         self.config = None
         self.sheet = None             # SpriteSheet for the open cart (built on open)
         self.tilemap = None           # TileMap for the open cart (built on open, #32)
+        self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
         self.tables = None            # {name: rows} Sheets docs, read via table() (#78)
@@ -173,6 +182,24 @@ class Project:
                 pass
         return TileMap()
 
+    def _build_flags(self, cart=None):
+        """Build `cart`'s 512-byte tile-flag table from its flags.moyflags blob
+        (SPEC.md 3.5) (default: the open cart) -- the mirror of _build_tilemap.
+
+        Always a table, never None: an absent or unreadable file is all-zero,
+        which is what the spec says a missing file means, so fget()/fset() and
+        map(..., layers) are callable for every cart. It is MUTABLE and lives
+        for the run: fset writes here and the next map(..., layers) sees it,
+        exactly like a sheet edit reaching the next spr()."""
+        cart = cart if cart is not None else self.cart
+        blob = cart.get("flags") if cart else None
+        if blob:
+            try:
+                return _parse_flags(blob)
+            except Exception:  # noqa: BLE001
+                pass
+        return bytearray(TILE_FLAGS)
+
     def _build_scenes(self, cart=None):
         """Build `cart`'s Scenes (#85) from its scenes/*.moyscene blobs (default: the
         open cart), or an empty Scenes when the cart has none -- the mirror of
@@ -194,6 +221,17 @@ class Project:
         data = self.cart.get("sounds") if self.cart else None
         bank = AudioBank.from_dict(data) if data else AudioBank.default()
         engine = AudioEngine(bank)
+        # The console's MASTER LEVEL has to be re-applied here. The backend is
+        # rebuilt per run, so a level set anywhere else -- the dev channel, a
+        # future Settings VOLUME row that is not a mock -- lasted exactly until
+        # the next cart start and then came back at full volume. That is not a
+        # cosmetic gap on a board with a speaker: `vol 0` at the launcher looked
+        # like it worked and the next game was loud (measured on a T-Deck,
+        # 2026-08-22).
+        try:
+            engine.set_volume(int(ws.system.get("volume", engine.master)))
+        except Exception:  # noqa: BLE001 -- a bad stored level must not block a run
+            pass
         if ws.make_audio is not None:
             ws.audio = ws.make_audio(engine)
         else:
@@ -345,7 +383,7 @@ class Project:
     def reset_config_history(self):
         """Fresh #111 op-history for `config`: called whenever the live dict is
         replaced WHOLESALE (Project.__init__ via a fresh workspace open, and a
-        journal walk's console._reload_after_walk) so a stale field op from a
+        journal walk's HistoryRouter._reload_after_walk) so a stale field op from a
         superseded config can never be replayed against the new one -- the same
         "clean boundary" reset paint/map/scene/music get from dropping their
         whole editor instance on a reload."""
@@ -424,7 +462,7 @@ class Project:
         surface (ws.save_code), which calls this once the source is known to parse.
         Returns True iff the write succeeded.
 
-        `quiet` is set by the Stage-7 idle-debounce autosave (ws._autosave_code): that
+        `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that
         save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
         achievement toast -- a visible side effect on a nominally-invisible save. The
         badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
@@ -458,8 +496,8 @@ class Project:
             # source of truth for graduation, so the additive ops never disturb it (the
             # journal WALK reloads snapshots + a fresh empty History; the ops ride along
             # for parity/future replay). flush() only after the store write succeeded.
-            ws._close_code_burst()
-            hist = ws._code_op_history()
+            ws.history.close_code_burst()
+            hist = ws.history.code_op_history()
             _t_burst = _ticks_diff(_ticks_ms(), _t0) - _t_write
             ops = hist.flush() if hist is not None else None
             _t_ops = _ticks_diff(_ticks_ms(), _t0) - _t_write - _t_burst
@@ -514,11 +552,11 @@ class Project:
 
     def _code_history(self):
         """The op-history of the OPEN code editor (#111 phase 4), or None -- created
-        lazily on the Workstation over the live CodeEditor and rebound when a fresh
-        editor is built (ws._code_op_history). The code burst + this History live on
-        ws where the keyboard input is handled; Project just references it (and
-        commit_code drains it, mirroring commit_sprites/commit_map)."""
-        return self.ws._code_op_history()
+        lazily on the UNDO ROUTER over the live CodeEditor and rebound when a fresh
+        editor is built (ws.history.code_op_history). The code burst + this History
+        live there, with the routing that consumes them; Project just references it
+        (and commit_code drains it, mirroring commit_sprites/commit_map)."""
+        return self.ws.history.code_op_history()
 
     def _blocks_history(self):
         """The op-history of the OPEN BlockEditor (#111 phase 4), or None. A
@@ -537,7 +575,7 @@ class Project:
     # menu_view maps to the Project method returning that tab's live History (or
     # None for a tab with no in-RAM op stack). One entry per surface, ADDITIVE:
     # paint/map (#111 phase 2) + code/blocks (phase 4) here; scene/music/config
-    # wire theirs in the same shape. Console._active_history reads it -- keeping
+    # wire theirs in the same shape. HistoryRouter.active_history reads it -- keeping
     # this a data table (not a switch ladder in console) is why new tabs merge
     # cleanly (one line each) instead of colliding in one growing if/elif.
     _HISTORY_TABS = {

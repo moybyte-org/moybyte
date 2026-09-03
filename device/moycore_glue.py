@@ -76,6 +76,53 @@ except ImportError:
 # back here.
 
 
+_P8_BUFFERS = []
+
+
+def _p8_buffers():
+    """The PICO-8 machine's 64KB memory and 0x4300 ROM snapshot, once -- or
+    an empty list when the heap cannot give them, which the caller passes on
+    as "no machine".
+
+    The machine is OPTIONAL (moy.h: a host that does not open it offers no
+    __moy_p8 globals, and the port shim keeps its Lua for exactly that), so
+    failing to allocate it must not fail the cart. It did: on the Guition,
+    with the desk and its store up, the S3's MicroPython heap has hundreds of
+    KB free and no 64KB run of it, and every Lua cart -- conformance scenes
+    that never touch the machine included -- died with "MemoryError:
+    allocating 65536 bytes" before drawing a pixel (on glass, 2026-09-03).
+    A collect first is what usually finds the run; a run that still is not
+    there is a slower p8 port, not a dead one. Retried per run rather than
+    remembered, because fragmentation changes."""
+    if not _P8_BUFFERS:
+        import gc
+        gc.collect()
+        try:
+            mem = bytearray(65536)
+            rom = bytearray(0x4300)
+        except MemoryError:
+            return []
+        _P8_BUFFERS.append(mem)
+        _P8_BUFFERS.append(rom)
+    return _P8_BUFFERS
+
+
+def reserve_p8_memory():
+    """Take the PICO-8 machine's buffers NOW, while the heap is still whole.
+
+    Called from device_boot ahead of the cart-store scan, because that scan is
+    what fragments the heap: after it an S3 has hundreds of KB free and no
+    64KB run of it, and _p8_buffers' first-run allocation fails -- measured on
+    the Guition, where every p8 port then ran without its machine. 81KB held
+    for the whole session is the price of a port running at C speed on every
+    board rather than only on the ones whose heap happened to have room. True
+    when the machine is provisioned; False on a build with no moycore or no
+    room even at boot, in which case first-run allocation stays the fallback."""
+    if _moycore is None or not hasattr(_moycore, "p8_memory"):
+        return False
+    return bool(_p8_buffers())
+
+
 class MoycoreRun:
     """One cart run under moycore. Same shape as LuaCartRun."""
 
@@ -94,11 +141,19 @@ class MoycoreRun:
         project = getattr(ws, "project", None)
         sheet = getattr(project, "sheet", None) if project is not None else None
         tilemap = getattr(project, "tilemap", None) if project is not None else None
+        # SPEC.md 3.5 tile flags. Unlike the sheet and the map this crosses as a
+        # COPY (run_begin memcpys 512 bytes into the console's own table), so a
+        # cart's fset writes are the C table's, not this bytearray's -- which is
+        # right: they are run state, and nothing persists them.
+        flags = getattr(project, "flags", None) if project is not None else None
 
         # Slot numbers bound ONCE: every one of these was a module attribute
         # lookup per frame in _refresh.
         self._I_BTN = _moycore.SNAP_BTN
         self._I_BTNP = _moycore.SNAP_BTNP
+        self._I_BTN_P1 = _moycore.SNAP_BTN_P1
+        self._I_BTNP_P1 = _moycore.SNAP_BTNP_P1
+        self._I_PLAYERS = _moycore.SNAP_PLAYERS
         self._I_TIME = _moycore.SNAP_TIME_MS
         self._I_TX = _moycore.SNAP_TOUCH_X
         self._I_TY = _moycore.SNAP_TOUCH_Y
@@ -135,12 +190,23 @@ class MoycoreRun:
                 wire = None
 
         cfg = ns.get("_moy_cfg") if hasattr(ns, "get") else None
+        # The PICO-8 machine's memory (moy-spec libmoy moy_p8.c), from THIS
+        # heap and handed over like the framebuffer -- not from the ESP heap,
+        # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
+        # once; moycore reseeds it per run.
+        if hasattr(_moycore, "p8_memory"):
+            bufs = _p8_buffers()
+            if bufs:
+                _moycore.p8_memory(*bufs)
+            else:
+                _moycore.p8_memory(None, None)      # no machine this run
+
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
             getattr(tilemap, "cells", None),
             getattr(tilemap, "w", 0) or 0, getattr(tilemap, "h", 0) or 0,
-            self.snap, self.aq, self.pmem_img, cfg)
+            self.snap, self.aq, self.pmem_img, cfg, flags)
         # The superset, on top of libmoy's table and BEFORE the cart runs.
         # Anything callable in the namespace that libmoy did not already
         # install: registering a name libmoy owns would shadow the C verb with
@@ -174,7 +240,7 @@ class MoycoreRun:
             finally:
                 raise RuntimeError(err)
 
-        self.snap[_moycore.SNAP_PLAYERS] = 1
+        self.snap[_moycore.SNAP_PLAYERS] = 1   # refreshed every frame by _refresh
         self._view = None
         self._sync_view()          # a view declared in _init must land now
         # init already ran inside run_begin (libmoy's moy_lua_init), so the
@@ -230,6 +296,21 @@ class MoycoreRun:
             held, pressed = masks(MOY_BUTTONS)
         s[self._I_BTN] = held
         s[self._I_BTNP] = pressed
+        # PLAYER TWO (#65). These snapshot slots exist in the C ABI and nothing
+        # filled them, so libmoy's `players()` answered 1 forever and a Lua cart
+        # could not have a second player at all -- the Python twin of the same
+        # cart fielded two tanks and the Lua one fielded one. The count is read
+        # through the router because a transport slot (a radio peer) lives
+        # there, not on the InputState; the fast path costs one dict test.
+        n = 1
+        pr = getattr(inp, "players", None)
+        if pr is not None:
+            n = pr.count()
+            if n > 1:
+                h1, p1 = pr.button_masks(MOY_BUTTONS, 1)
+                s[self._I_BTN_P1] = h1
+                s[self._I_BTNP_P1] = p1
+        s[self._I_PLAYERS] = n
         if _ticks_ms is not None:
             try:
                 s[self._I_TIME] = _ticks_diff(_ticks_ms(), inp.cart_start_ms)

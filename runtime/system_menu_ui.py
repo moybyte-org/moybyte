@@ -21,7 +21,7 @@ surface where the *dangerous* privileged verbs concentrate, through `self.ws`:
   * shared (non-privileged): ws.sys_canvas, ws.sysmenu, ws._dirty, ws.cart,
                              ws.launcher, ws.apply, ws.go_home, ws.open_settings,
                              ws.updater (read-only, for the version string)
-  * privileged (draft make_system_api): ws.reboot_hook (REBOOT), ws.del_cart
+  * privileged (draft make_system_api): ws.reboot_hook (REBOOT), ws.carts.delete
                              (DELETE a cart), ws._about (open the about modal)
 
 `NAMES` is injected at construction (circular-import reason as the other UIs).
@@ -80,13 +80,14 @@ class SystemMenuUI:
             self.ws.apply()
 
     def _menu_delete_cart(self):
-        # Delete the OPEN cart (del_cart targets self.cart when a cart is open -- which a
-        # picker-opened cart is, even if it's not the launcher selection), then go home.
-        # del_cart guards read-only / last-cart. Count the FULL cart list (a wallpaper
-        # isn't in the launcher run-grid) to detect the deletion.
-        before = len(self.ws._all_carts)
-        self.ws.del_cart()
-        if len(self.ws._all_carts) < before:
+        # Delete the OPEN cart (carts.delete() targets ws.cart when a cart is open --
+        # which a picker-opened cart is, even if it's not the launcher selection),
+        # then go home.
+        # carts.delete() guards read-only / last-cart. Count the FULL cart list (a
+        # wallpaper isn't in the launcher run-grid) to detect the deletion.
+        before = len(self.ws.carts.all)
+        self.ws.carts.delete()
+        if len(self.ws.carts.all) < before:
             self.ws.go_home()
 
     def _menu_about(self):
@@ -125,8 +126,6 @@ class SystemMenuUI:
         # Panel-chrome inks: dark panels keep the frozen white/grey trio; a
         # light-bar theme flips to the dark ink family.
         light = th.get("bar_light", False)
-        row_ink = th["ink"] if light else th["chrome_ink"]
-        dim_ink = th["chrome_ink_dim"]
         hdr_ink = th["ink_dim"] if light else NAMES["dark_grey"]
         x, y, w, h = m.panel_rect()
         _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
@@ -144,20 +143,18 @@ class SystemMenuUI:
                 cy += _POPUP_SEP_H * fs
                 continue
             # ui.row owns the chrome (the selection fill + the label's ink and
-            # placement); the three inks stay this surface's semantics. They ride
-            # `colors` because a popup row is panel-CHROME coloured (chrome_ink /
-            # hilite), which is not the row kind's token palette -- the documented
-            # escape hatch, and the one line Phase 4 replaces with a skin entry.
+            # placement). A popup row is panel-CHROME coloured, which the row
+            # kind cannot express, so it draws in the skin's "row_menu" kind
+            # (#207). The HEADER keeps the hatch: its dark-chrome grey is a
+            # frozen literal with no token behind it, and the light branch is
+            # the only one that reads a role.
             label = it[1]
-            sel = (kind != "header" and idx == m.sel)
-            if kind == "header":
-                colors = (None, hdr_ink, None)        # dim section title
-            elif sel:
-                colors = (th["hilite"], row_ink, None)
-            else:
-                colors = (None, dim_ink, None)
-            _ui.row(cv, th, (x + 1, cy, w - 2, row_h), label, on=sel,
-                    colors=colors, edge=False, pad=pad, text_dy=dy, fs=fs)
+            header = (kind == "header")
+            sel = (not header and idx == m.sel)
+            _ui.row(cv, th, (x + 1, cy, w - 2, row_h), label,
+                    kind="row_menu", on=sel,
+                    colors=(None, hdr_ink, None) if header else None,
+                    edge=False, pad=pad, text_dy=dy, fs=fs)
             cy += row_h
 
     def _draw_about(self):

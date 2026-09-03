@@ -18,6 +18,19 @@ def _ws(tmp_path):
     return host_app.build_workstation(str(tmp_path / "carts"))
 
 
+def _pin_clock(ws, drv):
+    """Freeze the bar's HH:MM and settle one frame, so a zero-redraw assertion
+    is about the CACHE and not about the wall clock. _cart_bar_key folds
+    _clock_text in on purpose (a minute rollover must repaint the bar), which
+    means a test that counts zero re-renders across several frames straddles a
+    real :00 sooner or later -- it did, in CI, on 2026-09-03 (the same rollover
+    the redraw-on-change tests are already isolated for). The settle frame
+    absorbs the one legitimate rebuild the pin itself causes."""
+    ws.bar_layer._clock_text = lambda: "12:00"
+    ws._dirty = True
+    drv.frame(1 / 30)
+
+
 # -- IconSheet (16x16 tiles) ------------------------------------------------
 
 def test_icon_sheet_is_16x16():
@@ -57,8 +70,8 @@ def test_default_icon_theme_paints_every_chrome_icon():
     """The baked default theme fills a non-blank, in-bounds 16x16 tile for every icon
     in the _ICON map, so the bar renders a real picture for each kind."""
     from runtime import host_app  # noqa: F401 -- registers the editors/audio aliases
-    from runtime import console as C
-    sheet = C._default_icon_sheet()
+    from runtime import chrome as _chrome, console as C
+    sheet = _chrome._default_icon_sheet()
     assert sheet.TILE == 16
     for kind, slot in C._ICON.items():
         assert 0 <= slot < sheet.count, kind
@@ -75,24 +88,24 @@ def test_default_theme_loads_when_system_icons_absent(tmp_path):
     moy_carts.ensure_dirs(carts_dir)
     assert moy_carts.load_system_icons(carts_dir) is None     # nothing saved
     ws = _ws(tmp_path)
-    assert ws.icon_sheet is not None
-    assert ws.icon_sheet.TILE == 16
-    assert ws.icon_sheet.count == 32
+    assert ws.look.icon_sheet is not None
+    assert ws.look.icon_sheet.TILE == 16
+    assert ws.look.icon_sheet.count == 32
 
 
 def test_system_icons_load_save_round_trip(tmp_path):
     """load/save_system_icons round-trip the theme hex through a file beside the carts
     dir (mirrors shared.moygfx)."""
     from runtime import moy_carts
-    from runtime import console as C
+    from runtime import chrome as _chrome
     carts_dir = str(tmp_path / "carts")
     moy_carts.ensure_dirs(carts_dir)
-    hexs = C._default_icon_sheet().to_hex()
+    hexs = _chrome._default_icon_sheet().to_hex()
     moy_carts.save_system_icons(hexs, carts_dir)
     assert moy_carts.load_system_icons(carts_dir) == hexs
     # And a workstation built over that store loads the saved theme (not the default).
     ws = _ws(tmp_path)
-    assert ws.icon_sheet.to_hex() == hexs
+    assert ws.look.icon_sheet.to_hex() == hexs
 
 
 # -- the bar renders without error on both screens at 18px ------------------
@@ -132,7 +145,7 @@ def test_bar_falls_back_to_glyphs_without_an_icon_sheet(tmp_path):
     ws.carts_root = carts_dir
     ws.pointer = console.Pointer(320, 240)
     ws.load_system()
-    assert ws.icon_sheet is None              # never wired
+    assert ws.look.icon_sheet is None              # never wired
     ws.frame(1 / 30)                          # launcher bar renders (glyph fallback)
     ws.launcher.sel = 0
     ws.open()
@@ -287,9 +300,9 @@ def test_wifi_off_glyph_is_a_distinct_nonblank_tile():
     at its own slot, and it DIFFERS from the connected "wifi" tile (the two states must be
     visually distinguishable). It also carries red (index 8) -- the slash."""
     from runtime import host_app  # noqa: F401 -- registers the editors aliases
-    from runtime import console as C
+    from runtime import chrome as _chrome, console as C
     assert "wifi_off" in C._ICON and C._ICON["wifi_off"] < 32
-    sheet = C._default_icon_sheet()
+    sheet = _chrome._default_icon_sheet()
     off = sheet.tile_image(C._ICON["wifi_off"])
     on = sheet.tile_image(C._ICON["wifi"])
     assert off is not None and any(p for p in off.pix)     # non-blank
@@ -315,6 +328,7 @@ def test_wifi_status_change_repaints_the_bar_strip(tmp_path):
     """The wifi kind is folded into the bar's cache key, so a connect/disconnect forces
     exactly the strip re-render that shows the new glyph (the #43 cache can't go stale)."""
     ws, drv = _run_a_cart(tmp_path)
+    _pin_clock(ws, drv)
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
@@ -405,6 +419,7 @@ def test_cart_bar_reuses_cache_when_state_unchanged(tmp_path):
     """A second running-cart frame with no state change must NOT re-render the bar -- it
     blits the cached strip. Witness it by counting _render_cart_bar calls across frames."""
     ws, drv = _run_a_cart(tmp_path)
+    _pin_clock(ws, drv)
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
@@ -429,7 +444,7 @@ def test_cart_bar_invalidates_on_theme_change(tmp_path):
         calls[0] += 1
         return orig(cv, key)
     ws.bar_layer._render_cart_bar = counting
-    ws.set_icon_sheet(ws.icon_sheet)              # bumps _bar_cache_gen -> key changes
+    ws.look.set_icon_sheet(ws.look.icon_sheet)              # bumps _bar_cache_gen -> key changes
     drv.frame(1 / 30)
     assert calls[0] == 1, "a theme change must re-render the bar once"
     for _ in range(3):
@@ -480,24 +495,24 @@ def test_icon_theme_versioning_reseeds_stale_keeps_current(tmp_path):
     load (so shipped icon changes land on an already-themed device/desktop without a
     manual wipe, #47-style); a theme stamped at the current version is kept (a user's
     EDIT ICONS edit survives until the next bump)."""
-    from runtime import console as C
+    from runtime import chrome as _chrome
     from runtime import host_app
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     store, root = ws.carts_store, ws.carts_root
-    default_hex = C._default_icon_sheet().to_hex()
+    default_hex = _chrome._default_icon_sheet().to_hex()
     other = ("f" if default_hex[0] != "f" else "0") + default_hex[1:]   # valid but different
     assert other != default_hex
 
     # STALE (version 0 < _ICON_VERSION): re-seeded to the baked default, version stamped.
     store.save_system_icons(other, root, 0)
-    ws.load_icon_sheet()
-    assert ws.icon_sheet.to_hex() == default_hex
-    assert store.load_system_icons_version(root) == C._ICON_VERSION
+    ws.look.load_icon_sheet()
+    assert ws.look.icon_sheet.to_hex() == default_hex
+    assert store.load_system_icons_version(root) == _chrome._ICON_VERSION
 
     # CURRENT (>= _ICON_VERSION): the saved theme is kept untouched.
-    store.save_system_icons(other, root, C._ICON_VERSION)
-    ws.load_icon_sheet()
-    assert ws.icon_sheet.to_hex() == other
+    store.save_system_icons(other, root, _chrome._ICON_VERSION)
+    ws.look.load_icon_sheet()
+    assert ws.look.icon_sheet.to_hex() == other
 
 
 # -- the zoned bar (Stage 4 of docs/history/shell_ux_technical_plan_v1.md, #46): the
@@ -514,7 +529,7 @@ def test_zoned_bar_reuses_cache_when_state_unchanged(tmp_path):
     from runtime import host_app
     ws = _ws(tmp_path)
     drv = host_app.ConsoleDriver(ws)
-    drv.frame(1 / 30)              # one clean frame: the strip is built + current
+    _pin_clock(ws, drv)            # one clean frame: the strip is built + current
     calls = [0]
     orig = ws.bar_layer._render_cart_bar
 
@@ -732,7 +747,7 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     """#88: the Editor's lent bar zone grows shared UNDO/REDO icons wired to the
     SAME journal verbs the code editor's Ctrl+Z/Y already drives -- reachable from
     every tab, not just code. Two real commits, then a tap on each bar icon must
-    actually walk the live source, and ws.can_undo()/can_redo() must track the
+    actually walk the live source, and ws.history.can_undo()/can_redo() must track the
     journal cursor (the icons' dimmed/enabled state) at each step."""
     from runtime import host_app, editor_app as EA
     ws = _ws(tmp_path)
@@ -743,33 +758,33 @@ def test_bar_undo_redo_icons_dispatch_the_journal_walk(tmp_path):
     drv.frame(1 / 30)
 
     # Nothing journaled for this cart yet -- UNDO must read disabled.
-    assert ws.can_undo() is False
-    assert ws.can_redo() is False
+    assert ws.history.can_undo() is False
+    assert ws.history.can_redo() is False
 
     ws.editor.set_text(ws.editor.text() + "\n# commit A\n")
     assert ws.save_code() is True          # commit #1: the floor -- still nothing before it
-    assert ws.can_undo() is False
+    assert ws.history.can_undo() is False
 
     ws.editor.set_text(ws.editor.text() + "# commit B\n")
     assert ws.save_code() is True          # commit #2: now there's a step back to A
-    assert ws.can_undo() is True
-    assert ws.can_redo() is False
+    assert ws.history.can_undo() is True
+    assert ws.history.can_redo() is False
     src_b = ws.editor.text()
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_UNDO))    # the bar's UNDO icon
     drv.frame(1 / 30)
     assert "# commit A" in ws.editor.text() and "# commit B" not in ws.editor.text(), \
         "the bar UNDO icon must walk the journal back to commit A"
-    assert ws.can_redo() is True
+    assert ws.history.can_redo() is True
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_REDO))    # the bar's REDO icon
     drv.frame(1 / 30)
     assert ws.editor.text() == src_b, "the bar REDO icon must re-apply commit B"
-    assert ws.can_redo() is False
+    assert ws.history.can_redo() is False
 
 
 def test_bar_undo_redo_icons_are_a_no_op_when_disabled(tmp_path):
-    """A tap on a disabled UNDO/REDO icon must be a safe no-op (ws.undo()/redo()
+    """A tap on a disabled UNDO/REDO icon must be a safe no-op (ws.history.undo()/redo()
     already floor/ceiling-guard the walk) -- no crash, no spurious reload."""
     from runtime import host_app, editor_app as EA
     ws = _ws(tmp_path)
@@ -778,7 +793,7 @@ def test_bar_undo_redo_icons_are_a_no_op_when_disabled(tmp_path):
     ws.open_in_editor()
     ws.set_menu_view("code")
     drv.frame(1 / 30)
-    assert ws.can_undo() is False and ws.can_redo() is False
+    assert ws.history.can_undo() is False and ws.history.can_redo() is False
     src = ws.editor.text()
 
     drv.click(*_sys_zone_center(ws, EA._ZONE_UNDO))

@@ -14,6 +14,9 @@
 BW = 44          # catcher width (a touch tighter than before)
 BH = 14
 SPR_SCALE = 4    # the 8x8 catcher tile is drawn at 4x (32x32)
+STAR = 2         # sheet tile: the falling star
+BASKET = 3       # sheet tiles: a 3x1 span whose painted 22x7 is BW x BH at 2x
+HEART = 6        # sheet tiles: a life, HEART full / HEART + 1 spent
 LIVES = 3
 score = 0
 combo = 0
@@ -154,13 +157,12 @@ def _draw():
     if flash > 0.0:
         cls(col("white"))     # the catch flash overrides the declared backdrop
     for s in stars:
-        circ(int(s[0]) + sx, int(s[1]), 3, col("yellow"))
-        pix(int(s[0]) + sx, int(s[1]) - 4, col("white"))   # tiny sparkle tail
+        spr(STAR, int(s[0]) + sx - 4, int(s[1]) - 4, 0)
     for p in sparks:
         pix(int(p[0]) + sx, int(p[1]), col("yellow"))
     by = H - 24 - BH
     rect(0, H - 24, W, 24, col("dark_blue"))         # floor
-    rect(int(bx) + sx, by, BW, BH, col("brown"))     # basket
+    spr(BASKET, int(bx) + sx, by, 0, 2, 0, 3, 1)     # basket
     spr(catcher, int(bx) + sx + BW // 2 - 8 * SPR_SCALE // 2, by - 8 * SPR_SCALE,
         0, SPR_SCALE)                               # catcher tile (frog/robot)
     print("SCORE " + str(score), 8, 8, col("white"), 2)
@@ -168,8 +170,7 @@ def _draw():
         print("X" + str(combo), 8, 26, col("yellow"), 1)
     # hearts (lives) top-right
     for i in range(LIVES):
-        c = "red" if i < lives else "dark_grey"
-        rect(W - 14 - i * 12, 9, 8, 7, col(c))
+        spr(HEART + (0 if i < lives else 1), W - 14 - i * 12, 9, 0)
     if over > 0.0:
         print("GAME OVER", W // 2 - 36, H // 2 - 8, col("red"), 2)
         print("BEST " + str(best), W // 2 - 24, H // 2 + 10, col("yellow"), 1)

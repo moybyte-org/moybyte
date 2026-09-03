@@ -15,9 +15,18 @@
 // "handoff protocol, copied from moy_axs verbatim" -- and a protocol with
 // documented races that lives twice is a protocol whose next fix lands once.
 // So the engine is ONE body here, and what stays per-board is exactly what
-// Phase C said could not share: the transport, the window arming, the band
-// synthesis (plain memcpy vs the Guition's rotate/fold), and each board's
-// bus-sharing rules (the T-Deck's sd_guard).
+// Phase C said could not share: the transport, the window arming, the
+// ROOT-COPY band synthesis (moy_lcd's memcpy of a row run vs moy_axs's
+// rotate-gather -- each reads its own framebuffer at its own stride), and each
+// board's bus-sharing rules (the T-Deck's sd_guard).
+//
+// THE OTHER HALF OF THE SYNTHESIS IS SHARED: moy_fold.h, the GAME FOLD, which
+// synthesizes a small-canvas frame straight from a snapshot instead of copying
+// the root at all. It reads a caller-supplied rectangle and writes a bounce
+// slot, so there is no transport in it -- both the straight-through and the
+// rotated gather live there, parameterized by geometry, rather than as a second
+// copy of a one-shot latch with a cross-core fence. Read that header before
+// touching either board's queue_band.
 //
 // THE SPLIT. The engine owns the frame STATE MACHINE, the FEEDER and the
 // BOUNCE SLOTS:

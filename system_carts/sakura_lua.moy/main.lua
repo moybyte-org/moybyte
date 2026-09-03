@@ -51,14 +51,9 @@ petals = {}         -- each: {x, y, fall_speed, sway_phase, sway_amp, shade(0 ne
 base = 0            -- the run's blossom sheet column (base tile); each petal draws base + shade
 t = 0.0
 
--- Falling-petal palette by depth: (near, mid, far). See main.py -- these colours
--- are BAKED INTO sprites.moygfx; change one and you must regenerate the sheet.
-BLOSSOMS = {
-    pink  = {14, 14, 2},
-    white = {7, 6, 13},
-    peach = {15, 9, 4},
-    mixed = {14, 15, 7},
-}
+-- The petal colours live in sprites.moygfx: 12 tiles, one column per blossom
+-- choice, three shades deep (0 near / 1 mid / 2 far, the near tile carrying a
+-- white glint). Recolour a blossom in the sprite editor -- nothing here to match.
 BLOSSOM_ORDER = {"pink", "white", "peach", "mixed"}   -- sheet column order (base = (i-1)*3)
 
 -- Python int(): truncation toward zero. floor works for the non-negative cases

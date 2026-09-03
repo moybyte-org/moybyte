@@ -2,7 +2,7 @@
 
 **The always-on VM recipe that used to live here is gone.** It hosted the
 live streaming web console tool, which was deleted in the
-2026-08 streaming sunset (`docs/moycore_plan_2026-08.md` §3.2). The browser
+2026-08 streaming sunset (`docs/history/moycore_plan_2026-08.md` §3.2). The browser
 console is now the **wasm head** (`firmware/web_runner`): the whole console
 compiled to WebAssembly, running client-side. It is a static bundle — build it
 with `firmware/web_runner/build.sh` and host `dist/` on anything that serves

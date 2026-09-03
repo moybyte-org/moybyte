@@ -60,9 +60,10 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 TDECK_MAINLINE = TDECK
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
+ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
 WEB = ROOT / "firmware" / "web_runner"
 BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-             "guition-s3": GUITION}
+             "guition-s3": GUITION, "zero": ZERO}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -70,7 +71,12 @@ BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
 MICROPYTHON_BUILTINS = {
     "array", "binascii", "builtins", "cmath", "collections", "errno", "gc",
     "hashlib", "heapq", "io", "json", "math", "os", "platform", "random", "re",
-    "select", "socket", "ssl", "struct", "sys", "time", "zlib",
+    "select", "socket", "ssl", "struct", "sys", "time",
+    # NOT `zlib`: MicroPython dropped it in v1.21 for `deflate`, and this table
+    # said otherwise until 2026-08-29 -- a false entry in a list whose whole
+    # purpose is claims somebody can check. The web target reaches zlib through
+    # firmware/web_runner/shims/zlib.py, which it STAGES as a module (below);
+    # any other target importing it would now be a finding, which is right.
     # MicroPython-specific
     "machine", "micropython", "network", "esp", "esp32", "bluetooth",
     "framebuf", "neopixel", "uctypes", "_thread", "uasyncio", "asyncio",
@@ -88,13 +94,22 @@ NATIVE = {
                        "moycore", "moy_web", "moy_flush", "moy_lcd"},
     # The P4 has no banded flush to feed -- DPI scans PSRAM continuously -- so
     # it denies moy_flush along with moy_sd and moy_audio.
+    # moy_c6 is the ESP-NOW-over-hosted shim + C6 plumbing (#7, the espnow
+    # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
-           "moy_ppa", "moy_ble_hid"},
+           "moy_ppa", "moy_ble_hid", "moy_c6"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
     # see its board.toml); moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
     "guition-s3": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
                    "moy_flush", "moy_axs"},
+    # The Zero is HEADLESS (#41): no panel, no touch, no frame loop, no carts
+    # running on it. `moy_web` is the only shared C module it compiles in, and
+    # it is the module that justifies the board having an image at all -- the
+    # browser console rides the firmware so the page a board serves cannot
+    # drift behind the board serving it. The other seven are denied in its
+    # board.toml, each with the hardware or the workload that is missing.
+    "zero": {"moy_web"},
     "web": {"moy_gfx", "moy_lua", "moy_audio", "moycore", "js", "jsffi"},
 }
 
@@ -102,6 +117,11 @@ NATIVE = {
 # mirror-image bug, a module that imports fine and then cannot work. Per target
 # and not global, because `host_api` is genuinely the WEB head's cart API
 # (web_boot.py imports it by name) while being meaningless on a board.
+
+# The only .py files in firmware/web_runner/ that must NOT be frozen: host dev
+# tools with no place in the image. Everything else there is an authored module
+# and ships -- see the derivation below, and why it is a derivation.
+WEB_HOST_ONLY = frozenset({"serve", "moy"})
 #
 # The boards' rows used to be four names shorter than the web's -- no
 # `gfx_binding`, `native_build`, `host_canvas` or `input` -- which is to say the
@@ -120,6 +140,14 @@ HOST_ONLY = {
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
                    "audio_binding", "lua_binding", "gfx_binding",
                    "native_build", "simulate_desktop"},
+    # Same list as the console boards, and it is worth having even though the
+    # Zero ALLOWLISTS `runtime/` and could not stage one of these by omission:
+    # the failure this catches is somebody adding a name to a group, and a
+    # tripwire that only works on boards with denylists is a tripwire that
+    # stops working the moment a second allowlist board appears.
+    "zero": {"host_app", "host_api", "host_canvas", "lua_host", "input",
+             "audio_binding", "lua_binding", "gfx_binding",
+             "native_build", "simulate_desktop"},
     # The browser reaches libmoy through its compiled-in usermods, so every
     # ctypes/subprocess host binding is dead weight there -- and gfx_binding is
     # the one that would look most plausible to stage, because it is the host's
@@ -136,14 +164,27 @@ GENERATED = {
     "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
     "guition-s3": {"carts_data", "_ota_build"},
+    # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
+    # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
+    # fallback for a missing card), and this board freezes the PACKED form
+    # (`CARTS_Z`, 202 KB of raw-deflate blobs) that `zero_host.seed_carts`
+    # inflates into an empty store on first boot. It did not carry one at all
+    # until that day -- the plain roster left 51 KB of a 2.8 MB slot, under the
+    # #168 warning floor -- so a flashed Zero came up an empty console and its
+    # carts arrived over a USB cable, or never.
+    "zero": {"carts_data", "_ota_build"},
     # The web GENERATES its palette (a literal twin of runtime/palette.py, which
     # needs CPython colorsys) -- which is exactly the fix the boards lack below.
     "web": {"palette"},
 }
 
 # Directory-shaped modules: a package staged wholesale rather than file by file.
-PACKAGES = {"tdeck-mainline": {"moybyte"},
-            "p4": {"moybyte"}, "guition-s3": {"moybyte"}, "web": set()}
+# The Zero's is EMPTY and is the only board's that is: `moybyte/` is the boards'
+# real InputState (plus the T-Deck keyboard matrix and the #69 poller), and the
+# other three freeze it whole because they all construct one. This board never
+# does -- its inputs arrive as HTTP requests.
+PACKAGES = {"tdeck-mainline": {"moybyte"}, "p4": {"moybyte"},
+            "guition-s3": {"moybyte"}, "zero": set(), "web": set()}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -231,13 +272,32 @@ def frozen_set(target):
         # died with the inline list.
         mods = {Path(name).stem: path for name, path
                 in board_config.staged_modules(WEB, ROOT).items()}
-        # web_boot/web_canvas are the runner's AUTHORED modules, copied by
-        # name in build.sh; its moy.py and serve.py are HOST dev tools and
-        # never enter the image.
-        for name in ("web_boot", "web_canvas"):
-            p = WEB / (name + ".py")
-            if p.exists():
-                mods[name] = p
+        # The runner's AUTHORED modules, DERIVED from the directory rather
+        # than listed. A hand-written copy of this list lived here and another
+        # in build.sh, and they were wrong in the SAME WAY: `update_link.py`
+        # was in neither, so it was never staged, never frozen, and
+        # web_boot.update_enable raised ImportError on every build for as long
+        # as the feature existed -- a headless Zero with no update row, behind
+        # two green lists. Anything ending .py that is not a host-only dev tool
+        # ships, so a new module cannot be forgotten in one place or both.
+        for p in sorted(WEB.glob("*.py")):
+            if p.stem in WEB_HOST_ONLY:
+                continue
+            mods[p.stem] = p
+        # The p8 importer (#194) is the one thing this build stages out of
+        # `tools/`: moy-spec's two vendored files -- the asset converter and the
+        # Lua porter that makes a dropped cart RUN -- and the guards/report file
+        # the CLI shares with them, carried in UNCHANGED (editing a vendored
+        # file is a red test). Plus the `zlib.decompress` shim over
+        # MicroPython's `deflate`, which is what lets the `.p8.png` inflate
+        # happen in the SAME converter the desktop runs instead of a second
+        # reader in JS.
+        for name, src in (("p8_import", ROOT / "tools" / "p8_import.py"),
+                          ("p8_lua_port", ROOT / "tools" / "p8_lua_port.py"),
+                          ("p8_writer", ROOT / "tools" / "p8_writer.py"),
+                          ("zlib", WEB / "shims" / "zlib.py")):
+            if src.exists():
+                mods[name] = src
     else:
         # The boards DECLARE their staging (#161 Phase 3): board.toml holds
         # the denylist over runtime/ and the allowlist over the shared device
@@ -334,13 +394,32 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck-mainline", "p4", "guition-s3", "web")
+TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web")
+
+# The floor each target's extraction must clear -- a smoke test on the
+# EXTRACTION, not on the board: a parser that silently found nothing would
+# otherwise pass every check below by having nothing to check. One number for
+# the consoles (they freeze the whole shared tree) and a much smaller one for
+# the Zero, whose thirteen-module allowlist is the point of it. A specific
+# number rather than `> 0`, so the Zero losing half its set still fails here.
+MIN_MODULES = {"zero": 12}
+DEFAULT_MIN_MODULES = 40
 
 
 def _unresolved(target):
     """[(module, path, missing-alternatives)] for `target`, gaps included."""
     mods = frozen_set(target)
     available = set(mods) | MICROPYTHON_BUILTINS | NATIVE[target]
+    # Imports the board has DECLARED unreachable (board.toml's
+    # [[modules.shared.lazy]]). Exactly one exists: `moy_carts.save_blocks`
+    # reaches the block compiler through a real try/except ladder, so this
+    # suite calls it mandatory and is right to on any board that can reach that
+    # function -- and its only callers are the block editor's UI and the Editor
+    # app, neither of which the Zero freezes. Read from the board file rather
+    # than listed here, so the reason lives beside the declaration and adding
+    # one is a visible diff in a board's own file (#161).
+    if target in BOARD_DIR:
+        available |= set(board_config.lazy_imports(BOARD_DIR[target]))
     out = []
     for name, path in sorted(mods.items()):
         if path is None:                   # generated / package: no one source
@@ -361,8 +440,10 @@ def _unresolved(target):
 @pytest.mark.parametrize("target", TARGETS)
 def test_every_frozen_module_can_import_on_its_target(target):
     mods = frozen_set(target)
-    assert len(mods) > 40, "%s: staging extraction found only %d modules" % (
-        target, len(mods))
+    floor = MIN_MODULES.get(target, DEFAULT_MIN_MODULES)
+    assert len(mods) >= floor, (
+        "%s: staging extraction found only %d modules (floor %d)"
+        % (target, len(mods), floor))
     failures = ["%s (%s) -> %s" % (name, path.relative_to(ROOT),
                                    ", ".join(sorted(group)))
                 for name, path, group in _unresolved(target)
@@ -385,7 +466,18 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
+BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero")
+# The boards whose `[modules.shared]` is a DENYLIST. The Zero's is an
+# allowlist, on the argument its board.toml makes in full: a denylist is right
+# when the source tree's default answer is YES, and `runtime/` IS the console,
+# which that board is not. The two checks below read denials and would pass
+# vacuously there, so they name this tuple instead of BOARDS and the Zero gets
+# its own pair further down -- an allowlist's failure mode is the opposite one
+# and needs the opposite test.
+DENYLIST_BOARDS = ("tdeck-mainline", "p4", "guition-s3")
+
+
+@pytest.mark.parametrize("target", BOARDS)
 def test_modules_that_cannot_load_on_a_board_are_not_frozen_onto_one(target):
     """A module that RAISES on import is worse than one that is missing.
 
@@ -432,7 +524,7 @@ def _kinds(target):
     return out
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
+@pytest.mark.parametrize("target", DENYLIST_BOARDS)
 def test_board_toml_denies_everything_the_policy_tables_forbid(target):
     declared = _kinds(target)
     # HOST_ONLY carries names that are not runtime modules at all
@@ -450,7 +542,7 @@ def test_board_toml_denies_everything_the_policy_tables_forbid(target):
             "longer exists -- that is what makes it a tripwire" % (target, name))
 
 
-@pytest.mark.parametrize("target", ("tdeck-mainline", "p4", "guition-s3"))
+@pytest.mark.parametrize("target", DENYLIST_BOARDS)
 def test_every_board_toml_denial_is_explained_and_classified(target):
     """#161: the prose rationale moves WITH the data. An unexplained denial is
     the state this phase existed to leave behind -- a staging list whose
@@ -475,6 +567,85 @@ def test_every_board_toml_denial_is_explained_and_classified(target):
                 "%s/board.toml denies %s, which is not a runtime module. Only "
                 "a never-on-a-board TRIPWIRE may name a file that is not there"
                 % (target, name))
+
+
+# -- the allowlist half (the Zero, 2026-08-29) --------------------------------
+#
+# The two checks above are a denylist's contract: every EXCLUSION is explained.
+# An allowlist's contract is the mirror image -- every INCLUSION is explained,
+# because there the silent failure is a module that quietly stopped being
+# staged, not one that quietly started. Both are the same #161 rule ("the
+# rationale moves with the data") applied to the shape the board actually has.
+
+
+def test_the_zero_declares_its_staging_shape_and_the_others_keep_theirs():
+    """Which shape a board uses is a CLAIM ABOUT THE BOARD, and it is declared.
+
+    `runtime/` is the console. A console board denies by exception because the
+    default answer there is yes; the Zero has no console, so its default answer
+    is no and forty denials saying "there is no console" would be noise with a
+    hole in it (the forty-first module nobody adds). Pinned in both directions
+    so a board silently changing shape -- which would silently change what it
+    freezes -- is a failing test rather than a diff nobody reads.
+    """
+    for target in DENYLIST_BOARDS:
+        assert board_config.shared_strategy(BOARD_DIR[target]) == "denylist", (
+            "%s stopped denying by exception -- read its board.toml diff"
+            % target)
+    assert board_config.shared_strategy(ZERO) == "allowlist"
+
+
+def test_every_zero_staging_group_says_what_the_board_does_with_it():
+    """An allowlist entry with no reason is a list somebody will prune wrongly.
+
+    Same eight-word floor the denials get, applied to the groups -- and applied
+    to the DEVICE allowlist too, which is the shape every board already uses
+    and which nothing checked before this board arrived with only four device
+    modules to its name.
+    """
+    cfg = board_config.load(ZERO)
+    shared = cfg["modules"]["shared"]
+    groups = shared.get("group", [])
+    assert groups, "the Zero's [modules.shared] allowlist has no groups"
+    for section, entries in (("shared", groups),
+                             ("device", cfg["modules"]["device"]["group"])):
+        for entry in entries:
+            assert entry.get("files"), "an empty %s group" % section
+            assert len(entry.get("why", "").split()) >= 8, (
+                "the Zero stages %s with no reason recorded"
+                % ", ".join(entry["files"]))
+    for entry in shared.get("lazy", []):
+        assert len(entry.get("why", "").split()) >= 8, (
+            "the Zero declares %s lazy with no reason" % entry.get("module"))
+
+
+def test_the_zero_stages_the_sync_stack_and_nothing_that_draws():
+    """The board's whole identity, as an invariant.
+
+    The positive half is the owner call of 2026-08-25 ("the Zero supports all
+    features"): before it, the board carried the minimum that BOOTS, which meant
+    `moy_sync.file_kinds()` found no store module and answered None -- read as
+    "refuse" everywhere, so the board 404'd /files.json and the kid's drawings
+    could not travel. Every name below is a feature, not a dependency detail.
+
+    The negative half is what makes two OTA slots fit in 8MB: a module that
+    draws is a module this board pays for twice and never calls.
+    """
+    staged = set(board_config.staged_modules(ZERO, ROOT))
+    for name in ("moy_sync.py", "moy_fs.py",          # the 3.4 RPC
+                 "moy_carts.py", "moy_image.py",      # #108 files sync
+                 "moy_journal.py",                    # the store of record
+                 "web_view_ws.py", "ticks.py",        # the transport's leaves
+                 "moy_webserver.py", "moy_webhost.py",
+                 "moy_ota.py"):                       # #53, wired 2026-08-29
+        assert name in staged, "the Zero no longer stages %s" % name
+    for name in ("console.py", "wm.py", "wm_windowed.py", "device_canvas.py",
+                 "banded_panel.py", "launcher_layer.py", "editors.py",
+                 "cart_api.py", "device_boot.py", "blocks.py"):
+        assert name not in staged, (
+            "the Zero stages %s -- it has no glass and runs no carts; if that "
+            "changed, the partition table's slot arithmetic changed with it"
+            % name)
 
 
 def test_the_two_boards_differ_by_exactly_the_presentation_tier():
@@ -601,3 +772,36 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
             "%s: NATIVE tripwire %s != declaration %s + board-authored %s"
             % (target, sorted(NATIVE[target]), sorted(shared),
                sorted(authored)))
+
+
+def test_every_authored_web_module_reaches_the_bundle():
+    """build.sh copies the runner's own modules BY NAME, and a name left out of
+    that list fails in the quietest way this tree has.
+
+    `update_link.py` was missing from it for the whole life of the feature. The
+    import that needs it sits inside a try/except that prints to a WORKER
+    console, the page went on reporting an updater because that message is sent
+    when the board's PROBE answers rather than when the console binds one, and
+    the browser suite asserted on the message. Green everywhere; no update row
+    on the one board whose only screen is that page.
+
+    So: every module in the directory is in the copy loop, and the two lists
+    that disagreed are one derivation now.
+    """
+    # COMMENTS STRIPPED. A first version of this grepped the whole file and
+    # passed its own mutation test, because the comment above the copy loop
+    # names `update_link.py` -- the check has to read what the script DOES.
+    sh = "\n".join(line.split("#", 1)[0]
+                   for line in (WEB / "build.sh").read_text(encoding="utf-8")
+                                                 .splitlines())
+    authored = sorted(p.stem for p in WEB.glob("*.py")
+                      if p.stem not in WEB_HOST_ONLY)
+    assert len(authored) >= 4, authored
+    for name in authored:
+        assert name in sh, (
+            "%s.py is an authored web module and build.sh never copies it into "
+            "the stage -- it will ImportError at runtime" % name)
+    for name in sorted(WEB_HOST_ONLY):
+        if (WEB / (name + ".py")).exists():
+            assert name not in sh, (
+                "%s.py is a host dev tool and must not enter the image" % name)

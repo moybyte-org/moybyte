@@ -90,23 +90,31 @@ class FakeWs:
 class FakeStore:
     CARTS_DIR = "/sd/moybyte/carts"
 
-    def __init__(self, carts=None, raise_on=None):
+    def __init__(self, carts=None, raise_on=None, dead_root=None):
         self.carts = carts if carts is not None else [{"title": "a"}]
         self.raise_on = raise_on
+        # A store that is dead at ONE root and fine at another: an empty card
+        # slot, which is not "storage is broken" but "storage is elsewhere".
+        self.dead_root = dead_root
         self.calls = []
 
     def ensure_dirs(self, root):
         self.calls.append(("ensure_dirs", root))
-        if self.raise_on == "ensure_dirs":
+        if self.raise_on == "ensure_dirs" or root == self.dead_root:
             raise OSError("no card")
 
-    def seed_builtins(self, seed, root, progress=None):
+    def seed_any(self, seed, root, progress=None):
+        # The real store dispatches on the roster's FORM (moy_carts.seed_any);
+        # what the boot spine has to get right is that it calls the one door.
         self.calls.append(("seed_builtins", root, len(seed)))
         if self.raise_on == "seed_builtins":
             raise OSError("write failed")
         if progress is not None:
             for i in range(len(seed)):
                 progress(i, len(seed), seed[i].get("title"))
+
+    def embedded_floor(self, seed):
+        return [dict(c) for c in seed]
 
     def scan(self, root):
         self.calls.append(("scan", root))
@@ -218,6 +226,12 @@ def test_a_splash_that_never_composed_still_shows_the_logo():
 # -- the cart store -----------------------------------------------------------
 
 
+def _raises_session(fn):
+    """The T-Deck's `with_sd_live` against an empty slot: the mount itself is
+    what fails, before fn() is ever reached."""
+    return fn()
+
+
 def test_the_carts_load_through_the_boards_storage_session(capsys):
     boot, _, _ = _boot()
     store = FakeStore(carts=[{"title": "a"}, {"title": "b"}])
@@ -265,6 +279,67 @@ def test_an_unreadable_store_degrades_to_the_embedded_carts(capsys):
     out = capsys.readouterr().out
     assert "Moybyte SD carts unavailable: no card" in out
     assert "Moybyte using built-in carts" in out
+
+
+def test_a_cardless_board_keeps_a_writable_store_on_internal_flash(capsys):
+    """The T-Deck bug: no card in the slot meant a None root, which
+    `wire_workstation_core` turns into can_manage=False -- a console showing
+    every cart and able to save, edit or import none of them."""
+    boot, _, _ = _boot()
+    store = FakeStore(dead_root="/sd/moybyte/carts")
+
+    carts, root = boot.load_carts(store, [{"title": "s"}], session=_raises_session,
+                                  media="SD", fallback_root="/moy/carts")
+
+    assert root == "/moy/carts", ("a board with no card must still get a real "
+                                  "root -- that is what keeps it writable")
+    assert ("seed_builtins", "/moy/carts", 1) in store.calls, \
+        "the fallback store must be SEEDED, not just scanned"
+    out = capsys.readouterr().out
+    assert "Moybyte SD carts unavailable: no card" in out
+    assert "Moybyte loaded 1 carts from flash" in out
+    assert "using built-in carts" not in out, \
+        "the embedded read-only floor is for when BOTH stores are gone"
+
+
+def test_the_fallback_store_runs_without_the_boards_session():
+    """The session wrapper exists for the bus that just failed. Internal flash
+    shares nothing with the panel, and routing it through the SD bracket would
+    mount a card that is not there."""
+    boot, _, _ = _boot()
+    seen = []
+
+    def session(fn):
+        seen.append("used")
+        raise OSError("no card")
+
+    boot.load_carts(FakeStore(), [{"title": "s"}], session=session,
+                    fallback_root="/moy/carts")
+    assert seen == ["used"], "the primary attempt uses it exactly once"
+
+
+def test_both_stores_gone_still_reaches_the_read_only_floor(capsys):
+    boot, _, _ = _boot()
+    store = FakeStore(raise_on="ensure_dirs")
+    seed = [{"title": "built-in"}]
+
+    carts, root = boot.load_carts(store, seed, fallback_root="/moy/carts")
+
+    assert root is None and carts == seed and carts[0] is not seed[0]
+    out = capsys.readouterr().out
+    assert "Moybyte flash carts unavailable: no card" in out
+    assert "Moybyte using built-in carts" in out
+
+
+def test_a_working_card_is_never_second_guessed():
+    """No fallback attempt when the primary store answered: two live stores is
+    the arrangement where a save lands in the one nobody is looking at."""
+    boot, _, _ = _boot()
+    store = FakeStore()
+    carts, root = boot.load_carts(store, [{"title": "s"}],
+                                  fallback_root="/moy/carts")
+    assert root == store.CARTS_DIR
+    assert not any("/moy/carts" in str(c) for c in store.calls)
 
 
 def test_an_empty_store_also_falls_back(capsys):
@@ -590,7 +665,7 @@ def test_the_spine_imports_no_board_module():
     src = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
-               "time", "gc"}
+               "perf_line", "time", "gc"}
     seen = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -927,3 +1002,561 @@ def test_pump_slack_recovers_after_swallowing_the_whole_sleep(monkeypatch):
         periods.append(clock[0] - t0)
     tail = periods[-10:]
     assert max(tail) <= 17 and min(tail) >= 15, (tail, pump.slack)
+
+
+
+# -- the PERF line (#206 item 2) -------------------------------------------------
+#
+# ONE FORMAT, ONE BODY, THREE BOARDS (owner call 2026-08-28). It was three
+# formats under one name: the P4's, the Guition's hand copy of it (which said so
+# in its own comment), and the T-Deck's, which went through the offline diag
+# ring in a fourth field order and carried that ring's `Moybyte <uptime> ` stamp
+# -- so both readers, filtering on `startswith("PERF ")`, threw every T-Deck
+# sample away. The board whose fps most needed measuring was invisible to the
+# tool that measures it.
+#
+# WIRE_* below are real serial captures from the boards' PRE-CHANGE firmware
+# (2026-08-28, all three attached). They are what the values were; the expected
+# lines are those same values in the one format.
+
+from runtime.perf_line import ABSENT, FIELDS, format_perf, parse_perf  # noqa: E402
+
+# name -> (board dir, whether it hands the sampler an overlap source)
+PERF_BOARDS = {
+    "tdeck": (TDECK, False),
+    "p4": (P4, True),
+    "guition": (ROOT / "firmware" / "guition_jc3248w535" / "modules", False),
+}
+
+# The console meters + loop accumulators one sample was taken from, per board,
+# and the line the unified formatter must produce from them.
+#
+#   p4       captured idle with `diag on`: every column it can measure, most of
+#            them legitimately zero, and fps=0 because an idle desk paints
+#            nothing (the invariant this line is also the witness for).
+#   guition  captured idle: no windowed WM and no PPA on this board, so those
+#            columns are ABSENT rather than zero -- `wmr=0 ppa=0/0/0/0/0` is
+#            indistinguishable from the P4's meters having died, which is the
+#            `fold=0` bug one format over.
+#   tdeck    the values behind `Moybyte 2698583 PERF cart=Sakura_Lua fps=53
+#            net=- flush=0 draw=14`, plus the columns its old five-field line
+#            never carried. The slug and the `-` come straight from it.
+#   p4_dark  the P4 with the deep meters OFF, which is how tools/p4_perf.py
+#            measures: nothing writes _pf_wm_*, so those read `-` -- "not
+#            measured" and "measured zero" are different answers.
+PERF_CASES = {
+    "p4": (
+        {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
+         "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
+         "chrome": 33.0, "wmr": 28, "wmw": 1, "wms": 0,
+         "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0, "gfence_ms": 0.0,
+         "home": None},
+        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
+        "chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 fence_ms=0.0 "
+        "gfence_ms=0.0 home=-"),
+    "guition": (
+        {"cart": None, "fps": (0, 61), "net": None, "busy": 4,
+         "draw": 72.0, "flush": 0.0, "logic": 0.0, "render": 0.0,
+         "chrome": 72.0, "home": None},
+        "PERF cart=- fps=0/61 net=- busy=4ms draw=72 flush=0 logic=0 render=0 "
+        "chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- gfence_ms=- home=-"),
+    "tdeck": (
+        {"cart": "Sakura Lua", "fps": (53, 55), "net": None, "busy": 18,
+         "draw": 14.0, "flush": 0.0, "logic": 3.0, "render": 9.0,
+         "chrome": 2.0, "home": None},
+        "PERF cart=Sakura_Lua fps=53/55 net=- busy=18ms draw=14 flush=0 "
+        "logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
+        "gfence_ms=- home=-"),
+    "p4_dark": (
+        {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
+         "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
+         "chrome": 33.0, "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0,
+         "gfence_ms": 0.0, "home": None},
+        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
+        "chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 fence_ms=0.0 "
+        "gfence_ms=0.0 home=-"),
+}
+
+# Every column populated and every value DISTINCT: the captures above are idle
+# and mostly zeros, which cannot tell a swapped pair of fields from a correct
+# one, nor `%.0f` from `%d`. Each rounding here is one a plain int cast gets
+# wrong, and the cart title carries a space the tokeniser must not see.
+PERF_LOUD = (
+    {"cart": "Brick Siege", "fps": (20, 31), "net": 30, "busy": 8,
+     "draw": 3.6, "flush": 1.4, "logic": 5.4, "render": 12.7, "chrome": 2.2,
+     "wmr": 7, "wmw": 8, "wms": 9, "ppa": (1, 2, 3, 4, 0),
+     "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1)},
+    "PERF cart=Brick_Siege fps=20/31 net=30 busy=8ms draw=4 flush=1 logic=5 "
+    "render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 fence_ms=2.5 "
+    "gfence_ms=0.7 home=3/4/1")
+
+
+@pytest.mark.parametrize("case", sorted(PERF_CASES))
+def test_the_PERF_line_is_one_format_on_every_board(case):
+    values, expected = PERF_CASES[case]
+    assert format_perf(values) == expected
+
+
+def test_the_PERF_line_keeps_its_field_order_and_its_conversions():
+    values, expected = PERF_LOUD
+    assert format_perf(values) == expected
+
+
+def test_a_field_a_board_cannot_measure_prints_a_dash_and_never_a_zero():
+    """THE DOCTRINE (2026-08-22), which `fold=0` cost weeks by breaking: a
+    frozen 0 is also exactly what a broken lever looks like, so absence has to
+    look different. There is deliberately no way to say "absent" with a number
+    -- a missing key and an explicit None both render `-`, and every present
+    value renders through its declared spec."""
+    absent = format_perf({})
+    assert absent == "PERF " + " ".join(n + "=" + ABSENT for n, _s, _u in FIELDS)
+    zero = format_perf({"wmr": 0, "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0,
+                        "net": 0})
+    assert "wmr=0 " in zero and "ppa=0/0/0/0/0 " in zero
+    assert "fence_ms=0.0 " in zero and "net=0 " in zero
+    assert zero != absent
+
+
+def test_the_cart_title_is_one_token_because_the_readers_split_on_whitespace():
+    """`cart=Brick Siege` would arrive as a field `cart=Brick` and a stray word
+    -- and every field AFTER it would still parse, so the corruption would be
+    silent. The T-Deck's diag has slugged titles for this reason since it had
+    any; the rule is the formatter's now, not each caller's."""
+    assert "cart=Brick_Siege" in format_perf({"cart": "Brick Siege"})
+    assert "cart=a_b" in format_perf({"cart": "a\nb"})
+    assert "cart=?" in format_perf({"cart": ""})
+    for name, value in (("loud", PERF_LOUD[1]),) + tuple(
+            (k, v[1]) for k, v in PERF_CASES.items()):
+        for tok in value.split()[1:]:
+            assert "=" in tok, (name, tok)
+
+
+@pytest.mark.parametrize("case", sorted(PERF_CASES))
+def test_the_reader_and_the_writer_are_the_same_module(case):
+    """`tools/p4_perf.py` parses with what emits, so the two halves of the
+    contract cannot drift. An absent field comes back None -- never 0."""
+    values, line = PERF_CASES[case]
+    got = parse_perf(line)
+    for name, _spec, _unit in FIELDS:
+        want = values.get(name)
+        if want is None:
+            assert got[name] is None, name
+        elif name == "cart":
+            assert got[name] == want.replace(" ", "_")
+        elif isinstance(want, tuple):
+            assert got[name] == tuple(float(x) for x in want), name
+        else:
+            assert got[name] == float(want), name
+
+
+def test_the_reader_strips_the_diag_rings_uptime_stamp():
+    """THE BUG (#206 item 2). The T-Deck rings every sample for its offline SD
+    log and replays the ring to serial at the next boot, so `Moybyte <ms> PERF
+    ...` is a legitimate line -- and both readers filtered on
+    `startswith("PERF ")`, which is why that board was invisible to the tool
+    that produces #66's numbers."""
+    line = PERF_CASES["tdeck"][1]
+    assert parse_perf("Moybyte 2698583 " + line) == parse_perf(line)
+    assert parse_perf("PERF") is None
+    assert parse_perf("Moybyte 123 LOOP skip=0 n=188") is None
+    assert parse_perf("Moybyte BLE keyboard: scanning") is None
+
+
+# -- the sampler: one measurement path feeding that format ----------------------
+
+
+class PerfWs:
+    """The Workstation surface the sampler reads, and nothing else. Absent
+    attributes are how a board says it has no lever, so this sets only what the
+    case names."""
+
+    def __init__(self, net=None, cart=None, meters=(), diag_live=False):
+        self._frames_drawn = 0
+        self.diag_live = diag_live
+        self.perf_capture = False
+        self.cart = {"title": cart} if cart else None
+        self._net = net
+        for k, v in dict(meters).items():
+            setattr(self, k, v)
+
+    def perf_net(self):
+        return self._net
+
+
+def _drive(monkeypatch, sampler, ws, frames, elapsed, drawn):
+    """One whole period through the FrameLoop.account hook."""
+    for i in range(frames):
+        if i == frames - 1:
+            ws._frames_drawn = drawn
+            device_boot._ticks_ms.at[0] = sampler._at   # the period expires
+        sampler.account(0, elapsed, 0)
+
+
+def _clock(monkeypatch):
+    at = [0]
+
+    def now():
+        return at[0]
+    now.at = at
+    monkeypatch.setattr(device_boot, "_ticks_ms", now)
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    return at
+
+
+def test_the_sampler_measures_the_P4s_captured_idle_line(monkeypatch):
+    """The whole path, executed: the loop's frame/busy/drawn accumulators, the
+    shared console meters, this board's cumulative overlap counters turned into
+    per-sample deltas -- and the bytes that came off the wire."""
+    _clock(monkeypatch)
+    ov = [(0,) * 7]
+    ws = PerfWs(meters={"_draw_ms": 33.0, "_flush_ms": 1.0, "_upd_ms": 0.0,
+                        "_cart_ms": 0.0, "_chrome_ms": 33.0,
+                        "_pf_wm_restore": 28, "_pf_wm_windows": 1,
+                        "_pf_wm_stamp": 0, "_pf_home": None})
+    out = []
+    s = device_boot.PerfSampler(ws, overlap=lambda: ov[0], emit=out.append)
+    _drive(monkeypatch, s, ws, 124, 2, 0)
+    assert out == [PERF_CASES["p4"][1]]
+
+
+def test_a_board_with_no_overlap_source_reports_the_PPA_columns_absent(
+        monkeypatch):
+    """The S3 boards pass no `overlap`, and that is the whole of their
+    declaration: no argument, no columns, `-` rather than a zero."""
+    _clock(monkeypatch)
+    ws = PerfWs(meters={"_draw_ms": 72.0, "_flush_ms": 0.0, "_upd_ms": 0.0,
+                        "_cart_ms": 0.0, "_chrome_ms": 72.0})
+    out = []
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    _drive(monkeypatch, s, ws, 122, 4, 0)
+    assert out == [PERF_CASES["guition"][1]]
+
+
+def test_the_overlap_counters_arrive_as_deltas_over_one_sample(monkeypatch):
+    """`overlap_stats` is CUMULATIVE, and the mapping from its seven counters to
+    ppa=/fence_ms/gfence_ms is the FORMAT's business, so it lives once -- a
+    second board with an overlap engine hands over the same shape and says
+    nothing about layout."""
+    _clock(monkeypatch)
+    # us, and large enough that the fence columns survive their one decimal.
+    reads = [tuple(i * 10000 for i in range(1, 8)),
+             tuple(i * 20000 for i in range(1, 8))]
+    ws = PerfWs()
+    out = []
+    s = device_boot.PerfSampler(ws, overlap=lambda: reads.pop(0),
+                                emit=out.append)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    got = parse_perf(out[0])
+    d = [i * 10000 for i in range(1, 8)]
+    assert got["ppa"] == (d[0], d[1], d[2], d[4], d[6])
+    assert got["fence_ms"] == d[3] / 1000.0
+    assert got["gfence_ms"] == d[5] / 1000.0
+
+
+def test_the_absent_lockstep_marker_is_a_dash_and_never_a_zero(monkeypatch):
+    """`-` is NO SESSION; 0 is a real reading (matched but frozen). A mutant
+    that folds them together (`if not net`) dies here. Read BARE where every
+    field beside it is a getattr, because `-` is legitimate: a getattr default
+    would let a renamed meter forge "no match" forever."""
+    seen = {}
+    for net in (None, 0, 30):
+        _clock(monkeypatch)
+        out = []
+        ws = PerfWs(net=net)
+        s = device_boot.PerfSampler(ws, emit=out.append)
+        _drive(monkeypatch, s, ws, 2, 0, 0)
+        seen[net] = out[0].split("net=")[1].split(" ")[0]
+    assert seen == {None: "-", 0: "0", 30: "30"}
+
+
+def test_a_raising_meter_costs_the_sample_and_not_the_loop(monkeypatch):
+    """What dropped the P4 to the REPL two seconds after boot: this hook runs
+    after pace, OUTSIDE the frame `try`, so a rename in the shared
+    runtime/console.py used to end the loop with a traceback naming the
+    sampler. It must PRINT instead -- and the timer must reset either way, or a
+    broken sample becomes a per-frame retry flooding the serial it is measured
+    over."""
+    def boom():
+        raise AttributeError("overlap_stats")
+
+    _clock(monkeypatch)
+    out = []
+    ws = PerfWs()
+    s = device_boot.PerfSampler(ws, overlap=lambda: (0,) * 7, emit=out.append)
+    s._overlap = boom
+    _drive(monkeypatch, s, ws, 40, 1, 7)
+    assert out == ["PERF sample failed: AttributeError: overlap_stats"]
+    assert (s._n, s._busy, s._drawn) == (0, 0, 7)
+
+
+@pytest.mark.parametrize("frames", [40])
+def test_the_sampler_emits_once_per_period_and_never_once_per_frame(frames,
+                                                                    monkeypatch):
+    """The timer reset must run on the SUCCESS path too. A sampler that emits
+    and does not reset prints every frame afterwards, flooding the serial it is
+    measured over -- and `tools/p4_perf.py` would median hundreds of samples
+    per cart without noticing."""
+    at = _clock(monkeypatch)
+    out = []
+    ws = PerfWs()
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    for period in range(2):
+        at[0] = s._at
+        for _ in range(frames):
+            s.account(0, 1, 0)
+        assert len(out) == period + 1, out
+
+
+def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
+    """Settings -> PERF DIAG (#68) arms the deep meters, and flipping it must
+    need no reboot. The BOOT arm stays in each run_desktop (a service
+    assignment tests/test_board_service_parity.py reads); this is the re-sync,
+    which all three copies carried and which is now written once."""
+    for live in (True, False):
+        _clock(monkeypatch)
+        ws = PerfWs(diag_live=live)
+        ws.perf_capture = not live
+        s = device_boot.PerfSampler(ws, emit=lambda _l: None)
+        _drive(monkeypatch, s, ws, 2, 0, 0)
+        assert ws.perf_capture is live
+
+
+# -- what each board declares ---------------------------------------------------
+
+
+def _perf_call(board):
+    """The board's `PerfSampler(...)` construction, as AST. Static because these
+    modules import `machine`; the emitter they hand it to is executed above."""
+    path = PERF_BOARDS[board][0] / "moy_runtime.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "PerfSampler"):
+            return node
+    raise AssertionError("%s constructs no PerfSampler" % path)
+
+
+@pytest.mark.parametrize("board", sorted(PERF_BOARDS))
+def test_every_board_emits_through_the_one_sampler(board):
+    """No board writes a PERF line of its own. It had three producers with three
+    shapes; a fourth board would have copied one of them. `FrameLoop.account` is
+    the home -- it runs after pace, which is where frame accounting belongs."""
+    path = PERF_BOARDS[board][0] / "moy_runtime.py"
+    src = path.read_text(encoding="utf-8")
+    # A FORMAT is a string literal starting "PERF " -- AST, so the prose about
+    # why this rule exists does not satisfy the rule. `diag.ring("PERF", ...)`
+    # passes the ring's TAG, which has no trailing space and is not a format.
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            assert not node.value.startswith("PERF "), (board, node.value)
+    assert "PerfSampler(" in src and "_perf.account" in src, board
+
+
+@pytest.mark.parametrize("board", sorted(PERF_BOARDS))
+def test_only_the_board_with_a_PPA_declares_an_overlap_source(board):
+    """The one per-board argument, and the ONLY one: `overlap` is a compositor
+    that counts async work, which is the P4's DSI/PPA path and nothing else.
+    The windowed-WM columns need no argument -- wm_windowed stamps them on the
+    Workstation and a board that does not stage it never has them, so the
+    getattr IS the capability probe."""
+    kw = {k.arg for k in _perf_call(board).keywords}
+    assert ("overlap" in kw) is PERF_BOARDS[board][1], (board, sorted(kw))
+    assert not (kw - {"overlap", "emit"}), \
+        "%s declares per-board FIELDS again: %s" % (board, sorted(kw))
+
+
+def test_the_T_Deck_still_rings_its_samples_for_the_offline_log():
+    """TWO SINKS, ONE LINE. That board's serial RX was dead for months and the
+    SD ring is why anything was known about it, so the sample is persisted --
+    but through `diag.ring`, not `diag.log`, which would put it on the wire a
+    second time. And it is PRINTED now, like every other board: through the ring
+    alone it carried the `Moybyte <ms> ` stamp that made both readers drop it."""
+    src = (TDECK / "moy_runtime.py").read_text(encoding="utf-8")
+    assert "def _perf_emit(line):" in src
+    assert 'diag.ring("PERF", line[5:])' in src
+    assert "print(line)" in src
+    assert "_diag_perf_sample" not in src
+    diag = (ROOT / "device" / "moybyte_diag.py").read_text(encoding="utf-8")
+    assert "def ring(tag, msg):" in diag
+    assert "def format_perf(" not in diag and "def log_perf(" not in diag
+
+
+# -- the two shared frame-loop verbs, EXECUTED (#208 rank 5) --------------------
+#
+# `apply_touch` and `poll_webhost` are shared by all three boards and were
+# asserted only as source STRINGS in test_micropython_spike.py -- the shape #208
+# exists to stop. The routing greps there stay (a board must still CALL them);
+# what runs here is the body.
+
+
+class _Touch:
+    """A `device_input.Touch`-shaped source: `poll()` returns (x, y, tap), False
+    is never returned to this verb (the driver folds it into None), and `fresh`
+    marks a repeat of a sample the hardware never re-took."""
+
+    def __init__(self, samples, fresh=None):
+        self._samples = list(samples)
+        self._fresh = list(fresh) if fresh is not None else None
+        self.fresh = True
+        self.polls = 0
+
+    def poll(self):
+        if self._fresh is not None:
+            self.fresh = self._fresh[self.polls]
+        self.polls += 1
+        return self._samples[self.polls - 1]
+
+
+def _pointer(w=320, h=240):
+    from runtime.widgets import Pointer
+
+    return Pointer(w, h)
+
+
+def test_a_touch_sample_places_the_pointer_and_reports_the_tap():
+    p = _pointer()
+    touched, clicked = device_boot.apply_touch(_Touch([(40, 90, True)]), p)
+    assert (touched, clicked) == (True, True)
+    assert (p.x, p.y) == (40, 90)
+    assert p.down is True
+
+
+def test_the_tap_flag_is_the_press_EDGE_not_the_level():
+    """A held finger reports down every pass and taps once. Returning the level
+    as the click would re-fire the launcher's open on every frame of a drag."""
+    t = _Touch([(10, 10, True), (12, 10, False), (14, 10, False)])
+    p = _pointer()
+    passes = [device_boot.apply_touch(t, p) for _ in range(3)]
+    assert passes == [(True, True), (True, False), (True, False)]
+    assert p.down is True
+
+
+def test_a_pass_with_no_sample_lifts_the_pointer():
+    p = _pointer()
+    device_boot.apply_touch(_Touch([(5, 5, True)]), p)
+    assert device_boot.apply_touch(_Touch([None]), p) == (False, False)
+    assert p.down is False
+    assert (p.x, p.y) == (5, 5)      # the position is not reset by a lift
+
+
+def test_pointer_down_is_a_LEVEL_so_a_held_finger_survives_a_stale_pass():
+    """#74: the GT911 hands over ~20-30 samples/s against a 30-60fps loop, so
+    MOST frames of a real drag are repeats. The driver holds the point and this
+    verb must read it as still-down, or the gesture ends mid-swipe."""
+    t = _Touch([(100, 50, True), (100, 50, False), (108, 50, False)],
+               fresh=[True, False, True])
+    p = _pointer()
+    downs = []
+    for _ in range(3):
+        device_boot.apply_touch(t, p)
+        downs.append((p.down, p.fresh, p.x))
+    assert downs == [(True, True, 100), (True, False, 100), (True, True, 108)]
+
+
+def test_the_stale_mark_is_carried_even_on_the_lift_pass():
+    """The mark is set BEFORE the None bail: kinetic scrolling reads `fresh` on
+    the release frame too, and a lift that left it stale-cleared would charge
+    the fling a delta the hardware never measured (#113)."""
+    t = _Touch([None], fresh=[False])
+    p = _pointer()
+    p.fresh = True
+    device_boot.apply_touch(t, p)
+    assert p.fresh is False
+
+
+def test_a_backend_with_no_stale_mark_reads_as_always_fresh():
+    """The host mouse and the P4's own feed report a level every frame; absence
+    of the attribute must mean fresh, not stale, or every host frame would bank
+    its time instead of measuring."""
+    class _NoFresh:
+        def poll(self):
+            return (1, 2, False)
+
+    p = _pointer()
+    p.fresh = False
+    device_boot.apply_touch(_NoFresh(), p)
+    assert p.fresh is True
+
+
+def test_the_placed_point_is_clamped_to_the_canvas():
+    p = _pointer(320, 240)
+    device_boot.apply_touch(_Touch([(999, -4, False)]), p)
+    assert (p.x, p.y) == (319, 0)
+
+
+# -- poll_webhost --------------------------------------------------------------
+
+
+class _Host:
+    def __init__(self, serving=True, error=None):
+        self.serving = serving
+        self.error = error
+        self.polls = 0
+
+    def poll(self):
+        self.polls += 1
+        if self.error is not None:
+            raise self.error
+
+
+class _WSWeb:
+    def __init__(self, webhost=None):
+        self.webhost = webhost
+
+
+def test_the_webhost_is_polled_once_a_frame_while_it_serves():
+    ws = _WSWeb(_Host())
+    device_boot.poll_webhost(ws)
+    device_boot.poll_webhost(ws)
+    assert ws.webhost.polls == 2
+
+
+def test_a_bound_listener_that_is_not_serving_is_left_alone():
+    """`serving` is the gate, not `is not None`: a webhost object exists from
+    boot on every board, and polling one that never started would spend a
+    syscall per frame on all three."""
+    ws = _WSWeb(_Host(serving=False))
+    assert device_boot.poll_webhost(ws) == 0
+    assert ws.webhost.polls == 0
+
+
+def test_a_board_with_no_webhost_at_all_costs_nothing():
+    assert device_boot.poll_webhost(_WSWeb(None)) == 0
+    assert device_boot.poll_webhost(object()) == 0
+
+
+def test_a_failing_poll_never_breaks_the_frame(capsys):
+    """It runs at the frame TAIL of a single-threaded loop; an escaped exception
+    there is the desktop dropping to the REPL. It reports and carries on."""
+    ws = _WSWeb(_Host(error=RuntimeError("socket gone")))
+    assert device_boot.poll_webhost(ws) >= 0
+    assert "WEB ERR RuntimeError: socket gone" in capsys.readouterr().out
+    device_boot.poll_webhost(ws)
+    assert ws.webhost.polls == 2      # and the next frame still polls
+
+
+def test_the_elapsed_ms_is_measured_around_the_poll(monkeypatch):
+    """The T-Deck's HITCH line carries this as `web=`; a serve that stalls the
+    desktop must be visible as the cost it is."""
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+
+    class _Slow(_Host):
+        def poll(self):
+            _Host.poll(self)
+            clock[0] += 47
+
+    assert device_boot.poll_webhost(_WSWeb(_Slow())) == 47
+
+
+def test_a_failing_poll_still_reports_the_time_it_burned(monkeypatch):
+    """The stall is the interesting number precisely when the transfer died."""
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+
+    class _SlowBoom(_Host):
+        def poll(self):
+            clock[0] += 12
+            raise OSError(104)
+
+    assert device_boot.poll_webhost(_WSWeb(_SlowBoom())) == 12

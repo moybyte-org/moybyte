@@ -1,0 +1,12 @@
+{"query": "?handheld=1&dev=1", "boot_ms": 20000, "steps": [
+  {"note": "A BOARD-served page (serve.py --carts answers GET /sync). The import/export row used to be hidden here and the drop handler returned early -- both on the reading that a board-served page must not write to the board's store, which is what it does on every edit. Owner correction 2026-08-29.", "wait": 2500},
+  {"js": "document.getElementById('pz').style.display+'|'+(window.__moyPersist?window.__moyPersist.mode:'?')"},
+  {"file": "$MOY_DROP", "as": "__drop"},
+  {"note": "A REAL drop event through the page's own handler -- not the worker postMessage the p8 scenario uses. That is the point: the guard being tested lives on this listener."},
+  {"js": "(function(){var f=new File([window.__drop],window.__dropName,{type:'application/octet-stream'});var dt=new DataTransfer();dt.items.add(f);window.dispatchEvent(new DragEvent('drop',{dataTransfer:dt,bubbles:true,cancelable:true}));return 'dropped '+window.__dropName;})()"},
+  {"wait": 8000},
+  {"js": "window.__moyImported || 'nothing imported'"},
+  {"note": "let the commit sweep + POST /sync carry it to the board (1s pump cadence)"},
+  {"wait": 6000},
+  {"shot": "board_p8_drop"}
+]}

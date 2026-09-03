@@ -24,8 +24,8 @@ def _static_launcher(tmp_path):
     cleanest 'nothing changes' screen to prove idle frames are skipped."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     drv = host_app.ConsoleDriver(ws)
-    ws.select_wallpaper("fill:dark_blue", persist=False)
-    ws.ach.toast = None
+    ws.look.select_wallpaper("fill:dark_blue", persist=False)
+    ws._toast_until = 0
     return ws, drv
 
 
@@ -39,7 +39,7 @@ def _static_code_editor(tmp_path):
     ws.open()
     ws._open_menu()
     ws.set_menu_view("code")
-    ws.ach.toast = None
+    ws._toast_until = 0
     assert ws.menu_view == "code" and ws.editor is not None
     return ws, drv
 
@@ -49,7 +49,7 @@ def _settle(ws, drv, n=3):
     drawn-frame count to measure from."""
     for _ in range(n):
         drv.frame(DT)
-    ws.ach.toast = None
+    ws._toast_until = 0
     drv.frame(DT)
     return ws._frames_drawn
 
@@ -139,15 +139,15 @@ def test_live_wallpaper_keeps_launcher_animating(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     # Pick a wallpaper CART with a live _update (a STATIC cart -- Moy Night --
     # deliberately has none, so walk the options until an animating one is found).
-    cart_opts = [o for o in ws.wallpaper_options() if not str(o).startswith("fill:")]
+    cart_opts = [o for o in ws.look.wallpaper_options() if not str(o).startswith("fill:")]
     for opt in cart_opts:
-        ws.select_wallpaper(opt, persist=False)
+        ws.look.select_wallpaper(opt, persist=False)
         if ws.wallpaper._wp_update is not None:
             break
     else:
         import pytest
         pytest.skip("no live (animating) wallpaper cart seeded")
-    ws.ach.toast = None
+    ws._toast_until = 0
     base = _settle(ws, drv)
     for _ in range(30):
         drv.frame(DT)

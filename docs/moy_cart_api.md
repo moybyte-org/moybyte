@@ -113,11 +113,16 @@ The few Lua-specific notes:
 - **Numbers on the device are 32-bit** (`LUA_32BITS`, #67): floats carry ~7
   digits and integers wrap at ±2.1 billion — plenty for scores, timers and
   positions, and float math runs on the hardware FPU (part of why Lua is the
-  fast tier). The PC simulator uses 64-bit doubles, so a float-heavy cart can
-  drift slightly between sim and device.
+  fast tier). **The simulator is the same**: since 2026-08-14 the host builds the
+  boards' own vendored Lua 5.4 with the same `LUA_32BITS`, so float semantics and
+  integer wrap are identical on every tier and a float-heavy cart does not drift
+  between sim and device. (That used to be false — the host ran a second Lua with
+  64-bit doubles, and closing it is what made golden-frame parity meaningful for
+  float-heavy carts.)
 
-*(Host note: the PC simulator runs Lua carts through `lupa` — an optional dev
-dependency; without it a Lua cart opens the "needs the Lua runtime" panel.)*
+*(Host note: a Lua cart on the PC simulator needs a **C compiler**, not a Python
+dependency — the host compiles that same vendored VM on demand and caches it.
+Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 
 ## Frame pacing
 
@@ -171,12 +176,15 @@ Your `_update(dt)` gets the real `dt` either way — movement written as
 | `rectb(x, y, w, h, c)` | rectangle **outline** |
 | `circ(cx, cy, r, c)` | **filled** circle |
 | `circb(cx, cy, r, c)` | circle **outline** |
-| `tri(x1, y1, x2, y2, x3, y3, c)` | **filled** triangle — *provisional*, see below |
-| `trib(x1, y1, x2, y2, x3, y3, c)` | triangle **outline** — *provisional*, see below |
+| `tri(x1, y1, x2, y2, x3, y3, c)` | **filled** triangle — moy core's, see below |
+| `trib(x1, y1, x2, y2, x3, y3, c)` | triangle **outline** — moy core's, see below |
 | `print(s, x, y, c, scale=1)` | text (8×8 petme128 font, pixel-identical host↔device). `scale` is accepted but **ignored** — game text is always 8px (the Settings text-size option scales the SYSTEM UI only, #39). Honours `camera`/`clip`/`pal` like every primitive (native on device, #62) |
 | `camera(x=0, y=0)` | offset all subsequent draws by `-x,-y` (world → screen). No args resets |
 | `clip(x=None, y=None, w=None, h=None)` | clip drawing to a rect. No args resets to full screen |
-| `pal(c0=None, c1=None)` | draw color `c0` as `c1` until reset. No args resets |
+| `oval(x, y, w, h, c)` | **filled** ellipse inscribed in the `w×h` box at `x,y` |
+| `ovalb(x, y, w, h, c)` | ellipse **outline** — `oval`'s own rim, pixel for pixel, because one walk produces both |
+| `fillp(p=None, c=None)` | a 4×4 dither for the nine **shape** verbs. See below. No args resets to solid |
+| `pal(c0=None, c1=None, p=0)` | draw color `c0` as `c1` until reset. `p=1` sets the **screen** palette instead — see below. No args resets **both** |
 | `palt(c=None, on=None)` | make palette index `c` transparent (`on=True`) or not. No args resets |
 
 ## Sprites, sheets & tilemaps
@@ -187,15 +195,31 @@ editor). Tiles are referenced by integer id.
 | call | does |
 |---|---|
 | `spr(n, x, y, colorkey=-1, scale=1, flip=0, w=1, h=1)` | draw sheet tile `n` at `x,y`. `colorkey` = transparent index (`-1` = opaque). `scale` enlarges. `flip`: `0` none, `1` horizontal, `2` vertical, `3` both. `w,h>1` draws a multi-tile sprite (e.g. `w=2,h=2` = 16×16). `n` may also be an `Image` |
-| `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy` |
+| `map(mx=0, my=0, w=None, h=None, sx=0, sy=0, colorkey=-1, scale=1, layers=0)` | blit a `w×h` region of the cart's tilemap (top-left cell `mx,my`) to screen `sx,sy`. With `layers` non-zero, only the cells whose **tile's** flags share a bit with it |
 | `mget(x, y)` / `mset(x, y, tile)` | read / write a tilemap cell (tile id; `mget` = `-1` if none) |
+| `fget(n)` / `fget(n, b)` | tile `n`'s flag byte / whether bit `b` (0–7) of it is set. `0` / `False` off the sheet |
+| `fset(n, v)` / `fset(n, b, on)` | write tile `n`'s flag byte / set or clear one bit of it |
+| `sget(x, y)` / `sset(x, y, c)` | read / write one sheet **pixel** as a palette index. Sheet coords, not tile ones: tile `n`'s top-left is `((n % 16) * 8, (n // 16) * 8)`. `sset` masks the index to 0–15 and drops a write off the sheet; the edit is what the next `spr`/`sspr`/`map` draws |
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
 | `image(rows, mapping, transparent=".")` | build a small `Image` from ASCII art, e.g. `image(["..##..","..##.."], {"#": 8})` |
 | `Image(w, h, indices, transparent)` | a sprite bitmap object (also `Image.from_ascii(...)`) |
-| `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. *Provisional*, see below |
-| `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. *Provisional*, see below |
+| `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. moy core's, see below |
+| `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. moy core's, see below |
 
-### The 3D verbs are provisional
+### Tile flags, and drawing a level in strata
+
+Every tile has a **flag byte** — eight bits you tag it with once, in the cart's
+`flags.moyflags` file (SPEC.md 3.5), and every cell that uses that tile is tagged
+with it. It is the tile-tagging idiom: *solid*, *spike*, *coin*, *layer 2*.
+
+`fget` reads them (collision: `fget(mget(cx, cy), 0)` asks "is the tile at this
+cell solid?"), `fset` writes them mid-run (a door that opens), and `map(...,
+layers)` filters on them — which is how a level is drawn in strata from ONE map:
+the ground with mask `1`, then the actors, then the foreground with mask `2` on
+top. `layers` of `0` (or absent) is no filter at all, and a cart with no
+`flags.moyflags` has all-zero flags, so a non-zero mask draws nothing there.
+
+### The 3D verbs
 
 `tri`, `trib`, `sspr` and `tline` are **moy core's**, not moybyte's — their pixels are
 defined by [SPEC.md §6.1 and §7.1](https://github.com/moybyte-org/moy-spec), and moybyte
@@ -204,9 +228,43 @@ conforming console. That is also why the signatures above are terse: **the spec 
 authority on what they draw**, and a fuller restatement here would be a second source of
 truth that drifts.
 
-"Provisional" is the spec's own word (§6.1): membership is settled but the semantics may
-still move, and §11's conformance suite does not yet count them. A cart using them is fine
-— the seed carts do — but they are the one corner of this API that could change under you.
+They were **provisional** through core 0.2 — reported by the conformance suite but not
+counted — and are core as of **0.3**, so §11 counts them and a host that skips them fails
+conformance. Nothing about what they draw changed.
+
+### The fill pattern, and the screen palette
+
+Two verbs that change what *other* verbs do, both moy core's (SPEC.md §6, §12.1).
+
+**`fillp(p, c)`** is a dither. `p` is sixteen bits read as a 4×4 cell, row by row from
+the top-left, bit 15 first; a **set** bit is a hole. A hole takes colour `c`, or is left
+untouched when `c` is absent or negative — so `fillp(0xA5A5)` draws a checkerboard of
+the shape's colour over whatever was already there, and `fillp(0xA5A5, 0)` draws it over
+black. It reaches the nine **shape** verbs (`line`, `rect`, `rectb`, `circ`, `circb`,
+`tri`, `trib`, `oval`, `ovalb`) and nothing else: not `pix`, `print`, `cls`, sprites or
+the map.
+
+The pattern is anchored to the **screen**, not the camera, which is what makes it usable:
+a dithered shape holds still while the camera moves over it, and two shapes that overlap
+interleave rather than fight.
+
+**`pal(c0, c1, 1)`** sets the **screen** palette — a second remap composed *after* the
+draw palette, so a pixel written as `c0` lands as `spal[pal[c0]]`. Like the first it
+applies to pixels **as they are drawn**, not to pixels already on the canvas: set it
+before the frame's `cls` to recolour the whole frame, and redraw each frame of a fade
+under that frame's table. The two exist separately because they compose — `pal(2, 8)`
+with `pal(8, 11, 1)` draws a 2 as 11 *and* a real 8 as 11 — and it is the shape every
+PICO-8 fade and secret colour already has. `pal()` with no arguments resets both.
+
+It costs nothing per pixel on any tier. The flush-time pass PICO-8 does instead was
+measured at roughly half a frame on all three boards
+([#218](https://github.com/moybyte-org/moybyte/issues/218)), which is why the spec
+composes (SPEC.md §12.1). The one thing that buys you that this cannot: a fade over a
+frame you do *not* redraw. A pixel already drawn keeps its colour, and `pix(x, y)` reads
+back the index it landed as.
+
+Both reset every frame, like `camera`, `clip` and `pal` — set them in `_draw`, not once
+at startup.
 
 ### The batch verbs are gone (`spr_batch`, `rect_batch`, `spans`)
 
@@ -472,6 +530,31 @@ There is **one** multiplayer API and the way the extra players arrive (a second 
 gamepad, a phone over the web view, another Moybyte over the radio) is just a backend —
 your cart never knows the difference.
 
+**Two ways to get a second player today**, and your cart is written the same for both:
+
+- **One console, two kids.** Pair a Bluetooth keyboard to a console that already
+  has its own (a T-Deck), then Settings → **2 PLAYERS**: the built-in keyboard is
+  player one and the Bluetooth one is player two, on one screen. Nothing else
+  changes — `players()` just becomes `2`.
+- **Two consoles, one game.** Both kids open the *same* game with the
+  `"multiplayer"` permission, and the consoles find each other over the radio and
+  play together, each on their own screen. There is nothing to set up: being in
+  the same room is the whole handshake. The game restarts when your friend joins,
+  because both consoles have to start from the same first frame.
+
+> **Writing a game that works two-console:** always read `btn(name, 0)` and
+> `btn(name, 1)` with an explicit player number, never bare `btn(name)`, for
+> anything that moves the game. Bare `btn(name)` means "whoever is holding *this*
+> console", which is a different answer on each screen. Keep it for things where
+> that is what you want, like "press anything to restart".
+>
+> Two linked consoles run the *same game twice*, one on each screen, and they stay
+> in step by trading only which buttons are held. That works as long as both sides
+> compute the same thing from the same buttons: use `rnd()` for randomness (the
+> console seeds it identically on both), and never make the game depend on the
+> clock. `Brick Siege` and `Harpoon Pop` are both written this way if you want to
+> read one.
+
 **Shared screen (many controllers).** Read each player with the `player` argument.
 Player 0 is always this console:
 
@@ -510,6 +593,69 @@ Both `net` and `on_net` are **only present** when the manifest grants
 > **Keeping two consoles in step:** if both sides run the same game logic, seed your
 > randomness the same way on both (share a start seed and use it for `rnd()`), and keep
 > game logic off the wall clock — otherwise the two screens drift apart.
+
+## Pins — wires, lights and buttons (`#9`)
+
+Some consoles have a **spare pin header**: the Moybyte Zero is one, a little
+board with no screen that serves this console to your browser over WiFi. When
+your cart is running on a console like that, it gets two extra verbs and can
+turn things on and off in the real world.
+
+| call | does |
+|---|---|
+| `pin_write(n, v)` | pin `n` goes high (`v` = 1) or low (`v` = 0). `True`/`False` work too |
+| `pin_read(n)` | the last level pin `n` reported — `0`, `1`, or `None` before the first answer |
+
+```python
+LED = 21          # the Zero's own little light
+BUTTON = 2        # a switch wired between pin 2 and ground
+
+def _update(dt):
+    if pin_read(BUTTON) == 0:      # pressed (the switch pulls the pin low)
+        pin_write(LED, 0)          # this LED is ON when the pin is LOW
+    else:
+        pin_write(LED, 1)
+```
+
+**Your cart must ASK, in its manifest.** `"permissions": ["pins"]` -- the same
+declaration `network` and `multiplayer` need, and for the same reason: a cart
+that can move the wiring in somebody's room should have said so where a person
+can read it before running it. Without it the names are absent even on a console
+that has pins.
+
+**And the names are only there when the console has pins.** On moybyte.com, on a
+T-Deck or a P4, or in a browser tab you opened from a file, `pin_write` does
+not exist at all and using it is a `NameError` — the same rule as `wifi` and
+`net`. That is on purpose: a verb that pretends to work while nothing happens
+is the hardest possible bug for a kid to see.
+
+**They are not instant, and you should know how much.** Your cart runs in the
+browser and the pins are on the board across the room, so a `pin_write` does
+not go down a wire — it is **queued**, and the page sends everything that piled
+up about **30 times a second**. So:
+
+* a write lands roughly **one to two frames** after you make it, plus however
+  long your WiFi takes;
+* `pin_read(n)` answers with the **last thing the board said**, which is up to
+  one of those round trips old — the first call, before any answer has come
+  back, returns `None`;
+* writing the same pin twice in one frame is fine — only the **last** value was
+  ever real, and only it is sent.
+
+None of that is enough to notice for a light, a buzzer or a button. It is not
+fast enough to bit-bang a protocol, and it is not meant to be.
+
+**Which pins?** Each board publishes its own list, and a pin that is not on it
+is **refused, never driven** — the board needs some of its pins to stay alive
+(its flash, its USB, its serial console), and a typo must not be able to reach
+them. Ask for a pin outside the list and the console says so once, and nothing
+happens. On the Zero the list is `1, 2, 4, 5, 6, 7, 8, 9` (the pads marked
+`D0`, `D1`, `D3`, `D4`, `D5`, `D8`, `D9`, `D10`) plus `21`, the board's own
+built-in LED.
+
+> **On or off, and that is all — for now.** There is no `pin_pwm`, no servo and
+> no motor verb yet: driving a motor takes a driver board between the pin and
+> the motor, and that is `#9`'s next step rather than this one.
 
 ## Turning a cart into an APP (`#181`)
 

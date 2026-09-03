@@ -1,17 +1,21 @@
 # Surface model v1 — the presentation contract for every backend
 
 **Status: v1.2 LOCKED (2026-08-12) — v1.1 plus the STAGE-4 AMENDMENT (§13),
-which retires the web annex.** Written, then put through the parallel
-adversarial architecture + perf review passes (verdicts: **LOCK AFTER FIXES**
-/ **PERF CASE STANDS WITH FIXES**); all twenty findings are folded into this
-revision — **§12 is the finding-by-finding traceability ledger.**
+which retires the web annex, and the 2026-08-27 FOLD (§14), which absorbs the
+archived predecessor and changes no part of the model.** Written, then put
+through the parallel adversarial architecture + perf review passes
+(verdicts: **LOCK AFTER FIXES** / **PERF CASE STANDS WITH FIXES**); all twenty
+findings are folded into this revision — **§12 is the finding-by-finding
+traceability ledger.**
 **Tracks:** #73/#105 (windowed WM), #58 (P4 port), #175/#176 (web runner), #113
 (scroll), #163 (grid kernels), #76/#153 (web deltas).
-**Relation to prior docs:** this is the successor that `docs/ui_damage_model_v1.md`'s
-§0 review outcome asks for — it builds the §2.1 consolidation that survived that
-review (one invalidation mechanism instead of six, at *surface* granularity) and
-refuses everything that review killed (fine-grained damage, inferred static
-content). It does not supersede `shell_ux_v1.md` (what the UI does) or
+**Relation to prior docs:** this is the successor that
+`docs/history/ui_damage_model_v1.md`'s §0 review outcome asks for — it builds the
+§2.1 consolidation that survived that review (one invalidation mechanism instead
+of six, at *surface* granularity) and refuses everything that review killed
+(fine-grained damage, inferred static content). That doc was archived 2026-08-27
+and its still-binding kernel folded in as **§14**, so live code cites this file.
+It does not supersede `shell_ux_v1.md` (what the UI does) or
 `visual_identity_v1.md` (how it looks); it governs **how pixels reach glass**.
 
 **How to use this doc:** this is the contract. A new backend implements §4 and its
@@ -77,7 +81,7 @@ id `"launcher"` today (`launcher_layer.py` vs `wm_windowed.py`) — one sid,
 two contents across a world flip is exactly the aliasing §3 forbids.
 
 **Gen minting (no per-object counters, ever).** Both gens are stamped from
-**one monotonic per-WM counter** — the `atlas_gen` pattern (`web_view.py`:
+**one monotonic per-WM counter** — the `atlas_gen` pattern (from the since-deleted `web_view.py`:
 increments, never restarts), which §2's L3 cites as prior art and which this
 rule generalizes. Rationale: surfaces are destroyed wholesale in the real code
 (`on_relayout` does `_wins.clear()`; every world flip rebuilds all windows)
@@ -246,7 +250,8 @@ the contract cannot express the shipped fast path.
 The "content changed → re-run the immediate draw" cells are the
 **skip-draw generalization**: a backend may skip *calling* a gen-clean,
 non-animating, pointer-quiet surface's draw entirely — the shipped
-`_content_static` freeze promoted from one special case to the contract.
+`_content_static` freeze promoted from one special case to the contract
+(**§14.1** is that slice as built, and what its code cites).
 It inherits Class C's caps until the producer audit lands (§3).
 
 ## 5. Backend annexes (normative)
@@ -394,7 +399,7 @@ section and are preserved as reasoning about retained surfaces generally, not
 as a shipped wire.)*
 
 **Current shape (corrected):** `frame_payload.surfaces` entries are dicts —
-`{"id", "domain", "cmds"}` or `{"id", "domain", "same": 1}` (`web_view.py`
+`{"id", "domain", "cmds"}` or `{"id", "domain", "same": 1}` (the deleted `web_view.py`
 serve path; the `[sid, domain, cmds]` triple is the recorder-internal
 `frame_surfaces()` shape only).
 
@@ -469,8 +474,20 @@ pinning the field's absence.
 
 ## 8. The graveyard — do not re-try without new evidence
 
-- **LVGL / any third-party retained UI.** Left the draw path at 47→90fps on
-  the S3; no P4 port. Recorded with numbers in `ui_damage_model_v1.md`.
+- **LVGL / any third-party retained UI.** We shipped it and we left it, and
+  the numbers are here so this is not re-litigated. On the T-Deck LVGL only
+  ever brought up the panel and the SPI bus — nothing drew the UI with it —
+  and replacing the drawing path with our own native blitter measured
+  **47 → 90 FPS**, its CPU-bound rotation being the wall. The fork went with
+  it on **2026-08-17**: the T-Deck ships mainline + `native/moy_lcd` and no
+  LVGL exists anywhere in the tree. The P4 never had any, and no DSI port
+  exists — so on the one board where these costs hurt, "just use the library"
+  is first a port of LVGL. It also covers one of the four targets we render
+  the same pixels on: it is C with bindings and cannot run the host sim, so
+  adopting it forks the shell into two UI implementations. What we took is the
+  ALGORITHM — an invalid-area list, a merge, a clip discipline — not the
+  dependency. This flips only if the P4 becomes the only target, with no host
+  simulator; full analysis in `docs/history/ui_damage_model_v1.md` §4.
 - **Per-widget / fine-grained damage.** The `ui_damage_model_v1` §0 review
   killed the perf case; the maintainability case is served at surface
   granularity by this spec.
@@ -582,7 +599,7 @@ F8 L8 cost/per-tier definition → L8; F9 compositor memory/"for free" →
 
 This doc is LOCKED, so its web half is retired by an explicit versioned
 amendment rather than by editing §5.4 and §6 into a shape the code never had.
-The tracker is #192; the reasoning is `docs/moycore_plan_2026-08.md` §3.2/§6.
+The tracker is #192; the reasoning is `docs/history/moycore_plan_2026-08.md` §3.2/§6.
 
 **What changed underneath.** §5.4 opened "the device webserver, the host web
 console, and the wasm runner serve the same page protocol". The first two were
@@ -625,3 +642,102 @@ substitute for L8 that only the recording tier could run. The wasm head has
 pixels now, so it takes the same gate every other raster tier takes, and its
 screenshots are directly comparable to the host's (`pageshot.mjs`, which no
 longer reconstructs a replayer to produce them).
+
+## 14. Amendment: the predecessor folds in (2026-08-27)
+
+`docs/history/ui_damage_model_v1.md` — the doc this one succeeds — is archived,
+and three things in it were still load-bearing. The why-not-LVGL numbers are
+inlined in §8. The other two are here: the design source the shipped content
+freeze cites by section, and the evidence for having exactly one mechanism.
+**Nothing in the model changes** — §14.1 is §4's skip-draw cell as BUILT, and
+§14.2 is why §7 exists. What that doc's own §0 review walked or killed (the
+frame-level damage architecture, its §5 phases 1–3, the retained-mode
+primitives) stays there and is not carried forward; §8 keeps the verdicts.
+
+### 14.1 The shipped first slice: the focused-window content freeze
+
+`wm_windowed._content_static` is §4's skip-draw generalization as built: on a
+PAINTED frame that provably did not change the focused window's content, the
+content draw is skipped and the retained `win.buf` stamp presents it instead.
+"Provably" is four checkable facts, all of them required.
+
+- **`ws._dirty` is false.** It is still readable during the draw — `frame()`
+  clears it after — so false means no input or state handler reported a visible
+  change this frame.
+- **No pointer DOWN or CLICK, this frame or last.** Class C (§3) mutates
+  content without marking dirty, so any button activity renders live. The check
+  reads BOTH frames because handlers consume `p.click` in place — a tap that
+  opens a prompt zeroes it before the draw sees it, and the previous frame's
+  edge is still in `ws._last_ptr`. A position/visibility-only change is inert:
+  no content surface draws hover feedback (audited 2026-07-27), and anything
+  that appears without input is a Class B source or it could never paint under
+  the #44 gate at all.
+- **The content is not a Class B animating surface.** The `_animating` sources
+  that draw INSIDE an app window — the music preview's playhead, the bluetooth
+  panel's async scan/pair, the update screen's progress — are excluded by name
+  until §3's registration replaces the list. Sources outside app windows draw
+  on other layers and need no exclusion.
+- **`win.buf` is not stale.** A rebuilt buffer, or a gesture's `_direct_render`
+  painting past the buffer straight into the framebuffer, leaves it behind the
+  truth: the next paint renders live to refill it before the freeze resumes.
+
+Pinned by `tests/test_wm_content_freeze.py` — a frozen-vs-live pixel-equality
+check plus a case per leg of the gate.
+
+**The caret invariant this gate is designed around.** The one way a
+surface-granularity freeze breaks is a surface that animates without
+signalling: it silently stops moving. The 2026-07-27 audit found the feared
+case does not exist here — **both carets, the code editor's and Writer's, are
+deliberately SOLID** (Writer's own comment says so). A blinking caret added
+later without a Class B declaration is exactly how this freeze breaks.
+
+**MEASURED on P4 glass, 2026-07-27** (before the #159 L2-cache flag, which
+moved every surface median; #58 carries the post-flag sweep):
+
+| the focused editor window, per painted frame | cost |
+|---|---|
+| re-running the content draw (map tab) | 70.7ms |
+| stamping the retained `win.buf` 1:1 | 13.7ms |
+| stamping nothing, because nothing moved | ~0 |
+
+**The on-glass verdict is humbler than that table, and it is the honest one.**
+Most of the frame classes it promises were already covered on the P4: a game
+beside a focused editor takes `draw_stack`'s quiet partial stack, which
+bypasses every window draw (A/B: 32.2 vs 32.4ms — no change, correctly), and
+an open Editor freezes a live wallpaper anyway. Where animation-armed full
+paints DO happen — Settings over a live-wallpaper desk — the freeze measured
+**123.1 → 109.2ms per frame**, with `tools/p4_clicks.py`'s transitions
+unchanged within noise, all dirty-armed by design. The 70ms class is real on
+tap-settle frames on the P4 and on every cursor-move frame on the HOST tier,
+where a visible cursor defeats the quiet paths.
+
+**The widening still unbuilt:** waive the DOWN-guard when a WM drag or resize
+of a DIFFERENT window has captured the pointer. Widen one trigger source at a
+time, each behind the two gates this slice used — `tools/p4_clicks.py`
+transitions must not regress, `tools/p4_surface_sweep.py` drag medians must
+move.
+
+### 14.2 Why one mechanism — the evidence, kept
+
+§7's ledger says what becomes of the six hand-rolled invalidation mechanisms;
+this is why there are six and why that is a defect rather than an aesthetic
+complaint. Two of them produced the SAME bug and it cost a day to find
+(2026-07-26):
+
+- the **bar strip cache** keyed on canvas IDENTITY while the windowed WM
+  alternates destinations for the same bar (root canvas through a viewport on a
+  quiet frame, window buffer otherwise), so every switch read as a canvas swap
+  and rebuilt: **72ms of an 86ms Settings frame, twice per gesture**;
+- **`new_layer`'s pre-collect**, sized for a cart's ~384KB world, was charged
+  to the bar's 36KB strip. A collect on the P4 desk is **55ms**, 113ms with the
+  picker open (mark scales with the live set) — the sole source of GC pauses
+  during a gesture.
+
+**Neither produced any signal.** Nothing broke; two frames in thirty-one were
+five times slower, which shows up only if you happen to measure the exact
+frame, and four wrong models died before the real one (`tools/p4_alloc.py`'s
+header). A cache whose key silently stops describing reality is the recurring
+defect of this architecture, not an accident — which is why L3 forbids
+consumer-cleared booleans, L8 demands the silent-disable direction be
+testable, and §7 deletes each absorbed field with a grep-test instead of
+leaving it beside the model as a seventh mechanism.

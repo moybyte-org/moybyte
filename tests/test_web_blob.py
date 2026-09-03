@@ -275,10 +275,9 @@ def test_an_unchanged_bundle_does_not_touch_the_file(tmp_path):
 
 
 def test_a_bundle_older_than_the_console_says_so(tmp_path):
-    """The staleness baking CANNOT fix. `p4_push_web` compares dist against the
-    board, so a dist that is itself behind `runtime/` pushes -- and now bakes --
-    a stale console and reports success. That is the original bug wearing the
-    fix's clothes, so the build says it out loud."""
+    """The staleness baking CANNOT fix. Baking makes a board's console current
+    with its own firmware, but a dist that is itself behind `runtime/` bakes a
+    stale console and reports success -- so the build says it out loud."""
     d = _dist(tmp_path)
     assets, _ = gwb.collect(str(d))
     root = tmp_path / "root"
@@ -445,6 +444,40 @@ def test_the_module_is_importable_by_the_generator_without_a_board():
     assert spec is not None
 
 
+def test_make_test_refreshes_the_binary_the_next_section_reads():
+    """The checks below read the LIVE tree: they hash whatever
+    `firmware/web_runner/dist` last produced against what the binary BAKED. So
+    every web-runner build leaves a previously-built desktop MicroPython stale
+    and this file red until somebody runs `make unix-micropython` by hand --
+    which cost four separate red gates in one night on the #209 program.
+
+    `make test` therefore runs that target itself. It is the same reasoning the
+    target states about its own missing cache ("a cache MISS that skips the
+    check is the bug"), one level up, and it is affordable for the same reason:
+    0.4s warm.
+
+    BOTH halves are pinned, because the second is what keeps the first
+    harmless: the refresh must never take the host suite down with it. A
+    machine with no C toolchain still runs `make test`, and tests/unix_mp.py is
+    the thing that knows the difference between that machine and CI.
+    """
+    body = (ROOT / "Makefile").read_text()
+    after = body.partition("\ntest:\n")[2]
+    assert after, "the Makefile has no `test` rule"
+    recipe = []
+    for line in after.splitlines():
+        if not line.startswith("\t"):
+            break
+        recipe.append(line)
+    recipe = "\n".join(recipe)
+    assert "-m pytest" in recipe
+    assert "unix-micropython" in recipe, \
+        "`make test` no longer refreshes the desktop MicroPython it checks"
+    refresh = recipe.partition("unix-micropython")[2]
+    assert refresh.lstrip().startswith("||"), \
+        "the refresh must fall through on failure, not fail the test run"
+
+
 # -- the module under a REAL MicroPython -------------------------------------
 
 def _mp():
@@ -490,10 +523,19 @@ def test_the_native_module_serves_the_bytes_it_baked():
         return
     assets, _ = gwb.collect(str(ROOT / "firmware" / "web_runner" / "dist"))
     baked = {a[0]: (a[2], a[3][:16]) for a in assets}
-    assert sum(v[0] for v in baked.values()) == total
+    # THE BINARY IS CACHED AND THE BUNDLE IS NOT. `require_unix_mp` returns
+    # whatever `make unix-micropython` last built and never rebuilds it, so
+    # rebuilding the web bundle alone leaves a binary carrying the PREVIOUS
+    # blob -- and the bare size mismatch that produces reads like a generator
+    # bug rather than a stale artifact, which is an afternoon lost. Say it.
+    stale = ("this binary was built against a DIFFERENT bundle than "
+             "firmware/web_runner/dist holds now -- re-run `make "
+             "unix-micropython` after building the bundle. (If they were "
+             "built together, the generator really is dropping bytes.)")
+    assert sum(v[0] for v in baked.values()) == total, stale
     for line in lines[1:]:
         name, size, sha = line.split()
-        assert baked[name] == (int(size), sha), name
+        assert baked[name] == (int(size), sha), "%s: %s" % (name, stale)
 
 
 def test_the_native_module_refuses_a_write_to_flash():

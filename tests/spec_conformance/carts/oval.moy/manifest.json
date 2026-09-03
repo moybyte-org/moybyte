@@ -1,0 +1,11 @@
+{
+  "format": "moy-1",
+  "title": "conformance: oval",
+  "author": "moy",
+  "version": 1,
+  "main": "main.lua",
+  "fps": 30,
+  "input": [
+    "buttons"
+  ]
+}

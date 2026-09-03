@@ -257,9 +257,24 @@ rts         = true
 # CH343-specific; on this board it strands the handle, which is why the on-glass
 # suite attaches and leaves the console where it found it.
 attach_only = true
+# The USB device identity (see the P4's [serial] for the full why: ttyACM
+# numbers shuffle, and trusting a remembered one drove the wrong board on
+# 2026-08-24). 303a:1001 is the SoC's own USB-Serial/JTAG, so this id is
+# SHARED with the Guition -- it narrows the candidates and cannot finish the
+# job; the harness settles ambiguity by asking each candidate for its
+# `_ota_build.BOARD` (safe here: attach_only boards open without resetting).
+usb         = "303a:1001"
 # USB backpressures, so the default chunk is safe here -- measured 2026-08-19, a
 # 44KB cart pushed clean at 768 in 45s, twice as fast as the P4 needs at 256.
 chunk       = 768
+# The RAW window (`recv`, the dev channel's 8-bit upload path): how many bytes
+# the host may put on the wire before it must wait for the board's ack. Four
+# times the P4's, and for a different reason -- this board's USB-Serial/JTAG
+# ISR only drains what the stdin ring has room for, so the endpoint stalls and
+# the HOST blocks; the window here buys fewer round trips, it is not the safety
+# margin it is on the P4. The ceiling is the board's own RECV_MAX_WINDOW
+# (dev_channel), and the window is also the buffer it allocates.
+window      = 16384
 
 [monitor]
 baud = 115200
@@ -339,7 +354,8 @@ band feed off its VM-core pump timer and onto the Guition's core-0 feeder.
 What stays in `tdeck_panel.py` is what is this board's: the `moy_lcd` import,
 WIDTH/HEIGHT, the ASYNC_FLUSH and LAYER_COPY_ASYNC revert flags, `sd_bracket`
 (no other board shares its panel bus with an SD card) and the module-level
-`set_backlight`."""
+`set_backlight`. The GAME FOLD is `FoldingCompositor` in the same shared file
+since 2026-09, over `native/moy_flush/moy_fold`."""
 
 [[modules.device.group]]
 files = ["device_util.py", "device_canvas.py", "device_input.py", "gt911.py"]
@@ -391,6 +407,27 @@ in, audio queue out, pmem persisted at the #66 boundaries."""
 files = ["device_wifi.py"]
 why = "STAGE 6. The WLAN service the console's Settings WIFI panel and the OTA check ride."
 
+
+[[modules.device.group]]
+files = ["moy_espnow.py"]
+why = """
+The console's ONE ESP-NOW owner (#7/#65): discovery beacons, the two-console
+pairing handshake, and frame dispatch by type. It has to be an owner rather
+than a feature because `esp_now_register_recv_cb()` has exactly one callback
+slot for the whole firmware -- the second subscriber simply does not get one --
+so netplay's lockstep session and a cart's net.* inbox both read through here.
+
+Staged on all three console boards since 2026-08-24 -- and the same day this
+prose said "the two S3 boards and NOWHERE else, a hardware fact": the P4
+joined through the moy_c6 shim (stock modespnow.c over ESP-Hosted custom RPC
+to its C6; docs/history/espnow_p4_2026-08.md is that whole story, including the
+morning the flag flip failed at link). The browser still has no radio at all.
+
+Measured on this pair of boards, 2026-08-20, and the numbers are why the module
+looks the way it does: 48 KB delivered in 65ms at RATE_54M with rxbuf 32768 and
+zero loss, against 1680ms and 32% loss at MicroPython's stock 1 Mbps / 526-byte
+defaults; a 16-byte input frame round-trips in 5.0ms median, 14.2ms p99. The
+module header carries the full recipe and each trap it came from."""
 [[modules.device.group]]
 files = ["device_diag.py", "moybyte_diag.py"]
 why = """

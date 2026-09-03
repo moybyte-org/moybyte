@@ -199,7 +199,7 @@ mutated `DeviceCanvas`.
 
 *(Superseded 2026-08-12: the device mirror described here was deleted in the
 2026-08 streaming sunset, and the browser now runs the whole console itself as
-the wasm head — see `docs/moycore_plan_2026-08.md` §3.2. The motivation below is
+the wasm head — see `docs/history/moycore_plan_2026-08.md` §3.2. The motivation below is
 kept because the windowing argument it makes is what `wm_windowed` went on to
 implement.)*
 
@@ -211,8 +211,9 @@ compositor changes what there is to mirror: if the shell composites N layers ins
 one merged bitmap, the web view has the option of shipping **multiple layers/windows**
 to the browser instead of one flattened frame — which is what "the web view as a window
 manager" concretely means. This is a transport-side change built on a shell-side
-primitive; it doesn't require rewriting `web_view.py`'s existing recorder, just giving
-it more than one recordable surface to draw from.
+primitive; it did not require rewriting the recorder in `web_view.py`, just giving it
+more than one recordable surface to draw from. (That recorder was deleted in
+the 2026-08-12 streaming sunset; the wasm head rasterizes now.)
 
 ### 3.3 Why the One/P4 tier is where this actually lands first
 

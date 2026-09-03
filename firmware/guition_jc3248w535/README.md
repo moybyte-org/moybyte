@@ -30,7 +30,11 @@ board; tuning deliberately not copied, see `boards/.../sdkconfig.board`)
 owner's bezel insight the same evening): on a play frame the game composite
 never touches the root framebuffer -- `DeviceCanvas.blit_game`'s existing
 #190 plumbing arms `moy_axs`, whose flush synthesizes every band from the
-scratch snapshot directly. And because the bezels never change while the
+scratch snapshot directly. **Any integer scale**, the latch and both gathers
+living in the shared `native/moy_flush/moy_fold`: folding scale 1 alone would
+drop a cart-declared small canvas -- a 128px PICO-8 port at 2x on this 480x320
+glass -- back onto a full-root CPU composite every frame, which is the case the
+port exists for. And because the bezels never change while the
 panel's GRAM persists, only the FIRST folded flush ships full-screen (laying
 the bezels); every steady play frame after it arms CASET/RASET to the game's
 physical rectangle (240x320, 8-aligned) and ships the game alone -- the
@@ -82,11 +86,12 @@ physical rows; completion is counted by this module's `post_cb` ISR, whose
 body is the engine's `moy_flush_band_done_from_isr` -- static inline, so the
 callback keeps its IRAM placement. `modules/guition_panel.py` is the
 compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
-`device/banded_panel.py` (`BandedCompositor`, #206 item 1), the Python twin of
-the `moy_flush` split above. What is left in this file is the `moy_axs` import,
-WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag, `fold_supported` + the three
-`*_fold` verbs (no other board has the lever) and the module-level
-`set_backlight()`; there is no `sd_bracket` here, because nothing else is known
+`device/banded_panel.py` (`FoldingCompositor` over `BandedCompositor`, #206
+item 1), the Python twin of the `moy_flush` split above. What is left in this
+file is the `moy_axs` import, WIDTH/HEIGHT, the `ASYNC_FLUSH` revert flag and
+the module-level `set_backlight()` -- the `*_fold` verbs sit on the shared
+folding rung, which both S3 boards take, and what is this board's alone is the
+game WINDOW; there is no `sd_bracket` here, because nothing else is known
 to share this QSPI host. Init sequence provenance: ESPHome's AXS15231 model plus
 its generated DCS tail -- the exact sequence the owner's ESPHome build runs on
 this exact glass.
@@ -105,6 +110,16 @@ Bring-up smokes: `modules/moybyte_shell.py`'s `MODE` ("panel" / "touch" /
 ```python
 import moybyte_shell as s; s.MODE = "touch"; s.main()
 ```
+
+## The serial dev channel
+
+One vocabulary, every board (`runtime/dev_channel.py`; the T-Deck's README
+carries the RX story and the `recv` cart push, which are this board's too --
+same S3 USB-Serial/JTAG, same ISR, same **16384** `[serial] window`). What is
+board-specific here is where a pushed cart lands: `python tools/push_cart.py
+<cart.moy> --board guition_s3` copies a folder onto whichever store the console
+reports (`ws.carts_root` -- the TF card when one is in the slot, the internal
+VFS when not).
 
 ## Bring-up log
 

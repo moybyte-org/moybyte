@@ -60,16 +60,21 @@ def test_achievements_store_dedupes_and_ignores_garbage(tmp_path):
 
 def test_award_once_and_toast():
     saved = []
-    ach = C.Achievements(on_save=lambda ids: saved.append(list(ids)))
+    armed = []
+    ach = C.Achievements(on_save=lambda ids: saved.append(list(ids)),
+                         on_unlock=armed.append)
     assert ach.award("first_open") is True       # fresh unlock
     assert ach.award("first_open") is False      # repeat: no-op
     assert ach.has("first_open")
     assert ach.count() == 1
     assert saved == [["first_open"]]             # persisted exactly once
-    # The fresh unlock raised a toast naming the achievement.
+    # The fresh unlock raised a toast naming the achievement, and fired the
+    # unlock hook EXACTLY once -- the hook is what arms the shell's overlay
+    # deadline (#209 landing B), so a second firing would re-raise a banner the
+    # kid already saw and a missing one would leave the payload undrawn.
     assert ach.toast is not None
     assert ach.toast[0] == "first_open"
-    assert ach.toast_active()
+    assert armed == ["first_open"]
 
 
 def test_unknown_achievement_is_not_awarded():
@@ -143,7 +148,8 @@ def test_toast_renders(tmp_path):
     drv = host_app.ConsoleDriver(ws)
     ws.launcher.sel = 0
     ws.open()                                # raises the "First Steps" toast
-    assert ws.ach.toast_active()
+    assert ws.ach.toast is not None
+    assert ws._toast_until                   # the unlock armed the shell overlay
     drv.frame(1 / 30)                        # frame() draws the toast overlay
     assert probe.distinct_pixels_in(drv.rgb888(), 3) > 4        # not a blank frame
 

@@ -51,7 +51,7 @@ on:
         description: "Which board(s) to build ('both' = all boards)"
         type: choice
         default: tdeck
-        options: [tdeck, p4, guition_s3, both]
+        options: [tdeck, p4, guition_s3, xiao_zero, both]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -79,8 +79,19 @@ jobs:
           - board: guition_s3
             dir: firmware/guition_jc3248w535
             make_target: firmware-build-guition-s3
+          # The Zero (#41), a build target since 2026-08-29. Headless, so it
+          # builds like the others and is verified like none of them: there is
+          # no glass and no on-glass suite, and CI is where its image is
+          # produced for the OTA channels the same way.
+          # The matrix name is the board's `[board] ota` id, not its short
+          # name: it becomes the artifact folder AND the key the publisher
+          # looks up in OTA_IMAGES AND the `latest-<board>.json` a device asks
+          # for by the id stamped into its own image. Three places, one string.
+          - board: xiao_zero
+            dir: firmware/seeed_xiao_esp32s3_zero
+            make_target: firmware-build-zero
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
-    # branch build does all three boards in the matrix; a dispatch honours the
+    # branch build does every board in the matrix; a dispatch honours the
     # choice.
     env:
       WANT: ${{ github.event.inputs.board || 'both' }}
@@ -259,6 +270,16 @@ jobs:
             echo "== warm .build cache: single pass is patched"
           fi
 
+      # The P4's radio is a SECOND processor with its own firmware: the C6
+      # slave (the espnow shim -- docs/espnow_p4_2026-08.md). Built from the
+      # SAME managed-component checkout the P4 image just built against, so
+      # host and slave hosted versions cannot drift; the publisher stages it
+      # into latest-p4.json's `c6` block and the console's Settings UPGRADE
+      # C6 flow streams it over SDIO (device/moy_c6_update.py). P4 job only.
+      - name: Build the C6 co-processor image
+        if: steps.gate.outputs.run == 'true' && matrix.board == 'p4'
+        run: firmware/esp32_p4_wifi6_touch_lcd_7b/c6_slave/build.sh
+
       - name: Collect images
         if: steps.gate.outputs.run == 'true'
         run: |
@@ -282,6 +303,10 @@ jobs:
           cp dist/tdeck_mainline/ota_build.json out/ 2>/dev/null || true
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
           cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
+          cp dist/zero/ota_build.json out/ 2>/dev/null || true
+          # The C6 slave's identity stamp (P4 job only) -- the publisher reads
+          # c6.version out of it; the .bin itself rode the find above.
+          cp dist/p4/c6_build.json out/ 2>/dev/null || true
           ls -l out || true
           # A build whose identity did not travel would publish a manifest that
           # lies about the image, so say it loudly rather than shipping it.

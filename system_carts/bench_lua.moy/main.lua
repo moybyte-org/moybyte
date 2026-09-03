@@ -92,6 +92,26 @@ local VERBS = {
       tline(0, (i * 13) % 240, 319, (i * 13) % 240,
             (i * 7) << 14, (i * 11) << 13, 16384 + ((i & 15) << 7), i << 6)
     end },
+  -- APPENDED with the Python twin when moy core 0.3 promoted SPEC.md 6.1.
+  { name = "trib", k0 = 50, fn = function(i)
+      trib((i * 17) % 300, (i * 31) % 230, (i * 59) % 300 + 10,
+           (i * 43) % 230, (i * 23) % 300, ((i * 13) % 230) + 8, 2 + (i & 15))
+    end },
+  { name = "oval", k0 = 100, fn = function(i)
+      oval((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+           2 + (i & 15))
+    end },
+  { name = "ovalb", k0 = 100, fn = function(i)
+      ovalb((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+            2 + (i & 15))
+    end },
+  -- Same call as oval, under a pattern: the difference IS fillp's cost.
+  { name = "oval_p", k0 = 100, fn = function(i)
+      fillp(0xA5A5)
+      oval((i * 17) % 280, (i * 31) % 200, 8 + (i & 31), 8 + ((i >> 2) & 31),
+           2 + (i & 15))
+      fillp()
+    end },
 }
 
 function _init()
@@ -285,7 +305,8 @@ end
 -- reader polling cell 3 never sees a half-written block.
 local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
                   rectb = 6, circb = 7, tri = 8, spr = 9, map = 10,
-                  sspr = 11, tline = 12 }
+                  sspr = 11, tline = 12, trib = 13, oval = 14, ovalb = 15,
+                  oval_p = 16 }
 local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
                       { "silent", 3 }, { "sound", 4 } }
 

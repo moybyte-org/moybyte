@@ -1,6 +1,6 @@
 {
   "format": "moy-1",
-  "version": 9,
+  "version": 11,
   "title": "Hop Quest",
   "type": "game",
   "runtime": "python",

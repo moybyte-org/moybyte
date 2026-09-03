@@ -305,10 +305,10 @@ def test_delete_cart_action_deletes_then_goes_home(tmp_path):
     from runtime import moy_carts
     ws = _ws(tmp_path)
     drv = _drv(ws)
-    # Need >1 cart so del_cart isn't blocked by the keep-at-least-one guard.
+    # Need >1 cart so carts.delete() isn't blocked by the keep-at-least-one guard.
     moy_carts.create("Extra", str(tmp_path / "carts"), src="def _draw():\n    cls(1)\n",
                      type="app")
-    ws._apply_items(moy_carts.scan(str(tmp_path / "carts")))   # refresh both grids + _all_carts
+    ws.carts.apply(moy_carts.scan(str(tmp_path / "carts")))   # refresh both grids + carts.all
     n0 = len(ws.launcher.items)
     _open_cart(ws)
     ws.toggle_sysmenu()

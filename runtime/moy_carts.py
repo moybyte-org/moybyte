@@ -163,6 +163,40 @@ SHEETS_NAME = "sheets.json"
 # across carts; the import-tile primitive copies tiles between any two sheets.
 SHARED_SHEET_NAME = "shared.moygfx"
 
+# Tile flags (SPEC.md 3.5): the FIFTH asset, one byte per tile for all 512 tiles
+# of the SPEC.md 3.2 sheet, as hex pairs in tile order. The tile-tagging idiom --
+# solid, spike, coin, layer 2 -- read by fget, written by fset and consulted by
+# map(..., layers). A sidecar rather than a manifest field because it is data
+# with the sheet's shape. PICO-8's __gff__ is its first 256 tiles byte for byte.
+FLAGS_NAME = "flags.moyflags"
+TILE_FLAGS = 512
+
+
+def parse_flags(text):
+    """A flags.moyflags blob -> a 512-byte bytearray (SPEC.md 3.5).
+
+    Two hex digits per tile in tile order, whitespace ignored; a SHORT file
+    leaves the remaining tiles zero. The mirror of moy-spec's
+    `moycore.cart.parse_flags` -- an odd digit count or more than 512 pairs is
+    the file being something else, and raises rather than guessing at an
+    alignment.
+    """
+    hexd = "".join(text.split())
+    if len(hexd) % 2 or len(hexd) > TILE_FLAGS * 2:
+        raise ValueError("expected up to %d hex byte pairs, got %d digits"
+                         % (TILE_FLAGS, len(hexd)))
+    out = bytearray(TILE_FLAGS)
+    for i in range(0, len(hexd), 2):
+        out[i // 2] = int(hexd[i:i + 2], 16)
+    return out
+
+
+def flags_to_hex(flags):
+    """The file form: sixteen lines of thirty-two tiles."""
+    return "\n".join(
+        "".join("%02x" % flags[row * 32 + i] for i in range(32))
+        for row in range(16)) + "\n"
+
 
 # The moyimg codec + cover-thumb sidecars and the crash-safe file primitives
 # moved to their own leaf modules (moy_image / moy_fs); imported back + re-exported
@@ -735,6 +769,9 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
         tilemap = cart.get("map")                 # TileMap.to_hex() blob, optional (#32)
         if tilemap:
             _write(d + "/map.moymap", tilemap)
+        flags = cart.get("flags")                 # tile flags (SPEC.md 3.5), optional
+        if flags:
+            _write(d + "/" + FLAGS_NAME, flags)
         images = cart.get("images")               # {name: .moyimg blob}, optional (#63)
         if images:
             _mkdir(d + "/" + IMAGES_DIR)
@@ -756,13 +793,172 @@ def seed_builtins(seed_list, root=CARTS_DIR, progress=None):
                 _write(d + "/" + name, data)
 
 
+# -- the PACKED seed roster (2026-08-30) -------------------------------------
+#
+# `seed_builtins` above takes cart DICTS, and on the console boards those come
+# straight out of a frozen `carts_data.CARTS` -- 732 KB of literal source whose
+# strings live in ROM and cost no heap. That representation is free on a board
+# with the flash for it, and the Zero is the board without. Both forms were
+# BUILT: the plain roster makes a 2,830,672 B image of a 2,883,584 B OTA slot,
+# 51 KB left -- it fits, by less than 2%, under the #168 warning floor and one
+# cart from a build failure, in a slot the board pays for TWICE.
+#
+# So the Zero froze `carts_data.CARTS_Z` instead: the SAME carts, one raw
+# deflate stream each (tools/gen_device_carts.py --packed), which builds to
+# 2,399,232 B and leaves 473 KB. The unit of work is ONE CART -- inflate it,
+# hand it to `seed_builtins`, drop it -- because the roster inflates to 732 KB
+# and no board should ever hold that at once.
+#
+# EVERY BOARD FREEZES THE PACKED ROSTER since 2026-08-30, and the argument on
+# the three that fit is not the fit, it is the MARGIN: the roster only grows and
+# a slot does not, so the board with the least room decides the form for all of
+# them, and a lever that lives on one target is the lever the next port forgets.
+# `seed_any` below is the one door a boot calls, so nothing else had to change.
+#
+# Nothing about the seed CONTRACT changes: the #47 version rules, the manifest
+# regeneration, the preserved pmem/config all stay in `seed_builtins`, which is
+# the one body that writes a cart to a store. This is a decoder in front of it.
+
+# The deflate window the roster was compressed with. `tools/gen_device_carts.py`
+# holds the writer's copy (SEED_WBITS) and tests/test_seed_pack.py pins the two
+# equal -- a mismatch is not a crash, it is a wrong-looking inflate.
+_SEED_WBITS = 15
+
+
+def _packed_stream(blob):
+    """A readable stream over one cart's raw-deflate blob.
+
+    `deflate` is MicroPython's built-in inflater and the reason there is no
+    `zlib` on a board at all (it replaced it in v1.21). CPython has no
+    `deflate`, so the host reaches the same bytes through zlib's raw mode --
+    which is what lets every host suite exercise THIS body rather than a twin.
+    """
+    import io as _io
+
+    try:
+        import deflate
+    except ImportError:                  # CPython (host suites, the simulator)
+        import zlib
+        return _io.BytesIO(zlib.decompress(blob, -_SEED_WBITS))
+    return deflate.DeflateIO(_io.BytesIO(blob), deflate.RAW, _SEED_WBITS)
+
+
+def unpack_seed(blob):
+    """One packed blob -> the cart dict `seed_builtins` takes.
+
+    `json.load` over the inflating stream, NOT `json.loads(stream.read())`:
+    read() materializes the whole inflated document beside the objects parsed
+    out of it, and the parse allocates those anyway. MEASURED under the desktop
+    MicroPython, as the smallest heap the whole roster seeds in -- 680 KB
+    streaming against 896 KB for the read-all version, which is also ~40%
+    slower. tests/test_seed_pack.py asserts at 768 KB, between the two.
+    """
+    return json.load(_packed_stream(blob))
+
+
+def seed_packed(packed, root=CARTS_DIR, progress=None, only_new=False):
+    """`seed_builtins` over a PACKED roster, one cart inflated at a time.
+
+    `packed` is `[(title, version, blob)]`. The title and the version ride
+    outside the blob so the #47 already-there check can be answered WITHOUT
+    inflating: a board that is already seeded walks the whole roster doing 35
+    directory stats and no decompression at all, which is what keeps this off
+    the warm-boot path rather than merely cheap on it.
+
+    `only_new` changes the skip rule from "already CURRENT" to "already THERE",
+    and it is the Zero's (2026-08-30). On a console board the store is a CACHE
+    of the image's built-ins, so #47 replaces a cart whose baked version is
+    newer and accepts that on-device edits to a built-in's code are lost. On the
+    Zero the store is the RECORD -- the only copy of a cart made in a browser,
+    with a `moy_journal` history behind it -- and `seed_builtins` names a folder
+    by the TITLE slug, so a version bump is exactly what would overwrite a kid's
+    edited "Hop Quest". A cart that is not there yet has nothing to overwrite,
+    which is the whole difference: this seeds what is MISSING and never rewrites
+    what is present.
+
+    Returns the number of carts actually written.
+    """
+    total = len(packed)
+    written = 0
+    for index, entry in enumerate(packed):
+        title, version, blob = entry
+        if progress is not None:
+            try:
+                progress(index, total, title)
+            except Exception:             # noqa: BLE001 -- as in seed_builtins
+                progress = None
+        d = root + "/" + slug(title) + ".moy"
+        if _exists(d) and (only_new or int(version) <= _cart_version(d)):
+            continue
+        # One cart in flight. seed_builtins gets a ONE-element list so every
+        # rule it owns still applies -- and no progress hook, because the
+        # counting is this loop's (it would report 1-of-1, 35 times).
+        #
+        # NO `gc.collect()` here, and that is MEASURED rather than assumed. The
+        # obvious version collects after each cart to "make peak heap be one
+        # cart"; under the desktop MicroPython the smallest heap the whole
+        # roster seeds in is 680 KB either way, and the collecting version is
+        # ~10% slower for it. The allocator already collects at the moment
+        # peak matters -- when an allocation cannot be served -- and on a board
+        # whose heap is megabytes of PSRAM a full scan per cart is a real cost
+        # paid 35 times for a bound it does not move.
+        seed_builtins([unpack_seed(blob)], root)
+        written += 1
+    return written
+
+
+# -- which roster is this? ----------------------------------------------------
+#
+# Since every console board freezes the PACKED roster (2026-08-30), the two
+# seeders both exist on every board and something has to choose. That choice
+# lives HERE, in the module that owns both bodies, and not in the boot spine:
+# it is a property of the DATA -- what `carts_data` was generated as -- and a
+# board passing the wrong flag beside the right roster is a failure mode worth
+# not having. A packed entry is a `(title, version, blob)` tuple; a plain one is
+# a cart dict. Nothing else has ever been in a roster.
+
+
+def is_packed(seed):
+    """True if `seed` is a packed roster (`carts_data.CARTS_Z`)."""
+    return bool(seed) and not isinstance(seed[0], dict)
+
+
+def seed_any(seed, root=CARTS_DIR, progress=None):
+    """Seed a roster of either form. The one call a board's boot makes."""
+    if is_packed(seed):
+        return seed_packed(seed, root, progress=progress)
+    return seed_builtins(seed, root, progress=progress)
+
+
+def embedded_floor(seed):
+    """The read-only carts a board falls back to when it has NO writable store.
+
+    Nearly unreachable since 2026-08-30: every board now retries on internal
+    flash before it gets here (device_boot.load_carts `fallback_root`), so
+    reaching this means the internal VFS itself is gone -- a board that cannot
+    save anything at all. That is the only reason inflating the WHOLE roster is
+    acceptable here: ~732 KB held at once, which every console board has in
+    PSRAM and none should ever spend on a warm path. The Zero, whose store is
+    the only thing it has, has no floor to fall to and does not call this.
+    """
+    if is_packed(seed):
+        return [unpack_seed(blob) for _title, _version, blob in seed]
+    return [dict(c) for c in seed]
+
+
 def load(path):
     """Load one .moy folder into a cart dict, or None on error.
 
     A corrupt cart (bad manifest.json, missing main.py, or anything else
     unexpected) returns None instead of throwing, so one broken folder can never
     take down the gallery or the boot path. The whole body is also guarded so a
-    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash."""
+    surprise (e.g. a weird VFS error) still degrades to a skip, not a crash.
+
+    Every optional asset is carried in its SERIALISED form -- `sprites`, `map`
+    and `flags` are the file text, `None` when the file is absent -- and the
+    live objects (SpriteSheet / TileMap / the 512-byte flag table) are built
+    from them by `Project`. An absent `flags.moyflags` is `None` here and
+    all-zero there, which is SPEC.md 3.5's own reading of a missing file."""
     try:
         try:
             # _read_recover falls back to manifest.json.bak so a crash mid-save
@@ -802,6 +998,10 @@ def load(path):
             tilemap = _read(path + "/map.moymap")   # TileMap blob (#32), optional
         except OSError:
             tilemap = None
+        try:
+            flags = _read(path + "/" + FLAGS_NAME)  # tile flags (SPEC.md 3.5), optional
+        except OSError:
+            flags = None
         try:
             blocks = json.loads(_read(path + "/blocks.json"))  # block source (#29), optional
         except (OSError, ValueError):
@@ -871,6 +1071,12 @@ def load(path):
             "sprites": sprites,
             "sounds": sounds,
             "map": tilemap,
+            # Tile flags (SPEC.md 3.5): the flags.moyflags text, or None when the
+            # cart has no such file -- carried in the SERIALISED form like
+            # sprites/map, and turned into the live 512-byte table by
+            # Project._build_flags (absent -> all zero, which is what the spec
+            # says an absent file means).
+            "flags": flags,
             # Block source (#29): the program tree a cart was authored from in the
             # block editor, or None for a code-authored cart. main.py stays the
             # runnable source either way; blocks.json is the editable origin.

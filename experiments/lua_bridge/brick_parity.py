@@ -8,7 +8,7 @@ after EVERY frame compares
 
   * the whole draw stream, call for call (background / map / spr / rect / print /
     sfx), and
-  * the whole game state (players, enemies, bullets, booms, spawn_q, spawn_t,
+  * the whole game state (tanks, enemies, bullets, booms, spawn_q, spawn_t,
     base_alive, score, state, state_t, t, shake) float-for-float AND type for
     type (an int that became a float is a real bug here: the HUD stringifies
     score and the spawn count), and
@@ -68,7 +68,7 @@ DT = 1.0 / 30.0
 SEED = 0xC0FFEE % 2147483648
 
 # The state globals both sides must agree on, in comparison order.
-STATE_LISTS = ("players", "enemies", "bullets", "booms")
+STATE_LISTS = ("tanks", "enemies", "bullets", "booms")
 STATE_SCALARS = ("spawn_q", "spawn_t", "base_alive", "score", "state",
                  "state_t", "t", "shake")
 
@@ -215,6 +215,11 @@ class FakeConsole:
             "rnd": self.lcg.rnd,
             "col": palette.color,
             "btn": self.btn, "btnp": self.btnp,
+            # The #65 roster verb: this is a single-player determinism check, so
+            # one player is the right answer -- and the carts read it to decide
+            # how many tanks to field. Both sides get THIS dict, so the Python
+            # cart and the Lua twin are told the same thing.
+            "players": lambda: 1,
             "mget": lambda x, y: self.tilemap.mget(x, y),
             "mset": lambda x, y, tile: self.tilemap.mset(x, y, tile),
             "background": background,
@@ -474,7 +479,7 @@ def _unit_checks(pyc, luc, verbose):
         return [t[i] for i in range(1, len(t) + 1)]
 
     # 1. _ai_player with nothing alive to shoot -> (0, 0, False).
-    py_players = pyc.ns["players"]
+    py_tanks = pyc.ns["tanks"]
     py_enemies = pyc.ns["enemies"]
     pyc.ns["enemies"] = []
     lua_enemies = luc.g["enemies"]
@@ -510,7 +515,7 @@ def _unit_checks(pyc, luc, verbose):
         luc.g._move_tank(t_lua, 1, 1, 0.0, 0.0)
         check("_move_tank(clamp %r)" % (pos,), (), (), list(t_py),
               lua_list(t_lua))
-    pyc.ns["players"] = py_players
+    pyc.ns["tanks"] = py_tanks
     return bad
 
 

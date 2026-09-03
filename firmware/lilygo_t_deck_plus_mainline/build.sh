@@ -16,9 +16,10 @@
 #   ./build.sh
 #   make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 #
-# There is no BOOT button on a T-Deck: the trackball CLICK is GPIO0, so hold the
-# trackball in while powering the board on, then release, to reach the ROM
-# loader. esptool's auto-reset does not sync over this board's native USB.
+# The flash target drives the board into the ROM loader itself: board.toml's
+# [flash] declares `before = "usb_reset"`, esptool's USB-Serial/JTAG sequence.
+# No button, and no BOOT button exists to press -- the trackball click is GPIO0
+# and holding it while powering on is the last resort, not the procedure.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +64,7 @@ moybyte_idf_component esp_lcd
 
 # 2b) REPR_C unboxed floats (#66) -- the chip-class lever this board measured.
 moybyte_patch_repr_c
+moybyte_patch_gc_split_reserve
 
 # 2c) Release the GIL across machine.I2C's blocking wait (#69).
 #     This is what makes the input POLLER THREAD work: a T-Deck keyboard C3
@@ -121,6 +123,7 @@ fi
 
 # 2e) Un-static esp_native_code_free_all (#66) -- shared with the P4.
 moybyte_patch_native_code_free
+moybyte_patch_espnow_ring_race
 
 # 2f) PSRAM temperature retune (#169) -- REQUIRED by this board's 120MHz octal
 #     MSPI setting in sdkconfig.board, not optional alongside it.
@@ -139,8 +142,11 @@ moybyte_stage_native
 "${BUILD_PYTHON}" "${REPO_ROOT}/tools/board_config.py" stage "${SCRIPT_DIR}"
 
 #    carts_data.py is built from system_carts/ so the seed + embedded-fallback
-#    carts can never drift from the host source of truth.
-"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" "${MODULES_DIR}/carts_data.py"
+#    carts can never drift from the host source of truth. PACKED (2026-08-30):
+#    one raw-deflate blob per cart instead of 732 KB of literal source, because
+#    the roster only grows and the slot does not. `moy_carts.seed_any` picks the
+#    decoder off the roster's FORM, so nothing else in the boot changed.
+"${BUILD_PYTHON}" "${REPO_ROOT}/tools/gen_device_carts.py" --packed "${MODULES_DIR}/carts_data.py"
 
 #    The OTA identity stamp (#53). BOARD "tdeck" is the same id the deleted
 #    fork build stamped, kept on purpose: an OTA payload is an app-partition

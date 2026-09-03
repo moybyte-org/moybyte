@@ -2,45 +2,36 @@
 
 The standing direction doc for adding boards, written the week the fork died
 and the two-board build system collapsed into one strategy (#161 closed
-2026-08-17). It exists because the next two boards are named and the cost
-curve #161 predicted ("the cost curve is in the number of boards") is about to
-be walked: **a port today costs ~400 lines of copied frame loop plus
-hand-written Makefile/CI plumbing**, and that is the remaining bill after
-everything data-driven already landed.
+2026-08-17). **A port reaches console-on-glass in one session** — measured on the
+Guition S3, 2026-08-18, its on-glass suite passing 10/10 that night with both cart
+runtimes. The bill is the table below.
 
 Status lives in the tracker issue (see below), not here. What IS here: the
 lineup, the measured per-board bill, the phases, and the declines.
 
-## The lineup, and why
+## Candidates, and why
+
+The shipped boards are the roster in `README.md`. This table is what is NOT
+ported and the argument for porting it; what a shipped board taught is in its
+own board-dir README and in the sections below.
 
 | board | class | why |
 |---|---|---|
-| **Guition JC1060P470-class (P4 + C6)** | desktop tier | the COST path: ~$33–37 vs the Waveshare 7B's ~$80 (bom_pricing_2026-07: the $100 retail floor "needs the Guition board as the electronics core"). Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + 1024×600 DSI touch — so this is a **variant port**, and its job is to prove variants are cheap. The 2026-06 evaluation (#12) was closed by buying the Waveshare instead; the reason to want the Guition (price) never went away. |
-| **Guition JC3248W535 (S3)** | handheld tier | a ~$15-class 3.5" 320×480 S3 smart display. Same chip as the T-Deck, but a **new port class** on every other axis: QSPI panel (AXS15231B — not `moy_lcd`'s ST7789-over-SPI), touch on the same chip (no keyboard, no trackball), and — owner call at bring-up, 2026-08-18 — LANDSCAPE 480×320 off a portrait-native panel whose MADCTL MV is dead on this glass, so `moy_axs` rotates in its band copy. Its job is to prove the contracts, not the copies. |
+| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. Two further risks: its ESP-Hosted transport to the C6 is unconfirmed while our whole P4 radio stack is the SDIO `moy_c6` shim plus a flashed slave image, and there is no published schematic — which is where several of the Waveshare's hard-won facts came from. |
 
-A working hardware definition for the JC3248W535 already exists at
-`~/Documents/Work/esphome/JC3248W535.yaml` (ESPHome, on the physical board):
-QSPI clk GPIO47 / data [21, 48, 40, 39] / cs 45 @ 40MHz, AXS15231 touch on
-I2C sda 4 / scl 8 (calibrated: swap_xy + mirror_y in landscape), backlight
-PWM GPIO1, battery ADC GPIO5, 16MB flash DIO, octal PSRAM @ 80MHz. Treat its
-pins as verified and its *tuning* as untested here — it runs a 64B cache line,
-and this repo's T-Deck learned on glass that 64B lines break the CPU↔GDMA
-handoff in OUR flush path (sdkconfig.board's cache note). Per-board verdicts
-don't transfer; A/B it.
-
-## What a port costs today (measured 2026-08-17)
+## What a port costs today (re-stated 2026-08-29)
 
 | piece | cost | state |
 |---|---|---|
 | `boards/<B>/` (sdkconfig, cmake, partitions) | per-chip facts + learned prose | irreducible, and good — this is where constraints live |
 | `board.toml` (modules + native, denials with whys) | copy + edit | solved (#161) |
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
-| panel backend (native C) | 800+ lines | irreducible unless the panel repeats |
-| input drivers | GT911 already exists twice | Phase C |
-| **`modules/moy_runtime.py`** | **~300–460 lines: run_desktop + frame loop** | **Phase B — the big one** |
-| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | Phase B rides along |
-| Makefile targets | hand-written per board | Phase A |
-| CI legs + cache keys | hand-written per board | Phase A |
+| panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
+| input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines** | the invariant order is `device_boot.FrameLoop`, and all three boards ride it |
+| `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
+| Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
+| CI legs + cache keys | one include-row per board | derived from the board list |
 | test tables (NATIVE/HOST_ONLY/WIRING…) | one row per board | deliberate tripwires — keep |
 | on-glass suite | cheap since the shared DevChannel | every board gets one at stage 6 |
 
@@ -132,13 +123,17 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
     `tests/test_staging_closure.py` can still see which board depends on which
     C module**), passes it in, and adds only what is its own — geometry, the
     `ASYNC_FLUSH` revert flag, the module-level `set_backlight()`, the
-    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's fold verbs.
+    T-Deck's `LAYER_COPY_ASYNC` and `sd_bracket`, the Guition's game window.
     Note what did NOT move: `set_backlight()` as a module function exists for
     callers holding no compositor, so routing it through the class would undo
     its reason to exist, and two two-line copies are cheaper than the
-    indirection. Nor did `fold_supported` become a base-class probe — the
-    T-Deck must carry no such attribute at all, which is how a board says it
-    lacks a lever. Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
+    indirection. Nor did `fold_supported` become a base-class probe — a board
+    without the lever must carry no such attribute at all, which is how a board
+    says it lacks one. **2026-09 amendment:** the T-Deck took the fold too, so
+    the verbs sit on a `FoldingCompositor` rung BETWEEN the base and the two
+    boards — a subclass and not four more base methods, precisely so that
+    absence stays available to the next banded board that cannot synthesize.
+    Measured on glass: T-Deck 58.1 → 58.7 fps, Guition
     44.7 → 44.8 (Brick Siege medians of three 6.6 s samples, fresh boot),
     `idle=0 gaps=0` on both, suites 9/9 and 10/10.
 
@@ -168,6 +163,24 @@ guard list), a `native/micropython.cmake` including the board modules +
 (run_desktop). Add the Makefile build target and the CI matrix row. Run
 `make test`: the staging-closure/board-toml suites must pass before any
 hardware exists.
+
+**Stages 1-6 are SKIPPABLE, all of them, and one board skips all of them.**
+The Zero (`firmware/seeed_xiao_esp32s3_zero/`, promoted to a build target
+2026-08-29) has no panel, no touch, no input device, no card slot, no audio and
+no frame loop: the browser runs the console and the board is its cart store. So
+the port was stage 0 and stopped. Two things that walk out of it and apply to
+the next one:
+
+* **A tier decides the module set, and "headless" is a tier.** That board's
+  `[modules.shared]` is an ALLOWLIST — the first — because `runtime/` is the
+  console and the default answer on a board with no console is no, not yes. The
+  shape is declared in `board.toml` and pinned in both directions; the reasoning
+  is in that file and in `tools/board_config.shared_strategy`.
+* **Stage 6's exit criteria assume glass and do not generalise.** "The desktop
+  on glass" and "the board's on-glass suite passes" have no headless meaning;
+  what replaced them there is the board answering its own endpoints over the
+  network. A future headless port should say what its equivalent is rather than
+  quietly dropping the criterion.
 
 **Stage 1 — panel.** The board's compositor (implementing
 `docs/surface_model_v1.md` §4 — size/framebuffer/gfx/flush/sync) over its
@@ -206,11 +219,32 @@ constructor carrying the board's pins).
 → `IdleBlank` + `DevChannel` (+ board extras via its `extra`/`env` hooks) →
 the board's `poll_inputs`/`present`/`tail`/`account` hooks + the shared
 `device_boot.FrameLoop`. Exit criteria, all three: the desktop on glass;
-`make test` green; **the board's on-glass suite exists and passes** (copy
-`tests/test_tdeck_on_glass.py`'s shape — attach or reset per the board's USB
-anatomy, assert against `state`, leave the console where you found it). OTA
+`make test` green; **the board's on-glass suite exists and passes**. OTA
 needs no extra step: the board id is in board.toml and the manifest publisher
 follows the CI matrix row.
+
+**TAKE THESE, DO NOT COPY THEM** (2026-08-28, #206 — the third port paid for
+each of these by copying, and a fourth would pay again):
+
+- **The panel compositor** is `device/banded_panel.BandedCompositor`; a board
+  subclasses it and adds only its own native module and levers. A lever the
+  board lacks is expressed by the ATTRIBUTE'S ABSENCE (`fold_supported`), never
+  by a zero.
+- **The PERF line** is `runtime/perf_line.py` (the field table, formatter and
+  parser in one module) measured by `device_boot.PerfSampler` on the
+  `FrameLoop.account` hook. A board emits the SAME field set as every other
+  board and prints `-` for what it cannot measure. Do not add a board-shaped
+  variant: three of them existed under one name, and the odd one out was
+  silently unreadable by `tools/p4_perf.py` for as long as it existed.
+- **The on-glass suite** is `tests/on_glass.py`'s `gate()` + `session()` + its
+  checks; the suite supplies coordinates and the board's own tests. Reset vs
+  attach comes from `board.toml`'s `[serial]`, never from a choice written into
+  the suite — opening a SoC-USB board with both lines low chip-resets it, and
+  every read afterwards returns nothing forever, which reads exactly like a
+  dead board.
+- **The flush engine** is `native/moy_flush`; its header is the authority, and
+  `tests/moy_flush_harness/` compiles it on a host with no board attached, so a
+  change to it is testable before it reaches glass.
 
 ## What the Guition S3 specifically stresses (and the P4 doesn't)
 
