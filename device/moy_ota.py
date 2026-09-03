@@ -97,14 +97,14 @@ BOARD = "tdeck"
 #       (and the version) via a generated `_ota_build` module from MOYBYTE_OTA_CHANNEL, so
 #       the committed default stays "stable" and the channel is a build choice -- clean
 #       across merges, not a per-branch source edit.
-FIRMWARE_VERSION = 8            # v8: Hardening: every async lever now has a meter that reads. The S3 fold counter had printed 0 on every board since the fold shipped, and the P4's overlap had none at all. Fixes: the shared flush engine no longer frees bounce slots the done-ISR can still reach; an interrupted WiFi-store write no longer destroys every other saved network; the P4 stops taking the non-blocking fence for a game composite; the board accepts all six connections a browser opens, not four. Perf: the console stops decoding a 32,768-pixel sheet per cart at boot (browser first paint 431 -> 152ms, and the same wiring runs on every board). Build: a board's sdkconfig facts are stated once and the build derives them, which caught an advertising-buffer setting IDF had been silently refusing on both S3 boards.
+FIRMWARE_VERSION = 9            # v9: PICO-8 comes to Moybyte: drop a .p8 or .p8.png in the browser console and it converts and plays, on a PICO-8 machine (memory map, screen palette, fill pattern, system font) so ported carts run at C speed. moy core 0.3: the 3D verbs (tri/trib/sspr/tline) are core, and oval/ovalb, fillp, sget/sset and the screen palette join them -- one cart, every tier, the conformance suite pixel-identical on all three boards. Performance on the S3 boards: the Lua VM's hot loop lives in IRAM, a table and a printed integer and a float result stopped costing a malloc each, the small-object pool gives chunks back, and the PSRAM reserve keeps a card of carts loadable. Fixes: the screen palette composes so ported carts show PICO-8's colours; a cart's palette and tile flags reach the raster; the p8 machine's memory is reserved at boot so Lua carts run on every board; a census use-after-free the newer toolchain caught. Tooling: one push_cart for every board, the conformance harness reaches the S3 boards, and a heap-fragmentation probe reports the largest free block at each cart exit.
 #   FIRMWARE_NAME -- what a HUMAN calls this release ("0.6"), and the only version anyone
 #       outside the code ever reads: the update screen, the manifest label, the git tag.
 #       Deliberately separate from FIRMWARE_VERSION above, which exists solely so the
 #       device can order two builds with `>` -- it is signed as an int, and betas stamp a
 #       build epoch into it, so it can never carry a dotted name. `make release NAME=0.7`
 #       sets this; MAJOR.MINOR, with a third component only when a release is purely a fix.
-FIRMWARE_NAME = "0.11"
+FIRMWARE_NAME = "0.12"
 FIRMWARE_CHANNEL = "stable"
 FIRMWARE_LABEL = None
 try:
