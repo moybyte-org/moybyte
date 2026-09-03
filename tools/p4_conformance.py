@@ -44,6 +44,10 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The board table and the repo root are push_cart's: one place derives the
+# flashable boards from their board.toml files, and this tool only needs to
+# name one of them to open its port the way that board declares.
+from push_cart import BOARDS, ROOT  # noqa: E402
 from p4_autotest import P4Board            # noqa: E402
 
 W, H = 320, 240
@@ -171,54 +175,72 @@ def _order(b):
     return 'little' if lo >= hi else 'big'
 
 def _grab():
-    # RGB565 -> palette indices, on the device: half as many bytes to send, and
-    # the mapping is exact. DeviceCanvas only ever writes colours it looked up
-    # in PAL565_WIRE, so a halfword that is not one means something wrote this
-    # framebuffer that should not have -- reported, never rounded away.
     b = ws.canvas._buf
     n = len(b) // 2
-    out = bytearray(n)
-    bad = 0
-    if _order(b) == 'little':
-        for i in range(n):
-            v = _rev.get(b[2 * i] | (b[2 * i + 1] << 8))
-            if v is None:
-                bad += 1
-                v = 0
-            out[i] = v
-    else:
-        for i in range(n):
-            v = _rev.get((b[2 * i] << 8) | b[2 * i + 1])
-            if v is None:
-                bad += 1
-                v = 0
-            out[i] = v
-    # RUN-LENGTH ENCODE before it goes near the wire. A conformance frame is
-    # flat by construction -- fills, spans, a background -- and the wire is a
-    # 115200-baud serial line, so the raw 76800 bytes cost ~9s of the ~15s a
-    # scene took. Runs of (count, value), count 1..255; if that comes out BIGGER
-    # than the raw frame (a dithered or noise-heavy scene would), the raw frame
-    # is sent instead and the leading byte says which. Lossless either way --
-    # this is a transport, and a golden comparison would catch it if it were not.
+    little = _order(b) == 'little'
     enc = bytearray()
-    i = 0
-    while i < n:
-        v = out[i]
-        j = i + 1
-        end = i + 255
-        if end > n:
-            end = n
-        while j < end and out[j] == v:
-            j += 1
-        enc.append(j - i)
-        enc.append(v)
-        i = j
-    if len(enc) < n:
-        ws._grabbed = b'\x01' + bytes(enc)
-    else:
-        ws._grabbed = b'\x00' + bytes(out)
+    bad = 0
+    rv = -1
+    rn = 0
+    for i in range(n):
+        if little:
+            v = _rev.get(b[2 * i] | (b[2 * i + 1] << 8))
+        else:
+            v = _rev.get((b[2 * i] << 8) | b[2 * i + 1])
+        if v is None:
+            bad += 1
+            v = 0
+        if v == rv and rn < 255:
+            rn += 1
+        else:
+            if rn:
+                enc.append(rn)
+                enc.append(rv)
+            rv = v
+            rn = 1
+        if len(enc) > n:
+            ws._grabbed = None
+            return -1
+    if rn:
+        enc.append(rn)
+        enc.append(rv)
+    ws._grabbed = b'\x01' + bytes(enc)
     return bad
 """
+
+
+def _capture_raw(board, log):
+    """A frame the board could not RLE (it ran past raw size): pull the RGB565
+    words in slices and reduce them HERE. Slower on the wire (153600 bytes
+    instead of a few thousand) and never a whole-frame allocation on the
+    board -- which is the constraint the whole helper now lives under: an S3
+    with the desk up has hundreds of KB free and no 76KB run of it (measured on
+    both S3 boards, 2026-09-03), so the old `out = bytearray(n)` was a
+    MemoryError on every scene there. Each `py` runs at a frame boundary and a
+    conformance scene is static, so the slices agree."""
+    from runtime import host_canvas
+    host_canvas.install()
+    import device_canvas as _dc
+    import array as _array
+    n = board.pyval("len(ws.canvas._buf)", timeout=10.0)
+    swapped = board.pyval(
+        "int(__import__('device_canvas').PAL565_WIRE is not "
+        "__import__('device_canvas').PAL565)", timeout=10.0)
+    raw = bytearray()
+    step = 1536
+    while len(raw) < n:
+        piece = board.pyval(
+            "__import__('binascii').b2a_base64(ws.canvas._buf[%d:%d])"
+            % (len(raw), len(raw) + step), timeout=30.0)
+        if not piece:
+            raise RuntimeError("raw frame read stalled at byte %d of %d" % (len(raw), n))
+        raw.extend(binascii.a2b_base64(piece))
+    log("  %d bytes on the wire (raw: the frame did not compress)" % n)
+    wire = _array.array("H", _dc.PAL565_SW if swapped else _dc.PAL565)
+    out = _dc.to_indices(bytes(raw[:n]), None if wire == _dc.PAL565_WIRE else wire, False)
+    if len(out) != FRAME_BYTES:
+        raise RuntimeError("frame decoded to %d bytes, expected %d" % (len(out), FRAME_BYTES))
+    return bytes(out)
 
 
 def capture(board, log=print):
@@ -232,9 +254,11 @@ def capture(board, log=print):
                    "else 0", timeout=8.0) != 1:
         if not board.pyexec(CAPTURE_SETUP):
             raise RuntimeError("could not install the capture helper")
-    bad = board.pyval("ws._g['_grab']()", timeout=60.0)
+    bad = board.pyval("ws._g['_grab']()", timeout=120.0)
     if bad is None:
-        raise RuntimeError("the capture helper did not run")
+        raise RuntimeError("the capture helper did not run (%s)" % board.last_error)
+    if bad == -1:
+        return _capture_raw(board, log)
     if bad:
         log("  WARNING: %d pixels were not palette colours (reported as 0)" % bad)
     n = board.pyval("len(ws._grabbed)")
@@ -319,11 +343,11 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
 SOCKET = "/tmp/moy-p4-conformance.sock"
 
 
-def serve(port, sock_path, log):
+def serve(port, sock_path, log, board_dir=None):
     import socket
     if os.path.exists(sock_path):
         os.unlink(sock_path)
-    board = P4Board(port)
+    board = P4Board(port, board_dir=board_dir)
     try:
         board.drain(0.4)
         if board.pyval("1", timeout=8.0) != 1:
@@ -404,6 +428,10 @@ def main(argv=None):
     ap.add_argument("cart", nargs="?", help="the conformance cart folder")
     ap.add_argument("out", nargs="?", help="where to write the raw frame")
     ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--board", default="p4", choices=sorted(BOARDS),
+                    help="whose [serial] declaration to open the port with -- "
+                         "the P4's line state chip-resets an S3 (default p4, "
+                         "which is what this tool was written for)")
     ap.add_argument("--reset", action="store_true",
                     help="hard-reset first (slow; only needed if the board is wedged)")
     ap.add_argument("--serve", action="store_true",
@@ -415,15 +443,16 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     log = print if (a.verbose or a.serve) else (lambda *x: None)
+    board_dir = os.path.join(ROOT, BOARDS[a.board])
     if a.serve:
-        return serve(a.port, a.socket, log)
+        return serve(a.port, a.socket, log, board_dir)
     if not a.cart or not a.out:
         ap.error("cart and out are required unless --serve")
 
     if not a.no_server and via_server(a.socket, a.cart, a.out):
         return 0
 
-    board = P4Board(a.port)
+    board = P4Board(a.port, board_dir=board_dir)
     try:
         # Opening the port already rebooted the board (see above), so this is
         # not so much a probe as a wait -- but it stays a probe, because a

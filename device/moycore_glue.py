@@ -80,10 +80,30 @@ _P8_BUFFERS = []
 
 
 def _p8_buffers():
-    """The PICO-8 machine's 64KB memory and 0x4300 ROM snapshot, once."""
+    """The PICO-8 machine's 64KB memory and 0x4300 ROM snapshot, once -- or
+    an empty list when the heap cannot give them, which the caller passes on
+    as "no machine".
+
+    The machine is OPTIONAL (moy.h: a host that does not open it offers no
+    __moy_p8 globals, and the port shim keeps its Lua for exactly that), so
+    failing to allocate it must not fail the cart. It did: on the Guition,
+    with the desk and its store up, the S3's MicroPython heap has hundreds of
+    KB free and no 64KB run of it, and every Lua cart -- conformance scenes
+    that never touch the machine included -- died with "MemoryError:
+    allocating 65536 bytes" before drawing a pixel (on glass, 2026-09-03).
+    A collect first is what usually finds the run; a run that still is not
+    there is a slower p8 port, not a dead one. Retried per run rather than
+    remembered, because fragmentation changes."""
     if not _P8_BUFFERS:
-        _P8_BUFFERS.append(bytearray(65536))
-        _P8_BUFFERS.append(bytearray(0x4300))
+        import gc
+        gc.collect()
+        try:
+            mem = bytearray(65536)
+            rom = bytearray(0x4300)
+        except MemoryError:
+            return []
+        _P8_BUFFERS.append(mem)
+        _P8_BUFFERS.append(rom)
     return _P8_BUFFERS
 
 
@@ -159,7 +179,12 @@ class MoycoreRun:
         # which the S3 boards' MicroPython heap leaves 1.5KB of. Allocated
         # once; moycore reseeds it per run.
         if hasattr(_moycore, "p8_memory"):
-            _moycore.p8_memory(*_p8_buffers())
+            bufs = _p8_buffers()
+            if bufs:
+                _moycore.p8_memory(*bufs)
+            else:
+                _moycore.p8_memory(None, None)      # no machine this run
+
         _moycore.run_begin(
             canvas._buf, canvas.w, canvas.h, wire,
             getattr(sheet, "pix", None),
