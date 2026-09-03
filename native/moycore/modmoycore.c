@@ -126,13 +126,20 @@ static inline void census_add(const void *p, size_t n)
     if (g_live_total > g_peak) g_peak = g_live_total;
 }
 
-// A realloc may have MOVED or released the block already; reading the region of
-// a pointer the allocator has freed is safe, because it is an address-range
-// comparison and not a dereference.
+// A freed block's bytes come off the region it was IN, so the caller reads the
+// region while the pointer is still valid and passes it here. gcc 12's
+// -Wuse-after-free rejects touching a pointer after realloc at all -- even for
+// the address-range compare mc_region does, which never dereferences -- and it
+// is right that the standard makes the value indeterminate either way.
+static inline void census_sub_region(int region, size_t n)
+{
+    g_live_r[region] -= n;
+    g_live_total -= n;
+}
+
 static inline void census_sub(const void *p, size_t n)
 {
-    g_live_r[mc_region(p)] -= n;
-    g_live_total -= n;
+    census_sub_region(mc_region(p), n);
 }
 
 // The snapshot the host refreshes before every tick. Plain int32 slots in a
@@ -376,6 +383,9 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
         if (ptr != NULL) { census_sub(ptr, osize); free(ptr); }
         return NULL;
     }
+    // BEFORE the realloc: after it, `ptr` may have been freed, and its region
+    // is not readable from an indeterminate value (see census_sub_region).
+    int oregion = (ptr != NULL) ? mc_region(ptr) : 0;
     void *np;
 #ifdef MOYCORE_PSRAM
     int tried_sram = 0;
@@ -394,7 +404,7 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
     np = realloc(ptr, nsize);
 #endif
     if (np != NULL) {
-        if (ptr != NULL) census_sub(ptr, osize);
+        if (ptr != NULL) census_sub_region(oregion, osize);
         census_add(np, nsize);
     }
     return np;                       // NULL: Lua runs an emergency GC and retries
