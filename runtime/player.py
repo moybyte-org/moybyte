@@ -551,6 +551,57 @@ class Player:
             gc.collect()           # off the play path: the run just ended
         except Exception:  # noqa: BLE001
             pass
+        self._diag_frag()          # #66: the heap the NEXT cart inherits
+
+    def _diag_frag(self, tag="MEMX"):
+        """One line per cart exit: the largest allocatable block and total free
+        on the heap the next cart inherits -- #66's repeat-run fragmentation as
+        a number instead of a feel. MicroPython's GC does not compact, so freed
+        bytes pile into holes and the largest CONTIGUOUS run -- what a layer or
+        the p8 machine's 64KB must fit -- shrinks over a session even while
+        total free does not. Emitted after release_world's collect, so it reads
+        the compact-as-it-gets state, and carries `exit=` (the run counter) so
+        the series over repeated opens IS the degradation curve.
+
+        The block is BINARY-SEARCHED, which #66 line 1125 prescribes for a
+        reason: `mem_free()` reads high on these ports (it folds in a potential
+        PSRAM split), so only a probe that actually allocates is honest. Each
+        trial drops at once and a failing one auto-collects before it raises, so
+        the search perturbs nothing -- and it runs between carts with nothing
+        else live. Off unless measurement mode is on, like every line here."""
+        if not self._diag_enabled():
+            return
+        try:
+            import gc
+            gc.collect()
+            free = gc.mem_free()
+            lo, hi = 0, min(free if free > 0 else (1 << 20), 8 << 20)
+            while hi - lo > 1024:
+                mid = (lo + hi) // 2
+                try:
+                    bytearray(mid)          # unnamed: collectable at once
+                    lo = mid
+                except MemoryError:
+                    hi = mid
+            big = lo
+            # The internal-SRAM pool the p8 machine, the flush bounce and the
+            # framebuffers compete in -- regions under 1MB. Device only; -1 off it.
+            int_free = int_big = -1
+            try:
+                import esp32
+                int_free = int_big = 0
+                for reg in esp32.idf_heap_info(esp32.HEAP_DATA):
+                    if reg[0] < 1024 * 1024:
+                        int_free += reg[1]
+                        if reg[2] > int_big:
+                            int_big = reg[2]
+            except Exception:  # noqa: BLE001 -- host / no esp32: leave -1
+                pass
+            print("Moybyte %d %s exit=%d free=%dk big=%dk int=%dk/%dk"
+                  % (_ticks_ms(), tag, self._run_seq, free // 1024, big // 1024,
+                     int_free // 1024, int_big // 1024))
+        except Exception:  # noqa: BLE001 -- a diag never blocks an exit
+            pass
 
     def _diag_enabled(self):
         """Only emit the extra lifecycle/profiling lines in measurement mode."""

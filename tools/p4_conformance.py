@@ -132,15 +132,21 @@ def push_cart(board, cart_dir, name, log=print):
         if not board.pyexec("ws._pf.close()"):
             raise RuntimeError("write of %s failed" % fn)
         log("    %-16s %d bytes" % (fn, len(blob)))
-    # Rebuild the cart list in place. `ws.carts.all` is the roster the
-    # launcher's items are derived from (#209 landing C moved it off the console
-    # -- assigning the old `ws._all_carts` here would now create a stray console
-    # attribute nothing reads, and the shelf would silently keep the old carts),
-    # so re-scanning and re-deriving is the no-reboot path.
+    # Make the launcher see THIS cart, without rescanning the whole store.
+    # `ws.carts.all` is the roster the launcher's items derive from (#209
+    # landing C moved it off the console). A full moy_carts.scan(root) re-loads
+    # every folder on the card -- 25s on the T-Deck, 130s on the Guition's TF
+    # card, and WORSE as a long session fragments the heap (measured 2026-09-03:
+    # a fresh Guition scans in 25s, a day-worn one in 52s). One cart's load is
+    # ~0.1s, so load just the folder we pushed and splice it in: same visible
+    # result, ~600x less time, and no dependence on the heap's state.
     ok = board.pyexec(
         "import moy_carts\n"
-        "ws.carts.all = moy_carts.scan(%r)\n"
-        "ws.launcher.items = ws._launcher_items(ws.carts.all)\n" % root)
+        "_c = moy_carts.load(%r)\n"
+        "if _c:\n"
+        "    ws.carts.all = [x for x in ws.carts.all"
+        " if x.get('path') != _c['path']] + [_c]\n"
+        "    ws.launcher.items = ws._launcher_items(ws.carts.all)\n" % dst)
     if not ok:
         raise RuntimeError("could not refresh the cart list")
 
