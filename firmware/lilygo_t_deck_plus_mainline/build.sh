@@ -16,9 +16,10 @@
 #   ./build.sh
 #   make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 #
-# There is no BOOT button on a T-Deck: the trackball CLICK is GPIO0, so hold the
-# trackball in while powering the board on, then release, to reach the ROM
-# loader. esptool's auto-reset does not sync over this board's native USB.
+# The flash target drives the board into the ROM loader itself: board.toml's
+# [flash] declares `before = "usb_reset"`, esptool's USB-Serial/JTAG sequence.
+# No button, and no BOOT button exists to press -- the trackball click is GPIO0
+# and holding it while powering on is the last resort, not the procedure.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

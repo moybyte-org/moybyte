@@ -470,9 +470,10 @@ firmware-monitor-zero:
 	$(REQUIRE_PYSERIAL)
 	$(PYTHON) tools/board_flash.py monitor firmware/seeed_xiao_esp32s3_zero --port $(PORT)
 
-# T-Deck recovery note: there is NO BOOT BUTTON on a T-Deck. The trackball
-# CLICK is GPIO0: hold the trackball in while powering the board on, then
-# release, to reach the ROM loader when an image wedges the USB device.
+# T-Deck recovery note: the flash target reaches the ROM loader on its own
+# (board.toml `before = "usb_reset"`), so this is only for a board so wedged
+# that esptool cannot connect at all. There is NO BOOT BUTTON on a T-Deck --
+# the trackball CLICK is GPIO0, so hold it in while powering the board on.
 # (The build/flash/monitor targets live above, under their canonical
 # firmware-*-tdeck-mainline names; the image + otadata offsets are the MPY_*
 # variables at the top of this file.)

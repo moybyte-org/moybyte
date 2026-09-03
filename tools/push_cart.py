@@ -147,6 +147,41 @@ RAW_WINDOW_FALLBACK = 4096
 RAW_PROBE_S = 6.0
 
 
+def quiet_diag(b):
+    """Turn the diag stream OFF for the upload, and say whether it was on.
+
+    NOT tidiness. The dev channel's diag lines and the raw payload share one
+    UART with no flow control, so a diag line printed while a window is in
+    flight lands in the middle of it: the board reads short, never acks, and
+    its idle timeout reports "timeout after N of M bytes" -- which reads as a
+    cable or a window-size problem and is neither. Seen on a P4 twice in a row
+    (12270/17116, then 4083/17116); the same push went through first time with
+    the stream off.
+
+    `diag` does not persist (the console takes persist=False for exactly this
+    reason), so this is a session-local change and restore_diag puts it back."""
+    try:
+        was = bool(b.pyval("bool(getattr(ws, 'diag_live', False))", timeout=20))
+    except Exception:  # noqa: BLE001 -- an older console has no flag to read
+        was = False
+    if was:
+        b.cmd("diag 0", wait_for="REMOTE diag")
+        b.drain(0.3)                 # let anything already queued clear the wire
+    return was
+
+
+def restore_diag(b, was_on):
+    """Put the diag stream back if this push turned it off. Best-effort: the
+    upload is done by now, and a board that has gone quiet is not worth an
+    error the user cannot act on."""
+    if not was_on:
+        return
+    try:
+        b.cmd("diag 1", wait_for="REMOTE diag")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def raw_window(b, declared, log=None):
     """The window to blast in -- or a one-line exit naming the firmware.
 
@@ -306,6 +341,7 @@ def main(argv=None):
     # payload does not ride `py` at all. Still per board: the P4's UART
     # drops an over-long line as noise with no error (see its board.toml).
     b.CHUNK = int(ser.get("chunk") or P4Board.CHUNK)
+    diag_was_on = False
     try:
         if ser.get("attach_only"):
             # ATTACH: never pulse the line. P4Board.reset() is CH343-specific and
@@ -336,6 +372,9 @@ def main(argv=None):
         # TF card being present, so asking beats declaring.
         dest = a.dest or (str(b.pyval("str(ws.carts_root)", timeout=20)).rstrip("/")
                           + "/" + os.path.basename(cart))
+        # Before the probe, not just before the payload: a diag line can land
+        # inside the probe's answer too.
+        diag_was_on = quiet_diag(b)
         # ONE probe per session, before the first file: `recv` is a property of
         # the IMAGE, not of the cart, and asking per file would spend a round
         # trip each time to learn the same thing.
@@ -358,6 +397,8 @@ def main(argv=None):
         # The store is scanned at boot, so a pushed cart appears on the next one.
         print("reset the board (or `machine.reset()`) for the launcher to rescan")
     finally:
+        # In the finally, so a push that FAILS leaves the board as it found it.
+        restore_diag(b, diag_was_on)
         b.close()
     return 0
 

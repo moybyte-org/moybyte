@@ -80,15 +80,20 @@ cable flash.
 # build (first run clones micropython v1.28.0 into .build/, ~4 min; warm ~40s)
 ./firmware/lilygo_t_deck_plus_mainline/build.sh
 
-# put the board in the ROM loader BY HAND -- see below -- then:
 make firmware-flash-tdeck-mainline PORT=/dev/ttyACM0
 make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0
 ```
 
-**There is no BOOT button on a T-Deck.** The trackball CLICK is GPIO0: hold the
-trackball pressed in while powering the board on, then release. esptool's
-auto-reset does not sync over this board's native USB, which is why the flash
-target uses `--before no_reset`.
+**The flash needs no hands.** `board.toml`'s `[flash]` declares
+`before = "usb_reset"` -- esptool's USB-Serial/JTAG reset sequence, which drives
+this board into the ROM loader over its own USB. esptool's *default* reset does
+not (it write-times-out against a wedged node); `usb_reset` connected in every
+state tried, measured 2026-08-17.
+
+**There is no BOOT button on a T-Deck**, which is why that matters. The
+trackball CLICK is GPIO0, so holding it in while powering the board on is the
+way into the loader when even `usb_reset` cannot connect -- a last resort, not
+the procedure.
 
 Outputs land in `dist/tdeck_mainline/`:
 

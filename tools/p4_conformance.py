@@ -275,6 +275,12 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
     # Leave whatever is running, so a repeat call starts from the desk.
     board.pyexec("ws.exit()")
     board.drain(0.6)
+    # The diag stream OFF for the session: its PERF lines share this UART
+    # with the base64 push below and the capture after, and a line landing
+    # mid-chunk is a decode error or a stalled read -- the same finding
+    # push_cart.py records for its raw window. `diag` does not persist.
+    board.cmd("diag 0", wait_for="REMOTE diag", timeout=8.0)
+    board.drain(0.4)
 
     log("  pushing %s" % name)
     push_cart(board, cart_dir, name, log=log)
@@ -291,12 +297,14 @@ def run_scene(board, cart_dir, log=print, frames=1.5):
 
 # --- the server -------------------------------------------------------------
 #
-# OPENING THE PORT REBOOTS THE BOARD. Not the RTS pulse -- P4Board already holds
-# dtr/rts low across open for exactly that reason -- but the CH343 resets on
-# enumeration anyway, and the board comes up reporting rst:0x1 (POWERON). So a
-# player command that opens the port per scene pays a full boot per scene: ~40s
-# of waiting for the desktop and 34 carts to load, against ~5s of actual work.
-# Ten scenes spent twelve minutes doing ninety seconds of testing.
+# WHY A SERVER. Opening the port per scene used to reboot the board (the
+# CH343's auto-reset circuit fires on the DTR/RTS order the kernel and pyserial
+# produce at open; P4Board has opened in the order that does NOT fire it since
+# 2026-09-02, and the board's board.toml [serial] carries the why). Even with
+# that fixed, one process per scene re-installs the capture helper (~21 round
+# trips) and re-learns the store; holding the board across the suite keeps the
+# helper installed and the desk where it is. What still costs ~60s a scene is
+# push_cart's whole-store rescan below, which a reboot would only make worse.
 #
 # The suite's player protocol is one process per scene and should stay that way
 # -- it is what lets any implementation be a shell command. So the port is held
