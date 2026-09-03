@@ -181,7 +181,10 @@ Your `_update(dt)` gets the real `dt` either way — movement written as
 | `print(s, x, y, c, scale=1)` | text (8×8 petme128 font, pixel-identical host↔device). `scale` is accepted but **ignored** — game text is always 8px (the Settings text-size option scales the SYSTEM UI only, #39). Honours `camera`/`clip`/`pal` like every primitive (native on device, #62) |
 | `camera(x=0, y=0)` | offset all subsequent draws by `-x,-y` (world → screen). No args resets |
 | `clip(x=None, y=None, w=None, h=None)` | clip drawing to a rect. No args resets to full screen |
-| `pal(c0=None, c1=None)` | draw color `c0` as `c1` until reset. No args resets |
+| `oval(x, y, w, h, c)` | **filled** ellipse inscribed in the `w×h` box at `x,y` |
+| `ovalb(x, y, w, h, c)` | ellipse **outline** — `oval`'s own rim, pixel for pixel, because one walk produces both |
+| `fillp(p=None, c=None)` | a 4×4 dither for the nine **shape** verbs. See below. No args resets to solid |
+| `pal(c0=None, c1=None, p=0)` | draw color `c0` as `c1` until reset. `p=1` sets the **screen** palette instead — see below. No args resets **both** |
 | `palt(c=None, on=None)` | make palette index `c` transparent (`on=True`) or not. No args resets |
 
 ## Sprites, sheets & tilemaps
@@ -196,11 +199,12 @@ editor). Tiles are referenced by integer id.
 | `mget(x, y)` / `mset(x, y, tile)` | read / write a tilemap cell (tile id; `mget` = `-1` if none) |
 | `fget(n)` / `fget(n, b)` | tile `n`'s flag byte / whether bit `b` (0–7) of it is set. `0` / `False` off the sheet |
 | `fset(n, v)` / `fset(n, b, on)` | write tile `n`'s flag byte / set or clear one bit of it |
+| `sget(x, y)` / `sset(x, y, c)` | read / write one sheet **pixel** as a palette index. Sheet coords, not tile ones: tile `n`'s top-left is `((n % 16) * 8, (n // 16) * 8)`. `sset` masks the index to 0–15 and drops a write off the sheet; the edit is what the next `spr`/`sspr`/`map` draws |
 | `image(name)` | load a paint-image asset (`images/<name>.moyimg`) as a big `Image`; place with `spr(img, x, y)`. Memoised. `None` if absent |
 | `image(rows, mapping, transparent=".")` | build a small `Image` from ASCII art, e.g. `image(["..##..","..##.."], {"#": 8})` |
 | `Image(w, h, indices, transparent)` | a sprite bitmap object (also `Image.from_ascii(...)`) |
-| `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. *Provisional*, see below |
-| `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. *Provisional*, see below |
+| `sspr(sx, sy, sw, sh, dx, dy, dw=None, dh=None, colorkey=-1, flip=0)` | **stretch** a `sw×sh` region of the sheet into a `dw×dh` rect. Source coords are sheet **pixels**, not tile ids. Unlike `spr`'s integer `scale` this is an arbitrary stretch — the textured wall-slice verb, and how you scale a sprite by a non-integer amount. `dw`/`dh` default to `sw`/`sh`. moy core's, see below |
+| `tline(x0, y0, x1, y1, u, v, du, dv, colorkey=-1)` | a **textured** line: exactly `line()`'s pixels, but sampling the **tilemap** as a virtual texture. `u,v` is the start texture coord and `du,dv` the per-pixel step, all in **16.16 fixed point** — an integer, so a cart passes `int(f * 65536)`. Wraps modulo the map's pixel size; empty cells draw nothing. One call per scanline is a Mode 7 floor, one per column textures a raycaster. moy core's, see below |
 
 ### Tile flags, and drawing a level in strata
 
@@ -227,6 +231,40 @@ truth that drifts.
 They were **provisional** through core 0.2 — reported by the conformance suite but not
 counted — and are core as of **0.3**, so §11 counts them and a host that skips them fails
 conformance. Nothing about what they draw changed.
+
+### The fill pattern, and the screen palette
+
+Two verbs that change what *other* verbs do, both moy core's (SPEC.md §6, §12.1).
+
+**`fillp(p, c)`** is a dither. `p` is sixteen bits read as a 4×4 cell, row by row from
+the top-left, bit 15 first; a **set** bit is a hole. A hole takes colour `c`, or is left
+untouched when `c` is absent or negative — so `fillp(0xA5A5)` draws a checkerboard of
+the shape's colour over whatever was already there, and `fillp(0xA5A5, 0)` draws it over
+black. It reaches the nine **shape** verbs (`line`, `rect`, `rectb`, `circ`, `circb`,
+`tri`, `trib`, `oval`, `ovalb`) and nothing else: not `pix`, `print`, `cls`, sprites or
+the map.
+
+The pattern is anchored to the **screen**, not the camera, which is what makes it usable:
+a dithered shape holds still while the camera moves over it, and two shapes that overlap
+interleave rather than fight.
+
+**`pal(c0, c1, 1)`** sets the **screen** palette — a second remap composed *after* the
+draw palette, so a pixel written as `c0` lands as `spal[pal[c0]]`. Like the first it
+applies to pixels **as they are drawn**, not to pixels already on the canvas: set it
+before the frame's `cls` to recolour the whole frame, and redraw each frame of a fade
+under that frame's table. The two exist separately because they compose — `pal(2, 8)`
+with `pal(8, 11, 1)` draws a 2 as 11 *and* a real 8 as 11 — and it is the shape every
+PICO-8 fade and secret colour already has. `pal()` with no arguments resets both.
+
+It costs nothing per pixel on any tier. The flush-time pass PICO-8 does instead was
+measured at roughly half a frame on all three boards
+([#218](https://github.com/moybyte-org/moybyte/issues/218)), which is why the spec
+composes (SPEC.md §12.1). The one thing that buys you that this cannot: a fade over a
+frame you do *not* redraw. A pixel already drawn keeps its colour, and `pix(x, y)` reads
+back the index it landed as.
+
+Both reset every frame, like `camera`, `clip` and `pal` — set them in `_draw`, not once
+at startup.
 
 ### The batch verbs are gone (`spr_batch`, `rect_batch`, `spans`)
 

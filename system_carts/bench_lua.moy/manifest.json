@@ -1,13 +1,17 @@
 {
   "format": "moy-1",
-  "version": 6,
+  "version": 7,
   "title": "Bench Lua",
   "type": "game",
   "runtime": "lua",
   "main": "main.lua",
   "system": true,
   "order": 260,
-  "targets": ["host", "device", "web"],
+  "targets": [
+    "host",
+    "device",
+    "web"
+  ],
   "canvas": "320x240",
   "permissions": [
     "graphics",

@@ -777,6 +777,28 @@ static mp_obj_t moy_gfx_tline(size_t n_args, const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_tline_obj, 26, 26, moy_gfx_tline);
 
+// shape(dst, dw, dh, kind, a0..a5, color, pat, hole, cam_x, cam_y, cx0, cy0,
+// cx1, cy1) -- SPEC.md 6's nine shape verbs behind one entry point. The body is
+// mg_shape in moy_gfx_kernels.c; see its header note for why one and not nine.
+// The canvas reaches for it only when a fill pattern is set and for oval/ovalb,
+// so no solid draw pays the extra marshalling.
+static mp_obj_t moy_gfx_shape(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    size_t cap;
+    uint16_t *dst = moy_gfx_buf_w(a[0], &cap);
+    mp_int_t dw = mp_obj_get_int(a[1]);
+    (void)mp_obj_get_int(a[2]);                    // dh: derived from cap
+    mg_shape(dst, cap, (int)dw, mp_obj_get_int(a[3]),
+             mp_obj_get_int(a[4]), mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+             mp_obj_get_int(a[7]), mp_obj_get_int(a[8]), mp_obj_get_int(a[9]),
+             mp_obj_get_int(a[10]), mp_obj_get_int(a[11]), mp_obj_get_int(a[12]),
+             mp_obj_get_int(a[13]), mp_obj_get_int(a[14]),
+             mp_obj_get_int(a[15]), mp_obj_get_int(a[16]),
+             mp_obj_get_int(a[17]), mp_obj_get_int(a[18]));
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_gfx_shape_obj, 19, 19, moy_gfx_shape);
+
 // circ(dst, dw, dh, cx, cy, r, color, cam_x, cam_y, cx0, cy0, cx1, cy1) -- FILLED
 // circle: each scanline a clipped, camera-offset span (matches host canvas circ()).
 static mp_obj_t moy_gfx_circ(size_t n_args, const mp_obj_t *a) {
@@ -1971,10 +1993,16 @@ static mp_obj_t moy_gfx_membench(void) {
     if (d16p && src16) MB_BEST(r[5], mb_blit16(d16p, src16, src_px));
     if (d8s && src8) MB_BEST(r[6], mb_blit8(d8s, src8, src_px));
     if (d8p && src8) MB_BEST(r[7], mb_blit8(d8p, src8, src_px));
-    if (d8s && chunk) {
+    if (d8p && chunk) {
+        // The SOURCE is the PSRAM index buffer, not the internal-SRAM one. A
+        // resolve that rode the flush would read the CANVAS, and an 8-bit
+        // canvas does not fit internal SRAM on an S3 -- which is what the
+        // fill8_sram/blit8_sram rows above report as n/a. Sourcing from d8s
+        // made this row n/a on every live console for the same reason, so the
+        // one number the resolve idea needed was the one never measured.
         static uint16_t lut[64];
         for (int i = 0; i < 64; i++) lut[i] = (uint16_t)(i * 1031);
-        MB_BEST(r[8], mb_resolve(d8s, chunk, lut));
+        MB_BEST(r[8], mb_resolve(d8p, chunk, lut));
     }
     if (d16p && chunk) MB_BEST(r[9], mb_bounce(d16p, chunk));
     free(d16s); free(d16p); free(d8s); free(d8p);
@@ -2007,6 +2035,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_tri),        MP_ROM_PTR(&moy_gfx_tri_obj) },
     { MP_ROM_QSTR(MP_QSTR_sspr),       MP_ROM_PTR(&moy_gfx_sspr_obj) },
     { MP_ROM_QSTR(MP_QSTR_tline),      MP_ROM_PTR(&moy_gfx_tline_obj) },
+    { MP_ROM_QSTR(MP_QSTR_shape),      MP_ROM_PTR(&moy_gfx_shape_obj) },
     { MP_ROM_QSTR(MP_QSTR_circ),       MP_ROM_PTR(&moy_gfx_circ_obj) },
     { MP_ROM_QSTR(MP_QSTR_circb),      MP_ROM_PTR(&moy_gfx_circb_obj) },
     { MP_ROM_QSTR(MP_QSTR_line),       MP_ROM_PTR(&moy_gfx_line_obj) },

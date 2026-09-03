@@ -91,6 +91,8 @@ _SIGS = (
     ("mg_blit_indices", [_P, _Z, _I, _I, _I, _I, _P, _Z, _I, _I, _P, _Z], None),
     ("mg_text", [_P, _Z, _I, _P, _Z, _I, _I, _I, _P, _I, _I, _I, _I, _I,
                  _I, _I, _I, _I], None),
+    ("mg_shape", [_P, _Z, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I, _I,
+                  _I, _I, _I, _I, _I, _I], None),
     # ...and the host-side rest.
     ("hg_copy_async", [_P, _Z, _I, _P, _Z, _I, _I], _I),
     ("hg_copy_wait", [], _I),
@@ -177,6 +179,19 @@ def fill_rect(buf, stride, x, y, w, h, color):
     arr, cap = _buf(buf)
     _lib().mg_fill_rect(ctypes.cast(arr, _P), cap, int(stride), int(x), int(y),
                         int(w), int(h), int(color) & 0xFFFF)
+
+
+def shape(buf, dw, dh, kind, a0, a1, a2, a3, a4, a5, color, pat, hole,
+          cam_x=0, cam_y=0, cx0=0, cy0=0, cx1=0, cy1=0):
+    # SPEC.md 6's nine shape verbs, dispatched on `kind` -- see mg_shape's note
+    # in moy_gfx_kernels.h. `dh` is accepted and ignored, like the usermod's
+    # wrapper: the kernel derives the height from the buffer's capacity.
+    arr, cap = _buf(buf)
+    _lib().mg_shape(ctypes.cast(arr, _P), cap, int(dw), int(kind),
+                    int(a0), int(a1), int(a2), int(a3), int(a4), int(a5),
+                    int(color) & 0xFFFF, int(pat) & 0xFFFF, int(hole),
+                    int(cam_x), int(cam_y),
+                    int(cx0), int(cy0), int(cx1), int(cy1))
 
 
 def scroll_rect(buf, stride, rx, ry, rw, rh, dx, dy):

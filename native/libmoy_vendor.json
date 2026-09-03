@@ -4,17 +4,17 @@
     "native/moy_audio/libmoy/moy_audio.c": "fd6a6ea5714f4b196d0046cae075bdfc267e22626012875efd2307b85df977b4",
     "native/moy_audio/libmoy/moy_audio.h": "cc54bda1648e3159bd0d98701ad8f492efd43b6f1e2304f92ca5032fb578b910",
     "native/moy_gfx/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
-    "native/moy_gfx/libmoy/moy.h": "7068a6fdbf8d4cbf2200a1d6b2487747c2189921f34043e0337744251a9bc619",
-    "native/moy_gfx/libmoy/moy_canvas.c": "d801c5da594c7f975667768bf923a3914ef060b7b21edda7730c673ba3e34a55",
+    "native/moy_gfx/libmoy/moy.h": "e6bf36ead9b79d5a6acc394d582798fadb9398ea6584064a514440a7a480fecc",
+    "native/moy_gfx/libmoy/moy_canvas.c": "352d6d50f37d77a8f18d4ef8b1b1adfcf52fe0c876d73e67eaab6f6af21a8a06",
     "native/moy_gfx/libmoy/moy_data.c": "091a8271274d6165dd8ac73e1d577c65c6cf86a03da44223368c564eddbd366c",
     "native/moy_gfx/libmoy/moy_pixel.h": "46cf4139a46bbf8f641e8f9ec98982ff21482734d352b196b40b86fd82a17d40",
     "native/moy_gfx/libmoy/moy_sprite.c": "5d95ef9aeb5d2322511ca58a6223b63af01a5dd0d9fdcb516022be9519c9ec57",
     "native/moycore/libmoy/LICENSE": "b405680e72b1cea95fea5072fd140185d793e860867f3d9f66d4af244dcd0d5a",
     "native/moycore/libmoy/moy_lua.c": "45b30acfd8894ec9642b4bdaea1c014516165dc25beeb7f3486b7efccefd97ec",
-    "native/moycore/libmoy/moy_p8.c": "d51f8ab450cce269102d28f979d7797c1a9afa7d6fe28e7a4aff779435c5e08c"
+    "native/moycore/libmoy/moy_p8.c": "4e2c0c80ca8698a61412c1737749342a10aecc05ecbd53a739ba90af4951f50e"
   },
   "upstream": {
-    "commit": "0d8fd924ca2f8382a8e4a93cbcb659d51aafb180",
+    "commit": "47fe434b4a593ff1c2365768fe325f1bfe6cc660",
     "date": "2026-09-03",
     "dirty": false,
     "repo": "moybyte-org/moy-spec"

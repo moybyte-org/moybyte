@@ -112,11 +112,11 @@ typedef struct {
     int      clip_x1, clip_y1;
     uint8_t  pal[MOY_PALETTE];   /* draw-time index remap */
     uint8_t  palt[MOY_PALETTE];  /* per-index sprite transparency */
-    /* SPEC.md 6 / 12.1 screen palette: applied by moy_present when the frame
-     * is shown, never while drawing. spal_identity is kept current so a host
-     * can skip the pass, which is every frame of most carts. */
+    /* SPEC.md 6 / 12.1 screen palette: a second remap COMPOSED after pal into
+     * store[] as pixels are drawn -- never applied to the canvas afterwards.
+     * Kept as a table so a host can read it back (the PICO-8 machine peeks it
+     * at 0x5f10); the raster only ever reads store[]. */
     uint8_t  spal[MOY_PALETTE];
-    int      spal_identity;
     /* SPEC.md 6 fill pattern: 16 bits, row-major from the top-left of a 4x4
      * cell anchored to the SCREEN, a set bit is a hole. A hole pixel takes
      * colour fillp_col (through pal, at draw time) when that is >= 0 and is
@@ -212,18 +212,11 @@ void moy_clip  (moy_canvas *c, int x, int y, int w, int h);
 void moy_clip_reset(moy_canvas *c);
 void moy_pal   (moy_canvas *c, int c0, int c1);
 void moy_pal_reset(moy_canvas *c);          /* BOTH palettes: pal() with no args */
-void moy_pal_screen(moy_canvas *c, int c0, int c1);   /* pal(c0, c1, 1) */
+/* pal(c0, c1, 1): show c0 as c1, composed AFTER pal for every pixel drawn
+ * from here on. There is no flush-time pass (SPEC.md 12.1): the canvas holds
+ * what is shown, so a cart sets this before its cls to recolour a frame. */
+void moy_pal_screen(moy_canvas *c, int c0, int c1);
 void moy_pal_screen_reset(moy_canvas *c);
-
-/* The frame as SHOWN (SPEC.md 6, 12.1): the canvas through the screen
- * palette, written to `out` (w*h pixels, NOT the canvas itself -- the canvas
- * must keep its drawn indices for a cart that draws incrementally). Returns
- * 0 when the screen palette is identity and nothing was written: present the
- * canvas directly. On the RGB565 build the pixels are resolved back through
- * the wire table (a shared word resolves to the lower index, like moy_pget),
- * so a host with a direct-colour canvas pays this pass only on frames that
- * use the verb. */
-int moy_present(const moy_canvas *c, moy_pixel *out);
 void moy_palt  (moy_canvas *c, int col, int on);
 void moy_palt_reset(moy_canvas *c);
 /* The fill pattern (SPEC.md 6): honoured by line, rect, rectb, circ, circb,

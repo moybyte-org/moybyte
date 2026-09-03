@@ -139,13 +139,15 @@ static inline void mg_canvas(moy_canvas *c, uint16_t *dst, int dw, size_t cap,
     // caught a circle with 383 of them.)
     c->fillp = 0;
     c->fillp_col = -1;
-    c->spal_identity = 1;
     c->clip_y1 = cy1;
-    /* pal is already folded into `lut` by the Python side (_wire_pal), so
-     * store[] IS that table and pal[] stays identity -- libmoy reads store[] on
-     * every pixel and pal[] only when rebuilding, which never happens here. */
+    /* BOTH palettes are already folded into `lut` by the Python side (its
+     * _wire carries the screen palette, _wire_pal the draw one), so store[] IS
+     * that table and pal[]/spal[] stay identity -- libmoy reads store[] on
+     * every pixel and the two maps only when rebuilding, which never happens
+     * on a borrowed canvas. */
     for (int i = 0; i < MOY_PALETTE; i++) {
         c->pal[i] = (uint8_t)i;
+        c->spal[i] = (uint8_t)i;
         c->store[i] = lut[i];
         c->wire[i] = lut[i];
     }
@@ -182,6 +184,27 @@ static inline void mg_canvas_solid(moy_canvas *c, uint16_t *dst, int dw,
  * `dh = 0` ops in tests/test_gfx_binding.py's clamp script.
  */
 
+/* A canvas for one shape verb under a FILL PATTERN (SPEC.md 6). Same bridge as
+ * mg_canvas_solid, plus the two fields libmoy's shape kernels read per pixel.
+ *
+ * The hole COLOUR arrives already resolved, like `col`, so it needs somewhere
+ * in store[] to live: index 0 is the draw colour every caller passes and index
+ * 1 is the hole, which the 63 identical entries around them make unambiguous.
+ * `hole` < 0 means a hole pixel is left untouched, which is fillp_col's own
+ * convention. */
+static inline void mg_canvas_shape(moy_canvas *c, uint16_t *dst, int dw,
+                                   size_t cap, uint16_t col, int pat, int hole,
+                                   int cam_x, int cam_y,
+                                   int cx0, int cy0, int cx1, int cy1)
+{
+    uint16_t lut[MOY_PALETTE];
+    for (int i = 0; i < MOY_PALETTE; i++) lut[i] = col;
+    if (hole >= 0) lut[1] = (uint16_t)(hole & 0xFFFF);
+    mg_canvas(c, dst, dw, cap, lut, NULL, cam_x, cam_y, cx0, cy0, cx1, cy1);
+    c->fillp = (uint16_t)(pat & 0xFFFF);
+    c->fillp_col = hole >= 0 ? 1 : -1;
+}
+
 /* The solid-colour verbs' whole prologue (line/circ/circb/tri): refuse a
  * degenerate width, clamp the clip to the buffer, borrow a one-colour canvas.
  * 0 = nothing to draw. A function and not a macro so neither surface has to
@@ -213,6 +236,30 @@ void mg_fill(uint16_t *px, size_t cap, int npix, int color);
 /* fill_rect in an RGB565 buffer of `stride` px/row, every edge clamped. */
 void mg_fill_rect(uint16_t *px, size_t cap, int stride,
                   int x, int y, int w, int h, int color);
+
+/* SPEC.md 6's nine shape verbs behind ONE entry point, chosen by `kind`.
+ *
+ * WHY ONE AND NOT NINE. Only two things need it: the fill pattern, which every
+ * shape verb honours and no other verb does, and `oval`/`ovalb`, which had no
+ * binding at all. A patterned twin of each verb would have been nine more
+ * marshalling bodies per surface for a state carts set rarely -- so the solid
+ * calls stay exactly the calls they were (mg_fill_rect, moy_gfx.line, .circ,
+ * .tri...), and everything else arrives here. The cost of the generality is
+ * one switch on an int, against a verb that is about to walk a shape.
+ *
+ * a0..a5 are the verb's own arguments, unused ones ignored: line takes
+ * (x0,y0,x1,y1), rect/rectb/oval/ovalb (x,y,w,h), circ/circb (cx,cy,r), and
+ * tri/trib all six. `col` and `hole` are resolved pixel words, not indices;
+ * `pat` of 0 is solid, and `hole` < 0 leaves hole pixels untouched. */
+enum {
+    MG_SHAPE_LINE = 0, MG_SHAPE_RECT, MG_SHAPE_RECTB,
+    MG_SHAPE_CIRC, MG_SHAPE_CIRCB, MG_SHAPE_TRI, MG_SHAPE_TRIB,
+    MG_SHAPE_OVAL, MG_SHAPE_OVALB
+};
+void mg_shape(uint16_t *dst, size_t cap, int dw, int kind,
+              int a0, int a1, int a2, int a3, int a4, int a5,
+              int col, int pat, int hole,
+              int cam_x, int cam_y, int cx0, int cy0, int cx1, int cy1);
 
 /* Shift the pixels inside (rx, ry, rw, rh) by (dx, dy) IN PLACE: the #113
  * scroll-as-blit primitive. Pixels that would leave the rect are dropped; the

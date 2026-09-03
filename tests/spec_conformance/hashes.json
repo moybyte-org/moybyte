@@ -88,9 +88,9 @@
     {
       "name": "screen_pal",
       "core": true,
-      "calls": 26,
-      "frame_sha256": "07911248ec600fabda3767f9a1f7bf1a72a183411f66e4508e7e9aa7f59975ea",
-      "note": "The screen palette (SPEC.md 6, 12.1): pal(c0, c1, 1) moves\npixels ALREADY drawn, chains after the draw palette, and\npal() resets both. The golden is the frame as shown."
+      "calls": 28,
+      "frame_sha256": "ed2dd255b66a37d3abfcdb8f2b925a70bf68e0137eecdd1159b16c3dd2060711",
+      "note": "The screen palette (SPEC.md 6, 12.1): pal(c0, c1, 1) composes\nafter the draw palette for pixels drawn from then on, and a\npixel already on the canvas does not move; pal() resets both."
     },
     {
       "name": "flags",

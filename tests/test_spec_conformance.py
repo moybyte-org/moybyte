@@ -16,6 +16,11 @@ is moybyte disagreeing with the spec about what a verb draws. That is either a
 regression or a spec change to follow, and `hashes.json`'s provenance field is
 what makes it arguable rather than a coin toss.
 
+EVERY SCENE IS DRAWN, with no pending set. Four of them (`oval`, `fillp`,
+`sheet`, `screen_pal`) were strict-xfail while the Python tier had no verbs for
+them; all four now draw, so a scene that stops matching is a regression rather
+than a gap.
+
 WHAT IT DOES NOT REACH. The kernel under this canvas is `runtime/gfx_binding`:
 libmoy compiled RGB565 and reached by ctypes -- the same SOURCE the boards
 compile, but not the same binary, not MicroPython, and not a panel.
@@ -130,6 +135,22 @@ def replay(calls, canvas, sheet=None, tilemap=None, flags=None):
             canvas.pal(*a)
         elif verb == "palt":
             canvas.palt(*a)
+        elif verb == "fillp":
+            canvas.fillp(*a)
+        elif verb == "oval":
+            canvas.oval(a[0], a[1], a[2], a[3], a[4])
+        elif verb == "ovalb":
+            canvas.ovalb(a[0], a[1], a[2], a[3], a[4])
+        elif verb == "sset":
+            # A sheet WRITE, recorded like a draw call because it changes what
+            # the next spr/sspr/map draws. The flush is not decoration: this
+            # canvas QUEUES sprites (#63), so without it the run either side of
+            # the write coalesces into one blit_batch and every sprite in it
+            # reads the sheet as it stood at flush time. cart_api's `sset` does
+            # the same thing for the same reason.
+            if sheet is not None:
+                canvas.flush_batch()
+                sheet.pset(a[0], a[1], a[2])
         elif verb == "spr":
             canvas.spr_tile(sheet, a[0], a[1], a[2], a[3], a[4], a[5])
         elif verb == "sspr":
@@ -220,28 +241,9 @@ def render(scene, canvas=None):
     return _index_frame(c)
 
 
-# moy-spec scenes for verbs the PYTHON tier does not draw yet -- fillp,
-# oval/ovalb, sset, the screen palette. The Lua tier has every one of them
-# through libmoy; the host canvas and cart_api are moybyte's own next step.
-# STRICT xfail: the day a twin lands, its scene flips from xfail to a failure
-# that says "remove me from this set".
-PYTHON_TIER_PENDING = {"oval", "fillp", "sheet", "screen_pal"}
 
-
-def _scene_params():
-    out = []
-    for name, core, golden in _scene_names():
-        marks = ()
-        if name in PYTHON_TIER_PENDING:
-            marks = (pytest.mark.xfail(
-                strict=True,
-                reason="the Python tier has no %s verbs yet; the Lua tier "
-                       "draws this scene through libmoy" % name),)
-        out.append(pytest.param(name, core, golden, id=name, marks=marks))
-    return out
-
-
-@pytest.mark.parametrize("scene,core,golden", _scene_params())
+@pytest.mark.parametrize("scene,core,golden",
+                         [pytest.param(n, c, g, id=n) for n, c, g in _scene_names()])
 def test_scene_is_pixel_identical_to_the_spec_golden(scene, core, golden):
     frame = render(scene)
     assert len(frame) == W * H, (

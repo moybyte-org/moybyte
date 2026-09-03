@@ -128,8 +128,8 @@ class _Layer:
     line worked on one tier and raised on the other."""
 
     _VERBS = ("cls", "pix", "line", "rect", "rectb", "circ", "circb",
-              "tri", "trib", "sspr", "tline",
-              "spr", "map", "mget", "mset", "print",
+              "tri", "trib", "oval", "ovalb", "fillp", "sspr", "tline",
+              "spr", "map", "mget", "mset", "sget", "sset", "print",
               "camera", "clip", "pal", "palt")
 
     def __init__(self, canvas, ns):
@@ -280,6 +280,27 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         if sheet is None or tilemap is None:
             return
         canvas.tline(tilemap, sheet, x0, y0, x1, y1, u, v, du, dv, colorkey)
+
+    def sget(x, y):
+        # SPEC.md 7.1: read one sheet PIXEL as a palette index. Sheet
+        # coordinates, not tile ones -- tile n's top-left is
+        # ((n % 16) * 8, (n // 16) * 8). Off the sheet reads 0.
+        return sheet.pget(int(x), int(y)) if sheet is not None else 0
+
+    def sset(x, y, c):
+        # SPEC.md 7.1: write one sheet pixel; the index is masked to 0-15 and a
+        # write off the sheet is dropped.
+        #
+        # THE FLUSH IS THE WHOLE VERB. spr() does not blit, it QUEUES (#63), so
+        # a run of sprites between two sset calls would coalesce into one
+        # blit_batch and every sprite in it would read the sheet as it stood at
+        # FLUSH time -- an edit appearing on draws made before it. The spec's
+        # `sheet` scene is built to catch exactly that: it draws tile 2, edits
+        # the tile, draws it again, and the two must differ.
+        if sheet is None:
+            return
+        canvas.flush_batch()
+        sheet.pset(int(x), int(y), int(c))
 
     def mget(x, y):
         return tilemap.mget(x, y) if tilemap is not None else -1
@@ -568,10 +589,12 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "line": canvas.line, "rect": canvas.rect, "rectb": canvas.rectb,
         "circ": canvas.circ, "circb": canvas.circb, "spr": _spr_entry,
         "tri": canvas.tri, "trib": canvas.trib,
+        "oval": canvas.oval, "ovalb": canvas.ovalb, "fillp": canvas.fillp,
         "sspr": sspr, "tline": tline,
         "background": background, "_moy_restore_bg": _restore_bg,
         "make_layer": make_layer, "draw_layer": draw_layer,
         "map": map_, "mget": mget, "mset": mset,
+        "sget": sget, "sset": sset,
         "fget": fget, "fset": fset,
         "print": canvas.print, "touch": touch, "mouse": mouse,
         "clip": canvas.clip, "camera": canvas.camera,

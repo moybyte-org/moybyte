@@ -40,15 +40,16 @@ CART_VERBS = (
     "W", "H",
     # Draw + state
     "cls", "pix", "line", "rect", "rectb", "circ", "circb", "spr",
-    "tri", "trib", "sspr", "tline", "print",
+    "tri", "trib", "oval", "ovalb", "fillp", "sspr", "tline", "print",
     "clip", "camera", "pal", "palt", "col", "background", "view",
     # Layers + images. `make_layer`/`draw_layer` are CORE since the
     # 2026-08-19 vendor (SPEC.md 6; upstream b9dbba1 moved them out of the
     # §10 `layers` extension -- a verb that degrades truthfully cannot be an
     # extension). `image` is moybyte's own, still `moybyte.images`.
     "make_layer", "draw_layer", "Image", "image",
-    # Tilemap + the tile flags it filters on (SPEC.md 3.5 / 7.2)
-    "map", "mget", "mset", "fget", "fset",
+    # Tilemap, the sheet pixels, and the tile flags map filters on
+    # (SPEC.md 3.5 / 7.1 / 7.2)
+    "map", "mget", "mset", "sget", "sset", "fget", "fset",
     # Input
     "btn", "btnp", "players", "key", "keyp", "touch", "mouse", "textmode",
     # Audio

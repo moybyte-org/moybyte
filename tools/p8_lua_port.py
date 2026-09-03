@@ -2381,16 +2381,20 @@ do
   function pal(a, b, p)
     if a == nil then m_pal() spal, spal_live = {}, false p8_palt_default() return end
     if type(a) == "table" then
-      -- p8 0.2.0's TABLE form: a whole palette in one call. A table with a
-      -- [0] entry keys by colour directly; a plain array maps its i-th entry
-      -- onto colour i-1. Carts use it for per-scene recolours, and floor()ing
-      -- a table is what stopped two of them on their first frame.
-      local shift = (a[0] ~= nil) and 0 or 1
+      -- p8 0.2.0's TABLE form: a whole palette in one call. The KEY is the
+      -- colour, masked to 0-15 like every colour argument -- so a plain array
+      -- {a, b, c} maps colours 1, 2, 3 and a sixteenth entry wraps onto 0,
+      -- which is how the manual's 16-entry example "re-colours the whole
+      -- screen". It used to shift a plain array down by one (entry i onto
+      -- colour i-1), a guess that no cart confirmed and two refuted: dungeons
+      -- & diagrams keys its floor's 12 onto 1 and pico off road leaves 7 on
+      -- 7, and both drew the wrong colour under the shift once the screen
+      -- palette reached the canvas. floor()ing the key is still load-bearing.
       local screen = (b == 1)
       for k, v in pairs(a) do
         if type(k) == "number" and type(v) == "number" then
-          if screen then spal_set(fl(k) - shift, scol(v))
-          else m_pal(fl(k) - shift, pcol(v)) end
+          if screen then spal_set(fl(k) & 15, scol(v))
+          else m_pal(fl(k) & 15, pcol(v)) end
         end
       end
       return

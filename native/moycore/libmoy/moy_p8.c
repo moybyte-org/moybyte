@@ -1230,13 +1230,13 @@ static int l_p8_pal(lua_State *L)
         return 0;
     }
     if (lua_type(L, 1) == LUA_TTABLE) {
-        /* p8 0.2's TABLE form, a whole palette in one call: a table with a
-         * [0] entry keys by colour, a plain array maps its i-th entry onto
-         * colour i-1. Walked with next(), which is what pairs() hands back. */
-        int shift, screen;
-        lua_geti(L, 1, 0);
-        shift = lua_isnil(L, -1) ? 1 : 0;
-        lua_pop(L, 1);
+        /* p8 0.2's TABLE form, a whole palette in one call: the KEY is the
+         * colour, masked to 0-15 like every colour argument, so a plain array
+         * {a, b, c} maps colours 1, 2, 3 and a sixteenth entry wraps onto 0.
+         * (A plain array used to be shifted down by one here and in the shim;
+         * the shim's comment records the two carts that refuted it.) Walked
+         * with next(), which is what pairs() hands back. */
+        int screen;
         /* `b == 1`: a NUMBER equal to one. The string "1" is not, in Lua. */
         screen = lua_type(L, 2) == LUA_TNUMBER
                  && lua_tonumber(L, 2) == (lua_Number)1;
@@ -1245,7 +1245,7 @@ static int l_p8_pal(lua_State *L)
             /* key at -2, value at -1; both must be NUMBERS, not strings that
              * look like one -- the shim asks type(), not tonumber(). */
             if (lua_type(L, -2) == LUA_TNUMBER && lua_type(L, -1) == LUA_TNUMBER) {
-                int32_t k = p8_fl(L, -2) - shift;
+                int32_t k = p8_fl(L, -2) & 15;
                 if (screen) p8_spal_set(p, (int)k, p8_scol(L, -1));
                 else moy_pal(c, (int)k, p8_pcol(L, p, -1));
             }

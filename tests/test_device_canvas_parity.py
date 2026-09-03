@@ -124,6 +124,7 @@ class _FakeGfx:
     circ = staticmethod(gfx_binding.circ)
     circb = staticmethod(gfx_binding.circb)
     line = staticmethod(gfx_binding.line)
+    shape = staticmethod(gfx_binding.shape)
 
     @staticmethod
     def fill(buf, npix, color):
@@ -536,6 +537,61 @@ def test_baseline_primitives_match():
         _draw_baseline(host)
         _draw_baseline(dev)
         _assert_same(host, dev, "baseline gfx=%s" % gfx)
+
+
+# --------------------------------------------------------------------------- #
+# The shape verbs under a fill pattern, and oval/ovalb.                      #
+# --------------------------------------------------------------------------- #
+def _draw_shapes(c):
+    # Every verb SPEC.md 6 says the pattern reaches, and the two it does not
+    # (pix, print): a fallback that dithered those would pass a hash built only
+    # from shapes.
+    c.cls(1)
+    c.oval(4, 4, 30, 18, 8)
+    c.ovalb(38, 4, 18, 30, 11)
+    c.fillp(0xA5A5)
+    c.rect(4, 26, 20, 12, 12)
+    c.circ(34, 40, 8, 14)
+    c.fillp(0x5A5A, 3)
+    c.rectb(2, 2, 60, 44, 7)
+    c.circb(50, 20, 9, 10)
+    c.line(0, 46, 63, 30, 9)
+    c.tri(10, 40, 30, 46, 16, 30, 15)
+    c.trib(40, 26, 58, 44, 44, 46, 6)
+    c.oval(20, 10, 24, 24, 5)
+    c.ovalb(20, 10, 24, 24, 4)
+    c.pix(1, 1, 7)
+    c.print("ab", 8, 20, 7)
+    c.fillp()
+    c.rect(0, 0, 3, 3, 2)                  # solid again
+
+
+def test_fill_pattern_and_ovals_match():
+    for gfx in (True, False):
+        m, host, dev = _both(gfx)
+        _draw_shapes(host)
+        _draw_shapes(dev)
+        _assert_same(host, dev, "shapes gfx=%s" % gfx)
+
+
+def test_the_fill_pattern_is_screen_anchored_under_a_camera():
+    # The pattern is anchored to the SCREEN (SPEC.md 6), so it is tested AFTER
+    # the camera offset. These two draws land on the same buffer pixels by two
+    # different routes, so screen-anchoring makes them identical -- while a
+    # raster that tested the pattern in world space would put the dither three
+    # columns out of phase and still pass every other case in this file.
+    for gfx in (True, False):
+        _, _, a = _both(gfx)               # both arms the SAME lane, so the
+        _, _, b = _both(gfx)               # camera is the only variable
+        a.cls(1)
+        a.fillp(0x3C69)                    # asymmetric: a phase shift shows
+        a.rect(10, 10, 20, 12, 8)
+        b.cls(1)
+        b.fillp(0x3C69)
+        b.camera(3, 1)
+        b.rect(13, 11, 20, 12, 8)
+        assert _dev_rgb565(a) == _dev_rgb565(b), \
+            "the fill pattern moved with the camera (gfx=%s)" % gfx
 
 
 # --------------------------------------------------------------------------- #

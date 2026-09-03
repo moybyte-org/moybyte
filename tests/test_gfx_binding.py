@@ -296,6 +296,32 @@ tri(buf, 16, 0, 1, 1, 13, 2, 5, 6, 0x2004, 0, 0, 0, 0, 16, 8)
 sspr(buf, 16, 0, sheet, 128, 256, 0, 0, 8, 8, 2, 1, 9, 5, -1, 0, lut, palt, 0, 0, 0, 0, 16, 8)
 tline(buf, 16, 0, cells, 4, 4, sheet, 128, 256, 0, 1, 15, 6, 0, 0, 65536, 32768, -1, lut, palt, 0, 0, 0, 0, 16, 8)
 blit_batch(buf, 16, 0, quads, sheet, 128, 256, lut, palt, -1, 1, 0, 0, 0, 0, 16, 8)
+
+# -- shape: the nine verbs behind one kind, and the fill pattern -------------
+# kind: 0 line, 1 rect, 2 rectb, 3 circ, 4 circb, 5 tri, 6 trib, 7 oval,
+# 8 ovalb (moy_gfx_kernels.h). Each runs twice -- solid, then under a pattern
+# with and without a hole colour -- because the pattern is a per-pixel branch
+# inside libmoy's shape kernels and a solid-only script would never take it.
+shape(buf, 16, 8, 0, 1, 1, 14, 6, 0, 0, 0x18e3, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 0, 1, 6, 14, 1, 0, 0, 0x18e3, 0xA5A5, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 1, 2, 1, 9, 5, 0, 0, 0x2345, 0xA5A5, 0x0011, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 2, 1, 0, 14, 8, 0, 0, 0x6789, 0xF0F0, -1, 1, 1, 0, 0, 16, 8)
+shape(buf, 16, 8, 3, 8, 4, 3, 0, 0, 0, 0x3210, 0x5A5A, 0x0022, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 4, 12, 5, 4, 0, 0, 0, 0x001f, 0x5A5A, -1, 1, 1, 0, 0, 16, 8)
+shape(buf, 16, 8, 5, 1, 1, 14, 2, 6, 7, 0xf800, 0xA5A5, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 6, 0, 7, 15, 0, 4, 4, 0x07e0, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 7, 1, 1, 13, 6, 0, 0, 0x4a69, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 8, 1, 1, 13, 6, 0, 0, 0x9cd3, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 7, 2, 0, 11, 8, 0, 0, 0xffe0, 0xA5A5, 0x0033, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 8, -3, -2, 9, 7, 0, 0, 0x7bef, 0x3C69, -1, 2, 1, 1, 1, 15, 7)
+# Degenerate boxes and a negative radius: the early-outs, which differ per verb.
+shape(buf, 16, 8, 7, 4, 4, 0, 6, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 7, 4, 4, 6, 0, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 8, 4, 4, -5, 5, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 3, 8, 4, -1, 0, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 7, 5, 3, 1, 1, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+shape(buf, 16, 8, 99, 0, 0, 4, 4, 0, 0, 0x0f0f, 0, -1, 0, 0, 0, 0, 16, 8)
+
 """
 
 OPS = OPS + CLAMP_OPS
@@ -456,7 +482,8 @@ def test_the_binding_carries_every_verb_device_canvas_calls_outright():
 
 
 def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
-    """tri/sspr/tline/text are PROBED by device_canvas, and present regardless.
+    """tri/sspr/tline/text/shape are PROBED by device_canvas, and here
+    regardless.
 
     Pinning the decision _SIGS records: "optional" on a board means "the board
     would be slower", not "the host may diverge". If one of these were dropped
@@ -465,7 +492,7 @@ def test_the_optional_libmoy_verbs_are_implemented_here_anyway():
     testing anything.
     """
     probed, _ = _canvas_verbs()
-    for name in ("tri", "sspr", "tline", "text"):
+    for name in ("tri", "sspr", "tline", "text", "shape"):
         assert name in probed, "%s is no longer probed by device_canvas" % name
         assert callable(getattr(g, name, None)), name
 
@@ -589,6 +616,7 @@ def tri(*a): moy_gfx.tri(*a); _shot()
 def blit_indices(*a): moy_gfx.blit_indices(*a); _shot()
 def sspr(*a): moy_gfx.sspr(*a); _shot()
 def tline(*a): moy_gfx.tline(*a); _shot()
+def shape(*a): moy_gfx.shape(*a); _shot()
 
 @OPS@
 '''
