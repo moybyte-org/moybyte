@@ -666,3 +666,48 @@ def test_only_pushes_the_named_file_and_refuses_one_the_cart_lacks(
     with pytest.raises(SystemExit) as exc:
         push_cart.main([cart, "--board", "tdeck", "--only", "sprites.json"])
     assert "sprites.json" in str(exc.value)
+
+
+def _sub(cart, rel, data):
+    path = os.path.join(cart, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data)
+
+
+def test_a_carts_subfolders_travel_with_it(monkeypatch, tmp_path):
+    """A cart is a TREE. `scenes/`, `images/` and `sheets/` are as much the
+    cart as main.py is, and a listdir walk left every one of them on the host:
+    the cart landed on the board without the assets it needs, and the folders
+    were never made there either."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE,
+                            "manifest.json": b'{"title": "Demo"}\n'})
+    scene = b'{"actors": [], "w": 40}\n'
+    _sub(cart, "scenes/x.moyscene", scene)
+    _sub(cart, "images/tiles/a.moyimg", b"IMG\n")
+
+    assert push_cart.main([cart, "--board", "tdeck"]) == 0
+
+    assert dev.fs.files["/sd/carts/demo.moy/scenes/x.moyscene"] == scene
+    assert dev.fs.files["/sd/carts/demo.moy/images/tiles/a.moyimg"] == b"IMG\n"
+    # ... and the folders were created, parents first -- `_mkdir` is one
+    # os.mkdir on the board and does not make them.
+    assert "/sd/carts/demo.moy/scenes" in dev.fs.dirs
+    assert "/sd/carts/demo.moy/images/tiles" in dev.fs.dirs
+    mk = [line for line in dev.sent if "_mkdir" in line]
+    assert mk.index("py ws._g['_mkdir']('/sd/carts/demo.moy/images')") < \
+        mk.index("py ws._g['_mkdir']('/sd/carts/demo.moy/images/tiles')")
+
+
+def test_only_reaches_a_file_inside_a_subfolder(monkeypatch, tmp_path):
+    """`--only` names a path inside the cart, so the assets it exists to
+    re-push one of are reachable by it."""
+    dev = _FakeConsole(board="tdeck", carts_root="/sd/carts")
+    monkeypatch.setattr(push_cart, "P4Board", _factory(dev))
+    cart = _cart(tmp_path, {"main.lua": SOURCE})
+    _sub(cart, "scenes/x.moyscene", b"{}\n")
+    assert push_cart.main([cart, "--board", "tdeck",
+                           "--only", "scenes/x.moyscene"]) == 0
+    assert list(dev.fs.files) == ["/sd/carts/demo.moy/scenes/x.moyscene"]

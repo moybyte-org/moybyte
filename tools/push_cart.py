@@ -308,6 +308,37 @@ def push_file_raw(b, src, dst, window, verbose=False):
     return True
 
 
+def cart_files(cart):
+    """Every file in the cart folder, RELATIVE to it, forward-slashed.
+
+    A cart is a TREE, not a flat list: `scenes/`, `images/` and `sheets/` are
+    as much the cart as main.py is, and a listdir walk left every one of them
+    on the host -- the cart arrived on the board without the assets it needs,
+    and `--only scenes/x.moyscene` could not name one. Forward slashes because
+    these become device paths, sorted so the transcript is stable."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(cart):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        rel = os.path.relpath(dirpath, cart)
+        for f in filenames:
+            if f.startswith("."):
+                continue
+            out.append(f if rel == "." else
+                       rel.replace(os.sep, "/") + "/" + f)
+    return sorted(out)
+
+
+def sub_dirs(names):
+    """The folders those paths need, SHALLOWEST FIRST -- `_mkdir` is one
+    os.mkdir and does not make parents."""
+    out = set()
+    for n in names:
+        parts = n.split("/")[:-1]
+        for i in range(len(parts)):
+            out.add("/".join(parts[:i + 1]))
+    return sorted(out, key=lambda p: (p.count("/"), p))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("cart", help="the cart folder (e.g. ports/celeste.moy)")
@@ -321,7 +352,8 @@ def main(argv=None):
     ap.add_argument("--dest",
                     help="target path (default <ws.carts_root>/<foldername>)")
     ap.add_argument("--only", action="append",
-                    help="push just this file (repeatable)")
+                    help="push just this file, as its path inside the cart "
+                         "(scenes/x.moyscene); repeatable")
     ap.add_argument("--force", action="store_true",
                     help="push even when the hash already matches")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -330,9 +362,7 @@ def main(argv=None):
     cart = a.cart.rstrip("/")
     if not os.path.isdir(cart):
         sys.exit("not a cart folder: " + cart)
-    names = sorted(f for f in os.listdir(cart)
-                   if os.path.isfile(os.path.join(cart, f))
-                   and not f.startswith("."))
+    names = cart_files(cart)
     if a.only:
         missing = [f for f in a.only if f not in names]
         if missing:
@@ -391,6 +421,8 @@ def main(argv=None):
         if not b.pyexec(HELPERS):
             sys.exit("could not install the upload helpers")
         b.pyval("ws._g['_mkdir'](%r)" % dest)
+        for sub in sub_dirs(names):
+            b.pyval("ws._g['_mkdir'](%r)" % (dest + "/" + sub))
         wrote = 0
         for f in names:
             if a.force:
