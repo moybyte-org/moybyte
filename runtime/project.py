@@ -92,6 +92,15 @@ class _ConfigOps(OpCodec):
         doc.config[op["k"]] = op["o"]
 
 
+# How slow a code commit has to be before the perf_capture COMMIT line prints.
+# It is a NOISE FLOOR, not a measurement: a normal commit stays silent so the
+# diag stream is readable. Settable over the dev channel (`py "import project;
+# project.COMMIT_LOG_MS = 0"`) so a measurement session can see every commit
+# without a reflash -- which is the only way to read one that now lands under
+# the floor.
+COMMIT_LOG_MS = 500
+
+
 class Project:
     """The open cart's live data + its persistence verbs (Stage 1). The six data
     fields (cart/config/sheet/tilemap/images/pmem) are exposed back on Workstation
@@ -505,7 +514,7 @@ class Project:
             if hist is not None:
                 hist.clear()                  # re-baseline (subsumes mark_keyframe)
             _total = _ticks_diff(_ticks_ms(), _t0)
-            if ws.perf_capture and _total > 500:
+            if ws.perf_capture and _total > COMMIT_LOG_MS:
                 # journal = the remainder: _journal_code's graduation decision + the
                 # journal_append SD session (which the device SD_TRACE brackets too,
                 # so a big journal= with a small SD bracket is the compare/snapshot).
