@@ -472,19 +472,36 @@ class HistoryRouter:
         # surfaces via save_status/cart_error, as it must.
         ws.project.commit_code(src, quiet=True)   # persists + journals; clears ed.dirty
 
+    def _autosave_tab(self):
+        """The idle commit for a tab that is not code: hand it to the Editor's own
+        `save_current`, which runs the clean-tab guard and routes to that tab's
+        persist verb. Nothing is duplicated here -- the ladder has one author."""
+        ws = self.ws
+        app = getattr(ws, "editor_app", None)
+        if app is None or app.tab != ws.menu_view:
+            return
+        app.save_current()
+
     def idle_tick(self):
-        """Fire the idle-typing autosave-commit once the code editor has sat quiet
-        for `edit_debounce_ms`. Called every frame by `Workstation.frame` BEFORE
-        the redraw gate so it runs even while a static editor screen is skipping
-        its redraw -- the exact idle moment the between-frames SD write should
-        land. Cheap: one early-out on the common no-pending-edit path."""
+        """Fire the idle autosave-commit once the ACTIVE EDITOR TAB has sat quiet for
+        `edit_debounce_ms`. Called every frame by `Workstation.frame` BEFORE the
+        redraw gate so it runs even while a static editor screen is skipping its
+        redraw -- the exact idle moment the between-frames store write should land.
+        Cheap: one early-out on the common no-pending-edit path.
+
+        Every tab, not just code (#154). A commit is the dearest thing the Editor
+        does, and on the other six tabs it used to fall on a TAB SWITCH or PLAY --
+        i.e. inside the interaction, where the kid feels all of it. Riding the
+        debounce moves it into the gap the kid already left, and it also lands
+        SOONER: a paint edit was durable only once the tab was left."""
         if self.edit_ms is None:
             return
-        ed = self.ws.editor
-        if ed is None or not getattr(ed, "dirty", False):
-            self.edit_ms = None           # the edit was saved/cleared elsewhere -> disarm
-            return
         if _ticks_diff(_ticks_ms(), self.edit_ms) < self.edit_debounce_ms:
-            return                        # not idle long enough -- the kid is still typing
+            return                        # not idle long enough -- still editing
         self.edit_ms = None
-        self._autosave_code()
+        if not self.ws.wm.top_is("menu"):
+            return                        # the Editor is no longer the surface
+        if self.ws.menu_view == "code":
+            self._autosave_code()         # the compile gate is code's alone
+        else:
+            self._autosave_tab()

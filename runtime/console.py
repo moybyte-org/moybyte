@@ -452,9 +452,9 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
 # stay one-line forwards (tested surface).
 try:
-    from editor_app import EditorApp
+    from editor_app import EditorApp, COMMIT_TABS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.editor_app import EditorApp
+    from runtime.editor_app import EditorApp, COMMIT_TABS
 
 # FullscreenStackWM (wm.py): viewport composite (#39), the back-stack `screen`
 # projects onto, and the MEMOIZED visible/draw stack (rebuilt only on push/pop
@@ -3304,14 +3304,16 @@ class Workstation:
         if getattr(i, "_pressed", None) or i.last_key:
             if not self.wm.keys_to_cart():
                 self._dirty = True
-        # Undo journal (Stage 7): any activity in the code editor (re)arms the idle
+        # Undo journal (Stage 7): activity in an EDITOR TAB (re)arms the idle
         # autosave-commit debounce -- frame() fires the durable commit once the kid
-        # STOPS typing for _edit_debounce_ms, so the SD write lands in a gap. Marked
+        # stops for _edit_debounce_ms, so the store write lands in a gap. Marked
         # here (before routing) so it tracks the last keystroke regardless of who
-        # consumes it; frame() only actually commits when the editor is dirty.
-        if (self.editor is not None and self.wm.top_is("menu")
-                and self.menu_view == "code"
-                and (i.last_key or getattr(i, "_pressed", None))):
+        # consumes it; frame() only actually commits a tab that is dirty. The touch
+        # tabs re-arm from handle_pointer -- paint/map/scene/music are drawn at
+        # rather than typed at, and a debounce they could not arm would fire
+        # mid-stroke.
+        if ((i.last_key or getattr(i, "_pressed", None))
+                and self.menu_view in COMMIT_TABS and self.wm.top_is("menu")):
             self.history.edit_ms = _ticks_ms()
         # Walk the MEMOIZED visible stack top -> bottom (Stage 6c): the WM caches it
         # pre-reversed, so this hot per-frame routing allocates neither the list nor a
@@ -3378,6 +3380,10 @@ class Workstation:
         self._ptr_was_down = p.down
         self._ptr_last_x = px
         self._ptr_last_y = py
+        # ...and a touch in an editor tab re-arms that same debounce. Past the idle
+        # fast-path above, so a frame the pointer did nothing in pays nothing.
+        if (click or p.down) and self.menu_view in COMMIT_TABS and self.wm.top_is("menu"):
+            self.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
         # REGISTERED app's bar band belongs to the bar, and the router routes it
         # BEFORE the app's own handle_pointer -- checked inside the walk (not

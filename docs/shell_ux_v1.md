@@ -284,7 +284,9 @@ There is no SAVE (#111): the bar used to carry one compact persist-now icon, but
 autosave (§7) is the only model now, so it was removed along with the concept it
 stood for. Every tab-leaving event (switching tabs, PLAY, PROJECTS, a window/context-X
 close, a workspace swap, going home) hard-commits whichever tab was showing, on top of
-the idle-typing debounce -- exactly what SAVE used to do, just automatic.
+the idle debounce -- exactly what SAVE used to do, just automatic. The debounce runs
+on EVERY tab (#154), so by the time one of those events fires it usually finds nothing
+left to write.
 
 The ladder is the icons → blocks → code progression (#29) made spatial: growth is
 "one tab to the right," and every rung is visible from every other rung.
@@ -297,8 +299,10 @@ Two guarantees, stated as UX law:
 
 - **Save is never required — there is no SAVE.** No "unsaved changes" state, no save
   prompt on exit, no SAVE button anywhere (#111): edits persist continuously — a
-  typing-idle autosave debounce plus hard commits on every tab-leaving event (a tab
-  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home). A
+  an idle autosave debounce on every tab -- armed by typing on the code tab and by
+  touch on the drawn ones -- plus hard commits on every tab-leaving event (a tab
+  switch, PLAY, PROJECTS, a window/context-X close, a workspace swap, going home,
+  and the reboot into a new firmware image). A
   kid can pull the battery mid-edit and lose (at most) the last idle-debounce window.
   (`commit` in the §10 contract is the app telling the OS "persist this" — the exit
   paths above are simply every place that telling now happens automatically.)

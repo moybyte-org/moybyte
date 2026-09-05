@@ -87,6 +87,13 @@ _ZONE_TABS = (
 )
 _ZONE_STRIDE = _BAR_ICON        # 0-gap ladder (#88) -- see the block comment above
 
+# The tabs save_current() can route a commit to, derived from the ladder rather
+# than listed a second time. The sentinels (PROJECTS/UNDO/REDO) and PLAY (None)
+# are actions; "theme" is the EDIT-ICONS reuse of the paint renderer and commits
+# through its own leave, so it is not a tab here either.
+COMMIT_TABS = tuple(t for t, _g in _ZONE_TABS
+                    if isinstance(t, str) and not t.startswith("\x00"))
+
 # The SHELF-density zone (visual identity v1 Phase 3, the Studio mockup): the six
 # tabs as LABELED chips (icon + name) via ui.tab_row, PROJECTS as an icon chip on
 # the left, PLAY a labeled button on the right (SAVE dropped, #111). The 320x240
