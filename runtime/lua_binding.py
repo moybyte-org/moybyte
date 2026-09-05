@@ -254,8 +254,12 @@ class HostLuaRun:
 
     # The dispatch callback's C signature; kept alive on the instance because
     # ctypes will collect a CFUNCTYPE object the C side is still holding.
-    _DISPATCH = ctypes.CFUNCTYPE(_I, _I, _I, ctypes.POINTER(_I), _C,
-                                 ctypes.POINTER(_I))
+    # (idx, argc, kinds, iargs, sargs, out, sout) -- moyhost_lua.c's hl_tramp
+    # holds the kind table; this side only has to agree with it.
+    _DISPATCH = ctypes.CFUNCTYPE(_I, _I, _I, ctypes.POINTER(_I),
+                                 ctypes.POINTER(_I), ctypes.POINTER(_C),
+                                 ctypes.POINTER(_I), ctypes.POINTER(_C))
+    KIND_NUM, KIND_STR, KIND_BOOL, KIND_NIL = 0, 1, 2, 3
 
     def register(self, name, fn):
         """Add a verb libmoy does not bind. After __init__, before load()."""
@@ -267,19 +271,37 @@ class HostLuaRun:
         self._ext.append(fn)
         self._d.hl_register(self._r, name.encode(), idx)
 
-    def _dispatch(self, idx, argc, iargs, sarg, out):
-        """C -> Python. Returns 1 when it produced a value, 0 for nil."""
+    def _dispatch(self, idx, argc, kinds, iargs, sargs, out, sout):
+        """C -> Python. 0 nil, 1 the int in out, 2 the string, 3 the boolean."""
         try:
             fn = self._ext[idx]
             args = []
-            if sarg:
-                args.append(sarg.decode("utf-8", "replace"))
-            args.extend(int(iargs[i]) for i in range(argc))
+            for i in range(argc):
+                k = kinds[i]
+                if k == self.KIND_STR:
+                    args.append(sargs[i].decode("utf-8", "replace"))
+                elif k == self.KIND_BOOL:
+                    args.append(bool(iargs[i]))
+                elif k == self.KIND_NIL:
+                    args.append(None)
+                else:
+                    args.append(int(iargs[i]))
             r = fn(*args)
         except Exception:  # noqa: BLE001 -- a raising verb reads as nil, and
             return 0       # the console's own error path reports it
-        if r is None or r is False:
+        if r is None:
             return 0
+        if r is True or r is False:
+            out[0] = 1 if r else 0
+            return 3
+        if isinstance(r, str):
+            # PINNED on the instance: sout[0] holds a pointer into this bytes
+            # object, and hl_tramp copies it with lua_pushlstring during this
+            # same call -- but a temporary would already be collectable here.
+            self._sret = r.encode("utf-8")
+            sout[0] = self._sret
+            out[0] = len(self._sret)
+            return 2
         try:
             out[0] = int(r)
         except (TypeError, ValueError):

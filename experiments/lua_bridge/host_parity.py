@@ -20,7 +20,11 @@ Also wired into pytest as tests/test_lua_sakura_parity.py (skips without lupa).
 
 import json
 import os
+import sys
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from runtime.widgets import Scenes                             # noqa: E402
 
 _CARTS = os.path.join(os.path.dirname(__file__), "..", "..", "system_carts")
 PY_CART_DIR = os.path.join(_CARTS, "sakura.moy")        # the Python original
@@ -76,6 +80,10 @@ function image(name)
   return "img:" .. name
 end
 
+function scene(name)
+  return __SCENE
+end
+
 function make_layer(w, h)
   local l = { __id = __py_make_layer(w, h) }
   l.spr = function(self, img, x, y, ck)
@@ -115,6 +123,20 @@ def _load_config():
     return py_cfg
 
 
+def _load_scene():
+    """The shed points, from the .moyscene both twins ship -- through the SHARED
+    `widgets.Scenes`, which is the console's own parser, not a second one. The
+    two files are compared byte-for-byte for the same reason the configs are:
+    the twins must shed from the same canopy or nothing below means anything."""
+    blobs = []
+    for d in (PY_CART_DIR, LUA_CART_DIR):
+        with open(os.path.join(d, "scenes", "blossoms.moyscene")) as fh:
+            blobs.append(fh.read())
+    if blobs[0] != blobs[1]:
+        raise AssertionError("sakura.moy and sakura_lua.moy scenes drifted")
+    return Scenes({"blossoms": blobs[0]}, ["blossoms"])
+
+
 # --- Python side --------------------------------------------------------------
 
 class _PyLayer:
@@ -129,12 +151,13 @@ class _PyLayer:
 class PyCart:
     """Exec the real main.py under the fake recording API."""
 
-    def __init__(self, config):
+    def __init__(self, config, scenes):
         self.events = []
         self.frame = -1
         self.lcg = Lcg(SEED)
         self._layers = 0
         ns = {
+            "scene": scenes.scene,
             "W": 320, "H": 240,
             "cfg": lambda k, d=None: config.get(k, d),
             "rnd": self.lcg.rnd,
@@ -176,7 +199,7 @@ class PyCart:
 class LuaCart:
     """Run main.lua under lupa with the same fake API, via the GLUE shims."""
 
-    def __init__(self, config):
+    def __init__(self, config, scenes):
         # Lua 5.4 explicitly -- the version #67 vendors on the device; lupa's
         # default runtime tracks the newest release instead.
         try:
@@ -201,6 +224,13 @@ class LuaCart:
         for k, v in config.items():
             cfg_t[k] = v
         g["__CFG"] = cfg_t
+        scene_t = self.lua.table()
+        for i, a in enumerate(scenes.scene()):
+            row = self.lua.table()
+            row["tag"], row["tile"] = a.tag, a.tile
+            row["x"], row["y"], row["flip"] = a.x, a.y, a.flip
+            scene_t[i + 1] = row
+        g["__SCENE"] = scene_t
         touch_t = self.lua.table()
         for f, (x, y) in TOUCH_FRAMES.items():
             touch_t[f] = self.lua.table(x, y)
@@ -247,9 +277,9 @@ def _check_prng_twins(lua):
 
 
 def run_parity(frames=600, verbose=True):
-    config = _load_config()
-    pyc = PyCart(config)
-    luc = LuaCart(config)
+    config, scenes = _load_config(), _load_scene()
+    pyc = PyCart(config, scenes)
+    luc = LuaCart(config, scenes)
     _check_prng_twins(luc.lua)
 
     # identical seed on both sides, then _init
@@ -313,9 +343,9 @@ def run_bench(frames=2000):
     """Host-only ballpark: CPython vs liblua on x86 says nothing about the S3
     (that number comes from the main.c spike / the device bridge), but a Lua
     port that is NOT faster than Python on the host would flag a porting blunder."""
-    config = _load_config()
+    config, scenes = _load_config(), _load_scene()
 
-    pyc = PyCart(config)
+    pyc = PyCart(config, scenes)
     pyc.lcg.state = SEED
     pyc.frame = -1              # touch inactive: pure physics
     pyc.ns["_init"]()
@@ -325,7 +355,7 @@ def run_bench(frames=2000):
         upd(DT)
     py_ms = (time.perf_counter() - t0) * 1000.0 / frames
 
-    luc = LuaCart(config)
+    luc = LuaCart(config, scenes)
     luc.lua.execute("__seed(%d)" % SEED)
     luc.set_frame(-1)
     luc.lua.eval("_init()")

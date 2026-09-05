@@ -159,11 +159,19 @@ static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL
  * -- a cart needing a Python-backed verb needs one engine that can hold one,
  * not a second engine.
  *
- * The contract is deliberately narrow, because it is exactly what those verbs
- * take and return: up to four integer arguments plus at most one string
- * (image("bg") is the only string-taking verb), and an integer result or
- * nothing. Objects have never crossed this boundary -- layers and images
- * travel as int handles, which is what the prelude's wrappers speak. */
+ * The contract is what moycore's l_tramp already had, because a host and a
+ * device that disagree about what an argument IS is the same disease as one
+ * that disagree about what a verb does: up to eight arguments, each an
+ * integer, a string, a boolean or nil, each WHERE THE CART PUT IT, and an
+ * integer, a string, a boolean or nothing back. Objects still never cross --
+ * layers, images and actors travel as int handles, which is what the prelude's
+ * wrappers speak, and a whole scene crosses as one encoded string.
+ *
+ * It used to be an int vector plus "the first string", with a boolean landing
+ * as 0 and every later string dropped: __actor_flag(id, "hidden", true) would
+ * have arrived as ("hidden", id, 0). Nothing mixed the kinds until the
+ * placement verbs did, which is why that survived this long; every existing
+ * verb (all ints, or the lone string of image("bg")) sees what it always saw. */
 /* Eight, not four: the widest wrapper is the prelude's
  * __layer_spr(lid, tile, x, y, ck, scale, flip) at seven. Four silently
  * TRUNCATED it -- the extra arguments never reached Python, the closure raised
@@ -171,8 +179,17 @@ static const char *h_cfg(void *u, const char *k) { (void)u; (void)k; return NULL
  * sprite would simply not draw, with nothing printed anywhere. */
 #define HL_MAX_IARGS 8
 
-typedef int (*hl_dispatch_fn)(int idx, int argc, const int *iargs,
-                              const char *sarg, int *out);
+/* Argument i: HL_NUM takes iargs[i], HL_STR sargs[i], HL_BOOL iargs[i] != 0,
+ * HL_NIL nothing. Result: 0 nothing, 1 the integer in *out, 2 the *out bytes
+ * at *sout, 3 the boolean *out != 0. */
+#define HL_NUM  0
+#define HL_STR  1
+#define HL_BOOL 2
+#define HL_NIL  3
+
+typedef int (*hl_dispatch_fn)(int idx, int argc, const int *kinds,
+                              const int *iargs, const char **sargs,
+                              int *out, const char **sout);
 
 static hl_dispatch_fn CUR_DISPATCH;
 
@@ -180,20 +197,38 @@ static int hl_tramp(lua_State *L)
 {
     int idx = (int)lua_tointeger(L, lua_upvalueindex(1));
     int n = lua_gettop(L);
+    int kinds[HL_MAX_IARGS];
     int iargs[HL_MAX_IARGS];
-    const char *sarg = NULL;
+    const char *sargs[HL_MAX_IARGS];
     int ic = 0;
-    for (int i = 1; i <= n; i++) {
-        if (lua_type(L, i) == LUA_TSTRING) {
-            if (sarg == NULL) sarg = lua_tostring(L, i);
-        } else if (ic < HL_MAX_IARGS) {
-            iargs[ic++] = (int)lua_tointeger(L, i);
+    for (int i = 1; i <= n && ic < HL_MAX_IARGS; i++) {
+        int t = lua_type(L, i);
+        sargs[ic] = NULL;
+        iargs[ic] = 0;
+        if (t == LUA_TSTRING) {
+            kinds[ic] = HL_STR;
+            sargs[ic] = lua_tostring(L, i);
+        } else if (t == LUA_TBOOLEAN) {
+            kinds[ic] = HL_BOOL;
+            iargs[ic] = lua_toboolean(L, i);
+        } else if (t == LUA_TNIL || t == LUA_TNONE) {
+            kinds[ic] = HL_NIL;
+        } else {
+            kinds[ic] = HL_NUM;
+            iargs[ic] = (int)lua_tointeger(L, i);
         }
+        ic++;
     }
     if (CUR_DISPATCH == NULL) return 0;
     int out = 0;
-    int has = CUR_DISPATCH(idx, ic, iargs, sarg, &out);
-    if (has) { lua_pushinteger(L, out); return 1; }
+    const char *sout = NULL;
+    int has = CUR_DISPATCH(idx, ic, kinds, iargs, sargs, &out, &sout);
+    if (has == 1) { lua_pushinteger(L, out); return 1; }
+    if (has == 2 && sout != NULL) {
+        lua_pushlstring(L, sout, (size_t)out);
+        return 1;
+    }
+    if (has == 3) { lua_pushboolean(L, out); return 1; }
     return 0;
 }
 
@@ -351,7 +386,7 @@ int hl_exec(host_lua *r, const char *src, int len, const char *name,
  * The split exists for the GLUE PRELUDE (runtime/lua_ext.py), which has to run
  * after hl_register and before the cart: moybyte's object-valued verbs reach
  * Lua as int-handle functions plus wrappers, because this dispatch marshals
- * ints and one string and a Layer is neither. */
+ * ints and strings and a Layer is neither. */
 int hl_load(host_lua *r, const char *src, int len, const char *name,
             char *err, int errlen)
 {

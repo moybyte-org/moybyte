@@ -20,7 +20,7 @@ crop. Run with no arguments to use it:
 
     .venv/bin/python tools/import_sakura_bg.py ~/sakura_source.jpeg
     .venv/bin/python tools/import_sakura_bg.py SRC --png /tmp/sakura.png
-    .venv/bin/python tools/import_sakura_bg.py SRC --emit      # the EMIT tables
+    .venv/bin/python tools/import_sakura_bg.py SRC --emit      # + the shed scene
     .venv/bin/python tools/import_sakura_bg.py SRC --dry-run   # write nothing
 
 The pipeline: centre-crop to 4:3 (the source is a little wider), LANCZOS down to
@@ -31,11 +31,12 @@ lavender/rose family, and both error-diffused and ordered dithering laid a
 visible crosshatch over the flat sky and water. Straight nearest-colour keeps
 those areas clean.
 
-`--emit` prints the carts' `EMIT` literals -- the petal-shedding points, which
-have to sit on the canopy of THIS image. They are derived from the quantised
-result (dense runs of blossom colour, thinned onto a grid), printed in both
-Python and Lua syntax; the two carts' tables must stay identical or
-tests/test_lua_sakura_parity.py fails.
+`--emit` also writes the carts' `scenes/blossoms.moyscene` -- the petal-shedding
+points, which have to sit on the canopy of THIS image. They are derived from the
+quantised result (dense runs of blossom colour, thinned onto a grid). Both carts
+get the SAME file (a byte difference fails tests/test_lua_sakura_parity.py), and
+both read it with `scene()`, so a kid who repaints the tree can drag the points
+back onto their new canopy in the Editor's Scene tab without this tool (#214).
 
 After importing, bump `"version"` in BOTH carts' manifest.json (#47) or an
 already-seeded device keeps the old art, and refresh sakura_lua's cover with
@@ -167,21 +168,12 @@ def emit_points(buf):
     return pts
 
 
-def _wrap(text, width=86, indent=""):
-    out, line = [], indent
-    for word in text.split(" "):
-        if line != indent and len(line) + len(word) + 1 > width:
-            out.append(line)
-            line = indent
-        line += ("" if line == indent else " ") + word
-    out.append(line)
-    return "\n".join(out)
-
-
-def emit_tables(pts):
-    py = "EMIT = [" + ", ".join("(%d, %d)" % p for p in pts) + "]"
-    lua = "EMIT = { " + ", ".join("{%d, %d}" % p for p in pts) + " }"
-    return py, _wrap(lua)
+def emit_scene(pts):
+    """The shed points as a .moyscene -- the row shape SceneEditor writes back
+    (tag/tile/x/y, `flip` omitted when 0), so a kid editing it in the Scene tab
+    re-saves the same file rather than a reformatted one."""
+    return json.dumps([{"tag": "blossom", "tile": 0, "x": int(x), "y": int(y)}
+                       for x, y in pts])
 
 
 def write_png(path, buf, scale=1):
@@ -217,7 +209,7 @@ def main(argv=None):
     ap.add_argument("--png", help="also write a preview PNG here")
     ap.add_argument("--scale", type=int, default=1, help="preview PNG scale")
     ap.add_argument("--emit", action="store_true",
-                    help="print the EMIT literals for main.py / main.lua")
+                    help="also write both carts' scenes/blossoms.moyscene")
     ap.add_argument("--dry-run", action="store_true",
                     help="convert (and preview) but do not touch the carts")
     args = ap.parse_args(argv)
@@ -235,9 +227,17 @@ def main(argv=None):
                 f.write(blob)
             print("wrote", os.path.join(d, "bg.moyimg"), len(blob), "bytes")
     if args.emit:
-        py, lua = emit_tables(emit_points(buf))
-        print("\n--- main.py ---\n" + py)
-        print("\n--- main.lua ---\n" + lua)
+        blob = emit_scene(emit_points(buf))
+        for slug in CARTS:
+            d = os.path.join(ROOT, "system_carts", slug + ".moy", "scenes")
+            os.makedirs(d, exist_ok=True)
+            path = os.path.join(d, "blossoms.moyscene")
+            if args.dry_run:
+                print("would write", path, len(blob), "bytes")
+                continue
+            with open(path, "w") as f:
+                f.write(blob)
+            print("wrote", path, len(blob), "bytes")
     return 0
 
 

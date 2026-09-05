@@ -1,13 +1,13 @@
-EMIT = [(2, 143), (6, 113), (16, 102), (24, 97), (25, 80), (26, 73), (26, 106), (40, 80), (42, 107), (44, 100), (49, 54), (49, 64), (53, 98), (57, 53), (57, 110), (59, 74), (62, 44), (66, 80), (74, 40), (75, 72), (75, 105), (79, 45), (79, 77), (80, 103), (84, 27), (86, 101), (87, 29), (96, 70), (99, 40), (99, 52), (99, 84), (99, 110), (104, 71), (105, 111), (107, 57), (113, 86), (116, 93), (117, 28), (118, 40), (119, 28), (121, 59), (121, 76), (122, 33), (122, 90), (126, 71), (128, 105), (138, 69), (139, 49), (139, 102), (145, 29), (149, 77), (152, 42), (157, 13), (158, 40), (159, 68), (164, 22), (164, 59), (167, 121), (168, 77), (169, 94), (169, 105), (171, 23), (171, 122), (174, 14), (174, 68), (174, 90), (176, 109), (177, 36), (177, 86), (182, 59), (188, 19), (189, 13), (189, 57), (192, 90), (197, 67), (198, 81), (199, 106), (201, 134), (202, 38), (202, 138), (204, 110), (207, 25), (207, 41), (207, 134), (215, 55), (217, 100), (218, 60), (218, 89), (220, 140), (222, 119), (224, 126), (228, 42), (229, 65), (231, 96), (231, 150), (234, 85), (236, 55), (236, 144), (240, 46), (240, 114), (241, 131), (245, 91), (248, 39), (248, 72), (249, 151), (250, 147), (253, 80), (259, 85), (259, 153), (260, 104), (262, 48), (262, 126), (262, 139), (264, 74), (265, 113), (274, 118), (279, 83), (281, 71), (282, 136), (285, 90), (285, 123), (290, 118), (290, 128), (292, 96), (296, 88), (306, 92)]
-
 # Sakura -- a living cherry-tree wallpaper (v0.4). The backdrop is an image supplied
 # by the project owner (AI-generated; the project's own, no outside rights
 # holder), converted to this cart's 320x240 MOY64 bitmap by
 # tools/import_sakura_bg.py -- crop to 4:3, LANCZOS downscale, nearest-colour
-# quantise. That script also generates the EMIT table below, since the shedding
-# points have to sit on THIS image's canopy. Blossoms shed from the canopy, drift
-# on the breeze, and scatter from your cursor (touch on device). Petal count /
-# fall / breeze / colour are editable in "Make it mine".
+# quantise. That script also writes scenes/blossoms.moyscene, since the shedding
+# points have to sit on THIS image's canopy -- and because it is a SCENE, a kid
+# who repaints the tree can drag the points onto their new canopy in the Scene
+# tab, with no host tool involved. Blossoms shed from the canopy, drift on the
+# breeze, and scatter from your cursor (touch on device). Petal count / fall /
+# breeze / colour are editable in "Make it mine".
 #
 # The static scene is a PAINT-IMAGE ASSET (#63 Fold 3): a 320x240 MOY64 index bitmap
 # stored as images/bg.moyimg (deflate-compressed data, NOT draw calls). At _init it is
@@ -23,6 +23,7 @@ EMIT = [(2, 143), (6, 113), (16, 102), (24, 97), (25, 80), (26, 73), (26, 106), 
 
 import math
 
+EMIT = []           # canopy shed points (scenes/blossoms.moyscene), read at _init
 SIN = []            # sine LUT (built once); the hot loop indexes it, never calls sin
 lay = None          # the static scene, inflated + painted once, copied per frame (#54)
 petals = []         # each: [x, y, fall_speed, sway_phase, sway_amp, shade(0 near..2 far)]
@@ -61,7 +62,9 @@ def _shed(p, fresh):
     # starts full.
     n = len(EMIT)
     if n:
-        ex, ey = EMIT[int(rnd(n)) % n]
+        a = EMIT[int(rnd(n)) % n]
+        ex = a.x
+        ey = a.y
     else:
         ex = rnd(W)
         ey = 0.0
@@ -71,7 +74,8 @@ def _shed(p, fresh):
 
 
 def _init():
-    global lay, petals, base, t
+    global lay, petals, base, t, EMIT
+    EMIT = scene()                         # the canopy, as placed in the Scene tab
     _build_sin()
     if lay is None:                        # allocate the scene buffer only once
         lay = make_layer(W, H)

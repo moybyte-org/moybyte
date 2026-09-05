@@ -1,11 +1,12 @@
 """The Lua-side glue for moybyte's OBJECT-valued cart verbs -- one definition.
 
-Three verbs in the moybyte cart API return objects: `make_layer` (a Layer),
-`image` (a paint image), and the pair `draw_layer` consumes. No Lua runtime
-here marshals objects across its boundary -- moy_lua passes scalars, moycore
-passes scalars and tuples, and the host's ctypes binding passes ints and one
-string -- so all of them solve it the same way: an int-handle registry on the
-Python side, and Lua wrappers that hide the handles from the cart.
+Two families of the moybyte cart API return objects: `make_layer` (a Layer),
+`image` (a paint image), and the placement verbs of #85/#109 (`scene`,
+`actors` and the actor they hand out). No Lua runtime here marshals objects
+across its boundary -- moy_lua passes scalars, moycore passes scalars and
+tuples, and the host's ctypes binding passes ints and strings -- so all of them
+solve it the same way: an int-handle registry on the Python side, and Lua
+wrappers that hide the handles from the cart.
 
 This module is that solution, once. It used to live in moy_lua_glue.py, which
 made it reachable from the two DEVICE runtimes and invisible to the host's --
@@ -99,10 +100,15 @@ LIBMOY_VERBS = frozenset((
 #
 # make_layer/draw_layer/image/Image are object-valued, and objects do not cross
 # any of these bindings -- moy_lua passed scalars, moycore passes scalars and
-# tuples, the host's ctypes binding passes ints and one string. They ride
+# tuples, the host's ctypes binding passes ints and strings. They ride
 # install_handles + PRELUDE_HANDLES below instead, which is also why a moybyte
 # layer can take an Image (`lay:spr(image("bg"), ...)`) where libmoy's
 # sheet-tile pair cannot.
+#
+# The placement verbs (#214) are denied for the same reason and ride the same
+# route: scene()/load_scene()/actors() answer with a LIST of Actor rows, and
+# touching/move_actor/move_actor_to/remove_actor take one. draw_scene stays
+# registered -- no arguments, no result, nothing to marshal.
 #
 # `table` is the #164 case: registering that name would set the GLOBAL `table`
 # and clobber Lua's library, which celeste's p8 shim needs for table.remove. It
@@ -119,6 +125,8 @@ NOT_REGISTRABLE = frozenset((
     "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
     "Image",                               # a constructor, likewise
     "table",                               # goes in as moy_table_verb (#164)
+    "scene", "load_scene", "actors",       # rows of actors: prelude + handles
+    "touching", "move_actor", "move_actor_to", "remove_actor",
 ))
 
 # The prelude in three chunks, because moycore takes only two of them.
@@ -182,6 +190,212 @@ do
     return t
   end
 end
+
+do
+  -- The placement API (#85/#109) for Lua carts, #214. A scene row is a plain
+  -- table -- a.tag / a.tile / a.x / a.y / a.flip / a.flags, the same names the
+  -- Python rows carry -- and `__id` is its handle back to the Actor, exactly
+  -- as a layer's `__id` is.
+  --
+  -- A WHOLE SCENE CROSSES AS ONE STRING, decoded here. The per-field
+  -- alternative is six upcalls a row, and a scene is up to a few hundred rows;
+  -- the encoder is the Python half of this same file, so the two ends cannot
+  -- drift apart across the two runtimes.
+  --
+  -- The live world is then MIRRORED here and the mirror is authoritative:
+  -- actors()/touching()/move_actor()/remove_actor() are pure Lua over it, at
+  -- zero upcalls a frame, and draw_scene() -- the only verb that reads the
+  -- actors back on the Python side -- pushes down what actually changed first.
+  local scene_rows, scene_load, world_rows = __scene_rows, __scene_load, __world_rows
+  local actor_set, actor_tag = __actor_set, __actor_tag
+  local actor_flag, actor_drop = __actor_flag, __actor_remove
+  local draw_scene_h = draw_scene
+  __scene_rows, __scene_load, __world_rows = nil, nil, nil
+  __actor_set, __actor_tag, __actor_flag, __actor_remove = nil, nil, nil, nil
+  local find, sub, gsub = string.find, string.sub, string.gsub
+  local floor, tremove, tonum = math.floor, table.remove, tonumber
+  local UNESC = { c = ",", ["\\\\"] = "\\\\" }
+  local rows = {}                 -- __id -> the ONE table that actor ever gets
+
+  local function rd(s, p)         -- one comma-terminated field, unescaped
+    local e = find(s, ",", p, true)
+    local v = sub(s, p, e - 1)
+    if find(v, "\\\\", 1, true) then v = gsub(v, "\\\\(.)", UNESC) end
+    return v, e + 1
+  end
+
+  local function decode(blob)
+    local out, p, n = {}, 1, nil
+    n, p = rd(blob, p)
+    for i = 1, tonum(n) do
+      local id, tile, x, y, flip, tag, nf, k, kind, v
+      id, p = rd(blob, p)
+      tile, p = rd(blob, p)
+      x, p = rd(blob, p)
+      y, p = rd(blob, p)
+      flip, p = rd(blob, p)
+      tag, p = rd(blob, p)
+      nf, p = rd(blob, p)
+      id = tonum(id)
+      local row = rows[id]
+      if row == nil then
+        row = { __id = id, flags = {} }
+        rows[id] = row
+      end
+      row.tag, row.tile = tag, tonum(tile)
+      row.x, row.y, row.flip = tonum(x), tonum(y), tonum(flip)
+      local fl = row.flags
+      for _ = 1, tonum(nf) do
+        k, p = rd(blob, p)
+        kind, p = rd(blob, p)
+        v, p = rd(blob, p)
+        if kind == "n" then fl[k] = tonum(v)
+        elseif kind == "b" then fl[k] = (v == "1")
+        else fl[k] = v end
+      end
+      out[i] = row
+    end
+    return out
+  end
+
+  local function snapshot(src, tag)
+    local out, n = {}, 0
+    for i = 1, #src do
+      local r = src[i]
+      if tag == nil or r.tag == tag then
+        n = n + 1
+        out[n] = r
+      end
+    end
+    return out
+  end
+
+  -- A fresh sequence over the SAME rows every call, which is what the Python
+  -- side does (`list(self._parse(n))`): a cart may reorder its own copy, and a
+  -- for-each may remove_actor() mid-loop, without either reaching the cache.
+  local parsed = {}
+  function scene(name)
+    local key = name or ""
+    local got = parsed[key]
+    if got == nil then
+      got = decode(scene_rows(key))
+      parsed[key] = got
+    end
+    return snapshot(got)
+  end
+
+  function load_scene(name)
+    local got = decode(scene_load(name or ""))
+    parsed = {}                   -- the ACTIVE scene moved
+    return snapshot(got)
+  end
+
+  local live, gone = nil, nil
+  local sx, sy, st, sf, sg, sfl = {}, {}, {}, {}, {}, {}
+
+  local function world()
+    if live == nil then
+      live = decode(world_rows())
+      for i = 1, #live do
+        local r = live[i]
+        local h = r.__id
+        sx[h], sy[h], st[h], sf[h], sg[h] = r.x, r.y, r.tile, r.flip, r.tag
+        -- The shadow starts at what Python HOLDS, not empty: a flag the cart
+        -- clears before the first draw_scene would otherwise be in neither
+        -- table and never be sent down.
+        local shadow = nil
+        for k, v in pairs(r.flags) do
+          shadow = shadow or {}
+          shadow[k] = v
+        end
+        sfl[h] = shadow
+      end
+    end
+    return live
+  end
+
+  function actors(tag)
+    return snapshot(world(), tag)
+  end
+
+  local function overlap(a, b)
+    return a.x < b.x + 8 and b.x < a.x + 8 and a.y < b.y + 8 and b.y < a.y + 8
+  end
+
+  function touching(a, b)
+    if a == nil then return false end
+    if type(b) == "table" then return overlap(a, b) end
+    local w = world()
+    for i = 1, #w do
+      local o = w[i]
+      if o ~= a and o.tag == b and overlap(a, o) then return true end
+    end
+    return false
+  end
+
+  -- int() truncates toward zero, and the seam carries integers only, so the
+  -- rounding happens HERE rather than differing between the two tiers.
+  local function itrunc(v)
+    if v >= 0 then return floor(v) end
+    return -floor(-v)
+  end
+
+  function move_actor(a, dx, dy)
+    if a == nil then return end
+    a.x, a.y = itrunc(a.x + dx), itrunc(a.y + dy)
+  end
+
+  function move_actor_to(a, x, y)
+    if a == nil then return end
+    a.x, a.y = itrunc(x), itrunc(y)
+  end
+
+  function remove_actor(a)
+    if a == nil then return end
+    local w = world()
+    for i = 1, #w do
+      if w[i] == a then
+        tremove(w, i)
+        gone = gone or {}
+        gone[#gone + 1] = a.__id
+        return
+      end
+    end
+  end
+
+  function draw_scene()
+    if live ~= nil then
+      if gone ~= nil then
+        for i = 1, #gone do actor_drop(gone[i]) end
+        gone = nil
+      end
+      for i = 1, #live do
+        local r = live[i]
+        local h = r.__id
+        local x, y, tile, flip = itrunc(r.x), itrunc(r.y), r.tile, r.flip
+        if x ~= sx[h] or y ~= sy[h] or tile ~= st[h] or flip ~= sf[h] then
+          sx[h], sy[h], st[h], sf[h] = x, y, tile, flip
+          actor_set(h, x, y, tile, flip)
+        end
+        if r.tag ~= sg[h] then
+          sg[h] = r.tag
+          actor_tag(h, r.tag)
+        end
+        local fl, shadow = r.flags, sfl[h]
+        if next(fl) ~= nil or shadow ~= nil then
+          if shadow == nil then shadow = {}; sfl[h] = shadow end
+          for k, v in pairs(fl) do
+            if shadow[k] ~= v then shadow[k] = v; actor_flag(h, k, v) end
+          end
+          for k in pairs(shadow) do
+            if fl[k] == nil then shadow[k] = nil; actor_flag(h, k) end
+          end
+        end
+      end
+    end
+    if draw_scene_h ~= nil then draw_scene_h() end
+  end
+end
 """
 
 PRELUDE_FASTMATH = """
@@ -202,14 +416,60 @@ end
 _LUA_PRELUDE = PRELUDE_TABLE + PRELUDE_HANDLES + PRELUDE_FASTMATH
 
 
+def _esc(s):
+    """One blob field. `,` separates fields, so `,` and `\\` are escaped."""
+    return str(s).replace("\\", "\\\\").replace(",", "\\c")
+
+
+def _flag_field(v):
+    """A scene flag as (kind, text), or None for a value Lua has no shape for."""
+    if v is True or v is False:
+        return "b", "1" if v else "0"
+    if isinstance(v, int) or isinstance(v, float):
+        return "n", str(v)
+    if isinstance(v, str):
+        return "s", v
+    return None
+
+
+def rows_blob(rows, ident):
+    """Actor rows as the ONE string the prelude's `decode` reads.
+
+    `count,` then per row `id,tile,x,y,flip,tag,nflags,` and `key,kind,value,`
+    per flag. Every field is comma-terminated and escaped, so a tag holding a
+    comma (or a backslash) survives and the decoder never has to count bytes --
+    which is what keeps it correct for a non-ASCII tag under Lua's byte
+    strings. Dependency-free and MicroPython-safe: both boards run this.
+    """
+    parts = [str(len(rows))]
+    for a in rows:
+        parts.append(str(ident(a)))
+        parts.append(str(a.tile))
+        parts.append(str(a.x))
+        parts.append(str(a.y))
+        parts.append(str(a.flip))
+        parts.append(_esc(a.tag))
+        flags = []
+        for k in (a.flags or {}):
+            kv = _flag_field(a.flags[k])
+            if kv is not None:
+                flags.append(_esc(k))
+                flags.append(kv[0])
+                flags.append(_esc(kv[1]))
+        parts.append(str(len(flags) // 3))
+        parts.extend(flags)
+    return ",".join(parts) + ","
+
+
 def install_handles(ns, reg):
     """Register the int-handle half of PRELUDE_HANDLES; return the registries.
 
-    The object-valued API entries (layers, paint images) stay Python-side and
-    the prelude's Lua wrappers speak int handles to them, because objects have
-    never crossed either VM boundary -- moy_lua marshals scalars, and moycore
-    marshals scalars and tuples. The returned lists also PIN the objects for
-    the run's lifetime; drop them at close and the layers go with them.
+    The object-valued API entries (layers, paint images, the placement rows of
+    #85/#109) stay Python-side and the prelude's Lua wrappers speak int handles
+    to them, because objects have never crossed either VM boundary -- moy_lua
+    marshals scalars, and moycore marshals scalars and tuples. The returned
+    lists also PIN the objects for the run's lifetime; drop them at close and
+    the layers go with them.
 
     `reg` is the runtime's own register verb (`moy_lua.register` or
     `moycore.register`), which is the only thing that differs between the two.
@@ -250,4 +510,63 @@ def install_handles(ns, reg):
     reg("__layer_cls", _layer_cls)
     reg("__draw_layer", _draw_layer)
     reg("__image_handle", _image_handle)
+
+    # The placement half (#214). `scene` and friends are absent from a
+    # make_layer/probe namespace, so every one of these degrades to "no actors"
+    # rather than to a nil global the cart dies on.
+    scene = ns.get("scene")
+    load_scene = ns.get("load_scene")
+    world_actors = ns.get("actors")
+    drop_actor = ns.get("remove_actor")
+    actors_by_id = []
+    id_of = {}
+
+    def _ident(a):
+        h = id_of.get(a)
+        if h is None:
+            h = len(actors_by_id)
+            actors_by_id.append(a)
+            id_of[a] = h
+        return h
+
+    def _scene_rows(name):
+        if scene is None:
+            return "0,"
+        return rows_blob(scene(name) if name else scene(), _ident)
+
+    def _scene_load(name):
+        if load_scene is None:
+            return "0,"
+        return rows_blob(load_scene(name), _ident)
+
+    def _world_rows():
+        if world_actors is None:
+            return "0,"
+        return rows_blob(world_actors(), _ident)
+
+    def _actor_set(h, x, y, tile, flip):
+        a = actors_by_id[int(h)]
+        a.x, a.y, a.tile, a.flip = int(x), int(y), int(tile), int(flip)
+
+    def _actor_tag(h, tag):
+        actors_by_id[int(h)].tag = str(tag)
+
+    def _actor_flag(h, key, value=None):
+        flags = actors_by_id[int(h)].flags
+        if value is None:
+            flags.pop(key, None)
+        else:
+            flags[key] = value
+
+    def _actor_remove(h):
+        if drop_actor is not None:
+            drop_actor(actors_by_id[int(h)])
+
+    reg("__scene_rows", _scene_rows)
+    reg("__scene_load", _scene_load)
+    reg("__world_rows", _world_rows)
+    reg("__actor_set", _actor_set)
+    reg("__actor_tag", _actor_tag)
+    reg("__actor_flag", _actor_flag)
+    reg("__actor_remove", _actor_remove)
     return layers, images

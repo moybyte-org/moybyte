@@ -1245,9 +1245,11 @@ static mp_obj_t run_chunk(mp_obj_t src_obj, mp_obj_t name_obj)
 // "unsupported value" and the whole cart falls back to the trampoline runtime.
 // moy_lua has always solved this the same way (int-handle registries plus Lua
 // wrappers that hide them), so moycore runs the SAME prelude rather than
-// growing an object marshaller. Hence a chunk verb: the prelude has to execute
-// after register() and before the cart, which is exactly the window load()
-// closes.
+// growing an object marshaller. The placement verbs of #85/#109 took that
+// route too (#214) and needed nothing here: a scene crosses as one STRING,
+// which push_mp_to_lua already carried. Hence a chunk verb: the prelude has to
+// execute after register() and before the cart, which is exactly the window
+// load() closes.
 static mp_obj_t mod_exec(mp_obj_t src_obj, mp_obj_t name_obj)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,

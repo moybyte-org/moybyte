@@ -104,6 +104,12 @@ The few Lua-specific notes:
   path). Paint images (`image("name")`) are placed via a layer —
   `lay:spr(image("bg"), x, y)` — not passed to `spr()` directly; multi-tile
   sprites (`w,h` spans) are drawn as their individual tiles.
+- Anything the document calls a **list** is a 1-based Lua **sequence**: walk it
+  with `for _, a in ipairs(scene()) do … end` and size it with `#`. Anything it
+  calls a **row** (a scene actor) is a Lua **table** with the same field names —
+  `a.tag`, `a.tile`, `a.x`, `a.y`, `a.flip`, `a.flags` — and anything it calls a
+  **dict** (`a.flags`) is a table too, read as `a.flags.size` or
+  `a.flags["size"]`.
 - No imports, same as Python. The **safe Lua stdlib** is available: `math.*`,
   `string.*`, `table.*` (no `io`/`os`/`load`/`require`).
 - A crash opens the same error panel, and EDIT drops on the offending
@@ -311,7 +317,7 @@ drag to move, and set its tag in the props row — PLAY spawns what you placed.
 
 | call | does |
 |---|---|
-| `scene()` | the ACTIVE scene's actors — a list of read-only rows with `.tag` (the kind your code branches on), `.tile` (sheet index), `.x`/`.y` (world-space), `.flip`, `.flags` (a dict of extras). Missing/empty scene → `[]` |
+| `scene()` | the ACTIVE scene's actors — a list of read-only rows with `.tag` (the kind your code branches on), `.tile` (sheet index), `.x`/`.y` (world-space), `.flip`, `.flags` (a dict of extras). Missing/empty scene → `[]` (Lua: an empty table) |
 | `scene(name)` | a named scene's actors, WITHOUT switching the active one |
 | `load_scene(name)` | switch the active scene (e.g. `level2`) and return its actors. Resets to the default on the next run. Unknown name → `[]`, active unchanged |
 
@@ -324,6 +330,19 @@ def _init():
             coins.append([a.x, a.y])
         elif a.tag == "player":
             px, py = a.x, a.y
+```
+
+```lua
+function _init()
+  coins = {}
+  for _, a in ipairs(scene()) do      -- spawn whatever was placed
+    if a.tag == "coin" then
+      coins[#coins + 1] = { a.x, a.y }
+    elseif a.tag == "player" then
+      px, py = a.x, a.y
+    end
+  end
+end
 ```
 
 Treat the rows as read-only — a game's *changing* state belongs in your own
@@ -369,6 +388,33 @@ def _draw():
     cls(col("dark_blue"))
     draw_scene()
     print("SCORE " + str(score), 4, 4, col("white"))
+```
+
+…and the same cart in Lua, call for call:
+
+```lua
+score = 0
+
+function _update(dt)
+  for _, player in ipairs(actors("player")) do
+    if btn("left")  then move_actor(player, -2, 0) end
+    if btn("right") then move_actor(player, 2, 0) end
+    if btn("up")    then move_actor(player, 0, -2) end
+    if btn("down")  then move_actor(player, 0, 2) end
+  end
+  for _, coin in ipairs(actors("coin")) do
+    if touching(coin, "player") then
+      remove_actor(coin)
+      score = score + 1
+    end
+  end
+end
+
+function _draw()
+  cls(col("dark_blue"))
+  draw_scene()
+  print("SCORE " .. score, 4, 4, col("white"))
+end
 ```
 
 The **Actors** block category gives you the no-loop version of the same thing:

@@ -405,6 +405,7 @@ def make_ns(**extra):
         "cls": lambda *a: None,
         "rnd": lambda *a: None,
         "scene": lambda *a: log.append(("scene",) + a),
+        "draw_scene": lambda *a: log.append(("draw_scene",) + a),
         "text": lambda *a: log.append(("text",) + a),
         "make_layer": lambda w, h: FakeLayer(w, h, log),
         "draw_layer": lambda lay, cx, cy: log.append(("draw_layer", lay, cx, cy)),
@@ -716,8 +717,11 @@ def test_a_moybyte_verb_nobody_remembered_is_registered_anyway(w):
     w.run(ns=ns)
     assert "brand_new_verb_2026" in w.core.registered
     assert w.core.registered["brand_new_verb_2026"] is ns["brand_new_verb_2026"]
-    for shared in ("scene", "text"):
+    for shared in ("draw_scene", "text"):
         assert shared in w.core.registered
+    # ...and scene() is not one of them: it answers with a LIST of rows, so it
+    # rides the handle glue instead (#214).
+    assert "scene" not in w.core.registered
 
 
 def test_libmoys_own_verbs_are_never_shadowed_by_a_trampoline(w):
@@ -873,7 +877,7 @@ def test_a_missing_image_answers_a_negative_handle_and_pins_nothing(w):
 
 
 def test_a_register_that_raises_closes_the_vm_and_reraises(w):
-    w.core.register_error = ("scene", ValueError("bad verb"))
+    w.core.register_error = ("text", ValueError("bad verb"))
     with pytest.raises(ValueError):
         w.run()
     assert w.core.closes == 1

@@ -173,6 +173,66 @@ print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
       moycore.get_global("MISS"))
 moycore.close()
 
+# The placement API (#85/#109) over the SAME shared Scenes the Python tier
+# binds -- widgets.py imports here unchanged, so this is the real world object
+# and the real prelude, not a transcription of either (#214).
+from widgets import Scenes
+
+SCN = ('[{"tag": "player", "tile": 1, "x": 100, "y": 100, "flip": 0},'
+       ' {"tag": "coin", "tile": 2, "x": 104, "y": 100, "flip": 1,'
+       '  "flags": {"size": 200, "say": "hi, there", "hidden": false}},'
+       ' {"tag": "coin", "tile": 2, "x": 200, "y": 8, "flip": 0}]')
+_scenes = Scenes({"main": SCN, "two": '[{"tag": "boss", "tile": 9}]'},
+                 ["main", "two"])
+_world = _scenes.world()
+_drawn = []
+PNS = {"scene": _scenes.scene, "load_scene": _scenes.load_scene,
+       "actors": _world.actors, "touching": _world.touching,
+       "move_actor": _world.move, "move_actor_to": _world.move_to,
+       "remove_actor": _world.remove,
+       "draw_scene": lambda: _drawn.append(
+           [(a.tag, a.tile, a.x, a.y, a.flip, a.flags)
+            for a in _world.actors()])}
+moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
+moycore.register("draw_scene", PNS["draw_scene"])
+install_handles(PNS, moycore.register)
+print("PPRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
+print("PLACE", moycore.load(
+    "function _init()\n"
+    "  local s = scene()\n"
+    "  N = #s\n"
+    "  TAG = (s[1].tag == 'player') and 1 or 0\n"
+    "  X, Y, TILE, FLIP = s[2].x, s[2].y, s[2].tile, s[2].flip\n"
+    "  SAY = (s[2].flags.say == 'hi, there') and 1 or 0\n"     # escaped comma
+    "  SIZE = s[2].flags.size\n"
+    "  HID = (s[2].flags.hidden == false) and 1 or 0\n"
+    "  TWO = #scene('two')\n"
+    "  MISS = #scene('nope')\n"
+    "  A, C = #actors(), #actors('coin')\n"
+    "  local p = actors('player')[1]\n"
+    "  T0 = touching(p, 'coin') and 1 or 0\n"
+    "  move_actor(p, -3.5, 4)\n"
+    "  PX, PY = p.x, p.y\n"
+    "  p.flags.hidden = true\n"
+    "  p.tag = 'hero'\n"
+    "  for _, c in ipairs(actors('coin')) do remove_actor(c) end\n"
+    "  LEFT = #actors()\n"
+    "end\n"
+    "function _update(dt) draw_scene() end\n"
+    "function _draw() end\n", "@place"))
+moycore.tick(0.03125)
+print("PROWS", moycore.get_global("N"), moycore.get_global("TAG"),
+      moycore.get_global("X"), moycore.get_global("Y"),
+      moycore.get_global("TILE"), moycore.get_global("FLIP"))
+print("PFLAGS", moycore.get_global("SAY"), moycore.get_global("SIZE"),
+      moycore.get_global("HID"))
+print("PNAMED", moycore.get_global("TWO"), moycore.get_global("MISS"))
+print("PWORLD", moycore.get_global("A"), moycore.get_global("C"),
+      moycore.get_global("T0"), moycore.get_global("PX"),
+      moycore.get_global("PY"), moycore.get_global("LEFT"))
+print("PDRAWN", _drawn)
+moycore.close()
+
 # time() must ADVANCE INSIDE a tick. Input is frozen for the frame on purpose;
 # a clock bundled into that same snapshot is not a clock, and the cart that
 # proves it is Bench Lua -- it grows a batch until the batch costs TARGET_MS,
@@ -421,6 +481,26 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
     # table() rides Lua's table LIBRARY as __call (#164), so both work.
     assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
         "the table graft or the missing-image nil regressed: %s" % out
+
+    # The placement API (#214). scene() reached Lua as NIL until the rows got a
+    # route across the boundary, so `ipairs(scene())` was "value expected" on
+    # every board -- and the Blocks ladder compiles to these exact calls.
+    assert by["PPRE"][1] == "None", out
+    assert by["PLACE"][1] == "None", \
+        "the prelude did not define the placement verbs for the cart: %s" % out
+    assert by["PROWS"][1:] == ["3", "1", "104", "100", "2", "1"], \
+        "a scene row lost a field crossing into Lua: %s" % out
+    # A tag or a say holding the blob's separator must survive it, and a false
+    # flag must arrive false rather than vanish.
+    assert by["PFLAGS"][1:] == ["1", "200", "1"], \
+        "a scene flag did not survive the crossing: %s" % out
+    assert by["PNAMED"][1:] == ["1", "0"], \
+        "scene(name) or the missing-scene empty list regressed: %s" % out
+    # move_actor truncates toward zero exactly as Python's int() does, and the
+    # coins removed in Lua are gone from the Python world.
+    assert by["PWORLD"][1:] == ["3", "2", "1", "96", "104", "1"], out
+    assert ("PDRAWN [[('hero', 1, 96, 104, 0, {'hidden': True})]]" in out), \
+        "the mutations did not reach the Python actor draw_scene draws: %s" % out
 
     # time() reads the host's frame base AND advances within the tick. The
     # snapshot freezes INPUT for a frame deliberately; freezing the clock with
