@@ -2,7 +2,11 @@
 icons + windows) vs the fullscreen PLAY world (Library + games), and the
 navigation loop between them (PLAY icon <-> Make tile / CHANGE)."""
 
+import pytest
+
 from runtime import host_app
+from runtime import ui as _ui
+from runtime.host_canvas import make_system_canvas
 
 
 from ws_helpers import build_desktop_ws as _ws
@@ -44,6 +48,97 @@ def test_desk_icon_labels_fit_their_pills(tmp_path):
     fs = ws.look.effective_font_scale()
     for _key, _box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
         assert len(label) * 8 * fs + 4 <= pill[2], label
+
+
+# -- #174: the desk column, DRAWN, on the wallpaper that hid the bug ----------
+#
+# The geometry assertion above cannot see the failure it was written for: the
+# overflow was drawn in title_ink on Open Machine's black field, so it left the
+# pill and vanished. These render the desk and count what actually landed.
+
+_WINDOWED = [((480, 320), 1), ((1024, 600), 1), ((1024, 600), 2),
+             ((1024, 600), 3)]
+
+
+def _desk_on_open_machine(tmp_path, size=(1024, 600), fs=2, titles=None):
+    ws = _ws(tmp_path, sys_size=size, font_scale=fs)
+    if titles:
+        ws._app_titles.update(titles)      # an app's manifest title, as declared
+    ws.look.select_wallpaper("open_machine", persist=False)
+    ws.open_desk()
+    ws.pointer.visible = False
+    ws._toast_until = 0
+    drv = host_app.ConsoleDriver(ws)
+    drv.frame(1 / 30)
+    drv.frame(1 / 30)
+    return ws
+
+
+def _ink(cv, rect, col):
+    x, y, w, h = rect
+    return sum(1 for yy in range(y, y + h) for xx in range(x, x + w)
+               if cv.pix(xx, yy) == col)
+
+
+def _label_ink(label, fs, ink, field):
+    """The ink a WHOLE label costs, rasterized outside ui.chip -- comparing a
+    chip against a chip would only prove the clip agrees with itself."""
+    cv = make_system_canvas(len(label) * 8 * fs + 8, 8 * fs + 8, font_scale=fs)
+    cv.cls(field)
+    cv.print(label, 4, 4, ink, 1)
+    return _ink(cv, (0, 0, cv.w, cv.h), ink)
+
+
+def _chip_colors(ws, key):
+    st = _ui.ON if key == "play" else _ui.REST
+    return _ui.state_colors(ws.theme_colors, "chip", st)
+
+
+def _on_canvas(cv, r):
+    return (r[0] >= 0 and r[1] >= 0
+            and r[0] + r[2] <= cv.w and r[1] + r[3] <= cv.h)
+
+
+def _overlaps(a, b):
+    return not (a[0] + a[2] <= b[0] or b[0] + b[2] <= a[0]
+                or a[1] + a[3] <= b[1] or b[1] + b[3] <= a[1])
+
+
+@pytest.mark.parametrize("size,fs", _WINDOWED)
+def test_desk_labels_render_whole_on_the_open_machine_wallpaper(tmp_path, size, fs):
+    """Every shipped desk label draws every one of its glyphs, at every
+    windowed config -- PROJECTS drew as PROJECT and STORYBOOK as STORYBO."""
+    ws = _desk_on_open_machine(tmp_path, size, fs)
+    cv = ws.sys_canvas
+    efs = ws.look.effective_font_scale()
+    seen = []
+    for key, box, pill, label, _cart in ws.wm._backdrop_layer._icon_rects():
+        field, ink, _edge = _chip_colors(ws, key)
+        assert _ink(cv, pill, ink) == _label_ink(label, efs, ink, field), label
+        assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
+        assert not any(_overlaps(pill, p) for p in seen), key
+        seen.append(pill)
+
+
+def test_a_long_app_title_keeps_every_desk_icon_on_the_canvas(tmp_path):
+    """A user may add an app, and its manifest title is what the desk labels
+    its icon with. The cell sizes to the LONGEST label, so an unbounded title
+    marched the last column past the right edge -- and an icon drawn off the
+    canvas is unreachable, not merely ugly. It clips inside its pill instead."""
+    long_title = "CALCULATING MACHINE DELUXE"
+    ws = _desk_on_open_machine(tmp_path, fs=3, titles={"calc": long_title})
+    cv = ws.sys_canvas
+    fs = ws.look.effective_font_scale()
+    rects = ws.wm._backdrop_layer._icon_rects()
+    assert any(label == long_title for _k, _b, _p, label, _c in rects)
+    seen = []
+    for key, box, pill, label, _cart in rects:
+        assert _on_canvas(cv, box) and _on_canvas(cv, pill), (key, box, pill)
+        assert not any(_overlaps(pill, p) for p in seen), key
+        seen.append(pill)
+        field, ink, _edge = _chip_colors(ws, key)
+        fits = (pill[2] - 4) // (8 * fs)
+        assert _ink(cv, pill, ink) == _label_ink(label[:fits], fs, ink, field), label
 
 
 def test_desk_bar_has_no_context_x(tmp_path):

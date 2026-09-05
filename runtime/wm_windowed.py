@@ -418,24 +418,34 @@ class _BackdropLayer(Layer):
         fs = ws.look.effective_font_scale()
         bar_h = self.wm._bar_h()
         box = 40 * fs
+        gut = 10 * fs                   # the cell's trailing gutter: pill = cell_w - gut
         catalog = self._icon_catalog()
-        # The pill (cell_w - 10*fs) must hold the longest catalog label, or
-        # the chip clips it (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK).
-        maxc = max((len(label) for _k, label, _c in catalog), default=0)
-        cell_w = max(66 * fs, maxc * 8 * fs + 10 * fs + 4)
         cell_h = 62 * fs
-        x = 14 * fs
+        x0 = 14 * fs
         y0 = bar_h + 12 * fs
+        bottom = ws.sys_canvas.h - 6 * fs
+        # The pill must hold the longest catalog label or the chip clips it
+        # (#174: a fixed 66*fs cell cut PROJECTS/STORYBOOK) -- but only as wide
+        # as the columns it takes still fit the canvas, or a long app title
+        # marches the last column off the right edge and out of reach. The last
+        # column draws no gutter, so its width is not charged against the fit.
+        maxc = max((len(label) for _k, label, _c in catalog), default=0)
+        rows = max(1, (bottom - y0) // cell_h)
+        cols = max(1, (len(catalog) + rows - 1) // rows)
+        fit_w = (ws.sys_canvas.w - x0 + gut) // cols
+        cell_w = max(66 * fs, maxc * 8 * fs + gut + 4)
+        cell_w = max(box + gut, min(cell_w, fit_w))
+        x = x0
         y = y0
         out = []
         for key, label, cart in catalog:
-            if y + cell_h > ws.sys_canvas.h - 6 * fs:
+            if y + cell_h > bottom:
                 y = y0
                 x += cell_w
-            bx = x + (cell_w - 10 * fs - box) // 2
+            bx = x + (cell_w - gut - box) // 2
             out.append((key,
                         (bx, y, box, box),
-                        (x, y + box + 3 * fs, cell_w - 10 * fs, 13 * fs),
+                        (x, y + box + 3 * fs, cell_w - gut, 13 * fs),
                         label, cart))
             y += cell_h
         return out
