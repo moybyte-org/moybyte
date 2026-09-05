@@ -105,13 +105,15 @@ class SceneLayout(LayoutBase):
     star of the reflow -- a big panel shows the whole 320x240 viewport (and
     beyond) with no panning."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
+                 chrome_scale=None):
         # `bounds` (bx, by, bw, bh) confines the whole editor to a SUB-RECT of the
         # system canvas -- the right pane of the combined Blocks+Scene workspace
         # (blocks-left / objects-right, Scratch-style). A bounded layout never takes
         # the frozen 320x240 branch (it's a big-screen feature), so `_base` excludes
         # it and the T-Deck's scene tab is byte-identical.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None)
+        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+                            chrome_scale=chrome_scale)
         fs = self.fs
         self.zooms = _SV_ZOOMS
         if self._base:
@@ -136,7 +138,7 @@ class SceneLayout(LayoutBase):
             return
         # -- responsive: the MapLayout formulas (right column anchored to the
         # panel's right edge, button row to its bottom, view fills the rest) ----
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         if bounds is not None:
             # Confined to the workspace's right pane: the panel fills the pane
             # (minus a hair of inset), and every rect below derives from px/py/
@@ -224,9 +226,9 @@ class SceneEditorUI:
         sc = ws.sys_canvas
         self.layout = SceneLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- ws._relayout fan-out."""
-        self.layout = SceneLayout(w, h, fs)
+        self.layout = SceneLayout(w, h, fs, chrome_scale=cs)
         if self.scene_zoom >= len(self.layout.zooms):
             self.scene_zoom = 0
         self._clamp_cam()

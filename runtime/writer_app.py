@@ -80,8 +80,8 @@ def _encode(body):
 
 
 class WriterLayout(ListShellLayout):
-    def __init__(self, w, h, fs=1, windowed=False):
-        self._init_frame(w, h, fs, windowed)
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
+        self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.toolbar_h = 24 * fs
         self.cell = 8 * fs
@@ -158,7 +158,8 @@ class WriterAppLayer(ListShellApp):
         self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = WriterLayout(cv.w, cv.h, self._surf.font_scale(),
-                                   self._surf.windowed())
+                                   self._surf.windowed(),
+                                   self._surf.chrome_scale())
         self.mode = "list"            # list | edit | rename
         self.grid = FileGridView(ctx.shell, "docs")
         self.doc_name = None          # the open doc's file name (None = none open)
@@ -311,8 +312,8 @@ class WriterAppLayer(ListShellApp):
 
     # -- lifecycle -----------------------------------------------------------
 
-    def relayout(self, w, h, fs):
-        self.layout = WriterLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = WriterLayout(w, h, fs, self._surf.windowed(), cs)
         if self.editor is not None:
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 

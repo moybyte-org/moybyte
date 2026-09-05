@@ -502,7 +502,7 @@ try:
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _nibble,
+        _blit_glyph, _ICON, _ICON_ART, _nibble, chrome_scale_floor,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
     )
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -512,7 +512,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
         _ICON_GAP_Y, _ICON_X0, _ICON_Y0, _ICON_BOX, _PAGE_PREV, _PAGE_NEXT,
         _CURSOR_BASE, _CURSOR_ACCEL,
         _BASE_W, _BASE_H, _FONT_W, Layout, CodeLayout, _GLYPH_SIZE, _GLYPHS,
-        _blit_glyph, _ICON, _ICON_ART, _nibble,
+        _blit_glyph, _ICON, _ICON_ART, _nibble, chrome_scale_floor,
         _cursor_delta, _clamp_scroll, _in, _SPLASH_MS,
     )
 
@@ -602,12 +602,13 @@ def _ema(cur, sample):
 
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
-                 font_scale=1):
+                 font_scale=1, panel_diagonal_in=None):
         # Built in five ordered stages (each a method so the constructor reads
         # as a table of contents). The ORDER is load-bearing: the WM must exist
         # before anything reads/writes `screen`, Project/Player/EditorApp before
         # anything sets their forwarded fields, and the layer stack last.
-        self._init_canvases(comp, canvas, sys_canvas, font_scale)
+        self._init_canvases(comp, canvas, sys_canvas, font_scale,
+                            panel_diagonal_in)
         self._init_components(input, carts)
         self._init_state()
         self._init_perf()
@@ -616,9 +617,20 @@ class Workstation:
         # once here; _visible_stack()/_draw_stack() z-order + gate them per frame.
         self._build_layers()
 
-    def _init_canvases(self, comp, canvas, sys_canvas, font_scale):
+    def _init_canvases(self, comp, canvas, sys_canvas, font_scale,
+                       panel_diagonal_in=None):
         """The two-domain canvas seam (#39), the WM, the theme and the responsive layouts."""
         self.comp = comp
+        # The board's glass, in inches, or None when it did not say (#203). The
+        # ONE fact behind the tap-target floor, and the reason the floor is an
+        # opt-in: millimetres are the only unit that can answer "is this icon big
+        # enough to hit", and only a board knows its own. Resolved to an integer
+        # here, from the PANEL's size -- never from a window's, which is what
+        # `chrome_floor` being a constructor-time field buys on the windowed tier.
+        self.panel_diagonal_in = panel_diagonal_in
+        _panel = sys_canvas if sys_canvas is not None else canvas
+        self.chrome_floor = chrome_scale_floor(_panel.w, _panel.h,
+                                               panel_diagonal_in)
         # Two rendering domains (#39). The GAME canvas is the fixed 320x240 indexed
         # surface the cart + cart API draw on -- carts are UNCHANGED. The SYSTEM
         # canvas is the panel/window surface the desktop/launcher/settings + status
@@ -672,7 +684,8 @@ class Workstation:
         # True only while the windowed WM's DESK (the make world) is open --
         # see the property below the screen projection.
         self.layout = Layout(self.sys_canvas.w, self.sys_canvas.h,
-                             self.look.effective_font_scale())
+                             self.look.effective_font_scale(),
+                             self.look.effective_chrome_scale())
         # Responsive editor geometry (#39 step 2): the code + block editors now draw
         # on the SYSTEM canvas at native size, so their layout (visible cols/rows,
         # button rects, palette/menu) derives from (w, h, font_scale) -- exactly the
@@ -680,7 +693,8 @@ class Workstation:
         # a size/font change. (Sprite/paint + map editors stay a 320x240 viewport --
         # step 3.)
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self.look.effective_font_scale())
+                                      self.look.effective_font_scale(),
+                                      self.look.effective_chrome_scale())
         # The block editor's UI (issue #29 Part 2, extracted from this class -- see
         # block_editor_ui.py): one instance, built once here and delegated to from
         # handle_input/handle_pointer/frame's menu_view == "blocks" branches plus
@@ -688,7 +702,8 @@ class Workstation:
         # _clamp_scroll are injected (see that module's docstring for why).
         self.block_ui = BlockEditorUI(self, NAMES, _in, _err_text, _clamp_scroll)
         self.block_ui.relayout(self.sys_canvas.w, self.sys_canvas.h,
-                               self.look.effective_font_scale())
+                               self.look.effective_font_scale(),
+                               self.look.effective_chrome_scale())
 
     def _init_components(self, input, carts):
         """Injected-service attach points + the shell processes (Project/Player/
@@ -1417,20 +1432,21 @@ class Workstation:
         EFFECTIVE font scale and re-push it into the launcher (so its grid reflows).
         Called on a font-scale change (and could be called on a resize)."""
         w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
-        self.layout = Layout(w, h, fs)
+        cs = self.look.effective_chrome_scale()
+        self.layout = Layout(w, h, fs, cs)
         self.launcher.set_layout(self.layout)
         self._relayout_code()             # editor layouts reflow too (#39 step 2)
-        self.block_ui.relayout(w, h, fs)
+        self.block_ui.relayout(w, h, fs, cs)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
         for _lyr in ("paint_layer", "map_ui", "scene_ui", "music_ui", "cards_layer"):
             _obj = getattr(self, _lyr, None)
             if _obj is not None:
-                _obj.relayout(w, h, fs)
+                _obj.relayout(w, h, fs, cs)
         for _app, _t in getattr(self, "_apps", ()):   # registered system apps
             _relay = getattr(_app, "relayout", None)
             if _relay is not None:
-                _relay(w, h, fs)
+                _relay(w, h, fs, cs)
         # The windowed WM (wm_windowed.py, big-screen tier) re-anchors its layout
         # contexts after any relayout; a no-op hook on the fullscreen-stack WM.
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
@@ -1443,7 +1459,8 @@ class Workstation:
         `code_layout` after __init__ -- _relayout above and EditorApp._relayout_tab
         (entering the tab, #216) both come through here."""
         self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self.look.effective_font_scale())
+                                      self.look.effective_font_scale(),
+                                      self.look.effective_chrome_scale())
         if self.editor is not None:
             self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
 
@@ -1804,7 +1821,8 @@ class Workstation:
         # ≡ rect (the launcher/Settings/Editor bar), not the fixed crash-bar slot.
         bx, _by, bw, _bh = self.layout.sysmenu_btn
         fs = self.look.effective_font_scale()
-        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled geometry
+        self.sysmenu.fs = fs          # rows hold fs-scaled text -> fs-scaled width
+        self.sysmenu.cs = self.layout.cs      # ...and cs-scaled rows (#203)
         pw = _POPUP_W * fs
         ax = bx + bw - pw
         self.sysmenu.anchor_x = max(0, min(ax, self.sys_canvas.w - pw))
@@ -4439,13 +4457,14 @@ class Workstation:
             self.sys_canvas.spr(CURSOR, self.pointer.x, self.pointer.y,
                             self.look.font_scale)
 
-    def _glyph(self, kind, rect, c, cv=None):
+    def _glyph(self, kind, rect, c, cv=None, scale=None):
         # Draw a centered icon glyph in color `c`. Defaults to the GAME canvas (the
         # editors/cart-overlay callers); the desktop/system callers pass cv=
-        # self.sys_canvas so the glyph follows the system font scale (#39). The shared
-        # blit + the glyph encoding live in the module-level _blit_glyph so Launcher
-        # (canvas-only) renders the identical vocabulary.
-        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c)
+        # self.sys_canvas so the glyph follows the system font scale (#39). `scale`
+        # overrides that -- what the bar passes so its glyphs fill a chrome-scaled
+        # slot (#203). The shared blit + the glyph encoding live in the module-level
+        # _blit_glyph so Launcher (canvas-only) renders the identical vocabulary.
+        _blit_glyph(cv if cv is not None else self.canvas, kind, rect, c, scale)
 
     def _wifi_icon_kind(self):
         """The right-zone wifi STATUS glyph (Part 3): "wifi" when the injected wifi
@@ -4526,24 +4545,26 @@ class Workstation:
             return None
         return sheet.tile_image(slot, transparent=0)
 
-    def _icon(self, kind, x, y, cv=None):
+    def _icon(self, kind, x, y, cv=None, scale=None):
         """Blit the top-bar icon `kind` (a 16x16 IconSheet sprite) at (x, y). The
         themeable replacement for _glyph on the bar; falls back to _glyph (the 12x12
         bitmap, centered) when the icon sheet/slot is missing, so the bar never crashes
         on a half-wired theme. cv defaults to the system canvas (the bar lives there);
         the running-cart bar passes the game canvas explicitly. The icon scales with
         the canvas's system font scale (#39) so it grows on a larger panel -- the GAME
-        canvas is always scale 1, so the cart bar is byte-identical."""
+        canvas is always scale 1, so the cart bar is byte-identical. `scale` overrides
+        that with the layout's CHROME scale (#203), which is what the responsive bar
+        passes so the sprite fills the tap target the layout sized."""
         cv = cv if cv is not None else self.sys_canvas
-        fs = getattr(cv, "font_scale", 1)
+        fs = int(scale) if scale else getattr(cv, "font_scale", 1)
         if fs < 1:
             fs = 1
         img = self._bar_image(kind)
         if img is not None:
-            cv.spr(img, x, y, fs)                        # 16px art upscaled by font scale
+            cv.spr(img, x, y, fs)                        # 16px art upscaled by that scale
         else:
             self._glyph(kind, (x, y, _BAR_ICON * fs, _BAR_ICON * fs),
-                        self.theme_colors.get("chrome_ink_dim", 6), cv)
+                        self.theme_colors.get("chrome_ink_dim", 6), cv, fs)
 
 
 def wire_workstation_core(ws, store, carts_root, make_api, wifi,

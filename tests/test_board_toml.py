@@ -220,6 +220,36 @@ def test_the_board_identity_matches_the_ota_stamp():
     assert 'BOARD = "%s"' % tdeck_id in ota
 
 
+def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
+    """The #203 tap-target floor's one input, and the same-fact-in-two-files
+    shape again: `[panel].diagonal_in` is the authority, `moy_runtime.py`'s
+    PANEL_DIAGONAL_IN is what the boot path hands the Workstation, and a floor
+    derived from a stale copy would size every tap target on the board wrong.
+
+    Declaring a diagonal is the OPT-IN, so the silences are asserted too --
+    each is a decision recorded in `chrome.chrome_scale_floor`'s docstring, and
+    a board that grows a `[panel]` block should be a red test read by a human
+    rather than a chrome scale that doubled on somebody's glass."""
+    from runtime.chrome import chrome_scale_floor
+
+    declared = {b: board_config.load(d).get("panel", {}).get("diagonal_in")
+                for b, d in BOARDS.items()}
+    assert {b for b, v in declared.items() if v} == {"guition-s3"}, (
+        "the set of boards opting in to the chrome tap-target floor changed: "
+        "%s. Read chrome_scale_floor's docstring before updating this."
+        % sorted(b for b, v in declared.items() if v))
+
+    guition = declared["guition-s3"]
+    runtime_py = (GUITION / "modules" / "moy_runtime.py").read_text(
+        encoding="utf-8")
+    assert "PANEL_DIAGONAL_IN = %s" % guition in runtime_py
+    assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py
+    # ...and the number does the job it was declared for: the landscape glass
+    # this board composites onto (480x320, its board.toml [board] prose) floors
+    # the chrome a scale above its font.
+    assert chrome_scale_floor(480, 320, guition) == 2
+
+
 # -- the [native] declaration (#161: the C-module list is data too) -----------
 
 

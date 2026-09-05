@@ -236,7 +236,8 @@ def _seed_system_carts(carts_dir):
                     fh.write(data)
 
 
-def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=False):
+def build_workstation(carts_dir=None, sys_size=None, font_scale=1,
+                      windowed=False, panel_diagonal_in=None):
     """Build the shared console.Workstation wired to host backends.
 
     The two-domain seam (#39): `sys_size` is the SYSTEM canvas size (w, h) -- the
@@ -249,7 +250,12 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
     `windowed=True` installs the Picotron-style windowed WM (wm_windowed.py --
     the big-screen / P4 presentation, #73/#58): the launcher is the desktop and
     every pushed app is a floating window. Needs a distinct big `sys_size`;
-    silently ignored on the shared-canvas 320x240 build."""
+    silently ignored on the shared-canvas 320x240 build.
+
+    `panel_diagonal_in` is the board fact a BOARD declares in its board.toml
+    (#203): the glass's diagonal in inches, from which the chrome tap-target
+    floor is derived. None -- every simulated tier by default -- keeps chrome on
+    the font scale."""
     carts_dir = carts_dir or os.path.expanduser("~/.moybyte/carts")
     _seed_system_carts(carts_dir)
     carts = moy_carts.scan(carts_dir)
@@ -274,7 +280,8 @@ def build_workstation(carts_dir=None, sys_size=None, font_scale=1, windowed=Fals
         sys_canvas = host_canvas.make_system_canvas(sw, sh, font_scale=font_scale)
     inp = InputState()
     ws = console.Workstation(_NullComp(), canvas, inp, carts,
-                             sys_canvas=sys_canvas, font_scale=font_scale)
+                             sys_canvas=sys_canvas, font_scale=font_scale,
+                             panel_diagonal_in=panel_diagonal_in)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own Canvas; the WM composites it up like a view.
     ws.make_game_canvas = lambda w, h: host_canvas.make_canvas(w, h)

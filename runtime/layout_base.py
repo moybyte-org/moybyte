@@ -8,11 +8,21 @@ VERBATIM rather than re-deriving them, so no reflow formula's integer floor can
 drift a T-Deck pixel. Eight classes hand-copied the same four-line `__init__`
 head and the same predicate; this is that head, and nothing else.
 
-What the base owns: `w`, `h`, `fs` (clamped to >= 1) and `_base`. What it
+What the base owns: `w`, `h`, `fs` (clamped to >= 1), `cs` and `_base`. What it
 deliberately does NOT own is everything the subclasses diverge on immediately
 after -- the per-class `font_w`/`cell`/`lh` cell metrics, and the panel-rect
 block that map/paint/scene share (`px, py = 8 * fs ...`). Those stay per class:
 this base is the predicate's home, not a geometry library.
+
+`cs` is the CHROME scale (#203) and it is the second half of the same contract:
+`fs` sizes TEXT, `cs` sizes the things a FINGER lands on, and `cs >= fs` with
+`cs == fs` as the default -- so every tier that does not opt in is byte-identical
+and `_base` still means what it always meant. A board opts in by declaring the
+physical size of its glass (`chrome.chrome_scale_floor`), because "is a 16px icon
+big enough to tap" is a question only millimetres can answer and only a board
+knows its own. The 3.5" Guition is the case that forced it: 165 PPI put a bar
+icon at 2.5mm, and raising the FONT scale to compensate was built, shipped and
+reverted the same day (#202, 2026-08-19).
 
 `base_extra` is how a subclass ANDs one more term into the predicate without
 re-declaring it. `SceneLayout` and `BlockLayout` pass `bounds is None`: a
@@ -41,9 +51,11 @@ class LayoutBase:
     """The common `__init__` head + the `_base` predicate. Constructed at init
     and relayout only, never per frame."""
 
-    def __init__(self, w=BASE_W, h=BASE_H, font_scale=1, base_extra=True):
+    def __init__(self, w=BASE_W, h=BASE_H, font_scale=1, base_extra=True,
+                 chrome_scale=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(font_scale))
+        self.cs = max(self.fs, int(chrome_scale)) if chrome_scale else self.fs
         self._base = (self.w == BASE_W and self.h == BASE_H and self.fs == 1
-                      and base_extra)
+                      and self.cs == self.fs and base_extra)

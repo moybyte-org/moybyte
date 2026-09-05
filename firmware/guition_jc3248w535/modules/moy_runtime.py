@@ -35,11 +35,15 @@ GAME_W, GAME_H = 320, 240
 FONT_SCALE = 1                 # 2x was BUILT AND REVERTED on owner verdict
                                # (2026-08-19, same day): text at 1x reads fine on
                                # this glass and 2x "looks bad" -- the real problem
-                               # is TAP TARGETS, which want a PPI floor on chrome
-                               # geometry (bar icons/menu rows) independent of the
-                               # font scale. That design is recorded in #202 and
-                               # deferred until after the UI refactor; do not
-                               # re-flip this constant to solve tap size.
+                               # is TAP TARGETS, and PANEL_DIAGONAL_IN below is
+                               # the lever that answers them. Do not re-flip this
+                               # constant to solve tap size.
+PANEL_DIAGONAL_IN = 3.5        # the glass, in inches -- board.toml [panel] is the
+                               # authority and tests/test_board_toml.py pins the
+                               # two together. It buys the #203 chrome tap-target
+                               # floor: at ~165 PPI a 16px bar icon is 2.5mm, so
+                               # interactive geometry lays out at scale 2 while
+                               # every glyph stays at FONT_SCALE.
 # Internal-flash store root -- the P4's arrangement and the P4's hard-learned
 # name rule: NOT "/moybyte/..." (a root-level VFS dir named like a frozen
 # module SHADOWS it; '' precedes '.frozen' on sys.path).
@@ -151,7 +155,8 @@ def run_desktop(fps_cap=60):
                               auto_start=False)
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
-                     sys_canvas=sys_canvas, font_scale=FONT_SCALE)
+                     sys_canvas=sys_canvas, font_scale=FONT_SCALE,
+                     panel_diagonal_in=PANEL_DIAGONAL_IN)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart-declared raster gets
     # its own off-screen canvas; blit_game upscales the view like any other.
     ws.make_game_canvas = lambda w, h: DeviceCanvas(

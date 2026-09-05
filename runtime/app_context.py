@@ -143,6 +143,13 @@ class Surface:
         framebuf text cannot scale, regardless of the setting)."""
         return self.__ws.look.effective_font_scale()
 
+    def chrome_scale(self):
+        """The scale the OS chrome around this app is laid out at (#203) -- the
+        font scale, or the board's tap-target floor when that is larger. An app
+        needs it to know how tall the bar band above it is; its own text stays on
+        `font_scale`."""
+        return self.__ws.look.effective_chrome_scale()
+
     def windowed(self):
         """True while the app is a WINDOW on the desk (#105): the WM's title
         strip carries the close, so the app's own layout reserves no bar band."""

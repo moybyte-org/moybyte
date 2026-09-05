@@ -117,8 +117,8 @@ def _fit_art(w, h, idx, max_w=320, max_h=240):
 
 
 class StorybookLayout(ListShellLayout):
-    def __init__(self, w, h, fs=1, windowed=False):
-        self._init_frame(w, h, fs, windowed)
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
+        self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.band_h = 24 * fs
         x = 6 * fs
@@ -179,7 +179,8 @@ class StorybookAppLayer(ListShellApp):
         self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = StorybookLayout(cv.w, cv.h, self._surf.font_scale(),
-                                      self._surf.windowed())
+                                      self._surf.windowed(),
+                                      self._surf.chrome_scale())
         self.mode = "shelf"           # shelf | pages | page
         self.cart = None              # the open story cart dict
         self.deck = None              # its parsed deck.json
@@ -254,8 +255,8 @@ class StorybookAppLayer(ListShellApp):
 
     # -- lifecycle ---------------------------------------------------------------
 
-    def relayout(self, w, h, fs):
-        self.layout = StorybookLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = StorybookLayout(w, h, fs, self._surf.windowed(), cs)
         if self.editor is not None:
             self.editor.set_view_size(self.layout.cols, self.layout.rows)
 

@@ -89,8 +89,9 @@ class CardsLayout(LayoutBase):
     on a larger canvas / bigger font. A bigger panel shows MORE cards at once (the
     view band grows) and the cards span its full width."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
+                 chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         if self._base:
             self.body = (0, 18, _BASE_W, _BASE_H - 18)
@@ -104,7 +105,7 @@ class CardsLayout(LayoutBase):
             self.gap = 2
             self.h_cells, self.h_icons, self.h_meter = 44, 36, 32
             return
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         self.body = (0, bar_h, self.w, self.h - bar_h)
         self.head_glyph = (8 * fs, bar_h + 4 * fs, 14 * fs, 14 * fs)
         self.head_xy = (26 * fs, bar_h + 4 * fs)
@@ -156,10 +157,10 @@ class CardsLayer:
         sc = ws.sys_canvas
         self.layout = CardsLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
         a font-scale change."""
-        self.layout = CardsLayout(w, h, fs)
+        self.layout = CardsLayout(w, h, fs, chrome_scale=cs)
 
     def reset(self):
         """Reset the scroll/selection state (called by ws.open on a fresh cart)."""

@@ -41,6 +41,13 @@ keeps the matrix a clean product instead of a pile of special cases.
                            coverage before this file; asserted only in
                            `tests/test_guition_on_glass.py`, which skips
                            without the board.
+  guition_tapfloor_dark    the SAME Guition tier with its panel DIAGONAL
+                           declared (3.5"), which is how a board opts in to
+                           the #203 tap-target floor. One axis from the row
+                           above: chrome_scale 2 against font_scale 1, so
+                           these two rows together are the proof the mechanism
+                           was built for -- the bar, the ≡ menu and the
+                           Settings rows grew, and not one glyph did.
   big_800x480_fs3_dark     font_scale 3. fs=2 renders elsewhere but is never a
                            pinned reference and fs=3 never drew a shell frame
                            at all (`ui_widgets_2026-08.md` A-m6). 800x480 is
@@ -49,7 +56,7 @@ keeps the matrix a clean product instead of a pile of special cases.
                            fs=2 rung is pinned here rather than in a config of
                            its own), plus the desk and a desk-with-one-window.
 
-That is 5 configurations x 19 surfaces (+2 windowed-only) = 97 goldens in
+That is 6 configurations x 19 surfaces (+2 windowed-only) = 116 goldens in
 about 1 second. The combination NOT covered is light-on-windowed; it is the
 one intersection, not an axis, and adding it would start the product
 explosion this phase was told to avoid.
@@ -140,8 +147,8 @@ _EDITOR_CART = "Star Catcher"
 #
 # The launcher shelf, the picker grid and the desk icon column render REAL
 # seeded content (see "What moves these goldens" above), so without this list
-# these 87 goldens are a function of `system_carts/` and merely ADDING a cart
-# turns five configurations red for a reason that is not a pixel. That is the
+# these 116 goldens are a function of `system_carts/` and merely ADDING a cart
+# turns six configurations red for a reason that is not a pixel. That is the
 # worst kind of red: it trains the reader to re-baseline, which is precisely the
 # laundering this file exists to prevent.
 #
@@ -197,17 +204,27 @@ class _GoldenWebHost:
         return GOLDEN_URL + "?pin=" + GOLDEN_PIN
 
 
+# `diagonal_in` is the board fact behind the #203 tap-target floor; None is
+# every tier that does not declare one, i.e. chrome on the font scale.
 CONFIGS = {
     "tdeck_320x240_fs1_dark": dict(
-        sys_size=None, font_scale=1, windowed=False, variant="dark"),
+        sys_size=None, font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None),
     "tdeck_320x240_fs1_light": dict(
-        sys_size=None, font_scale=1, windowed=False, variant="light"),
+        sys_size=None, font_scale=1, windowed=False, variant="light",
+        diagonal_in=None),
     "guition_480x320_fs1_dark": dict(
-        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark"),
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=None),
+    "guition_tapfloor_dark": dict(
+        sys_size=(480, 320), font_scale=1, windowed=False, variant="dark",
+        diagonal_in=3.5),
     "big_800x480_fs3_dark": dict(
-        sys_size=(800, 480), font_scale=3, windowed=False, variant="dark"),
+        sys_size=(800, 480), font_scale=3, windowed=False, variant="dark",
+        diagonal_in=None),
     "p4_1024x600_fs2_windowed": dict(
-        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark"),
+        sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
+        diagonal_in=None),
 }
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every
@@ -219,9 +236,10 @@ _INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
 def _axes(cfg):
     """The one-line axis description quoted in a failure message."""
     w, h = cfg["sys_size"] or (320, 240)
-    return "size=%dx%d font_scale=%d variant=%s tier=%s" % (
+    return "size=%dx%d font_scale=%d variant=%s tier=%s diagonal=%s" % (
         w, h, cfg["font_scale"], cfg["variant"],
-        "windowed" if cfg["windowed"] else "fullscreen")
+        "windowed" if cfg["windowed"] else "fullscreen",
+        cfg["diagonal_in"] or "-")
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +307,8 @@ def _build(cfg, carts_dir):
     from runtime import host_app
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"],
-        font_scale=cfg["font_scale"], windowed=cfg["windowed"])
+        font_scale=cfg["font_scale"], windowed=cfg["windowed"],
+        panel_diagonal_in=cfg["diagonal_in"])
     # persist=False: the two tdeck rows must differ by the token set ALONE, so
     # neither may leave a theme_variant behind in its store.
     ws.look.set_theme_variant(cfg["variant"], persist=False)
@@ -507,6 +526,22 @@ def test_every_axis_is_actually_exercised():
     assert {c["font_scale"] for c in CONFIGS.values()} >= {1, 2, 3}
     assert {c["variant"] for c in CONFIGS.values()} == {"dark", "light"}
     assert {c["windowed"] for c in CONFIGS.values()} == {True, False}
+    assert {bool(c["diagonal_in"]) for c in CONFIGS.values()} == {True, False}
+
+
+def test_the_tap_floor_moves_chrome_and_leaves_text_alone(request):
+    """#203's whole claim, as pixels. Two configs differ ONLY by the declared
+    panel diagonal, so every surface that draws chrome must differ -- and the
+    one surface that draws no OS chrome at all must not."""
+    if _updating(request):
+        pytest.skip("re-baselining: the file is rewritten at module teardown")
+    stored = _load_goldens()
+    plain = stored["guition_480x320_fs1_dark"]
+    floored = stored["guition_tapfloor_dark"]
+    same = [s for s in plain if plain[s] == floored.get(s)]
+    assert not same, (
+        "these surfaces hash IDENTICALLY with and without the tap-target "
+        "floor, i.e. the declared diagonal reached nothing: %s" % sorted(same))
 
 
 def test_the_light_variant_really_draws_different_pixels(request):

@@ -41,6 +41,27 @@
     "web_console": "8e51a14ecacc3b07217782881ae0890a0e3a2be4083ed4370165d82327c65278",
     "web_console_address": "98ee53078b96636e082e813cd17a45eae2dd210dae19e9a527b62d8eb76a97e0"
   },
+  "guition_tapfloor_dark": {
+    "app_appearance": "82774414d09f1904b148171c2e92c83b3974524e9f5dbd23c0191e4fbe388c0a",
+    "app_artwork": "6c2bab27def775f732eaaeda10a27eaa6ac995b4a610784a402f3b0211cb34ac",
+    "app_calc": "6d8cea6a5900fdb76f83df73c0108ee09ea537ad94bb03c49028a3550c5e7699",
+    "app_files": "52ae13f433d5f627fbf17138d00f070f9948d28bbf26f6bd4a479a6016ce4b8f",
+    "app_sheets": "730b85aa30812a04dce35d93e22b89a12a3497e325ab5af954f1699d32b2f344",
+    "app_storybook": "786b4abb0b0537e132d6aecf1740f0b0cc8d6313e80ac150a97f230bfb37963e",
+    "app_writer": "67979c0490149ceadb04c092f077dd73f1c31463458bab49d361676c078a9763",
+    "editor_blocks": "82c9b37211880adb763236d5c4f05ecd2c16d2895269c5da2b21cc3feaeafad7",
+    "editor_cards": "9a979d63ce1cfeb584b29e6a0a7adbdea486417219e36c6ea8b40533a7cfc744",
+    "editor_code": "b98dc938923accf0ac1b38295da82d79fd3fd0e4b0303f975e3790cc257e5c0e",
+    "editor_map": "e05b64abe4775325bd60febcf2232bb0a7b33fe97b0864aa2b0c7e1b69ba4e82",
+    "editor_music": "2ca0eb57c7f4a4a1300d4c9320731690dce76ce2a66a8af7c6d47e83446137e3",
+    "editor_paint": "c6842320bc11f24a8fdab428606651f1fc933ab9aadb883d3576757109a3a90c",
+    "editor_scene": "541d7b2f647e4d48fcfa2b94c198c1b7d89085343603da5f72bee92141203d2f",
+    "launcher": "d8eb3e9a5b9de2f736c70ad10d71a5b638817a70aeb372d5e103c22a3be4b23d",
+    "picker": "fe66a608494de1be2bb0fa7e80a48601eabbeb23aa1568f1ca8a7e9a5341cff0",
+    "settings": "b77e07e30313ffb92aa2531b549847cad6967943fc5a1cf406dc189b7029cdf2",
+    "web_console": "b4b3de6a6ee776a9eb7caae77c8f120c89c9a3069c87dcd9d1e00d8c270b525b",
+    "web_console_address": "580b1554bb82df590903546d3137d8bfb3ed8b59516ad428999f368d7cd0fe97"
+  },
   "p4_1024x600_fs2_windowed": {
     "app_appearance": "44294bd9c86e40694b00a768c9d4a176089ad4aac18e9cb11c023178ea00a63c",
     "app_artwork": "0e0f8f6c6551fb0c2dede102e0fb1fe2b51f672fb3006c183c58d6012bb4dabb",

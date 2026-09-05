@@ -160,8 +160,9 @@ class MusicLayout(LayoutBase):
     on a larger canvas / bigger font. The LIST is the star of the reflow: a bigger
     panel shows more steps/slots at once."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
+                 chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         if self._base:
             self.title_y = _MU_TITLE_Y
@@ -181,7 +182,7 @@ class MusicLayout(LayoutBase):
             return
         # -- responsive: the control row hangs under the bar, the bottom bar anchors
         # to the canvas floor, and the list gains rows to fill the band between ----
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         ctl_y = bar_h + 1 * fs
         self.title_y = bar_h + 3 * fs
         self.view_btn = (2 * fs, ctl_y, 46 * fs, 14 * fs)
@@ -236,10 +237,10 @@ class MusicEditorUI:
         sc = ws.sys_canvas
         self.layout = MusicLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39 step 3) -- called by ws._relayout on
         a font-scale change."""
-        self.layout = MusicLayout(w, h, fs)
+        self.layout = MusicLayout(w, h, fs, chrome_scale=cs)
 
     def build(self):
         """Build the MusicEditor over the open cart's live AudioBank (#50): the

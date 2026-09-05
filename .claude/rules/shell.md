@@ -54,7 +54,11 @@ to whoever called it.
   (wallpaper + panel theme — the ONE appearance surface; Settings' APPEARANCE
   action row deep-links to it, the old WALLPAPER/THEME stepper rows are gone),
   still editable via the picker.
-- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned 18px bar. RIGHT
+- **The zoned top bar (#46, macOS-menu-bar model):** one OS-owned bar, 18px ×
+  the CHROME scale — `chrome.Layout`'s `cs` (#203), which equals the font scale
+  unless a board declared a panel diagonal small enough that a 16px icon falls
+  under `chrome.MIN_TAP_MM` (which boards do is pinned in
+  `tests/test_board_toml.py`). RIGHT
   zone = OS status (clock/wifi/batt/≡ + a **context-X** that exits the active app;
   the launcher root draws no X). LEFT zone = LENT to the active app (`draw_zone`):
   the launcher shows the selected cart's name, the Editor its PROJECTS/tab-ladder/

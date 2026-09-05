@@ -172,8 +172,9 @@ class PaintLayout(LayoutBase):
     whole on-screen pixels), which is what "a larger editing app" means for paint --
     a hugely bigger drawing surface, not just scaled chrome."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1,
+                 chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
         if self._base:
             self.body_fill = (0, 18, _BASE_W, _BASE_H - 18)
@@ -202,7 +203,7 @@ class PaintLayout(LayoutBase):
             return
         # -- responsive: anchor the panel to the canvas, the swatch/button column to
         # the panel's right edge, and grow the grid to fill what's left ------------
-        bar_h = 18 * fs
+        bar_h = 18 * self.cs          # the OS bar's own height (#203)
         px, py = 8 * fs, bar_h - 2 * fs
         pw, ph = self.w - 16 * fs, self.h - (bar_h - 2 * fs) - 20 * fs
         self.body_fill = (0, bar_h, self.w, self.h - bar_h)
@@ -276,10 +277,10 @@ class PaintLayer:
         sc = ws.sys_canvas
         self.layout = PaintLayout(sc.w, sc.h, getattr(sc, "font_scale", 1))
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive geometry (#39) -- called by ws._relayout on a
         font-scale change (and, later, a window resize)."""
-        self.layout = PaintLayout(w, h, fs)
+        self.layout = PaintLayout(w, h, fs, chrome_scale=cs)
 
     def reset_drag(self):
         """Clear the drag-stroke origin (called by ws lifecycle: open_theme /

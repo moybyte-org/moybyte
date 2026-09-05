@@ -1326,9 +1326,10 @@ class LauncherHomeLayer:
             th = ws.theme_colors
             ink = th["ink"] if ws.bar_layer.zone_band_light("home") \
                 else th["chrome_ink"]
-            ws._icon("moy", rect[0] + 2, rect[1], cv)
-            cv.print("moybyte", rect[0] + 2 + 20 * fs,
-                     rect[1] + (16 * fs - 8 * fs) // 2, ink, 1)
+            cs = lay.cs
+            ws._icon("moy", rect[0] + 2, rect[1], cv, cs)
+            cv.print("moybyte", rect[0] + 2 + 20 * cs,
+                     rect[1] + (rect[3] - 8 * fs) // 2, ink, 1)
             return
         sel = ws.launcher.selected()
         if sel is None:
@@ -1342,7 +1343,7 @@ class LauncherHomeLayer:
         if len(name) > maxc:
             name = name[:maxc]
         th_ = ws.theme_colors
-        cv.print(name, rect[0] + 2, 3,
+        cv.print(name, rect[0] + 2, 3 + lay.bar_text_dy,
                  th_["ink"] if ws.bar_layer.zone_band_light("home")
                  else th_["chrome_ink"], 1)
         if chips is not None:
@@ -1654,8 +1655,8 @@ class EditorPickerLayer:
         lay = ws.layout
         real = ws._real_selected(ws.picker)
         if ws.can_manage and real is not None:
-            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv)
-            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv)
+            ws._icon("dup", lay.dup_btn[0], lay.dup_btn[1], cv, lay.cs)
+            ws._icon("del", lay.del_btn[0], lay.del_btn[1], cv, lay.cs)
         armed = self._del_armed and real is not None
         title = "DELETE? TAP AGAIN" if armed else "PICK A PROJECT"
         th = ws.theme_colors
@@ -1663,7 +1664,7 @@ class EditorPickerLayer:
             ink = th["danger"] if armed else th["ink"]
         else:
             ink = NAMES["yellow"] if armed else NAMES["white"]
-        cv.print(title, lay.status_name_x, 3, ink, 1)
+        cv.print(title, lay.status_name_x, 3 + lay.bar_text_dy, ink, 1)
 
     def zone_tap(self, px, py, rect=None):
         """The picker's lent left-zone tap slice: DUP (copy) fires immediately on the

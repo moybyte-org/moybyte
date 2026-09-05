@@ -162,6 +162,42 @@ _FONT_W = 8                 # petme128 cell width at scale 1 (one char advance)
 # (The letterbox/bezel fill _VIEWPORT_BEZEL (#39) moved to wm.py with the viewport
 # composite it belongs to -- FullscreenStackWM.composite_game is its only user.)
 
+# The tap-target floor (#203): the smallest a bar icon may be ON GLASS, whatever
+# the font scale. A CONFIGURATION number, not a measurement -- deliberately under
+# the usual phone-button guidance, because a console icon sits in a ROW of its
+# neighbours on a handheld held in two hands, and because the scale ladder is
+# integers: it is the number that lifts the 3.5" Guition (165 PPI, a 2.5mm icon
+# at 16px) one rung and leaves every other panel in the lineup where it is.
+MIN_TAP_MM = 4.5
+
+
+def chrome_scale_floor(w, h, diagonal_in=None):
+    """The smallest chrome scale that keeps a `_BAR_ICON`-px icon at least
+    MIN_TAP_MM wide on a `diagonal_in`-inch panel of `w` x `h` pixels.
+
+    1 when no diagonal is declared, which is the OPT-IN: a panel's physical size
+    is a board fact that nothing else in the tree knows, so a board that does not
+    state it keeps chrome on the font scale exactly as before. Both silences today
+    are decisions, not omissions. The T-Deck has a keyboard and a trackball, so
+    its chrome makes no touch-first claim. The P4's glass floors at 2 as well, so
+    declaring it is only free while that board runs at font scale 2 -- its shipped
+    FONT_SCALE is 1 (owner call 2026-07-12: the 7" panel fits CONTENT, not
+    magnification), and doubling its chrome is an owner's call about a screen he
+    is using, not an arithmetic consequence."""
+    if not diagonal_in:
+        return 1
+    diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5
+    if diag_px <= 0:
+        return 1
+    icon_mm = _BAR_ICON * 25.4 * float(diagonal_in) / diag_px
+    if icon_mm <= 0:
+        return 1
+    need = MIN_TAP_MM / icon_mm
+    n = int(need)
+    if need > n:
+        n += 1
+    return max(1, n)
+
 
 class Layout(LayoutBase):
     """Responsive desktop-shell geometry (#39): the status strip, cart icon grid,
@@ -178,15 +214,26 @@ class Layout(LayoutBase):
     a fixed 320x240 viewport in step 1, so their constants are NOT routed here.
 
     `font_w` is the on-screen char-cell width (8 * fs) so callers center/space text
-    that the SystemCanvas renders at `fs`; chrome heights/margins scale with fs too."""
+    that the SystemCanvas renders at `fs`.
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    TWO scales, since #203: `fs` sizes TEXT and `cs` (>= fs, equal by default)
+    sizes what a finger lands on -- the bar and its buttons, the Settings rows,
+    the ≡ menu's rows. Where a hand-tuned text offset sits inside one of those
+    elements, the `*_text_dy` fields below re-center the fs-tall band inside the
+    cs-tall box; each is 0 at cs == fs, which is what keeps every existing tier
+    byte-identical."""
+
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
+        cs = self.cs
         self.font_w = _FONT_W * fs
 
-        # -- status strip (height/position scales with the font) ----------------
-        self.status_h = _STATUS_H * fs
+        # -- status strip (height/position scales with the CHROME scale) --------
+        self.status_h = _STATUS_H * cs
+        # The bar's clock/title print at a hand-tuned y=3 inside an fs-tall bar;
+        # this re-centers that band when the bar is taller than the font asked for.
+        self.bar_text_dy = (self.status_h - _STATUS_H * fs) // 2
 
         # -- cart icon grid (reflows COLS x ROWS to fill the band) ---------------
         # The launcher/home screen stopped drawing the bottom dock in #46, so the
@@ -253,13 +300,14 @@ class Layout(LayoutBase):
 
         # -- unified top bar: icon size + clusters (Stage 1) -------------------
         # Every bar control is a 16x16 IconSheet sprite (16px icons, 1px margin in the
-        # 18px bar -> y = _BAR_Y). Icons scale with the font (24px at fs=2, etc.) so
-        # the bar grows on a larger system canvas.
-        ic = _BAR_ICON * fs                           # bar icon side, scaled
-        stride = ic + _BAR_GAP * fs                   # left-edge step between bar icons
+        # 18px bar -> y = _BAR_Y). Icons scale with the CHROME scale (#203) -- with the
+        # font by default, and past it on a panel dense enough that 16px is under
+        # MIN_TAP_MM.
+        ic = _BAR_ICON * cs                           # bar icon side, scaled
+        stride = ic + _BAR_GAP * cs                   # left-edge step between bar icons
         self.bar_icon = ic
         self.bar_stride = stride
-        edge = 2 * fs                                 # margin from the canvas edges
+        edge = 2 * cs                                 # margin from the canvas edges
 
         # -- right zone (OS-owned, Stage 4 #46 zoned bar -- the macOS-menu-bar
         # model): batt hard against the right edge, then wifi, then the ≡ system-
@@ -309,8 +357,11 @@ class Layout(LayoutBase):
         self.scroll_lt = (px_ + am, ay, aw, ah)
         self.scroll_rt = (px_ + pw_ - am - aw, ay, aw, ah)
 
-        # -- Settings rows + panel (scale row height with the font) --------------
-        self.set_row_h = _SET_ROW_H * fs
+        # -- Settings rows + panel (a row is a TAP TARGET -> the chrome scale) ---
+        # The row list already scrolls (_settings_visible derives its window from
+        # the panel height), so a taller row costs rows on SCREEN, never rows.
+        self.set_row_h = _SET_ROW_H * cs
+        self.row_text_dy = (self.set_row_h - _SET_ROW_H * fs) // 2
         if self._base:
             self.set_x = _SET_X
             self.set_w = _SET_W
@@ -319,6 +370,7 @@ class Layout(LayoutBase):
             self.set_back = _SET_BACK
             self.set_ach = _SET_ACH
             self.set_title_hit = _SET_TITLE_HIT
+            self.set_head_dy = 0
         else:
             # The Settings panel fills the band between the status strip and the
             # bottom inset (_PANEL_FLOOR -- the retired dock's band, kept).
@@ -327,17 +379,28 @@ class Layout(LayoutBase):
             self.settings_panel = (8 * fs, py0, self.w - 16 * fs, ph)
             self.set_x = self.settings_panel[0] + 10 * fs
             self.set_w = self.settings_panel[2] - 20 * fs
-            self.set_row_y0 = py0 + 24 * fs
+            # The title band holds the X / trophy buttons, so it takes the chrome
+            # scale with them; its gear + "SETTINGS" text re-center via set_head_dy.
+            self.set_row_y0 = py0 + 24 * cs
+            self.set_head_dy = 12 * (cs - fs)
             pr = self.settings_panel[0] + self.settings_panel[2]   # panel right edge
-            self.set_back = (pr - 20 * fs, py0 + 2 * fs, 18 * fs, 14 * fs)
-            self.set_ach = (pr - 46 * fs, py0 + 2 * fs, 22 * fs, 14 * fs)
-            self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * fs,
-                                  10 * self.font_w, 16 * fs)
+            self.set_back = (pr - 20 * cs, py0 + 2 * cs, 18 * cs, 14 * cs)
+            self.set_ach = (pr - 46 * cs, py0 + 2 * cs, 22 * cs, 14 * cs)
+            self.set_title_hit = (self.settings_panel[0] + 14 * fs, py0 + 2 * cs,
+                                  10 * self.font_w, 16 * cs)
 
     # -- derived rects (mirror the old module-constant arithmetic) ----------
     def settings_row_rect(self, i):
         return (self.set_x, self.set_row_y0 + i * self.set_row_h,
                 self.set_w, self.set_row_h - 2)
+
+    def row_band(self, rect):
+        """The fs-tall band inside a chrome-scaled row (#203) -- where the row's
+        own hand-tuned content sits, so a bottom-anchored mark (the wifi list's
+        signal bars) still lands beside the label instead of at the floor of a
+        box the tap-target floor made taller. The IDENTITY at cs == fs."""
+        d = self.row_text_dy
+        return (rect[0], rect[1] + d, rect[2], rect[3] - 2 * d)
 
     def tile_cell(self, i):
         """(row, col) of grid slot `i` in the shelf packing. Slot 0 is the ONE
@@ -402,23 +465,32 @@ class CodeLayout(LayoutBase):
     `rows` are how many fit -- the CodeEditor's view window adopts them so it scrolls
     the right span."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1):
-        LayoutBase.__init__(self, w, h, font_scale)
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, chrome_scale=None):
+        LayoutBase.__init__(self, w, h, font_scale, chrome_scale=chrome_scale)
         fs = self.fs
+        cs = self.cs
         self.cell = _FONT_W * fs                  # char-cell width (8*fs)
         self.lh = _CODE_LH * fs                   # line height
         # -- symbol palette (bottom strip): one cell per coding symbol -----------
-        self.sym_cell = _SYM_CELL * fs
-        self.sym_h = _SYM_H * fs
+        # A key is TAPPED (on a board with no keyboard this strip IS the keyboard),
+        # so it takes the chrome scale and the symbol re-centers inside it. WIDTH is
+        # capped at what the canvas can hold, because a key that grew off the right
+        # edge is a key that cannot be pressed at all -- never below the fs width,
+        # which is what keeps the existing tiers (fs 3 already overflows) unmoved.
+        self.sym_cell = max(_SYM_CELL * fs,
+                            min(_SYM_CELL * cs, self.w // len(_CODE_SYMBOLS)))
+        self.sym_h = _SYM_H * cs
+        self.sym_text_dx = (self.sym_cell - _SYM_CELL * fs) // 2
+        self.sym_text_dy = (self.sym_h - _SYM_H * fs) // 2
         self.sym_y = self.h - self.sym_h
         self.sym_area = (0, self.sym_y, self.sym_cell * len(_CODE_SYMBOLS), self.sym_h)
         # -- code area origin (below the unified 18px bar) -----------------------
         # The old RUN/SAVE/CLOSE top-band icons are gone (Stage-4 bar rollout): the
         # unified zoned bar owns the top 18px, so CodeLayout no longer carries their
-        # rects. y0 stays 18 (the text begins right under the bar), so the body is
+        # rects. y0 is the BAR's height (_CODE_Y0 == _STATUS_H), so the body is
         # fullscreen text + the symbol palette with no chrome of its own.
         self.x0 = _CODE_X0 * fs
-        self.y0 = _CODE_Y0 * fs
+        self.y0 = _CODE_Y0 * cs
         # -- the COLS x ROWS text grid (fills between the bar + palette) ---------
         if self._base:
             self.cols = CodeEditor.COLS          # 38

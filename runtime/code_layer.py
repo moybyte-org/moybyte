@@ -1193,4 +1193,6 @@ class CodeLayer:
             # +6px offset is measured from that rect, not from the cell).
             art = _ui.cell(cv, t, (x, sy, sc - 1, sh - 1),
                            pad=0, caption_h=0, fs=fs)
-            cv.print(syms[i], art[0] + 6 * fs, art[1] + 6 * fs, t["sym_ink"], 1)
+            # re-centre the fs-sized symbol in a key the chrome scale grew (#203)
+            cv.print(syms[i], art[0] + 6 * fs + lay.sym_text_dx,
+                     art[1] + 6 * fs + lay.sym_text_dy, t["sym_ink"], 1)

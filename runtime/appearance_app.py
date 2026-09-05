@@ -38,12 +38,14 @@ class AppearanceLayout:
     MIN_W = 310
     MIN_H = 230
 
-    def __init__(self, w, h, fs=1, windowed=False):
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
         fs = self.fs
-        self.bar_h = 0 if windowed else 18 * fs
+        # The chrome scale (#203) sizes only the OS bar band above this app.
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.bar_h = 0 if windowed else 18 * self.cs
         self.tabs_h = 30 * fs
         # Side-by-side: the catalog COLUMN on the left, the preview pane on the
         # right. `wide` only picks the chunkier paddings/bezels of big surfaces.
@@ -158,7 +160,8 @@ class AppearanceAppLayer:
         self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = AppearanceLayout(cv.w, cv.h, self._surf.font_scale(),
-                                       self._surf.windowed())
+                                       self._surf.windowed(),
+                                       self._surf.chrome_scale())
         self.mode = "images"
         self.sel = 0
         self.status = "IMAGE WALLPAPERS"
@@ -180,8 +183,8 @@ class AppearanceAppLayer:
         base = str(path).replace("\\", "/").rsplit("/", 1)[-1]
         return base in ("theme_picker.moy", "appearance.moy")
 
-    def relayout(self, w, h, fs):
-        self.layout = AppearanceLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = AppearanceLayout(w, h, fs, self._surf.windowed(), cs)
 
     def open(self):
         # Land on the current wallpaper's source category. Solid fills live on

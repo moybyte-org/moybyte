@@ -295,7 +295,7 @@ class PaintAppLayout:
     MIN_W = 310
     MIN_H = 230
 
-    def __init__(self, w, h, fs=1, windowed=False):
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
@@ -303,7 +303,9 @@ class PaintAppLayout:
         # Physical surface threshold: a 894x502 P4 window at font-scale 2 still has
         # room for the full 512x300 document plus desktop rails, so it is WIDE.
         self.compact = self.w < 700 or self.h < 420
-        self.bar_h = 0 if windowed else 18 * fs
+        # The chrome scale (#203) sizes only the OS bar band above this app.
+        self.cs = max(fs, int(cs)) if cs else fs
+        self.bar_h = 0 if windowed else 18 * self.cs
         self.top_h = 28 * fs
         self.status_h = 18 * fs
         self.left_w = (36 if self.compact else 52) * fs
@@ -390,7 +392,8 @@ class PaintAppLayer:
         self.doc = PaintDocument(512, 300) if desktop else PaintDocument()
         self._starter_pending = desktop
         self.layout = PaintAppLayout(cv.w, cv.h, self._surf.font_scale(),
-                                     self._surf.windowed())
+                                     self._surf.windowed(),
+                                     self._surf.chrome_scale())
         self.tool = 0
         self.color = names["blue"]
         self.pal_page = 0
@@ -417,8 +420,8 @@ class PaintAppLayer:
         self._unsaved = False
         self._idle = 0.0
 
-    def relayout(self, w, h, fs):
-        self.layout = PaintAppLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = PaintAppLayout(w, h, fs, self._surf.windowed(), cs)
         self.display = None
 
     def is_app(self, cart):

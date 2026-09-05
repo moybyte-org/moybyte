@@ -8,7 +8,7 @@ Four claims, in the order they matter:
    hashes did not move, which `test_shell_goldens.py` and `test_ui_states.py`
    assert on every run. What is added HERE is the round trip: installing the
    catalog's `"default"` entry renders byte-identically to installing no skin
-   at all, on every one of the five golden configurations.
+   at all, on every one of the six golden configurations.
 
 2. **A second skin is pure data.** `skin.use("outline")` restyles the entire
    shell -- every surface, every app, every Editor tab -- and this file is the
@@ -112,7 +112,7 @@ def test_the_whole_shell_round_trips_the_default_skin_and_restyles_under_a_secon
 
     ROUND TRIP: `ui.set_skin(None)` and `skin.use("default")` are independent
     expressions of the same look -- the built-in table, and the catalog entry
-    that points at it -- and 87 hashes across five configurations say they
+    that points at it -- and 116 hashes across six configurations say they
     agree, surface for surface.
 
     RESTYLE: `skin.use("outline")` then repaints essentially every one of those
@@ -715,7 +715,7 @@ def _center(rect):
 
 
 def test_the_skin_chips_fit_every_tier(tmp_path):
-    """Geometry, on the golden matrix's five configurations: the chips sit
+    """Geometry, on the golden matrix's six configurations: the chips sit
     inside the preview field, never overlap the DARK/LIGHT band above them,
     and are wide enough for the catalog's longest name at font scale 1-2.
 

@@ -29,6 +29,25 @@ time. `wm_windowed.py` is still the wrong tier here; see its denial below."""
 
 # ---------------------------------------------------------------------------
 
+[panel]
+# The GLASS, in inches. Declaring it is how a board opts in to the chrome
+# tap-target floor (#203): `chrome.chrome_scale_floor` turns it into the
+# smallest scale that keeps a 16px bar icon at `chrome.MIN_TAP_MM`, and the
+# shell lays out interactive geometry -- the bar, the ≡ menu's rows, the
+# Settings rows, the code editor's symbol keys -- at that scale while every
+# glyph stays on the font scale.
+#
+# This board is why the floor exists. 480x320 on 3.5" is ~165 PPI, so a 16px
+# icon is 2.5mm -- physically SMALLER than the T-Deck's, on a board that is
+# touch-ONLY. The other lever was tried first and rejected: FONT_SCALE 2 was
+# built, shipped and reverted the same day (#202, 2026-08-19) because 1x text
+# reads fine on this panel and 2x "looks bad" -- the problem was never
+# legibility. `modules/moy_runtime.py`'s PANEL_DIAGONAL_IN carries this number
+# to the console; tests/test_board_toml.py pins the two together.
+diagonal_in = 3.5
+
+# ---------------------------------------------------------------------------
+
 [modules]
 dest = "modules"
 

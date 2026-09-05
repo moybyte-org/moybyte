@@ -242,13 +242,15 @@ class BlockLayout(LayoutBase):
     `_BLK_*` constant verbatim (the `_base` branch), so the degradation path is
     pixel-identical to today."""
 
-    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None):
+    def __init__(self, w=_BASE_W, h=_BASE_H, font_scale=1, bounds=None,
+                 chrome_scale=None):
         # `bounds` (bx, by, bw, bh) confines the OUTLINE + action bar to a sub-rect
         # -- the left pane of the combined Blocks+Scene workspace (blocks-left /
         # objects-right). The modal overlays (insert menu / prompts) stay centered
         # on the full canvas. A bounded layout never takes the frozen 320x240 branch
         # (big-screen feature), so `_base` excludes it and the T-Deck is unchanged.
-        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None)
+        LayoutBase.__init__(self, w, h, font_scale, base_extra=bounds is None,
+                            chrome_scale=chrome_scale)
         fs = self.fs
         self.cell = _FONT_W * fs
         # The hint + SAVE-status strip sits just below the 18px unified bar (the old
@@ -389,11 +391,11 @@ class BlockEditorUI:
         # see _layout_workspace.
         self._ws_memo = None
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         """Rebuild the responsive layout from the live system-canvas size + the
         effective font scale (mirrors Workstation._relayout), and re-clamp the
         outline scroll if an editor is already open."""
-        self.block_layout = BlockLayout(w, h, fs)
+        self.block_layout = BlockLayout(w, h, fs, chrome_scale=cs)
         if self.blocks_ed is not None:
             self._blk_reveal()
 
@@ -419,7 +421,7 @@ class BlockEditorUI:
         action bar always fits -- the scene gets whatever's left over."""
         sc = self.ws.sys_canvas
         fs = max(1, getattr(sc, "font_scale", 1))
-        top = 18 * fs
+        top = 18 * self.block_layout.cs        # the OS bar's own height (#203)
         body_h = sc.h - top
         gap = 3 * fs
         scene_w = (sc.w * _WORKSPACE_SCENE_PCT) // 100

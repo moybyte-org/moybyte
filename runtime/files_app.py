@@ -49,8 +49,8 @@ class FilesLayout(ListShellLayout):
     MIN_W = 310
     MIN_H = 230
 
-    def __init__(self, w, h, fs=1, windowed=False):
-        self._init_frame(w, h, fs, windowed)
+    def __init__(self, w, h, fs=1, windowed=False, cs=None):
+        self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.top_h = 24 * fs
         self.head = (4 * fs, self.bar_h + 2 * fs, 58 * fs, self.top_h - 4 * fs)
@@ -115,7 +115,8 @@ class FilesAppLayer(ListShellApp):
         self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = FilesLayout(cv.w, cv.h, self._surf.font_scale(),
-                                  self._surf.windowed())
+                                  self._surf.windowed(),
+                                  self._surf.chrome_scale())
         self.mode = "kinds"           # kinds | grid | trash | rename | game
         self.grid = FileGridView(ctx.shell, "drawings")
         self.counts = {}
@@ -132,8 +133,8 @@ class FilesAppLayer(ListShellApp):
         self.used_rows = ()           # provenance "used in:" rows (#108 phase 2)
         self.used_name = None
 
-    def relayout(self, w, h, fs):
-        self.layout = FilesLayout(w, h, fs, self._surf.windowed())
+    def relayout(self, w, h, fs, cs=None):
+        self.layout = FilesLayout(w, h, fs, self._surf.windowed(), cs)
 
     # -- store ----------------------------------------------------------------
 

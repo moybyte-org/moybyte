@@ -605,6 +605,9 @@ class SettingsLayer:
         lay = ws.layout
         fs = lay.fs
         fw = lay.font_w
+        # Every offset below is inside the row's fs-tall band (#203): 0 unless
+        # the tap-target floor made the rows taller than the font asked for.
+        dy = lay.row_text_dy
         px, py, pw, ph = lay.settings_panel
         # Status line (slot 0).
         x, y, w, h = lay.settings_row_rect(0)
@@ -618,18 +621,19 @@ class SettingsLayer:
         # The status ICON is an IconSheet sprite the caller owns (ui.py must not
         # learn about the sheet), so it draws first and the label row takes the
         # rest of the slot; the IP keeps its own fixed column.
-        ws._icon("wifi" if connected else "wifi_off", x, y, cv)
+        ws._icon("wifi" if connected else "wifi_off", x, y + dy, cv)
         if connected:
             # The ONE ink here that is not a widget state: `play` says CONNECTED,
             # which is a status the theme owns and no skin should overrule.
             _ui.row(cv, th, (x, y, w, h), ("ON  " + str(ssid))[:22],
                     colors=(None, th["play"], None), edge=False,
-                    pad=20 * fs, text_dy=5, fs=fs)
+                    pad=20 * fs, text_dy=5 + dy, fs=fs)
             if ip:
-                cv.print(str(ip)[:15], x + w - 15 * fw, y + 5, NAMES["blue"], 1)
+                cv.print(str(ip)[:15], x + w - 15 * fw, y + 5 + dy,
+                         NAMES["blue"], 1)
         else:
             _ui.row(cv, th, (x, y, w, h), "NOT CONNECTED", kind="row_list",
-                    edge=False, pad=20 * fs, text_dy=5, fs=fs)
+                    edge=False, pad=20 * fs, text_dy=5 + dy, fs=fs)
         if self.wifi_pick is not None:
             # Password prompt: the picked ssid + the typed password + a caret.
             x, y, w, h = self._wifi_row_rect(0)
@@ -638,16 +642,17 @@ class SettingsLayer:
             _ui.row(cv, th, (x, y, w, h),
                     ("PASSWORD FOR " + str(self.wifi_pick))[:30],
                     colors=(None, th["ink"], None), edge=False, pad=4,
-                    text_dy=5, fs=fs)
+                    text_dy=5 + dy, fs=fs)
             bx, by, bw2, bh2 = self._wifi_row_rect(1)
             cv.rect(bx, by, bw2, bh2 - 2, NAMES["black"])
             cv.rectb(bx, by, bw2, bh2 - 2, ws.theme_colors["edge"])
             shown = self.wifi_pw[-max(4, bw2 // fw - 3):]
-            cv.print(shown, bx + 4, by + 5, NAMES["yellow"], 1)
-            cv.rect(bx + 4 + len(shown) * fw, by + 3, fs, bh2 - 8, NAMES["yellow"])
+            cv.print(shown, bx + 4, by + 5 + dy, NAMES["yellow"], 1)
+            cv.rect(bx + 4 + len(shown) * fw, by + 3 + dy, fs,
+                    bh2 - 8 - 2 * dy, NAMES["yellow"])
             x, y, w, h = self._wifi_row_rect(2)
             _ui.row(cv, th, (x, y, w, h), "ENTER = CONNECT   ESC = BACK",
-                    kind="row_list", edge=False, pad=4, text_dy=5, fs=fs)
+                    kind="row_list", edge=False, pad=4, text_dy=5 + dy, fs=fs)
         else:
             # The network list.
             for k in range(len(self.wifi_nets)):
@@ -661,17 +666,21 @@ class SettingsLayer:
                 # this list's own per-row content at their fixed columns.
                 _ui.row(cv, th, (x, y, w, h), str(ssid_k)[:16],
                         kind="row_list", on=sel,
-                        edge=False, pad=4, text_dy=5, fs=fs)
+                        edge=False, pad=4, text_dy=5 + dy, fs=fs)
+                _bx, band_y, _bw, band_h = lay.row_band((x, y, w, h))
                 bars = max(0, min(4, int(sig) // 25 + 1))
                 for s in range(4):
                     c = th["play"] if s < bars else th["ink_dim"]
-                    cv.rect(x + w - 46 * fs + s * 8 * fs, y + h - 6 * fs - 2 * fs * s,
+                    cv.rect(x + w - 46 * fs + s * 8 * fs,
+                            band_y + band_h - 6 * fs - 2 * fs * s,
                             5 * fs, (2 + 2 * s) * fs, c)
                 if locked:
-                    ws._glyph("lock", (x + w - 62 * fs, y + 2, 12 * fs, 12 * fs),
+                    ws._glyph("lock",
+                              (x + w - 62 * fs, y + 2 + dy, 12 * fs, 12 * fs),
                               NAMES["orange"], cv)
                 if str(ssid_k) in self.wifi_known:
-                    cv.print("SAVED", x + w - 110 * fs, y + 5, NAMES["blue"], 1)
+                    cv.print("SAVED", x + w - 110 * fs, y + 5 + dy,
+                             NAMES["blue"], 1)
         if self.wifi_msg:
             mx, my = px + 10 * fs, py + ph - 30 * fs - 10 * fs
             cv.print(self.wifi_msg[:36], mx, my, th["accent"], 1)
@@ -1178,9 +1187,11 @@ class SettingsLayer:
         # the closing X, so the panel's own header + X are suppressed (no doubled
         # chrome); the trophy (the achievements door, #21) stays either way.
         p_ink = th["ink"] if th.get("bar_light", False) else th["chrome_ink"]
+        hd = lay.set_head_dy      # the title band's own re-centring (#203)
         if not getattr(ws, "windowed_chrome", False):
-            ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
-            cv.print("SETTINGS", px + 24, py + 4, p_ink, 2)
+            ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
+                      th["accent"], cv)
+            cv.print("SETTINGS", px + 24, py + 4 + hd, p_ink, 2)
             ws._mini_btn("X", lay.set_back, th["danger"], cv)
         if self.wifi_view:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
@@ -1194,9 +1205,9 @@ class SettingsLayer:
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
         cv.rect(sa[0], sa[1], sa[2], sa[3], th["hilite"])
-        ws._glyph("trophy", (sa[0] - 2, sa[1], 14 * fs, 14 * fs), th["accent"], cv)
-        cv.print(str(ws.ach.count()), sa[0] + 13 * fs, sa[1] + 4,
-                 th["selection_ink"], 1)
+        ws._glyph("trophy", (sa[0] - 2, sa[1], sa[3], sa[3]), th["accent"], cv, fs)
+        cv.print(str(ws.ach.count()), sa[0] + 13 * fs,
+                 sa[1] + 4 + (sa[3] - 14 * fs) // 2, th["selection_ink"], 1)
         rows = self._settings_rows()
         for i in range(len(rows)):
             if self._settings_row_visible(i):
@@ -1244,7 +1255,12 @@ class SettingsLayer:
         # panel-CHROME coloured, which the row kind cannot express, so it is its
         # own catalog entry rather than a hand-built triple no skin could reach.
         _ui.row(cv, th, (x, y, w, h), label, kind="row_menu", on=sel,
-                edge=False, pad=4, text_dy=5, fs=lay.fs)
+                edge=False, pad=4, text_dy=5 + lay.row_text_dy, fs=lay.fs)
+        # Below here the rect is the row's own CONTENT band -- the fs-tall strip
+        # the chrome scale re-centred inside the tap target (#203). The identity
+        # at cs == fs; `row` above kept the FULL rect, because the selection fill
+        # is the tap target and has to paint all of it.
+        x, y, w, h = lay.row_band((x, y, w, h))
         if kind == "wifi-net":
             # WIFI (#38): the connected SSID (or OFF) + the status icon as the OPEN
             # affordance -- a tap / A opens the wifi panel, no stepper.

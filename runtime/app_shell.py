@@ -41,11 +41,14 @@ class ListShellLayout:
     first, lays out its own bands/views, then _init_list(top) for the list
     geometry. Nothing here reads a subclass field except what it set."""
 
-    def _init_frame(self, w, h, fs, windowed):
+    def _init_frame(self, w, h, fs, windowed, cs=None):
         self.w = int(w)
         self.h = int(h)
         self.fs = max(1, int(fs))
-        self.bar_h = 0 if windowed else 18 * self.fs
+        # The chrome scale (#203) sizes only the OS bar band this app sits under;
+        # everything the app itself draws stays on `fs`.
+        self.cs = max(self.fs, int(cs)) if cs else self.fs
+        self.bar_h = 0 if windowed else 18 * self.cs
 
     def _init_list(self, top):
         """The notebook-list rows below `top` (the title/toolbar band's bottom)."""

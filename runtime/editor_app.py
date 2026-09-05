@@ -109,7 +109,7 @@ _TAB_CHIPS = (
 )
 
 # The `ws` attribute holding each tab's layout owner -- the object whose
-# `relayout(w, h, fs)` rebuilds that tab's geometry from the live canvas
+# `relayout(w, h, fs, cs)` rebuilds that tab's geometry from the live canvas
 # (EditorApp._relayout_tab). The Code tab is absent because ws itself owns the
 # CodeLayout handle (see code_layer.py's boundary note); "cards" is here because
 # the Config tab has a layout like any other.
@@ -330,8 +330,12 @@ class EditorApp:
         name = _TAB_LAYOUT_UI.get(view)
         owner = getattr(ws, name, None) if name else None
         if owner is not None:
+            # BOTH scales (#203): a tab that re-derived on the font scale alone
+            # would inset for an 18*fs bar and draw under the taller one an
+            # opted-in board actually has.
             owner.relayout(ws.sys_canvas.w, ws.sys_canvas.h,
-                           ws.look.effective_font_scale())
+                           ws.look.effective_font_scale(),
+                           ws.look.effective_chrome_scale())
 
     # -- PLAY: commit the tab, then run the cart (spec Section 2/Section 6) ---------
 

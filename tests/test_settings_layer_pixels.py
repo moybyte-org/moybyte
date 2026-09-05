@@ -172,7 +172,7 @@ def _build(cfg, carts_dir):
     from runtime import host_app
     ws = host_app.build_workstation(
         str(carts_dir), sys_size=cfg["sys_size"], font_scale=cfg["font_scale"],
-        windowed=cfg["windowed"])
+        windowed=cfg["windowed"], panel_diagonal_in=cfg["diagonal_in"])
     ws.look.set_theme_variant(cfg["variant"], persist=False)
     ws.wifi = _Wifi(True)
     ws.updater = _Updater()

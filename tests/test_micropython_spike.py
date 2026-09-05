@@ -2059,7 +2059,7 @@ def test_unified_top_bar_wired_into_device_shell():
     assert "class IconSheet(SpriteSheet):" in editors
     assert "TILE = 16" in editors
     assert "_ICON = {" in chrome            # the bar's icon-slot map lives in chrome.py now
-    assert "def _icon(self, kind, x, y, cv=None):" in console
+    assert "def _icon(self, kind, x, y, cv=None, scale=None):" in console
     assert "self.look.icon_sheet" in console      # the sheet is the look's (#209 D)
 
     # Storage: load/save the editable theme beside the carts dir (absent = default).

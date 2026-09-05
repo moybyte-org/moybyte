@@ -117,11 +117,12 @@ class SystemMenuUI:
         NAMES = self._NAMES
         cv = self.ws.sys_canvas
         m = self.ws.sysmenu
-        # Geometry scales with the popup's fs (set by toggle_sysmenu from the
-        # effective font scale, #39/#58): the rows hold fs-scaled petme128 text,
-        # so unscaled 12px rows overlap at font 2 (glass-found on the P4). fs=1
-        # keeps every product byte-identical (the 320x240 baseline).
+        # Two scales, both set by toggle_sysmenu. `fs` (#39/#58) is the text: the
+        # rows hold fs-scaled petme128, so unscaled 12px rows overlap at font 2
+        # (glass-found on the P4). `cs` (#203) is the row HEIGHT, which is a tap
+        # target. Equal keeps every product byte-identical (the 320x240 baseline).
         fs = m.fs
+        cs = m.cs
         th = self.ws.theme_colors
         # Panel-chrome inks: dark panels keep the frozen white/grey trio; a
         # light-bar theme flips to the dark ink family.
@@ -129,18 +130,19 @@ class SystemMenuUI:
         hdr_ink = th["ink_dim"] if light else NAMES["dark_grey"]
         x, y, w, h = m.panel_rect()
         _ui.dialog(cv, (x, y, w, h), ring=th["edge"], fill=th["panel"])
-        cy = _POPUP_Y * fs
-        row_h = _POPUP_ROW_H * fs
+        cy = _POPUP_Y * cs
+        row_h = _POPUP_ROW_H * cs
         # Rows sit 1px inside the panel ring, so the label's own inset from the
         # PANEL edge (_POPUP_PAD_X) is one less from the ROW edge.
         pad = _POPUP_PAD_X * fs - 1
-        dy = 2 * fs
+        # The label's own band, re-centred in a row the chrome scale made taller.
+        dy = 2 * fs + (row_h - _POPUP_ROW_H * fs) // 2
         for idx in range(len(m.items)):
             it = m.items[idx]
             kind = it[0]
             if kind == "sep":
-                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H * fs, th["edge"])
-                cy += _POPUP_SEP_H * fs
+                cv.rect(x + 1, cy, w - 2, _POPUP_SEP_H * cs, th["edge"])
+                cy += _POPUP_SEP_H * cs
                 continue
             # ui.row owns the chrome (the selection fill + the label's ink and
             # placement). A popup row is panel-CHROME coloured, which the row

@@ -101,8 +101,8 @@ class SheetsLayout(ListShellLayout):
     MIN_W = 200
     MIN_H = 200
 
-    def __init__(self, w, h, fs=1, windowed=False, cols=DEFAULT_COLS):
-        self._init_frame(w, h, fs, windowed)
+    def __init__(self, w, h, fs=1, windowed=False, cols=DEFAULT_COLS, cs=None):
+        self._init_frame(w, h, fs, windowed, cs)
         fs = self.fs
         self.cols = int(cols)
         self.toolbar_h = 24 * fs
@@ -193,7 +193,8 @@ class SheetsAppLayer(ListShellApp):
         self._in = in_rect
         cv = ctx.surface.canvas()
         self.layout = SheetsLayout(cv.w, cv.h,
-                                   self._surf.font_scale(), self._surf.windowed())
+                                   self._surf.font_scale(), self._surf.windowed(),
+                                   cs=self._surf.chrome_scale())
         self.mode = "list"            # list | grid | rename | attach
         self.grid = FileGridView(ctx.shell, "tables")
         self.sheet = None             # the open formula.Sheet
@@ -279,9 +280,9 @@ class SheetsAppLayer(ListShellApp):
 
     # -- lifecycle -----------------------------------------------------------
 
-    def relayout(self, w, h, fs):
+    def relayout(self, w, h, fs, cs=None):
         cols = self.sheet.cols if self.sheet is not None else DEFAULT_COLS
-        self.layout = SheetsLayout(w, h, fs, self._surf.windowed(), cols)
+        self.layout = SheetsLayout(w, h, fs, self._surf.windowed(), cols, cs)
         self._scroll_grid()
 
     def open(self):
@@ -317,7 +318,8 @@ class SheetsAppLayer(ListShellApp):
         self.edit_buf = ""
         self._ekey_prev = 0
         self.layout = SheetsLayout(self.layout.w, self.layout.h, self.layout.fs,
-                                   self._surf.windowed(), sheet.cols)
+                                   self._surf.windowed(), sheet.cols,
+                                   self.layout.cs)
         self.status = name.upper()
         self.history = self._build_history(sheet, name)
         self._damage.all()

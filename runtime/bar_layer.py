@@ -423,7 +423,10 @@ class BarLayer:
             title = (ws.cart.get("title") if ws.cart else "") or ""
             maxc = zone[2] // 8                                      # 8px cells in the lent rect
             if maxc > 0:
-                cv.print(title[:maxc], zone[0], 3, th["chrome_ink_dim"], 1)
+                # 0 on the fixed cluster, whose bar is _STATUS_H whatever the
+                # layout says; the responsive-app-cart case (#181) re-centres.
+                dy = 0 if self._zone_is_game(where) else ws.layout.bar_text_dy
+                cv.print(title[:maxc], zone[0], 3 + dy, th["chrome_ink_dim"], 1)
             return
         # -- the zoned bar (Stage 4): a black backing band (with a thin shelf edge
         # line below), the OS-owned RIGHT zone, then the active app's LENT left zone.
@@ -471,13 +474,18 @@ class BarLayer:
             if show_x:                    # context X (Stage 5): tap to exit the app
                 ws._icon("close", _ZONE_CONTEXT_X[0], _ZONE_CONTEXT_X[1], cv)
         else:
+            # The responsive arm is the ONLY one that follows the chrome scale
+            # (#203): the branch above draws the fixed 320x240 game-canvas cluster,
+            # whose rects are frozen module constants.
             lay = ws.layout
-            cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
-            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv)
-            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv)
-            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv)
+            cs = lay.cs
+            cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
+                     th["chrome_ink_dim"], 1)
+            ws._icon(ws._wifi_icon_kind(), lay.wifi_btn[0], lay.wifi_btn[1], cv, cs)
+            ws._icon("batt", lay.batt_btn[0], lay.batt_btn[1], cv, cs)
+            ws._glyph("menu", lay.sysmenu_btn, th["chrome_ink"], cv, cs)
             if show_x:                    # context X (Stage 5): tap to exit the app
-                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv)
+                ws._icon("close", lay.context_x_btn[0], lay.context_x_btn[1], cv, cs)
 
     def redraw_clock(self, where):
         """Repaint JUST the clock cell of an already-drawn bar (#155).
@@ -487,7 +495,7 @@ class BarLayer:
         clock is the only part of it that changes while nothing else does -- so
         without this, ticking the minute invalidated the whole cached desk once a
         second. The clock cell is right of the taskbar chips (they stop at
-        lay.clock_x - 4*cs), so repainting it cannot erase them."""
+        lay.clock_x - 4*fs), so repainting it cannot erase them."""
         ws = self.ws
         cv = self._bar_canvas(where)
         if cv is None:
@@ -504,7 +512,8 @@ class BarLayer:
             bg = th["bar"]
         bar_h = self._bar_h(where)
         cv.rect(x, y, w, min(h, max(0, bar_h - 1)), bg)
-        cv.print(self._clock_text(), lay.clock_x, 3, th["chrome_ink_dim"], 1)
+        cv.print(self._clock_text(), lay.clock_x, 3 + lay.bar_text_dy,
+                 th["chrome_ink_dim"], 1)
 
     def _clock_text(self):
         """A wall-clock HH:MM from time.localtime when available, else a mm:ss

@@ -671,6 +671,11 @@ class Popup:
         # from _effective_font_scale(); 1 keeps every product byte-identical (the
         # T-Deck / 320x240 baseline).
         self.fs = 1
+        # The menu's ROWS are tap targets, so their height follows the chrome
+        # scale (#203) while the labels stay on `fs`. Equal by default, which is
+        # what keeps every tier byte-identical; the panel WIDTH stays on `fs`
+        # because it is sized to hold text, not to be hit.
+        self.cs = 1
 
     # -- open/close ----------------------------------------------------------
     def show(self, items):
@@ -735,13 +740,13 @@ class Popup:
     def panel_rect(self):
         """(x, y, w, h) of the whole panel -- height grows with the row count. The
         left edge is `anchor_x` (set under the ≡ button by toggle_sysmenu, Stage 4);
-        defaults to _POPUP_X (flush left). All geometry scales by `fs` (1 = the
-        byte-identical baseline)."""
-        fs = self.fs
+        defaults to _POPUP_X (flush left). Rows and the drop under the bar scale by
+        `cs`, the text-sized width by `fs`; equal is the byte-identical baseline."""
+        fs, cs = self.fs, self.cs
         h = 0
         for it in self.items:
-            h += _POPUP_SEP_H * fs if it[0] == "sep" else _POPUP_ROW_H * fs
-        return (self.anchor_x, _POPUP_Y * fs, _POPUP_W * fs, h)
+            h += _POPUP_SEP_H * cs if it[0] == "sep" else _POPUP_ROW_H * cs
+        return (self.anchor_x, _POPUP_Y * cs, _POPUP_W * fs, h)
 
     def row_at(self, px, py):
         """Index of the row under (px, py), or None when outside the panel."""
@@ -750,10 +755,10 @@ class Popup:
         x, y, w, h = self.panel_rect()
         if not _in(px, py, (x, y, w, h)):
             return None
-        fs = self.fs
-        cy = _POPUP_Y * fs
+        cs = self.cs
+        cy = _POPUP_Y * cs
         for i in range(len(self.items)):
-            rh = _POPUP_SEP_H * fs if self.items[i][0] == "sep" else _POPUP_ROW_H * fs
+            rh = _POPUP_SEP_H * cs if self.items[i][0] == "sep" else _POPUP_ROW_H * cs
             if cy <= py < cy + rh:
                 return i
             cy += rh
