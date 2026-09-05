@@ -407,18 +407,18 @@ def test_a_store_lost_in_the_write_window_is_recovered_not_reported_empty(tmp_pa
 
 
 def test_a_truncated_store_falls_back_to_the_backup(tmp_path):
-    """The rename-unsupported _copy fallback publishes by truncating `path` and
-    writing into it, so a crash there leaves a HALF file rather than none. Garbage
-    must read as "use the backup", never as "no saved networks"."""
+    """The publish overwrites `path` in place, so a crash there leaves a HALF file
+    rather than none. Garbage must read as "use the backup", never as "no saved
+    networks" -- and the backup is the REDO log (#154), carrying the same save's
+    bytes, so what comes back is the newest store rather than the one before it."""
     from runtime import moy_carts
 
     carts = _two_saved(tmp_path)
     with open(moy_carts.wifi_store_path(carts), "w") as f:
         f.write('{"networks": [{"ssi')     # torn mid-write
 
-    # .bak is the copy from before the second save, so Home is what survives.
-    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
-    assert moy_carts.load_wifi(carts)[0]["password"] == "secretpw"
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
+    assert moy_carts.load_wifi(carts)[1]["password"] == "secretpw"
 
 
 def test_a_wrong_shaped_store_falls_back_to_the_backup(tmp_path):
@@ -429,7 +429,7 @@ def test_a_wrong_shaped_store_falls_back_to_the_backup(tmp_path):
     with open(moy_carts.wifi_store_path(carts), "w") as f:
         f.write('{"networks": "oops"}')
 
-    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Home"]
+    assert [n["ssid"] for n in moy_carts.load_wifi(carts)] == ["Work", "Home"]
 
 
 def test_a_deliberately_emptied_store_is_not_resurrected(tmp_path):
@@ -460,9 +460,9 @@ def test_a_save_after_a_corrupt_read_does_not_eat_the_other_networks(tmp_path):
 
 def _arm_write_probe(carts):
     """Delete the store's .bak and hand back a "did anything republish the store?"
-    check. _write_atomic ALWAYS rotates an existing store to .bak before
-    publishing, so a reappeared .bak is proof of a rewrite -- an exact signal,
-    where an mtime comparison depends on the filesystem's timestamp granularity."""
+    check. _write_atomic ALWAYS writes the .bak beside the store it publishes, so
+    a reappeared .bak is proof of a rewrite -- an exact signal, where an mtime
+    comparison depends on the filesystem's timestamp granularity."""
     import os
     from runtime import moy_carts
     bak = moy_carts.wifi_store_path(carts) + ".bak"
@@ -566,7 +566,8 @@ def test_an_unreadable_store_does_not_blank_the_saved_password(tmp_path):
 
 def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
     """system.json and achievements.json are the same read-modify-write over the
-    same _write_atomic. One loader, one rule."""
+    same _write_atomic. One loader, one rule -- and the backup carries the LAST
+    save, so a publish lost to a crash costs nothing (#154)."""
     import os
     from runtime import moy_carts
 
@@ -581,5 +582,6 @@ def test_the_sibling_system_stores_recover_the_same_way(tmp_path):
                  moy_carts.achievements_store_path(carts)):
         os.remove(path)                  # the crash window, again
 
-    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night"}
-    assert moy_carts.load_achievements(carts) == ["first_cart"]
+    assert moy_carts.load_system(carts) == {"wallpaper": "moy_night",
+                                            "theme": "outline"}
+    assert moy_carts.load_achievements(carts) == ["first_cart", "first_edit"]

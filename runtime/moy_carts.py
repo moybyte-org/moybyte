@@ -206,13 +206,14 @@ try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, encode_moyimg,
                            moyimg_runs, decode_moyimg, cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
-                        _write_atomic, _read_recover)
+                        _write_atomic, _read_recover, _read_bak, _forget_bak)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
                                    encode_moyimg, moyimg_runs, decode_moyimg,
                                    cover_sig, _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
-                                _write_atomic, _read_recover)
+                                _write_atomic, _read_recover, _read_bak,
+                                _forget_bak)
 
 
 def load_image(path, name):
@@ -404,25 +405,31 @@ def _load_store_json(path, pick):
     recovery is durable rather than re-run on every read.
 
     Every sibling store must read through this. `_write_atomic` is crash-safe only
-    BECAUSE of that .bak, so its window leaves the store missing or truncated -- and
-    a loader that reads either as "nothing saved yet" makes the loss permanent: the
-    next save rotates the one surviving good copy into .bak and the save after that
-    deletes it.
+    BECAUSE of that .bak, so its window leaves the store truncated -- and a loader
+    that reads a truncated store as "nothing saved yet" makes the loss permanent:
+    the next save overwrites the one surviving good copy.
     """
-    for src in (path, path + ".bak"):
+    def _pick(text):
         try:
-            got = pick(json.loads(_read(src)))
-        except (OSError, ValueError, TypeError, AttributeError):
-            got = None
-        if got is None:
-            continue
-        if src != path:
-            try:
-                _copy(src, path)      # heal: republish the last known-good copy
-            except Exception:         # noqa: BLE001 -- still return what we recovered
-                pass
+            return pick(json.loads(text)) if text is not None else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    try:
+        got = _pick(_read(path))
+    except OSError:
+        got = None
+    if got is not None:
         return got
-    return None
+    text = _read_bak(path)
+    got = _pick(text)
+    if got is None:
+        return None
+    try:
+        _write(path, text)            # heal: republish the last known-good copy
+    except Exception:                 # noqa: BLE001 -- still return what we recovered
+        pass
+    return got
 
 
 def _write_sibling(root, name, text):
@@ -1755,11 +1762,15 @@ def new_from_template(root=CARTS_DIR, title="New Cart"):
 #                           copy "undo" into the source project's edits
 #   pmem.json            -- the original's save state, not the new project's
 #   thumbs/              -- a regenerable preview cache, stamped against the source
+#   *.bak / *.tmp        -- moy_fs's crash-safety artifacts. A copied .bak stamps
+#                           content the copy's own file does not hold, and the next
+#                           read would "recover" the SOURCE's bytes over it (#154).
 def _dup_skip(name, main):
-    return (name in ("manifest.json", "manifest.json.bak", "config.json",
+    return (name in ("manifest.json", "config.json",
                      "pmem.json", main, THUMBS_DIR, JOURNAL_DIR, JOURNAL_LOG,
                      JOURNAL_CURSOR, JOURNAL_SNAP_DIR)
-            or name.startswith("journal"))
+            or name.startswith("journal")
+            or name.endswith(".bak") or name.endswith(".tmp"))
 
 
 def _copy_cart_files(src, dst, main):
@@ -2236,6 +2247,7 @@ def rename_file(kind, name, new_title, root=CARTS_DIR):
         return name
     new = _unique_name(kind, new, root)
     os.rename(file_path(kind, name, root), file_path(kind, new, root))
+    _forget_bak(file_path(kind, name, root))   # the old name's crash backup, #154
     _ensure_history_dir(kind, root)
     _sidecar_move(_history_path(kind, name, root), _history_path(kind, new, root))
     return new
@@ -2286,6 +2298,7 @@ def delete_file(kind, name, root=CARTS_DIR):
     _mkdir(_trash_dir(kind, root))
     new = _unique_name(kind, name, root, _trash_path)
     os.rename(file_path(kind, name, root), _trash_path(kind, new, root))
+    _forget_bak(file_path(kind, name, root))   # the backup does not follow it, #154
     # The op-history sidecar (#111) follows the file into the trash under the
     # SAME trashed name, so a restore brings the undo history back with it.
     _ensure_history_trash_dir(kind, root)
@@ -2311,6 +2324,7 @@ def restore_file(kind, name, root=CARTS_DIR):
     _ensure_kind_dir(kind, root)
     new = _unique_name(kind, name, root)
     os.rename(_trash_path(kind, name, root), file_path(kind, new, root))
+    _forget_bak(_trash_path(kind, name, root))
     # Bring the op-history sidecar (#111) back out of the trash with the file.
     _ensure_history_dir(kind, root)
     _sidecar_move(_history_trash_path(kind, name, root), _history_path(kind, new, root))
@@ -2323,6 +2337,7 @@ def _remove_trash_entry(kind, name, root):
         _rmtree(p)
     else:
         _remove(p)
+    _forget_bak(p)
     _remove(_history_trash_path(kind, name, root))   # drop the sidecar too (#111)
 
 

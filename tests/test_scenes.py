@@ -128,7 +128,9 @@ def test_save_scene_is_atomic(tmp_path):
     # a re-save rotates the previous good copy aside (crash-safe atomic swap)
     mc.save_scene(c, "main", LEVEL2_SCENE)
     assert f.read_text() == LEVEL2_SCENE
-    assert (scene_dir / "main.moyscene.bak").read_text() == MAIN_SCENE
+    # The backup is the REDO log (#154): the bytes the publish was writing, stamped.
+    bak = (scene_dir / "main.moyscene.bak").read_text()
+    assert bak.startswith("#moyfs1 ") and bak.endswith(LEVEL2_SCENE)
 
 
 def test_scene_names_orders_manifest_first_then_stray_files(tmp_path):

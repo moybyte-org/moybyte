@@ -127,19 +127,11 @@ except ImportError:  # pragma: no cover
     os = None
 
 try:
-    from moy_fs import _mkdir, _write, _remove, _exists, _copy, _write_atomic
+    from moy_fs import (_mkdir, _write, _remove, _exists, _copy, _write_atomic,
+                        _crc32)
 except ImportError:  # host / CPython: the runtime package
     from runtime.moy_fs import (_mkdir, _write, _remove, _exists, _copy,
-                                _write_atomic)
-
-try:
-    from binascii import crc32 as _crc32
-except ImportError:  # pragma: no cover -- every target ships binascii
-    def _crc32(data, seed=0):
-        h = seed
-        for b in data:
-            h = (h * 31 + b) & 0xFFFFFFFF
-        return h
+                                _write_atomic, _crc32)
 
 
 # The carts batch keeps v1 FOREVER: it is the shape every already-flashed
@@ -708,9 +700,12 @@ def _apply_one(root, op, desc, journal=False):
 
 
 def _publish(path):
-    """Publish `<path>.tmp` as `path` -- steps 2-3 of moy_fs._write_atomic's
-    crash-safe dance (the .tmp already holds the full new bytes), FAT
-    rename-can't-clobber fallback included."""
+    """Publish `<path>.tmp` as `path` -- the rename-rotation publish, for the
+    chunked path where the .tmp already holds the full new bytes and re-reading
+    them into RAM to hand `_write_atomic` a string is the thing being avoided. FAT
+    rename-can't-clobber fallback included. The `.bak` it rotates into place is an
+    UNSTAMPED one (moy_fs reads it as a legacy backup, which is exactly what it
+    is: the previous whole file), so the stale-stamp invariant holds."""
     tmp = path + ".tmp"
     bak = path + ".bak"
     if not _exists(tmp):

@@ -24,10 +24,12 @@ def test_save_code_atomic_roundtrip(tmp_path):
     # The new source is on disk and the in-RAM cart was updated.
     assert "cls(2)" in moy_carts.load(c["path"])["src"]
     assert "cls(2)" in c["src"]
-    # No temp file is left behind; a backup of the previous good version is kept.
+    # No temp file is left behind, and the stamped backup (#154) carries the bytes
+    # that were just published, so a crash in the publish loses nothing.
     main = Path(c["path"]) / "main.py"
     assert not (Path(c["path"]) / "main.py.tmp").exists()
-    assert (Path(c["path"]) / "main.py.bak").read_text().endswith("cls(1)\n")
+    bak = (Path(c["path"]) / "main.py.bak").read_text()
+    assert bak.startswith("#moyfs1 ") and bak.endswith("cls(2)\n")
     assert main.read_text().endswith("cls(2)\n")
 
 
@@ -371,141 +373,129 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
 
 # -- (g) [MAJOR] atomic-write crash window is recoverable via .bak ----------
 
-def test_crash_between_renames_is_recoverable_via_bak(tmp_path, monkeypatch):
-    # Simulate a crash AFTER the good file is moved to .bak but BEFORE .tmp is
-    # published: there is no main.py on disk, only main.py.bak. load() must heal.
-    from runtime import moy_carts
+def test_crash_before_the_publish_is_recoverable_via_bak(tmp_path, monkeypatch):
+    # Simulate a power loss between _write_atomic's two writes: the stamped backup
+    # holds the new source, main.py still holds the old one. load() must publish
+    # the backup rather than serve a save that never landed.
+    from runtime import moy_carts, moy_fs
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    good = "def _draw():\n    cls(1)  # GOOD\n"
-    c = moy_carts.create("Crashy", root, src=good, type="app")
+    c = moy_carts.create("Crashy", root, src="def _draw():\n    cls(1)  # OLD\n",
+                         type="app")
     path = c["path"]
     main = Path(path) / "main.py"
 
-    # Make the SECOND rename (tmp -> path) "crash" mid-_write_atomic.
-    real_rename = moy_carts.os.rename
-    calls = {"n": 0}
+    real_write = moy_fs._write
 
-    def flaky_rename(src, dst):
-        calls["n"] += 1
-        if calls["n"] == 2:               # path->bak ran; now blow up the tmp->path swap
-            raise KeyboardInterrupt("power lost")
-        return real_rename(src, dst)
+    def crash_on_publish(p, data):
+        if p.endswith("main.py"):
+            raise KeyboardInterrupt("power lost")   # the backup already landed
+        return real_write(p, data)
 
-    monkeypatch.setattr(moy_carts.os, "rename", flaky_rename)
+    monkeypatch.setattr(moy_fs, "_write", crash_on_publish)
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
     except KeyboardInterrupt:
         pass
-    monkeypatch.setattr(moy_carts.os, "rename", real_rename)
+    monkeypatch.setattr(moy_fs, "_write", real_write)
 
-    # The damage we expect: main.py is gone, only main.py.bak (the GOOD copy) remains.
-    assert not main.exists()
-    assert (Path(path) / "main.py.bak").exists()
-
-    # load() must NOT return None here -- it heals from .bak.
+    assert "OLD" in main.read_text()               # the publish never ran
     loaded = moy_carts.load(path)
     assert loaded is not None
-    assert "GOOD" in loaded["src"]        # recovered the last-known-good source
-    assert main.exists()                  # and republished it on disk
-    assert "GOOD" in main.read_text()
+    assert "NEW" in loaded["src"]                  # the save that reached the backup
+    assert "NEW" in main.read_text()               # ...republished on disk
 
 
-# -- (h) [MAJOR] rename-unsupported fallback keeps the data -----------------
-
-def test_rename_unsupported_fallback_keeps_data(tmp_path, monkeypatch):
-    # On a FAT VFS where os.rename raises, _write_atomic must fall back to copy and
-    # NEVER delete the good file before publishing -> no data loss.
-    from runtime import moy_carts
+def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):
+    # The window the old rename dance could not see: `path` is present but SHORT.
+    # _read_recover checked only for a MISSING file, so a truncated main.py read as
+    # good source. The stamp beside it says otherwise.
+    from runtime import moy_carts, moy_fs
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    good = "def _draw():\n    cls(1)  # OLD\n"
-    c = moy_carts.create("NoRename", root, src=good, type="app")
+    c = moy_carts.create("Torn", root, src="def _draw():\n    cls(1)\n", type="app")
     path = c["path"]
     main = Path(path) / "main.py"
 
-    def no_rename(src, dst):
-        raise OSError("rename not supported on FAT")
-    monkeypatch.setattr(moy_carts.os, "rename", no_rename)
+    real_write = moy_fs._write
 
-    status, msg = moy_carts.save_code(c, "def _draw():\n    cls(2)  # NEW\n")
-    assert status == moy_carts.SAVE_OK
-    # The new bytes published via copy; the real file is present and correct.
-    assert main.exists() and "NEW" in main.read_text()
-    # No orphan tmp survives the fallback.
-    assert not (Path(path) / "main.py.tmp").exists()
-    # And load() reads the new content.
-    assert "NEW" in moy_carts.load(path)["src"]
+    def torn_publish(p, data):
+        if p.endswith("main.py"):
+            return real_write(p, data[: len(data) // 2])   # half the bytes land
+        return real_write(p, data)
+
+    monkeypatch.setattr(moy_fs, "_write", torn_publish)
+    moy_carts.save_code(c, "def _draw():\n    cls(2)  # WHOLE\n")
+    monkeypatch.setattr(moy_fs, "_write", real_write)
+
+    assert "WHOLE" not in main.read_text()         # torn on disk
+    assert "WHOLE" in moy_carts.load(path)["src"]  # ...and whole to every reader
+    assert "WHOLE" in main.read_text()
 
 
-def test_rename_unsupported_keeps_path_if_publish_copy_fails(tmp_path, monkeypatch):
-    # Even when BOTH os.rename and the publish copy fail, the original good file
-    # must remain (the old code did _remove(path) first -> total loss). We never
-    # delete path early, so the data is always still recoverable.
-    from runtime import moy_carts
+# -- (h) [MAJOR] a failed backup write keeps the published file --------------
+
+def test_failed_bak_write_keeps_the_published_file(tmp_path, monkeypatch):
+    # ENOSPC on the backup (the FIRST write) must leave the good file untouched and
+    # no half-written backup behind to be mistaken for one.
+    from runtime import moy_carts, moy_fs
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
     good = "def _draw():\n    cls(1)  # KEEPME\n"
     c = moy_carts.create("Keep", root, src=good, type="app")
-    main_path = c["path"] + "/main.py"
-    main = Path(main_path)
+    main = Path(c["path"]) / "main.py"
 
-    monkeypatch.setattr(moy_carts.os, "rename",
-                        lambda s, d: (_ for _ in ()).throw(OSError("no rename")))
-    # Make the publish copy (tmp -> the real main.py) fail too -- the worst case.
-    # (_write_atomic's internals live in moy_fs since the split -- patch there.)
-    from runtime import moy_fs
-    real_copy = moy_fs._copy
+    real_open = open
 
-    def boom_copy(src, dst):
-        if dst == main_path:              # only the publish copy of main.py blows up
-            raise OSError("write failed")
-        return real_copy(src, dst)
-    monkeypatch.setattr(moy_fs, "_copy", boom_copy)
+    def failing_open(p, mode="r"):
+        if p.endswith("main.py.bak") and mode == "w":
+            raise OSError("ENOSPC")
+        return real_open(p, mode)
+    monkeypatch.setattr(moy_fs, "open", failing_open, raising=False)
 
     try:
         moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
     except OSError:
         pass
-    monkeypatch.setattr(moy_fs, "_copy", real_copy)
+    monkeypatch.delattr(moy_fs, "open", raising=False)
 
-    # path was never deleted before publishing -> the original good file is intact.
-    assert main.exists() and "KEEPME" in main.read_text()
-    # And load() still returns the last-known-good cart (no data loss).
+    assert "KEEPME" in main.read_text()
+    assert not (Path(c["path"]) / "main.py.bak").exists()
     loaded = moy_carts.load(c["path"])
     assert loaded is not None and "KEEPME" in loaded["src"]
 
 
-# -- (i) [MINOR] orphan .tmp is cleaned on a partial/failed write -----------
-
-def test_orphan_tmp_cleaned_on_failed_write(tmp_path, monkeypatch):
+def test_a_torn_backup_is_refused_not_published(tmp_path):
+    # The other half of the stamp: a backup that fails its OWN stamp is garbage,
+    # and garbage must never be written over a whole file.
     from runtime import moy_carts
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
-    c = moy_carts.create("Tmp", root, src="def _draw():\n    cls(1)\n", type="app")
-    path = c["path"]
+    c = moy_carts.create("Half", root, src="def _draw():\n    cls(0)\n", type="app")
+    moy_carts.save_code(c, "def _draw():\n    cls(1)  # GOOD\n")
+    bak = Path(c["path"]) / "main.py.bak"
+    bak.write_text(bak.read_text()[:-8])           # truncate the stamped payload
 
-    # Force the tmp write to fail (e.g. ENOSPC) AFTER it would have created the file.
-    # (_write_atomic's internals live in moy_fs since the split -- patch there.)
-    from runtime import moy_fs
-    real_write = moy_fs._write
+    assert "GOOD" in moy_carts.load(c["path"])["src"]
+    assert "GOOD" in (Path(c["path"]) / "main.py").read_text()
 
-    def failing_write(p, data):
-        if p.endswith(".tmp"):
-            real_write(p, data[: len(data) // 2])   # partial bytes land...
-            raise OSError("ENOSPC")                  # ...then the write dies
-        return real_write(p, data)
-    monkeypatch.setattr(moy_fs, "_write", failing_write)
 
-    try:
-        moy_carts.save_code(c, "def _draw():\n    cls(2)\n")
-    except OSError:
-        pass
-    monkeypatch.setattr(moy_fs, "_write", real_write)
+def test_a_legacy_unstamped_backup_still_reads(tmp_path):
+    # A board upgrades in place: every .bak already on its card was written by the
+    # rename dance and carries no stamp. It stays a usable backup, and a whole
+    # `path` beside it is never second-guessed.
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Legacy", root, src="def _draw():\n    cls(1)  # LIVE\n",
+                         type="app")
+    main = Path(c["path"]) / "main.py"
+    bak = Path(c["path"]) / "main.py.bak"
+    bak.write_text("def _draw():\n    cls(9)  # OLD\n")     # pre-#154 shape
 
-    assert not (Path(path) / "main.py.tmp").exists()   # orphan cleaned up
-    # The original file is untouched (the failure happened before any swap).
-    assert "cls(1)" in (Path(path) / "main.py").read_text()
+    assert "LIVE" in moy_carts.load(c["path"])["src"]        # path wins while it reads
+    main.unlink()
+    assert "OLD" in moy_carts.load(c["path"])["src"]         # ...and the legacy bak heals
 
 
 def test_save_shared_sheet_is_atomic(tmp_path):
@@ -517,7 +507,7 @@ def test_save_shared_sheet_is_atomic(tmp_path):
     # _write_atomic used -> no orphan tmp left behind beside the sheet.
     sheet = Path(moy_carts.shared_sheet_path(root))
     assert not Path(str(sheet) + ".tmp").exists()
-    # A second save keeps a .bak of the previous version (recoverable).
+    # A second save keeps a stamped .bak of what it just published (recoverable).
     moy_carts.save_shared_sheet("4455\n", root)
     assert moy_carts.load_shared_sheet(root).startswith("4455")
-    assert Path(str(sheet) + ".bak").read_text().startswith("0011")
+    assert Path(str(sheet) + ".bak").read_text().endswith("4455\n")

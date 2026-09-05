@@ -523,7 +523,8 @@ def test_files_count_is_the_kinds_item_count_not_its_listing(tmp_path):
     assert err is None
     assert n == 3
     assert n == len(files.list("docs")[0])
-    assert n == len(os.listdir(_store.file_kind_dir("docs", ws.carts_root)))
+    assert n == len([f for f in os.listdir(_store.file_kind_dir("docs", ws.carts_root))
+                     if not f.endswith(".bak")])   # moy_fs's crash backups, #154
     assert files.delete("docs", "two")[1] is None
     assert files.count("docs") == (2, None)
     assert files.count("drawings") == (0, None)     # a kind nobody has written
@@ -687,7 +688,8 @@ def test_carts_images_reads_the_assets_by_name_from_a_cart_or_a_path(tmp_path):
     assert err is None
     assert sorted(by_cart) == ["moon", "star"] and by_cart["star"] == blob
     assert carts.images(cart["path"]) == (by_cart, None)
-    assert sorted(os.listdir(cart["path"] + "/" + _store.IMAGES_DIR)) == \
+    assert sorted(f for f in os.listdir(cart["path"] + "/" + _store.IMAGES_DIR)
+                  if not f.endswith(".bak")) == \
         ["moon" + _store.IMAGE_EXT, "star" + _store.IMAGE_EXT]
 
 
@@ -775,7 +777,8 @@ def test_the_scoped_handle_acts_on_its_granted_kind_only(tmp_path):
     assert scoped.delete("copy") == ("copy", None)
     assert sorted(scoped.list()[0]) == ["note", "plain"]
     ext = _kind_ext("docs")
-    assert sorted(os.listdir(_store.file_kind_dir("docs", ws.carts_root))) == \
+    assert sorted(f for f in os.listdir(_store.file_kind_dir("docs", ws.carts_root))
+                  if not f.endswith(".bak")) == \
         ["note" + ext, "plain" + ext]
     for kind in ("drawings", "tables", "sprites", "music"):
         assert files.count(kind) == (0, None), kind
