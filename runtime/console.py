@@ -1422,12 +1422,8 @@ class Workstation:
         w, h, fs = self.sys_canvas.w, self.sys_canvas.h, self.look.effective_font_scale()
         self.layout = Layout(w, h, fs)
         self.launcher.set_layout(self.layout)
-        # Editor layouts reflow too (#39 step 2); an open code editor adopts the new
-        # visible window live so a font/size change reflows it without losing the buffer.
-        self.code_layout = CodeLayout(w, h, fs)
+        self._relayout_code()             # editor layouts reflow too (#39 step 2)
         self.block_ui.relayout(w, h, fs)
-        if self.editor is not None:
-            self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
         # The step-3 responsive editors (#39): each converted layer owns its layout;
         # guarded, since _relayout is first called before _build_layers registers them.
         for _lyr in ("paint_layer", "map_ui", "scene_ui", "music_ui", "cards_layer"):
@@ -1443,6 +1439,16 @@ class Workstation:
         _hook = getattr(self.wm, "on_relayout", None) if hasattr(self, "wm") else None
         if _hook is not None:
             _hook()
+
+    def _relayout_code(self):
+        """Rebuild the Code tab's geometry and let an open editor adopt it live (so a
+        font/size change reflows without losing the buffer). The ONE author of
+        `code_layout` after __init__ -- _relayout above and EditorApp._relayout_tab
+        (entering the tab, #216) both come through here."""
+        self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
+                                      self.look.effective_font_scale())
+        if self.editor is not None:
+            self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
 
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------

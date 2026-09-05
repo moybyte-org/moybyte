@@ -101,6 +101,20 @@ _TAB_CHIPS = (
     ("music", "MUSIC", "music"),
 )
 
+# The `ws` attribute holding each tab's layout owner -- the object whose
+# `relayout(w, h, fs)` rebuilds that tab's geometry from the live canvas
+# (EditorApp._relayout_tab). The Code tab is absent because ws itself owns the
+# CodeLayout handle (see code_layer.py's boundary note); "cards" is here because
+# the Config tab has a layout like any other.
+_TAB_LAYOUT_UI = {
+    "cards": "cards_layer",
+    "blocks": "block_ui",
+    "paint": "paint_layer",
+    "map": "map_ui",
+    "scene": "scene_ui",
+    "music": "music_ui",
+}
+
 try:
     import ui as _ui
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
@@ -284,10 +298,33 @@ class EditorApp:
             # by the preview AND by the cart on resume. Edits go straight into that
             # bank; a tab-leave/PLAY hard-commit persists it to sounds.json (#111).
             ws.music_ui.build()
+        self._relayout_tab(view)
         ws._set_text_mode(view == "code")
         # Achievements (#21): visiting each editor (code/paint/map) earns "Toolbox
         # Master". "cards" isn't an editor, so it's ignored by note().
         ws.ach.note("editor", view)
+
+    def _relayout_tab(self, view):
+        """Re-derive the entered tab's geometry from the live canvas.
+
+        Every tab layout is a pure function of (canvas size, effective font scale),
+        but the objects are shared singletons on `ws`, so ANOTHER tab can overwrite
+        one and leave it there. The Blocks+Scene workspace binds `ws.scene_ui.layout`
+        to its right pane (block_editor_ui._layout_workspace) and nothing unbound it,
+        so the Scene tab opened afterwards drew into that pane -- at 800x480/3x a rect
+        of NEGATIVE width, off the right edge (#216). Rebuilding the ENTERED tab's own
+        layout is what makes that whole class impossible instead of fixing one pair:
+        whatever a tab inherits, it re-derives before it draws. It runs after the tab's
+        editor is built, so the clamps inside each `relayout` see the live editor."""
+        ws = self.ws
+        if view == "code":
+            ws._relayout_code()              # ws owns the CodeLayout handle
+            return
+        name = _TAB_LAYOUT_UI.get(view)
+        owner = getattr(ws, name, None) if name else None
+        if owner is not None:
+            owner.relayout(ws.sys_canvas.w, ws.sys_canvas.h,
+                           ws.look.effective_font_scale())
 
     # -- PLAY: commit the tab, then run the cart (spec Section 2/Section 6) ---------
 

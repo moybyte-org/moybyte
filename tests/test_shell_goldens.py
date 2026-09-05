@@ -210,6 +210,11 @@ CONFIGS = {
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark"),
 }
 
+# The config test_editor_tabs_render_independently sweeps. The largest one: every
+# cross-tab bounding an editor layout can suffer is a big-screen feature, and #216
+# showed only here.
+_INDEPENDENCE_CONFIG = "big_800x480_fs3_dark"
+
 
 def _axes(cfg):
     """The one-line axis description quoted in a failure message."""
@@ -265,6 +270,14 @@ def _render(ws, surface, config_name):
         "naming what and why." % (surface, config_name, _MAX_FRAMES))
 
 
+def _editor_tab_hash(ws, tab):
+    """Open the Editor on the pinned cart at `tab` and hash the settled frame --
+    the same two calls `_surface_plan`'s per-tab `enter` makes."""
+    ws.open_in_editor(_cart_by_title(ws, _EDITOR_CART))
+    ws.set_menu_view(tab)
+    return _render(ws, "editor_" + tab, _INDEPENDENCE_CONFIG)
+
+
 def _cart_by_title(ws, title):
     for cart in ws.carts.all:
         if cart.get("title") == title:
@@ -304,7 +317,10 @@ def _surface_plan(ws, cfg):
     cart = _cart_by_title(ws, _EDITOR_CART)
     for tab in TABS:
         def enter(tab=tab):
-            ws.open_in_editor(cart)      # re-open per tab: no cross-tab state
+            # Re-open per tab. That alone does NOT buy independence -- the layouts
+            # are ws singletons another tab can bind (#216); what pins it is
+            # test_editor_tabs_render_independently.
+            ws.open_in_editor(cart)
             ws.set_menu_view(tab)
         plan.append(("editor_" + tab, enter))
     for app in APPS:
@@ -507,6 +523,42 @@ def test_the_light_variant_really_draws_different_pixels(request):
     assert not same, (
         "these surfaces hash IDENTICALLY in dark and light, i.e. they ignore "
         "the theme variant: %s" % sorted(same))
+
+
+def test_editor_tabs_render_independently(tmp_path):
+    """An Editor tab renders the same pixels whatever tab was rendered before it.
+
+    `_surface_plan` re-opens the Editor per tab and its comment claims that buys
+    independence. It did not (#216): the Blocks+Scene workspace binds
+    `ws.scene_ui.layout` to its right pane and nothing unbound it, so the Scene tab
+    entered afterwards drew into that pane -- at this config a rect of NEGATIVE
+    width, off the right edge, leaving the blocks pixels standing underneath. One
+    golden was therefore a function of the surface before it, and an unrelated
+    map-editor change moved `editor_scene` with a re-baseline reason that looked
+    wrong.
+
+    Every ORDERED PAIR, at the config where it showed. font_scale 3 is what
+    collapses the workspace panes; the 320x240 rows take the frozen `_base`
+    branches, where no editor is ever bounded. The pairs share one workstation, so
+    the state also ACCUMULATES across them -- a stronger claim than pairwise, for
+    the price of one build."""
+    cfg = CONFIGS[_INDEPENDENCE_CONFIG]
+    alone = {tab: _editor_tab_hash(_build(cfg, tmp_path / ("alone_" + tab)), tab)
+             for tab in TABS}
+    ws = _build(cfg, tmp_path / "pairs")
+    leaked = []
+    for before in TABS:
+        for tab in TABS:
+            if tab == before:
+                continue
+            _editor_tab_hash(ws, before)
+            if _editor_tab_hash(ws, tab) != alone[tab]:
+                leaked.append("%s after %s" % (tab, before))
+    assert not leaked, (
+        "these Editor tabs render DIFFERENT pixels depending on which tab was "
+        "rendered before them (config %r, cart %r): %s. A tab must re-derive its "
+        "own state on entry -- see EditorApp._relayout_tab."
+        % (_INDEPENDENCE_CONFIG, _EDITOR_CART, leaked))
 
 
 def test_tab_ladder_is_fully_covered():
