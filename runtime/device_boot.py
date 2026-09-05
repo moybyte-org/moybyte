@@ -673,6 +673,7 @@ class PerfSampler:
         self._busy = 0
         self._drawn = 0
         self._miss = 0
+        self._sched = None    # WHOSE misses _miss is a baseline for
         self._ov = overlap() if overlap is not None else None
 
     def account(self, now, elapsed, sleep_ms):
@@ -726,9 +727,19 @@ class PerfSampler:
             if pl is not None and pl.tick_ms:
                 sc = pl.sched
                 v["tick"] = (sc.rate, sc.div)
+                # The baseline belongs to THAT scheduler. Every cart start
+                # builds a new one counting from 0, so subtracting the previous
+                # cart's total reported a NEGATIVE miss in the first sample of
+                # each run (`tick=60/1 miss=-424`, on glass) whenever no sample
+                # landed at the launcher in between -- which is what a `run`
+                # straight after an `exit` does.
+                if sc is not self._sched:
+                    self._sched = sc
+                    self._miss = 0
                 v["miss"] = sc.misses - self._miss
                 self._miss = sc.misses
             else:
+                self._sched = None
                 self._miss = 0
             self._emit(format_perf(v))
         except Exception as exc:  # noqa: BLE001 -- a diag never kills the loop

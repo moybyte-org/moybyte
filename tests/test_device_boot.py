@@ -1522,6 +1522,40 @@ def test_the_sampler_emits_once_per_period_and_never_once_per_frame(frames,
         assert len(out) == period + 1, out
 
 
+class _FakeSched:
+    """The Player's scheduler, as the sampler reads it (#217)."""
+
+    def __init__(self, rate=30, div=1, misses=0):
+        self.rate, self.div, self.misses = rate, div, misses
+
+
+class _FakePlayer:
+    def __init__(self, sched, tick_ms=33):
+        self.sched, self.tick_ms = sched, tick_ms
+
+
+def test_a_new_carts_misses_count_from_its_own_scheduler(monkeypatch):
+    """`miss=` is a DELTA over one sample, and every cart start builds a NEW
+    scheduler counting from zero -- so a baseline taken from the previous
+    cart's total reported a NEGATIVE miss in the first sample of each run.
+    Measured on the Guition (`tick=60/1 miss=-424`, 2026-09-05), which is what
+    a `run` straight after an `exit` does: no sample lands at the launcher in
+    between, so the else-branch never clears the baseline."""
+    _clock(monkeypatch)
+    out = []
+    ws = PerfWs()
+    ws.player = _FakePlayer(_FakeSched(rate=60, div=1, misses=424))
+    s = device_boot.PerfSampler(ws, emit=out.append)
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    assert parse_perf(out[-1])["miss"] == 424.0
+
+    ws.player.sched = _FakeSched(rate=30, div=1, misses=2)     # the next cart
+    _drive(monkeypatch, s, ws, 2, 0, 0)
+    got = parse_perf(out[-1])
+    assert got["tick"] == (30.0, 1.0)
+    assert got["miss"] == 2.0
+
+
 def test_the_meters_follow_PERF_DIAG_live(monkeypatch):
     """Settings -> PERF DIAG (#68) arms the deep meters, and flipping it must
     need no reboot. The BOOT arm stays in each run_desktop (a service
