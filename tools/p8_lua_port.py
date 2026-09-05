@@ -15,8 +15,8 @@ emits a complete Lua cart --
                                     (`!=` -> `~=`, `x += e` -> `x = x + (e)`,
                                     one-line `if (c) s` -> `if c then s end`,
                                     `_init/_update/_draw` renamed to `p8_*` so
-                                    the shim can pace them at PICO-8's fixed
-                                    30fps from moy's dt-driven loop)
+                                    the shim can give them PICO-8's button
+                                    semantics; the host paces them, SPEC.md 5)
 
 plus sprites.moygfx / sounds.json via import_p8's converters and a lua-runtime
 manifest that declares `"canvas": "128x128"` (SPEC.md 1/3.1) -- the cart draws
@@ -1937,7 +1937,6 @@ SHIM = r'''-- ============================================================
 -- is core (SPEC.md 6) and cannot mislead a cart, so no guard -- lossy only at
 -- PRESENTATION.
 local P8_VH = __P8_VH__
-local P8_DT = 1 / 30               -- _update's rate; _update60 relocks it to 60
 if P8_VH < 128 then view(128, P8_VH) end
 do
   local m_spr, m_btn, m_btnp = spr, btn, btnp
@@ -1962,18 +1961,14 @@ do
 
   local BTN = {[0] = "left", [1] = "right", [2] = "up", [3] = "down",
                [4] = "a", [5] = "b"}
-  -- btnp reads the LATCH and nothing else, and both halves of that matter.
-  --
-  -- Latched, because a 30fps cart ticks every OTHER console frame while an
-  -- engine press edge lasts ONE, so reading the engine directly ate half of
-  -- all presses.
-  --
-  -- And nothing else, because a fallback to the engine double-counts the other
-  -- way round: a 60fps cart on a 30fps host runs TWO ticks inside one console
-  -- frame, the first clears the latch, and the second still sees the engine's
-  -- edge -- which is live for that whole frame. One tap of left moves two slots
-  -- in an upgrade menu. The latch is set once per console frame and cleared by
-  -- the tick that consumes it, so one press is one edge at any pair of rates.
+  -- btnp reads `pending`, this TICK's press edges, and nothing else. The host
+  -- latches an edge until the tick that takes it and shows a second tick in
+  -- the same frame nothing (SPEC.md 5 / 7.3), so one press is one edge at any
+  -- pair of rates -- the shim used to keep that latch itself, across console
+  -- frames, back when it also kept the clock. An edge stays visible for the
+  -- whole cart frame, _draw included: PICO-8's btnp() answers the same in
+  -- _draw as it did in _update, and petal quest's title starts from a btnp()
+  -- inside its draw.
   --
   -- Held, btnp REPEATS: p8 fires again after a 15-tick delay, then every 4.
   -- That is what makes a menu scroll while a cart holds left, and without it
@@ -3214,120 +3209,46 @@ do
     camera, map = p8c("camera"), p8c("map")
   end
 
-  -- moybyte lifecycle -> the p8 one, paced at PICO-8's fixed 30fps
+  -- moybyte lifecycle -> the p8 one. The HOST paces the cart (SPEC.md 5):
+  -- one `_update` call is one PICO-8 tick, at the rate the manifest declares
+  -- (build_manifest reads it off the cart), catch-up and all, and `_draw`
+  -- never runs before the first tick. The shim kept its own accumulator for
+  -- as long as it could not verify the host was doing that; the spec now
+  -- requires it of every host, so what is left here is the rename and
+  -- PICO-8's button semantics.
   --
-  -- FALSE to start, because PICO-8 never draws before its first update. On a
-  -- host whose first console frame arrives in under one cart period -- a
-  -- _update60 cart on a board running at 60, right after load -- a `true`
-  -- here ran _draw with no tick behind it, and a cart that creates state in
-  -- _init and POSITIONS it in the first update drew against the half-built
-  -- thing: dank tomb indexed a nil player position, on every board, four
-  -- runs in five. run_cart's fixed 1/30 always ticks first and never showed
-  -- it (test/p8_first_draw.py runs it at a shorter dt, which does).
+  -- A cart picks its rate by which function it DEFINES: `_update60` runs
+  -- the game at 60, `_update` at 30, and a cart that defines both means the
+  -- 60 (so does PICO-8). The FUNCTION is looked up every tick because a cart
+  -- may reassign it -- a scene machine swapping its update for the next
+  -- screen is ordinary p8 -- so caching it on frame one freezes any cart
+  -- that defines it later, silently.
+  --
+  -- FALSE to start, and the cheap guard stays: PICO-8 never draws before its
+  -- first update, and a cart may rely on it -- dank tomb creates its player
+  -- light in _init and positions it in the first update, so a draw with no
+  -- tick behind it indexed a nil position.
   local ticked = false
   function _init()
     if p8_init then p8_init() end
   end
-  -- WALL-CLOCK cadence: p8_update runs 30x per real second whatever rate the
-  -- host calls _update at, and a host too slow to draw that often loses DRAWS,
-  -- not game speed. That is SPEC.md 5's one sanctioned degradation ("skip
-  -- _draw while continuing to call _update at the full rate"), applied from
-  -- inside the cart because the shim cannot verify the host is doing it.
-  --
-  -- On a host that does pace to 30 (both reference players do), dt is 1/30 and
-  -- this ticks exactly once per call -- the same frame-for-frame behaviour a
-  -- quantized cadence gave, reached without assuming the pacing.
-  --
-  -- The cost, and it is real: where the host rate is not a multiple of 30, the
-  -- ticks land on ITS frame grid, so their spacing alternates (at 45fps, gaps
-  -- of 22 and 44ms). That is arithmetic, not a scheme to tune away -- a 45fps
-  -- host cannot place 30 evenly spaced ticks per second, and quantizing to an
-  -- even spacing instead runs the cart at the wrong RATE, which is worse.
-  local EPS = P8_DT * 0.02      -- absorbs an integer-ms host period (33 vs 33.33)
-  -- A late frame runs extra ticks to catch up, but only while a tick is
-  -- CHEAP: under half the cart's period, PICO-8's own line for running two
-  -- ticks per draw. A heavier tick cannot be caught up on -- each extra one
-  -- makes the next frame later still, until the frame is nothing but ticks --
-  -- so past that line a late frame slows time instead, as it does on PICO-8.
-  local MAX_CATCHUP = 4         -- past this the board genuinely cannot keep up
-  local CHEAP = P8_DT * 500     -- ms
-  local tick_ms = 0             -- what the last tick cost, on the host clock
-  local acc = 0
-  -- A cart picks its own rate by which one it DEFINES: `_update60` runs the
-  -- game at 60, `_update` at 30, and a cart that defines both means the 60 (so
-  -- does PICO-8). The choice cannot be made when this shim loads -- the cart's
-  -- own functions are defined below it -- so it is locked on the first frame,
-  -- which is also the first moment it can be known.
-  --
-  -- Reading only `p8_update` leaves a 60fps cart DEAD, not slow: its update
-  -- never runs, so it draws its first frame forever and answers no input
-  -- (`bunnysurvivor`).
-  --
-  -- The RATE is locked once; the FUNCTION is looked up every tick. p8 reads
-  -- `_update` fresh each frame, and a cart may reassign it -- a scene machine
-  -- swapping its update for the next screen is ordinary p8 -- so caching the
-  -- function on frame one freezes any cart that defines it later, silently.
-  local locked = false
-  -- An edge stays visible for the WHOLE cart frame, _draw included: PICO-8's
-  -- btnp() answers the same in _draw as it did in _update, and petal quest's
-  -- title starts from a btnp() inside its draw. So a consumed edge is cleared
-  -- at the top of the NEXT console frame, not the moment the tick returns --
-  -- and an edge latched on a frame with no tick (a host faster than 30Hz)
-  -- still waits for one.
-  local consumed = false
   function _update(dt)
-    if not locked and (p8_update60 or p8_update) then
-      locked = true
-      if p8_update60 then
-        P8_DT = 1 / 60
-        EPS = P8_DT * 0.02
-        CHEAP = P8_DT * 500
-      end
-    end
-    if p8_in_frame then                          -- the latch, in C
+    if p8_in_frame then                          -- the latch and the holds, in C
       p8_in_frame()
+      p8_in_tick(false)
     else
-      if consumed then
-        for i = 0, 5 do pending[i] = false end
-        consumed = false
-      end
-      for i = 0, 5 do                            -- latch edges EVERY frame
-        if m_btnp(BTN[i]) then pending[i] = true end
+      for i = 0, 5 do
+        pending[i] = m_btnp(BTN[i]) and true or false
+        hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
       end
     end
-    dt = dt or P8_DT
-    if dt > 0.25 then dt = 0.25 end              -- a stall is a pause, not debt
-    acc = acc + dt
-    local n = 0
-    while acc >= P8_DT - EPS and n < MAX_CATCHUP do
-      if n > 0 and tick_ms > CHEAP then break end
-      acc = acc - P8_DT
-      n = n + 1
-      if p8_in_tick then
-        p8_in_tick(n > 1)                        -- the hold counters, in C
-      else
-        for i = 0, 5 do                          -- hold length, in CART ticks
-          hold[i] = m_btn(BTN[i]) and (hold[i] or 0) + 1 or 0
-        end
-        if n > 1 then                            -- a catch-up tick: the first
-          for i = 0, 5 do pending[i] = false end -- in this frame took the edge
-        end
-      end
-      local tick = p8_update60 or p8_update
-      if tick then
-        local t0 = m_time()
-        tick()
-        tick_ms = m_time() - t0
-      end
-      consumed = true
-      ticked = true
-    end
-    if acc > P8_DT then acc = P8_DT end          -- what cannot be paid is written off
+    local tick = p8_update60 or p8_update
+    if tick then tick() end
+    ticked = true
   end
   -- A cart with NO update function draws every frame, as PICO-8 does: there
-  -- is no tick for it to wait for. The rate lock in _update decides which
-  -- name a cart uses, and _update always runs first, so both are resolvable
-  -- by the time this reads them.
+  -- is no tick for it to wait for. _update always runs first, so both names
+  -- are resolvable by the time this reads them.
   function _draw()
     if p8_draw and (ticked or not (p8_update60 or p8_update)) then
       -- the console resets camera/clip/pal/palt after every cart frame;
@@ -3343,7 +3264,6 @@ do
         spal_apply()
       end
       p8_draw()
-      ticked = false
     end
   end
 end
@@ -3817,10 +3737,8 @@ def localization_lua(body):
 def build_manifest(title, icon=None, fps=30):
     # The spec manifest (SPEC.md 3.1). `fps` is the cart's LOGIC rate, and a p8
     # cart picks it by which lifecycle it defines: _update60 means 60, _update
-    # means 30. It reaches the host -- `Workstation.frame_cap_fps` reads this
-    # field -- so declaring 30 for a 60fps cart caps the loop to 30Hz while the
-    # shim still wants 60Hz logic, i.e. two cart ticks inside one console
-    # frame, which is what doubles a btnp edge.
+    # means 30. The host's scheduler calls the shim's `_update` at exactly this
+    # rate (SPEC.md 5), so a 60fps cart declared as 30 would run at half speed.
     # "ported_from" is an unrecognised field; the spec requires hosts to ignore
     # it (3.1).
     man = {
