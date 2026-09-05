@@ -85,6 +85,21 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def _skip_unparked(board, why):
+    """Skip this test -- but not with the glass left PARKED.
+
+    `web` parks the console on the connection screen before anyone knows
+    whether the batch will land, and both of this test's early exits are taken
+    after that. A bare skip therefore ended the session with a console that
+    draws nothing, and the suite shares ONE board in file order: every later
+    test read an idle board, and `test_perf_line_is_the_one_format` failed with
+    "no PERF lines in 5s" -- a real failure, of the previous test's tidying.
+    The finally at the bottom does this for the paths that reach it."""
+    board.cmd("py ws.stop_web_console(); print('WEBOFF')",
+              wait_for="WEBOFF", timeout=8.0)
+    pytest.skip(why)
+
+
 def test_sync_push_writes_the_store_and_the_shelf_follows(board):
     """The 3.4 sync RPC against the REAL board: bring the webhost up, POST a
     batch from this machine over the LAN, and read the result back over
@@ -100,7 +115,9 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
 
     line = board.cmd("web", wait_for="WEB ", timeout=30.0)
     if line is None or "http://" not in line:
-        pytest.skip("webhost did not come up (no wifi on this bench): %r" % line)
+        _skip_unparked(board,
+                       "webhost did not come up (no wifi on this bench): %r"
+                       % line)
     # Since #197 the `web` line is the PAIRED url -- the pin rides ?pin= and
     # every write batch must carry it (a bare batch is the 403 the pin exists
     # to give). The glass is parked on the connection screen while this runs.
@@ -119,7 +136,8 @@ def test_sync_push_writes_the_store_and_the_shelf_follows(board):
             headers={"Content-Type": "application/json"}), timeout=15)
         doc = _json.loads(r.read())
     except OSError as exc:
-        pytest.skip("board url unreachable from this machine: %s" % exc)
+        _skip_unparked(board,
+                       "board url unreachable from this machine: %s" % exc)
     try:
         assert doc == {"ok": 2, "err": []}, doc
         if pin:
