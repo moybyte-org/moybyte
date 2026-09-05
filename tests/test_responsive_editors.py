@@ -420,7 +420,9 @@ def test_map_layout_baseline_constants(tmp_path):
     assert not hasattr(lay, "save_btn")
     assert (lay.mv_x0, lay.mv_y0) == (M._MV_X0, M._MV_Y0)
     assert (lay.mv_avail_w, lay.mv_avail_h) == (M._MV_AVAIL_W, M._MV_AVAIL_H)
-    assert lay.zooms == tuple(M._MV_ZOOMS)
+    # The detail rungs are the frozen list; the OVERVIEW sentinel is appended on
+    # every tier (#215) and is always last, so a rung is identified by name.
+    assert lay.zooms == tuple(M._MV_ZOOMS) + (M._MV_OVERVIEW,)
     assert lay.tp_area == M._TP_AREA and lay.tp_page == M._TP_PAGE
     assert lay.tp_prev == M._TP_PREV and lay.tp_next == M._TP_NEXT
     assert lay.sky_btn == M._TP_SKY and lay.zoom_btn == M._MAP_ZOOM

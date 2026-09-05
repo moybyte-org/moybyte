@@ -1520,23 +1520,36 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     assert fitted >= 2, "no shipped map exercised the fit guarantee"
 
 
-def test_map_cycle_zoom_increases_cell_and_shrinks_view(tmp_path):
-    # Cycling the zoom steps IN: the cell size strictly grows and the visible cell
-    # count strictly shrinks, level by level, until it wraps back to the default.
+def test_map_cycle_zoom_increases_cell_then_lands_on_overview(tmp_path):
+    # Cycling the zoom steps IN through the detail rungs -- the cell size strictly
+    # grows and the visible cell count strictly shrinks -- then lands on OVERVIEW,
+    # which is BELOW every detail rung, and wraps back to the 8px field size.
     from runtime import console as C
+    from runtime import map_editor_ui as M
     _C, ws, drv = _open_cart_map(tmp_path, "brick_siege")
+    rungs = ws.map_ui.layout.zooms
+    assert rungs[-1] == M._MV_OVERVIEW                   # the sentinel is last (#215)
     seen = []
-    for _ in range(len(C._MV_ZOOMS)):
+    for _ in range(len(rungs)):
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-        seen.append((ws.map_ui.map_zoom, cell, cols * rows))
-        drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next level
+        seen.append((ws.map_ui.map_zoom, cell, cols * rows,
+                     ws.map_ui._mv_overview()))
+        drv.click(C._MAP_ZOOM[0] + 2, C._MAP_ZOOM[1] + 2)   # tap ZOOM -> next rung
         drv.frame(1 / 30)
     # Back to the default after a full cycle.
     assert ws.map_ui.map_zoom == 0
-    # Ascending cell size, descending visible-cell count across the levels.
-    for k in range(1, len(seen)):
-        assert seen[k][1] > seen[k - 1][1]               # bigger cells
-        assert seen[k][2] < seen[k - 1][2]               # fewer visible cells
+    detail = [s for s in seen if not s[3]]
+    assert len(detail) == len(rungs) - 1
+    # Ascending cell size, descending visible-cell count across the detail rungs.
+    for k in range(1, len(detail)):
+        assert detail[k][1] > detail[k - 1][1]           # bigger cells
+        assert detail[k][2] < detail[k - 1][2]           # fewer visible cells
+    # The OVERVIEW rung is the only one visited that is below one tile, and it shows
+    # strictly more cells than any detail rung.
+    ov = [s for s in seen if s[3]]
+    assert len(ov) == 1
+    assert ov[0][1] < detail[0][1] and ov[0][1] < 8
+    assert ov[0][2] > detail[0][2]
 
 
 def test_map_tap_and_sky_hit_right_cell_after_zoom(tmp_path):

@@ -261,8 +261,10 @@ gentlest:
 - **Sprites / Map / Scene / Music** — the asset editors, each with an icon-buttoned
   tool row (#90/#91/#92): the sprite painter has stroke-level undo/redo, a bucket
   fill, and whole-sprite transforms (flip/rotate/shift/clear); the map editor has
-  per-gesture undo/redo, rectangle + flood fills, and map resize; the scene
-  placement editor (#85 Stage 2) places tagged actors WYSIWYG on the world (tap =
+  per-gesture undo/redo, rectangle + flood fills, map resize, and a zoom ladder
+  whose last rung is an OVERVIEW of the WHOLE map -- each cell a solid block of
+  its tile's dominant colour, because no tile can be drawn below 8px (#215);
+  the scene placement editor (#85 Stage 2) places tagged actors WYSIWYG on the world (tap =
   place/select, drag = move or pan, snap toggle, tag/flip props, front/back
   z-order, per-gesture undo/redo — every committed gesture live-syncs so PLAY
   runs the freshest placement); the music editor has copy/paste/duplicate,

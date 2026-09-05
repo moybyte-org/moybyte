@@ -123,6 +123,9 @@ class SpriteSheet:
         # device's per-image RGB565 cache survive frames for the console's own tiles too.
         self._tile_cache = {}
         self._tile_cache_gen = 0
+        # tile_color() memo, on the same `gen` invalidation (#215).
+        self._tile_color = {}
+        self._tile_color_gen = 0
         if spec and not self.is_spec_shape():
             raise ValueError(
                 "sprite sheet must be %d x %d tiles of %dpx (%d x %d px) -- moy "
@@ -188,6 +191,41 @@ class SpriteSheet:
         img = _SheetSprite(self.TILE, self.TILE, pix, transparent)
         self._tile_cache[key] = img
         return img
+
+    def tile_color(self, n):
+        """The palette index tile n is MOSTLY made of -- the colour that stands for
+        the whole tile when it is too small to draw (the map editor's OVERVIEW rung,
+        #215). Ties go to the lower index, so the answer is stable for a tile with
+        two equal halves. Returns -1 for a tile id off the sheet.
+
+        Counted over all 64 pixels including index 0: a tile that really is mostly
+        black reads black, and no shipped tile is (every seed cart's map tiles win
+        on a non-zero index). Memoised per tile and dropped when `gen` bumps, like
+        tile_image -- the Paint tab's every pset bumps it."""
+        if n < 0 or n >= self.count:
+            return -1
+        if self._tile_color_gen != self.gen:
+            self._tile_color = {}
+            self._tile_color_gen = self.gen
+        c = self._tile_color.get(n)
+        if c is not None:
+            return c
+        ox, oy = self.tile_origin(n)
+        w = self.w
+        pix = self.pix
+        count = [0] * 16
+        for ly in range(self.TILE):
+            base = (oy + ly) * w + ox
+            for lx in range(self.TILE):
+                count[pix[base + lx] & 15] += 1
+        best = 0
+        best_n = count[0]
+        for i in range(1, 16):
+            if count[i] > best_n:
+                best = i
+                best_n = count[i]
+        self._tile_color[n] = best
+        return best
 
     def tile_span_image(self, n, tw=1, th=1, transparent=-1):
         """Build a (tw x th)-tile blittable starting at sprite n -- a TIC-80-style
