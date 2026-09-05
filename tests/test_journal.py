@@ -423,3 +423,25 @@ def test_missing_and_torn_cursor_default_to_newest(tmp_path):
     assert mj._journal_cursors(cur, entries) == {"main.py": 2, "map.moymap": 4}
     assert mc.journal_can_redo(path, ("main.py",)) is False   # already at the top
     assert mc.journal_can_undo(path, ("main.py",)) is True
+
+
+def test_the_journal_dirs_are_made_once_not_on_every_commit(tmp_path, monkeypatch):
+    """Two directory ops per save, on every board, to re-make a folder that has
+    existed since the project's first commit (#154). The dirs are created by
+    FAILING to write into them instead, so only the first commit pays."""
+    from runtime import moy_journal
+    store, path = _cart(tmp_path)
+
+    made = []
+    real = moy_journal._mkdir
+    monkeypatch.setattr(moy_journal, "_mkdir",
+                        lambda p: (made.append(p), real(p))[1])
+
+    store.journal_append(path, "main.py", "v1\n")
+    assert len(made) == 2                     # the first commit builds journal/ + s/
+    made.clear()
+
+    store.journal_append(path, "main.py", "v2\n")
+    store.journal_append(path, "main.py", "v3\n")
+    assert made == []
+    assert store.journal_undo(path) == "main.py"      # ...and the journal still walks

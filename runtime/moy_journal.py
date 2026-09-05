@@ -358,9 +358,6 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
                 return None
         except OSError:
             pass
-    # We are committing to a WRITE now -> create the journal dirs lazily.
-    _mkdir(jdir)
-    _mkdir(snap_dir)
     # -- Google-Docs rule, PER-FILE: a commit of `file` while `file` is rewound truncates
     #    only THIS FILE's redo tail (other files' redo tails survive). The ONE non-append
     #    rewrite on the commit path (rare -- only right after an undo of this file).
@@ -378,7 +375,17 @@ def journal_append(cart_dir, file, new_bytes, grad=None, ops=None):
     #    entries above the cut keep unique seqs), write the snapshot, then RAW-append.
     seq = (entries[-1]["seq"] + 1) if entries else 1
     snap = JOURNAL_SNAP_DIR + "/" + _journal_snap_name(seq, file)
-    _write(jdir + "/" + snap, new_bytes)              # snapshot BEFORE the log line
+    # The journal dirs are created by FAILING to write into them, not by an
+    # _mkdir pair on every commit: two directory ops per save, on every board, to
+    # re-make a folder that exists after the project's first one (#154). The
+    # snapshot is the first write that needs them -- the redo-tail rewrite above
+    # only runs when there are already entries, so the dirs already exist there.
+    try:
+        _write(jdir + "/" + snap, new_bytes)          # snapshot BEFORE the log line
+    except OSError:
+        _mkdir(jdir)
+        _mkdir(snap_dir)
+        _write(jdir + "/" + snap, new_bytes)
     # `len` is the snapshot's recorded length: undo/redo validate the on-disk snapshot
     # against it before copying it over the live file, so a torn/truncated snapshot (a
     # device power loss + FAT cache reordering -- snapshots are non-atomic) is REFUSED
