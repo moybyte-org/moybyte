@@ -186,25 +186,33 @@ def _forget_bak(path):
     _remove(path + ".bak")
 
 
+def _heal(path, data):
+    """Republish recovered bytes so the recovery is paid once rather than on every
+    read. Best-effort: a read-only or full medium must not turn a read that DID
+    recover into a failure."""
+    try:
+        _write(path, data)
+    except Exception:                 # noqa: BLE001
+        pass
+    return data
+
+
 def _read_recover(path):
     """Read `path`, healing it from `<path>.bak` when the published file is
     missing or does not match the stamp beside it (i.e. a crash landed in the
-    middle of the publish). A recovered file is republished on disk, so the
-    recovery is paid once rather than on every read. Re-raises the original error
-    if there is no usable backup."""
+    middle of the publish). Re-raises the original error if there is no usable
+    backup."""
     try:
         data = _read(path)
     except OSError:
         rec = _read_bak(path)         # never published, or lost after the backup landed
         if rec is None:
             raise
-        _write(path, rec)
-        return rec
+        return _heal(path, rec)
     stamp = _bak_stamp(path)
     if stamp is None or _fits(data, stamp):
         return data                   # no stamp to check against, or it checks out
     rec = _read_bak(path)             # `path` is torn or pre-publish: the backup is newer
     if rec is None:
         return data                   # ...unless the backup is torn too -- keep what we have
-    _write(path, rec)
-    return rec
+    return _heal(path, rec)

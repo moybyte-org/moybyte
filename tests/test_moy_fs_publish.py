@@ -230,6 +230,21 @@ def test_a_missing_publish_recovers_from_the_backup(fs):
     assert moy_fs._read_recover("/c/main.py") == NEW
 
 
+def test_a_recovery_that_cannot_republish_still_returns_the_bytes(fs, monkeypatch):
+    """The heal is a courtesy -- it saves the NEXT read the same work. A medium
+    that refuses the write must not turn a read that DID recover into a failure."""
+    moy_fs._write_atomic("/c/main.py", NEW)
+    del fs.files["/c/main.py"]
+
+    def read_only(path, mode="r"):
+        if "w" in mode:
+            raise OSError("EROFS")
+        return fs.open(path, mode)
+    monkeypatch.setattr(moy_fs, "open", read_only)
+
+    assert moy_fs._read_recover("/c/main.py") == NEW
+
+
 def test_no_backup_at_all_still_reads_and_still_raises(fs):
     moy_fs._write("/c/plain.py", OLD)
     assert moy_fs._read_recover("/c/plain.py") == OLD
