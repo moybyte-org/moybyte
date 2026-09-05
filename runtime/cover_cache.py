@@ -311,7 +311,8 @@ class CoverCache:
                                  # surface opens, not after (p4_clicks measured the
                                  # cold pipeline as two ~1s clicks). Latched False once
                                  # every cart is known; re-armed by a store re-scan.
-        self._pf_i = 0           # round-robin cursor over ws.carts.all
+        self._pf_i = 0           # phase-1 cursor: carts warmed this arm (#200)
+        self._pb_i = 0           # phase-2 cursor: prebuild specs settled this arm
 
     # -- the frame loop's two touches ----------------------------------------
 
@@ -359,6 +360,11 @@ class CoverCache:
         self._seen = True     # re-arm the idle prefetch (it latches off once
                               # every cart is known; a surface asking again is
                               # the cheap signal to re-check)
+        self._pb_i = 0        # the prebuild set is SIZE- and selection-keyed, so
+                              # a surface asking can have changed it. The phase-1
+                              # cursor is not reset here: runs are keyed by path
+                              # alone, so only a cache DROP makes a warmed cart
+                              # worth re-reading (#200).
         if path in self._none:       # known cover-less: never re-probe
             return None
         key = (path, w, h)
@@ -499,6 +505,8 @@ class CoverCache:
         self._prune_icons()
         self.gen += 1             # re-arm the idle prefetch: new/changed carts
         self._seen = True         # should warm before their surface opens
+        self._pf_i = 0            # a fresh pass over the (possibly new) roster
+        self._pb_i = 0
 
     def _prune_icons(self):
         """Drop every desktop icon that CAN be rebuilt, and every icon whose
@@ -586,6 +594,8 @@ class CoverCache:
         self._drop_payloads(_COVER_DIET_KEEP, scratch=True)
         self.gen += 1             # any shelf band repaints from scratch
         self._seen = True         # re-arm the idle prefetch for the return home
+        self._pf_i = 0            # the dropped tail has to be walked again
+        self._pb_i = 0
 
     # -- the idle warmers (frame()'s quiet branch) ---------------------------
 
@@ -614,15 +624,27 @@ class CoverCache:
         per cart per session, then never again -- the exhaustion latch below).
         A RUNNING game is never affected: it animates, so the idle branch that
         calls this never executes. Runs only after a couple of quiet frames so
-        the gap between two gestures is not spent on flash."""
+        the gap between two gestures is not spent on flash.
+
+        ONE PASS PER ARM, both phases (#200). The walk used to be a round-robin
+        over the roster that stopped when every cart's runs were CACHED -- two
+        different questions conflated, because both LRUs evict: with more cover
+        bytes than `_COVER_RUNS_MAX_BYTES` warming the tail evicted the head, so
+        every idle frame forever re-read a blob it was about to lose (measured:
+        2000 ticks, 2000 loads, latch never cleared, against 83 ticks / 73 loads
+        for the same roster with the cache big enough). Both cursors advance
+        monotonically instead and neither is rewound by a cache miss, so the arm
+        terminates in at most (roster + prebuild specs) ticks whatever the cache
+        does; re-reading an evicted cover here could only evict another one, and
+        the shelf's draw path loads the tail lazily as it always did."""
         ws = self.ws
         carts = ws.carts.all
         if not self._seen or ws.carts_store is None or not carts:
             return
         n = len(carts)
         i = self._pf_i
-        for _ in range(n):
-            cart = carts[i % n]
+        while i < n:
+            cart = carts[i]
             i += 1
             path = cart.get("path")
             if (not path or path in self._none
@@ -656,15 +678,25 @@ class CoverCache:
     def _prebuild_tick(self):
         """Build ONE pending cover image from the grids' cover_specs (the exact
         (cart, w, h) set their next full draw requests). Returns True while
-        there is (or may be) work left, False when the visible set is fully
-        built.
+        there is (or may be) work left, False when the visible set is settled.
 
         Runs on idle frames only (the caller), so it must not re-arm the paint
         machinery: cover_for sets _deferred when a build defers, which would
-        turn the NEXT painted frame into two -- save/restore it."""
+        turn the NEXT painted frame into two -- save/restore it. For the same
+        reason it brings its OWN build budget: `_built`/`_ms` are the PAINTED
+        frame's time slice, reset by begin_frame, and inheriting a spent one
+        made this loop refuse every build while still reporting work left (#200
+        -- a walk that converged in 45 ticks on an idle host never converged at
+        all on one 40x loaded, which is what the flake was).
+
+        `_pb_i` is a cursor over the spec positions, not a "still uncached" test:
+        the cover LRU is pixel-capped, so a set larger than the cap evicts its
+        own head and an uncached test never runs out of work."""
         ws = self.ws
         grids = (ws.launcher, ws.picker)
         cap = self._COVER_PREBUILD_PER_GRID
+        at = self._pb_i
+        pos = 0
         for grid in grids:
             specs = getattr(grid, "cover_specs", None)
             if specs is None:
@@ -674,16 +706,31 @@ class CoverCache:
                 if n >= cap:
                     break
                 n += 1
+                here = pos
+                pos += 1
+                if here < at:
+                    continue
                 path = cart.get("path")
-                if (not path or path in self._none
-                        or (path, w, h) in self._cache):
+                key = (path, w, h)
+                if not path or path in self._none or key in self._cache:
+                    self._pb_i = pos
                     continue
                 deferred = self._deferred
+                built = self._built
+                ms = self._ms
+                self._built = False
+                self._ms = 0
                 try:
                     self.cover_for(cart, w, h)
                 finally:
                     self._deferred = deferred
+                    self._built = built
+                    self._ms = ms
+                # A job still in flight is re-stepped next tick (its decode and
+                # crop cursors only move forward); anything else is settled.
+                self._pb_i = here if key in self._jobs else pos
                 return True
+        self._pb_i = pos
         return False
 
     # -- the runs cache: the size-independent half of a build ----------------

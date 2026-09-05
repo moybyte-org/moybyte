@@ -306,6 +306,88 @@ def test_prefetch_stops_once_every_cart_is_known(tmp_path):
     assert ws.covers._seen is False
 
 
+def _tick_to_convergence(ws, limit=400):
+    """Tick the idle prefetch until it disarms; returns the tick count."""
+    for i in range(1, limit + 1):
+        ws.covers.prefetch_tick()
+        if not ws.covers._seen:
+            return i
+    raise AssertionError(
+        "prefetch still armed after %d ticks -- an idle console is walking the "
+        "cart list forever (#200)" % limit)
+
+
+def test_prefetch_stops_with_a_runs_cache_too_small_for_every_cover(
+        tmp_path, monkeypatch):
+    """The walk must converge under RUNS-cache pressure (#200).
+
+    Its convergence test used to be "are this cart's runs cached?", which is a
+    different question from "have I warmed this cart", because the runs cache is
+    LRU and byte-capped: warming the tail evicts the head, the head reads as
+    unknown again, and the round-robin re-reads a blob per idle frame forever
+    (~108ms of flash each on the P4). Measured before the fix on this fixture:
+    2000 ticks, 2000 blob loads, still armed."""
+    from runtime import cover_cache, host_app
+    monkeypatch.setattr(cover_cache, "_COVER_RUNS_MAX_BYTES", 4096)
+    root, carts = _mk_carts_with_covers(tmp_path, 24, with_cover=24)
+    ws = host_app.build_workstation(root)
+    loads = []
+    inner = ws.covers._runs_load
+    monkeypatch.setattr(ws.covers, "_runs_load",
+                        lambda p: (loads.append(p), inner(p))[1])
+
+    ticks = _tick_to_convergence(ws)
+
+    # The cap is far below what the covers need, so the head IS evicted...
+    assert ws.covers._runs_bytes <= 4096
+    assert len(ws.covers._runs) < len(loads)
+    # ...and the arm still costs one pass over the roster plus, at worst, one
+    # re-read per prebuilt cover (its runs having been evicted behind it).
+    budget = len(ws.carts.all) + 2 * cover_cache.CoverCache._COVER_PREBUILD_PER_GRID
+    assert len(loads) <= budget, (
+        "%d blob loads for %d carts in %d ticks" % (
+            len(loads), len(ws.carts.all), ticks))
+
+
+def test_prefetch_stops_with_a_cover_cache_too_small_for_the_visible_set(
+        tmp_path, monkeypatch):
+    """Same shape one phase later (#200): the PREBUILD walked the grids' specs
+    until none was uncached, and the cover cache is pixel-capped and LRU, so a
+    visible set larger than the cap evicts its own head and that test never runs
+    out of work. Every one of those idle ticks also bumped `gen`, which is the
+    shelf's band-repaint key."""
+    from runtime import cover_cache, host_app
+    monkeypatch.setattr(cover_cache, "_COVER_CACHE_MAX_PIXELS", 0)
+    root, carts = _mk_carts_with_covers(tmp_path, 12, with_cover=12)
+    ws = host_app.build_workstation(root)
+
+    _tick_to_convergence(ws)
+
+    assert ws.covers._cache == {}, "the cap should have evicted every build"
+
+
+def test_prefetch_converges_on_a_machine_too_slow_for_the_build_budget(
+        tmp_path):
+    """The prebuild must bring its OWN build budget (#200).
+
+    `_built`/`_ms` are the PAINTED frame's time slice; the idle prefetch paints
+    nothing, so inheriting a spent one made every prebuild refuse to build while
+    still reporting work left -- an unbounded walk whose trigger is wall-clock,
+    which is exactly the shape of the one 2026-08-15 failure (it raced a
+    concurrent firmware build). A 40x-slower host reproduced it: 45 ticks to
+    converge unloaded, never within 2000 loaded."""
+    from runtime import host_app
+    root, carts = _mk_carts_with_covers(tmp_path, 3, with_cover=1)
+    ws = host_app.build_workstation(root)
+    ws.covers._built = True          # a painted frame spent the whole slice
+    ws.covers._ms = 10 ** 6
+
+    _tick_to_convergence(ws)
+
+    assert ws.covers._built is True, "the painted frame's budget was clobbered"
+    assert ws.covers._ms == 10 ** 6
+
+
 def test_cover_blob_read_budget(tmp_path):
     """Each cart's cover blob must be read from storage AT MOST ONCE per session.
 
