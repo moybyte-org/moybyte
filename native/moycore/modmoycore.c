@@ -42,6 +42,7 @@
 // hold one, never a second runtime (the first cut shipped two and the
 // deletion commit records what that cost).
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,9 +92,7 @@
 #ifndef MOYCORE_SRAM_FLOOR
 #define MOYCORE_SRAM_FLOOR (48 * 1024)
 #endif
-#ifdef MOYCORE_PSRAM
 static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
-#endif
 
 // The census the floor is set from: live bytes per region, the peak, and how
 // often the floor sent an allocation to PSRAM. Deliberately four numbers where
@@ -108,6 +107,28 @@ static size_t g_sram_floor = MOYCORE_SRAM_FLOOR;
 // only tier that runs it is not a guard.
 static size_t g_live_r[2], g_live_total, g_peak;
 static uint32_t g_sram_denied;
+
+// What the RUN had (#211): the low-water mark of free internal SRAM while it
+// ran, and whether the floor ever pushed it into the ~2x-slower PSRAM regime.
+// Both are read where big_realloc already knows the free figure, so the
+// accounting is one compare and NO extra syscall -- a per-frame sample would
+// have cost a heap_caps_get_free_size the allocator does not otherwise need.
+// The consequence is worth stating: the mark is sampled at the VM's big
+// allocations, which is the moment the floor decision is actually made, and
+// not between them.
+//
+// SIZE_MAX means "never sampled", which reports as None -- a run whose Lua
+// never allocated big is not a run with zero headroom.
+static size_t g_sram_free_min = SIZE_MAX;
+static uint8_t g_psram_fallback;
+#ifndef MOYCORE_PSRAM
+// Off-board there is ONE region, so the split above cannot happen and the
+// report is None. `sram_sim(bytes)` supplies the free figure the boards read
+// from the heap, which is what makes the floor arithmetic and the fallback
+// flag testable on the tier the tests run on (tests/test_moycore_pool.py).
+// A TEST verb, like pool_check: it cannot exist in a firmware build.
+static size_t g_sram_sim;
+#endif
 
 static inline int mc_region(const void *p)
 {
@@ -390,8 +411,9 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
 #ifdef MOYCORE_PSRAM
     int tried_sram = 0;
     np = NULL;
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
-            >= nsize + g_sram_floor) {
+    size_t sram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (sram_free < g_sram_free_min) g_sram_free_min = sram_free;
+    if (sram_free >= nsize + g_sram_floor) {
         tried_sram = 1;
         np = heap_caps_realloc(ptr, nsize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
@@ -399,8 +421,16 @@ static void *big_realloc(void *ptr, size_t osize, size_t nsize)
         if (!tried_sram) g_sram_denied++;   // the FLOOR turned it away, not a
         np = heap_caps_realloc(ptr, nsize,  // failed internal allocation
                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (np != NULL) g_psram_fallback = 1;
     }
 #else
+    if (g_sram_sim) {                       // the host's simulated split
+        if (g_sram_sim < g_sram_free_min) g_sram_free_min = g_sram_sim;
+        if (g_sram_sim < nsize + g_sram_floor) {
+            g_sram_denied++;
+            g_psram_fallback = 1;
+        }
+    }
     np = realloc(ptr, nsize);
 #endif
     if (np != NULL) {
@@ -1093,6 +1123,10 @@ static mp_obj_t mod_run_begin(size_t n_args, const mp_obj_t *a)
     if (RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                MP_ERROR_TEXT("moycore: a run is already open"));
     memset(&RUN, 0, sizeof(RUN));
+    // #211's two meters belong to the RUN, so they start here and survive
+    // close() -- the report is read at the exit boundary, after the VM is gone.
+    g_sram_free_min = SIZE_MAX;
+    g_psram_fallback = 0;
 
     size_t fblen = 0;
     moy_pixel *fb = (moy_pixel *)buf_w(a[0], &fblen);
@@ -1515,6 +1549,46 @@ static mp_obj_t mod_alloc_stats(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_alloc_stats_obj, mod_alloc_stats);
 
+// sram_report() -> (sram_free_min, psram_fallback, floor), or None on a tier
+// whose allocator has one region to choose from (#211).
+//
+// What the RUN just had, not what the session accumulated: run_begin resets
+// both meters, close() does not, so the exit boundary reads the run that ended.
+// `psram_fallback` is the field that matters -- a BOOLEAN about a regime
+// change, because a cart that outgrows the floor does not fail, it silently
+// starts allocating from PSRAM and gets about twice as slow (#67).
+//
+// None, never a zeroed tuple, where the concept does not apply: a Python cart
+// has no Lua allocator and the host has no second region, and both must stay
+// distinguishable from a run that fitted with nothing to spare.
+static mp_obj_t mod_sram_report(void)
+{
+#ifndef MOYCORE_PSRAM
+    if (!g_sram_sim) return mp_const_none;
+#endif
+    mp_obj_t t[3];
+    t[0] = (g_sram_free_min == SIZE_MAX) ? mp_const_none
+                                         : mp_obj_new_int((mp_int_t)g_sram_free_min);
+    t[1] = mp_obj_new_bool(g_psram_fallback);
+    t[2] = mp_obj_new_int((mp_int_t)g_sram_floor);
+    return mp_obj_new_tuple(3, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_sram_report_obj, mod_sram_report);
+
+#ifndef MOYCORE_PSRAM
+// sram_sim(bytes) -- arm the host's simulated internal-SRAM region, 0 to
+// disarm; returns what is armed. The board reads that figure from the heap and
+// this file is the only place the floor arithmetic lives, so this is how the
+// fallback flag and the low-water mark are driven where tests run. Absent from
+// every firmware build.
+static mp_obj_t mod_sram_sim(mp_obj_t bytes_obj)
+{
+    g_sram_sim = (size_t)mp_obj_get_int(bytes_obj);
+    return mp_obj_new_int((mp_int_t)g_sram_sim);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_sram_sim_obj, mod_sram_sim);
+#endif
+
 // pool_check() -> 0 when the pool's own invariants hold, else a negative code
 // (README.md lists them). A TEST verb: the invariant that a block masks back
 // to the chunk it came from cannot be seen from Python and does not fault when
@@ -1546,6 +1620,10 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active),      MP_ROM_PTR(&mod_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_sram_floor), MP_ROM_PTR(&mod_set_sram_floor_obj) },
     { MP_ROM_QSTR(MP_QSTR_alloc_stats), MP_ROM_PTR(&mod_alloc_stats_obj) },
+    { MP_ROM_QSTR(MP_QSTR_sram_report), MP_ROM_PTR(&mod_sram_report_obj) },
+#ifndef MOYCORE_PSRAM
+    { MP_ROM_QSTR(MP_QSTR_sram_sim),    MP_ROM_PTR(&mod_sram_sim_obj) },
+#endif
     { MP_ROM_QSTR(MP_QSTR_pool_check), MP_ROM_PTR(&mod_pool_check_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_global),  MP_ROM_PTR(&mod_get_global_obj) },
     { MP_ROM_QSTR(MP_QSTR_view),        MP_ROM_PTR(&mod_view_obj) },

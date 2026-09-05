@@ -223,6 +223,37 @@ print("CYCLEAFTERCHECK", moycore.pool_check())
 moycore.close()
 print("CYCLECLOSED", moycore.alloc_stats())
 
+# ------------------------------------------------- the SRAM report (#211)
+# What the run HAD: the low-water mark of free internal SRAM and whether the
+# floor ever pushed the VM into the ~2x-slower PSRAM regime. Off-board there is
+# one region, so the report is None -- the same answer a Python cart gives, and
+# deliberately not a zero. `sram_sim` supplies the free figure a board reads
+# from its heap, which is the only way the floor arithmetic and the fallback
+# flag can be driven on the tier the tests run on.
+BIG_TABLE = r"""
+function _update(dt)
+  local t = {}
+  for i = 1, 20000 do t[i] = i end
+  KEEP = #t
+end
+function _draw() end
+"""
+
+print("SRAMNONE", moycore.sram_report())
+print("SRAMTIGHTARM", moycore.sram_sim(64 * 1024))
+begin()
+run("TIP", BIG_TABLE, 2)
+print("SRAMTIP", moycore.sram_report())
+moycore.close()
+print("SRAMTIPCLOSED", moycore.sram_report())
+print("SRAMWIDEARM", moycore.sram_sim(8 * 1024 * 1024))
+begin()
+run("FIT", BIG_TABLE, 2)
+print("SRAMFIT", moycore.sram_report())
+moycore.close()
+print("SRAMDISARM", moycore.sram_sim(0))
+print("SRAMOFFAGAIN", moycore.sram_report())
+
 # ------------------------------------------------------------- the formatter
 # tostring() and `..` take the hand-rolled path; string.format("%d") is still
 # snprintf, so the cart compares them itself and reports any disagreement.
@@ -467,3 +498,47 @@ def test_an_integral_float_prints_bare_and_1e7_still_falls_back():
     after = _stats(out, "FMTAFTER")
     assert after[PSRAM] == 0 and after[POOL_CHUNKS] == 0, \
         "the formatting run leaked: %r" % (after,)
+
+
+def test_a_run_reports_the_internal_sram_headroom_it_actually_had():
+    """#211: a cart that outgrows the floor does not fail and does not warn --
+    it starts allocating from PSRAM and runs about twice as slow (#67), and
+    nothing anywhere said so. The run's low-water mark and the fallback flag
+    are that regime change as two numbers, read at the exit boundary.
+
+    `psram_fallback` is the one that matters: a BOOLEAN about a regime change,
+    not a gauge. And the report is None -- never a zeroed tuple -- on a tier
+    whose allocator has one region to choose from, because a run that fitted
+    with nothing to spare and a run that could not have tipped at all are not
+    the same answer.
+
+    Off-board there IS one region, so `sram_sim` stands in for the free figure
+    a board reads from its heap. What that makes testable here is the whole
+    mechanism except the heap itself: the floor arithmetic, the flag, the
+    low-water sample, that the report survives close() (the exit boundary is
+    read after the VM is gone) and that run_begin resets it (a run must not
+    inherit the last one's verdict)."""
+    out = _run()
+    assert "TIPERR" not in out and "FITERR" not in out, out
+    floor = 48 * 1024                       # the compiled default, off-board
+
+    assert _stats(out, "SRAMNONE") is None, \
+        "a one-region tier must report None, not zeros: %r" % (
+            _stats(out, "SRAMNONE"),)
+
+    tip = _stats(out, "SRAMTIP")
+    assert tip == (64 * 1024, True, floor), \
+        "a run that could not fit above the floor did not report the " \
+        "fallback: %r" % (tip,)
+    assert _stats(out, "SRAMTIPCLOSED") == tip, \
+        "the report did not survive close() -- the exit boundary reads it " \
+        "after the VM is gone: %r" % (_stats(out, "SRAMTIPCLOSED"),)
+
+    fit = _stats(out, "SRAMFIT")
+    assert fit == (8 * 1024 * 1024, False, floor), \
+        "a run with room to spare inherited the previous run's fallback, or " \
+        "lost its low-water mark: %r" % (fit,)
+
+    assert _stats(out, "SRAMOFFAGAIN") is None, \
+        "the report stayed on with no region to choose between: %r" % (
+            _stats(out, "SRAMOFFAGAIN"),)

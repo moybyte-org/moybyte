@@ -103,6 +103,20 @@ holds is `(psram_live - pool_live) + pool_cap`. **`pool_cap` falls when chunks
 go back**, and that is the number to watch — `tests/test_moycore_pool.py`'s
 burst scenario is where that fall is asserted.
 
+`sram_report()` → `(sram_free_min, psram_fallback, floor)`, or **`None`** on a
+tier whose allocator has one region to choose from (the host, the wasm head).
+This is the SAME switch above, reported per RUN rather than per session:
+`run_begin` resets both meters and `close()` does not, so the console reads them
+at the exit boundary, after the VM is gone (`Player.release_world`, #211).
+`psram_fallback` is the field that matters — a **boolean about a regime
+change**, because a cart that outgrows the floor does not fail and does not
+warn, it starts allocating from PSRAM and runs about twice as slow. Both are
+read where the large path already knows the free figure, so the accounting adds
+one compare and no syscall; the consequence is that the low-water mark is
+sampled at the VM's large allocations, which is where the floor decision is
+actually made, and not between them. `sram_free_min` is `None` until a run
+reaches that test at all.
+
 Two verbs serve the pool and nothing else:
 
 - **`gc()`** → the VM's heap in KB after a full, stop-the-world collect. A
@@ -161,3 +175,9 @@ everywhere else. Tests that need the binary say so loudly when it is absent
 rather than vanishing from the run.
 
 `MOYBYTE_MICROPYTHON=/path/to/micropython` points them at a different build.
+
+One verb exists only there: **`sram_sim(bytes)`** arms a simulated internal-SRAM
+region on a build with no `esp_heap_caps.h`, supplying the free figure a board
+reads from its heap. It is how the floor arithmetic and `sram_report`'s fallback
+flag are driven where the tests run, and it is compiled out of every firmware
+build — like `pool_check`, a test verb rather than a knob.

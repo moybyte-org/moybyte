@@ -158,6 +158,23 @@ def test_state_reports_no_stages_at_all_where_no_shared_loop_runs():
     assert _remote_state(FakeWS())["stages"] is None
 
 
+def test_state_reports_the_sram_headroom_the_run_had_or_none():
+    """#211's route, and it is `state` for the same reason #210's is: every
+    board serves it. A run that tipped into PSRAM reports the regime change as
+    a boolean beside the low-water mark it tipped at; a Python cart and a tier
+    whose allocator has one region report None -- never zeros, which is also
+    what a meter that stopped working looks like."""
+
+    class PlayerWS(FakeWS):
+        def __init__(self, report):
+            FakeWS.__init__(self)
+            self.player = type("P", (), {"sram_report": lambda _s: report})()
+
+    tipped = {"sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
+    assert _remote_state(PlayerWS(tipped))["sram"] == tipped
+    assert _remote_state(PlayerWS(None))["sram"] is None
+
+
 # -- gesture scripts -----------------------------------------------------------
 
 

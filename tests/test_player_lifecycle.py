@@ -94,3 +94,44 @@ def test_text_mode_restored_on_play_exit_to_code_tab(tmp_path):
     ws._leave_menu()
     ws._exit_to_caller()
     assert ws.input.text_mode is False
+
+
+def test_the_exit_boundary_reports_the_sram_headroom_the_run_had(tmp_path, capsys,
+                                                                 monkeypatch):
+    """#211: at the exit boundary -- where pmem already flushes -- a Lua run
+    says what internal SRAM it actually had and whether the floor ever pushed
+    it into the ~2x-slower PSRAM regime. The report is read AFTER the VM is
+    closed, which is why moycore's meters survive close() and reset at
+    run_begin instead.
+
+    A PYTHON cart has no such allocator, so it reports None -- and must not
+    inherit the last Lua run's verdict, which is what the clear in start() is
+    for. None, never zeros: "fitted with nothing to spare" and "could not have
+    tipped at all" are different answers.
+    """
+    import sys
+    import types
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_game(ws)                                  # a Python cart
+    for _ in range(5):
+        ws.frame(1 / 60)
+    assert ws.player.sram_report() is None, \
+        "a Python cart run reported an allocator it does not have"
+
+    fake = types.ModuleType("moycore")
+    fake.sram_report = lambda: (21504, True, 24576)
+    monkeypatch.setitem(sys.modules, "moycore", fake)
+    ws.diag_live = True
+    ws.player._lua = type("L", (), {"close": lambda _s: None})()
+    ws.go_home()                                    # release_world, the boundary
+    assert ws.player.sram_report() == {
+        "sram_free_min": 21504, "psram_fallback": True, "floor": 24576}
+    line = [l for l in capsys.readouterr().out.splitlines() if " SRAM " in l]
+    assert len(line) == 1 and "min=21504 fallback=1 floor=24576" in line[0], line
+
+    _open_game(ws)                                  # the next run is Python again
+    for _ in range(3):
+        ws.frame(1 / 60)
+    assert ws.player.sram_report() is None, \
+        "a Python cart inherited the previous Lua run's headroom report"

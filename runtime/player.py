@@ -172,6 +172,35 @@ def _heap_stats():
         return -1, -1
 
 
+def _moycore_sram():
+    """#211: `{sram_free_min, psram_fallback, floor}` for the Lua run in the
+    allocator's meters, or None where the concept does not apply.
+
+    None is the honest answer on a tier whose Lua allocator has one region to
+    choose from -- the host, the wasm head, a board with no PSRAM -- and it is
+    NOT the same answer as a zero: a run that fitted with nothing to spare and a
+    run that could never have been squeezed must stay distinguishable. Same
+    rule as the pump/fold meters in dev_channel.
+
+    `sram_free_min` is itself None until the run's Lua allocates something big
+    enough to reach the floor test, which is where moycore samples it.
+    """
+    try:
+        import moycore
+    except ImportError:
+        return None
+    fn = getattr(moycore, "sram_report", None)
+    if fn is None:
+        return None
+    try:
+        r = fn()
+    except Exception:  # noqa: BLE001 -- a meter never blocks an exit
+        return None
+    if not r:
+        return None
+    return {"sram_free_min": r[0], "psram_fallback": bool(r[1]), "floor": r[2]}
+
+
 def _exc_cart_line(exc, fname="<cart>"):
     """Best-effort: the 1-based source line INSIDE the cart where `exc` was
     raised, or None -- so a runtime crash can drop the kid on the offending line
@@ -349,6 +378,8 @@ class Player:
         self._lua = None              # #67: the running "lua" cart's runtime state (a
                                       # ws.lua_runtime handle; _close_lua() on exit so a
                                       # cart's whole Lua heap dies with its run)
+        self._sram_run = None         # #211: the Lua allocator's headroom report for the
+                                      # run that ENDED, kept until the next run starts
         self._net = None              # #65: the running cart's net.* service, when it
                                       # has the "multiplayer" permission (else None); tick()
                                       # pumps inbound messages to its on_net handler
@@ -444,6 +475,11 @@ class Player:
                 lua.close()
             except Exception:  # noqa: BLE001
                 pass
+            # #211: the allocator's meters outlive the VM (moycore resets them
+            # at run_begin, not at close), so the run's headroom is still
+            # readable here -- which is what lets the exit report run AFTER the
+            # heap it describes is gone.
+            self._sram_run = _moycore_sram()
 
     def release_world(self):
         """Drop the dead run's WORLD at EXIT, not at the next start (#66 the
@@ -565,6 +601,7 @@ class Player:
         except Exception:  # noqa: BLE001
             pass
         self._diag_frag()          # #66: the heap the NEXT cart inherits
+        self._diag_sram()          # #211: the internal SRAM the run just had
         self._reset_stage_meters()  # #210: the shell does not inherit the run's
         self._disarm_pacing()
 
@@ -577,6 +614,40 @@ class Player:
         sm = getattr(self.ws, "stage_meters", None)
         if sm is not None:
             sm.reset()
+
+    def sram_report(self):
+        """#211: the internal-SRAM headroom the cart RUN had, or None.
+
+        Live while a Lua run is open, the ended run's once it is gone, and None
+        for a Python cart (no such allocator) or a tier with one region. The dev
+        channel's `state` is the route -- it is the one every board serves.
+        """
+        if self._lua is not None:
+            return _moycore_sram()
+        return self._sram_run
+
+    def _diag_sram(self):
+        """One line per Lua cart exit: what the run had, and whether it tipped.
+
+        `fallback=1` is the whole point -- a cart that outgrows the floor does
+        not fail and does not warn, it starts allocating from PSRAM and gets
+        about twice as slow (#67), which reads as "the cart got slower" with no
+        cause attached. Nothing is printed for a run with no such allocator,
+        because a line of `none`s at every Python cart's exit is not a report.
+        """
+        if not self._diag_enabled():
+            return
+        try:
+            r = self._sram_run
+            if not r:
+                return
+            lo = r["sram_free_min"]
+            print("Moybyte %d SRAM exit=%d min=%s fallback=%d floor=%d"
+                  % (_ticks_ms(), self._run_seq,
+                     "none" if lo is None else lo,
+                     1 if r["psram_fallback"] else 0, r["floor"]))
+        except Exception:  # noqa: BLE001 -- a diag never blocks an exit
+            pass
 
     def _diag_frag(self, tag="MEMX"):
         """One line per cart exit: the largest allocatable block and total free
@@ -744,6 +815,8 @@ class Player:
             except Exception:  # noqa: BLE001 -- scene reset must never block a run
                 pass
         self._close_lua()              # a re-run replaces the previous run's Lua state
+        self._sram_run = None          # #211: whatever it reported was the LAST
+                                       # run's; a Python cart must not inherit it
         self._pmem_last = t0           # periodic pmem flush counts from this run's start
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).

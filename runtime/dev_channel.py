@@ -308,6 +308,16 @@ def _remote_state(ws):
                        bool(pl.sched.steady)] if pl.tick_ms else None)
     except Exception as exc:  # noqa: BLE001
         st["tick_err"] = str(exc)
+    try:
+        # #211: the internal-SRAM headroom the cart run actually had --
+        # {sram_free_min, psram_fallback, floor} -- live while a Lua cart is
+        # open, the ended run's at the launcher. None (never zeros) for a Python
+        # cart and for a tier whose allocator has one region: the moment a cart
+        # tips into the ~2x-slower PSRAM regime has to be distinguishable from
+        # the board that cannot tip at all.
+        st["sram"] = ws.player.sram_report()
+    except Exception as exc:  # noqa: BLE001
+        st["sram_err"] = str(exc)
     return st
 
 
