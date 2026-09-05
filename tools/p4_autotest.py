@@ -407,7 +407,10 @@ class P4Board:
 
     # -- lifecycle --------------------------------------------------------
 
-    def reset(self, boot_timeout=40.0, settle=3.0):
+    # 60, not 40: a 75-cart store boots to the desk in 36.2s freshly flashed and
+    # 39.2s once anything has been written to it (measured 2026-09-05, dev
+    # 5b244b6), so a 40s budget left under a second of margin on a real store.
+    def reset(self, boot_timeout=60.0, settle=3.0):
         """Hard-reset via the CH343 RTS pulse and wait for the desktop.
 
         CH343-ONLY. On a board whose USB-Serial/JTAG is on the SoC the pulse
