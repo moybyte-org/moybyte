@@ -19,6 +19,38 @@ def _sched(rate=30, steady=True):
     return s
 
 
+def _loop(s, secs, D, T, tick_cost=0.0005, idle=None):
+    """Drive the scheduler the way a free-running board loop does: a frame
+    that drew costs D, a frame that only ticked costs T, an idle frame costs
+    `idle` (the loop's floor; T by default). Returns (time, div) per frame."""
+    t = 0.0
+    out = []
+    while t < secs:
+        if s.draw:
+            dt = D
+        elif s.n:
+            dt = T
+        else:
+            dt = T if idle is None else idle
+        s.plan(dt)
+        if s.n:
+            s.note_tick(tick_cost)
+        t += dt
+        out.append((t, s.div))
+    return out
+
+
+def _changes(trace):
+    """The times N changed, from a _loop trace."""
+    out = []
+    last = trace[0][1]
+    for t, d in trace:
+        if d != last:
+            out.append(t)
+            last = d
+    return out
+
+
 def test_a_thirty_cart_on_a_sixty_loop_ticks_every_other_frame():
     s = _sched(30)
     plan, ns = [], []
@@ -33,14 +65,18 @@ def test_a_thirty_cart_on_a_sixty_loop_ticks_every_other_frame():
 
 def test_a_sixty_cart_on_a_thirty_loop_runs_two_ticks_per_draw():
     """PICO-8's own degraded mode, and not ours to improve on: a 60fps cart on
-    a 30fps host runs two ticks inside one frame and draws once."""
+    a 30fps host runs two ticks inside one frame and draws once, every
+    frame, however long it runs (the host simulator paces exactly like this).
+    N may read 2 there -- two ticks per draw IS the cycle -- and that changes
+    no frame: every frame still draws."""
     s = _sched(60)
-    ns = []
-    for _ in range(30):
-        s.plan(1 / 30)
+    ns, draws = [], []
+    for _ in range(30 * 10):
+        draws.append(s.plan(1 / 30))
         ns.append(s.n)
-    assert ns == [2] * 30
-    assert s.ticks == 60 and s.draws == 30 and s.misses == 0
+    assert ns == [2] * 300 and all(draws)
+    assert s.ticks == 600 and s.draws == 300 and s.misses == 0
+    assert s.div <= 2
 
 
 def test_anything_but_sixty_is_the_thirty_the_console_guarantees():
@@ -84,90 +120,141 @@ def test_catch_up_is_capped_and_the_rest_is_reported():
     assert s.n == MAX_CATCHUP and s.misses == 1
 
 
-def test_free_follows_load_on_every_draw_frame():
-    s = _sched(30, steady=False)
-    s.plan(1 / 30)                           # tick + draw
-    assert s.draw and s.div == 1
-    s.plan(0.045)                            # that draw frame cost 45ms: over 33
-    assert s.div == 2
-    # Now the frame between draws is cheap and the draw frame fits one period
-    # with room: back to 1 as soon as one draw frame says so.
-    s.plan(0.005)                            # logic-only frame's cost lands here
-    while not s.draw:
-        s.plan(0.005)
-    s.plan(0.020)                            # the draw frame cost 20ms <= 0.85 * 33
-    assert s.div == 1
+# The four trajectories the T-Deck measured on 2026-09-05 (#217), as dt
+# sequences. D = a drawing loop frame, T = a frame that only ticked (the
+# loop's own floor -- flush wait, chrome, I2C -- which on that board is 16ms
+# against a sub-millisecond logic tick).
+
+def test_hop_quest_on_the_tdeck_holds_sixty_at_one():
+    """D=17 against a 16.67 period is an overrun catch-up absorbs -- one
+    extra tick every ~50 frames, ~58 drawn -- and T=16 means a tick-only
+    frame costs a whole period, so N=2 could only be worse. The first cut's
+    budget test (div*P - (div-1)*T) shrank as N grew, ratcheted to 4 and
+    read 30/30 for a cart that had run 60/58."""
+    s = _sched(60)
+    trace = _loop(s, 14.0, D=0.017, T=0.016, tick_cost=0.00024)
+    assert all(d == 1 for _t, d in trace)
+    assert s.misses <= 1
+    assert s.draws / 14.0 > 56
 
 
-def _window(s, cost, frames=None, secs=tick_model.STEADY_S):
-    """Feed draw frames costing `cost` (and 3ms logic-only ones) for `secs`."""
-    t = 0.0
-    while t < secs + 0.01:
-        dt = cost if s.draw else 0.003
-        s.plan(dt)
-        t += dt
-
-
-def test_steady_holds_through_a_hitch_and_follows_a_scene():
+def test_celeste_on_the_tdeck_holds_thirty_at_one():
     s = _sched(30)
-    _window(s, 0.020)
+    trace = _loop(s, 14.0, D=0.027, T=0.0005, tick_cost=0.0055)
+    assert all(d == 1 for _t, d in trace)
+    assert s.misses == 0
+    assert abs(s.draws / 14.0 - 30) < 1
+
+
+def test_moss_moss_on_the_tdeck_pins_at_one_and_reports_misses():
+    """92 of 107ms is logic: T=49 exceeds the 33ms period, so no divisor
+    helps. The first cut ratcheted it to 4 and drew 7 times a second for no
+    gain; now it runs one tick per frame at N=1 and the misses say so.
+
+    T cannot be measured while every frame draws (no idle frame, no
+    tick-only frame), so the first window's misses buy ONE probe of N=2; its
+    tick-only frames price T, the next window pins N=1, and it stays there --
+    T is only ever re-sampled by frames that do not draw."""
+    s = _sched(30)
+    trace = _loop(s, 14.0, D=0.037, T=0.049, tick_cost=0.0278)
+    assert max(d for _t, d in trace) <= 2, "one probe step, never a ratchet"
+    assert all(d == 1 for t, d in trace if t > 2.5 * tick_model.STEADY_S)
+    assert s.div == 1 and s.misses > 0
+    assert s.rate == 30
+
+
+def test_a_draw_heavy_sixty_cart_settles_at_three_and_stays():
+    """D=40, T=2 at 60Hz: N=2 does not fit (40+2 > 33), N=3 does (40+4 <=
+    50). Ticks at N=1 ran as bursts of 2-3 per 40ms frame -- game time
+    caught up, motion did not -- which is the late signal; at N=3 every
+    frame carries exactly its ticks."""
+    s = _sched(60)
+    trace = _loop(s, 20.0, D=0.040, T=0.002, tick_cost=0.001)
+    assert s.div == 3
+    settled = [d for t, d in trace if t > 8.0]
+    assert settled and all(d == 3 for d in settled), "no thrash once settled"
+    assert 2 not in [d for _t, d in trace], "N=2 never fit and was never tried"
+
+
+def test_steady_changes_n_at_most_once_per_window():
+    s = _sched(60)
+    trace = []
+    t = 0.0
+    # a load that flips between light and heavy every second, on purpose
+    # faster than the window can follow
+    while t < 12.0:
+        heavy = int(t) % 2 == 1
+        seg = _loop(s, 1.0, D=0.040 if heavy else 0.010, T=0.002,
+                    tick_cost=0.001)
+        trace.extend((t + st, d) for st, d in seg)
+        t += 1.0
+    changes = _changes(trace)
+    assert changes, "the load did move N at all"
+    gaps = [b - a for a, b in zip(changes, changes[1:])]
+    assert all(g >= tick_model.STEADY_S - 0.05 for g in gaps), gaps
+
+
+def test_steady_holds_through_a_hitch():
+    s = _sched(60)
+    _loop(s, 2.5, D=0.012, T=0.002)
     assert s.div == 1
     s.plan(0.200)                            # one GC-class hitch
-    _window(s, 0.020)
-    assert s.div == 1, "one hitch in a window is not a scene change"
-    _window(s, 0.045)                        # a boss fight: every draw overruns
-    assert s.div == 2
-    _window(s, 0.045)
-    assert s.div == 2, "and it holds there: 45ms fits two periods with a 3ms tick between"
-    _window(s, 0.015)                        # back to the menu: the first
-    _window(s, 0.015)                        # window still tails the fight
+    trace = _loop(s, 4.0, D=0.012, T=0.002)
+    assert all(d == 1 for _t, d in trace), "one hitch in a window is not a scene"
+
+
+def test_steady_follows_a_scene_both_ways():
+    s = _sched(60)
+    _loop(s, 4.0, D=0.012, T=0.002)
+    assert s.div == 1
+    _loop(s, 6.0, D=0.040, T=0.002, tick_cost=0.001)      # the boss fight
+    assert s.div == 3
+    _loop(s, 6.0, D=0.010, T=0.002, tick_cost=0.001)      # back to the menu
     assert s.div == 1
 
 
-def test_steady_re_decides_once_a_window_not_every_frame():
-    s = _sched(30)
-    for _ in range(10):
-        s.plan(1 / 30)
-        s.plan(0.045)
-    assert s.div == 1, "STEADY needs a whole window before it moves"
+def test_free_follows_the_same_rule_per_draw_frame():
+    s = _sched(60, steady=False)
+    _loop(s, 1.0, D=0.040, T=0.002, tick_cost=0.001)
+    assert s.div == 3, "FREE reaches the fitting N inside a second"
+    _loop(s, 1.0, D=0.010, T=0.002, tick_cost=0.001)
+    assert s.div == 1
+    s = _sched(60, steady=False)
+    trace = _loop(s, 6.0, D=0.017, T=0.016, tick_cost=0.00024)
+    assert all(d == 1 for _t, d in trace), \
+        "one catch-up tick in fifty is the tick being held, in FREE too"
 
 
-def test_the_divisor_never_leaves_its_bounds():
-    s = _sched(30, steady=False)
-    for _ in range(40):
-        s.plan(0.500)                        # every frame draws, and overruns
+def test_a_cart_nothing_fits_stays_at_one_and_reports():
+    """Drawing less often cannot buy a cadence back when even four periods
+    do not hold one draw: N stays 1 rather than pretending."""
+    s = _sched(60)
+    _loop(s, 6.0, D=0.500, T=0.002, tick_cost=0.001)
+    assert s.div == 1 and s.misses > 0
+    s = _sched(60)
+    _loop(s, 8.0, D=0.060, T=0.002, tick_cost=0.001)
     assert s.div == MAX_DIV
-    for _ in range(400):
-        s.plan(0.001)                        # every draw frame fits with room
-    assert s.div == 1
 
 
-def test_a_logic_bound_cart_reports_the_miss_and_keeps_its_rate():
-    """moss moss: 92 of 107ms is logic on the S3 boards. No divisor saves it,
-    so the scheduler runs as fast as it can, keeps the declared rate, and
-    REPORTS -- it does not halve the logic to look steady."""
-    s = _sched(30)
-    s.note_tick(0.090)
-    ns = []
-    for _ in range(60):
-        s.plan(0.100)
-        ns.append(s.n)
-    assert ns == [1] * 60, "one tick per frame: never zero, never a burst"
-    assert s.misses > 0
-    assert s.rate == 30 and s.div == 1
-
-
-def test_switching_steady_live_resets_only_the_window():
-    s = _sched(30)
-    s.plan(1 / 30)
-    s.plan(0.045)
-    s.steady_mode(False)
-    assert s.div == 1 and s.steady is False
-    s.plan(0.003)
+def test_the_costs_are_slow_averages_not_last_samples():
+    s = _sched(60)
+    _loop(s, 3.0, D=0.010, T=0.002)
     while not s.draw:
-        s.plan(0.003)
-    s.plan(0.045)
-    assert s.div == 2
+        s.plan(0.002)
+    d0 = s.draw_frame
+    s.plan(0.200)                            # a drawing frame that took 200ms
+    assert d0 < s.draw_frame < 0.05, "one hitch is one sample in eight"
+
+
+def test_switching_steady_live_keeps_n_and_the_costs():
+    s = _sched(60)
+    _loop(s, 6.0, D=0.040, T=0.002, tick_cost=0.001)
+    assert s.div == 3
+    d = s.draw_frame
+    s.steady_mode(False)
+    assert s.div == 3 and s.draw_frame == d and s.steady is False
+    _loop(s, 1.0, D=0.010, T=0.002, tick_cost=0.001)
+    assert s.div == 1
 
 
 # -- the Player, through ws.frame ---------------------------------------------
