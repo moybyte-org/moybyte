@@ -599,19 +599,6 @@ def _ema(cur, sample):
     readouts' smoothing, written once (frame() applies it to ~10 fields)."""
     return float(sample) if cur <= 0 else cur + (sample - cur) * 0.15
 
-# Frame pacing knob (#63): True locks GAME carts to a steady cadence (30 default,
-# manifest "fps": 60 opt-out); False runs everything uncapped at the loop's own
-# fps cap -- the measurement mode (owner call 2026-07-08: we want the REAL
-# per-cart numbers on the glass, and #66 is fed from them).
-#
-# RE-AFFIRMED ON PRODUCT GROUNDS 2026-08-19 (owner): uncapped-by-default is
-# not just the measurement mode, it is the intended shipping behavior --
-# "if no fps set, it should be 60; 30 is available via FRAMESKIP always."
-# The 30-lock is the governor/frameskip's business, chosen per device in
-# Settings, never the silent default. (This footnote exists because the
-# docstring below once read as "games default to 30" and a same-day A/B
-# verdict was misworded off the back of it.)
-FPS_GOVERNOR = False
 
 class Workstation:
     def __init__(self, comp, canvas, input, carts=None, sys_canvas=None,
@@ -1001,16 +988,17 @@ class Workstation:
         self._with_sd = lambda fn: fn()
 
     def _init_perf(self):
-        """The perf/diag/frameskip measurement fields (#43/#44/#66/#68/#77)."""
+        """The perf/diag measurement fields (#43/#44/#66/#68)."""
         # The persisted ON/OFF settings, at the registry's declared defaults
         # (#209 section 7 -- SETTINGS_TOGGLES in settings_layer.py carries each
-        # one's prose). FLAT ATTRIBUTES on purpose and forever: `frame_cap_fps`
-        # reads self.frameskip and device_boot's `pace` calls it every loop
-        # iteration on all three boards; both WMs read show_fps per painted game
-        # frame. load_system replaces these with the store's values at boot.
+        # one's prose). FLAT ATTRIBUTES on purpose and forever: both WMs read
+        # show_fps per painted game frame, and the Player reads `steady` at
+        # every run start. load_system replaces these with the store's values
+        # at boot.
         for _key, _label, _default, _setter, _gate, _dev in SETTINGS_TOGGLES:
             setattr(self, _key, _default)
-        self._fps = 0.0               # smoothed frames/sec (EMA of 1/dt)
+        self._fps = 0.0               # smoothed frames/sec DRAWN (EMA, #217)
+        self._since_draw = 0.0        # seconds since the last drawn frame
         # Frame-time breakdown HUD (#43/#44 perf): off by default; tap the FPS
         # readout (bottom-right, while a cart runs) to toggle it. When on, frame()
         # records the per-frame split in ms -- _flush_ms is the compositor's panel
@@ -1081,7 +1069,6 @@ class Workstation:
         self._stk_ms = 0.0  # the WM stack walk's CHROME share (2026-08-14)
         self._bg_ms = 0.0   # #172: backdrop restore, a SUB-slice of _cart_ms
         # (The clock-text cache moved to self.bar_layer with the rest of the bar #66.)
-        self._fs_phase = False        # frameskip's alternation bit (#77)
 
     def _init_overlays(self):
         """Achievements/eggs (#21), the system menu (#52), device hooks, and the
@@ -1166,7 +1153,7 @@ class Workstation:
         self._pf_bg = 0     # #172: the declared-backdrop share of _pf_cart
         self._pf_stack = 0  # total us of the last painted frame's layer walk
         # #172: the frame's unmeasured EDGES, us -- pre = entry..draw span open
-        # (journal tick, splash, frameskip branch, redraw gate), post = the tail
+        # (journal tick, splash, tick-model gate, redraw gate), post = the tail
         # after the flush (dirty clear, covers/fling re-arm, pointer snapshot).
         self._pf_pre = 0
         self._pf_post = 0
@@ -1417,6 +1404,10 @@ class Workstation:
         # used to sit here, and a seventh toggle is now none.
         for key, _label, default, setter, _gate, _dev in SETTINGS_TOGGLES:
             getattr(self, setter)(self.system.get(key, default), persist=False)
+        # A key a retired setting left behind (#217 took FRAMESKIP) would ride
+        # every persist forever; drop it once.
+        if self.system.pop("frameskip", None) is not None:
+            self.prefs.persist()
 
 
 
@@ -1508,9 +1499,8 @@ class Workstation:
 
         The mirror is set with setattr, which is fine because this runs on a
         FLIP and at boot, never per frame; the READ side stays a plain
-        attribute everywhere, and must -- `frame_cap_fps` reads self.frameskip
-        and device_boot's `pace` calls it every loop iteration on all three
-        boards."""
+        attribute everywhere, and must -- both WMs read show_fps on every
+        painted game frame on all three boards."""
         setattr(self, key, on)
         self._dirty = True
         if persist:
@@ -1531,12 +1521,14 @@ class Workstation:
         flushes are unconditional either way (the safety net)."""
         self._set_toggle("diag_sd", bool(on), persist)
 
-    def set_frameskip(self, on, persist=True):
-        """Flip the #77 frameskip gate (Settings -> FRAMESKIP) and persist it.
-        Takes effect on the next frame; the phase bit resets so the first frame
-        after a toggle always renders (no one-frame blank on enable)."""
-        self._fs_phase = False
-        self._set_toggle("frameskip", bool(on), persist)
+    def set_steady(self, on, persist=True):
+        """Flip the tick model's STEADY / FREE knob (#217, Settings -> STEADY)
+        and persist it: how long the draw divisor remembers before it decides
+        again. Relayed live into the running cart's scheduler."""
+        self._set_toggle("steady", bool(on), persist)
+        pl = getattr(self, "player", None)
+        if pl is not None:
+            pl.steady_mode(on)
 
     def second_keyboard(self):
         """The keyboard that can become player two, or None.
@@ -1713,7 +1705,7 @@ class Workstation:
 
     # -- Settings screen (#28) -----------------------------------------------
     #
-    # Most rows are live (wallpaper/theme/font size/icons/frameskip/fps/diag --
+    # Most rows are live (wallpaper/theme/font size/icons/steady/fps/diag --
     # settings_layer.py is the authority); only the remaining "mock" rows step a
     # cosmetic placeholder value. Each row is (key, label, kind).
 
@@ -2174,36 +2166,6 @@ class Workstation:
         True iff a tool icon consumed it. Same isolation reason as _draw_cart_bar: the
         Player calls this instead of reaching the bar surface."""
         return self.bar_layer.handle_cart_tap(px, py)
-
-    def frame_cap_fps(self):
-        """The frame-loop cap for THIS moment (#63 frame pacing). DEFAULT:
-        everything runs uncapped at the loop's 60 -- FPS_GOVERNOR ships False
-        (see its block above; owner-affirmed twice). WHEN the governor or
-        FRAMESKIP is on, a running GAME locks to a steady 30 (the SNES rule: a
-        LOCKED cadence feels smoother than a swing -- most carts land in the
-        29-45 band, and holding the fast frames to the slow ones' pace turns
-        "38-55 and jittery" into "30 and rock solid") unless its manifest
-        declares `"fps": 60` (Hop Quest, Sky Run). Tools/apps and every console
-        screen keep 60 in every mode -- the pointer must stay responsive. The
-        device loop re-reads this every iteration; the host simulator paces via
-        its own --fps flag."""
-        # #77 pairing (2026-08-10, learned on zoomed celeste): FRAMESKIP implies
-        # the cap. The p8 ports pace THEMSELVES by frame-quantized dt with a
-        # never-fast rule -- against an UNCAPPED skip loop (~30ms frames) the
-        # quantizer must halve to avoid running fast, so skip made the game
-        # SLOWER (20Hz -> 16.5Hz). Capped at 30, dt=33.3ms quantizes to
-        # tick-every-frame: correct 30Hz logic, render at 15 -- the trade skip
-        # promises. dt-driven carts are indifferent to the cap either way.
-        if ((FPS_GOVERNOR or self.frameskip) and self.wm.top_is_player()
-                and self.cart_error is None):
-            cart = self.cart
-            if cart is not None and cart.get("type") == "game":
-                try:
-                    f = int(cart.get("fps") or 30)
-                except (TypeError, ValueError):
-                    f = 30
-                return 60 if f >= 60 else 30
-        return 60
 
     def _running_cart_shows_bar(self):
         """True while a TOOL/APP cart is PLAYING (screen "desktop", not crashed): it runs
@@ -3774,8 +3736,8 @@ class Workstation:
 
     def frame(self, dt):
         # #172: bracket the frame's UNMEASURED edges. `draw` starts at _frame_t0,
-        # which is after the journal idle tick, the splash check, the frameskip
-        # branch and the redraw gate -- so all of that, plus the dirty/pointer
+        # which is after the journal idle tick, the splash check, the tick-model
+        # gate and the redraw gate -- so all of that, plus the dirty/pointer
         # bookkeeping in the tail, sits inside the loop's `frm` but outside
         # DRAWBRK+flush. Comparing those two (an EMA against a windowed mean)
         # put the gap somewhere between -4 and +15ms, which is not a measurement.
@@ -3790,8 +3752,7 @@ class Workstation:
         # find. Capture now follows Settings -> PERF DIAG on device.
         _fe0 = _ticks_us() if self.perf_capture else 0
         if dt > 0:
-            # EMA so the readout reflects sustained rate, not single-frame jitter.
-            self._fps = _ema(self._fps, 1.0 / dt)
+            self._since_draw += dt
             # The loop tick in ms for the input phase (which runs BEFORE frame()
             # and has no dt of its own): feeds the kinetic scroll velocity
             # (#113). Clamped so a hitch can't spike the physics.
@@ -3817,47 +3778,20 @@ class Workstation:
         if self._splash_until is not None and _ticks_diff(self._splash_until, _ticks_ms()) <= 0:
             self._splash_until = None
             self._dirty = True
-        # Frameskip (#77): with the gate ON and a GAME playing (not crashed), every
-        # SECOND frame ticks only the cart's logic + audio (player.tick(render=False))
-        # and presents nothing -- the panel simply retains the last frame, so the
-        # whole render side (cart _draw + composite + flush -- measured to be
-        # per-draw-call dispatch, the one tax left) is halved while input/logic keep
-        # the full loop rate. Sits BEFORE the redraw gate so a skip frame never
-        # consumes dirty state (a pending repaint in a background window survives to
-        # the next rendered frame). Games only: tools/apps are event-driven (the
-        # redraw gate already keeps them ~free) and their cursor must stay 60.
-        # LOCKSTEP (#65): a linked game's world only changes on the shared 30Hz
-        # tick, so drawing it at the panel's rate (40-55fps on the two S3
-        # boards) repaints an identical frame one to two times in three. Holding
-        # the last frame instead hands that time back to the loop -- and the
-        # loop's regularity is what decides whether the input buffer can be cut,
-        # because a slow frame is what makes a tick late. The Player still runs:
-        # it re-sends the input packet on these frames.
-        _np = self.netplay
-        _linked = (_np is not None and self.wm.top_is_player()
-                   and self.cart_error is None)
-        if _linked and not _np.pending(_ticks_ms()):
-            self.player.tick(dt, render=False)
-            return
-        # ...and a linked game does NOT also take the frameskip gate. Frameskip
-        # is a phase toggle -- it renders every second LOOP frame, so it is half
-        # of whatever the loop is doing (~20fps on the Guition's 40, ~27 on the
-        # T-Deck's 55), not the 30Hz its own comment claims from back when the
-        # loop ran at 60. Stacking it under lockstep would halve a rate that is
-        # already the shared tick, for a saving that no longer exists: the whole
-        # premise of frameskip is logic at the full loop rate, and here logic IS
-        # 30Hz.
-        if (not _linked and self.frameskip and self.wm.top_is_player()
-                and self.cart_error is None
-                and self.cart is not None and self.cart.get("type") == "game"):
-            # phase True = render, False = logic-only; the setter resets it False,
-            # so the first frame after a toggle (or a fresh run) always RENDERS.
-            self._fs_phase = not self._fs_phase
-            if not self._fs_phase:
+        # The tick model (#217): while a GAME plays, the Player's scheduler
+        # decides what this loop frame is -- which logic ticks run, and whether
+        # it draws. A frame that does not draw ticks logic only and presents
+        # nothing: the panel keeps the last frame, and the loop hands the time
+        # back. Sits BEFORE the redraw gate so it never consumes dirty state. A
+        # lockstep match (#65) owns its clock in there: the world moves only on
+        # the shared tick, so a frame that tick is not due for holds the last
+        # agreed frame instead of repainting it.
+        if self.wm.top_is_player() and self.cart_error is None:
+            if not self.player.frame_plan(dt):
                 self.player.tick(dt, render=False)
                 return
-        else:
-            self._fs_phase = False
+        elif self.player.tick_ms:
+            self.player.park()
         # Redraw-on-change (#44): a static UI screen (no animation, no pointer change,
         # nothing marked dirty) is skipped entirely -- no draw, no flush. The panel /
         # host window simply retains the last frame, so an idle UI costs ~0 and the
@@ -3878,6 +3812,12 @@ class Workstation:
                 self.launcher_layer.prealloc_retained()
             return
         self._quiet_frames = 0
+        # The fps the chip shows is the DRAWN rate (#217): an EMA over the
+        # frames that reach the glass, so a paced cart reads its draw rate and
+        # not the loop's spin between ticks.
+        if self._since_draw > 0:
+            self._fps = _ema(self._fps, 1.0 / self._since_draw)
+            self._since_draw = 0.0
         # Perf HUD (#43/#44): mark the start of this frame's draw work. Cheap (one
         # ticks call); only meaningful for a frame we actually paint, so it's after
         # the redraw gate. _flush_ms is filled around comp.flush() below; _draw_ms
@@ -3891,7 +3831,7 @@ class Workstation:
         _frame_t0 = _ticks_us() if _perf else 0
         if _deep:
             # Everything from frame() entry to here: journal idle tick, splash
-            # expiry, the frameskip branch, and the redraw gate itself.
+            # expiry, the tick-model gate, and the redraw gate itself.
             self._pf_pre = _ticks_diff(_ticks_us(), _fe0)
         _cmp = 0            # CHROMEBRK: _composite_game us
         _cur = 0            # CHROMEBRK: _draw_cursor us
@@ -4335,7 +4275,7 @@ class Workstation:
         (#172).
 
         `draw` is timed from _frame_t0, which sits after the journal idle tick,
-        the splash expiry, the frameskip branch and the redraw gate; the tail
+        the splash expiry, the tick-model gate and the redraw gate; the tail
         after the flush is outside it too. Both land inside the device loop's
         `frm` stage, so DRAWBRK + flush has never summed to a whole frame and the
         difference was being inferred by subtracting an EMA from a windowed mean

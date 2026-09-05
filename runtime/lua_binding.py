@@ -123,7 +123,7 @@ def _lib():
             d.hl_load.restype = _I
             d.hl_exec.argtypes = [_P, _C, _I, _C, _P, _I]
             d.hl_exec.restype = _I
-            d.hl_tick.argtypes = [_P, _F, _P, _I]
+            d.hl_tick.argtypes = [_P, _F, _I, _P, _I]
             d.hl_tick.restype = _I
             d.hl_pmem_image.argtypes = [_P, _P, _I]
             d.hl_pmem_image.restype = _I
@@ -327,10 +327,11 @@ class HostLuaRun:
             return err.value.decode("utf-8", "replace")
         return None
 
-    def tick(self, dt):
-        """One whole cart frame. None, or the error text."""
+    def tick(self, dt, draw=True):
+        """One cart tick: _update, then _draw unless `draw` is False (a
+        logic-only tick, #217). None, or the error text."""
         err = ctypes.create_string_buffer(256)
-        if self._d.hl_tick(self._r, ctypes.c_float(dt),
+        if self._d.hl_tick(self._r, ctypes.c_float(dt), 1 if draw else 0,
                            ctypes.cast(err, _P), 256):
             return err.value.decode("utf-8", "replace")
         return None

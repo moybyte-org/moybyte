@@ -151,9 +151,9 @@ payload-shape tests are re-baselined knowingly (§9).
     hash assertion cannot catch either.
 - **L9 — cart output is opaque.** A game surface's content is free-form; the
   shell never parses or diffs it. A running cart's surface is content-dirty
-  **on frames it renders** — under frameskip (#77) logic ticks at full rate
-  while render runs at half, and the gen moves only with renders, or web
-  clients would re-ship at 60 while glass draws 30.
+  **on frames it renders** — under the tick model (#217) logic ticks at the
+  cart's rate while render runs on a divisor of it, and the gen moves only
+  with renders, or web clients would re-ship at 60 while glass draws 30.
 - **L10 — new backends implement §4; they do not add invalidation
   mechanisms.** This is the "we don't redesign this again" law.
 

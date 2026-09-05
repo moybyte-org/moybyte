@@ -404,16 +404,16 @@ def _diag_loop(diag, ws, acc):
     try:
         n = acc[0]
         stages = acc[2] + acc[3] + acc[4] + acc[5] + acc[6] + acc[7] + acc[8] + acc[9]
-        # skip= is the #77 frameskip gate. It belongs on every measurement line
-        # because it changes what fps MEANS -- with it on, logic ticks every loop
-        # frame but render/composite/flush run every second one, so a cart reads
-        # far higher than the same build with it off. #66's last full-roster
-        # T-Deck session was dated the day frameskip shipped, and nothing in any
-        # log said which way the toggle sat, so the ledger's numbers could not be
-        # compared with a later run's at all. A setting that silently redefines a
-        # metric has to be printed beside it.
+        # div= is the tick model's draw divisor (#217). It belongs on every
+        # measurement line because it changes what fps MEANS -- at div=2 the
+        # cart draws every second tick, so a rate read against another run's
+        # is only comparable beside it. `-` while no game is paced: a frozen
+        # number there would look like a lever that died. A setting that
+        # silently redefines a metric has to be printed beside it.
+        pl = getattr(ws, "player", None)
+        div = pl.sched.div if (pl is not None and getattr(pl, "tick_ms", 0)) else None
         diag.log("LOOP",
-                 "skip=%d " % (1 if getattr(ws, "frameskip", False) else 0) +
+                 "div=%s " % ("-" if div is None else div) +
                  "n=%d frame=%.1f kbd=%.1f inp=%.1f sb=%.1f ws=%.1f "
                  "(hi=%.1f hp=%.1f frm=%.1f) web=%.1f diag=%.1f sd=%.1f "
                  "sleep=%.1f other=%.1f"

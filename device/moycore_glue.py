@@ -399,6 +399,13 @@ class MoycoreRun:
         upd, drw = f()
         return (upd / 1000.0, drw / 1000.0)
 
+    # The Player's scheduler (#217) clears this for a logic-only tick. A module
+    # built before `tick` took the flag draws every tick, which is the fused
+    # frame it always ran -- the divisor then saves the composite and flush
+    # on those frames, and not the cart's own drawing.
+    draw_next = True
+    _tick_draw = None
+
     def _update(self, dt):
         """The whole cart frame. `draw` is None because this already drew: the
         C loop runs _update and _draw back to back, which is the point."""
@@ -410,7 +417,10 @@ class MoycoreRun:
         if buf is not self._last_buf():
             _moycore.retarget(buf)
             self._buf = buf
-        err = _moycore.tick(dt)
+        td = self._tick_draw
+        if td is None:
+            td = MoycoreRun._tick_draw = bool(getattr(_moycore, "TICK_DRAW", 0))
+        err = _moycore.tick(dt, self.draw_next) if td else _moycore.tick(dt)
         self._sync_view()
         self._drain_audio()
         if err:

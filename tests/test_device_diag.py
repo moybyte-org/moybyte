@@ -857,19 +857,19 @@ def test_the_pacing_sleep_is_carried_beside_other_and_not_subtracted_from_it(dd)
     assert f["other"] == "2.0"                     # 10 - (1+1+1+2+1+1+1)
 
 
-def test_the_frameskip_gate_is_printed_beside_the_numbers_it_redefines(dd):
-    """#77: with it on, logic ticks every loop frame but render/composite/flush
-    run every second one, so a cart reads far higher fps. #66's last full-roster
-    T-Deck session could not be compared with a later run because no log said
-    which way the toggle sat."""
+def test_the_draw_divisor_is_printed_beside_the_numbers_it_redefines(dd):
+    """#217: at div=2 a cart draws every second tick, so a rate read against
+    another run's is only comparable beside it. #66's last full-roster T-Deck
+    session could not be compared with a later run because no log said which
+    way the old toggle sat. `-` while nothing is paced, never a frozen 0."""
     diag = FakeDiag()
-    dd._diag_loop(diag, Obj(frameskip=True), acc_of())
-    assert diag.one("LOOP")["skip"] == "1"
+    dd._diag_loop(diag, Obj(player=Obj(tick_ms=33, sched=Obj(div=2))), acc_of())
+    assert diag.one("LOOP")["div"] == "2"
 
     diag = FakeDiag()
-    dd._diag_loop(diag, Obj(frameskip=False), acc_of())
+    dd._diag_loop(diag, Obj(player=Obj(tick_ms=0, sched=Obj(div=2))), acc_of())
     dd._diag_loop(diag, Obj(), acc_of())
-    assert [fields(m)["skip"] for _t, m in diag.lines] == ["0", "0"]
+    assert [fields(m)["div"] for _t, m in diag.lines] == ["-", "-"]
 
 
 def test_an_empty_window_prints_nothing_rather_than_dividing_by_zero(dd):

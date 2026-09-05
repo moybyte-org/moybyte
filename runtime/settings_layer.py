@@ -84,10 +84,9 @@ _SET_TITLE_HIT = (30, 18, 130, 16)  # the "SETTINGS" panel title (secret door, #
 #
 # Every entry renders as the "diag" row kind: a generic ON/OFF that reads the
 # flat mirror by name. Which is the other half of the contract -- the mirrors
-# stay FLAT ATTRIBUTES and this table never becomes a read path. `frame` reads
-# `self.frameskip` on the pace check every loop iteration on all three boards,
-# and a dict lookup there would buy a boot-time convenience at a per-frame
-# price.
+# stay FLAT ATTRIBUTES and this table never becomes a read path. Both WMs read
+# `show_fps` on every painted game frame on all three boards, and a dict lookup
+# there would buy a boot-time convenience at a per-frame price.
 
 
 def _gate_second_keyboard(ws):
@@ -112,17 +111,15 @@ SETTINGS_TOGGLES = (
     # alone with a Bluetooth keyboard wants to be player one, not player two.
     ("two_player", "2 PLAYERS", False, "set_two_player",
      _gate_second_keyboard, None),
-    # FRAMESKIP (#77): while a GAME plays, tick its logic + input at the full
-    # loop rate but render every SECOND frame -- halves the whole render-side
-    # cost (per-draw-call dispatch, the measured tax). It is a PHASE TOGGLE, so
-    # what it gives you is half of whatever the loop is doing, NOT a 30Hz lock
-    # (measured 2026-08-22: ~40fps on the Guition, ~55 on the T-Deck, so
-    # frameskip means ~20 and ~27 there). Default OFF -- the on-glass feel pass
-    # kept it opt-in (2026-07-10, both boards). _fs_phase is the alternation
-    # bit the setter resets, so the first frame after a flip always renders.
-    ("frameskip", "FRAMESKIP", False, "set_frameskip", None, "skip"),
+    # STEADY (#217): the tick model's one knob. A GAME's logic always runs at
+    # its declared rate; its draw runs on an integer divisor the Player picks
+    # from what draw frames cost. ON, the divisor is re-decided once every
+    # couple of seconds with hysteresis, so a cadence holds through a hitch
+    # and a heavy menu does not condemn the game; OFF (FREE) it follows load
+    # on every draw frame and judders at transitions. Default ON.
+    ("steady", "STEADY", True, "set_steady", None, "steady"),
     # CRISP PIXELS (#204): nearest-neighbour game composite instead of the
-    # PPA's fixed-bilinear scaler. Sits by FRAMESKIP -- both are play-time
+    # PPA's fixed-bilinear scaler. Sits by STEADY -- both are play-time
     # quality/perf trades. Default OFF: smooth is the shipped behaviour, and
     # the trade is sharp pixel art against a real per-frame CPU cost the async
     # PPA path does not pay.
@@ -184,7 +181,7 @@ class SettingsLayer:
         # deferred to #52, so it lives in Settings for now. "action" rows aren't
         # +/- steppers: any tap / left / right activates them (open_theme).
         ("icons", "EDIT ICONS", "action"),
-        # The ON/OFF gate rows (FRAMESKIP, SHOW FPS, PERF DIAG, DIAG SD LOG and
+        # The ON/OFF gate rows (STEADY, SHOW FPS, PERF DIAG, DIAG SD LOG and
         # the two capability-gated ones) are NOT here: they are declared once in
         # SETTINGS_TOGGLES above and spliced in by _toggle_rows below, in
         # registry order, directly after this row.
@@ -925,7 +922,7 @@ class SettingsLayer:
         if kind == "action":                    # EDIT ICONS / UPDATE FW: open the tool
             self._activate_settings_action(key)
             return
-        if kind == "diag":                      # the ON/OFF gates (#68 diag, #77 frameskip)
+        if kind == "diag":                      # the ON/OFF gates (#68 diag, #217 steady)
             self._toggle_diag_row(key)
             return
         if kind == "webhost":                   # WEB CONSOLE: serve / stop serving

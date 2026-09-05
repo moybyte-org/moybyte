@@ -34,7 +34,7 @@ def test_row_is_capability_gated(tmp_path):
     rows = ws.settings_layer._settings_rows()
     keys = [row[0] for row in rows]
     i = keys.index("crisp_pixels")
-    assert keys[i - 1] == "frameskip"      # sits by its sibling perf trade
+    assert keys[i - 1] == "steady"         # sits by its sibling perf trade
     assert rows[i] == ("crisp_pixels", "CRISP PIXELS", "diag")
     assert calls == []                     # showing the row flips nothing
 

@@ -103,8 +103,9 @@ tilemaps, layers, audio, scenes, spreadsheets and documents, persistent memory �
 in a native C kernel on device (`moy_gfx`). The 7″ board composites the game
 through the SoC's hardware PPA, with the DMA overlapping the next frame's input
 poll; scrolling shifts retained pixels instead of repainting them; sprite
-batching collapses N calls into one. An optional frameskip runs logic at the full
-rate and motion at 30 Hz.
+batching collapses N calls into one. A cart's logic runs at its declared rate
+and its draw on an integer divisor the console picks from load, so motion stays
+even when a frame is heavy.
 
 **Sound** — a C mixer (`moy_audio`) on the boards and in the browser, fed by a
 tracker-style sound bank. PICO-8 imports carry eight waveforms, the effect

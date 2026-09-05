@@ -170,10 +170,14 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
   - **Per-board verdicts do NOT transfer.** The `-O3` `moy_gfx` pragma is
     A/B-confirmed on the S3 (compute-bound there) and measured NULL on the
     dispatch-bound P4 — one pragma line, opposite answers.
-  - **Frameskip (#77) ships OFF** (Settings → FRAMESKIP, persisted, serial
-    `skip 0|1`): a GAME's logic+input+audio tick every loop frame, render and
-    flush every second — full-rate logic, 30Hz motion, at the cost of roughly
-    double the alloc churn.
+  - **The tick model (#217) replaced FRAMESKIP and `FPS_GOVERNOR`** (both
+    deleted): ONE scheduler in the Player (`runtime/tick_model.py`) runs a
+    GAME's logic at its manifest rate — 30, or 60 by `"fps": 60` — never
+    reduced, and draws on an integer divisor it picks from what draw frames
+    cost. Settings → STEADY (persisted, serial `steady 0|1`) is the one knob:
+    how long the divisor remembers before it re-decides. The loop does not
+    sleep while a game is paced; `frame_slot_ms` reports the cart's tick.
+    PERF's `tick=rate/div miss=n` is how a cart says whether it held its tick.
   - **Kid mode (#68): PERF DIAG is OFF by default and gates the diag frame-eaters
     — a measurement session needs it ON**, and DIAG SD LOG separately gates the
     periodic diag→SD write (keep it off for stutter-free serial measurement).

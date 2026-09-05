@@ -411,7 +411,9 @@ int hl_load(host_lua *r, const char *src, int len, const char *name,
     return rc;
 }
 
-int hl_tick(host_lua *r, float dt, char *err, int errlen)
+/* `draw` 0 is a logic-only tick: the Player's scheduler (#217) skips _draw on
+ * the ticks its divisor does not draw, which SPEC.md 5 sanctions. */
+int hl_tick(host_lua *r, float dt, int draw, char *err, int errlen)
 {
     int rc;
     CUR = r;
@@ -421,7 +423,7 @@ int hl_tick(host_lua *r, float dt, char *err, int errlen)
     /* ONE exit, so a cart that draws and THEN errors still lands its pixels --
      * the crash-to-code panel is drawn over the frame the cart died on. */
     rc = moy_lua_update(r->L, dt, err, (size_t)errlen);
-    if (rc == 0) rc = moy_lua_draw(r->L, err, (size_t)errlen);
+    if (rc == 0 && draw) rc = moy_lua_draw(r->L, err, (size_t)errlen);
     hl_narrow(r);
     return rc;
 }

@@ -299,6 +299,15 @@ def _remote_state(ws):
         st["app_claims"] = claims
     except Exception as exc:  # noqa: BLE001
         st["app_err"] = str(exc)
+    try:
+        # The tick model (#217): [rate, divisor, misses, steady] while a game
+        # is paced, else None -- the on-glass suites read "did the cart hold
+        # its tick" from here rather than from pixels.
+        pl = ws.player
+        st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
+                       bool(pl.sched.steady)] if pl.tick_ms else None)
+    except Exception as exc:  # noqa: BLE001
+        st["tick_err"] = str(exc)
     return st
 
 
@@ -327,13 +336,14 @@ class DevChannel:
       drag [frames] [step]         grab the TOP window's title strip and
                       oscillate it (windowed tier; declines with no window)
       diag 0|1        the diagnostic frame-eaters (perf_capture + the FPS chip)
-      skip 0|1        the #77 frameskip gate
+      steady 0|1      the tick model's STEADY / FREE knob (#217)
       crisp 0|1       the #204 nearest-neighbour game composite -- these two
                       are SETTINGS_TOGGLES entries that declared a serial word,
                       not branches written here; a board whose capability gate
                       says no declines the word. Neither persists, so a
                       measurement session cannot leave the board off-default.
-      gov 0|1         the #63 frame governor
+      skip, gov       retired with FRAMESKIP and the governor (#217); both
+                      decline and name `steady`
       mem             a forced collect + the live/free split
       bl 0|1          panel backlight. The board keeps RENDERING either way, so
                       a dark screen is a fine way to bench unattended.
@@ -760,11 +770,9 @@ class DevChannel:
             print("REMOTE %s %s"
                   % (cmd, "on" if getattr(ws, key, on) else "off"))
             return
-        if cmd == "gov":
-            on = not (len(parts) == 2 and parts[1] == "0")
-            import console as _console_mod
-            _console_mod.FPS_GOVERNOR = on
-            print("REMOTE gov %s" % ("on" if on else "off"))
+        if cmd in ("skip", "gov"):
+            print("REMOTE %s: retired by the tick model (#217) -- the Player "
+                  "schedules logic and draw; `steady 0|1` is the knob" % cmd)
             return
         if cmd == "mem":
             import gc

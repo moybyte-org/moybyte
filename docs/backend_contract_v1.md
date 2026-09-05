@@ -242,7 +242,7 @@ them keeps Phase 3's allowlist from becoming a permanent exemption list.
   — and this must land **before** `surface_model_v1` Phase B, which versions the
   protocol and re-baselines those payloads knowingly.
 - **Phase 2 — devices.** Device presenter; P4 native overrides. Gates:
-  **#156 on-glass green**; a **governor-ON** (`console.FPS_GOVERNOR`) timed span
+  **#156 on-glass green**; a paced-game timed span (the tick model, #217)
   over N fixed frames via `P4Board.pyval`, plus `ws.note_cost` counters
   asserting each converted site executes the **same number of times** before and
   after (`test_a_drag_touches_no_storage_and_rebuilds_no_cache` is the working
@@ -386,7 +386,7 @@ objects — listed so they are decisions rather than omissions): `ws.wifi`,
 | M7/F5 | merge premature; `end_frame`/`defer` insufficient and out of contract | Q2 resolved "beside"; both removed from §4 |
 | M8 | Phase 0's gate already green at HEAD | restated as coverage matrix; dispatch-only caveat |
 | F7 | risk mis-sized vs #43/#63 | §6 re-derived (~0.18ms/frame) |
-| F8 | "unchanged fps" cannot gate | Phase 2 → governor-ON span + `note_cost` counters |
+| F8 | "unchanged fps" cannot gate | Phase 2 → paced-game span + `note_cost` counters |
 | F9/N4 | Phase 1 ↔ surface_model Phase B payload collision; coverage overclaim | sequenced in Phase 1; §1.4 corrected |
 | N1 | `view` collides with the cart verb | renamed `place_span`, real signature |
 | N2 | two latent sites unmentioned | §1.3 + Phase 1 disposition |

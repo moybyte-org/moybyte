@@ -146,7 +146,7 @@ def test_platformer_falling_off_respawns(tmp_path):
     ts = ws.ns["TS"]
     ws.ns["py"] = float(ws.ns["MH"] * ts + 200)           # well below the level
     ws.input.begin_frame()
-    ws.frame(1 / 30)
+    ws.frame(1 / 60)                     # ONE tick of this 60fps cart (#217)
     assert ws.ns["py"] == float(spawn[1] * ts)            # back at the spawn tile
 
 

@@ -128,8 +128,10 @@ class MoycoreHostRun:
         # The C loop runs _update and _draw back to back inside the tick, so
         # there is nothing left to do here -- but the hook must EXIST. The
         # Player calls update() then draw(), and a None draw would silently
-        # change the shape every other runtime presents.
+        # change the shape every other runtime presents. `draw_next` is how
+        # the Player's scheduler (#217) asks for a logic-only tick.
         self.draw = self._draw_noop
+        self.draw_next = True
 
     def _update(self, dt):
         s = self._run.snap
@@ -172,7 +174,7 @@ class MoycoreHostRun:
                 s[SNAP_BTN_P1] = h1
                 s[SNAP_BTNP_P1] = p1
         s[SNAP_PLAYERS] = n
-        err = self._run.tick(dt)
+        err = self._run.tick(dt, self.draw_next)
         self._sync_view()
         # Audio drains through the SAME api closures a Python cart uses, so the
         # engine's behaviour lives in one place; only the per-call trip is gone.

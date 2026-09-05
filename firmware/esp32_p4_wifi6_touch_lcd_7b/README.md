@@ -87,7 +87,7 @@ UI while watching the glass:
 - `drag [frames] [step]` — grab the top window's title strip and oscillate it (step = px/frame amplitude scale, default 6; 30 ≈ a violent finger drag)
 - `cache 0|1` — A/B the drag backdrop cache
 - `union 0|1` — A/B the dirty-union gesture restore (window-sized backdrop re-stamp vs full-screen)
-- `skip 0|1` — A/B the #77 frameskip (logic full-rate, render halved; non-persisting)
+- `steady 0|1` — A/B the tick model's STEADY / FREE knob (#217; non-persisting)
 - `bt status|scan|forget` — inspect/restart BLE-keyboard discovery or clear its local bond keys (`fast=(rx, drops, queued, peak, enabled)`)
 - `bt trace 0|1` — print raw HID notification bytes, native queue age, and decoded held input state
 - `recv <n> <window> <path>` — take `n` RAW bytes off stdin into `<path>.new` (see below)

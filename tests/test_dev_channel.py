@@ -135,9 +135,6 @@ def test_state_reports_every_frame_stage_with_its_budget_and_misses():
             self.perf_capture = True
             self.stage_meters = device_boot.StageMeters(self)
 
-        def frame_cap_fps(self):
-            return 60
-
     ws = CapWS()
     m = ws.stage_meters
     m.start(m.slot_ms)

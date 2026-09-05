@@ -427,8 +427,7 @@ Piped whole lines, one per newline: `echo state > /dev/ttyACM0`.
 | `tap <name>` | tap a named bar button (any `ws.layout.<name>_btn` rect) |
 | `run [name]` | select the first cart whose title matches, and run it |
 | `diag 0\|1` | the diagnostic frame-eaters (`perf_capture` + the FPS chip) |
-| `skip 0\|1` | the #77 frameskip gate |
-| `gov 0\|1` | the #63 frame governor |
+| `steady 0\|1` | the tick model's STEADY / FREE knob (#217; `skip`/`gov` decline and name it) |
 | `mem` | a forced collect, then the live/free split |
 | `py <code>` | eval/exec one line against the LIVE console (`ws`, `wm`, `pointer` in scope) |
 | `recv <n> <window> <path>` | take `n` RAW bytes off stdin into `<path>.new`, acking every `window` |

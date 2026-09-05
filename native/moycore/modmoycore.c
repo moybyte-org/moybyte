@@ -1302,12 +1302,15 @@ static mp_obj_t mod_gc(void)
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_gc_obj, mod_gc);
 
-// tick(dt) -> None on a clean frame, else the error text.
+// tick(dt[, draw]) -> None on a clean frame, else the error text.
 //
 // The whole frame: reset the per-frame draw state (SPEC.md's rule that draw
 // state must not leak between frames or from host UI into a cart), then
-// _update and _draw. The host refreshed the snapshot before calling and drains
-// the audio queue after.
+// _update and -- unless `draw` is false -- _draw. A logic-only tick is the
+// Player's scheduler (#217) skipping _draw on a tick its divisor does not
+// draw, which SPEC.md 5 sanctions; TICK_DRAW in the module table is how the
+// glue knows this build takes the flag. The host refreshed the snapshot before
+// calling and drains the audio queue after.
 // The last tick's two halves, in microseconds. The loop's own clock cannot see
 // them any more: it times `update()` and `draw()`, and moycore runs BOTH inside
 // update(), so the diag's logic/render split read `logic = the whole frame,
@@ -1318,26 +1321,27 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_gc_obj, mod_gc);
 // to attribute.
 static uint32_t g_upd_us, g_draw_us;
 
-static mp_obj_t mod_tick(mp_obj_t dt_obj)
+static mp_obj_t mod_tick(size_t n_args, const mp_obj_t *args)
 {
     if (!RUN.open) mp_raise_msg(&mp_type_RuntimeError,
                                 MP_ERROR_TEXT("moycore: no run"));
     char err[192];
     uint32_t t0, t1;
+    int draw = n_args < 2 || mp_obj_is_true(args[1]);
     moy_reset_state(&RUN.canvas);
-    float dt = (float)mp_obj_get_float(dt_obj);
+    float dt = (float)mp_obj_get_float(args[0]);
     g_tick_ms = (uint32_t)mp_hal_ticks_ms();   // h_time_ms counts from here
     t0 = (uint32_t)mp_hal_ticks_us();
     if (moy_lua_update(RUN.L, dt, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     t1 = (uint32_t)mp_hal_ticks_us();
-    if (moy_lua_draw(RUN.L, err, sizeof(err)) != 0)
+    if (draw && moy_lua_draw(RUN.L, err, sizeof(err)) != 0)
         return mp_obj_new_str(err, strlen(err));
     g_upd_us = t1 - t0;
-    g_draw_us = (uint32_t)mp_hal_ticks_us() - t1;
+    g_draw_us = draw ? (uint32_t)mp_hal_ticks_us() - t1 : 0;
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_tick_obj, mod_tick);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_tick_obj, 1, 2, mod_tick);
 
 // tick_split() -> (update_us, draw_us) for the last tick. Microseconds, not the
 // loop's milliseconds: a cart frame this project cares about is single-digit ms
@@ -1533,6 +1537,7 @@ static const mp_rom_map_elem_t moycore_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_exec),        MP_ROM_PTR(&mod_exec_obj) },
     { MP_ROM_QSTR(MP_QSTR_load),        MP_ROM_PTR(&mod_load_obj) },
     { MP_ROM_QSTR(MP_QSTR_tick),        MP_ROM_PTR(&mod_tick_obj) },
+    { MP_ROM_QSTR(MP_QSTR_TICK_DRAW),   MP_ROM_INT(1) },
     { MP_ROM_QSTR(MP_QSTR_tick_split),  MP_ROM_PTR(&mod_tick_split_obj) },
     { MP_ROM_QSTR(MP_QSTR_pmem_image),  MP_ROM_PTR(&mod_pmem_image_obj) },
     { MP_ROM_QSTR(MP_QSTR_retarget),    MP_ROM_PTR(&mod_retarget_obj) },

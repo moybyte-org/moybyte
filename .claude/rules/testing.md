@@ -41,10 +41,11 @@ paths:
     few lines of p8 source and runs them on the real Player. The corpus found
     them; the inline tests hold them.
   - **What the Player still adds over `run_cart` is TIME**: run_cart calls
-    update once per frame at a fixed 1/30, while the Player runs a cart's own
-    rate against the host's, with catch-up and a btnp latch spanning console
-    frames. That is why the pacing tests live here and are worth keeping. See
-    #217, which folds all of it into one scheduler.
+    update once per frame at a fixed 1/30, while the Player's scheduler
+    (`runtime/tick_model.py`, #217) places a cart's declared rate on the host's
+    clock, with catch-up, a draw divisor and a press-edge latch per logic tick.
+    That is why the pacing tests live here (`tests/test_tick_model.py` and the
+    btnp pins in `tests/test_import_p8.py`) and are worth keeping.
 
 - **On-glass testing — all three boards have a suite** (#156). Each is gated on
   its own env var and shares one session in file order, leaving the board where
@@ -63,7 +64,7 @@ paths:
     driver glitches the reset circuit). A bare probe right after open is
     measuring a board mid-boot, ~17s to the desk.
   - **The dev channel is ONE class** (`runtime/dev_channel.py`) with one
-    vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`skip`/`gov`/
+    vocabulary: `state`/`tap`/`run`/`open`/`swipe`/`drag`/`diag`/`steady`/
     `mem`/`bl`/`vol`/`power`/`web`/`py`/`recv`/`quit`. A command a board cannot
     serve DECLINES, and `recv` — the only one that stops reading lines and takes
     raw bytes — is the ONLY cart-push transport, so a board whose image predates

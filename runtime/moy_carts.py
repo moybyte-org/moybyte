@@ -1046,9 +1046,9 @@ def load(path):
             # not graduated). Un-set only through the undo journal (the grad rider).
             "graduated": bool(man.get("graduated", False)),
             "src": src,
-            # Frame pacing (#63): a GAME cart locks to 30fps unless its manifest
-            # says "fps": 60 (only carts that SUSTAIN 60 should -- frame_cap_fps).
-            # Spec carts default to the spec's guaranteed tick (SPEC.md 5): 30.
+            # The cart's LOGIC rate (#217): the Player ticks a GAME at 60 only
+            # when its manifest says so, else at the 30 SPEC.md 5 guarantees.
+            # Spec carts default to that tick explicitly.
             "fps": man.get("fps", 30 if spec else 0),
             # Cart-supplied palette (SPEC.md 2.2): 64 "RRGGBB" strings replacing
             # the default table for this cart's run, or None. Player applies it.

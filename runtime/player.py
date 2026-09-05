@@ -60,6 +60,10 @@ try:
     from cart_api import CART_BUTTONS as _NET_BUTTONS
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.cart_api import CART_BUTTONS as _NET_BUTTONS
+try:
+    from tick_model import TickScheduler
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.tick_model import TickScheduler
 
 
 # Auto-native carts (#67 spike): when the runtime HAS the native code emitter
@@ -363,6 +367,15 @@ class Player:
         self._start_diag = None       # (reclaim,audio,api,compile,exec,init,total,free0,free1,alloc0,alloc1)
         self._slow_logic_next = 0
         self._native_fail = None      # reason for bytecode fallback, when auto-native fails
+        # The tick model (#217): one scheduler per run. `tick_ms` is the cart's
+        # tick period while a GAME is paced and 0 otherwise -- a flat attribute
+        # because device_boot's frame_slot_ms reads it every loop iteration.
+        self.sched = TickScheduler()
+        self.tick_ms = 0
+        self._n_ticks = 1             # frame_plan's answer, run by tick()
+        self._keyp_latch = 0          # a keyp edge waiting for a logic tick
+        self._tick_edges = None       # ws.input.tick_edges, bound while paced
+        self._keep_edges = None       # ws.input.keep_edges, bound while paced
 
     def _layout_args(self):
         """`(w, h, fs)` for a responsive app cart's `_layout` (#181).
@@ -553,13 +566,14 @@ class Player:
             pass
         self._diag_frag()          # #66: the heap the NEXT cart inherits
         self._reset_stage_meters()  # #210: the shell does not inherit the run's
+        self._disarm_pacing()
 
     def _reset_stage_meters(self):
         """#210: the frame loop's per-stage deadline meters start clean at both
         ends of a run. A run's misses must not carry the shell's and the
         shell's must not carry the run's -- and these are also the two moments
-        the pacing slot the budgets are cut from changes, because frame_cap_fps
-        follows the open cart."""
+        the pacing slot the budgets are cut from changes, because frame_slot_ms
+        follows the open cart's tick."""
         sm = getattr(self.ws, "stage_meters", None)
         if sm is not None:
             sm.reset()
@@ -712,6 +726,7 @@ class Player:
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
         self._reset_stage_meters()     # #210: this run's misses are its own
+        self._disarm_pacing()          # re-armed below, once the cart is running
         # USER APP per-run state (#181): cleared here rather than at the bind
         # site below, so the early SPEC refusals (extensions / canvas) cannot
         # leave a previous app's `_layout` armed against this cart.
@@ -956,8 +971,11 @@ class Player:
         # through the injected Lua runtime instead (same ns, same error panel).
         _rt = project.cart.get("runtime", "python")
         if _rt != "python":
-            return self._start_lua(_rt, ns, src, t0, h0,
-                                   (t_reclaim, t_audio, t_api))
+            ok = self._start_lua(_rt, ns, src, t0, h0,
+                                 (t_reclaim, t_audio, t_api))
+            if ok:
+                self._arm_pacing(cart)
+            return ok
         self._native_ins = None
         self._native_fail = None
         code = None
@@ -1066,8 +1084,91 @@ class Player:
         self._start_diag = (t_reclaim, t_audio, t_api, t_compile, t_exec, t_init,
                             _ticks_diff(_ticks_ms(), t0),
                             h0[0], h1[0], h0[1], h1[1])
+        self._arm_pacing(cart)
         self._print_run_diag("RUNSTART")
         return True
+
+    def _arm_pacing(self, cart):
+        """A GAME runs on the tick model (#217): logic at its manifest rate --
+        60 opt-in, anything else the 30 the console guarantees -- and draw on
+        the scheduler's divisor. A tool/app is event-driven and ticks with the
+        loop it serves, so it is not paced."""
+        if self._is_tool:
+            return
+        try:
+            rate = int(cart.get("fps") or 30)
+        except (TypeError, ValueError):
+            rate = 30
+        ws = self.ws
+        self.sched.start(rate, getattr(ws, "steady", True))
+        self.tick_ms = self.sched.tick_ms
+        self._keyp_latch = 0
+        inp = ws.input
+        self._tick_edges = getattr(inp, "tick_edges", None)
+        self._keep_edges = getattr(inp, "keep_edges", None)
+
+    def _disarm_pacing(self):
+        self.tick_ms = 0
+        self._n_ticks = 1
+        self._tick_edges = None
+        self._keep_edges = None
+        self.park()
+
+    def park(self):
+        """A paced game that is not the surface on top (an Editor or menu
+        over it) neither ticks nor keeps edges: what it kept for its next
+        tick is dropped, so the shell reads fresh edges and the game does not
+        resume on a press made before it was covered."""
+        self._keyp_latch = 0
+        de = getattr(self.ws.input, "drop_edges", None)
+        if de is not None:
+            de()
+
+    def steady_mode(self, on):
+        self.sched.steady_mode(on)
+
+    def frame_plan(self, dt):
+        """What this loop frame is for the running cart (#217): schedules its
+        logic ticks (tick() runs them) and returns whether the frame DRAWS. A
+        tool/app or a crashed cart ticks and draws with the loop it serves. A
+        lockstep match (#65) owns its own clock: its due tick decides, and the
+        draw divisor stays 1 there -- composing the two is its own step."""
+        if not self.tick_ms:
+            self._n_ticks = 1
+            return True
+        np = self._netplay
+        if np is not None:
+            self._n_ticks = 1
+            return bool(np.pending(_ticks_ms()))
+        s = self.sched
+        s.plan(dt)
+        self._n_ticks = s.n
+        if s.n == 0 and self._keep_edges is not None:
+            self._keep_edges()
+        return s.draw
+
+    def _run_ticks(self, n, dt, draw):
+        """`n` logic ticks of `dt`. Each takes the latched press edges, and the
+        last carries this frame's draw for a runtime whose tick fuses _update
+        and _draw (the Lua tier)."""
+        upd = self._update
+        lua = self._lua
+        te = self._tick_edges
+        inp = self.ws.input
+        sched = self.sched
+        i = 0
+        while i < n:
+            i += 1
+            if te is not None:
+                te()
+            inp.cart_keyp = self._keyp_latch
+            self._keyp_latch = 0
+            if lua is not None:
+                lua.draw_next = draw and i == n
+            if upd is not None:
+                t0 = _ticks_us()
+                upd(dt)
+                sched.note_tick(_ticks_diff(_ticks_us(), t0) / 1000000.0)
 
     def _start_lua(self, runtime, ns, src, t0, h0, t_pre):
         """Start a "runtime": "lua" cart (#67 Phase 2) through the injected
@@ -1137,28 +1238,29 @@ class Player:
         return True
 
     def tick(self, dt, render=True):
-        """The running-cart content (game domain): tick the cart _update/_draw + mixer
-        (the game loop), then the crash chrome + the transient hold-to-exit toast. Fills
-        the per-frame perf split (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting
+        """The running-cart content (game domain): the logic ticks frame_plan
+        scheduled for this loop frame, the cart's _draw when `render`, the mixer
+        feed, then the crash chrome + the transient hold-to-exit toast. Fills the
+        per-frame perf split (ws._pf_*) the router's DRAWBRK/CHROMEBRK accounting
         reads. Drawn on the fixed 320x240 GAME canvas, composited by the router.
 
-        render=False is the #77 frameskip's logic-only tick (ws.frame's skip frames):
-        the cart's _update + audio + exit/textmode handling run as normal, but the
-        backdrop restore, the cart's _draw and every chrome draw are skipped -- the
-        game canvas keeps the last rendered frame's pixels and nothing composites or
-        flushes this frame, so input/logic hold the full loop rate while the render
-        cost is halved."""
+        render=False is a logic-only frame (#217): the cart's ticks, audio and
+        exit/textmode handling run as normal, but the backdrop restore, the cart's
+        _draw and every chrome draw are skipped -- the game canvas keeps the last
+        rendered frame's pixels and nothing composites or flushes this frame."""
         ws = self.ws
         _perf = ws.perf_hud or ws.perf_capture
         if self.cart_error is None:
-            # Resolve this frame's keyboard edge for the cart's key()/keyp():
-            # last_key is the byte held this frame (0 when nothing is down);
-            # keyp fires only on the 0->key transition. Done here (not in
-            # InputState) so it's independent of whether the backend sets
-            # last_key before or after begin_frame().
+            # The keyboard edge for the cart's key()/keyp(): last_key is the
+            # byte held this loop frame (0 when nothing is down); keyp fires on
+            # the 0->key transition, and the edge LATCHES until a logic tick
+            # takes it (#217). Done here (not in InputState) so it is
+            # independent of whether the backend sets last_key before or after
+            # begin_frame().
             k = ws.input.last_key
             ws.input.cart_key = k
-            ws.input.cart_keyp = k if (k and k != self._cart_key_prev) else 0
+            if k and k != self._cart_key_prev:
+                self._keyp_latch = k
             self._cart_key_prev = k
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window
@@ -1174,7 +1276,7 @@ class Player:
                 # Declared background (#63): restore the cart's named backdrop BEFORE
                 # its frame runs, so a naive cart draws only its actors. No-op (one
                 # early-out) when the cart never called background(). Skipped on a
-                # frameskip logic-only tick (nothing draws over it this frame).
+                # logic-only frame (nothing draws over it this frame).
                 #
                 # TIMED, and charged to RENDER, not chrome (#172, on-glass
                 # 2026-08-02): this restore IS the cart's drawing (it stands in
@@ -1188,8 +1290,8 @@ class Player:
                 bg = _ticks_diff(_ticks_us(), _tb) if _perf else 0
                 # Multiplayer (#65): deliver any inbound net.* messages to the cart's
                 # on_net handler BEFORE its _update runs (incoming shared state applied
-                # first -- the lockstep-friendly order). Every logic tick, incl. a
-                # frameskip logic-only frame. No-op when the cart has no net permission.
+                # first -- the lockstep-friendly order). Every frame, drawn or
+                # not. No-op when the cart has no net permission.
                 if self._net is not None:
                     self._net.pump()
                 # LOCKSTEP (#65 Phase 2): the session owns the clock. `dt` becomes
@@ -1245,8 +1347,12 @@ class Player:
                 # ws._pf_* are microsecond ints now; _frame_perf_end divides once,
                 # at the EMA, so every public number stays in ms.
                 _ts = _ticks_us() if _perf else 0
-                if self._update and not stalled:
-                    self._update(dt)
+                if np is not None:
+                    self._run_ticks(0 if stalled else 1, dt, render)
+                elif self.tick_ms:
+                    self._run_ticks(self._n_ticks, self.sched.period, render)
+                else:
+                    self._run_ticks(1, dt, render)
                 _tm = _ticks_us() if _perf else 0
                 if render and self._draw:
                     self._draw()
@@ -1268,8 +1374,11 @@ class Player:
                         if _sp is not None:
                             # frame_split keeps its ms contract (lua_host twins it);
                             # this side is us, so convert rather than widening it.
-                            upd = int(_sp[0] * 1000.0)
-                            cart = int(_sp[1] * 1000.0) + bg
+                            # The draw half is the last tick's; the rest of the
+                            # bracket is every logic tick this frame ran.
+                            _dr = int(_sp[1] * 1000.0)
+                            cart = _dr + bg
+                            upd = upd - _dr if upd > _dr else 0
                     aud = _ticks_diff(_ticks_us(), _td)   # audio.tick (mixer feed)
                     ws._pf_upd = upd
                     ws._pf_cart = cart
@@ -1300,6 +1409,7 @@ class Player:
                     self.crash_line = self._map_crash_line(_exc_cart_line(exc))
                 self._update = None
                 self._draw = None
+                self._disarm_pacing()  # the crash panel is a console screen
                 # Print the _err_text-guarded string, never the raw `exc`: a
                 # cart exception whose __str__ itself raises would otherwise
                 # escape here -> the silent device hang the panel exists to prevent.
@@ -1353,10 +1463,9 @@ class Player:
         # Clear any cart-set camera/clip/pal/palt (#11) before the console paints
         # its own UI overlays, so they're never offset/clipped/recoloured.
         ws._reset_canvas_state()
-        # Frameskip logic-only tick (#77): nothing below draws pixels this frame --
-        # the crash panel/tool bar/hold toast all repaint on the next rendered frame
-        # (a crash mid-skip disables the skip gate itself: ws.frame requires
-        # cart_error None to skip, so the panel is never starved).
+        # A logic-only frame (#217): nothing below draws pixels this frame --
+        # the crash panel/tool bar/hold toast all repaint on the next drawn frame
+        # (a crash disarms the pacing itself, so the panel is never starved).
         if not render:
             return
         # The bar auto-hides while a cart PLAYS (Stage 5): the game owns the full

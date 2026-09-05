@@ -17,7 +17,7 @@ it refuses beyond that:
    hides the row and declines the serial word; it never silently keeps a flag
    nothing reads. `set_two_player` is the honest end of the same rule and
    reports OFF whatever it is told when no second keyboard exists.
-2. **The flat mirrors stay FLAT.** `frame`'s pace check reads `self.frameskip`
+2. **The flat mirrors stay FLAT.** Both WMs read `ws.show_fps`
    every loop iteration on all three boards, and both WMs read `ws.show_fps`
    per painted game frame. The registry owns declaration, persistence and the
    row -- never a read path.
@@ -236,7 +236,7 @@ def test_a_board_that_cannot_serve_a_toggle_shows_no_row(tmp_path):
 def test_a_granted_gate_adds_its_row_in_registry_order(tmp_path):
     """Grant both capabilities and the block is the registry, in order,
     directly after EDIT ICONS. This is the order the Settings goldens rest on:
-    2 PLAYERS above FRAMESKIP, CRISP PIXELS below it."""
+    2 PLAYERS above STEADY, CRISP PIXELS below it."""
     ws = _ws(tmp_path)
     ws.sys_canvas.set_crisp_scale = lambda on: None
     ws.ble_keyboard = _FakeSecondKeyboard()
@@ -286,21 +286,21 @@ def test_a_gated_toggle_declines_its_serial_word(tmp_path, capsys):
 
 
 def test_the_serial_word_reports_what_the_console_reached(tmp_path, capsys):
-    """`skip` keeps its wire behaviour verbatim -- the on-glass suites and the
+    """`steady` keeps the wire shape `skip` had -- the on-glass suites and the
     bench tools speak it -- and it does not persist, so a measurement session
     cannot leave a kid's system.json off-default."""
     from runtime.dev_channel import DevChannel
     from tests.test_dev_channel import FakePointer
     ws = _ws(tmp_path)
-    ws.system.pop("frameskip", None)
+    ws.system.pop("steady", None)
     ch = DevChannel(ws, FakePointer())
     capsys.readouterr()                 # the channel's own no-fileno notice
-    ch.run(ws, "skip 1")
-    assert capsys.readouterr().out.strip() == "REMOTE skip on"
-    assert ws.frameskip is True and "frameskip" not in ws.system
-    ch.run(ws, "skip 0")
-    assert capsys.readouterr().out.strip() == "REMOTE skip off"
-    assert ws.frameskip is False
+    ch.run(ws, "steady 0")
+    assert capsys.readouterr().out.strip() == "REMOTE steady off"
+    assert ws.steady is False and "steady" not in ws.system
+    ch.run(ws, "steady 1")
+    assert capsys.readouterr().out.strip() == "REMOTE steady on"
+    assert ws.steady is True
 
 
 def test_a_setter_that_cannot_work_still_reports_honestly(tmp_path):
@@ -366,13 +366,10 @@ def test_no_toggle_is_a_property(tmp_path):
 
 
 def test_the_hot_readers_still_read_the_flat_attribute():
-    """The named per-frame sites, by source. `frame`'s frameskip gate and its
-    pace check run every loop iteration on all three boards; both WMs read
-    show_fps per painted game frame. None of them may go through the registry
-    or the system dict."""
+    """The named per-frame sites, by source: both WMs read show_fps per
+    painted game frame on all three boards. Neither may go through the
+    registry or the system dict."""
     console_src = CONSOLE.read_text(encoding="utf-8")
-    assert "self.frameskip and self.wm.top_is_player()" in console_src
-    assert "FPS_GOVERNOR or self.frameskip" in console_src
     assert 'ws.show_fps and self._stack[-1] == "desktop"' in (
         ROOT / "runtime" / "wm.py").read_text(encoding="utf-8")
     assert "self.ws.show_fps and bool(self._stack)" in (

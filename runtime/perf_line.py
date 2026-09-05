@@ -50,6 +50,8 @@ FIELDS = (
     ("cart", "%s", ""),                 # slugged title, `-` at the launcher
     ("fps", "%d/%d", ""),               # frames DRAWN / frames LOOPED, per second
     ("net", "%d", ""),                  # #65 lockstep ticks/s; `-` = no session
+    ("tick", "%d/%d", ""),              # #217 logic rate / draw divisor; `-` = no paced game
+    ("miss", "%d", ""),                 # #217 frames whose tick debt was written off, this sample
     ("busy", "%dms", "ms"),             # mean loop ms excluding the pacing sleep
     ("draw", "%.0f", ""),               # ws._draw_ms   } the shared console's
     ("flush", "%.0f", ""),              # ws._flush_ms  } EMA phase split

@@ -70,10 +70,18 @@ class FakeComp:
         self.flushes += 1
 
 
+class FakePlayer:
+    """The one thing the loop asks the Player: the cart's tick period, 0 when
+    no game is paced (#217)."""
+
+    def __init__(self, tick_ms=0):
+        self.tick_ms = tick_ms
+
+
 class FakeWs:
-    def __init__(self, frames=0, cap=60):
+    def __init__(self, frames=0, tick_ms=0):
         self._frames_drawn = frames
-        self._cap = cap
+        self.player = FakePlayer(tick_ms)
         self.armed = 0
         self.announced = 0
 
@@ -82,9 +90,6 @@ class FakeWs:
 
     def announce_update(self):
         self.announced += 1
-
-    def frame_cap_fps(self):
-        return self._cap
 
 
 class FakeStore:
@@ -490,54 +495,44 @@ def test_dt_is_seconds_and_clamped_so_a_hitch_cannot_teleport_a_cart():
 
 def test_a_frame_inside_its_budget_sleeps_the_remainder():
     pump = _pump()
-    assert pump.pace(FakeWs(cap=60), 5) == 11      # 16ms slot
+    assert pump.pace(FakeWs(), 5) == 11            # 16ms slot
     assert pump.debt == 0
 
 
-def test_a_running_game_paces_to_its_own_cadence_never_faster_than_the_cap():
+def test_a_paced_game_never_sleeps_and_still_publishes_its_tick_as_the_slot():
+    """#217: the Player's scheduler places ticks on the cart's own clock, so
+    the loop must not quantize them onto a sleep grid -- and the slot the
+    budgets are cut from is the cart's tick, not the loop cap."""
     pump = _pump(cap=60)
-    # #63: a GAME locks to 30 (the SNES rule -- a locked 30 beats a 38-55 swing)
-    assert pump.pace(FakeWs(cap=30), 10) == 23
-    # ...and a cart that asks for MORE than the loop cap still gets the cap.
-    assert pump.pace(FakeWs(cap=120), 2) == 14
+    assert pump.pace(FakeWs(tick_ms=33), 10) == 0
+    assert pump.slot == 33
+    assert pump.pace(FakeWs(tick_ms=33), 50) == 0     # an overrun accrues no debt
+    assert pump.debt == 0
+    # ...and a 60Hz cart's tick is never a slot FASTER than the loop cap.
+    assert pump.pace(FakeWs(tick_ms=16), 2) == 0
+    assert pump.slot == 16
+    # Back on a console screen the cap paces again, with no debt carried over.
+    assert pump.pace(FakeWs(), 4) == 12
 
 
 def test_pacing_never_kills_the_loop_when_the_console_throws():
-    class Broken(FakeWs):
-        def frame_cap_fps(self):
-            raise ValueError("no wm")
+    class Broken:
+        @property
+        def player(self):
+            raise ValueError("no player")
 
     assert _pump(cap=60).pace(Broken(), 4) == 12    # falls back to the loop cap
 
 
-def test_the_frameskip_pair_lands_on_cadence_instead_of_overshooting():
-    """#77's celeste measurement, as arithmetic.
-
-    A per-frame clamp can only slow FAST frames. With frameskip on and a full
-    frame at 50ms against a 33ms budget, the padded skip frame made the PAIR
-    83ms -- the game 20% slow at 12fps, worse on both axes than no skip at all.
-    The debt makes the pair 50 + 16 = 66ms, i.e. two 30fps slots: true 30Hz
-    logic, an even 15fps of render.
-    """
-    pump = _pump(cap=60)
-    ws = FakeWs(cap=30)                    # frameskip implies the 30 cap
-
-    assert pump.pace(ws, 50) == 0          # the full frame overruns
-    assert pump.debt == 50 - 33
-    assert pump.pace(ws, 16) == 0          # the skip frame pays the debt down
-    assert pump.debt == 0
-    # 50 + 16 = 66ms for the pair == two 33ms slots, which is the whole claim.
-
-
 def test_the_debt_is_capped_at_one_pair_so_a_real_hitch_is_not_repaid_forever():
     pump = _pump(cap=60)
-    ws = FakeWs(cap=30)
+    ws = FakeWs()
     pump.pace(ws, 300)                     # a 200ms+ GC collect
-    assert pump.debt == 2 * 33, "unpayable: just run flat out"
+    assert pump.debt == 2 * 16, "unpayable: just run flat out"
     # Repaid within a couple of frames rather than eating a second of sleeps.
     assert pump.pace(ws, 0) == 0
     assert pump.pace(ws, 0) == 0
-    assert pump.pace(ws, 0) == 33 - 0
+    assert pump.pace(ws, 0) == 16 - 0
 
 
 def test_the_debt_is_inert_while_frames_fit_their_budget():
@@ -548,7 +543,7 @@ def test_the_debt_is_inert_while_frames_fit_their_budget():
     identical to the plain clamp it replaced.
     """
     pump = _pump(cap=60)
-    ws = FakeWs(cap=60)
+    ws = FakeWs()
     for elapsed in (0, 3, 8, 15, 16):
         expect = 16 - elapsed if elapsed < 16 else 0
         assert pump.pace(ws, elapsed) == expect
@@ -888,17 +883,14 @@ def test_frameloop_gate_respects_a_deliberate_blank():
 class _CapWS:
     """The two things StageMeters asks a console: the cadence, and the flag."""
 
-    def __init__(self, fps=60, capture=True):
-        self._fps = fps
+    def __init__(self, tick_ms=0, capture=True):
+        self.player = FakePlayer(tick_ms)
         self.perf_capture = capture
 
-    def frame_cap_fps(self):
-        return self._fps
 
-
-def _meters(fps=60, floor_ms=1000 // 60):
+def _meters(tick_ms=0, floor_ms=1000 // 60):
     from runtime import device_boot
-    return device_boot.StageMeters(_CapWS(fps), floor_ms)
+    return device_boot.StageMeters(_CapWS(tick_ms), floor_ms)
 
 
 def test_the_budget_table_is_one_place_and_spends_one_whole_slot():
@@ -1039,12 +1031,12 @@ def test_the_meters_stay_asleep_until_perf_capture_arms_them():
 
 
 def test_the_budgets_are_cut_from_the_pacing_slot_and_follow_it():
-    """A governed game halves the cadence, so every stage's allowance doubles.
+    """A paced 30Hz game halves the cadence, so every stage's allowance doubles.
     Cutting budgets from a constant would make one of the two cadences a
     permanent miss, which is a broken meter with extra steps."""
     from runtime import device_boot
 
-    fast = _meters(60)
+    fast = _meters()
     assert fast.slot_ms == 16
     assert fast.budget[device_boot._S_FRAME] == 16 * 1000 * 780 // 1000
 
@@ -1056,8 +1048,8 @@ def test_the_budgets_are_cut_from_the_pacing_slot_and_follow_it():
 
 def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
     """One author for the cadence: pace() derives the slot and the budgets read
-    what it derived, so a cart that changes the cap cannot be judged against
-    the cap it replaced."""
+    what it derived, so a cart that changes the cadence cannot be judged
+    against the one it replaced."""
     from runtime import device_boot
 
     clock = [0]
@@ -1065,9 +1057,9 @@ def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     assert pump.slot == 16
-    pump.pace(_CapWS(30), 5)
+    pump.pace(_CapWS(33), 5)
     assert pump.slot == 33
-    pump.pace(_CapWS(120), 5)                # never pace FASTER than the cap
+    pump.pace(_CapWS(8), 5)                  # never a slot FASTER than the cap
     assert pump.slot == 16
 
 
@@ -1124,8 +1116,7 @@ def test_pump_slack_converges_on_a_constant_sleep_overshoot(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -1156,8 +1147,7 @@ def test_pump_slack_stays_zero_on_exact_sleeps(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -1182,8 +1172,7 @@ def test_pump_slack_never_charges_a_hitch(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -1208,8 +1197,7 @@ def test_pump_slack_recovers_after_swallowing_the_whole_sleep(monkeypatch):
     monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
 
     class WS:
-        def frame_cap_fps(self):
-            return 60
+        pass
 
     pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
     pump.last = clock[0]
@@ -1276,30 +1264,31 @@ PERF_CASES = {
          "chrome": 33.0, "wmr": 28, "wmw": 1, "wms": 0,
          "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0, "gfence_ms": 0.0,
          "home": None},
-        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
-        "chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 fence_ms=0.0 "
-        "gfence_ms=0.0 home=-"),
+        "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
+        "logic=0 render=0 chrome=33 wmr=28 wmw=1 wms=0 ppa=0/0/0/0/0 "
+        "fence_ms=0.0 gfence_ms=0.0 home=-"),
     "guition": (
         {"cart": None, "fps": (0, 61), "net": None, "busy": 4,
          "draw": 72.0, "flush": 0.0, "logic": 0.0, "render": 0.0,
          "chrome": 72.0, "home": None},
-        "PERF cart=- fps=0/61 net=- busy=4ms draw=72 flush=0 logic=0 render=0 "
-        "chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- gfence_ms=- home=-"),
+        "PERF cart=- fps=0/61 net=- tick=- miss=- busy=4ms draw=72 flush=0 "
+        "logic=0 render=0 chrome=72 wmr=- wmw=- wms=- ppa=- fence_ms=- "
+        "gfence_ms=- home=-"),
     "tdeck": (
         {"cart": "Sakura Lua", "fps": (53, 55), "net": None, "busy": 18,
          "draw": 14.0, "flush": 0.0, "logic": 3.0, "render": 9.0,
          "chrome": 2.0, "home": None},
-        "PERF cart=Sakura_Lua fps=53/55 net=- busy=18ms draw=14 flush=0 "
-        "logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
+        "PERF cart=Sakura_Lua fps=53/55 net=- tick=- miss=- busy=18ms draw=14 "
+        "flush=0 logic=3 render=9 chrome=2 wmr=- wmw=- wms=- ppa=- fence_ms=- "
         "gfence_ms=- home=-"),
     "p4_dark": (
         {"cart": None, "fps": (0, 62), "net": None, "busy": 2,
          "draw": 33.0, "flush": 1.0, "logic": 0.0, "render": 0.0,
          "chrome": 33.0, "ppa": (0, 0, 0, 0, 0), "fence_ms": 0.0,
          "gfence_ms": 0.0, "home": None},
-        "PERF cart=- fps=0/62 net=- busy=2ms draw=33 flush=1 logic=0 render=0 "
-        "chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 fence_ms=0.0 "
-        "gfence_ms=0.0 home=-"),
+        "PERF cart=- fps=0/62 net=- tick=- miss=- busy=2ms draw=33 flush=1 "
+        "logic=0 render=0 chrome=33 wmr=- wmw=- wms=- ppa=0/0/0/0/0 "
+        "fence_ms=0.0 gfence_ms=0.0 home=-"),
 }
 
 # Every column populated and every value DISTINCT: the captures above are idle
@@ -1307,13 +1296,14 @@ PERF_CASES = {
 # one, nor `%.0f` from `%d`. Each rounding here is one a plain int cast gets
 # wrong, and the cart title carries a space the tokeniser must not see.
 PERF_LOUD = (
-    {"cart": "Brick Siege", "fps": (20, 31), "net": 30, "busy": 8,
+    {"cart": "Brick Siege", "fps": (20, 31), "net": 30, "tick": (60, 2),
+     "miss": 3, "busy": 8,
      "draw": 3.6, "flush": 1.4, "logic": 5.4, "render": 12.7, "chrome": 2.2,
      "wmr": 7, "wmw": 8, "wms": 9, "ppa": (1, 2, 3, 4, 0),
      "fence_ms": 2.5, "gfence_ms": 0.7, "home": (3, 4, 1)},
-    "PERF cart=Brick_Siege fps=20/31 net=30 busy=8ms draw=4 flush=1 logic=5 "
-    "render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 fence_ms=2.5 "
-    "gfence_ms=0.7 home=3/4/1")
+    "PERF cart=Brick_Siege fps=20/31 net=30 tick=60/2 miss=3 busy=8ms draw=4 "
+    "flush=1 logic=5 render=13 chrome=2 wmr=7 wmw=8 wms=9 ppa=1/2/3/4/0 "
+    "fence_ms=2.5 gfence_ms=0.7 home=3/4/1")
 
 
 @pytest.mark.parametrize("case", sorted(PERF_CASES))

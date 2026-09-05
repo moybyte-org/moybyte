@@ -132,15 +132,16 @@ Without one, a Lua cart opens the "needs the Lua runtime" panel.)*
 
 ## Frame pacing
 
-The console has a frame governor: a **game** cart locks to a steady **30fps** —
-a steady 30 feels smoother than a jittery 40, and the headroom absorbs hiccups.
-If your cart genuinely holds 60 (measure it!), declare `"fps": 60` in
-`manifest.json` (Hop Quest and Sky Run do). Tools/apps and all console screens
-run at 60. *(The governor currently ships **disabled** — `console.FPS_GOVERNOR
-= False`, an owner measurement mode so every cart shows its real uncapped fps;
-the manifest field and the policy are live the moment the flag flips back.)*
-Your `_update(dt)` gets the real `dt` either way — movement written as
-`speed * dt` is framerate-independent.
+A **game** cart's `_update` runs at its declared rate: **30 ticks a second**, or
+60 when `manifest.json` says `"fps": 60` (Hop Quest and Sky Run do — declare it
+only if your cart genuinely holds 60, and measure). The console never lowers
+that rate: a cart that counts frames (`x += 1`) plays at the same speed on every
+board. When a board cannot also draw that often it draws every second (or
+third) tick instead, so motion coarsens evenly rather than the game slowing;
+Settings → STEADY decides how long it remembers before changing its mind.
+Tools/apps and all console screens tick with the loop. `_update(dt)` gets the
+tick period as `dt`, so movement written as `speed * dt` is right at either
+rate.
 
 ## The canvas
 

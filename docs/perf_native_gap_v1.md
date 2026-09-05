@@ -125,9 +125,10 @@ on the P4 with hardware levers. Consequences:
 - **`moy_gfx` in IRAM is predicted null on the P4** (it accelerates the same C
   that just measured as a minor fraction of the slice) — deprioritized, not worth
   a build unless the T-Deck (SPI flush profile, different cache) wants it.
-- Levers that reduce **how often dispatch runs** get promoted: frameskip halves
-  the number of dispatched `_draw` calls per second, and the Lua/native tier
-  (#67) cheapens each one. Everything else render-side is noise.
+- Levers that reduce **how often dispatch runs** get promoted: the tick model's
+  draw divisor (#217) halves or thirds the number of dispatched `_draw` calls
+  per second, and the Lua/native tier (#67) cheapens each one. Everything else
+  render-side is noise.
 - Two build-cycle gotchas recorded: cmake `set_source_files_properties` does
   NOT reach `moy_gfx` (directory-scoped; the linked object compiles in the
   `micropython.elf` target's dir — verified via build.ninja; use an in-source
@@ -150,9 +151,11 @@ each.** The **fb-in-internal-SRAM** lever measured
 **cannot engage** on the T-Deck: `fb=psram free-int=164KB need=420KB` (both
 ping-pong buffers + WiFi reserve); the guard + boot line stay self-documenting.
 
-### Shipped 2026-07-10 — frameskip (#77, both boards)
+### Shipped 2026-07-10 — frameskip (#77, both boards); RETIRED by #217
 
-Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
+Superseded by the tick model (#217): logic at the cart's declared rate, draw on
+an adaptive integer divisor, one STEADY knob. What follows is the record of the
+manual toggle it replaced. Settings → FRAMESKIP (default OFF, persisted; P4 serial `skip 0|1`): a GAME's
 `_update`+input+audio tick every loop frame, `_draw`+composite+flush every
 SECOND. On-glass: P4 Brick Siege logic 55→60Hz / render locked 30 / busy 17.6→9.0ms;
 Letter Blitz logic 49→60Hz. Trade: 30Hz motion + doubled logic rate ⇒ ~2×
@@ -195,8 +198,8 @@ Kids write ordinary code and shouldn't have to know the expert idioms. The path
 there is NOT hardware acceleration (the PPA dead-ended for everything but the
 composite), NOT "faster sprites" (already fast), and — as of the 2026-07-09 A/B —
 NOT compiler flags or SRAM placement either (both measured null; the render
-slice is dispatch). What's left is: **run the dispatch less often** (frameskip,
-the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
+slice is dispatch). What's left is: **run the dispatch less often** (the draw
+divisor, the composite overlaps) and **make each dispatch cheaper** (Lua/native tier,
 #67). The plain-ESP32 NES emulator is the proof the hardware has the grunt — the
 ceiling is the layers we put on top of it.
 

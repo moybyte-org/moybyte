@@ -6,8 +6,8 @@ written on one board, forgotten on the other, and silent about it because
 every consumer is capability-gated.
 
 `_pace_debt` is the proof. It shipped 2026-08-10 (fd068fc) into the T-Deck's
-loop only, four days before this file was written. Frameskip ships on BOTH
-boards (Settings -> FRAMESKIP; the P4 also has serial `skip 0|1`), and the
+loop only, four days before this file was written. Frameskip shipped on BOTH
+boards (Settings -> FRAMESKIP, since retired by the tick model, #217), and the
 pathology it fixes -- a full frame that overruns the budget, padded to cadence,
 so the skip PAIR runs 83ms instead of 66 -- is a property of the pacing
 arithmetic, not of a panel. Nothing pointed at the P4's absence. Nothing could:
@@ -327,20 +327,21 @@ class OtaHealth:
 
 
 def frame_slot_ms(ws, floor_ms):
-    """The cadence slot ONE frame is paced into, in ms: the console's current
-    cap (#63 -- a running game locks to 30 unless its manifest says 60; tools
-    and console screens stay at the loop's own), never FASTER than the loop cap
-    the board booted with.
+    """The cadence ONE frame is measured against, in ms: the running cart's
+    tick period while the Player paces a game (#217 -- 33 at the 30 the
+    console guarantees, 16 for a manifest `"fps": 60`), else the loop's own
+    cap; never FASTER than the cap the board booted with.
 
-    One author, two readers. `FramePump.pace` sleeps a frame into this slot and
-    `StageMeters` cuts its budgets out of it, so a cart that halves the cadence
-    doubles every stage's allowance instead of turning the whole loop into a
-    permanent miss. Never raises -- pacing must not die of a console.
+    One author, two readers. `StageMeters` cuts its budgets out of it, so a
+    cart that halves the cadence doubles every stage's allowance instead of
+    turning the whole loop into a permanent miss; `FramePump.pace` sleeps a
+    frame into it -- except under a paced game, where it does not sleep at
+    all (see pace). Never raises -- pacing must not die of a console.
     """
     try:
-        fms = 1000 // ws.frame_cap_fps()
+        fms = ws.player.tick_ms
     except Exception:  # noqa: BLE001
-        fms = floor_ms
+        fms = 0
     return fms if fms > floor_ms else floor_ms
 
 
@@ -424,9 +425,16 @@ class FramePump:
         arithmetic on an INJECTED elapsed -- never a clock -- so a test can walk
         an exact trajectory (same rule as ui.ScrollRegion's physics).
 
-        A running GAME locks to a steady cadence (#63: 30fps default, manifest
-        `"fps": 60` for carts that sustain it) -- a LOCKED 30 feels smoother
-        than a 38-55 swing, and the freed headroom absorbs GC/SD hitches.
+        A PACED GAME DOES NOT SLEEP (#217, owner call 2026-09-01: these boards
+        draw about the same power idle as loaded, so a cap buys nothing). The
+        Player's scheduler places logic ticks on the cart's own clock, and a
+        sleep here would quantize them onto an integer-ms grid -- 33 against a
+        33.33 period is a tick dropped every few seconds, and the P4's 10ms
+        FreeRTOS tick makes any sleep at all a 10ms one. The loop spins on
+        cheap no-tick frames instead and a tick lands within one of them.
+        The slot is still published, because it is the cadence #210's budgets
+        are cut from.
+
         Console screens and tools keep the loop's own fps_cap so the pointer
         stays responsive. Re-read every iteration: it changes on cart open/exit.
 
@@ -435,16 +443,20 @@ class FramePump:
         budget produced 50 + 33-padded pairs = 83ms under frameskip -- the game
         20% slow (audio still ahead) at 12fps, worse on both axes than no skip
         at all. An over-budget frame now accrues debt that the following frames'
-        sleeps pay down, so the PAIR totals two budget slots (50 + 16 = 66ms):
-        the shim quantizes to tick-every-frame, the game runs its true 30Hz,
-        render an even 15fps. Capped at one pair so a real hitch (a 200ms GC)
-        doesn't eat the sleeps for a second afterwards.
-
-        This ran on the T-Deck only for four days. It is pacing arithmetic, not
-        a panel property, and frameskip ships on both boards -- so the P4 has it
-        now. It is inert while frames fit their budget (debt stays 0).
+        sleeps pay down, so the PAIR totals two budget slots (50 + 16 = 66ms).
+        Capped at one pair so a real hitch (a 200ms GC) doesn't eat the sleeps
+        for a second afterwards. Inert while frames fit their budget.
         """
         fms = self.slot = frame_slot_ms(ws, self.frame_ms)
+        try:
+            paced = bool(ws.player.tick_ms)
+        except Exception:  # noqa: BLE001
+            paced = False
+        if paced:
+            self.debt = 0
+            self._expected = elapsed
+            self._slept = False
+            return 0
         if elapsed < fms:
             sleep = fms - elapsed
             if self.debt:                       # pay the debt out of this sleep
@@ -660,6 +672,7 @@ class PerfSampler:
         self._n = 0
         self._busy = 0
         self._drawn = 0
+        self._miss = 0
         self._ov = overlap() if overlap is not None else None
 
     def account(self, now, elapsed, sleep_ms):
@@ -706,6 +719,17 @@ class PerfSampler:
             # getattr default would let a renamed meter forge "no match"
             # forever. A rename costs the whole line and says so.
             v["net"] = ws.perf_net()
+            # The tick model (#217): the rate the cart's logic holds, the draw
+            # divisor it holds it at, and the frames this sample wrote debt
+            # off in -- `-` while nothing is paced, never a frozen 0.
+            pl = getattr(ws, "player", None)
+            if pl is not None and pl.tick_ms:
+                sc = pl.sched
+                v["tick"] = (sc.rate, sc.div)
+                v["miss"] = sc.misses - self._miss
+                self._miss = sc.misses
+            else:
+                self._miss = 0
             self._emit(format_perf(v))
         except Exception as exc:  # noqa: BLE001 -- a diag never kills the loop
             self._emit(PERF_FAILED % (type(exc).__name__, exc))
@@ -719,8 +743,8 @@ class PerfSampler:
 #
 # THE BUDGETS, and this tuple is the only copy of them. A stage's allowance is
 # a share of the PACING SLOT in per-mille, never a fixed microsecond count: the
-# slot is 16ms while the desktop runs at the loop cap and 33ms under a governed
-# game (frame_slot_ms above), and a budget cut from a constant would read as a
+# slot is 16ms while the desktop runs at the loop cap and the cart's tick under
+# a paced game (frame_slot_ms above), and a budget cut from a constant would read as a
 # permanent miss on one of those two. They sum to 1000 -- the frame's own 780
 # plus 220 of overhead is the STATEMENT: four fifths of every slot is supposed
 # to reach the glass.
