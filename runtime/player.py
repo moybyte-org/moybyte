@@ -552,6 +552,17 @@ class Player:
         except Exception:  # noqa: BLE001
             pass
         self._diag_frag()          # #66: the heap the NEXT cart inherits
+        self._reset_stage_meters()  # #210: the shell does not inherit the run's
+
+    def _reset_stage_meters(self):
+        """#210: the frame loop's per-stage deadline meters start clean at both
+        ends of a run. A run's misses must not carry the shell's and the
+        shell's must not carry the run's -- and these are also the two moments
+        the pacing slot the budgets are cut from changes, because frame_cap_fps
+        follows the open cart."""
+        sm = getattr(self.ws, "stage_meters", None)
+        if sm is not None:
+            sm.reset()
 
     def _diag_frag(self, tag="MEMX"):
         """One line per cart exit: the largest allocatable block and total free
@@ -700,6 +711,7 @@ class Player:
         h0 = _hs()
         ws._dirty = True               # a (re)started cart paints its first frame (#44)
         self._reset_exit_state()       # a fresh run drops any half-done exit gesture
+        self._reset_stage_meters()     # #210: this run's misses are its own
         # USER APP per-run state (#181): cleared here rather than at the bind
         # site below, so the early SPEC refusals (extensions / canvas) cannot
         # leave a previous app's `_layout` armed against this cart.

@@ -59,11 +59,11 @@ except ImportError:  # pragma: no cover - host package lane
 
 try:
     from chrome import _ticks_ms, _ticks_diff
-    from ticks import _sleep_ms
+    from ticks import _ticks_us, _sleep_ms
     from perf_line import FAILED as PERF_FAILED, format_perf
 except ImportError:  # pragma: no cover - host package lane
     from runtime.chrome import _ticks_ms, _ticks_diff
-    from runtime.ticks import _sleep_ms
+    from runtime.ticks import _ticks_us, _sleep_ms
     from runtime.perf_line import FAILED as PERF_FAILED, format_perf
 
 
@@ -326,6 +326,24 @@ class OtaHealth:
             self.ota = None
 
 
+def frame_slot_ms(ws, floor_ms):
+    """The cadence slot ONE frame is paced into, in ms: the console's current
+    cap (#63 -- a running game locks to 30 unless its manifest says 60; tools
+    and console screens stay at the loop's own), never FASTER than the loop cap
+    the board booted with.
+
+    One author, two readers. `FramePump.pace` sleeps a frame into this slot and
+    `StageMeters` cuts its budgets out of it, so a cart that halves the cadence
+    doubles every stage's allowance instead of turning the whole loop into a
+    permanent miss. Never raises -- pacing must not die of a console.
+    """
+    try:
+        fms = 1000 // ws.frame_cap_fps()
+    except Exception:  # noqa: BLE001
+        fms = floor_ms
+    return fms if fms > floor_ms else floor_ms
+
+
 class FramePump:
     """The frame loop's shared head and tail: the dt clock, the once-only boot
     housekeeping, and the cadence.
@@ -342,6 +360,11 @@ class FramePump:
         self.boot = boot
         self.ota = ota
         self.frame_ms = 1000 // fps_cap
+        # The slot pace() last put a frame into (frame_slot_ms above). Published
+        # because it is the cadence the whole frame is measured against: #210's
+        # stage budgets are shares of it, and deriving them a second time is how
+        # a budget and the pacing it judges drift apart.
+        self.slot = self.frame_ms
         # Pacing debt (#77, 2026-08-10): ms the loop is BEHIND its cadence.
         # See pace() for what it buys.
         self.debt = 0
@@ -421,12 +444,7 @@ class FramePump:
         a panel property, and frameskip ships on both boards -- so the P4 has it
         now. It is inert while frames fit their budget (debt stays 0).
         """
-        try:
-            fms = 1000 // ws.frame_cap_fps()
-        except Exception:  # noqa: BLE001 -- pacing must never kill the loop
-            fms = self.frame_ms
-        if fms < self.frame_ms:
-            fms = self.frame_ms                 # never pace FASTER than the loop cap
+        fms = self.slot = frame_slot_ms(ws, self.frame_ms)
         if elapsed < fms:
             sleep = fms - elapsed
             if self.debt:                       # pay the debt out of this sleep
@@ -697,6 +715,148 @@ class PerfSampler:
         self._drawn = drawn
 
 
+# -- #210: the frame loop's per-stage deadline meters -------------------------
+#
+# THE BUDGETS, and this tuple is the only copy of them. A stage's allowance is
+# a share of the PACING SLOT in per-mille, never a fixed microsecond count: the
+# slot is 16ms while the desktop runs at the loop cap and 33ms under a governed
+# game (frame_slot_ms above), and a budget cut from a constant would read as a
+# permanent miss on one of those two. They sum to 1000 -- the frame's own 780
+# plus 220 of overhead is the STATEMENT: four fifths of every slot is supposed
+# to reach the glass.
+#
+# `None` is a DECLARATION, not a gap. `tail` is where poll_webhost runs, and a
+# browser pulling the console bundle owns the frame it lands in -- the honest
+# behaviour of a single-threaded board, written down in poll_webhost's own
+# docstring -- so there is no deadline to miss and the stage says so.
+#
+# Boards do not get their own copy. Where the loop genuinely differs per board
+# it differs by which HOOKS exist, and a stage no hook fills is never sampled:
+# it reports None rather than a budget nothing ever measured against.
+STAGE_BUDGETS = (
+    ("inputs", 60),         # every input source: trackball, keyboard, GT911
+    ("dev", 20),            # the serial dev channel's byte-at-a-time read
+    ("idle", 5),            # the idle blank's arithmetic
+    ("pointer", 10),        # click latch + pointer.tick
+    ("present", 30),        # pre-frame buffer work (sync_back, present_pending)
+    ("frame", 780),         # handle_input + handle_pointer + draw/composite/flush
+    ("backlight", 5),       # the one-shot first-frame gate, and its fence
+    ("pump_tail", 30),      # boot.first_frame + the OTA rollback confirm
+    ("tail", None),         # webhost/diag/SD services -- see above
+    ("pace", 10),           # the cadence arithmetic, never the sleep
+    ("account", 50),        # HITCH/LOOP accumulators + the PERF sample
+)
+
+STAGE_ORDER = tuple(name for name, _share in STAGE_BUDGETS)
+
+# Index constants for the mark sites in step(), derived from the table so a
+# stage cannot be added without one. tests/test_device_boot.py pins that the
+# loop marks them in exactly STAGE_ORDER.
+(_S_INPUTS, _S_DEV, _S_IDLE, _S_POINTER, _S_PRESENT, _S_FRAME, _S_BACKLIGHT,
+ _S_PUMP_TAIL, _S_TAIL, _S_PACE, _S_ACCOUNT) = range(len(STAGE_BUDGETS))
+
+
+class StageMeters:
+    """Per-stage deadline accounting for the shared frame loop (#210).
+
+    WHY. Attribution used to be detective work: the frame was measured in
+    aggregate (PERF/HITCH/DRAWBRK/CHROMEBRK/PUMP), and when a number moved
+    somebody picked a suspect and hand-added a probe for it. This turns "the
+    frame was slow" into "THIS stage was slow" with no hunt, because the order
+    is already an invariant with one author.
+
+    `misses` is the field that matters. A high-water mark alone is noise on a
+    console that GCs; a COUNT of frames over a declared budget is a statement
+    about intent, and it survives being read once a minute over serial.
+
+    NOTHING HERE IS 0 BY DEFAULT. A stage that was never sampled -- a hook this
+    board does not have, or a console with perf_capture off -- reports None for
+    every measured field, and a stage with no declared budget reports None for
+    `misses` however many frames it saw. A frozen 0 is also what a broken meter
+    looks like, and that ambiguity is what hid `fold=0` for weeks.
+
+    COST. Five preallocated integer lists, indexed; `mark` is a ticks_us pair,
+    three list stores and two compares, and allocates nothing on any frame. The
+    loop only calls it under `perf_capture`, so kid mode pays one attribute read
+    and eleven `is not None` tests a frame and never reads the clock.
+    """
+
+    def __init__(self, ws, floor_ms=1000 // 60):
+        self.floor_ms = floor_ms
+        n = len(STAGE_BUDGETS)
+        self.budget = [None] * n
+        self.last = [0] * n
+        self.max = [0] * n
+        self.misses = [0] * n
+        self.n = [0] * n
+        self.slot_ms = 0
+        self._t = 0
+        self.rebudget(frame_slot_ms(ws, floor_ms))
+
+    def rebudget(self, slot_ms):
+        """Re-cut every declared budget out of a new pacing slot."""
+        self.slot_ms = slot_ms
+        us = slot_ms * 1000
+        i = 0
+        for _name, share in STAGE_BUDGETS:
+            self.budget[i] = None if share is None else us * share // 1000
+            i += 1
+
+    def reset(self):
+        """Drop every sample. Called at cart start AND at cart exit, so a run's
+        numbers never carry the launcher's and the launcher's never carry the
+        run's -- and the budgets re-cut themselves on the next measured frame,
+        because the pacing slot changes at exactly those two moments."""
+        i = 0
+        n = len(self.n)
+        while i < n:
+            self.last[i] = 0
+            self.max[i] = 0
+            self.misses[i] = 0
+            self.n[i] = 0
+            i += 1
+
+    def start(self, slot_ms):
+        """Top of a measured frame: re-cut the budgets if the cadence moved,
+        then stamp the clock the first stage is measured from."""
+        if slot_ms != self.slot_ms:
+            self.rebudget(slot_ms)
+        self._t = _ticks_us()
+
+    def mark(self, i):
+        """Close stage `i` at the current clock and open the next one."""
+        t = _ticks_us()
+        us = _ticks_diff(t, self._t)
+        self._t = t
+        self.last[i] = us
+        if us > self.max[i]:
+            self.max[i] = us
+        self.n[i] += 1
+        b = self.budget[i]
+        if b is not None and us > b:
+            self.misses[i] += 1
+
+    def report(self):
+        """`{stage: {budget_us, last_us, max_us, misses, n}}` for the `state`
+        blob. Built on demand, never on a frame. `n` is the denominator the
+        miss count is only readable against: three misses in thirty frames and
+        three in thirty thousand are opposite findings."""
+        out = {}
+        i = 0
+        for name, _share in STAGE_BUDGETS:
+            b = self.budget[i]
+            seen = self.n[i]
+            out[name] = {
+                "budget_us": b,
+                "last_us": self.last[i] if seen else None,
+                "max_us": self.max[i] if seen else None,
+                "misses": self.misses[i] if (seen and b is not None) else None,
+                "n": seen,
+            }
+            i += 1
+        return out
+
+
 class FrameLoop:
     """The device frame loop's INVARIANT ORDER, one copy for every board
     (#202 Phase B -- the extraction #161 declined while the loop middles were
@@ -735,6 +895,12 @@ class FrameLoop:
     and the drew/frames_before pair the T-Deck's SD bracket and idle-band
     drain read. run() returns "quit" when the dev channel asked for the REPL;
     the board prints its own goodbye.
+
+    Every stage above is METERED against a declared budget (#210): `self.meters`
+    is a StageMeters, stamped on the console as `ws.stage_meters` so the dev
+    channel's `state` can dump it and the Player can reset it per run. A stage
+    whose hook this board does not have is never marked, which is what makes
+    "no such stage here" read as None instead of as a stage that cost nothing.
     """
 
     def __init__(self, ws, pump, pointer, poll_inputs,
@@ -758,6 +924,10 @@ class FrameLoop:
         self.t_ws = 0            # the whole ws phase (input+pointer+frame) ms
         self.frames_before = 0   # _frames_drawn entering the ws phase
         self.drew = False        # did this frame reach the glass
+        # #210. Built here rather than injected per board: the stages ARE this
+        # class's order, so a board cannot own a different set of them.
+        self.meters = StageMeters(ws, getattr(pump, "frame_ms", 1000 // 60))
+        ws.stage_meters = self.meters
 
     def step(self):
         """One frame. Returns "quit" when the dev channel asked for the REPL,
@@ -765,24 +935,43 @@ class FrameLoop:
         ws = self.ws
         pointer = self.pointer
         now, dt = self.pump.begin()
+        # #210: gated exactly like every other measurement in this loop. `m` is
+        # None for the whole frame when it is off, so kid mode never reads the
+        # microsecond clock -- and the slot comes from pace(), the one author of
+        # the cadence the budgets are cut from.
+        m = self.meters
+        if getattr(ws, "perf_capture", False):
+            m.start(getattr(self.pump, "slot", m.floor_ms))
+        else:
+            m = None
         click, active = self.poll_inputs(now)
+        if m is not None:
+            m.mark(_S_INPUTS)
         ran = False
         if self.serial is not None:
             ran = self.serial.poll(ws)
             click = self.serial.click or click
             if self.serial.quit:
                 return "quit"
+            if m is not None:
+                m.mark(_S_DEV)
         if self.idle is not None:
             # After EVERY input source (poll_inputs + the dev channel) and
             # before the pointer reaches the console -- the ordering that lets
             # the waking touch be swallowed instead of pressing what it landed
             # on. A dev command or scripted gesture frame counts as activity.
             click = self.idle.tick(now, bool(active) or ran, ws, pointer, click)
+            if m is not None:
+                m.mark(_S_IDLE)
         pointer.click = click
         pointer.tick(now)
         self.frames_before = getattr(ws, "_frames_drawn", 0)
+        if m is not None:
+            m.mark(_S_POINTER)
         if self.present is not None:
             self.present()
+            if m is not None:
+                m.mark(_S_PRESENT)
         t0 = _ticks_ms()
         self.t_hi = 0
         self.t_hp = 0
@@ -801,6 +990,8 @@ class FrameLoop:
                 print("Moybyte frame error:", exc)
         self.t_ws = _ticks_diff(_ticks_ms(), t0)
         self.drew = getattr(ws, "_frames_drawn", 0) != self.frames_before
+        if m is not None:
+            m.mark(_S_FRAME)
         # First composed frame lights the panel (#45): _frames_drawn ticks past
         # 0 only inside frame() after the flush, so the first sight is the
         # desktop, not power-on GRAM noise. `not idle.asleep` keeps the gate
@@ -821,13 +1012,23 @@ class FrameLoop:
             except Exception as exc:  # noqa: BLE001
                 print("Moybyte backlight on failed:", exc)
             self._lit = True
+        if m is not None:
+            m.mark(_S_BACKLIGHT)
         self.pump.tail(ws)
+        if m is not None:
+            m.mark(_S_PUMP_TAIL)
         if self.tail is not None:
             self.tail(now)
+            if m is not None:
+                m.mark(_S_TAIL)
         elapsed = _ticks_diff(_ticks_ms(), now)
         sleep_ms = self.pump.pace(ws, elapsed)
+        if m is not None:
+            m.mark(_S_PACE)
         if self.account is not None:
             self.account(now, elapsed, sleep_ms)
+            if m is not None:
+                m.mark(_S_ACCOUNT)
         if sleep_ms:
             _sleep_ms(sleep_ms)
         return None

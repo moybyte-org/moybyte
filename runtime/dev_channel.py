@@ -260,6 +260,21 @@ def _remote_state(ws):
     except Exception as exc:  # noqa: BLE001
         st["pump_err"] = str(exc)
     try:
+        # #210's per-stage deadline meters: {stage: {budget_us, last_us, max_us,
+        # misses, n}} in the loop's invariant order. `state` is the route
+        # because it is the one every board serves -- the Guition stages no
+        # device_diag and so has no PUMP line to hang this off.
+        #
+        # The measurement is perf_capture-gated like every other frame-eater
+        # here, so a kid's console reports every stage unsampled (n=0, the rest
+        # None) and `diag 1` is what arms it. None is also the answer for a
+        # stage this board has no hook for and for a whole tier with no shared
+        # frame loop -- never 0, which is what a broken meter reads as.
+        sm = getattr(ws, "stage_meters", None)
+        st["stages"] = sm.report() if sm is not None else None
+    except Exception as exc:  # noqa: BLE001
+        st["stages_err"] = str(exc)
+    try:
         # Look system-app carts up by TITLE, never folder name: the device seeds
         # from the title slug and the host store copies the source folder, and
         # assuming either name is what broke `is_app` on the P4's glass.

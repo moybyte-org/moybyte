@@ -1027,6 +1027,12 @@ class Workstation:
         # numbers into the offline diag log without painting the HUD on screen.
         # Default False -> host behaviour is byte-identical (no extra ticks calls).
         self.perf_capture = False     # measure flush/draw without drawing the HUD
+        # The frame loop's per-stage deadline meters (#210,
+        # device_boot.StageMeters): stamped here by FrameLoop on the boards, and
+        # None on every tier that runs its own loop (the host simulator, the
+        # wasm head), which is why the `state` blob reads it through a probe.
+        # Reset per run by the Player, dumped by the dev channel's `state`.
+        self.stage_meters = None
         self._flush_ms = 0.0          # smoothed comp.flush() ms (panel DMA)
         self._draw_ms = 0.0           # smoothed draw ms (total frame - flush)
         # DRAWBRK phase split of _draw_ms (#43 follow-up): where the per-frame draw

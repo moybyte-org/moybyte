@@ -123,6 +123,44 @@ def test_state_is_one_line_json(capsys):
     assert st["screen"] == "home"
 
 
+def test_state_reports_every_frame_stage_with_its_budget_and_misses():
+    """#210's route. `state` is the one every board serves -- the Guition
+    stages no device_diag and has no PUMP line -- so the per-stage deadline
+    meters ride it, in the loop's invariant order and with its field shape."""
+    from runtime import device_boot
+
+    class CapWS(FakeWS):
+        def __init__(self):
+            FakeWS.__init__(self)
+            self.perf_capture = True
+            self.stage_meters = device_boot.StageMeters(self)
+
+        def frame_cap_fps(self):
+            return 60
+
+    ws = CapWS()
+    m = ws.stage_meters
+    m.start(m.slot_ms)
+    m.mark(device_boot._S_FRAME)
+
+    st = _remote_state(ws)
+    assert list(st["stages"]) == list(device_boot.STAGE_ORDER)
+    for row in st["stages"].values():
+        assert sorted(row) == ["budget_us", "last_us", "max_us", "misses", "n"]
+    frame = st["stages"]["frame"]
+    assert frame["n"] == 1 and frame["budget_us"] == 16 * 780
+    # A stage no hook filled, and one with no deadline to miss: None either
+    # way, never the 0 that reads identically to a broken meter.
+    assert st["stages"]["inputs"]["last_us"] is None
+    assert st["stages"]["tail"]["budget_us"] is None
+
+
+def test_state_reports_no_stages_at_all_where_no_shared_loop_runs():
+    """The host simulator and the wasm head run their own loops, so there are
+    no stage meters to dump -- and that is None, not eleven zeroed rows."""
+    assert _remote_state(FakeWS())["stages"] is None
+
+
 # -- gesture scripts -----------------------------------------------------------
 
 

@@ -882,6 +882,231 @@ def test_frameloop_gate_respects_a_deliberate_blank():
     assert lit == [], "a blanked panel must not be re-lit by the boot gate"
 
 
+# -- the per-stage deadline meters (#210) -------------------------------------
+
+
+class _CapWS:
+    """The two things StageMeters asks a console: the cadence, and the flag."""
+
+    def __init__(self, fps=60, capture=True):
+        self._fps = fps
+        self.perf_capture = capture
+
+    def frame_cap_fps(self):
+        return self._fps
+
+
+def _meters(fps=60, floor_ms=1000 // 60):
+    from runtime import device_boot
+    return device_boot.StageMeters(_CapWS(fps), floor_ms)
+
+
+def test_the_budget_table_is_one_place_and_spends_one_whole_slot():
+    """Budgets are CONFIGURATION and live in exactly one tuple. The shares sum
+    to the slot on purpose: the frame's own 780 against 220 of overhead is the
+    statement that four fifths of every slot is meant to reach the glass."""
+    from runtime import device_boot
+
+    declared = [sh for _n, sh in device_boot.STAGE_BUDGETS if sh is not None]
+    assert sum(declared) == 1000
+    assert device_boot.STAGE_ORDER == tuple(
+        n for n, _sh in device_boot.STAGE_BUDGETS)
+    # The index constants the loop marks with are the table's own positions --
+    # a stage cannot be added without one, and none can silently swap.
+    assert (device_boot._S_INPUTS, device_boot._S_FRAME,
+            device_boot._S_ACCOUNT) == (0, 5, 10)
+    assert len(device_boot.STAGE_ORDER) == 11
+
+
+def test_every_stage_in_the_pinned_order_is_metered_in_that_order():
+    """The companion the order test asked for: the marks are not a second list
+    that can drift from the loop's shape. A measured frame with every hook
+    present closes each stage exactly once, in STAGE_ORDER."""
+    from runtime import device_boot
+
+    class Serial:
+        click = False
+        quit = False
+
+        def poll(self, ws):
+            return False
+
+    class Idle:
+        asleep = False
+
+        def tick(self, now, active, ws, pointer, click):
+            return click
+
+    class Rec(device_boot.StageMeters):
+        def __init__(self, *a, **kw):
+            self.marks = []
+            device_boot.StageMeters.__init__(self, *a, **kw)
+
+        def mark(self, i):
+            self.marks.append(device_boot.STAGE_ORDER[i])
+            device_boot.StageMeters.mark(self, i)
+
+    r = _Rec(serial=Serial(), idle=Idle())
+    r.ws.perf_capture = True
+    lp = r.loop()
+    lp.meters = Rec(r.ws)
+    lp.step()
+    assert tuple(lp.meters.marks) == device_boot.STAGE_ORDER
+
+
+def test_the_loop_stamps_the_meters_on_the_console_for_state_to_find():
+    r = _Rec()
+    lp = r.loop()
+    assert r.ws.stage_meters is lp.meters
+
+
+def test_a_stage_over_budget_counts_a_miss_and_lifts_the_max(monkeypatch):
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot.STAGE_ORDER.index("inputs")
+    budget = m.budget[i]
+    assert budget == 16 * 1000 * 60 // 1000
+
+    m.start(m.slot_ms)
+    clock[0] += budget                      # exactly ON budget is not a miss
+    m.mark(i)
+    assert (m.misses[i], m.max[i], m.last[i]) == (0, budget, budget)
+
+    m.start(m.slot_ms)
+    clock[0] += budget + 1
+    m.mark(i)
+    assert m.misses[i] == 1 and m.max[i] == budget + 1
+
+    m.start(m.slot_ms)
+    clock[0] += 1                           # a fast frame keeps the high water
+    m.mark(i)
+    assert m.misses[i] == 1 and m.max[i] == budget + 1 and m.last[i] == 1
+    rep = m.report()["inputs"]
+    assert rep == {"budget_us": budget, "last_us": 1, "max_us": budget + 1,
+                   "misses": 1, "n": 3}
+
+
+def test_a_stage_with_no_declared_budget_reports_None_and_never_zero(monkeypatch):
+    """`tail` is where poll_webhost runs and a browser pulling the console
+    bundle owns the frame it lands in -- there is no deadline, so there is no
+    miss count. 0 would read as a stage that always makes its deadline."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot.STAGE_ORDER.index("tail")
+    assert m.budget[i] is None
+    m.start(m.slot_ms)
+    clock[0] += 900000                      # 0.9s: a whole asset transfer
+    m.mark(i)
+    rep = m.report()["tail"]
+    assert rep["budget_us"] is None and rep["misses"] is None
+    assert rep["last_us"] == 900000 and rep["n"] == 1
+
+
+def test_a_stage_this_board_has_no_hook_for_is_never_sampled():
+    """The absence rule, at the stage level: a board with no dev channel and no
+    idle blank has no such stage, and every measured field reads None rather
+    than a 0 that would say the stage ran and cost nothing."""
+    r = _Rec()                               # no serial, no idle
+    r.ws.perf_capture = True
+    lp = r.loop()
+    lp.step()
+    rep = lp.meters.report()
+    for absent in ("dev", "idle"):
+        assert rep[absent]["n"] == 0
+        assert rep[absent]["last_us"] is None
+        assert rep[absent]["max_us"] is None
+        assert rep[absent]["misses"] is None
+        assert rep[absent]["budget_us"] is not None   # declared, just unfilled
+    assert rep["frame"]["n"] == 1 and rep["frame"]["last_us"] is not None
+
+
+def test_the_meters_stay_asleep_until_perf_capture_arms_them():
+    """Gated like every other frame-eater (#68 keeps them off for a kid). Off,
+    the loop never reads the microsecond clock at all."""
+    r = _Rec()
+    lp = r.loop()
+    lp.step()
+    assert all(v["n"] == 0 for v in lp.meters.report().values())
+    r.ws.perf_capture = True
+    lp.step()
+    assert lp.meters.report()["frame"]["n"] == 1
+
+
+def test_the_budgets_are_cut_from_the_pacing_slot_and_follow_it():
+    """A governed game halves the cadence, so every stage's allowance doubles.
+    Cutting budgets from a constant would make one of the two cadences a
+    permanent miss, which is a broken meter with extra steps."""
+    from runtime import device_boot
+
+    fast = _meters(60)
+    assert fast.slot_ms == 16
+    assert fast.budget[device_boot._S_FRAME] == 16 * 1000 * 780 // 1000
+
+    fast.start(33)                           # what pace() slotted this frame
+    assert fast.slot_ms == 33
+    assert fast.budget[device_boot._S_FRAME] == 33 * 1000 * 780 // 1000
+    assert fast.budget[device_boot._S_TAIL] is None
+
+
+def test_the_pump_publishes_the_slot_the_budgets_are_cut_from(monkeypatch):
+    """One author for the cadence: pace() derives the slot and the budgets read
+    what it derived, so a cart that changes the cap cannot be judged against
+    the cap it replaced."""
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(device_boot, "_ticks_diff", lambda a, b: a - b)
+    pump = device_boot.FramePump(boot=None, ota=None, fps_cap=60)
+    assert pump.slot == 16
+    pump.pace(_CapWS(30), 5)
+    assert pump.slot == 33
+    pump.pace(_CapWS(120), 5)                # never pace FASTER than the cap
+    assert pump.slot == 16
+
+
+def test_reset_drops_every_sample_but_keeps_the_declarations(monkeypatch):
+    from runtime import device_boot
+
+    clock = [0]
+    monkeypatch.setattr(device_boot, "_ticks_us", lambda: clock[0])
+    m = _meters()
+    i = device_boot._S_INPUTS
+    for _ in range(3):
+        m.start(m.slot_ms)
+        clock[0] += m.budget[i] + 5
+        m.mark(i)
+    assert m.report()["inputs"]["misses"] == 3
+    m.reset()
+    rep = m.report()["inputs"]
+    assert rep == {"budget_us": m.budget[i], "last_us": None, "max_us": None,
+                   "misses": None, "n": 0}
+
+
+def test_a_cart_start_and_a_cart_exit_each_reset_the_meters(tmp_path):
+    """#210's pollution rule, on the real Player: a run's misses are its own
+    and the desk does not inherit them."""
+    from ws_helpers import build_ws
+    from runtime import device_boot
+
+    ws = build_ws(tmp_path)
+    ws.stage_meters = device_boot.StageMeters(ws)
+    m = ws.stage_meters
+    m.n[device_boot._S_FRAME] = 7
+    m.misses[device_boot._S_FRAME] = 3
+    ws.player._reset_stage_meters()
+    assert m.n[device_boot._S_FRAME] == 0 and m.misses[device_boot._S_FRAME] == 0
+    # ...and both call sites are wired, not just the helper.
+    src = (ROOT / "runtime" / "player.py").read_text(encoding="utf-8")
+    assert src.count("self._reset_stage_meters()") == 2
+
+
 # -- FramePump slack: sleep-overshoot feedback (#202, 2026-08-17) -------------
 
 
