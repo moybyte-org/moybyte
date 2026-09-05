@@ -206,14 +206,15 @@ try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, encode_moyimg,
                            moyimg_runs, decode_moyimg, cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
-                        _write_atomic, _read_recover, _read_bak, _forget_bak)
+                        _write_atomic, _read_recover, _read_bak, _forget_bak,
+                        set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
                                    encode_moyimg, moyimg_runs, decode_moyimg,
                                    cover_sig, _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
-                                _forget_bak)
+                                _forget_bak, set_publish_root)
 
 
 def load_image(path, name):
@@ -651,6 +652,11 @@ def ensure_dirs(root=CARTS_DIR):
     if parent:
         _mkdir(parent)
     _mkdir(root)
+    # The publish marker (#154) goes at the PARENT, because that is what covers
+    # the whole store in one file: the cart folders and their journals under
+    # `root`, the #108 files layer and the sibling stores (system.json,
+    # wifi.json, shared.moygfx) beside it. One marker, one read per boot.
+    set_publish_root(parent or root)
 
 
 def _cart_version(path):

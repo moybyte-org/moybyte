@@ -4,42 +4,69 @@
 # binascii only; no shutil).
 #
 # THE CRASH-SAFETY STORY (the ONE every durable store write in the console rides
-# on; #154). A save is TWO writes and nothing else -- no stat, no remove, no
+# on; #154). A save is THREE writes and nothing else -- no stat, no remove, no
 # rename:
 #
-#   1. `<path>.bak` <- a STAMP LINE ("#moyfs1 <chars> <crc32>\n") + the new text.
-#      The stamp describes the text that follows it, so the backup can say
+#   1. `<root>/.publish` <- ONE line naming the file about to be published and
+#      its stamp: "#moyfs1 <chars> <crc32> <path>\n". One marker per store root,
+#      overwritten in place, never cleared -- the next save overwrites it. Only
+#      one publish is ever in flight, so one line says everything.
+#   2. `<path>.bak`      <- a STAMP LINE ("#moyfs1 <chars> <crc32>\n") + the new
+#      text. The stamp describes the text that follows it, so the backup can say
 #      whether it is whole.
-#   2. `<path>`     <- the new text, overwritten in place, byte for byte what
-#      every other reader in the system expects. Nothing is ever added to the
-#      published file: a cart's main.py, a manifest, a sprite blob are exactly
-#      their own bytes, so the store scan, the web sync RPC and tools/ see no
-#      header and no trailer.
+#   3. `<path>`          <- the new text, overwritten in place, byte for byte
+#      what every other reader in the system expects. Nothing is ever added to
+#      the published file: a cart's main.py, a manifest, a sprite blob are
+#      exactly their own bytes, so the store scan, the web sync RPC and tools/
+#      see no header and no trailer.
+#
+# WHY THE MARKER EXISTS, AND IT IS NOT BELT AND BRACES. Without it the reader has
+# to open `<path>.bak` on EVERY read to learn whether the file beside it is whole
+# -- and on littlefs a path lookup is the expensive op (#198: 98 block reads), so
+# a P4 boot, which reads every manifest in the store through `_read_recover`,
+# measured +6.0s of boot-to-desk and +25% of store scan for it (75 carts). The
+# marker turns that per-file lookup into ONE read per process: the reader loads
+# the line lazily, and a path the line does not name is returned with no extra
+# lookup at all. The T-Deck's FAT never showed the cost -- two reads per lookup
+# there -- which is exactly why this is a marker and not a per-board tune.
 #
 # The `.bak` is a redo log for ONE failure, and `_read_recover` is deliberately
-# narrow about which. It reads `path`, reads the stamp beside it, and on a
-# mismatch asks whether the published text is a strict PREFIX of the backup's
-# payload -- because that is exactly what an interrupted publish leaves: FAT
-# truncates on open-for-write and then grows the file, so a power loss lands it
-# somewhere between empty and whole, and never anywhere else. Only then does the
-# backup win. A power loss lands in one of three places:
+# narrow about which. For the file the marker names, it asks whether the
+# published text is a strict PREFIX of the backup's payload -- because that is
+# exactly what an interrupted publish leaves: FAT truncates on open-for-write and
+# then grows the file, so a power loss lands it somewhere between empty and
+# whole, and never anywhere else. Only then does the backup win. A power loss
+# lands in one of these places:
 #
-#   * mid step 1  -- `.bak` fails its own stamp (short, or no stamp line at all)
-#                    and `path` was never opened, so the published file is the
-#                    previous save, whole. The reader trusts `path`.
-#   * mid step 2  -- `path` is a prefix of the backup's payload. The reader
+#   * mid step 1  -- the marker is torn, so it does not parse (the line must end
+#                    in a newline) and names nothing; on littlefs it is
+#                    copy-on-write and still names the PREVIOUS publish, which
+#                    completed. Either way nothing else was touched: `path` holds
+#                    the previous save, whole, and the reader trusts it.
+#   * mid step 2  -- the marker names `path`, `path` still holds the previous
+#                    save and the backup fails its own stamp. A torn backup is
+#                    refused rather than published, so the reader keeps `path`.
+#   * mid step 3  -- `path` is a prefix of the backup's payload. The reader
 #                    republishes the backup, and the save completes. This is the
 #                    window the old rename dance could not see: `_read_recover`
 #                    used to fall back only when `path` was MISSING, so a short
 #                    file read as good.
-#   * between     -- `.bak` is stamped and whole, `path` still holds the previous
-#                    save, which is generally not a prefix of the new one. THE
-#                    PREVIOUS SAVE IS WHAT SURVIVES -- the same guarantee the
-#                    pre-#154 rename dance gave, and the same one littlefs gives
-#                    on its own (it is copy-on-write, so an interrupted publish
-#                    there leaves the old file rather than a torn one, which is
-#                    this case and not the one above). The redo log's value is
-#                    the FAT torn write, which nothing else can see.
+#   * between 2+3 -- the backup is stamped and whole, `path` still holds the
+#                    previous save, which is generally not a prefix of the new
+#                    one. THE PREVIOUS SAVE IS WHAT SURVIVES -- the same
+#                    guarantee the pre-#154 rename dance gave, and the same one
+#                    littlefs gives on its own (it is copy-on-write, so an
+#                    interrupted publish there leaves the old file rather than a
+#                    torn one, which is this case and not the one above). The
+#                    redo log's value is the FAT torn write, which nothing else
+#                    can see.
+#
+# The marker is best-effort at the writing end: if it cannot be written the save
+# still goes through, one save without torn-write detection rather than a save
+# refused on a medium that is already failing. With NO root registered
+# (`set_publish_root`), the reader falls back to opening `<path>.bak` per read --
+# which is the pre-marker behaviour, correct and slower, and what a bare
+# `moy_journal` on a tmp dir gets.
 #
 # Anything else at `path` was put there DELIBERATELY by someone that is not this
 # module -- `tools/push_cart.py` places a file with remove+rename over the dev
@@ -76,6 +103,18 @@ _STAMP = "#moyfs1 "
 # The stamp is folded over slices rather than one `data.encode()` so a save never
 # needs a second full-size buffer beside the text it is already holding.
 _CRC_CHUNK = 2048
+_PUBLISH = ".publish"
+# Registered store roots, longest first (longest prefix wins, so a root nested
+# inside another resolves to the inner one). Bounded because a host test session
+# registers one per tmp store and `_root_for` walks the list on every recovered
+# read; a board has one or two. Falling off the end costs the per-file check, not
+# correctness.
+_ROOT_MAX = 8
+_roots = []
+# root -> the marker's (path, chars, crc), or None for "nothing in flight here".
+# A root absent from this dict has not been read yet; present means read (or
+# written) by us, so the marker file is opened at most once per root per process.
+_marks = {}
 
 
 def _mkdir(path):
@@ -124,8 +163,89 @@ def _text_crc(text):
     return crc & 0xFFFFFFFF
 
 
+def _stamp_of(text):
+    return len(text), _text_crc(text)
+
+
 def _stamp_line(text):
-    return "%s%d %d\n" % (_STAMP, len(text), _text_crc(text))
+    n, crc = _stamp_of(text)
+    return "%s%d %d\n" % (_STAMP, n, crc)
+
+
+# -- the store-wide publish marker (#154) -----------------------------------
+
+def set_publish_root(root):
+    """Register a store root, so `_read_recover` under it costs no extra lookup.
+    Idempotent; the store's dir setup calls it. Everything below a registered
+    root -- cart folders, their journals, the sibling stores -- shares its one
+    marker, because only one publish is ever in flight."""
+    if not root:
+        return
+    root = root.rstrip("/")
+    if root in _roots:
+        _roots.remove(root)
+    _roots.insert(0, root)
+    _roots.sort(key=len, reverse=True)
+    while len(_roots) > _ROOT_MAX:
+        _marks.pop(_roots.pop(), None)
+
+
+def _root_for(path):
+    for r in _roots:
+        if path.startswith(r + "/"):
+            return r
+    return None
+
+
+def _parse_mark(line):
+    """(path, chars, crc) from a marker line, or None when it isn't one. A torn
+    marker has no trailing newline and so can never parse as naming a file."""
+    if not line.startswith(_STAMP) or not line.endswith("\n"):
+        return None
+    bits = line[len(_STAMP):-1].split(" ", 2)
+    if len(bits) != 3 or not bits[2]:
+        return None
+    try:
+        return bits[2], int(bits[0]), int(bits[1])
+    except ValueError:
+        return None
+
+
+def _mark(root):
+    """The marker under `root`, read at most once per process."""
+    try:
+        return _marks[root]
+    except KeyError:
+        pass
+    m = None
+    try:
+        with open(root + "/" + _PUBLISH, "r") as f:
+            m = _parse_mark(f.readline())
+    except OSError:                   # no marker: nothing was ever in flight here
+        pass
+    _marks[root] = m
+    return m
+
+
+def _unmark(path):
+    """Forget the in-RAM marker for `path`'s root once its one question has been
+    answered, so the rest of this process reads that root for free."""
+    root = _root_for(path)
+    if root is not None:
+        _marks[root] = None
+
+
+def _stamp_for(path):
+    """What the published `path` should look like, or None for "nothing says".
+    Under a registered root this is a dict lookup; outside one it falls back to
+    opening the backup, which is what costs a path lookup per read."""
+    root = _root_for(path)
+    if root is None:
+        return _bak_stamp(path)
+    m = _mark(root)
+    if m is None or m[0] != path:
+        return None
+    return m[1], m[2]
 
 
 def _parse_stamp(line):
@@ -178,12 +298,23 @@ def _read_bak(path):
 
 def _write_atomic(path, data):
     """Write `data` to `path` so that any crash mid-write is recoverable by
-    `_read_recover`. Two writes, no stat/remove/rename -- see the module docstring
-    for the crash-safety argument and the invariant it asks of other writers."""
+    `_read_recover`. Three writes, no stat/remove/rename -- see the module
+    docstring for the crash-safety argument and the invariant it asks of other
+    writers."""
     bak = path + ".bak"
+    n, crc = _stamp_of(data)
+    root = _root_for(path)
+    if root is not None:
+        try:
+            _write(root + "/" + _PUBLISH,
+                   "%s%d %d %s\n" % (_STAMP, n, crc, path))
+        except Exception:             # noqa: BLE001 -- best effort, see the docstring
+            _marks[root] = None       # this save publishes without detection
+        else:
+            _marks[root] = (path, n, crc)
     try:
-        with open(bak, "w") as f:     # the redo log lands first, stamped
-            f.write(_stamp_line(data))
+        with open(bak, "w") as f:     # the redo log, stamped
+            f.write("%s%d %d\n" % (_STAMP, n, crc))
             f.write(data)
     except Exception:                 # noqa: BLE001 -- ENOSPC etc.
         _remove(bak)                  # free the half-written backup; `path` is untouched
@@ -221,13 +352,15 @@ def _read_recover(path):
         if rec is None:
             raise
         return _heal(path, rec)
-    stamp = _bak_stamp(path)
+    stamp = _stamp_for(path)
     if stamp is None or _fits(data, stamp):
-        return data                   # no stamp to check against, or it checks out
+        return data                   # nothing in flight here, or it checks out
     rec = _read_bak(path)
     if rec is None:
-        return data                   # a torn backup -- keep the file we can read
+        _unmark(path)                 # a torn backup -- keep the file we can read
+        return data
     if rec.startswith(data):
         return _heal(path, rec)       # a truncated publish: finish it
     _forget_bak(path)                 # someone else published here; the stamp is stale
+    _unmark(path)
     return data

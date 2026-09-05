@@ -13,15 +13,16 @@ from runtime import moy_fs
 
 class FakeFs:
     """An in-memory filesystem that RECORDS every metadata op and can die in the
-    middle of any of them. `crash_at` is a 1-based op index; `tear` decides
-    whether that op leaves half its bytes behind (FAT truncates on open-for-write)
-    or nothing at all."""
+    middle of any of them. `crash_at` is a 1-based op index and `landing` says how
+    much of that op reached the card: NOTHING (open-for-write truncated and no
+    more), HALF (FAT grows the file from empty, so a torn write is a prefix) or
+    WHOLE (the write completed and the power went a moment later)."""
 
     def __init__(self):
         self.files = {}
         self.ops = []
         self.crash_at = None
-        self.tear = False
+        self.landing = "nothing"
 
     # -- the recorder --------------------------------------------------------
     def _op(self, name, path):
@@ -30,11 +31,11 @@ class FakeFs:
             return True
         return False
 
-    def arm(self, step, tear=False):
-        """Die in the `step`-th op FROM HERE (the recorder restarts), leaving half
-        that op's bytes behind when `tear`."""
+    def arm(self, step, landing="nothing"):
+        """Die in the `step`-th op FROM HERE (the recorder restarts), leaving
+        `landing` of that op's bytes behind."""
         self.ops = []
-        self.crash_at, self.tear = step, tear
+        self.crash_at, self.landing = step, landing
 
     # -- the os module moy_fs reaches for ------------------------------------
     def stat(self, path):
@@ -69,8 +70,11 @@ class FakeFs:
         return _FakeRead(self.files[path])
 
 
-class _Crash(Exception):
-    """A power loss: raised from the op the test chose to die in."""
+class _Crash(BaseException):
+    """A power loss: raised from the op the test chose to die in. NOT an
+    Exception, because the machine stopping is not an ENOSPC -- nothing after it
+    runs, including _write_atomic's own cleanup, which is what makes this a
+    faithful model of pulling the plug."""
 
 
 class _FakeWrite:
@@ -90,8 +94,10 @@ class _FakeWrite:
     def __exit__(self, *exc):
         text = "".join(self.buf)
         if self.dying:
-            # half the bytes reached the card, or none of them did
-            self.fs.files[self.path] = text[: len(text) // 2] if self.fs.tear else ""
+            land = self.fs.landing
+            self.fs.files[self.path] = (
+                text if land == "whole" else
+                text[: len(text) // 2] if land == "half" else "")
             raise _Crash("power lost")
         self.fs.files[self.path] = text
         return False
@@ -126,7 +132,17 @@ def fs(monkeypatch):
     f = FakeFs()
     monkeypatch.setattr(moy_fs, "os", f)
     monkeypatch.setattr(moy_fs, "open", f.open, raising=False)
+    monkeypatch.setattr(moy_fs, "_roots", [])
+    monkeypatch.setattr(moy_fs, "_marks", {})
     return f
+
+
+@pytest.fixture
+def rooted(fs):
+    """A store root, the way moy_carts.ensure_dirs registers one -- so the reader
+    is on the marker path rather than the per-file fallback."""
+    moy_fs.set_publish_root("/c")
+    return fs
 
 
 def _rename_dance(path, data):
@@ -146,7 +162,17 @@ NEW = "print('a rather longer new file')\n"
 
 # -- the cost ---------------------------------------------------------------
 
-def test_a_save_costs_two_metadata_ops(fs):
+def test_a_save_costs_three_metadata_ops(rooted):
+    fs = rooted
+    moy_fs._write_atomic("/c/main.py", OLD)
+    fs.ops = []
+    moy_fs._write_atomic("/c/main.py", NEW)
+
+    assert fs.ops == ["write /c/.publish", "write /c/main.py.bak",
+                      "write /c/main.py"]
+
+
+def test_a_save_outside_every_root_costs_two(fs):
     moy_fs._write_atomic("/c/main.py", OLD)
     fs.ops = []
     moy_fs._write_atomic("/c/main.py", NEW)
@@ -164,10 +190,27 @@ def test_the_rename_dance_it_replaced_cost_five(fs):
                       "rename /c/main.py.tmp"]
 
 
-def test_a_recovered_read_costs_one_op_more_than_a_plain_one(fs):
-    """What the scheme charges for the torn-write detection: the published file,
-    then the stamp line beside it -- never the backup's payload unless the stamp
-    says the published file cannot be trusted."""
+def test_a_boot_shaped_scan_reads_the_marker_once_not_a_backup_per_file(rooted):
+    """The shape of a P4 boot: every manifest in the store read through
+    _read_recover. On littlefs a path lookup is the expensive op, so the cost of
+    the torn-write detection has to be ONE read for the whole scan, not one per
+    file -- opening a `.bak` per manifest measured +6.0s of boot on 75 carts."""
+    fs = rooted
+    for i in range(20):
+        moy_fs._write_atomic("/c/cart%d/manifest.json" % i, '{"n": %d}' % i)
+    moy_fs._marks.clear()             # a fresh boot
+    fs.ops = []
+
+    for i in range(20):
+        assert moy_fs._read_recover("/c/cart%d/manifest.json" % i) == '{"n": %d}' % i
+
+    assert len(fs.ops) == 21
+    assert fs.ops.count("read /c/.publish") == 1
+
+
+def test_without_a_root_the_reader_falls_back_to_a_lookup_per_read(fs):
+    """A path under no registered root -- a bare moy_journal on a tmp dir -- keeps
+    the pre-marker behaviour: correct, one extra lookup, and never wrong."""
     moy_fs._write_atomic("/c/main.py", NEW)
     fs.ops = []
     assert moy_fs._read_recover("/c/main.py") == NEW
@@ -177,23 +220,55 @@ def test_a_recovered_read_costs_one_op_more_than_a_plain_one(fs):
 
 # -- the crash ladder -------------------------------------------------------
 
-@pytest.mark.parametrize("step", [1, 2])
-@pytest.mark.parametrize("tear", [False, True])
-def test_a_crash_at_any_step_still_reads_a_whole_file(fs, step, tear):
-    """Omit or truncate each of the two writes in turn. Whatever the reader gets
-    back is one of the two WHOLE versions -- never a fragment, never nothing."""
+@pytest.mark.parametrize("step", [1, 2, 3])
+@pytest.mark.parametrize("landing", ["nothing", "half", "whole"])
+def test_a_crash_at_any_landing_point_still_reads_a_whole_file(rooted, step,
+                                                               landing):
+    """Every point a power loss can land: three writes (marker, backup, publish)
+    times three ways each can land. Whatever the reader gets back is one of the
+    two WHOLE versions -- never a fragment, never nothing."""
+    fs = rooted
     moy_fs._write_atomic("/c/main.py", OLD)
-    fs.arm(step, tear)
+    fs.arm(step, landing)
     with pytest.raises(_Crash):
         moy_fs._write_atomic("/c/main.py", NEW)
     fs.crash_at = None
+    moy_fs._marks.clear()             # the next boot re-reads the marker from disk
 
     assert moy_fs._read_recover("/c/main.py") in (OLD, NEW)
 
 
+def test_a_marker_naming_a_file_whose_backup_is_torn_trusts_the_file(rooted):
+    """The crash landed between the marker and the backup: the marker says a
+    publish of this file was in flight, and the backup cannot vouch for itself.
+    A torn backup is refused, so the previous save stands."""
+    fs = rooted
+    moy_fs._write_atomic("/c/main.py", OLD)
+    fs.arm(2, "half")
+    with pytest.raises(_Crash):
+        moy_fs._write_atomic("/c/main.py", NEW)
+    fs.crash_at = None
+    moy_fs._marks.clear()
+
+    assert moy_fs._read_recover("/c/main.py") == OLD
+
+
+def test_a_stale_marker_from_a_previous_process_costs_nothing(rooted):
+    """The marker is never cleared, so at boot it names the last file published --
+    normally one that completed. That must cost a read of the file and nothing
+    else: the marker's own stamp answers it, with no lookup of the backup."""
+    fs = rooted
+    moy_fs._write_atomic("/c/main.py", NEW)
+    moy_fs._marks.clear()             # a fresh process
+    fs.ops = []
+
+    assert moy_fs._read_recover("/c/main.py") == NEW
+    assert fs.ops == ["read /c/main.py", "read /c/.publish"]
+
+
 def test_a_crash_in_the_backup_keeps_the_published_file(fs):
     moy_fs._write_atomic("/c/main.py", OLD)
-    fs.arm(1, tear=True)
+    fs.arm(1, "half")
     with pytest.raises(_Crash):
         moy_fs._write_atomic("/c/main.py", NEW)
     fs.crash_at = None
@@ -207,7 +282,7 @@ def test_a_truncated_publish_is_finished_from_the_backup(fs):
     """A FAT open-for-write truncates and then grows the file, so an interrupted
     publish leaves a PREFIX of the new bytes -- anywhere from empty to whole."""
     moy_fs._write_atomic("/c/main.py", OLD)
-    fs.arm(2, tear=True)
+    fs.arm(2, "half")
     with pytest.raises(_Crash):
         moy_fs._write_atomic("/c/main.py", NEW)
     fs.crash_at = None
