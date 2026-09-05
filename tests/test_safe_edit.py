@@ -373,10 +373,11 @@ def test_save_sprites_failure_surfaces_error(tmp_path, monkeypatch):
 
 # -- (g) [MAJOR] atomic-write crash window is recoverable via .bak ----------
 
-def test_crash_before_the_publish_is_recoverable_via_bak(tmp_path, monkeypatch):
-    # Simulate a power loss between _write_atomic's two writes: the stamped backup
-    # holds the new source, main.py still holds the old one. load() must publish
-    # the backup rather than serve a save that never landed.
+def test_crash_before_the_publish_keeps_the_previous_save(tmp_path, monkeypatch):
+    # A power loss between _write_atomic's two writes: the stamped backup holds the
+    # new source, main.py still holds the old one and is not a prefix of it. The
+    # PREVIOUS save is what survives -- the guarantee the rename dance gave -- and
+    # the cart is readable, which is the part that matters.
     from runtime import moy_carts, moy_fs
     root = str(tmp_path / "carts")
     moy_carts.ensure_dirs(root)
@@ -402,8 +403,8 @@ def test_crash_before_the_publish_is_recoverable_via_bak(tmp_path, monkeypatch):
     assert "OLD" in main.read_text()               # the publish never ran
     loaded = moy_carts.load(path)
     assert loaded is not None
-    assert "NEW" in loaded["src"]                  # the save that reached the backup
-    assert "NEW" in main.read_text()               # ...republished on disk
+    assert "OLD" in loaded["src"]
+    assert not (Path(path) / "main.py.bak").exists()   # the stale stamp is retired
 
 
 def test_a_torn_publish_is_detected_and_healed(tmp_path, monkeypatch):

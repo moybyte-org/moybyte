@@ -203,7 +203,9 @@ def test_a_crash_in_the_backup_keeps_the_published_file(fs):
     assert moy_fs._read_recover("/c/main.py") == OLD
 
 
-def test_a_crash_in_the_publish_recovers_the_save_that_reached_the_backup(fs):
+def test_a_truncated_publish_is_finished_from_the_backup(fs):
+    """A FAT open-for-write truncates and then grows the file, so an interrupted
+    publish leaves a PREFIX of the new bytes -- anywhere from empty to whole."""
     moy_fs._write_atomic("/c/main.py", OLD)
     fs.arm(2, tear=True)
     with pytest.raises(_Crash):
@@ -214,13 +216,49 @@ def test_a_crash_in_the_publish_recovers_the_save_that_reached_the_backup(fs):
     assert fs.files["/c/main.py"] == NEW      # healed on disk, not re-derived per read
 
 
-def test_a_same_length_tear_is_caught_by_the_stamp(fs):
-    """Length alone would miss this one: the publish is overwritten with a file of
-    exactly the right size and the wrong bytes."""
+def test_an_empty_publish_is_finished_from_the_backup(fs):
+    """The far end of the same prefix: the truncation landed and nothing else did."""
+    moy_fs._write_atomic("/c/main.py", OLD)
     moy_fs._write_atomic("/c/main.py", NEW)
-    fs.files["/c/main.py"] = "x" * len(NEW)
+    fs.files["/c/main.py"] = ""
 
     assert moy_fs._read_recover("/c/main.py") == NEW
+
+
+def test_a_crash_between_the_two_writes_keeps_the_previous_save(fs):
+    """The backup is whole and the publish never started, so `path` holds the
+    previous save -- not a prefix of anything. That save is what survives (the
+    guarantee the rename dance gave), and the stamp that outlived its publish is
+    dropped rather than left to confuse a later read."""
+    moy_fs._write_atomic("/c/main.py", OLD)
+    moy_fs._write("/c/main.py.bak", moy_fs._stamp_line(NEW) + NEW)
+
+    assert moy_fs._read_recover("/c/main.py") == OLD
+    assert "/c/main.py.bak" not in fs.files
+
+
+def test_a_foreign_write_is_trusted_and_retires_the_stale_stamp(fs):
+    """tools/push_cart.py places a file with remove+rename over the dev channel,
+    and the kid may have saved that same file on the board first. Recovering the
+    kid's version over the push would be a silent undo of a deliberate write."""
+    pushed = "print('pushed from the PC')\n"
+    assert len(pushed) != len(NEW)
+    moy_fs._write_atomic("/c/main.py", NEW)          # the kid's save, stamped
+    moy_fs._write("/c/main.py", pushed)              # ...then the push lands
+
+    assert moy_fs._read_recover("/c/main.py") == pushed
+    assert "/c/main.py.bak" not in fs.files          # and cannot bite the next read
+
+
+def test_a_same_length_foreign_write_is_trusted_too(fs):
+    """Same rule, and the honest cost of it: a same-length wrong-content publish
+    is indistinguishable from a deliberate write, so it is not recoverable."""
+    moy_fs._write_atomic("/c/main.py", NEW)
+    other = "x" * len(NEW)
+    moy_fs._write("/c/main.py", other)
+
+    assert moy_fs._read_recover("/c/main.py") == other
+    assert "/c/main.py.bak" not in fs.files
 
 
 def test_a_missing_publish_recovers_from_the_backup(fs):

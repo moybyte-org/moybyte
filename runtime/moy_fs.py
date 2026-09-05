@@ -16,34 +16,46 @@
 #      their own bytes, so the store scan, the web sync RPC and tools/ see no
 #      header and no trailer.
 #
-# The `.bak` is therefore a REDO log, not the previous version: once step 1 lands
-# the new text is durable, and step 2 only publishes it. Recovery (`_read_recover`)
-# reads `path`, then reads the stamp beside it and checks the published text
-# against it. A power loss can land in exactly three places:
+# The `.bak` is a redo log for ONE failure, and `_read_recover` is deliberately
+# narrow about which. It reads `path`, reads the stamp beside it, and on a
+# mismatch asks whether the published text is a strict PREFIX of the backup's
+# payload -- because that is exactly what an interrupted publish leaves: FAT
+# truncates on open-for-write and then grows the file, so a power loss lands it
+# somewhere between empty and whole, and never anywhere else. Only then does the
+# backup win. A power loss lands in one of three places:
 #
 #   * mid step 1  -- `.bak` fails its own stamp (short, or no stamp line at all)
 #                    and `path` was never opened, so the published file is the
 #                    previous save, whole. The reader trusts `path`.
+#   * mid step 2  -- `path` is a prefix of the backup's payload. The reader
+#                    republishes the backup, and the save completes. This is the
+#                    window the old rename dance could not see: `_read_recover`
+#                    used to fall back only when `path` was MISSING, so a short
+#                    file read as good.
 #   * between     -- `.bak` is stamped and whole, `path` still holds the previous
-#                    save. The stamp does not match, so the reader publishes the
-#                    backup: the save that got as far as step 1 survives.
-#   * mid step 2  -- `path` is TORN (FAT truncates on open-for-write; littlefs is
-#                    copy-on-write and leaves the old file, which is the case
-#                    above). The stamp does not match, so the reader republishes
-#                    the backup. This is the window the old rename dance could not
-#                    see: `_read_recover` used to fall back only when `path` was
-#                    MISSING, so a short file read as good.
+#                    save, which is generally not a prefix of the new one. THE
+#                    PREVIOUS SAVE IS WHAT SURVIVES -- the same guarantee the
+#                    pre-#154 rename dance gave, and the same one littlefs gives
+#                    on its own (it is copy-on-write, so an interrupted publish
+#                    there leaves the old file rather than a torn one, which is
+#                    this case and not the one above). The redo log's value is
+#                    the FAT torn write, which nothing else can see.
+#
+# Anything else at `path` was put there DELIBERATELY by someone that is not this
+# module -- `tools/push_cart.py` places a file with remove+rename over the dev
+# channel, and a board's kid may have saved that same file first. Reverting a
+# push to a stale backup would be a silent undo of the developer's write, so the
+# reader trusts `path` and drops the stale `.bak` on the spot. That is also why
+# a same-length wrong-content publish is not recoverable: it is indistinguishable
+# from a foreign write, and guessing wrong costs more than it saves.
 #
 # A torn `.bak` is refused rather than published -- garbage never overwrites a
 # whole file. When the stamp is absent entirely the file is a LEGACY backup (the
 # pre-#154 rename dance, or `moy_sync._publish`'s rotation) and is read as raw
 # text, which is what those writers left behind.
 #
-# THE INVARIANT THIS BUYS AND WHAT IT COSTS: a file published by `_write_atomic`
-# must only ever be republished by `_write_atomic`. A writer that puts different
-# bytes at `path` behind the scheme's back leaves a stamp describing content that
-# is no longer there, and the next read will "recover" over it -- so such a writer
-# has to drop the `.bak` (or rotate it, as `_publish` does) in the same breath.
+# `_forget_bak` is the same drop, done by the writer rather than the next reader:
+# a foreign writer that calls it leaves nothing stale behind at all.
 
 try:
     import os
@@ -199,9 +211,9 @@ def _heal(path, data):
 
 def _read_recover(path):
     """Read `path`, healing it from `<path>.bak` when the published file is
-    missing or does not match the stamp beside it (i.e. a crash landed in the
-    middle of the publish). Re-raises the original error if there is no usable
-    backup."""
+    missing or is a half-written publish. Re-raises the original error if there is
+    no usable backup. See the module docstring for why a mismatch that is NOT a
+    truncation is read as a foreign write rather than as damage."""
     try:
         data = _read(path)
     except OSError:
@@ -212,7 +224,10 @@ def _read_recover(path):
     stamp = _bak_stamp(path)
     if stamp is None or _fits(data, stamp):
         return data                   # no stamp to check against, or it checks out
-    rec = _read_bak(path)             # `path` is torn or pre-publish: the backup is newer
+    rec = _read_bak(path)
     if rec is None:
-        return data                   # ...unless the backup is torn too -- keep what we have
-    return _heal(path, rec)
+        return data                   # a torn backup -- keep the file we can read
+    if rec.startswith(data):
+        return _heal(path, rec)       # a truncated publish: finish it
+    _forget_bak(path)                 # someone else published here; the stamp is stale
+    return data

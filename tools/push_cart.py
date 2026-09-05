@@ -298,6 +298,11 @@ def push_file_raw(b, src, dst, window, verbose=False):
                            % (name, got, want))
     b.pyval("__import__('os').remove(%r) or 1" % dst)     # no-op if absent
     b.pyval("__import__('os').rename(%r, %r) or 1" % (tmp, dst))
+    # moy_fs's invariant (#154): a file the store published carries a stamped
+    # `.bak` describing it, and a writer that puts different bytes at the path
+    # has to drop that stamp -- or the board's next read "recovers" the kid's own
+    # last save over what was just pushed.
+    b.pyval("__import__('os').remove(%r) or 1" % (dst + ".bak"))   # no-op if absent
     print("  > %-16s %d B in %.0fs  sha %s"
           % (name, len(raw), time.time() - t0, want))
     return True

@@ -430,6 +430,26 @@ def test_the_pushed_bytes_arrive_intact(tmp_path):
     assert dev.fs.files == {dst: SOURCE}
 
 
+def test_a_push_retires_the_stamped_backup_the_board_kept(tmp_path):
+    """moy_fs's invariant (#154): the store leaves a stamped `<file>.bak` beside
+    everything it publishes, and it describes the file it published. A push puts
+    different bytes there, so leaving that stamp behind would have the board's
+    next read "recover" the kid's own last save over what was just pushed."""
+    from runtime import moy_fs
+    dev = _FakeConsole()
+    b, window = _raw(dev)
+    src = _cart(tmp_path, {"main.lua": SOURCE}) + "/main.lua"
+    dst = "/moy/carts/demo.moy/main.lua"
+    kid = "-- the kid's own save, made on the board\n"
+    dev.fs.files[dst] = kid
+    dev.fs.files[dst + ".bak"] = moy_fs._stamp_line(kid) + kid
+
+    assert push_cart.push_file_raw(b, src, dst, window) is True
+
+    assert dev.fs.files == {dst: SOURCE}
+    assert any("remove(%r)" % (dst + ".bak") in line for line in dev.sent)
+
+
 def test_a_first_push_survives_the_remove_of_a_file_that_is_not_there(tmp_path):
     """The pre-rename remove is a no-op by design: on a first push the device
     raises ENOENT and the push must carry on regardless."""
