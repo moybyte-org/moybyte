@@ -616,14 +616,16 @@ is the same staged `moy_gfx` source at the same `-O3`, and the CPU is 240 MHz on
 both. The PSRAM clock is the only systematic difference left, and it predicts the
 measurement to 1.5%.
 
-**So the residual is the 120 MHz MSPI row in the lever table below, not the layer
-copy** — and that row is a deliberate, well-argued "off" (an experimental IDF
-feature whose failure mode is random faults ~20 °C away from boot temperature,
-which also needs the fork's vendor-gate retune patch to be safe). It is a real
-lever with a real risk, not an oversight; it is simply where the ~2 ms lives.
-Two consequences worth stating plainly: any cart whose backdrop is a colour
-`background()` or a `cls()` carries the same ~1.5× tax on that fill, and no
-amount of overlap machinery can remove it, because the CPU is the thing waiting.
+**So the residual was the 120 MHz MSPI row in the lever table below, not the
+layer copy** — and that row was TAKEN the same day (`bec713e`): `sdkconfig.board`
+runs flash and PSRAM at 120 MHz with the temperature-sensor retune on a 5 s
+interval, over `patches/esp_psram_temp_retune_any_vendor.patch` (#169). The
+numbers above are therefore a measurement of this board against a build it no
+longer is, kept because the arithmetic is what identified the bus as the cause.
+The consequence that outlives the lever: any cart whose backdrop is a colour
+`background()` or a `cls()` pays a full-screen PSRAM fill every frame, the MSPI
+clock sets its price, and no amount of overlap machinery can hide it — the CPU
+is the thing waiting.
 
 ### `modules/tdeck_panel.py` — the compositor
 
@@ -696,7 +698,7 @@ with an A/B rather than inherited.
 | lever | fork | here | why |
 |---|---|---|---|
 | cache geometry (#63) | 32KB icache / 64KB dcache / 32B line | **same** | pure win, already proven on this board; costs 48KB internal SRAM |
-| flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **off** (80/80) | an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature. It needs the retune patch to be safe, and neither belongs in a bring-up. **This is where the remaining cart-side gap lives** — Brick Siege's whole `bg=` difference is a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is the one lever left that would close it, and turning it on is a risk decision, not a perf decision |
+| flash + PSRAM at 120MHz (#66/#169) | on, plus a vendor-gate patch | **on** (`bec713e`), with the temperature retune | it was the last cart-side gap — Brick Siege's whole `bg=` difference was a 153,600 B PSRAM fill at 2/3 the clock, measured to within 1.5% of the clock ratio (see "the render-side gap is the PSRAM clock" above). It is an EXPERIMENTAL IDF feature whose failure mode is random faults ~20 °C from boot temperature, so it ships WITH `CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR` and the vendor-gate patch that keeps that option from aborting this board's boot; the five flags move together or not at all (`sdkconfig.board` says which) |
 | `-O3` on moy_gfx (#77) | on (Brick Siege 33→51 fps) | inherited | it is a pragma inside the shared `moy_gfx` source, so it comes with the staged module |
 | async flush + pump (#40/#43/#66) | on | **on** (2026-08-16) | ported — see the flush section above. Was the biggest single lever here; `ASYNC_FLUSH = False` in `tdeck_panel.py` reverts it |
 | GDMA async layer copy (#54 St.2 / #63) | on | **on** (2026-08-16) | `tdeck_panel.LAYER_COPY_ASYNC = True`, assigned onto `device_canvas` by `run_desktop` before the first canvas — the flag lives in the compositor module because that is where the fork keeps it (`moy_compositor.SRAM_BOUNCE_FLUSH`) and `device_canvas.py` is staged, not ours. Safe here for the reason the fork is safe: the 2026-07-03 verdict was about a GDMA blit starving a panel DMA that read PSRAM *directly*, and `moy_lcd`'s only ever reads internal SRAM — on both flush paths, since `show()` is `kick`+`drain`. **It does NOT close the gap above and was never going to**: it is armed only for a screen-wide layer at `cam_x == 0`, so Sky Run (800 px) and layer_test (512 px) keep the sync `blit_window`, and Brick Siege has no layer at all. It pays on sakura, letter_blitz and platformer — the whole list — where the fork measured 7 ms → 0.04 ms |
