@@ -81,10 +81,14 @@ about the feeder or the handoff is restated here. What moy_axs supplies is
 three hooks: `frame_begin` (acquire the bus, arm the window, ship the pixel
 header), `queue_band` (the ROTATE-gather or the fold synthesis into the slot
 the engine hands it, queued with `SPI_TRANS_CS_KEEP_ACTIVE` on all but the
-last) and `frame_end` (retrieve the results, release the bus). Bands are 32
-physical rows; completion is counted by this module's `post_cb` ISR, whose
-body is the engine's `moy_flush_band_done_from_isr` -- static inline, so the
-callback keeps its IRAM placement. `modules/guition_panel.py` is the
+last) and `frame_end` (wait the queued bands out, close CS if the frame's
+last band never went, release the bus -- THE FAILURE PATHS in the C, #205).
+Bands are 32 physical rows; completion is counted by this module's `post_cb`
+ISR, whose body is the engine's `moy_flush_band_done_from_isr` -- static
+inline, so the callback keeps its IRAM placement. The device runs
+`SPI_DEVICE_NO_RETURN_RESULT`: a band's queue slot frees as the ISR starts
+it and no result is ever filed, so a band that completes late cannot leave
+anything behind. `modules/guition_panel.py` is the
 compositor over it -- since 2026-08-21 a thin SUBCLASS of the shared
 `device/banded_panel.py` (`FoldingCompositor` over `BandedCompositor`, #206
 item 1), the Python twin of the `moy_flush` split above. What is left in this
@@ -123,6 +127,28 @@ VFS when not).
 
 ## Bring-up log
 
+* 2026-09-05 -- **the flush's failure paths are proven, not assumed** (#205;
+  numbers in the issue). Three decisions, each verified on this glass with
+  `moy_axs.fault(kind)` arming one failure for the next flush:
+  * a band's `spi_master` queue slot frees when the ISR starts it
+    (`SPI_DEVICE_NO_RETURN_RESULT`) -- the old count-based retrieve left every
+    late-completing band's result filed in the driver for the rest of the
+    boot (measured before the change: the driver's result queue filled to its
+    depth over a run of injected late frames, and `spi_bus_remove_device`
+    refuses a device in that state). Teardown/re-add DECLINED: the driver
+    cannot remove a device with an unfinished transaction, so it cannot drop
+    an orphan, only be blocked by one.
+  * every error exit that left CS asserted now closes it (one DCS NOP header
+    with no `KEEP_ACTIVE`, after the queued bands are waited out), so the
+    frame after a failed one arms its window with CS high and is clean.
+  * a drain that gives up is no longer followed by a kick, a bus command or
+    a fold/bezel write: `moy_axs: feeder busy` is raised instead.
+  * the two A/Bs the issue named were RUN and both DECLINED on data (numbers
+    in #205): `-O3` on the rotate/fold gathers made the feeder's per-frame CPU
+    WORSE on every cart, with the transport never starved either way; and
+    `vTaskDelay(1)` in place of the fold fence's 20us spin -- the fence never
+    spins on the shipped cadence, and a 10ms tick (FREERTOS_HZ 100) is the
+    wrong unit for a sub-millisecond wait when it does.
 * 2026-08-20 -- **stage 4 lands: the TF card is the cart store** (owner call
   "already has an SD inside, so you can do that now"; the exit-gesture DECLINE
   and the #202 close are the same session -- see the hardware table's SD row

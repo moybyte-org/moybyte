@@ -127,9 +127,10 @@ static void moy_flush_run_frame(void) {
     // returning here told the VM the bus was quiet. What the VM does next with
     // a quiet-looking bus is the hazard: moy_lcd_sd_guard(on) drains and then
     // opens an sdspi session on the shared host (the documented hang -- gray
-    // screen, dead USB, no panic), and moy_axs's frame_end reaps exactly
-    // `done` results before releasing the bus, so a band the count never
-    // reached leaks its transaction queue slot and skews s_retrieved for good.
+    // screen, dead USB, no panic), and moy_axs's frame_end closes the CS
+    // chain and releases the bus on the strength of this promise -- its own
+    // bounded wait on done/target is a fence for the FAILURE paths, not a
+    // substitute for it.
     //
     // The wait costs nothing it could not already cost: the deadline is the
     // frame's ONE absolute fence (flush_t0 + MOY_FLUSH_TIMEOUT_US), shared

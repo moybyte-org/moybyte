@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -621,6 +622,43 @@ def test_a_stop_that_is_not_acknowledged_frees_nothing():
         src = mod.read_text(encoding="utf-8")
         assert "if (!moy_flush_stop()) {" in src, (
             "%s deinit ignores a failed stop" % mod)
+
+
+def test_the_guition_transport_cannot_leak_a_queue_slot_or_leave_cs_low():
+    """#205, pinned where the on-glass proof cannot reach (a host checkout).
+    The class of leak was a retrieve loop reclaiming what an ISR had COUNTED:
+    with SPI_DEVICE_NO_RETURN_RESULT there is no result to retrieve, so the
+    verb that could disagree with the count must be gone with it. And every
+    exit that left CS asserted -- a command's failed parameters, a frame the
+    last band never closed -- reaches the one close; every VM-side verb that
+    drains before it mutates feeder-owned state refuses a feeder that never
+    came back."""
+    src = Path("firmware/guition_jc3248w535/native/moy_axs/modmoy_axs.c").read_text(
+        encoding="utf-8")
+    assert "SPI_DEVICE_HALFDUPLEX | SPI_DEVICE_NO_RETURN_RESULT" in src
+    assert "spi_device_get_trans_result" not in src, (
+        "a retrieve loop is the leak class coming back")
+    assert ".queue_size = MOY_AXS_BOUNCE_SLOTS + 2" in src, (
+        "queue depth is bands the ISR has not started, never bands per frame")
+
+    def body(sig):
+        # The DEFINITION, not the forward declaration the ops struct needs.
+        head = re.search(r"static %s\([^;]*\) \{" % re.escape(sig), src).start()
+        return src[head:src.index("\n}\n", head)]
+
+    assert "moy_axs_cs_close_acquired()" in body("esp_err_t moy_axs_cmd_acquired")
+    end = body("void moy_axs_frame_end")
+    assert "moy_flush.done < moy_flush.target" in end, "wait the queued bands out"
+    assert end.index("moy_axs_cs_close_acquired()") \
+        < end.index("spi_device_release_bus("), "close CS before the bus goes"
+    qb = body("esp_err_t moy_axs_queue_band")
+    assert "err == ESP_OK && last" in qb and "s_cs_open = false" in qb
+    for verb in ("kick", "show", "set_madctl", "set_rot", "cmd_py", "fold_test"):
+        vb = body("mp_obj_t moy_axs_" + verb)
+        assert vb.index("moy_flush_drain()") < vb.index("moy_axs_require_idle()"), verb
+    # The proof hook the on-glass suite drives, one constant per failure path.
+    for k in ("FAULT_DROP", "FAULT_QERR", "FAULT_HDR", "FAULT_LATE"):
+        assert "MP_QSTR_" + k in src, k
 
 
 def test_the_sd_guard_is_a_nesting_depth_not_a_flag():

@@ -65,6 +65,34 @@ def test_swipe_rides_the_real_pointer_feed(board):
     on_glass.home_shelf_fling(board, 400, 80, 160)
 
 
+def test_a_failed_flush_is_recovered_from(board):
+    """#205. The QSPI transport's failure exits, each taken ON PURPOSE:
+    `moy_axs.fault(kind)` arms one for the next flush, the swipe supplies the
+    flushes. A recovered failure is COUNTED once (timeouts for the two
+    deadline shapes, errs for the two the transport refuses), the frames
+    after it ship, and the console keeps drawing -- the whole point being
+    that no natural run in three weeks ever took one of these paths."""
+    lcd = "ws.comp._lcd"
+    for kind, counter in (("FAULT_LATE", 6), ("FAULT_DROP", 6),
+                          ("FAULT_QERR", 7), ("FAULT_HDR", 7)):
+        before = board.pyval(lcd + ".pump_stats()", strict=True)
+        flushes0 = board.pyval(lcd + ".stats()", strict=True)[0]
+        board.pyexec("%s.fault(%s.%s)" % (lcd, lcd, kind), strict=True)
+        board.swipe(400, 160, 80, 160, frames=20)
+        board.drain(1.0)
+        after = board.pyval(lcd + ".pump_stats()", strict=True)
+        assert after[counter] == before[counter] + 1, (kind, before, after)
+        other = 7 if counter == 6 else 6
+        assert after[other] == before[other], (kind, before, after)
+        # The frame after the failed one, and the ones after that, went out.
+        flushes1 = board.pyval(lcd + ".stats()", strict=True)[0]
+        assert flushes1 >= flushes0 + 2, (kind, flushes0, flushes1)
+        board.swipe(80, 160, 400, 160, frames=20)
+    st = board.state()
+    assert st["stack"][-1] == "launcher", st["stack"]
+    assert not st.get("cart_error"), st["cart_error"]
+
+
 def test_a_cart_runs_and_exits(board):
     on_glass.cart_runs_and_exits(board, "star")
 
