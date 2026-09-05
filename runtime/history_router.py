@@ -449,8 +449,10 @@ class HistoryRouter:
     def _autosave_code(self):
         """The idle-debounce autosave-COMMIT (Stage 7): persist + journal the code
         editor's buffer once the kid has stopped typing, WITHOUT the SAVE UI (save
-        is invisible, spec Section 7). Only commits parseable source -- a mid-edit
-        syntax error just waits (no nag) -- and only a real, writable edit.
+        is invisible, spec Section 7). Only commits what the cart's RUNTIME gate
+        passes -- a mid-edit Python syntax error just waits (no nag); a Lua cart
+        has no parse gate on either tier, so it commits (#154/#67) rather than
+        never committing -- and only a real, writable edit.
         commit_code does the persist + the durable journal append + clears
         editor.dirty."""
         ws = self.ws
@@ -462,7 +464,7 @@ class HistoryRouter:
             ed.dirty = False              # nothing persistable (embedded/non-SD) -> disarm
             return
         src = ed.text()
-        ok, _msg = ws.carts_store.compile_check(src)
+        ok, _msg = ws.carts_store.runtime_compile_check(ws.cart, src)
         if not ok:
             return                        # don't autosave/journal un-parseable source
         # quiet=True keeps the autosave invisible (spec Section 7): it suppresses

@@ -2800,9 +2800,11 @@ class Workstation:
         if not (self.editor and self.cart):
             return False
         src = self.editor.text()
-        # Always compile-check, even for embedded/non-SD carts, so the kid sees a
-        # syntax error before run_code execs it into a hard failure.
-        ok, msg = self.carts_store.compile_check(src)
+        # Always gate, even for embedded/non-SD carts, so the kid sees a syntax
+        # error before run_code execs it into a hard failure. The gate is the
+        # cart's RUNTIME's: a lua cart used to be handed to the PYTHON compiler
+        # here, which refused every commit of its Code tab with a Python message.
+        ok, msg = self.carts_store.runtime_compile_check(self.cart, src)
         if not ok:
             self.save_status = "SYNTAX " + msg
             self.cart_error = "Syntax error -- " + msg

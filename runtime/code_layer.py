@@ -492,20 +492,23 @@ class CodeLayer:
         FOLLOWS the live syntax error (without moving the caret). A runtime
         crash marker can't be re-proven without a run, so a parsing source
         retires it too -- the closest static answer. The crash popup is
-        transient either way: the first edit/undo dismisses it. Lua carts have
-        no host-side parser -> the old clear-on-edit rule. No marker up ->
-        free (typing never pays a compile)."""
+        transient either way: the first edit/undo dismisses it. No marker up ->
+        free (typing never pays a compile).
+
+        The gate is the cart's runtime's, asked through the same store verb the
+        commit paths ask: a lua cart has no parse gate on either tier, answers
+        ok, and so keeps the clear-on-edit rule it always had."""
         ws = self.ws
         ws.crash_popup = None          # typing starts the fix -- the popup is done
         if ws.code_err is None and ws.code_err_row is None:
             return
         ed = ws.editor
-        check = getattr(ws.carts_store, "compile_check", None) \
+        check = getattr(ws.carts_store, "runtime_compile_check", None) \
             if ws.carts_store is not None else None
-        if ed is None or check is None or self._is_lua():
+        if ed is None or check is None:
             self._clear_err()
             return
-        ok, msg = check(ed.text())
+        ok, msg = check(ws.cart, ed.text())
         if ok:
             self._clear_err()
         else:

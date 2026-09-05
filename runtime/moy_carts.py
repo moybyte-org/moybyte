@@ -1256,20 +1256,34 @@ def compile_check(src):
         return False, str(exc)
 
 
+def runtime_compile_check(cart, src):
+    """The parse gate for THIS cart's runtime -- (ok, message), compile_check's
+    shape. Every commit path asks here (the store's save_code, ws.save_code,
+    the idle autosave, the live error marker), so "does this compile" cannot
+    mean the PYTHON compiler on one path and something else on the next.
+
+    A python cart is compile()d. A "lua" cart (#67) answers ok UNCHECKED:
+    neither tier has a syntax-only Lua entry -- the host's hl_exec and the
+    device's moycore run_chunk both luaL_loadbuffer AND lua_pcall in one step,
+    over a run that needs a framebuffer under it, which an Editor tab has not
+    got. So the gate degrades to COMMIT rather than to never-commit, and a Lua
+    syntax error surfaces where it always did, at PLAY. Gating Lua means a
+    compile-only entry on BOTH tiers; one alone would have the host and a board
+    disagree about what saves."""
+    if (cart or {}).get("runtime", "python") != "python":
+        return True, ""
+    return compile_check(src)
+
+
 def save_code(cart, src):
     """Persist edited source to the cart's main file, ATOMICALLY and only if it
-    compiles. Returns (status, message): status is SAVE_OK on success, or
-    SAVE_BAD_SYNTAX with a message (and the previous good file is left intact)
-    when `src` won't parse, so a kid's broken edit can never truncate the cart.
-
-    compile_check is the PYTHON compiler, so it only gates python-runtime carts;
-    a "lua" cart (#67) saves unchecked -- its syntax errors surface at PLAY
-    through the runtime's own load error -> the cart-error panel. (A Lua-side
-    pre-save check is the Phase 5 polish, needs the runtime present to check.)"""
-    if cart.get("runtime", "python") == "python":
-        ok, msg = compile_check(src)
-        if not ok:
-            return SAVE_BAD_SYNTAX, msg
+    passes its runtime's gate. Returns (status, message): status is SAVE_OK on
+    success, or SAVE_BAD_SYNTAX with a message (and the previous good file is
+    left intact) when `src` won't parse, so a kid's broken edit can never
+    truncate the cart."""
+    ok, msg = runtime_compile_check(cart, src)
+    if not ok:
+        return SAVE_BAD_SYNTAX, msg
     _write_atomic(cart["path"] + "/" + cart.get("main", "main.py"), src)
     cart["src"] = src
     return SAVE_OK, ""

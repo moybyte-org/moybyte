@@ -20,6 +20,15 @@ def _editable(ws):
     return cart["path"]
 
 
+def _lua_editable(ws):
+    """A seeded `runtime: "lua"` cart, open on the Code tab. Its source is not
+    valid PYTHON, which is the whole point of the tests below."""
+    cart = next(c for c in ws.carts.all if c.get("runtime") == "lua")
+    ws.open_in_editor(cart)
+    ws.set_menu_view("code")
+    return cart["path"]
+
+
 def _go_idle(ws):
     """Age the debounce past its window and run the frame hook that reads it."""
     ws.history.edit_ms = _ticks_ms() - ws.history.edit_debounce_ms - 1
@@ -124,6 +133,59 @@ def test_a_code_edit_still_waits_for_source_that_parses(tmp_path):
     ws.editor.dirty = True
     _go_idle(ws)
     assert "cls(7)" in moy_carts.load(path)["src"]
+
+
+# -- the gate is the cart's RUNTIME's (#154/#67) ----------------------------
+
+def test_the_parse_gate_answers_per_runtime(tmp_path):
+    """The store verb every commit path asks. Python is compile()d; a lua cart
+    answers ok UNCHECKED, because neither tier has a syntax-only Lua entry --
+    so the gate degrades to COMMIT, never to never-commit."""
+    from runtime import moy_carts
+    py, lua = {"runtime": "python"}, {"runtime": "lua"}
+    assert moy_carts.runtime_compile_check(py, "def _draw():\n    cls(7)\n")[0] is True
+    assert moy_carts.runtime_compile_check(py, "def _draw(:\n")[0] is False
+    assert moy_carts.runtime_compile_check(lua, "function _draw() cls(7) end\n")[0] is True
+    assert moy_carts.runtime_compile_check(lua, "function _draw(\n")[0] is True
+    assert moy_carts.runtime_compile_check(None, "def _draw(:\n")[0] is False
+
+
+def test_a_lua_code_edit_commits_on_the_debounce(tmp_path):
+    """Found on glass on the Guition: a Lua cart's Code tab sat dirty through
+    the whole pause and main.lua came back byte-unchanged, because the idle
+    commit asked the PYTHON compiler about Lua source."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    path = _lua_editable(ws)
+    ws.editor.set_text("function _draw() cls(9) end\n")
+    ws.editor.dirty = True
+
+    _go_idle(ws)
+
+    assert ws.editor.dirty is False
+    assert ws.menu_view == "code"                 # ...and nobody left the tab
+    assert "cls(9)" in moy_carts.load(path)["src"]
+    assert ws.save_status is None                 # no Python syntax error shown
+
+
+def test_a_broken_lua_chunk_commits_and_hard_commits(tmp_path):
+    """The recorded degradation: with no Lua parse gate on either tier, half-typed
+    Lua persists rather than being held back. Pinned so that giving moycore and
+    the host binding a compile-only entry is a deliberate change to this line, and
+    so that the hard path stays a path -- it used to refuse EVERY Lua commit."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    path = _lua_editable(ws)
+    ws.editor.set_text("function _draw( cls(9)\n")
+    ws.editor.dirty = True
+
+    _go_idle(ws)
+    assert "function _draw( cls(9)" in moy_carts.load(path)["src"]
+
+    ws.editor.set_text("function _draw( cls(4)\n")
+    ws.editor.dirty = True
+    ws.set_menu_view("cards")                     # tab leave: the hard commit
+    assert "cls(4)" in moy_carts.load(path)["src"]
 
 
 # -- what the debounce must NOT do ------------------------------------------
