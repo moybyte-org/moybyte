@@ -26,7 +26,7 @@ cart's manifest permissions rather than on a class constant.
     ctx.damage      the whole-system-surface invalidation flag
     ctx.surface     the system canvas, its font scale, chrome mode, pointer
     ctx.theme       the live token set + the theme/variant verbs
-    ctx.files       the USER-FILES store (#108: drawings/docs/tables/...)
+    ctx.files       the USER-FILES store (#108: drawings/docs/...)
     ctx.carts       the CART store (a cart is a project, not a document)
     ctx.nav         open another app, run a cart, keyboard text mode
     ctx.prefs       persisted per-app settings (system.json, namespaced)

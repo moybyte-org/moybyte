@@ -32,7 +32,7 @@ import contextlib
 import pytest
 
 from runtime import lua_binding as lb
-from runtime.lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+from runtime.lua_ext import PRELUDE_HANDLES, install_handles
 from runtime.widgets import Scenes
 
 pytestmark = pytest.mark.skipif(
@@ -77,7 +77,7 @@ class Run:
         self.run = lb.HostLuaRun(self.buf, 96, 64)
         self.run.register("draw_scene", self.ns["draw_scene"])
         install_handles(self.ns, self.run.register)
-        assert self.run.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude") is None
+        assert self.run.exec(PRELUDE_HANDLES, "prelude") is None
 
     def _draw_scene(self):
         self.drawn.append(self.state())

@@ -136,7 +136,7 @@ def test_a_manifest_asking_for_shell_or_carts_gets_neither():
 @pytest.mark.parametrize("perms,roles,kind", [
     (["graphics", "input"], (), None),
     (["files"], ("files",), "docs"),
-    (["files:tables"], ("files",), "tables"),
+    (["files:music"], ("files",), "music"),
     (["files:recordings"], (), None),      # folder-valued: not a text/blob kind
     (["files:nonsense"], (), None),        # a typo NARROWS, it never widens
     (["prefs"], ("prefs",), None),
@@ -146,8 +146,8 @@ def test_a_manifest_asking_for_shell_or_carts_gets_neither():
     (["files:docs", "files:docs"], ("files",), "docs"),   # a repeat is one kind
     # TWO kinds is a manifest error (below); the residual here fails CLOSED
     # rather than keeping whichever was declared last.
-    (["files:docs", "files:tables"], (), None),
-    (["files", "files:tables", "prefs"], ("prefs",), None),
+    (["files:docs", "files:music"], (), None),
+    (["files", "files:music", "prefs"], ("prefs",), None),
 ])
 def test_granted_roles_reads_the_manifest(perms, roles, kind):
     assert system_api.granted_roles({"permissions": perms}) == (roles, kind)
@@ -158,13 +158,13 @@ def test_granted_roles_reads_the_manifest(perms, roles, kind):
     (["files"], False),
     (["files", "files:docs"], False),           # the same kind, spelled twice
     (["files:nonsense", "files:docs"], False),  # the typo already narrowed away
-    (["files:docs", "files:tables"], True),
-    (["files", "files:tables"], True),          # bare `files` IS the docs kind
+    (["files:docs", "files:music"], True),
+    (["files", "files:music"], True),          # bare `files` IS the docs kind
 ])
 def test_two_file_kinds_is_a_manifest_error(perms, bad):
     """`files` is ONE kind-bound handle, so a second kind has nowhere to go.
     It used to be kept silently -- last declaration wins, order-dependent, no
-    diagnostic -- which put an app's documents in `tables` and looked like a
+    diagnostic -- which put an app's documents in `music` and looked like a
     save that did not happen."""
     err = system_api.manifest_error({"permissions": perms})
     if not bad:
@@ -179,7 +179,7 @@ def test_a_two_kind_manifest_is_refused_before_the_cart_runs(tmp_path):
     permission is not a crash)."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Greedy", "raise SystemExit\n",
-                perms=["files:docs", "files:tables"])
+                perms=["files:docs", "files:music"])
     ws = _ws(tmp_path)
     _open(ws, "Greedy")
     assert ws.player.cart_error is not None
@@ -337,16 +337,16 @@ def test_with_the_permission_the_same_source_runs(tmp_path):
 def test_a_scoped_grant_cannot_reach_another_kind(tmp_path):
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Tabby", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
-                                "    cls(0)\n", perms=["files:tables"])
+                                "    cls(0)\n", perms=["files:music"])
     ws = _ws(tmp_path)
     _open(ws, "Tabby")
     f = ws.player.ns["files"]
-    assert f.kind == "tables"
+    assert f.kind == "music"
     # The kind is bound at construction and is never an argument, so no
     # ARGUMENT to `save` reaches the kid's drawings.
     f.save_text("NOTE", "hi")
     assert moy_carts.list_files("drawings", ws.carts_root) == []
-    assert moy_carts.list_files("tables", ws.carts_root) == ["note"]
+    assert moy_carts.list_files("music", ws.carts_root) == ["note"]
 
 
 def test_the_scope_is_a_speed_bump_not_a_sandbox(tmp_path):
@@ -363,7 +363,7 @@ def test_the_scope_is_a_speed_bump_not_a_sandbox(tmp_path):
     for -- see system_api's module docstring."""
     carts = str(tmp_path / "carts")
     _write_cart(carts, "Tabby", "def _update(dt):\n    pass\n\n\ndef _draw():\n"
-                                "    cls(0)\n", perms=["files:tables", "prefs"])
+                                "    cls(0)\n", perms=["files:music", "prefs"])
     ws = _ws(tmp_path)
     _open(ws, "Tabby")
     f = ws.player.ns["files"]

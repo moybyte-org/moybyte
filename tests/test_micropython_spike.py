@@ -1550,7 +1550,7 @@ def test_paint_image_assets_wired_device_and_carts():
 
     # The device make_api takes `images` and exposes the image(name) accessor, decoding
     # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
-    assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
+    assert "pmem=None, wifi=None, images=None, scenes=None," in runtime
     assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     # _decode_moyimg lives in the unified cart_api since 2026-08-17 (one body
     # for every tier; the MicroPython lane inflates via `deflate`).
@@ -2377,7 +2377,7 @@ def test_device_sprite_storage_wired():
     # (#32) + persistent memory (pmem, #11).
     # make_api now also takes the capability-gated wifi backend LAST (#38).
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
+    assert "pmem=None, wifi=None, images=None, scenes=None," in runtime
     assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert "self.sheet = self._build_sheet()" in console                   # shared console
     # The sprite store-write moved to Project.commit_sprites (Stage 1b, project.py --
@@ -2734,7 +2734,7 @@ def test_device_wifi_wired():
 
     # make_api takes the gated wifi backend LAST and injects `wifi` only when set.
     assert "def make_api(canvas, input, config, sheet=None, audio=None," in runtime
-    assert "pmem=None, wifi=None, images=None, scenes=None, tables=None," in runtime
+    assert "pmem=None, wifi=None, images=None, scenes=None," in runtime
     assert "texts=None, net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
     assert 'ns["wifi"] = wifi' in runtime
     # The device WLAN backend (STUB -- needs hardware verification). LAZY: the WLAN
@@ -3188,38 +3188,6 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
                 Path("runtime/host_canvas.py")):
         assert "def new_layer(" not in mod.read_text(encoding="utf-8"), \
             mod.name + ": grew a new_layer copy back; use the _make_layer hook"
-
-
-def test_lua_table_verb_never_clobbers_the_table_library():
-    """#164: the #78 `table()` cart verb must ride Lua's `table` LIBRARY as a
-    metatable __call, never replace it -- a ported cart's p8 shim needs
-    table.remove (the shim generator lives in moy-spec now)."""
-    # The graft lives in the shared prelude (runtime/lua_ext.py), so every
-    # runtime that imports it inherits the #164 fix instead of carrying its own
-    # copy of the line.
-    ext = (ROOT.parent.parent / "runtime" / "lua_ext.py").read_text(
-        encoding="utf-8")
-    assert "setmetatable(table, { __call" in ext
-    host = (ROOT.parent.parent / "runtime" / "lua_host.py").read_text(
-        encoding="utf-8")
-    # The host has ONE lane now (lupa went on 2026-08-14), and it REGISTERS the
-    # verb rather than assigning it into the globals -- the assignment lane this
-    # used to also pin was lupa's, which could hand Lua a Python object directly.
-    assert 'reg("moy_table_verb", tv)' in host
-    assert 'g["moy_table_verb"] = v' not in host
-    glue = (DEVICE / "moycore_glue.py").read_text(encoding="utf-8")
-    # The glue's half is EXECUTED since #208's residue pass --
-    # tests/test_moycore_glue.py::test_the_table_verb_goes_in_under_its_own_name
-    # runs the register loop and asserts the alias goes in and the bare name
-    # does not, which a substring cannot tell apart.
-    # ...and the register loop must SKIP the bare name, or it sets the global
-    # `table` and clobbers the library before the prelude can graft anything.
-    # NOT_REGISTRABLE moved into the shared lua_ext with the prelude it pairs
-    # with (it was twinned between the glue and lua_host, unchecked); the glue
-    # is pinned on IMPORTING it, so a board that stopped sharing the list would
-    # still be caught here.
-    assert "NOT_REGISTRABLE" in glue
-    assert '"table",' in ext[ext.index("NOT_REGISTRABLE = frozenset(("):]
 
 
 def test_both_boards_service_the_web_console_every_frame():

@@ -538,14 +538,14 @@ def test_empty_trash_destroys_every_trashed_item_on_disk(tmp_path):
     absent from a listing the same module builds."""
     ws, files = _files(tmp_path)
     assert files.save("docs", "note", _store.encode_text("hi"))[1] is None
-    assert files.save("tables", "grid", "{}")[1] is None
+    assert files.save("music", "tune", "{}")[1] is None
     assert files.delete("docs", "note")[1] is None
-    assert files.delete("tables", "grid")[1] is None
+    assert files.delete("music", "tune")[1] is None
     listed, err = files.trash_list()
-    assert err is None and sorted(listed) == [("docs", "note"), ("tables", "grid")]
-    dirs = [_trash_dir(ws, k) for k in ("docs", "tables")]
+    assert err is None and sorted(listed) == [("docs", "note"), ("music", "tune")]
+    dirs = [_trash_dir(ws, k) for k in ("docs", "music")]
     assert [os.listdir(d) for d in dirs] == [["note" + _kind_ext("docs")],
-                                             ["grid" + _kind_ext("tables")]]
+                                             ["tune" + _kind_ext("music")]]
     assert files.empty_trash() == (None, None)
     assert files.trash_list() == ([], None)
     for d in dirs:
@@ -780,7 +780,7 @@ def test_the_scoped_handle_acts_on_its_granted_kind_only(tmp_path):
     assert sorted(f for f in os.listdir(_store.file_kind_dir("docs", ws.carts_root))
                   if not f.endswith(".bak")) == \
         ["note" + ext, "plain" + ext]
-    for kind in ("drawings", "tables", "sprites", "music"):
+    for kind in ("drawings", "sprites", "music"):
         assert files.count(kind) == (0, None), kind
 
 

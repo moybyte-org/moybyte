@@ -531,24 +531,3 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
     assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
     on_disk = moy_carts.load_history("docs", "story", root)
     assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
-
-
-# -- the stored-blob decoders ----------------------------------------------------
-
-def test_decode_table_trims_to_populated_extent():
-    blob = json.dumps({"format": "moysheet-v1", "name": "wave",
-                       "cells": {"A1": {"f": "", "v": 1},
-                                 "B1": {"f": "=A1+1", "v": 2},
-                                 "A2": {"f": "", "v": "hello"}}})
-    assert moy_carts.decode_table(blob) == [[1, 2], ["hello", ""]]
-
-
-def test_decode_text_splits_body_into_lines():
-    blob = json.dumps({"format": "moytext-v1", "body": "line one\nline two"})
-    assert moy_carts.decode_text(blob) == ["line one", "line two"]
-
-
-def test_decoders_degrade_on_garbage():
-    for bad in ("", "not json", "{}", '{"cells": null}', "[]", None):
-        assert moy_carts.decode_table(bad) == []
-        assert moy_carts.decode_text(bad) == []

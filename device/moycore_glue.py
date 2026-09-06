@@ -46,10 +46,10 @@ split it justified.
 from array import array
 
 try:
-    from lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+    from lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
                          LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 except ImportError:                      # host tests importing the device module
-    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+    from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
                                  LIBMOY_VERBS, NOT_REGISTRABLE,
                                  install_handles)
 
@@ -216,16 +216,13 @@ class MoycoreRun:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
                         and callable(ns[name])):
                     _moycore.register(name, ns[name])
-            tv = ns.get("table") if hasattr(ns, "get") else None
-            if callable(tv):
-                _moycore.register("moy_table_verb", tv)
             # The object-valued verbs and their Lua wrappers -- the same two
             # halves moy_lua uses, from the same source. Without this a cart
             # calling make_layer() gets "unsupported value" back from the
             # trampoline and the whole run falls to the old runtime, which is
             # what sakura_lua/brick_siege/ray did before this landed.
             self._layers, self._images = install_handles(ns, _moycore.register)
-            err = _moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM

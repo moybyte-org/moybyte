@@ -147,12 +147,9 @@ NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
 # Desk Lab interop assets (#78): the tiny cart-folder documents a game reads back
-# through the table(name)/text(name) cart verbs -- the document analogue of
-# Paint's images/<name>.moyimg. A .moysheet is the moysheet-v1 JSON blob (formula +
-# computed value per cell); a .moytext is the moytext-v1 blob (a document's body).
+# through the text(name) cart verb -- the document analogue of Paint's
+# images/<name>.moyimg. A .moytext is the moytext-v1 blob (a document's body).
 # Kid-greppable, engine-free (the v0.4 portability contract).
-TABLES_DIR = "tables"
-TABLE_EXT = ".moysheet"
 TEXTS_DIR = "docs"
 TEXT_EXT = ".moytext"
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
@@ -477,56 +474,13 @@ def save_notes(text, root=CARTS_DIR):
     _write_sibling(root, NOTES_NAME, text)
 
 
-# --- Desk Lab interop (#78): table(name) / text(name) cart-folder documents ---
+# --- Desk Lab interop (#78): text(name) cart-folder documents ---
 #
-# A game reads a sheet or a doc placed in ITS OWN cart folder, the
-# exact mirror of Paint's image(name) -> images/<name>.moyimg. The decoders turn a
-# tiny JSON blob into the plain-Python shape the cart verb hands the kid (rows of
-# values / lines of text); both are guarded so a missing/bad file degrades to an
-# empty list, never a crash (image()'s degrade-don't-throw contract).
-
-def decode_table(blob):
-    """A moysheet-v1 blob -> rows (a list of lists of computed values). Numbers
-    stay numbers, text stays strings, a blank cell is "". The grid is trimmed to
-    the last populated row/column, so a mostly-empty sheet reads as a tight table.
-    Anything malformed yields []."""
-    try:
-        data = json.loads(blob) if isinstance(blob, str) else blob
-    except (ValueError, TypeError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    cells = data.get("cells")
-    if not isinstance(cells, dict) or not cells:
-        return []
-    max_c = -1
-    max_r = -1
-    parsed = {}
-    for key, entry in cells.items():
-        cr = _ref_to_rc(key)
-        if cr is None:
-            continue
-        col, row = cr
-        if isinstance(entry, dict):
-            val = entry.get("v", "")
-        else:
-            val = entry
-        parsed[(row, col)] = val
-        if col > max_c:
-            max_c = col
-        if row > max_r:
-            max_r = row
-    if max_r < 0:
-        return []
-    rows = []
-    for r in range(max_r + 1):
-        row = []
-        for c in range(max_c + 1):
-            v = parsed.get((r, c), "")
-            row.append(v if v is not None else "")
-        rows.append(row)
-    return rows
-
+# A game reads a doc placed in ITS OWN cart folder, the exact mirror of Paint's
+# image(name) -> images/<name>.moyimg. The decoder turns a tiny JSON blob into
+# the plain-Python shape the cart verb hands the kid (lines of text), guarded so
+# a missing/bad file degrades to an empty list, never a crash (image()'s
+# degrade-don't-throw contract).
 
 def encode_text(body):
     """A doc body string -> the bytes its file holds.
@@ -555,35 +509,6 @@ def decode_text(blob):
         if isinstance(data, dict) and isinstance(data.get("body"), str):
             body = data["body"]
     return body.split("\n") if body else []
-
-
-def _ref_to_rc(ref):
-    """"B3" -> (col_index, row_index), both 0-based; None if malformed. A tiny
-    self-contained A1 parser so this module keeps its json+os-only footprint (no
-    formula.py import on the device asset path)."""
-    ref = str(ref).upper()
-    i = 0
-    while i < len(ref) and "A" <= ref[i] <= "Z":
-        i += 1
-    if i == 0 or i >= len(ref):
-        return None
-    col = 0
-    for ch in ref[:i]:
-        col = col * 26 + (ord(ch) - 64)
-    for ch in ref[i:]:
-        if not ("0" <= ch <= "9"):
-            return None
-    row = int(ref[i:])
-    if row < 1:
-        return None
-    return (col - 1, row - 1)
-
-
-def load_tables(path):
-    """A cart's table assets: {name: rows} for every tables/<name>.moysheet blob
-    (name = filename without the extension), decoded to rows. {} when the cart has
-    no tables/ dir. Mirrors load_images' degrade-don't-throw contract."""
-    return _load_docs(path, TABLES_DIR, TABLE_EXT, decode_table)
 
 
 def load_texts(path):
@@ -1088,7 +1013,6 @@ def load(path):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
         scenes = load_scenes(path)                # scene assets (#85), {} if none
-        tables = load_tables(path)                # cart tables/ (#78), {name: rows}, {} if none
         texts = load_texts(path)                  # Writer docs (#78), {name: lines}, {} if none
         return {
             "path": path,
@@ -1172,9 +1096,8 @@ def load(path):
             # manifest are appended sorted, so a hand-added scene still loads).
             "scenes": scenes,
             "scene_names": scene_names(man, scenes),
-            # Desk Lab interop (#78): sheets ({name: rows}) + docs
-            # ({name: lines}) placed in the cart folder, read via table()/text().
-            "tables": tables,
+            # Desk Lab interop (#78): docs ({name: lines}) placed in the cart
+            # folder, read via text().
             "texts": texts,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
@@ -1871,7 +1794,7 @@ def _dup_skip(name, main):
 
 def _copy_cart_files(src, dst, main):
     """Copy a cart folder's asset files (one level of subfolders -- images/,
-    scenes/, tables/, docs/) into a fresh copy. Degrade-don't-throw like load():
+    scenes/, docs/) into a fresh copy. Degrade-don't-throw like load():
     an unreadable entry is skipped, never fatal, so a copy can lose one asset but
     never fail outright."""
     try:
@@ -1913,7 +1836,7 @@ def duplicate(cart, root=CARTS_DIR, new_title=None):
                  canvas=cart.get("canvas"))                  # spec 1/3.1 cart canvas
     # create() writes the CODE side of a project (manifest/main/config/scenes).
     # Everything else a cart owns -- sprites.moygfx, map.moymap, sounds.json,
-    # blocks.json, images/, tables/, docs/ -- lived only in the source FOLDER, so
+    # blocks.json, images/, docs/ -- lived only in the source FOLDER, so
     # a copy used to arrive with just its code: the picker's COPY silently threw
     # away the sprite sheet, tilemap, sounds and cover art of every project it
     # duplicated. Copying the files (rather than re-serialising the loaded dict)
@@ -1982,7 +1905,6 @@ LEGACY_DOC_EXT = ".moytext"
 FILE_KINDS = {
     "drawings":   (IMAGE_EXT, False, "drawing"),
     "docs":       (DOC_EXT, False, "doc"),
-    "tables":     (TABLE_EXT, False, "table"),
     "sprites":    (".moygfx", False, "sheet"),
     "music":      (".moysong", False, "song"),
     "recordings": ("", True, "recording"),

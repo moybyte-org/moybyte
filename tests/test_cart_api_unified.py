@@ -81,5 +81,5 @@ def test_the_base_namespace_keyset_is_pinned():
         "btn", "btnp", "players", "key", "keyp", "time", "pmem",
         "textmode", "quit", "view", "cfg", "col",
         "sfx", "beep", "music", "music_stop", "sound_stop", "volume",
-        "rnd", "flr", "Image", "image", "table", "text",
+        "rnd", "flr", "Image", "image", "text",
     }

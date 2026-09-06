@@ -57,7 +57,7 @@ CART_VERBS = (
     # Misc / lifecycle
     "time", "pmem", "cfg", "rnd", "flr", "quit",
     # Desk Lab interop (#78)
-    "table", "text",
+    "text",
     # Capability-gated: network (#38), multiplayer (#65)
     "wifi", "net", "on_net",
     # Capability-gated: physical pins (#9), on a host that has them

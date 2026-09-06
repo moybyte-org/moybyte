@@ -110,10 +110,6 @@ LIBMOY_VERBS = frozenset((
 # touching/move_actor/move_actor_to/remove_actor take one. draw_scene stays
 # registered -- no arguments, no result, nothing to marshal.
 #
-# `table` is the #164 case: registering that name would set the GLOBAL `table`
-# and clobber Lua's library, which celeste's p8 shim needs for table.remove. It
-# goes in as `moy_table_verb` and PRELUDE_TABLE grafts it onto the library as a
-# metatable __call.
 # libmoy installs make_layer/draw_layer as CORE since moy-spec b9dbba1
 # (2026-08-19): they stopped being SPEC.md 10 extensions because a verb that
 # degrades truthfully belongs in core. Its versions return nil when the host
@@ -124,33 +120,20 @@ LIBMOY_VERBS = frozenset((
 NOT_REGISTRABLE = frozenset((
     "make_layer", "draw_layer", "image",   # object-valued: prelude + handles
     "Image",                               # a constructor, likewise
-    "table",                               # goes in as moy_table_verb (#164)
     "scene", "load_scene", "actors",       # rows of actors: prelude + handles
     "touching", "move_actor", "move_actor_to", "remove_actor",
 ))
 
-# The prelude in three chunks, because moycore takes only two of them.
+# The prelude in two chunks, because moycore takes only one of them.
 #
-# Under moy_lua every verb is a registered Python trampoline, so all three
+# Under moy_lua every verb is a registered Python trampoline, so both
 # apply. Under moycore the SPEC verbs are libmoy's own C functions, and
 # rnd/flr are among them -- shadowing a lua_CFunction with a Lua one there
 # would be a pessimisation AND a semantic change (libmoy's rnd draws from the
 # console's rng, which is the thing the spec pins). So PRELUDE_FASTMATH is
-# moy_lua's alone; the other two are shared, and shared as SOURCE rather than
+# moy_lua's alone; PRELUDE_HANDLES is shared, and shared as SOURCE rather than
 # as a second copy, so a fix to the layer wrappers cannot land on one runtime
 # and miss the other.
-PRELUDE_TABLE = """
-do
-  -- #164: `table` stays the Lua LIBRARY (celeste's p8 shim needs
-  -- table.remove); the #78 cart verb rides it as a metatable __call.
-  if moy_table_verb ~= nil then
-    local tv = moy_table_verb
-    setmetatable(table, { __call = function(_, name) return tv(name) end })
-    moy_table_verb = nil
-  end
-end
-"""
-
 PRELUDE_HANDLES = """
 do
   local layer_new, layer_spr_img = __layer_new, __layer_spr_img
@@ -423,7 +406,7 @@ do
 end
 """
 
-_LUA_PRELUDE = PRELUDE_TABLE + PRELUDE_HANDLES + PRELUDE_FASTMATH
+_LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
 
 def _esc(s):

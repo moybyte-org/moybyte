@@ -348,13 +348,6 @@ function image(name) end
 
 -- --- data interop ------------------------------------------------------------
 
----Rows of the cart's tables/<name>.moysheet (numbers as numbers, text as
----strings, blank cells ""). Missing -> {}. NB: `table` stays Lua's table
----library; this verb rides it as a call: table("scores"). VENDOR.
----@param name string
----@return table
----@overload fun(name: string): table
-
 ---Lines of the cart's docs/<name>.moytext. Missing -> {}. VENDOR.
 ---@param name string
 ---@return string[]

@@ -1914,14 +1914,6 @@ class Workstation:
         self.project.images = value
 
     @property
-    def tables(self):
-        return self.project.tables
-
-    @tables.setter
-    def tables(self, value):
-        self.project.tables = value
-
-    @property
     def texts(self):
         return self.project.texts
 
@@ -2317,7 +2309,6 @@ class Workstation:
         # Player, building the cart namespace -- goes through self.project.
         self.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
-        self.tables = self.cart.get("tables") or {}    # cart tables/, table() (#78)
         self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)

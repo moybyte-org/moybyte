@@ -29,7 +29,7 @@ Canonical home is runtime/; tests import it as runtime.lua_host.
 # marshals ints and one string, so they ride int handles plus a Lua prelude),
 # the moy_button bit order, and the two deny lists that decide what gets
 # registered on top of libmoy's table.
-from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES, MOY_BUTTONS,
+from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
                              LIBMOY_VERBS, NOT_REGISTRABLE, install_handles)
 
 # ---------------------------------------------------------------------------
@@ -101,9 +101,6 @@ class MoycoreHostRun:
                 if (name not in LIBMOY_VERBS and name not in NOT_REGISTRABLE
                         and callable(ns[name])):
                     reg(name, ns[name])
-            tv = ns.get("table")
-            if callable(tv):
-                reg("moy_table_verb", tv)
             # The object-valued verbs, through the shared int-handle glue --
             # the same module and the same prelude the boards run. Without it
             # `make_layer` returns a Layer, the dispatch cannot marshal it, and
@@ -111,7 +108,7 @@ class MoycoreHostRun:
             # than falling back to lupa, which is a worse failure than the one
             # the fallback exists for.
             self._layers, self._images = install_handles(ns, reg)
-            err = self._run.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude")
+            err = self._run.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 self._run.close()
                 raise RuntimeError(err)

@@ -431,7 +431,6 @@ class HistoryRouter:
         ws.sheet = ws._build_sheet()
         ws.tilemap = ws._build_tilemap()
         ws.images = fresh.get("images") or {}
-        ws.tables = fresh.get("tables") or {}
         ws.texts = fresh.get("texts") or {}
         ws.scenes = ws._build_scenes()   # a scene undo must reach the live rows (#85)
         ws.cart_error = None

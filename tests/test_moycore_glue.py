@@ -411,7 +411,6 @@ def make_ns(**extra):
         "draw_layer": lambda lay, cx, cy: log.append(("draw_layer", lay, cx, cy)),
         "image": lambda name: ("img", name) if name != "missing" else None,
         "Image": FakeLayer,
-        "table": lambda name: log.append(("table", name)),
         "_moy_cfg": {"speed": 3},
     }
     ns.update(extra)
@@ -743,22 +742,6 @@ def test_the_object_valued_verbs_are_never_registry_entries(w):
     assert not (set(w.core.registered) & NOT_REGISTRABLE)
 
 
-def test_the_table_verb_goes_in_under_its_own_name(w):
-    """#164: registering the bare name sets the GLOBAL `table` and clobbers
-    Lua's library, which a ported cart's p8 shim needs for table.remove."""
-    ns = make_ns()
-    w.run(ns=ns)
-    assert "table" not in w.core.registered
-    assert w.core.registered["moy_table_verb"] is ns["table"]
-
-
-def test_a_namespace_without_a_table_verb_registers_no_alias(w):
-    ns = make_ns()
-    del ns["table"]
-    w.run(ns=ns)
-    assert "moy_table_verb" not in w.core.registered
-
-
 def test_non_callable_namespace_entries_are_skipped(w):
     ns = make_ns(SOME_CONSTANT=7, some_table={"a": 1})
     w.run(ns=ns)
@@ -816,12 +799,11 @@ def test_the_prelude_is_the_shared_source_and_omits_the_fastmath_half(w):
     """`PRELUDE_FASTMATH` is moy_lua's alone: shadowing libmoy's C `rnd` with
     a Lua one is a pessimisation AND a semantic change -- libmoy's draws from
     the console rng the C seeds, which is the sequence SPEC.md 9 pins."""
-    from runtime.lua_ext import (PRELUDE_TABLE, PRELUDE_HANDLES,
-                                 PRELUDE_FASTMATH)
+    from runtime.lua_ext import PRELUDE_HANDLES, PRELUDE_FASTMATH
 
     w.run()
     src = [c[1] for c in w.core.calls if c[0] == "exec"][0]
-    assert src == PRELUDE_TABLE + PRELUDE_HANDLES
+    assert src == PRELUDE_HANDLES
     assert PRELUDE_FASTMATH not in src
     assert "function rnd(" not in src
 

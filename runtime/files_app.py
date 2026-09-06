@@ -54,7 +54,6 @@ KIND_LABELS = (
     ("drawings", "DRAWINGS"),
     ("sprites", "SPRITES"),
     ("music", "MUSIC"),
-    ("tables", "TABLES"),
     ("recordings", "RECORDINGS"),
 )
 
@@ -231,7 +230,7 @@ class FilesAppLayer(ListShellApp):
         kind = self.grid.kind
         if kind == "drawings":
             return self.GRID_ACTIONS
-        if kind in ("docs", "tables"):
+        if kind == "docs":
             return self.DOC_ACTIONS
         return self.PLAIN_ACTIONS
 

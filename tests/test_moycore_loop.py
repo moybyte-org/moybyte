@@ -132,7 +132,7 @@ moycore.close()
 
 # OBJECT-valued verbs ride the shared prelude, not the trampoline. This is the
 # real runtime/lua_ext.py, imported and executed -- not a transcription of it.
-from lua_ext import PRELUDE_TABLE, PRELUDE_HANDLES, install_handles
+from lua_ext import PRELUDE_HANDLES, install_handles
 
 class _Layer:
     def __init__(self, w, h):
@@ -149,19 +149,16 @@ calls = []
 _img = _Img()
 NS = {"make_layer": lambda w, h: (calls.append(("new", w, h)), _Layer(w, h))[1],
       "draw_layer": lambda l, x, y: calls.append(("draw", l.wh, x, y)),
-      "image": lambda n: _img if n == "bg" else None,
-      "table": lambda n: 77}
+      "image": lambda n: _img if n == "bg" else None}
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
-moycore.register("moy_table_verb", NS["table"])
 install_handles(NS, moycore.register)
-print("PRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
+print("PRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("OBJ", moycore.load(
     "function _init()\n"
     "  L = make_layer(9, 5)\n"
     "  B = image('bg')\n"
     "  MISS = image('nope')\n"
-    "  T = table('scores')\n"
-    "  N = #({1,2,3})\n"          # the table LIBRARY must survive the graft
+    "  N = #({1,2,3})\n"          # the table LIBRARY is untouched
     "end\n"
     "function _update(dt) end\n"
     "function _draw()\n"
@@ -169,8 +166,7 @@ print("OBJ", moycore.load(
     "end\n", "@obj"))
 moycore.tick(0.03125)
 print("OBJCALLS", calls)
-print("OBJGLOBALS", moycore.get_global("T"), moycore.get_global("N"),
-      moycore.get_global("MISS"))
+print("OBJGLOBALS", moycore.get_global("N"), moycore.get_global("MISS"))
 moycore.close()
 
 # The placement API (#85/#109) over the SAME shared Scenes the Python tier
@@ -196,7 +192,7 @@ PNS = {"scene": _scenes.scene, "load_scene": _scenes.load_scene,
 moycore.run_begin(fb, W, H, None, sheet, None, 0, 0, snap, aq, None, None, None)
 moycore.register("draw_scene", PNS["draw_scene"])
 install_handles(PNS, moycore.register)
-print("PPRE", moycore.exec(PRELUDE_TABLE + PRELUDE_HANDLES, "prelude"))
+print("PPRE", moycore.exec(PRELUDE_HANDLES, "prelude"))
 print("PLACE", moycore.load(
     "function _init()\n"
     "  local s = scene()\n"
@@ -478,9 +474,8 @@ def test_a_lua_cart_frame_runs_entirely_in_c():
                 out[out.index("<_Img"):out.index(">", out.index("<_Img")) + 1],
                 "<_Img object>")), \
         "layer/image handles did not reach the Python objects: %s" % out
-    # table() rides Lua's table LIBRARY as __call (#164), so both work.
-    assert by["OBJGLOBALS"][1:] == ["77", "3", "None"], \
-        "the table graft or the missing-image nil regressed: %s" % out
+    assert by["OBJGLOBALS"][1:] == ["3", "None"], \
+        "the table library or the missing-image nil regressed: %s" % out
 
     # The placement API (#214). scene() reached Lua as NIL until the rows got a
     # route across the boundary, so `ipairs(scene())` was "value expected" on

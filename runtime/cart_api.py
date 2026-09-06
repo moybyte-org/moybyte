@@ -16,7 +16,7 @@ each resolved here on its merits:
     `layer.tline(...)` worked on the host and raised AttributeError on a
     board. The superset is now everyone's.
   * make_layer: the device passed `owner=` (the #63 layer-loan leak fix) and
-    tables/texts through to the layer's namespace; the host passed neither.
+    texts through to the layer's namespace; the host passed neither.
     Both now do both.
   * time() reached the tick helpers through three different lanes; it rides
     `runtime/ticks.py` now, like everything else.
@@ -141,7 +141,7 @@ class _Layer:
 
 
 def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
-             pmem=None, wifi=None, images=None, scenes=None, tables=None,
+             pmem=None, wifi=None, images=None, scenes=None,
              texts=None, net=None, gpio=None, flags=None, owner="cart"):
     """The cartridge global namespace: the frozen TIC-80-style kid API
     (cls/pix/rect/circ/spr/map/print/btn/touch/... -- docs/moy_cart_api.md)
@@ -441,7 +441,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         # ~12-14ms) with a flat memory copy (~7ms) -- the lever for ~60fps scrollers.
         lc = canvas.new_layer(w, h, owner=owner)   # #63: lent to this program (leak fix)
         lns = make_api(lc, input, config, sheet, audio, tilemap, pmem, wifi, images,
-                       tables=tables, texts=texts, flags=tile_flags, owner=owner)
+                       texts=texts, flags=tile_flags, owner=owner)
         return _Layer(lc, lns)
 
     def draw_layer(layer, cam_x=0, cam_y=0):
@@ -488,14 +488,6 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
                 _img_cache[a] = im
             return im
         return Image.from_ascii(a, mapping, transparent)
-
-    def table(name):
-        # Desk Lab interop (#78): a sheet placed in the cart's folder
-        # (tables/<name>.moysheet) read as ROWS -- a list of lists of computed
-        # values. Missing name -> [] (image()'s degrade-don't-throw contract).
-        # The rows were decoded once at cart-load (moy_carts.decode_table).
-        rows = tables.get(name) if tables else None
-        return rows if rows is not None else []
 
     def text(name):
         # Desk Lab interop (#78): a Writer doc in the cart's folder
@@ -609,7 +601,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         "flr": lambda x: int(x // 1),
         "Image": Image,
         "image": image,
-        "table": table, "text": text,
+        "text": text,
     }
     # Capability-gated network API (#38): the shared Workstation passes a non-None
     # wifi backend ONLY for a cart with the "network" permission, so a normal kid

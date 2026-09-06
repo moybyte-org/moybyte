@@ -41,7 +41,7 @@ because the two histories are not the same object.
 
 TWO ROOTS since 2026-08-25 (owner call, "they should get synced"): the carts
 root, and the #108 user-files layer beside it -- the kid's drawings, docs,
-tables, sprite sheets, songs and recordings. One protocol, one watcher class,
+sprite sheets, songs and recordings. One protocol, one watcher class,
 one apply; a batch carries which root it speaks for and never mixes the two.
 
 One body, three consumers, so the two sides cannot disagree about the wire:

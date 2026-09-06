@@ -156,7 +156,7 @@ NEVER_GRANTED = ("shell", "carts", "wallpaper", "artwork",
 # The user-files kinds a `"files:<kind>"` permission may name. A closed set, and
 # `recordings` is deliberately outside it: it is the one FOLDER-valued kind
 # (moy_carts.FILE_KINDS), so `save(name, blob)` does not mean anything there.
-FILE_KINDS = ("docs", "tables", "drawings", "sprites", "music")
+FILE_KINDS = ("docs", "drawings", "sprites", "music")
 
 # `"files"` with no kind means the kid's DOCUMENTS -- the same `docs` kind
 # Writer authors and Files browses, so an app's notes show up where a kid would
@@ -227,9 +227,9 @@ def manifest_error(cart):
     ONE rule today: **a cart gets at most one user-files kind.** `files` is
     published as a single kind-bound handle (`ScopedFiles`, whose verbs take a
     name and never a kind), so there is nowhere for a second kind to go. Until
-    this check existed, `["files:docs", "files:tables"]` silently kept the LAST
+    this check existed, `["files:docs", "files:drawings"]` silently kept the LAST
     one -- an order-dependent grant, with the cart's docs quietly landing in
-    tables and no diagnostic anywhere. Refusing beats guessing: a manifest that
+    drawings and no diagnostic anywhere. Refusing beats guessing: a manifest that
     asks for two kinds is asking for something this build does not have, and
     the author is the only one who can say which kind they meant.
 
