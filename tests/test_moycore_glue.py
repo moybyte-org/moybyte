@@ -805,7 +805,7 @@ def test_the_prelude_runs_before_the_cart_and_after_the_registrations(w):
     assert verbs[-1] == "load"
     assert verbs.count("exec") == 1
     # EVERY registration, not merely the first: the prelude copies
-    # `__layer_new` and its five siblings into locals and then nils the
+    # `__layer_new` and its siblings into locals and then nils the
     # globals, so a handle registered after the exec is captured as nil and
     # `make_layer` dies on "attempt to call a nil value".
     last_register = max(i for i, v in enumerate(verbs) if v == "register")

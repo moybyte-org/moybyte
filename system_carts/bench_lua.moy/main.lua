@@ -10,12 +10,18 @@
 -- through moycore.pmem_image. Cells are the bench's own save file; the
 -- numbers persisting is harmless and even handy.
 --
+-- These two carts are the WHOLE bench shelf since 2026-09-06: ray_lua.moy
+-- folded in as the ray/tetra scenes, and layer_test.moy (which had no Lua
+-- twin) as the scroll/layer pair. Everything else in the store is a game or
+-- an app.
+--
 -- PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
 -- this cart, bench.moy/main.py, tools/p4_cart_bench.py):
 --   0 magic 45948   1 version   2 n_verbs   3 done flag (written LAST)
 --   8 + i*3:  verb_id, k, best_ms          (verb ids in VERB_ID below)
 --   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
---             (phases in order: idle=0 logic=1 draw=2 silent=3 sound=4)
+--             (phases in order: idle=0 logic=1 draw=2 silent=3 sound=4
+--              ray=5 tetra=6 scroll=7 layer=8)
 
 local PHASE_MICRO = 0
 local PHASE_IDLE = 1        -- the floor: a frame where the cart does nothing
@@ -23,19 +29,44 @@ local PHASE_LOGIC = 2       -- IDLE + arithmetic  -> LOGIC - IDLE = the language
 local PHASE_DRAW = 3        -- IDLE + draw calls  -> DRAW  - IDLE = the draw path
 local PHASE_GAME = 4        -- the scene, silent
 local PHASE_GAME_SND = 5    -- the SAME scene + a beep every ~0.4s
-local PHASE_DONE = 6
+local PHASE_RAY = 6         -- the software 3D frame (#167)
+local PHASE_TETRA = 7       -- the same frame's tri() half
+local PHASE_SCROLL = 8      -- a scrolling level re-rendered by map() every frame
+local PHASE_LAYER = 9       -- the SAME pixels window-copied from a layer (#54)
+local PHASE_DONE = 10
 
 local GAME_FRAMES = 400     -- ~10s at 40fps (the "GAME FRAMES" card overrides)
 local SCENE_FRAMES = 200    -- the three isolation phases (~5s each)
+local FOLD_FRAMES = 90      -- the four folded scenes: the ray/tetra turntable's
+                            -- full revolution at the TS step below
 local REPS = 8              -- best-of per verb
 local TARGET_MS = 25        -- grow a batch until it costs at least this
 
 -- The isolation phases exist because a whole-frame number cannot say WHERE the
 -- time went, and the Python-vs-Lua comparison kept stalling on exactly that:
 -- per-verb costs said Lua should win the game scene and the measured frame said
--- it lost. So measure the floor, then add one ingredient at a time.
+-- it lost. So measure the floor, then add one ingredient at a time. Every other
+-- scene draws the same one clear and one label the floor does, so subtracting
+-- the floor leaves the scene's own work and nothing else.
 local LOGIC_ITERS = 3000    -- per frame, in the LOGIC phase
 local DRAW_OPS = 300        -- per frame, in the DRAW phase
+
+-- The RAY/TETRA scenes (#167), the Python twin's header carries the full why:
+-- a DDA march per screen column, each wall one sspr(), the ceiling and floor
+-- two WIDE rects rather than per-column spans (measured 2x better on glass --
+-- contiguity, not call count). The maze is map.moymap cols 0..11 rows 8..29
+-- and the walls are sheet tiles 64..67, dim faces one sheet row down.
+local CEIL, FLOOR = 1, 5
+local TC, TS = 0.99755, 0.06994   -- one turn step; no trig needed anywhere
+local RAY_STEP = 2                -- screen pixels per ray (160 rays)
+local RAY_PX, RAY_PY = 5.5, 16.5  -- a parked camera: it turns, it never walks
+
+-- The SCROLL/LAYER pair (#54): the same level from a fixed camera, drawn once
+-- by map() per frame and once by a window copy out of a pre-rendered layer.
+-- SCROLL - FLOOR is the map() call, LAYER - FLOOR is the copy, and the ratio
+-- is what the old Layer Test cart printed.
+local CAM = 96              -- fixed scroll position: deterministic, mid-level
+local LW = 512              -- layer width in px (the map is 64 tiles = 512px)
 
 local st = {}
 
@@ -115,7 +146,9 @@ local VERBS = {
 }
 
 function _init()
-  -- the map verb's field: same deterministic 15x8 region as the Python twin
+  -- the map verb's field: same deterministic 15x8 region as the Python twin,
+  -- written over the shipped map's top-left corner, which the ray maze and the
+  -- scroll window both stay clear of
   for y = 0, 7 do
     for x = 0, 14 do
       mset(x, y, (x + y) & 7)
@@ -136,6 +169,10 @@ function _init()
                           -- names at closure-creation, not at call time)
   st.sink = 0
   st.warm = 5
+  st.dx, st.dy = 0.0, -1.0          -- the ray camera's basis: direction and
+  st.plx, st.ply = 0.66, 0.0        -- camera plane (66 degree FOV)
+  st.rc, st.rs = 1.0, 0.0           -- the tetra turntable's cos/sin
+  st.lay = nil                      -- the scroll layer, built at its own phase
   pmem(3, 0)              -- arm the pmem report: a PREVIOUS run's done flag
                           -- persists (pmem is the save file), and a harness
                           -- polling cell 3 must not read it
@@ -229,6 +266,152 @@ local function draw_scene(f)
   print("DRAW", 8, 6, 7)
 end
 
+-- March one ray per column and draw its wall slice. Textbook DDA: step whole
+-- map cells until one is solid, then take the PERPENDICULAR distance (not the
+-- ray length) so the walls come out flat instead of fish-eyed. mget() is -1 on
+-- an empty cell, so "did I hit something" and "which tile do I draw" are the
+-- same read -- and the maze's border is solid, so a ray never leaves it.
+--
+-- flr() where the Python twin writes int(): those disagree on a negative
+-- number, and every coordinate here is inside a walled map, so they cannot.
+local function cast(dx, dy, plx, ply)
+  local cols = W // RAY_STEP
+  local half = H // 2
+  for i = 0, cols - 1 do
+    local cam = 2.0 * i / cols - 1.0
+    local rdx = dx + plx * cam
+    local rdy = dy + ply * cam
+
+    local mapx, mapy = flr(RAY_PX), flr(RAY_PY)
+
+    local ddx = (rdx == 0.0) and 1e30 or (rdx < 0 and -1.0 / rdx or 1.0 / rdx)
+    local ddy = (rdy == 0.0) and 1e30 or (rdy < 0 and -1.0 / rdy or 1.0 / rdy)
+
+    local sx, sy, sidex, sidey
+    if rdx < 0 then sx, sidex = -1, (RAY_PX - mapx) * ddx
+    else sx, sidex = 1, (mapx + 1.0 - RAY_PX) * ddx end
+    if rdy < 0 then sy, sidey = -1, (RAY_PY - mapy) * ddy
+    else sy, sidey = 1, (mapy + 1.0 - RAY_PY) * ddy end
+
+    local side, cell = 0, -1
+    for _ = 1, 64 do
+      if sidex < sidey then
+        sidex = sidex + ddx; mapx = mapx + sx; side = 0
+      else
+        sidey = sidey + ddy; mapy = mapy + sy; side = 1
+      end
+      cell = mget(mapx, mapy)
+      if cell >= 0 then break end
+    end
+
+    local dist = (side == 1) and (sidey - ddy) or (sidex - ddx)
+    if dist < 0.02 then dist = 0.02 end
+
+    local lh = flr(H / dist)
+    local top = half - lh // 2   -- unclipped: the crop below needs the real extent
+
+    if lh > 0 and cell >= 0 then
+      -- Where along the wall face the ray landed picks the texture COLUMN,
+      -- and the side picks the row: the dim twin is one sheet row down.
+      local hit = (side == 1) and (RAY_PX + dist * rdx) or (RAY_PY + dist * rdy)
+      local u = (cell % 16) * 8 + flr((hit - flr(hit)) * 8)
+      local v = (cell // 16) * 8 + side * 8
+      -- A slice taller than the view is CROPPED, not squashed into what fits:
+      -- walking into a wall magnifies its texture, never shrinks it.
+      if lh > H then
+        local v0 = (-top * 8) // lh
+        local v1 = ((H - top) * 8 + lh - 1) // lh
+        if v1 > 8 then v1 = 8 end
+        sspr(u, v + v0, 1, v1 - v0, i * RAY_STEP, 0, RAY_STEP, H)
+      else
+        sspr(u, v, 1, 8, i * RAY_STEP, top, RAY_STEP, lh)
+      end
+    end
+  end
+end
+
+local function ray_scene(f)
+  -- The camera TURNS one fixed step a frame -- a turntable, not a walk -- so
+  -- FOLD_FRAMES sweeps the maze exactly once.
+  st.dx, st.dy = st.dx * TC + st.dy * TS, -st.dx * TS + st.dy * TC
+  st.plx, st.ply = st.plx * TC + st.ply * TS, -st.plx * TS + st.ply * TC
+  local half = H // 2
+  rect(0, 0, W, half, CEIL)              -- two WIDE sequential fills beat
+  rect(0, half, W, H - half, FLOOR)      -- per-column strips (see the header)
+  cast(st.dx, st.dy, st.plx, st.ply)
+  print("RAY", 8, 6, 7)
+end
+
+-- the tri() half: a spinning flat-shaded tetrahedron (numbers only, so it
+-- crosses the bridge fine)
+local TETRA = {
+  {{0.0, -1.0, 0.0}, {-0.94, 0.47, -0.54}, {0.94, 0.47, -0.54}},
+  {{0.0, -1.0, 0.0}, {0.94, 0.47, -0.54}, {0.0, 0.47, 1.08}},
+  {{0.0, -1.0, 0.0}, {0.0, 0.47, 1.08}, {-0.94, 0.47, -0.54}},
+  {{-0.94, 0.47, -0.54}, {0.94, 0.47, -0.54}, {0.0, 0.47, 1.08}},
+}
+local FACE = {8, 9, 10, 12}
+
+local function tetra_scene(f)
+  -- Rotate about Y by the turntable angle, project, then paint back-to-front:
+  -- a painter's sort is all the depth handling four faces need.
+  local c, s = st.rc, st.rs
+  st.rc, st.rs = c * TC - s * TS, c * TS + s * TC
+  rect(0, 0, W, H, 0)
+  local cx, cy = W // 2, H // 2
+  local k = W * 0.8
+  local order = {}
+  for fi = 1, 4 do
+    local zs, pts = 0.0, {}
+    for v = 1, 3 do
+      local p = TETRA[fi][v]
+      local x = p[1] * c + p[3] * s
+      local z = -p[1] * s + p[3] * c + 3.0
+      zs = zs + z
+      local m = k / z
+      pts[v] = {cx + flr(x * m), cy + flr(p[2] * m)}
+    end
+    order[fi] = {zs, fi, pts}
+  end
+  table.sort(order, function(a, b) return a[1] < b[1] end)
+  for i = 4, 1, -1 do
+    local it = order[i]
+    local p = it[3]
+    tri(p[1][1], p[1][2], p[2][1], p[2][2], p[3][1], p[3][2], FACE[it[2]])
+  end
+  print("TETRA", 8, 6, 7)
+end
+
+local function scroll_scene(f)
+  -- The layerless scroller's frame: re-render the visible level. 41 tile
+  -- columns covers 320px plus the sub-tile offset.
+  cls(1)
+  map(CAM // 8, 0, (W // 8) + 1, H // 8, -(CAM % 8), 0)
+  print("SCROLL", 8, 6, 7)
+end
+
+local function layer_scene(f)
+  -- The same pixels, window-copied out of a layer pre-rendered ONCE. Built at
+  -- this phase's first frame (inside the warm-up, so it is in no sample) --
+  -- `l:map` is the layer handle's own method, the prelude wrapper over the
+  -- Python layer, which is what lets this scene be the Python twin's line.
+  cls(1)
+  if st.lay == nil then
+    local ok, l = pcall(make_layer, LW, H)
+    if ok and l ~= nil then
+      l:cls(0)
+      l:map(0, 0, LW // 8, H // 8, 0, 0)
+      st.lay = l
+    else
+      st.lay = false      -- no room: the row reads as the floor, not a crash
+    end
+  end
+  if st.lay then
+    draw_layer(st.lay, CAM, 0)
+  end
+  print("LAYER", 8, 6, 7)
+end
+
 local function pct(s, p)
   local i = (p * #s) // 100 + 1
   if i > #s then i = #s end
@@ -266,6 +449,10 @@ local function scenes()
     [PHASE_DRAW] = { "draw", draw_scene, SCENE_FRAMES },
     [PHASE_GAME] = { "silent", game_scene, n },
     [PHASE_GAME_SND] = { "sound", game_scene, n },
+    [PHASE_RAY] = { "ray", ray_scene, FOLD_FRAMES },
+    [PHASE_TETRA] = { "tetra", tetra_scene, FOLD_FRAMES },
+    [PHASE_SCROLL] = { "scroll", scroll_scene, FOLD_FRAMES },
+    [PHASE_LAYER] = { "layer", layer_scene, FOLD_FRAMES },
   }
 end
 
@@ -308,7 +495,8 @@ local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
                   sspr = 11, tline = 12, trib = 13, oval = 14, ovalb = 15,
                   oval_p = 16 }
 local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
-                      { "silent", 3 }, { "sound", 4 } }
+                      { "silent", 3 }, { "sound", 4 }, { "ray", 5 },
+                      { "tetra", 6 }, { "scroll", 7 }, { "layer", 8 } }
 
 local function pmem_report()
   pmem(0, 45948)
@@ -324,8 +512,9 @@ local function pmem_report()
   for i = 1, #PHASE_ORDER do
     local s = st.stats[PHASE_ORDER[i][1]]
     if s ~= nil then
-      local base = 64 + (i - 1) * 8
-      pmem(base, PHASE_ORDER[i][2])
+      local pid = PHASE_ORDER[i][2]
+      local base = 64 + pid * 8
+      pmem(base, pid)
       pmem(base + 1, s.n)
       pmem(base + 2, flr(s.p50 * 10))
       pmem(base + 3, flr(s.p90 * 10))
@@ -350,19 +539,37 @@ local function report()
     local us = (m.best * 1000.0) / m.k
     print(m.name .. " x" .. m.k .. " = " .. m.best .. "ms  ("
           .. f1(us) .. "us/op)", 8, y, 7)
-    y = y + 10                       -- 12 verbs: tight rows
+    y = y + 9                        -- 17 verbs and four folded scenes: 240px
   end
   y = y + 4
-  -- The isolation phases as ONE line: the floor absolute, the other two as
-  -- deltas from it, because the delta is the whole point and 320px is 40
-  -- characters.
+  -- The scenes as delta lines: the floor absolute, everything else as its
+  -- distance from the floor, because the delta is the whole point and 320px
+  -- is 40 characters.
   local fl, lo, dr = st.stats["idle"], st.stats["logic"], st.stats["draw"]
   if fl ~= nil then
     local line1 = "FLOOR " .. f1(fl.p50)
     if lo ~= nil then line1 = line1 .. "  LOGIC +" .. f1(lo.p50 - fl.p50) end
     if dr ~= nil then line1 = line1 .. "  DRAW +" .. f1(dr.p50 - fl.p50) end
     print(line1, 8, y, 14)
-    y = y + 11
+    y = y + 10
+    local folded = { { "RAY", "ray" }, { "TET", "tetra" },
+                     { "MAP", "scroll" }, { "LAY", "layer" } }
+    local line2 = ""
+    for i = 1, #folded do
+      local s = st.stats[folded[i][2]]
+      if s ~= nil then
+        line2 = line2 .. folded[i][1] .. "+" .. f1(s.p50 - fl.p50) .. " "
+      end
+    end
+    local sc, la = st.stats["scroll"], st.stats["layer"]
+    if sc ~= nil and la ~= nil and la.p50 > fl.p50 then
+      -- >1 means the layer is still winning, which is what #54 asks
+      line2 = line2 .. f1((sc.p50 - fl.p50) / (la.p50 - fl.p50)) .. "X"
+    end
+    if line2 ~= "" then
+      print(line2, 8, y, 14)
+      y = y + 10
+    end
   end
   local rows = { { "SILENT", "silent" }, { "SOUND", "sound" } }
   for i = 1, 2 do
@@ -370,7 +577,7 @@ local function report()
     if s ~= nil then
       print(rows[i][1] .. " n=" .. s.n .. " fps=" .. f1(s.fps)
             .. " p50=" .. f1(s.p50) .. " w=" .. f1(s.worst), 8, y, 11)
-      y = y + 11
+      y = y + 10
     end
   end
   y = y + 4

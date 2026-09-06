@@ -954,10 +954,11 @@ def is_packed(seed):
 # directly): its store is the RECORD -- the only copy of a cart made in a
 # browser -- where a console board's store is a CACHE of the image's built-ins.
 #
-# The list starts with the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
+# The list is the 2026-09-06 bench fold (three benches became phases of Bench
+# and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
 # folders as well as the titles, so every board seeded before it has carried a
 # second, stale copy of Brick Siege and Harpoon Pop ever since.
-RETIRED = ("Battle City", "Bubble Trouble")
+RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble")
 RETIRED_GEN = 1
 RETIRED_VER_NAME = "retired.ver"
 

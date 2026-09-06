@@ -83,7 +83,7 @@ def test_the_roster_carries_free_through_to_the_boards():
 # motion in its _update is `* dt`, and its bare `+= 1`s are event counters
 # (lives, level, misses, a spawn queue). Adding a cart here is that audit.
 FREE_SEEDS = {"Star Catcher", "Brick Siege", "Tiny Runner", "Letter Blitz",
-              "Harpoon Pop", "Tap Only Red", "Pixel Pet", "Ray Test"}
+              "Harpoon Pop", "Tap Only Red", "Pixel Pet"}
 
 
 def test_only_audited_seed_games_declare_free():

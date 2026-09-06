@@ -155,9 +155,11 @@ PRELUDE_HANDLES = """
 do
   local layer_new, layer_spr_img = __layer_new, __layer_spr_img
   local layer_spr, layer_cls = __layer_spr, __layer_cls
+  local layer_map = __layer_map
   local draw_layer_h, image_h = __draw_layer, __image_handle
   __layer_new, __layer_spr_img, __layer_spr = nil, nil, nil
   __layer_cls, __draw_layer, __image_handle = nil, nil, nil
+  __layer_map = nil
   function make_layer(w, h)
     local l = { __id = layer_new(w, h), W = w, H = h }
     l.spr = function(self, img, x, y, ck, sc, fl)
@@ -168,6 +170,14 @@ do
       end
     end
     l.cls = function(self, c) layer_cls(self.__id, c or 0) end
+    -- The tile route into a layer, which is how a scroller actually fills one:
+    -- a level is a map, and without this a Lua cart had to spr() every cell.
+    -- The tile counts default to the layer's own size rather than crossing a
+    -- nil, because the trampoline speaks scalars.
+    l.map = function(self, mx, my, tw, th, sx, sy)
+      layer_map(self.__id, mx or 0, my or 0, tw or (self.W // 8),
+                th or (self.H // 8), sx or 0, sy or 0)
+    end
     return l
   end
   function draw_layer(l, cx, cy)
@@ -494,6 +504,10 @@ def install_handles(ns, reg):
     def _layer_cls(lid, c):
         layers[int(lid)].cls(int(c))
 
+    def _layer_map(lid, mx, my, tw, th, sx, sy):
+        layers[int(lid)].map(int(mx), int(my), int(tw), int(th),
+                             int(sx), int(sy))
+
     def _draw_layer(lid, cx, cy):
         draw_layer(layers[int(lid)], cx, cy)
 
@@ -508,6 +522,7 @@ def install_handles(ns, reg):
     reg("__layer_spr_img", _layer_spr_img)
     reg("__layer_spr", _layer_spr)
     reg("__layer_cls", _layer_cls)
+    reg("__layer_map", _layer_map)
     reg("__draw_layer", _draw_layer)
     reg("__image_handle", _image_handle)
 

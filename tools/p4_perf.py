@@ -63,13 +63,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from runtime.perf_line import parse_perf     # noqa: E402
 
 # The carts worth watching: the historically slowest (Brick Siege), the two Lua
-# twins against their Python originals (the #67 comparison), the 3D-verb carts
-# that this raster work actually touches, and a couple of cheap ones as a
-# control -- if a control moves, the change was not in the verbs.
+# twins against their Python originals (the #67 comparison), and a couple of
+# cheap ones as a control -- if a control moves, the change was not in the
+# verbs. The 3D-verb row used to be Ray Lua's; those scenes are phases of the
+# two Bench carts now, and `p4_cart_bench.py` is what reads them.
 DEFAULT_ROSTER = [
     "Brick Siege", "Brick Siege Lua",
     "Sakura", "Sakura Lua",
-    "Ray Lua",
     "Hop Quest", "Sky Run", "Letter Blitz", "Star Catcher",
 ]
 

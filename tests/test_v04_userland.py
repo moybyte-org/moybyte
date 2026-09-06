@@ -1493,12 +1493,13 @@ def test_map_default_zoom_fits_whole_shipped_maps(tmp_path):
     #
     # Expectations are DERIVED rather than listed per cart, because the listed form is
     # what went stale: it named platformer as the widest shipped map long after
-    # layer_test had shipped at 64x30.
+    # a 64x30 one had shipped (layer_test's, which is the bench's since the
+    # scroll A/B folded into it).
     from runtime import console as C
     from runtime.map_editor_ui import _MV_ZOOMS
 
     fitted = 0
-    for name in ("brick_siege", "ray_test", "letter_blitz", "platformer", "scroll_demo"):
+    for name in ("brick_siege", "bench", "letter_blitz", "platformer", "scroll_demo"):
         _C, ws, _drv = _open_cart_map(tmp_path / name, name)
         w, h = ws.tilemap.w, ws.tilemap.h
         assert ws.map_ui.map_zoom == 0                          # opens at the fit default

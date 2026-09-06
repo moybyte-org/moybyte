@@ -134,9 +134,9 @@ def test_the_seed_store_still_ships_a_map_bigger_than_the_view():
 
 # The maps that do NOT fit whole at the 4px floor, per tier -- the exhaustive
 # complement of "everything else fits". Sky Run's 100 columns need 400px and
-# layer_test's 64 need 256; the 320x240 view has 192, the 480x320 one 352.
+# the bench twins' 64 need 256; the 320x240 view has 192, the 480x320 one 352.
 PANS_AT_THE_FLOOR = {
-    (320, 240, 1): {"layer_test.moy", "scroll_demo.moy"},
+    (320, 240, 1): {"bench.moy", "bench_lua.moy", "scroll_demo.moy"},
     (480, 320, 1): {"scroll_demo.moy"},
     (800, 480, 3): set(),
     (1024, 600, 2): set(),
@@ -576,7 +576,7 @@ def test_the_issue_numbers_still_describe_the_shipped_maps():
     # #215 measured four maps that no longer fit; if a seed cart's map is retitled
     # or resized, this names it rather than letting a fit test quietly widen.
     want = {"platformer.moy": (40, 26), "harpoon_pop.moy": (40, 30),
-            "layer_test.moy": (64, 30), "scroll_demo.moy": (100, 30)}
+            "bench.moy": (64, 30), "scroll_demo.moy": (100, 30)}
     got = {n: (w, h) for n, w, h in _shipped_maps() if n in want}
     assert got == want
 

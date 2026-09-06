@@ -9,7 +9,10 @@
 Not to be confused with `p4_bench.py`, which benches the console's own UI
 panels end-to-end. This one drives `system_carts/bench.moy`: a MICRO phase
 timing one draw VERB per frame in adaptively-sized batches (best-of-8, so a GC
-landing is excluded rather than averaged in), then a busy scene. It prints
+landing is excluded rather than averaged in), then a scene per thing worth
+timing -- the busy game frame, and since 2026-09-06 the software 3D frame
+(`ray`/`tetra`) and the scroll A/B (`scroll`/`layer`) that used to be three
+separate carts. It prints
 `BENCHCART` lines to serial, which is what this reads. Use it to A/B a change to
 the raster kernel -- same workload every run, no play skill, no feel.
 
@@ -43,7 +46,8 @@ PMEM_MAGIC = 45948
 VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
               "circb", "tri", "spr", "map", "sspr", "tline", "trib",
               "oval", "ovalb", "oval_p")
-PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound")
+PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound",
+               "ray", "tetra", "scroll", "layer")
 
 
 def pmem_lines(cells):
@@ -91,7 +95,8 @@ def run_bench(board, title, secs, log):
     cells = None
     while time.time() < end:
         board.drain(1.0)
-        if any(l.startswith("BENCHCART phase=game_snd") for l in board.lines[n0:]):
+        # the LAST phase's serial line -- the Python twin's "run is over" mark
+        if any(l.startswith("BENCHCART phase=layer") for l in board.lines[n0:]):
             board.drain(1.0)
             break
         if board.pyval(poll, timeout=8.0) == 1:
@@ -185,7 +190,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--cart", default="Bench")
     ap.add_argument("--port", default="/dev/ttyACM0")
-    ap.add_argument("--secs", type=float, default=180.0)
+    ap.add_argument("--secs", type=float, default=300.0)   # the ray phase is
+                    # tens of ms a frame on an S3, and it is one of nine now
     ap.add_argument("--attach", action="store_true",
                     help="open with DTR/RTS HIGH and never pulse reset -- the"
                          " T-Deck arrangement (USB-Serial/JTAG: an open with"
