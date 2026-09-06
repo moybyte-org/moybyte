@@ -1914,14 +1914,6 @@ class Workstation:
         self.project.images = value
 
     @property
-    def texts(self):
-        return self.project.texts
-
-    @texts.setter
-    def texts(self, value):
-        self.project.texts = value
-
-    @property
     def pmem(self):
         return self.project.pmem
 
@@ -2309,7 +2301,6 @@ class Workstation:
         # Player, building the cart namespace -- goes through self.project.
         self.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
-        self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
         self._cart_key_prev = 0       # fresh cart: no stale key edge

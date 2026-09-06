@@ -21,7 +21,7 @@ this class does the three things that cannot live in C --
 Everything else the shell needs from a run -- `init`/`update`/`draw`/`close` --
 has the same shape `LuaCartRun` exposes, so `Player` needs no branch.
 
-EVERY Lua cart runs here. moybyte's superset verbs (scenes, tables, texts,
+EVERY Lua cart runs here. moybyte's superset verbs (scenes,
 flags, the batch forms) are not in libmoy's table, so they are REGISTERED on
 top of it as trampolines back to the same `make_api` closures they always had
 -- `moycore.register()` between `run_begin` and `load`, which is the window a

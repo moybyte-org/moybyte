@@ -145,7 +145,7 @@ transfer.
 
 ## Superset verbs are not bound here
 
-`make_layer`/`draw_layer`/`image`, scenes, texts and `view()` are
+`make_layer`/`draw_layer`/`image`, scenes and `view()` are
 moybyte's, not the spec's. The cart census that decided to leave them
 Python-side is in the plan: one Lua cart in the tree uses layers, at one blit
 per frame rather than one per sprite, so a second console in C would trade the

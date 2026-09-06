@@ -266,7 +266,7 @@ def test_host_and_device_make_api_agree_with_every_capability_gate_open():
     # Every gate the Player can open, together -- so a name that only appears
     # under a combination is compared too.
     gates = dict(scenes=widgets.Scenes({}, []), images={},
-                 texts={}, wifi=object(), gpio=_GpioGate())
+                 wifi=object(), gpio=_GpioGate())
     full_h, full_d = names(host_app, **gates), names(dev, **gates)
     assert full_h == full_d, (
         "host-only: %s / device-only: %s"
@@ -372,9 +372,7 @@ def test_duplicate_carries_every_asset(tmp_path):
     for sub, fn, blob in (
             ("images", "cover.moyimg",
              json.dumps({"format": "moyimg-v1", "w": 1, "h": 1,
-                         "codec": "rle", "data": "AA"})),
-            ("docs", "notes.moytext",
-             json.dumps({"format": "moytext-v1", "body": "hi"}))):
+                         "codec": "rle", "data": "AA"})),):
         (p / sub).mkdir()
         (p / sub / fn).write_text(blob)
 
@@ -386,7 +384,6 @@ def test_duplicate_carries_every_asset(tmp_path):
     assert dup["sounds"] == src["sounds"]
     assert dup["blocks"] == src["blocks"]
     assert set(dup["images"]) == {"cover"}
-    assert set(dup["texts"]) == {"notes"}
 
 
 # -- tile flags (SPEC.md 3.5) --------------------------------------------------

@@ -231,7 +231,7 @@ def test_no_property_forwards_to_a_collaborator():
 # honest and this set can only ever shrink.
 LEGACY_PROPERTY_FORWARDS = {
     "project": {"cart", "config", "images", "pmem", "scenes",
-                "sheet", "texts", "tilemap"},
+                "sheet", "tilemap"},
     "player": {"_cart_key_prev", "_draw", "_update",
                "cart_error", "crash_line", "ns"},
     "editor_app": {"menu_view"},

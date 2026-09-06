@@ -346,9 +346,3 @@ local MoyImage = {}
 ---@return MoyImage?
 function image(name) end
 
--- --- data interop ------------------------------------------------------------
-
----Lines of the cart's docs/<name>.moytext. Missing -> {}. VENDOR.
----@param name string
----@return string[]
-function text(name) end

@@ -37,7 +37,7 @@ from runtime.lua_ext import (PRELUDE_HANDLES, MOY_BUTTONS,
 #
 # `runtime/lua_binding.py` is the same C the boards run. This used to route only
 # the carts libmoy's SPEC table could serve and hand the rest to lupa; the
-# superset (layers/images, scenes, tables, texts, view) reaches moycore through
+# superset (layers/images, scenes, view) reaches moycore through
 # lua_ext's handles now, so every cart qualifies and the source gate that used
 # to decide is gone. What `moycore_supports` still answers is whether the module
 # BUILT -- see below.

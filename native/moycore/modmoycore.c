@@ -31,7 +31,7 @@
 //   * pmem lives in a C array with a dirty flag, which is the shape the device
 //     already deferred it to (#66): RAM during play, persisted at boundaries.
 //
-// Verbs moybyte adds ON TOP of the spec -- layers/images, scenes, texts,
+// Verbs moybyte adds ON TOP of the spec -- layers/images, scenes,
 // view() -- are not IMPLEMENTED here, and they do not need to be: they
 // are REGISTERED here, as Lua globals backed by the same Python closures they
 // always had (register() below).

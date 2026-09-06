@@ -146,11 +146,9 @@ COVER_IMAGE = "cover"
 NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
-# Desk Lab interop assets (#78): the tiny cart-folder documents a game reads back
-# through the text(name) cart verb -- the document analogue of Paint's
-# images/<name>.moyimg. A .moytext is the moytext-v1 blob (a document's body).
-# Kid-greppable, engine-free (the v0.4 portability contract).
-TEXTS_DIR = "docs"
+# A .moytext is the moytext-v1 blob (a document's body) -- the stored form of
+# every doc in the user-files vault. Kid-greppable, engine-free (the v0.4
+# portability contract).
 TEXT_EXT = ".moytext"
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
@@ -509,35 +507,6 @@ def decode_text(blob):
         if isinstance(data, dict) and isinstance(data.get("body"), str):
             body = data["body"]
     return body.split("\n") if body else []
-
-
-def load_texts(path):
-    """A cart's doc assets: {name: lines} for every docs/<name>.moytext blob,
-    decoded to lines. {} when the cart has no docs/ dir."""
-    return _load_docs(path, TEXTS_DIR, TEXT_EXT, decode_text)
-
-
-def _load_docs(path, subdir, ext, decode):
-    out = {}
-    d = path + "/" + subdir
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return out                     # no subfolder -> the common case
-    for name in names:
-        if name.endswith(ext):
-            try:
-                out[name[:-len(ext)]] = decode(_read(d + "/" + name))
-            except OSError:
-                pass                   # skip an unreadable entry, keep the rest
-    return out
-
-
-def save_text(cart, name, text):
-    """Attach a Writer doc to a cart as docs/<name>.moytext (atomically). `text`
-    is the moytext-v1 JSON blob; the cart reads it via the text(name) verb."""
-    _mkdir(cart["path"] + "/" + TEXTS_DIR)
-    _write_atomic(cart["path"] + "/" + TEXTS_DIR + "/" + name + TEXT_EXT, text)
 
 
 def slug(title):
@@ -1013,7 +982,6 @@ def load(path):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
         scenes = load_scenes(path)                # scene assets (#85), {} if none
-        texts = load_texts(path)                  # Writer docs (#78), {name: lines}, {} if none
         return {
             "path": path,
             "title": man.get("title", "cart"),
@@ -1096,9 +1064,6 @@ def load(path):
             # manifest are appended sorted, so a hand-added scene still loads).
             "scenes": scenes,
             "scene_names": scene_names(man, scenes),
-            # Desk Lab interop (#78): docs ({name: lines}) placed in the cart
-            # folder, read via text().
-            "texts": texts,
         }
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)

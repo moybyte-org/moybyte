@@ -434,29 +434,6 @@ actor touching `player`? → remove actor, change score by 1*, then *clear*, *dr
 scene*, *write score*. Inside a *for each … actor* block, "actor" always means the
 one it's currently looping over. (`system_carts/coin_quest.moy` is the built-in demo.)
 
-## Reading documents (`text`, `#78`)
-
-A game can read a doc that lives in its own cart folder — the document IS the
-game data. Place it under `docs/<name>.moytext`, then read it back. It is tiny
-kid-greppable JSON; a missing name reads as an empty list, so this never
-crashes your cart.
-
-| call | does |
-|---|---|
-| `text(name)` | read the doc `docs/<name>.moytext` as **lines** — a list of strings, one per line. Missing name → `[]` |
-
-```python
-# Dialog, shown a line at a time:
-LINES = text("intro")         # ["You wake in a cave.", "A torch flickers.", ...]
-
-def _draw():
-    cls(col("black"))
-    for i, ln in enumerate(LINES):
-        print(ln, 8, 8 + i * 10, col("white"))
-```
-
----
-
 ## Make it fast (five habits)
 
 Every draw call is native on the device, so the usual cost is not *how* you draw —

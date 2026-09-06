@@ -115,7 +115,6 @@ class Project:
         self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
-        self.texts = None             # {name: lines} Writer docs, read via text() (#78)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
                                       # scenes; make_api binds scene()/load_scene()

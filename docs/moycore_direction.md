@@ -50,7 +50,7 @@ cls default form, map with colorkey and scale, clip clamped both directions,
 camera's return value read back, pal past index 63 and a repeated tint, palt
 un-setting, the 2-arg `pix` read, btn/btnp edges, pmem wrap, audio order. NOT
 covered: `key`/`keyp`, `touch`/`mouse`, `textmode`/`quit`/`view`, the
-player-slot form `btn(name, p)`, scenes/texts, the exit-time state
+player-slot form `btn(name, p)`, scenes, the exit-time state
 read-back, and non-draw-lane **liveness guards** — the draw lanes assert they
 ran through C, and an input or audio crossing needs the analogous proof or it
 can pass vacuously.
@@ -107,7 +107,7 @@ caveat — "teeth on the dev machine and none in bare CI" — is closed; keeping
   nobody remembered to add, and did.
 - **The spec-surface core grows UPSTREAM.** Raster, audio, VM and loop are
   libmoy's, in the moy-spec repo; `native/moycore` vendors it and owns only what
-  is NOT spec — scenes/texts glue, pmem, net, textmode/quit/view. That is
+  is NOT spec — scenes glue, pmem, net, textmode/quit/view. That is
   audio's shipped shape. Fixes belong upstream and come back through the vendor
   target; editing a vendored file in place is a red test.
 - **Presentation stays per-board and outside moycore.** Moycore renders the cart

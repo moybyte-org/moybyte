@@ -130,7 +130,6 @@ SUPPORTED_EXTENSIONS = (
     "layers",             # CORE now (SPEC.md 6): make_layer/draw_layer/background
     "viewport",           # CORE now (SPEC.md 6): view(w, h)
     "moybyte.scenes",     # #85/#109: scene/load_scene + the actor world
-    "moybyte.docs",       # #78 Desk Lab interop: text(name)
     "moybyte.images",     # #63: image(name) / Image paint-image assets
     "moybyte.net",        # #65: net.send / on_net (also permission-gated)
     "moybyte.wifi",       # #38: the injected wifi service (permission-gated)
@@ -1016,7 +1015,6 @@ class Player:
         ns = ws.make_api(ws.canvas, ws.input, project.config, project.sheet,
                          ws.audio, project.tilemap, project.pmem, wifi, project.images,
                          project.scenes,    # #85: scene()/load_scene() over the cart's scenes
-                         texts=project.texts,  # #78 interop
                          net=net,           # #65: capability-gated net.* backend
                          gpio=gpio,         # #9: capability-gated physical pins
                          flags=project.flags)   # SPEC.md 3.5 tile flags (fget/fset)

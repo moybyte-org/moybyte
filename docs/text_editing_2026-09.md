@@ -23,7 +23,7 @@ Roots a person touches: PROJECTS (each cart a folder), NOTES (the vault, flat
 | door | path | what opens |
 |---|---|---|
 | make a game | Launcher → cart → EDIT → tab ladder | the Code tab is the cart's main file: highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
-| write | Launcher → Notes | the vault list, NEW, one note in Markdown mode; `text(name)` hands a note to a game |
+| write | Launcher → Notes | the vault list, NEW, one note in Markdown mode |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
@@ -61,13 +61,13 @@ QWERTY is planned.
 ## The six steps, each shippable alone
 
 1. Notes' files become `.md` in one flat vault, a one-shot migration from
-   `.moytext`, `text(name)` reads them.
+   `.moytext`.
 2. The editor mode table and the Files router.
 3. The editor handle verb; Notes rebuilt as the thin cart over it.
 4. Writer's shell process removed.
 5. The Config tab's ADVANCED files row, with JSON mode's rule.
 6. The script runner with the text console surface.
 
-Related: #108 (user files), #78 (`text(name)`, `table(name)`), #181 (apps are
-carts), #112 (cart-facing undo — settled by the handle, not by a verb), #114/#115
-(the terminal), #120 (the capability gate).
+Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —
+settled by the handle, not by a verb), #114/#115 (the terminal), #120 (the
+capability gate).
