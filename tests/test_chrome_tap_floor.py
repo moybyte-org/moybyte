@@ -255,3 +255,48 @@ def test_the_menu_rows_follow_the_chrome_scale_and_its_labels_do_not(tmp_path):
     assert y == ws.layout.status_h            # hangs under the taller bar
     assert w == 128                           # panel width is TEXT-sized: fs
     assert h >= 24 * len(rows)                # ...rows are 12*cs, not 12*fs
+
+
+def test_a_tap_box_centres_its_content_and_is_the_identity_at_cs_eq_fs():
+    """`Layout.tap_box` is `row_band` for a BUTTON (owner report on Guition
+    glass, 2026-09-06: "the achievements and x icons are tiny and in the top
+    left corner, but their buttons are big"). It has to be the exact identity
+    wherever the button did not grow, or every non-declaring tier moves."""
+    for w, h, fs in TIERS:
+        lay = Layout(w, h, fs, chrome_scale=fs)
+        for rect, base in ((lay.set_back, (18, 14)), (lay.set_ach, (22, 14))):
+            assert lay.tap_box(rect, *base) == tuple(rect), (w, h, fs)
+    w, h, fs, cs = GUITION
+    lay = Layout(w, h, fs, chrome_scale=cs)
+    for rect, base in ((lay.set_back, (18, 14)), (lay.set_ach, (22, 14))):
+        bx, by, bw, bh = lay.tap_box(rect, *base)
+        assert (bw, bh) == (base[0] * fs, base[1] * fs)      # font-sized content
+        assert bx > rect[0] and by > rect[1]                 # ...moved off the corner
+        # Centred: the margin it left is the same on both sides (+/- the odd px).
+        assert abs((bx - rect[0]) - (rect[0] + rect[2] - bx - bw)) <= 1
+        assert abs((by - rect[1]) - (rect[1] + rect[3] - by - bh)) <= 1
+
+
+def test_the_editor_zone_is_drawn_and_hit_tested_on_ONE_scale(tmp_path):
+    """The bar's lent zone lays its chips out on `_zone_scale` and DRAWS them
+    through `ui.tab_row`, which reads the scale off the canvas. Those were the
+    same number until #203, after which the Guition sized the ladder at cs 2 and
+    painted it at fs 1 -- a tap on the CODE chip opened Blocks. They are one
+    number now, and all seven tabs stay reachable on the bar the tap floor
+    shortened."""
+    from runtime import editor_app as _ea
+    from runtime import ui as _ui
+    for diag, cs in ((None, 1), (3.5, 2)):
+        ws = host_app.build_workstation(
+            str(tmp_path / ("z%s" % diag)), sys_size=(480, 320), font_scale=1,
+            panel_diagonal_in=diag)
+        assert ws.layout.cs == cs
+        cart = [c for c in ws.carts.all if c.get("edit")][0]
+        ws.open_in_editor(cart)
+        ed = ws.editor_app
+        assert ed._zone_scale() == ws.sys_canvas.font_scale
+        _proj, tabs_area, _play = ed._zone_parts(ws.layout.zone_left)
+        slim = [(tid, label) for tid, label, _ic in _ea._TAB_CHIPS]
+        rects = _ui.tab_row_rects(tabs_area, slim, ed._zone_scale())
+        assert [t for t, _r, _l in rects] == [t for t, _l, _i in _ea._TAB_CHIPS]
+        assert rects[0][1][3] == ws.layout.bar_icon      # ...as tall as the band

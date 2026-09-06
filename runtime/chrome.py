@@ -405,6 +405,19 @@ class Layout(LayoutBase):
         d = self.row_text_dy
         return (rect[0], rect[1] + d, rect[2], rect[3] - 2 * d)
 
+    def tap_box(self, rect, base_w, base_h):
+        """The fs-sized DRAWING box centred inside a cs-sized TAP TARGET (#203).
+
+        `rect` is a button the chrome scale grew from a `base_w` x `base_h` design
+        box; what goes inside it -- a 12px glyph, a `mini_btn` label, a badge
+        count -- is still font-sized, and drawn at the button's origin it lands in
+        the corner rather than under the finger. This is `row_band` for a BUTTON:
+        the same content, moved to the middle. The IDENTITY at cs == fs, where the
+        rect already is exactly this box."""
+        bw, bh = base_w * self.fs, base_h * self.fs
+        return (rect[0] + (rect[2] - bw) // 2, rect[1] + (rect[3] - bh) // 2,
+                bw, bh)
+
     def tile_cell(self, i):
         """(row, col) of grid slot `i` in the shelf packing. Slot 0 is the ONE
         tall featured card -- column 0 spanning BOTH visible rows (its row

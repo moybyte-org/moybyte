@@ -466,9 +466,14 @@ class UpdateUI:
         cv.rect(0, 0, lay.w, lay.h, th["bar"])
         px, py, pw, ph = lay.settings_panel
         _ui.dialog(cv, (px, py, pw, ph), ring=th["edge"], fill=th["surface"])
-        self.ws._glyph("gear", (px + 6, py + 2, 14 * fs, 14 * fs), th["accent"], cv)
-        cv.print("UPDATE", px + 24, py + 4, th["ink"], 2)
-        self.ws._mini_btn("X", lay.set_back, th["danger"], cv)
+        # The same title band Settings draws, so it takes the same #203 re-centring:
+        # the gear + word ride set_head_dy, the X's letter the middle of its chip.
+        hd = lay.set_head_dy
+        self.ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
+                       th["accent"], cv)
+        cv.print("UPDATE", px + 24, py + 4 + hd, th["ink"], 2)
+        self.ws._mini_btn("X", lay.set_back, th["danger"], cv,
+                          lay.tap_box(lay.set_back, 18, 14))
         u = self.ws.updater
         slot = u.slot() if u is not None else "?"
         ver = u.version() if u is not None else 0

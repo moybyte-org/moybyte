@@ -1434,14 +1434,20 @@ def game_icon_btn(cv, rect, kind, label, fill, glyph_draw=None):
                  m[GI_INK], 1)
 
 
-def mini_btn(cv, rect, label, fill):
+def mini_btn(cv, rect, label, fill, label_rect=None):
     """A tiny labeled chip (no ring) -- the Settings steppers' vocabulary. Its
     pads are UNSCALED (NON_DATA_QUIRKS): the vocabulary predates font scaling
-    and its frozen pixels never grew with it."""
+    and its frozen pixels never grew with it.
+
+    `label_rect` is where those pads are measured from when the CHIP is bigger
+    than the label's own box -- a chrome-scaled tap target (#203), whose fill
+    still paints the whole finger-sized `rect`. Defaults to `rect`, which is the
+    identity everywhere the two are the same size."""
     x, y, w, h = rect
     m = _METRICS["mini_btn"]
     cv.rect(x, y, w, h, fill)
-    cv.print(label, x + m[MB_PADX], y + m[MB_PADY], m[MB_INK], 1)
+    lx, ly = (rect if label_rect is None else label_rect)[:2]
+    cv.print(label, lx + m[MB_PADX], ly + m[MB_PADY], m[MB_INK], 1)
 
 
 def toolbar(cv, th, rect):

@@ -470,12 +470,27 @@ class EditorApp:
                       th["chrome_ink_dim"] if th.get("bar_light")
                       else self._NAMES["dark_blue"], cv)
 
+    def _zone_scale(self):
+        """The scale the shelf zone is laid out on: the FONT scale, which is also
+        what `ui.tab_row`/`ui.button` read off the canvas when they draw into it.
+
+        It used to be derived from the lent rect's height (`rect[3] // 16`), the
+        same number until #203 gave chrome its own scale -- after which the Guition
+        laid the ladder out at cs 2 and DREW it at fs 1, so a tap on the CODE chip
+        opened Blocks. The width stays on the font scale rather than the tap-target
+        one because the zone the bar can lend holds two of the seven chips at cs 2,
+        and the ladder is the only way to reach a tab on a board with no keyboard:
+        a chip that is off the bar cannot be tapped at all. What the chrome scale
+        does give every chip is the band's full HEIGHT, which is the axis a finger
+        aiming at a row of them misses in."""
+        return max(1, self.ws.layout.fs)
+
     def _zone_parts(self, rect):
         """PURE shelf-zone geometry (shared by draw_zone and zone_tap so a strip-
         cached draw and a later tap can't desync): PROJECTS chip | labeled tab row
-        | PLAY, the button right-aligned (SAVE dropped, #111). Scales off the
-        lent rect's height (16*fs, like the frozen ladder)."""
-        fs = max(1, rect[3] // 16)
+        | PLAY, the button right-aligned (SAVE dropped, #111). Widths scale with
+        the font (`_zone_scale`); every part is as tall as the lent band."""
+        fs = self._zone_scale()
         gap = 4 * fs
         proj, rest = _ui.cut_left(rect, 22 * fs)
         play_r, rest = _ui.cut_right(rest, 54 * fs)
@@ -497,9 +512,9 @@ class EditorApp:
                 return self._activate_zone_tab(_ZONE_PROJECTS)
             if self._in(px, py, play_r):
                 return self._activate_zone_tab(None)
-            fs = max(1, rect[3] // 16)
             slim = [(tid, label) for tid, label, _ic in _TAB_CHIPS]
-            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim, fs):
+            for tid, r, _labels_on in _ui.tab_row_rects(tabs_area, slim,
+                                                        self._zone_scale()):
                 if self._in(px, py, r):
                     return self._activate_zone_tab(tid)
             return False

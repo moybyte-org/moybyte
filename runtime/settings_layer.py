@@ -1192,7 +1192,10 @@ class SettingsLayer:
             ws._glyph("gear", (px + 6, py + 2 + hd, 14 * fs, 14 * fs),
                       th["accent"], cv)
             cv.print("SETTINGS", px + 24, py + 4 + hd, p_ink, 2)
-            ws._mini_btn("X", lay.set_back, th["danger"], cv)
+            # The X's chip is the TAP TARGET and paints all of it; its 8px letter
+            # sits in the fs-sized box at the middle of it (#203), not the corner.
+            ws._mini_btn("X", lay.set_back, th["danger"], cv,
+                         lay.tap_box(lay.set_back, 18, 14))
         if self.wifi_view:
             # The WIFI panel (#38) replaces the row list (its BACK returns here).
             self._draw_wifi()
@@ -1205,9 +1208,12 @@ class SettingsLayer:
         # Achievements view button (#21): a trophy badge with the unlocked count.
         sa = lay.set_ach
         cv.rect(sa[0], sa[1], sa[2], sa[3], th["hilite"])
-        ws._glyph("trophy", (sa[0] - 2, sa[1], sa[3], sa[3]), th["accent"], cv, fs)
-        cv.print(str(ws.ach.count()), sa[0] + 13 * fs,
-                 sa[1] + 4 + (sa[3] - 14 * fs) // 2, th["selection_ink"], 1)
+        # Trophy + count are an fs-sized pair inside a cs-sized badge (#203): the
+        # fill is the tap target, the pair is centred in it. Identity at cs == fs.
+        bx, by, _bw, bh = lay.tap_box(sa, 22, 14)
+        ws._glyph("trophy", (bx - 2, by, bh, bh), th["accent"], cv, fs)
+        cv.print(str(ws.ach.count()), bx + 13 * fs,
+                 by + 4 + (bh - 14 * fs) // 2, th["selection_ink"], 1)
         rows = self._settings_rows()
         for i in range(len(rows)):
             if self._settings_row_visible(i):
