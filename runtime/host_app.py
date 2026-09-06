@@ -213,6 +213,8 @@ def _seed_system_carts(carts_dir):
     matching the device's seed_builtins, so a bumped cart actually propagates on the host
     (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
+    moy_carts.prune_retired(carts_dir)   # a seed that no longer ships leaves the
+                                         # store, once (moy_carts.RETIRED)
     if not os.path.isdir(SYSTEM_CARTS):
         return
     for name in sorted(os.listdir(SYSTEM_CARTS)):

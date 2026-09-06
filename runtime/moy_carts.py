@@ -937,8 +937,69 @@ def is_packed(seed):
     return bool(seed) and not isinstance(seed[0], dict)
 
 
+# -- seeds that no longer ship (2026-09-06) ----------------------------------
+#
+# A seed is written to the store once and then LIVES there: nothing in the #47
+# version rules can express "this cart is gone", so a retired built-in stayed
+# on every flashed board's shelf forever and only a hand-deleted folder took it
+# off. RETIRED is that expression -- the titles a roster used to carry -- and
+# `prune_retired` removes their folders once per store.
+#
+# ONCE is the whole design. The generation counter is written into the store
+# after a sweep, so the pass runs when a store is behind and never again: a kid
+# who later makes their own cart under a retired title keeps it. Bump
+# RETIRED_GEN in the same commit that adds titles, or the new ones never sweep.
+#
+# The Zero is deliberately NOT a caller (it seeds `seed_packed(only_new=True)`
+# directly): its store is the RECORD -- the only copy of a cart made in a
+# browser -- where a console board's store is a CACHE of the image's built-ins.
+#
+# The list starts with the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
+# folders as well as the titles, so every board seeded before it has carried a
+# second, stale copy of Brick Siege and Harpoon Pop ever since.
+RETIRED = ("Battle City", "Bubble Trouble")
+RETIRED_GEN = 1
+RETIRED_VER_NAME = "retired.ver"
+
+
+def retired_version_path(root=CARTS_DIR):
+    """Sidecar (a sibling of the carts dir, like system_icons.ver) holding the
+    RETIRED generation this store has already been swept for."""
+    return _sibling_path(root, RETIRED_VER_NAME)
+
+
+def load_retired_version(root=CARTS_DIR):
+    """The generation the store was swept at -- 0 when absent/unreadable, so a
+    store that predates this sweeps once."""
+    try:
+        return int(_read(retired_version_path(root)).strip())
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
+    """Remove the folders of seeds that no longer ship, once per store.
+
+    Returns the number of folders removed (0 when the store is already at this
+    generation, which is the warm-boot path and costs one small file read)."""
+    if load_retired_version(root) >= generation:
+        return 0
+    gone = 0
+    for title in titles:
+        d = root + "/" + slug(title) + ".moy"
+        if _exists(d):
+            _rmtree(d)
+            gone += 1
+    try:
+        _write(retired_version_path(root), str(int(generation)))
+    except OSError:
+        return gone          # a read-only store: sweep again next boot, harmless
+    return gone
+
+
 def seed_any(seed, root=CARTS_DIR, progress=None):
     """Seed a roster of either form. The one call a board's boot makes."""
+    prune_retired(root)
     if is_packed(seed):
         return seed_packed(seed, root, progress=progress)
     return seed_builtins(seed, root, progress=progress)

@@ -441,3 +441,73 @@ def test_every_system_app_claims_its_device_seeded_folder(tmp_path):
         assert app.is_app(cart), \
             "%s does not claim its DEVICE-seeded folder %s" % (app.id,
                                                                cart["path"])
+
+
+# -- seeds that no longer ship (2026-09-06) ----------------------------------
+#
+# #47 versioning can say "this cart got newer" and could never say "this cart is
+# gone", so a retired built-in lived on every flashed board's shelf forever.
+# moy_carts.RETIRED + prune_retired is that missing half; these pin the two
+# things it must get right -- it removes them, and it removes them ONCE.
+
+def _retired_folder(moy_carts, root):
+    """The first retired title's folder under `root` -- by the list rather than
+    by name, so these keep testing the mechanism as the list moves on."""
+    return Path(root) / (moy_carts.slug(moy_carts.RETIRED[0]) + ".moy")
+
+
+def test_a_retired_seed_leaves_the_store(tmp_path):
+    from runtime import moy_carts
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    body = "def _draw():\n    cls(0)\n"
+    seed = [{"title": moy_carts.RETIRED[0], "type": "game", "src": body,
+             "cfg": {}, "edit": []},
+            {"title": "Bench", "type": "game", "src": body,
+             "cfg": {}, "edit": []}]
+    moy_carts.seed_builtins(seed, root)          # a store seeded before the fold
+    gone = _retired_folder(moy_carts, root)
+    assert gone.is_dir()
+
+    assert moy_carts.prune_retired(root) == 1
+    assert not gone.exists()
+    assert (Path(root) / "bench.moy").is_dir()   # nothing else is touched
+
+
+def test_the_sweep_runs_once_so_a_kids_own_cart_survives(tmp_path):
+    """The generation marker is the whole design: a title is swept when a store
+    is behind and never again, so a kid who later makes a cart of their own
+    under a retired title keeps it."""
+    from runtime import moy_carts
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    assert moy_carts.prune_retired(root) == 0    # nothing there: still marks
+    assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
+
+    mine = _retired_folder(moy_carts, root)
+    mine.mkdir()
+    (mine / "manifest.json").write_text(
+        '{"title": "%s", "version": 1}' % moy_carts.RETIRED[0])
+    assert moy_carts.prune_retired(root) == 0
+    assert mine.is_dir()
+    # ...until the list itself moves on, which is what the generation counts
+    assert moy_carts.prune_retired(root, generation=moy_carts.RETIRED_GEN + 1) == 1
+    assert not mine.exists()
+
+
+def test_seed_any_sweeps_before_it_seeds(tmp_path):
+    # The one call a board's boot makes has to be the one that sweeps, or every
+    # board needs its own remembering.
+    from runtime import moy_carts
+
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    stale = _retired_folder(moy_carts, root)
+    stale.mkdir()
+    seed = [{"title": "Bench", "type": "game", "src": "def _draw():\n    cls(0)\n",
+             "cfg": {}, "edit": []}]
+    moy_carts.seed_any(seed, root)
+    assert not stale.exists()
+    assert (Path(root) / "bench.moy").is_dir()
