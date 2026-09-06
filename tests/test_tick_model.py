@@ -185,9 +185,9 @@ def test_moss_moss_pins_at_one_and_reports_misses():
     helps. It runs one tick per frame at N=1 and the misses say so.
 
     T cannot be measured while every frame draws (no idle frame, no
-    tick-only frame), so two late windows buy ONE step to N=2; its tick-only
-    frames price T, the next window pins N=1, and it stays there -- T is only
-    ever re-sampled by frames that do not draw."""
+    tick-only frame), so the first very late window buys ONE step to N=2; its
+    tick-only frames price T, the next window pins N=1, and it stays there --
+    T is only ever re-sampled by frames that do not draw."""
     s = _sched(30)
     trace = _loop(s, 20.0, D=0.037, T=0.049, tick_cost=0.0278)
     assert max(d for _t, d in trace) <= 2, "one probe step, never a ratchet"
@@ -196,26 +196,118 @@ def test_moss_moss_pins_at_one_and_reports_misses():
     assert s.rate == 30
 
 
-def test_a_draw_heavy_sixty_cart_settles_at_three_and_probes_down_with_back_off():
+# The owner's two reports from the T-Deck (#217, 2026-09-06) and what they
+# asked of the model: a probe is gated on evidence, and a very late window
+# does not wait for a second one.
+
+def test_moss_moss_on_the_tdeck_stops_probing_until_the_scene_gets_cheaper():
+    """"quite buggy and slow". At 30/2 it holds -- a 46ms drawing frame and a
+    20ms tick-only one inside two 33ms periods -- but the model probed N=1
+    back on a timer, and each probe ran the cart at half speed for a window
+    before it was undone. One probe fails; the next waits for the SCENE to
+    get a fifth cheaper, which in a heavy state never comes."""
+    s = _sched(30)
+    trace = _loop(s, 6 * W, D=0.046, T=0.020, tick_cost=0.020)
+    changes = _changes(trace)
+    assert [d for _t, d in changes] == [2, 1, 2], "up, one probe, back"
+    assert changes[2][0] - changes[1][0] < 1.6 * W, "the probe cost one window"
+    misses = s.misses
+    trace = _loop(s, 60.0, D=0.046, T=0.020, tick_cost=0.020, t0=6 * W)
+    assert _changes(trace) == [], "a minute of the same scene, and no probe"
+    assert s.misses == misses, "N=2 held its tick throughout"
+    _loop(s, 3 * W, D=0.032, T=0.020, tick_cost=0.014, t0=6 * W + 60)
+    assert s.div == 1, "a 30% cheaper scene re-opens the probe, and it holds"
+
+
+def test_a_probe_needs_a_clean_window_and_a_fresh_one_reverts_at_once():
+    """Two halves of one rule. A probe that lands on an N-1 which is MILDLY
+    late -- D=21 against a 16.7ms period is a quarter tick per cycle, under
+    the threshold that holds an N -- is not passed: a probe has to come back
+    clean, or the kid gets the slow motion the threshold tolerates. And when
+    a probe DID pass and the very next window is late, the probe was
+    optimistic, so N goes back without waiting for a second window."""
+    s = _sched(60)
+    _loop(s, 4 * W, D=0.025, T=0.0075, tick_cost=0.001)
+    assert s.div == 2
+    trace = _loop(s, 8 * W, D=0.021, T=0.0075, tick_cost=0.001, t0=4 * W)
+    changes = _changes(trace)
+    assert [d for _t, d in changes] == [1, 2], "the probe is tried and refused"
+    assert changes[1][0] - changes[0][0] < 1.6 * W, "after one window"
+    assert s.div == 2
+
+    s = _sched(60)
+    _loop(s, 4 * W, D=0.025, T=0.0075, tick_cost=0.001)
+    _loop(s, 4 * W, D=0.010, T=0.002, tick_cost=0.001, t0=4 * W)
+    assert s.div == 1, "onto a clean N=1 the probe passes"
+    trace = _loop(s, 2 * W, D=0.025, T=0.0075, tick_cost=0.001, t0=8 * W)
+    changes = _changes(trace)
+    assert [d for _t, d in changes] == [2]
+    assert changes[0][0] - 8 * W < 1.3 * W, "one late window, not two"
+
+
+def test_bunnysurvivor_steps_up_inside_the_wave_and_comes_back_after():
+    """"performance drops hard when there is a lot going on the screen and
+    the game slows down even though STEADY is on". A wave doubles both halves
+    of the frame -- the drawing frame 11 -> 21ms, the logic tick 6 -> 12 --
+    and at N=1 that writes off a period every frame. A window of that is very
+    late, so N=2 lands INSIDE the wave rather than after it and the tick
+    holds for the rest; when the wave ends one probe brings N back."""
+    s = _sched(60)
+    _loop(s, 3 * W, D=0.011, T=0.006, tick_cost=0.006)
+    assert s.div == 1 and s.misses == 0
+    _loop(s, 2.1, D=0.021, T=0.012, tick_cost=0.012, t0=3 * W)
+    assert s.div == 2, "one window, inside a three-second wave"
+    held = s.misses
+    _loop(s, 0.9, D=0.021, T=0.012, tick_cost=0.012, t0=3 * W + 2.1)
+    assert s.misses - held <= 1, "and N=2 holds the tick for the rest of it"
+    trace = _loop(s, 10.0, D=0.011, T=0.006, tick_cost=0.006, t0=3 * W + 3.0)
+    assert [d for _t, d in _changes(trace)] == [1], "back to 1, once, no hunting"
+
+
+def test_one_stall_is_not_a_very_late_window():
+    """A stall is ONE late event, and it must not become a very late WINDOW
+    either. A FREE window is a quarter second, so a stall that long is the
+    only cycle its window has, and every cycle of that window lost a tick --
+    which is the very late reading, from a radio scan. Swept across the phase
+    of the window the stall lands in, because how many cycles it shares that
+    window with is exactly what the reading depends on."""
+    for steady in (True, False):
+        for stall in (0.300, 0.700):
+            for k in range(90):
+                s = _sched(60, steady=steady)
+                _loop(s, 4 * W, D=0.011, T=0.002, tick_cost=0.001)
+                for _ in range(k):
+                    s.plan(0.011 if s.draw else 0.002)
+                    if s.n:
+                        s.note_tick(0.001)
+                s.plan(stall)
+                trace = _loop(s, 2 * W, D=0.011, T=0.002, tick_cost=0.001)
+                assert s.div == 1 and all(d == 1 for _t, d in trace), (steady, stall, k)
+
+
+def test_a_draw_heavy_sixty_cart_settles_at_three_and_stops_probing():
     """D=40, T=2 at 60Hz: N=2 does not fit (40+2 > 33), N=3 does (40+4 <=
-    50). At N=1 the cycles ran 2-3 ticks each -- game time caught up,
-    motion did not -- and two late windows step straight to 3. N=2 is then
-    TRIED, once per back-off period: its cycles alternate 2 and 3 ticks,
-    which is late, so each probe costs one window and the next comes twice
-    as late."""
+    50). At N=1 the cycles ran 2-3 ticks each -- game time caught up, motion
+    did not, which is a whole tick lost per cycle -- so ONE window steps
+    straight to 3. N=2 is then tried ONCE; its cycles alternate 2 and 3
+    ticks, so the probe fails, and because the scene never gets cheaper it is
+    not tried again for a minute of windows: a kid does not get a slow-motion
+    window every back-off period. Once the scene DOES get cheaper the gate
+    opens on the evidence, without waiting the back-off out."""
     s = _sched(60)
     trace = _loop(s, 60.0, D=0.040, T=0.002, tick_cost=0.001)
     changes = _changes(trace)
     assert changes[0][1] == 3, "straight to the smallest N that fits"
+    assert changes[0][0] < 2.2 * W, "one very late window is enough"
     assert s.div == 3
     probes = [t for t, d in changes if d == 2]
-    assert len(probes) >= 2, "N=2 is tried, more than once"
-    for t in probes:                          # each probe lasts one window
-        back = [tb for tb, d in changes if d == 3 and tb > t][0]
-        assert W * 0.9 < back - t < W * 1.6
-    gaps = [b - a for a, b in zip(probes, probes[1:])]
-    assert gaps[0] >= 4 * W and all(b > g for g, b in zip(gaps, gaps[1:]))
-    assert all(d != 1 for t, d in trace if t > 3.1 * W), "never back to a 1 that failed"
+    assert len(probes) == 1, "tried once, and the failure is remembered"
+    back = [tb for tb, d in changes if d == 3 and tb > probes[0]][0]
+    assert W * 0.9 < back - probes[0] < W * 1.6, "the probe cost one window"
+    assert all(d != 1 for t, d in trace if t > 2.1 * W), "never back to a 1 that failed"
+    trace = _loop(s, 20.0, D=0.028, T=0.002, tick_cost=0.001, t0=60.0)
+    assert s.div == 2, "a 30% cheaper scene re-opens the probe on evidence"
+    assert _changes(trace)[0][0] < 60.0 + 5 * W
 
 
 def test_steady_changes_n_at_most_once_per_window():
@@ -236,13 +328,27 @@ def test_steady_changes_n_at_most_once_per_window():
 
 
 def test_a_step_up_needs_two_late_windows_in_a_row():
+    """The ordinary case: a MILDLY late window (D=25 against a 16.7ms period
+    runs two ticks every other cycle -- half a tick late) is not yet a scene,
+    and the second one in a row is."""
     s = _sched(60)
     _loop(s, 2 * W, D=0.010, T=0.002)         # warm-up + one clean window
     assert s.div == 1
-    _loop(s, W, D=0.040, T=0.002, tick_cost=0.001)
+    _loop(s, W, D=0.025, T=0.0075, tick_cost=0.001)
     assert s.div == 1, "one late window is not yet a scene"
+    _loop(s, W, D=0.025, T=0.0075, tick_cost=0.001)
+    assert s.div == 2
+
+
+def test_a_very_late_window_steps_up_on_its_own():
+    """The second threshold: a window whose cycles each lost most of a whole
+    tick is not waited out -- the cart is losing a third of its time and the
+    scene may be over before a second window closes."""
+    s = _sched(60)
+    _loop(s, 2 * W, D=0.010, T=0.002)
+    assert s.div == 1
     _loop(s, W, D=0.040, T=0.002, tick_cost=0.001)
-    assert s.div == 3
+    assert s.div == 3, "one window, and straight to the N that fits"
 
 
 def test_steady_holds_through_a_hitch():

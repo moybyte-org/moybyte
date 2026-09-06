@@ -12,14 +12,23 @@ where "draw 45 of 60" is 1-1-2 delivery that judders. Whether an N HOLDS is
 measured, never predicted: a draw cycle is N ticks by design, and every tick
 it runs beyond that (catch-up the design did not plan for), every period
 written off, and every stall is a late event; a window is late when its
-cycles ran more than a third of a tick late on average. N steps UP after two
-late windows in a row, to the smallest larger N whose cycle -- one drawing
-frame plus N-1 tick-only frames, D + (N-1)*T on slow EMAs -- fits its
-periods; that is the only thing `fits` predicts. N steps DOWN only by
-PROBING: after K clean windows try N-1 for one window and keep it if it held,
-else step back and wait twice as long before the next try. A loop whose
-tick-only frame already costs a period (T >= P) cannot be helped by drawing
-less often, so N pins at 1 and the misses say so. The first window after a
+cycles ran more than a third of a tick late on average, and VERY late when
+they averaged most of a whole one -- a cart losing a third of its time or
+more, which a second window of waiting would spend again. N steps UP after
+two late windows in a row, or after ONE very late window, to the smallest
+larger N whose cycle -- one drawing frame plus N-1 tick-only frames, D +
+(N-1)*T on slow EMAs -- fits its periods; that is the only thing `fits`
+predicts. N steps DOWN only by PROBING: after K clean windows try N-1 for
+one window, and keep it only if that window came back CLEAN, a stricter bar
+than the one that HOLDS an N. A failed probe records what its cycle cost and
+the next probe waits for EVIDENCE -- that cycle costing a fifth less, so the
+scene really did get cheaper -- or for a long back-off ceiling, whichever
+comes first, so a cart held in one heavy scene stops probing instead of
+dropping into slow motion for a window every back-off period; and the first
+late window after a probe PASSED steps back at once, because that probe was
+the optimistic one. A loop whose tick-only frame already costs a period
+(T >= P) cannot be helped by drawing less often, so N pins at 1 and the
+misses say so. The first window after a
 start is warm-up: it teaches nothing and decides nothing. STEADY and FREE are
 one parameter -- how long a window is.
 
@@ -34,9 +43,13 @@ EPS = 0.02            # of a period: absorbs an integer-ms host frame (33 vs 33.
 STEADY_S = 2.0        # a STEADY window, seconds
 FREE_S = 0.25         # a FREE window: follows load in a quarter second, judders for it
 LATE_CYCLE = 3        # a window is late when its cycles averaged over 1/3 tick late
+VERY_LATE = 0.8       # ...and VERY late at four fifths of a whole one: step up on ONE
 STALL = 4             # a frame over this many periods is ONE late event, not many ticks
 PROBE_K = 2           # clean windows at N before N-1 is tried
-PROBE_MAX = 16        # the back-off ceiling on that wait, in windows
+PROBE_LATE = 16       # a probe holds only under 1/16 of a tick late per cycle
+PROBE_BACK = 32       # windows a FAILED probe waits before time alone retries it
+PROBE_MAX = 64        # the ceiling on that wait: ~2 minutes of STEADY windows
+PROBE_DROP = 0.2      # ...or sooner, once the cycle it failed on costs this much less
 ALPHA = 0.125         # the frame-cost EMAs: a hitch is one sample in eight
 
 
@@ -70,6 +83,8 @@ class TickScheduler:
         self.probing = False  # this window tries N-1; `_probe_from` is the N it left
         self._probe_from = 0
         self._probe_k = PROBE_K
+        self._fail_cost = 0.0  # what the cycle cost when a probe last failed here
+        self._fresh_from = 0   # a probe just PASSED: the N one late window returns to
         self._clean = 0       # clean windows in a row at this N
         self._late_wins = 0   # late windows in a row at this N
         self._warm = True     # the first window teaches and decides nothing
@@ -84,6 +99,7 @@ class TickScheduler:
         self._win_s = 0.0
         self._win_cycles = 0
         self._win_late = 0
+        self._win_stalls = 0
         self.n = 0
         self.draw = False
 
@@ -179,8 +195,10 @@ class TickScheduler:
             # scan, a cart load) is one event however many ticks it cost.
             cyc = self._cyc_ticks
             late = (cyc - self.div if cyc > self.div else 0) + self._cyc_misses
-            if self._cyc_stall and late > 1:
-                late = 1
+            if self._cyc_stall:
+                if late > 1:
+                    late = 1
+                self._win_stalls += late
             self._cyc_ticks = 0
             self._cyc_misses = 0
             self._cyc_stall = False
@@ -195,16 +213,20 @@ class TickScheduler:
             if self._warm:
                 self._warm = False
             else:
-                self._decide(self._win_late * LATE_CYCLE > self._win_cycles)
+                self._decide()
             self._reset_window()
         return draw
 
-    def fits(self, div):
-        """Whether a draw cycle at `div` -- one drawing frame and div-1 frames
-        that only tick -- fits its div periods. A prediction, and the only one
-        the scheduler makes: it picks the N to step UP to."""
+    def cycle(self, div):
+        """What a draw cycle at `div` costs on the slow EMAs: one drawing
+        frame and div-1 frames that only tick."""
         t = self.tick_frame if self._t_known else 0.0
-        return self.draw_frame + (div - 1) * t <= div * self.period
+        return self.draw_frame + (div - 1) * t
+
+    def fits(self, div):
+        """Whether a draw cycle at `div` fits its div periods. A prediction,
+        and the only one the scheduler makes: it picks the N to step UP to."""
+        return self.cycle(div) <= div * self.period
 
     def _ema_d(self, x):
         if self._d_known:
@@ -224,9 +246,44 @@ class TickScheduler:
         self._win_s = 0.0
         self._win_cycles = 0
         self._win_late = 0
+        self._win_stalls = 0
 
-    def _decide(self, late):
-        """One verdict on N from a window's evidence: at most one step."""
+    def _probe_reset(self):
+        """A divisor arrived at rather than probed down to owes nothing to
+        the probe that failed at the one before it."""
+        self._probe_k = PROBE_K
+        self._fail_cost = 0.0
+
+    def _may_probe(self):
+        """Whether N-1 has earned a window. A probe that FAILED here is not
+        repeated until the cycle it failed on costs PROBE_DROP less -- the
+        scene got cheaper, so N-1 might hold now -- or until the back-off
+        ceiling runs out. A cart held in one heavy state therefore stops
+        probing after a failure or two, instead of dropping into slow motion
+        for a window every time a timer comes round."""
+        if self._clean >= self._probe_k:
+            return True
+        return (self._fail_cost > 0.0
+                and self.cycle(self.div - 1) <= self._fail_cost * (1.0 - PROBE_DROP))
+
+    def _probe_failed(self, back):
+        """N-1 did not hold: back to `back`, remember what its cycle cost
+        while it did not, and wait longer before asking again."""
+        k = min(max(self._probe_k * 2, PROBE_BACK), PROBE_MAX)
+        self._set_div(back)
+        self._fail_cost = self.cycle(back - 1)
+        self._probe_k = k
+
+    def _decide(self):
+        """One verdict on N from the closing window's evidence: at most one
+        step."""
+        cyc = self._win_cycles
+        n_late = self._win_late
+        late = n_late * LATE_CYCLE > cyc
+        # A stall is one late event and never evidence about a scene, so it
+        # comes off before asking whether the window was VERY late -- else a
+        # single 700ms hitch is a whole late cycle of a quarter-second window.
+        very = cyc > 0 and (n_late - self._win_stalls) >= cyc * VERY_LATE
         per = self.period
         if late and ((self._t_known and self.tick_frame >= per)
                      or self.tick_cost >= per):
@@ -237,42 +294,52 @@ class TickScheduler:
             if self.div != 1:
                 self._set_div(1)
             self.probing = False
+            self._probe_reset()
             self._clean = 0
             self._late_wins = 0
             return
         if self.probing:
-            # The window that tried N-1 is in: keep it if it held, else go
-            # back and wait twice as long before trying again.
+            # The window that tried N-1 is in. It keeps N-1 only if it came
+            # back CLEAN: the ordinary threshold would hold an N-1 that loses
+            # a tick every third cycle, and that is the slow motion a kid
+            # reads as a bug.
             self.probing = False
-            if late:
-                self._set_div(self._probe_from)
-                if self._probe_k < PROBE_MAX:
-                    self._probe_k *= 2
+            self._late_wins = 0
+            if n_late * PROBE_LATE > cyc:
+                self._probe_failed(self._probe_from)
             else:
-                self._probe_k = PROBE_K
+                self._probe_reset()
+                self._fresh_from = self._probe_from
                 self._clean = 1
-            self._late_wins = 0
             return
-        if late:
-            self._clean = 0
-            self._late_wins += 1
-            if self._late_wins < 2:
-                return
+        if not late:
             self._late_wins = 0
-            d = self.div + 1
-            while d <= MAX_DIV:
-                if self.fits(d):
-                    self._set_div(d)
-                    return
-                d += 1
+            self._clean += 1
+            if self.div > 1 and self._clean >= PROBE_K and self._may_probe():
+                self.probing = True
+                self._probe_from = self.div
+                self._clean = 0
+                self._set_div(self.div - 1)
+            return
+        self._clean = 0
+        if self._fresh_from:
+            # The first late window after a probe passed: that probe was
+            # optimistic, so go back now rather than spend a second window
+            # proving what this one already showed.
+            self._late_wins = 0
+            self._probe_failed(self._fresh_from)
+            return
+        self._late_wins += 1
+        if not very and self._late_wins < 2:
             return
         self._late_wins = 0
-        self._clean += 1
-        if self.div > 1 and self._clean >= self._probe_k:
-            self.probing = True
-            self._probe_from = self.div
-            self._clean = 0
-            self._set_div(self.div - 1)
+        d = self.div + 1
+        while d <= MAX_DIV:
+            if self.fits(d):
+                self._set_div(d)
+                self._probe_reset()
+                return
+            d += 1
 
     def _set_div(self, div):
         self.div = div
@@ -280,4 +347,5 @@ class TickScheduler:
         self._cyc_ticks = 0
         self._cyc_misses = 0
         self._cyc_stall = False
+        self._fresh_from = 0
         self.late = 0.0          # the old N's lateness says nothing about this one
