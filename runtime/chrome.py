@@ -183,7 +183,10 @@ def chrome_scale_floor(w, h, diagonal_in=None):
     declaring it is only free while that board runs at font scale 2 -- its shipped
     FONT_SCALE is 1 (owner call 2026-07-12: the 7" panel fits CONTENT, not
     magnification), and doubling its chrome is an owner's call about a screen he
-    is using, not an arithmetic consequence."""
+    is using, not an arithmetic consequence. The Guition P4 (10.1", 1280x800,
+    ~150 PPI) DECLARED on 2026-09-06, from the desk: at font scale 1 its 16px
+    icons were 2.7mm on touch-only glass -- "too tiny", never "hard to read"
+    -- so it floors at 2 while its glyphs stay at 1, the Guition S3's call."""
     if not diagonal_in:
         return 1
     diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5

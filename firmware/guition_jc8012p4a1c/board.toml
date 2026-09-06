@@ -27,6 +27,21 @@ system canvas plus a real 320x240 game canvas composited into a window
 That is what makes `wm_windowed.py` and its `surface.py` leaf right here and
 wrong on the S3 boards."""
 
+[panel]
+# The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203):
+# `chrome.chrome_scale_floor` turns it into the smallest scale that keeps a
+# 16px bar icon at `chrome.MIN_TAP_MM`, and the shell lays out interactive
+# geometry (the bar, the menu's rows, the Settings rows, the code editor's
+# symbol keys) at that scale while every glyph stays on the font scale.
+# Declared 2026-09-06 on the owner's verdict from the desk: the 1x layout the
+# Waveshare 7" runs makes the buttons "too tiny" on a 10.1" that is touch-only
+# -- 1280x800 on this diagonal is ~150 PPI, a 16px icon 2.7mm, so the floor
+# lands at 2 with the font untouched (the same call the Guition S3 made, for
+# the same reason: legibility was never the problem, tap size was).
+# `modules/moy_runtime.py`'s PANEL_DIAGONAL_IN carries this number to the
+# console; tests/test_board_toml.py pins the two together.
+diagonal_in = 10.1
+
 # ---------------------------------------------------------------------------
 
 [modules]

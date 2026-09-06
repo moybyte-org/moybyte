@@ -50,6 +50,13 @@ FONT_SCALE = 1                     # 1x, the Waveshare's call carried over: this
                                    # 10.1" 800x1280 is ~150 PPI against the 7"
                                    # 1024x600's ~170 -- the same legibility
                                    # class; Settings FONT SIZE persists overrides
+PANEL_DIAGONAL_IN = 10.1       # the glass, in inches -- board.toml [panel] is the
+                               # authority and tests/test_board_toml.py pins the
+                               # two together. It buys the #203 chrome tap-target
+                               # floor: at ~150 PPI a 16px bar icon is 2.7mm, so
+                               # interactive geometry lays out at scale 2 while
+                               # every glyph stays at FONT_SCALE (owner, from the
+                               # desk, 2026-09-06: "too tiny", not "too small to read").
 # Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
 # importable module SHADOWS the frozen module of that name (the Waveshare's
 # hardware-learned rule, 2026-07-08; same MicroPython, same rule).
@@ -204,11 +211,14 @@ def run_desktop(fps_cap=60):
                               auto_start=False)
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
-                     sys_canvas=sys_canvas, font_scale=FONT_SCALE)
+                     sys_canvas=sys_canvas, font_scale=FONT_SCALE,
+                     panel_diagonal_in=PANEL_DIAGONAL_IN)
     # The chrome strip a quiet frame rotates besides the game rect (the top
     # bar is stamped by an ungated blit every play frame, so the gates cannot
-    # see it change): the bar's own height, once the console knows it.
-    comp.strip_h = ws.bar_layer._bar_h("tool")
+    # see it change): the TALLEST bar the layout can draw, once the console
+    # knows it -- the app bar at the chrome floor (36 rows here, #203), which
+    # also covers the 18-row desk/game bar.
+    comp.strip_h = max(ws.layout.status_h, ws.bar_layer._bar_h("desktop"))
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own off-screen canvas -- the exact constructor the
     # boot `game` canvas uses -- and P4SystemCanvas.blit_game (PPA) upscales it

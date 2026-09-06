@@ -237,20 +237,21 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
 
     declared = {b: board_config.load(d).get("panel", {}).get("diagonal_in")
                 for b, d in BOARDS.items()}
-    assert {b for b, v in declared.items() if v} == {"guition-s3"}, (
+    assert {b for b, v in declared.items() if v} == {"guition-s3", "guition-p4"}, (
         "the set of boards opting in to the chrome tap-target floor changed: "
         "%s. Read chrome_scale_floor's docstring before updating this."
         % sorted(b for b, v in declared.items() if v))
 
-    guition = declared["guition-s3"]
-    runtime_py = (GUITION / "modules" / "moy_runtime.py").read_text(
-        encoding="utf-8")
-    assert "PANEL_DIAGONAL_IN = %s" % guition in runtime_py
-    assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py
-    # ...and the number does the job it was declared for: the landscape glass
-    # this board composites onto (480x320, its board.toml [board] prose) floors
-    # the chrome a scale above its font.
-    assert chrome_scale_floor(480, 320, guition) == 2
+    # ...and each number does the job it was declared for: the landscape glass
+    # the board composites onto floors the chrome a scale above its font.
+    for name, board_dir, glass in (("guition-s3", GUITION, (480, 320)),
+                                   ("guition-p4", GUITION_P4, (1280, 800))):
+        diag = declared[name]
+        runtime_py = (board_dir / "modules" / "moy_runtime.py").read_text(
+            encoding="utf-8")
+        assert "PANEL_DIAGONAL_IN = %s" % diag in runtime_py, name
+        assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py, name
+        assert chrome_scale_floor(glass[0], glass[1], diag) == 2, name
 
 
 # -- the [native] declaration (#161: the C-module list is data too) -----------
