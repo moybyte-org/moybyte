@@ -88,10 +88,18 @@ TOP_RIGHT = bytes.fromhex("0100e09814005706")
 RELEASED = bytes.fromhex("0000000016001c00")
 
 
-def test_the_packet_decodes_like_the_vendor_and_linux_drivers():
+# The same tap with the chip's y FLAG raised (bit 14 of y): what read as
+# y = 17248 on 2026-09-06 and pinned the pointer to the bottom edge until the
+# decode masked both axes to 12 bits, as Linux's silead.c does.
+BOTTOM_RIGHT_FLAGGED = bytes.fromhex("010094866a436a06")
+
+
+def test_the_packet_decodes_like_linux_both_axes_twelve_bit():
     i2c = FakeI2C({0x80: BOTTOM_RIGHT})
     chip = GSL3680(i2c, FakePin(), b"")
-    assert chip.read() == (1, 1642, 874)                # x from [6..7] & 0xfff, y from [4..5]
+    assert chip.read() == (1, 1642, 874)                # x from [6..7] & 0xfff, y from [4..5] & 0xfff
+    i2c.regs[0x80] = BOTTOM_RIGHT_FLAGGED
+    assert chip.read() == (1, 1642, 874)                # the flag is not a coordinate
     i2c.regs[0x80] = TOP_RIGHT
     assert chip.read() == (1, 1623, 20)
     i2c.regs[0x80] = RELEASED
@@ -107,6 +115,8 @@ def _touch(i2c, **knobs):
     t.flip_y = knobs.get("flip_y", False)
     t.raw_w = knobs.get("raw_w", 0)
     t.raw_h = knobs.get("raw_h", 0)
+    t.raw_x0 = knobs.get("raw_x0", 0)
+    t.raw_y0 = knobs.get("raw_y0", 0)
     t.available = True
     t.raw = None
     t.fingers = 0
@@ -128,6 +138,23 @@ def test_the_firmware_space_is_scaled_onto_the_glass():
     i2c.regs[0x80] = TOP_RIGHT
     x, y, edge = t.poll()
     assert (x, y, edge) == (1248, 17, False)
+
+
+def test_the_fitted_origin_and_span_put_the_five_targets_on_their_boxes():
+    """The Guition P4's second calibration (the five-target tool): the raw
+    origin sits (10, 21) in and the spans are 1640 x 865, so each target's
+    raw sample lands within a finger's width of the box it was tapped on."""
+    def pkt(x, y):
+        return bytes((1, 0, 0, 0, y & 0xFF, y >> 8, x & 0xFF, x >> 8))
+    i2c = FakeI2C({})
+    t = _touch(i2c, raw_w=1640, raw_h=865, raw_x0=10, raw_y0=21)
+    for raw, box in (((92, 86), (60, 60)), ((1575, 84), (1219, 60)),
+                     ((80, 820), (60, 739)), ((1567, 817), (1219, 739)),
+                     ((835, 462), (640, 400))):
+        i2c.regs[0x80] = pkt(*raw)
+        t._hp.release()
+        x, y, _ = t.poll()
+        assert abs(x - box[0]) <= 12 and abs(y - box[1]) <= 12, (raw, box, (x, y))
 
 
 def test_without_a_raw_space_the_glass_bounds_clamp():

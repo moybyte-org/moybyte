@@ -61,16 +61,22 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   once its firmware runs (glass-confirmed). Silead's GPL finger-id algorithm
   (`gsl_point_id.c`) is deliberately NOT carried: raw register 0x80 gives one
   finger's position, which is all a console pointer needs.
-- **Touch is CALIBRATED (2026-09-06, three corner holds with the raw packets
-  sampled over the dev channel).** The controller reports LANDSCAPE, aligned
-  with the desk as mounted (ROTATION 270) — no swap, no flips — but in the
-  firmware's OWN coordinate space, 1664×896 (the resolution in its config
-  block), not the glass's 1280×800: top-left read (33, 17), top-right
-  (1632, 27), bottom-right (1640, 875). So the driver SCALES
-  (`RAW_W`/`RAW_H` in `guition_p4_input.py`, `raw_w`/`raw_h` on the shared
-  driver); `tests/test_gsl3680.py` pins the decode against those packets. The
-  knobs stay live (`py touch.flip_x = True` over the dev channel); turning
-  the desk the other way up (ROTATION 90) means both flips go True.
+- **Touch is CALIBRATED (2026-09-06, twice).** Three corner holds with the
+  raw packets sampled over the dev channel gave the axes: the controller
+  reports LANDSCAPE, aligned with the desk as mounted (ROTATION 270) — no
+  swap, no flips — in the firmware's own space, not the glass's. The
+  five-target tool (`run_touch_calibrate()`) then gave the fit: the raw
+  origin sits (10, 21) counts in and the spans are 1640×865 over the
+  1280×800 glass (`RAW_X0/RAW_Y0/RAW_W/RAW_H` in `guition_p4_input.py`,
+  `raw_x0`…`raw_h` on the shared driver); the firmware's nominal 1664×896
+  was ~10px off at the edges. **The same session found the bug behind "the
+  touch feels inaccurate": the chip raises bit 14 of the raw Y on some
+  packets, the vendor's decoder never masked it (Linux's does), and every
+  such packet threw the pointer to the bottom edge.** `device/gsl3680.py`
+  masks both axes to 12 bits now; `tests/test_gsl3680.py` pins the flagged
+  packet and the five-target fit. The knobs stay live (`py touch.raw_x0 = 12`
+  over the dev channel); turning the desk the other way up (ROTATION 90)
+  means both flips go True.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
   the one fact the two boards' display modules differ on). The vendor BSP
   drives it as an LEDC PWM channel, so a duty is one line away the day

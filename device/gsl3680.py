@@ -19,8 +19,9 @@ factory driver runs it on every read, Linux's driver does not, and a console
 pointer needs one finger's position, which the chip reports raw at register
 0x80 without it. Dropped, not deferred.
 
-THE POLL: 8 bytes from 0x80 -- [0] finger count, [4..5] y, [6..7] x (12-bit,
-the high nibble of [7] is the finger id; bytes [2..3] are a frame counter).
+THE POLL: 8 bytes from 0x80 -- [0] finger count, [4..5] y, [6..7] x (BOTH
+12-bit: the high nibble of [7] is the finger id and bit 14 of y is a flag the
+chip raises on some packets; bytes [2..3] are a frame counter).
 There is no "buffer ready" flag as on the GT911: every read is the chip's
 current answer, so a count of 0 is a release, a count >0 a sample, and only
 a FAILED read is "no news" -- the gt911.HeldPoint contract still carries the
@@ -160,11 +161,16 @@ class GSL3680:
             return False
 
     def read(self):
-        """(fingers, x, y) of the FIRST point, raw controller coordinates."""
+        """(fingers, x, y) of the FIRST point, raw controller coordinates --
+        both axes 12-bit, as Linux's silead.c masks them. The vendor's driver
+        masks only x, and the chip sets bit 14 of y on some packets (a flag,
+        not a coordinate): unmasked, those read y = 16000+ and clamped the
+        pointer to the bottom edge on the Guition P4 -- three of five
+        calibration taps on 2026-09-06."""
         d = self._r(REG_TOUCH, 8)
         n = d[0]
         x = ((d[7] & 0x0F) << 8) | d[6]
-        y = (d[5] << 8) | d[4]
+        y = ((d[5] & 0x0F) << 8) | d[4]
         return n, x, y
 
 
@@ -177,18 +183,21 @@ class Touch:
 
     def __init__(self, fw, w, h, sda, scl, rst, int_pin=None, i2c_id=0,
                  freq=400000, swap_xy=False, flip_x=False, flip_y=False,
-                 raw_w=0, raw_h=0, log=print, progress=None):
+                 raw_w=0, raw_h=0, raw_x0=0, raw_y0=0, log=print, progress=None):
         self.w = w
         self.h = h
         self.swap_xy = swap_xy
         self.flip_x = flip_x
         self.flip_y = flip_y
         # The controller's OWN coordinate space, when it is not the glass's:
-        # the GSL firmware carries a resolution of its own (the Guition P4's
-        # is 1664x896 on 1280x800 glass -- three corner holds, 2026-09-06)
-        # and reports in it. 0 = the glass's, no scaling.
+        # the GSL firmware reports in a space of its own -- an origin
+        # (raw_x0, raw_y0) and a span (raw_w, raw_h) that map onto the glass
+        # (the Guition P4's: a 5-target fit, 2026-09-06). raw_w/raw_h 0 = the
+        # glass's, no scaling.
         self.raw_w = raw_w
         self.raw_h = raw_h
+        self.raw_x0 = raw_x0
+        self.raw_y0 = raw_y0
         self.available = False
         self.raw = None          # last raw controller coords, for calibrate
         self.fingers = 0
@@ -228,9 +237,9 @@ class Touch:
         if self.swap_xy:
             x, y = y, x
         if self.raw_w:
-            x = x * self.w // self.raw_w
+            x = (x - self.raw_x0) * self.w // self.raw_w
         if self.raw_h:
-            y = y * self.h // self.raw_h
+            y = (y - self.raw_y0) * self.h // self.raw_h
         if self.flip_x:
             x = self.w - 1 - x
         if self.flip_y:
