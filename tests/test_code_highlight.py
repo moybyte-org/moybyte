@@ -190,6 +190,33 @@ def test_highlight_cache_reuses_result(tmp_path):
     assert a is b                          # same line -> cached object
 
 
+def test_crossing_the_memo_bound_keeps_the_lines_still_on_screen(tmp_path):
+    """Dragging through a long file walks past the bound. Emptying the memo
+    there re-highlights the visible window inside one frame -- a hitch on the
+    very gesture the memo is for -- so the older generation is retired instead
+    and the lines just scrolled past are still one lookup away."""
+    from runtime.code_layer import _HL_MEMO
+    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+    onscreen = ["cls(%d)" % i for i in range(20)]
+    kept = [cl._hl(ln) for ln in onscreen]
+    for i in range(_HL_MEMO * 2):          # scroll far enough to rotate twice
+        cl._hl("x%d = %d" % (i, i))
+    assert len(cl._hl_cache) <= _HL_MEMO
+    assert len(cl._hl_old) <= _HL_MEMO
+    # The window is re-highlighted, not returned stale, once BOTH generations
+    # have rolled past it -- correctness never depends on the memo.
+    assert [cl._hl(ln) for ln in onscreen] == kept
+
+
+def test_a_rotation_does_not_lose_the_line_it_just_cached(tmp_path):
+    from runtime.code_layer import _HL_MEMO
+    cl = _make_ws_with_cart(tmp_path, "def _draw():\n    cls(5)\n").code_layer
+    for i in range(_HL_MEMO - 1):
+        cl._hl("a%d = 1" % i)
+    first = cl._hl("cls(1)")               # the entry that trips the rotation
+    assert cl._hl("cls(1)") is first
+
+
 def test_lua_project_switches_palette_and_highlighting(tmp_path):
     # The symbol palette + highlighter follow the OPEN project's runtime (#67
     # Phase 5): a lua cart's code tab offers `~` (for ~=) in place of the `;`

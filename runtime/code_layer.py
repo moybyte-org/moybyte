@@ -124,6 +124,11 @@ _HL_NUMBER = 9      # orange
 _HL_COMMENT = 5     # dark_grey
 _HL_BUILTIN = 14    # pink -- the cart drawing verbs stand out
 
+# Lines held per generation of the `_hl` memo. TWO generations live at a time,
+# so this is half the single bound it replaces and the memory ceiling is the
+# same; see _hl for why one generation was the wrong shape.
+_HL_MEMO = 200
+
 _HL_KEYWORDS = (
     "False", "None", "True", "and", "as", "assert", "break", "class",
     "continue", "def", "del", "elif", "else", "except", "finally", "for",
@@ -251,6 +256,7 @@ class CodeLayer:
         self._ekey = KeyEdge()        # keyboard edge tracker (editor edge detect)
         self._drag = None             # last pointer pos during a code-view drag-scroll
         self._hl_cache = {}           # per-line syntax-highlight memo (#24)
+        self._hl_old = {}             # ...and the generation it retires (see _hl)
         self._t = None                # per-draw tone map (set by _draw_code)
         # -- #89 additions: selection / tools / find / gutter -----------------
         self._tools_open = False      # the tool palette row is shown
@@ -982,15 +988,24 @@ class CodeLayer:
     def _hl(self, line):
         """Memoized per-line syntax highlight (#24). Lines recur every frame, so
         cache by text (keyed with the language, so switching a python project for
-        a lua one never replays stale colors); bound the cache so a long edit
-        session can't grow it."""
+        a lua one never replays stale colors).
+
+        The bound is TWO generations, not a clear. Dragging through a long file
+        walks past the bound, and emptying the memo there re-highlights the whole
+        visible window inside ONE frame -- a felt hitch, mid-drag, on exactly the
+        gesture the memo exists to make cheap. Retiring the older generation
+        leaves the lines still on screen one lookup away and caps the memory at
+        what the single larger bound it replaces held."""
         lua = self._is_lua()
         key = (lua, line)
         cols = self._hl_cache.get(key)
         if cols is None:
-            if len(self._hl_cache) > 400:
-                self._hl_cache.clear()
-            cols = _highlight(line, lua)
+            cols = self._hl_old.get(key)
+            if cols is None:
+                cols = _highlight(line, lua)
+            if len(self._hl_cache) >= _HL_MEMO:
+                self._hl_old = self._hl_cache
+                self._hl_cache = {}
             self._hl_cache[key] = cols
         return cols
 
