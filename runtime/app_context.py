@@ -654,6 +654,50 @@ class Nav:
         app carts out of project lists."""
         return self.__ws.is_system_app(cart)
 
+    def projects(self):
+        """The editable PROJECTS -- every scanned cart a system app does not
+        claim as its identity, which is exactly the roster the Editor's
+        project-picker shows without its "+ New" tile.
+
+        Here and not on `ctx.carts` on purpose: a list of places to GO is
+        navigation, and an app that browses projects is not thereby allowed to
+        author executable content."""
+        ws = self.__ws
+        return [c for c in ws.carts.all if not ws.is_system_app(c)]
+
+    def edit(self, cart, tab=None):
+        """Open `cart` in the project EDITOR, optionally landing on one tab.
+
+        The Files router's door for a `.moy` folder (which opens the project,
+        never a listing) and for a cart's own main file (`tab="code"`). False
+        when there is nothing to edit -- `open_in_editor` lands a source-less
+        cart on the error panel, and the caller shows its own status instead."""
+        if cart is None:
+            return False
+        ws = self.__ws
+        ws.open_in_editor(cart)
+        if ws.project is None or ws.project.cart is not cart:
+            return False
+        if tab:
+            ws.set_menu_view(tab)
+        return True
+
+    def open_text(self, name, kind=None, mode=None):
+        """Open a user-files TEXT document on the shell's text page, in `mode`.
+
+        The Files router's door for anything that is not a project, a project's
+        main file or a drawing. Resolved by REGISTERED ID like `app()`, so
+        Files holds no reference to whichever app draws the page -- step 3 of
+        docs/text_editing_2026-09.md swaps that app for a cart over the editor
+        handle and this signature does not move. False when the build carries
+        no text app."""
+        app = self.app("writer")
+        point = getattr(app, "open_named", None)
+        if app is None or point is None:
+            return False
+        point(name, mode)
+        return bool(self.open_app(app))
+
     def play(self, cart, caller):
         """Open `cart` as a workspace and RUN it, returning to `caller` on
         exit -- the Storybook PLAY verb."""

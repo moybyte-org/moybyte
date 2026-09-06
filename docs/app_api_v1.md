@@ -88,7 +88,7 @@ roles it declared:
 | `ctx.theme` | `colors()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
 | `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image codec |
 | `ctx.carts` | the CART store: projects, decks, cart images, `create`/`scan`/`hydrate` |
-| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()` |
+| `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()`, `projects()`, `edit()`, `open_text()` |
 | `ctx.prefs` | `get`/`set`/`clear` on `system.json`, namespaced per app |
 | `ctx.notify` | `achieve()`, `notice()` |
 | `ctx.wallpaper` | the desktop-backdrop capability (this app and Paint only) |
@@ -324,3 +324,12 @@ for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam -- resolution is
 by REGISTERED ID, so no app holds a reference to another app's class and a build
 without the target degrades to a status line. IPC beyond "open that, pointed
 here" is still out.
+
+The Files ROUTER (docs/text_editing_2026-09.md) is the seam's second customer,
+and it added three verbs that are all "open that, pointed here":
+`nav.projects()` lists the editable carts, `nav.edit(cart, tab)` opens one in
+the project Editor, and `nav.open_text(name, kind, mode)` opens a document on
+the shell's text page in a `text_modes` mode. `projects()` is on `nav` and not
+on `ctx.carts` deliberately: a list of places to GO is navigation, and an app
+that browses projects has not thereby earned the right to author executable
+content.

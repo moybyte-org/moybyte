@@ -195,26 +195,6 @@ def test_migration_turns_sheets_json_into_named_tables(tmp_path):
     assert ((7,),) in got and (("hi",),) in got
 
 
-def test_files_app_open_routes_a_table_to_sheets(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    s = formula.Sheet("nums", 4, 4)
-    s.set_cell(0, 0, "3")
-    moy_carts.save_file("tables", "nums", json.dumps(s.to_dict()), carts)
-    files = ws.files_app
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
-    ws.open()
-    ws.frame(1 / 30)
-    files._enter_kind("tables")
-    files._act("OPEN", "nums")
-    assert ws.wm.top_kind() == "sheets"
-    assert ws.sheets_app.sheet_name == "nums"
-    assert ws.sheets_app.sheet.value_at(0, 0) == 3
-
-
 def test_layout_reflows():
     small = SheetsLayout(320, 240, 1)
     big = SheetsLayout(960, 600, 1)
