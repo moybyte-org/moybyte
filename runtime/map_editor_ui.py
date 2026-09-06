@@ -965,7 +965,7 @@ class MapEditorUI:
         # quad groups in two fill_rects calls, pixel-identical by construction:
         #   1. backgrounds -- cells are disjoint, so the in-bounds block is ONE
         #      dark_blue quad and the out-of-bounds remainder two black strips;
-        #   2. (sprites, unchanged -- they ride the existing spr batch);
+        #   2. (the tiles between them are ONE map() -- see below);
         #   3. the grid lattice -- each cell's rectb edges merged into full-length
         #      1px lines (interior edges stay DOUBLED at k*cell and k*cell-1,
         #      exactly the pixels the per-cell outlines painted; overlaps at
@@ -1016,21 +1016,14 @@ class MapEditorUI:
         if overview:
             self._draw_map_blocks(cv, tm, sheet, me, x0, y0, cell, nx, ny)
         else:
-            cache = {}
-            scale = max(1, cell // sheet.TILE)
-            off = (cell - sheet.TILE * scale) // 2
-            for ry in range(ny):
-                cy = me.cam_y + ry
-                y = y0 + ry * cell
-                for rx in range(nx):
-                    tid = tm.mget(me.cam_x + rx, cy)
-                    if tid >= 0:
-                        img = cache.get(tid)
-                        if img is None:
-                            img = sheet.tile_image(tid, -1)
-                            cache[tid] = img if img is not None else False
-                        if img:
-                            cv.spr(img, x0 + rx * cell + off, y + off, scale)
+            # The visible window IS a map() region -- every detail rung's cell is a
+            # whole multiple of the tile (tests/test_map_tile_blit.py pins the
+            # ladder), so the cells sit on exactly the lattice blit_map walks. One
+            # native call for the window replaces an Image blit per cell, and it is
+            # the SAME kernel the cart's own map() runs, so a tile in the editor is
+            # the tile the cart draws.
+            cv.map(tm, sheet, me.cam_x, me.cam_y, nx, ny, x0, y0, -1,
+                   cell // sheet.TILE)
             cv.fill_rects(memo[2])
         # RECT preview (#91): while a box is being dragged, outline the covered cells
         # (clamped to the visible window) so the fill region is visible before release.
