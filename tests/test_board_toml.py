@@ -237,7 +237,8 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
 
     declared = {b: board_config.load(d).get("panel", {}).get("diagonal_in")
                 for b, d in BOARDS.items()}
-    assert {b for b, v in declared.items() if v} == {"guition-s3", "guition-p4"}, (
+    assert {b for b, v in declared.items() if v} == {
+        "guition-s3", "guition-p4", "p4"}, (
         "the set of boards opting in to the chrome tap-target floor changed: "
         "%s. Read chrome_scale_floor's docstring before updating this."
         % sorted(b for b, v in declared.items() if v))
@@ -245,13 +246,24 @@ def test_the_panel_diagonal_is_declared_once_and_reaches_the_console():
     # ...and each number does the job it was declared for: the landscape glass
     # the board composites onto floors the chrome a scale above its font.
     for name, board_dir, glass in (("guition-s3", GUITION, (480, 320)),
-                                   ("guition-p4", GUITION_P4, (1280, 800))):
+                                   ("guition-p4", GUITION_P4, (1280, 800)),
+                                   ("p4", P4, (1024, 600))):
         diag = declared[name]
         runtime_py = (board_dir / "modules" / "moy_runtime.py").read_text(
             encoding="utf-8")
         assert "PANEL_DIAGONAL_IN = %s" % diag in runtime_py, name
         assert "panel_diagonal_in=PANEL_DIAGONAL_IN" in runtime_py, name
         assert chrome_scale_floor(glass[0], glass[1], diag) == 2, name
+
+    # The T-Deck's silence is the one that was ARGUED (2026-09-06): the owner
+    # asked for the floor there, it was built and rendered, and it was declined
+    # because at 320px wide cs 2 leaves the bar's lent zone too narrow for the
+    # Editor's tab ladder. Its glass floors at 2 like everything else, so the
+    # arithmetic cannot be what stops a later re-declaration -- this can.
+    assert declared["tdeck"] is None and declared["tdeck-mainline"] is None
+    assert chrome_scale_floor(320, 240, 2.8) == 2
+    tdeck_toml = (TDECK / "board.toml").read_text(encoding="utf-8")
+    assert "NO [panel] BLOCK, AND THAT IS A DECISION" in tdeck_toml
 
 
 # -- the [native] declaration (#161: the C-module list is data too) -----------

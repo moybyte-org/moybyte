@@ -56,6 +56,12 @@ FONT_SCALE = 1                     # 1x everywhere (owner call, 2026-07-12): the
                                    # 1024x600 fits CONTENT, not magnification --
                                    # geometry is resolution-driven; persisted
                                    # system.json still overrides (Settings FONT SIZE)
+PANEL_DIAGONAL_IN = 7.0            # the glass, in inches -- board.toml [panel] is
+                                   # the authority and tests/test_board_toml.py
+                                   # pins the two together. It buys the #203 chrome
+                                   # tap-target floor: at ~170 PPI a 16px bar icon
+                                   # is 2.4mm, so interactive geometry lays out at
+                                   # scale 2 while every glyph stays at FONT_SCALE.
 # Internal-flash store root. NOT "/moybyte/..." -- a root-level dir named like an
 # importable module SHADOWS the frozen module of that name ('' precedes '.frozen'
 # on sys.path), and the first boot's seeded /moybyte dir broke the next boot's
@@ -220,7 +226,8 @@ def run_desktop(fps_cap=60):
                               auto_start=False)
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
-                     sys_canvas=sys_canvas, font_scale=FONT_SCALE)
+                     sys_canvas=sys_canvas, font_scale=FONT_SCALE,
+                     panel_diagonal_in=PANEL_DIAGONAL_IN)
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own off-screen canvas -- the exact constructor the
     # boot `game` canvas uses -- and P4SystemCanvas.blit_game (PPA) upscales it

@@ -30,6 +30,28 @@ them as the same object). That is what makes `wm.FullscreenStackWM` the right
 window manager here and the windowed desktop tier wrong -- see the
 `wm_windowed.py` denial below."""
 
+# NO [panel] BLOCK, AND THAT IS A DECISION (2026-09-06). Declaring this glass
+# would opt the board in to the #203 chrome tap-target floor; the owner asked
+# for it, it was built, RENDERED and declined on the pictures.
+#   * 320x240 on 2.8" is ~143 PPI -> a 16px icon is 2.8mm -> chrome scale 2:
+#     a 36px bar and 52px Settings rows on a 240px-tall screen.
+#   * What that costs is WIDTH, not height. cs 2 spends 188 of the 320 px on
+#     the bar's right cluster alone, so the lent left zone falls from ~202px to
+#     124: the Editor's tab ladder goes from eleven icons to ONE chip (Code,
+#     Sprites, Map, Scene, Music unreachable from the bar), the launcher's
+#     PLAY/CHANGE chips stop fitting entirely, Settings shows two rows instead
+#     of six, and the map editor's bottom button row clips past the panel.
+#     Declaring also moves 320x240 OFF chrome.Layout's frozen `_base` branch
+#     (its predicate ANDs `cs == fs`), so the reference geometry every other
+#     tier degrades to would stop being what this board runs.
+#   * What would have to land FIRST for this to be worth re-proposing: either
+#     the bar's right cluster shrinking under cs (four 32px icons + a clock is
+#     the whole cost) or the tab ladder taking a SECOND row when the lent zone
+#     cannot hold it. Until one of those exists the floor buys a bigger target
+#     for controls that are no longer on the screen.
+# The 7" P4 was declared the same day; its board.toml has the opposite
+# arithmetic, and chrome.chrome_scale_floor's docstring carries both.
+
 # ---------------------------------------------------------------------------
 
 [modules]

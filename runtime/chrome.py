@@ -177,16 +177,25 @@ def chrome_scale_floor(w, h, diagonal_in=None):
 
     1 when no diagonal is declared, which is the OPT-IN: a panel's physical size
     is a board fact that nothing else in the tree knows, so a board that does not
-    state it keeps chrome on the font scale exactly as before. Both silences today
-    are decisions, not omissions. The T-Deck has a keyboard and a trackball, so
-    its chrome makes no touch-first claim. The P4's glass floors at 2 as well, so
-    declaring it is only free while that board runs at font scale 2 -- its shipped
-    FONT_SCALE is 1 (owner call 2026-07-12: the 7" panel fits CONTENT, not
-    magnification), and doubling its chrome is an owner's call about a screen he
-    is using, not an arithmetic consequence. The Guition P4 (10.1", 1280x800,
-    ~150 PPI) DECLARED on 2026-09-06, from the desk: at font scale 1 its 16px
-    icons were 2.7mm on touch-only glass -- "too tiny", never "hard to read"
-    -- so it floors at 2 while its glyphs stay at 1, the Guition S3's call."""
+    state it keeps chrome on the font scale exactly as before. Every silence is a
+    decision, and each board.toml carries its own; the state of the lineup:
+
+      Guition S3   3.5" 480x320, DECLARED -- the board the floor exists for.
+                   FONT_SCALE 2 was built, shipped and reverted first (#202).
+      Guition P4  10.1" 1280x800, DECLARED 2026-09-06 from the desk: 2.7mm icons
+                   on touch-only glass, "too tiny", never "hard to read".
+      P4           7.0" 1024x600, DECLARED 2026-09-06. This one is NOT free --
+                   its FONT_SCALE ships at 1, so the floor really doubles its
+                   chrome -- but 1024px of width absorbs a 36px bar without
+                   dropping a control, and its symbol keys are its keyboard.
+      T-Deck       2.8" 320x240, DECLINED 2026-09-06 -- built, rendered, declined
+                   on the pictures. Its floor is 2 as well, and at 320px wide
+                   that leaves the bar's lent zone too narrow for the Editor's
+                   tab ladder or the launcher's verbs. The board.toml says what
+                   would have to change before it is worth re-proposing.
+
+    A floor of 3 is not reachable by any panel in the lineup; a board that
+    started answering 3 is a red test in tests/test_board_toml.py."""
     if not diagonal_in:
         return 1
     diag_px = (float(w) * float(w) + float(h) * float(h)) ** 0.5

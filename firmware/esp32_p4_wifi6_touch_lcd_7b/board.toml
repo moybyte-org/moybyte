@@ -27,6 +27,23 @@ module lists differ by exactly those two files, and by nothing else."""
 
 # ---------------------------------------------------------------------------
 
+[panel]
+# The GLASS, in inches -- the opt-in to the chrome tap-target floor (#203).
+# 1024x600 on 7.0" is ~170 PPI, so a 16px bar icon is 2.4mm and the floor
+# (`chrome.MIN_TAP_MM`, 4.5) answers chrome scale 2.
+#
+# The #203 note said declaring here was "only free while that board runs at
+# font scale 2", and this board runs at 1 (`FONT_SCALE`, owner call 2026-07-12:
+# the 7" panel fits CONTENT, not magnification) -- so it is NOT free, and the
+# owner made the call on 2026-09-06 anyway. It costs nothing but pixels here:
+# 1024px of width absorbs a 36px bar without dropping a single tab chip or a
+# Settings row, and the code editor's symbol keys -- this board's on-screen
+# keyboard until a BLE one is paired -- double. The T-Deck was declined on the
+# same day for the opposite arithmetic; its board.toml records why.
+diagonal_in = 7.0
+
+# ---------------------------------------------------------------------------
+
 [modules]
 dest = "modules"
 

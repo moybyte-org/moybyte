@@ -55,6 +55,16 @@ keeps the matrix a clean product instead of a pile of special cases.
   p4_1024x600_fs2_windowed the desktop tier: WindowedWM, font_scale 2 (so the
                            fs=2 rung is pinned here rather than in a config of
                            its own), plus the desk and a desk-with-one-window.
+                           It declares the P4's 7.0" glass (2026-09-06), whose
+                           floor is 2 -- the scale this row already ran -- so
+                           its hashes did not move by a byte when the diagonal
+                           landed. That is the PIXEL statement of "declaring
+                           the scale you already run changes nothing", the
+                           arithmetic half of which is
+                           tests/test_chrome_tap_floor.py. (The board ships
+                           FONT_SCALE 1, so what it actually draws is cs 2 over
+                           fs 1; no config models that tier, which was already
+                           true before the diagonal was declared.)
 
 That is 6 configurations x 19 surfaces (+2 windowed-only) = 116 goldens in
 about 1 second. The combination NOT covered is light-on-windowed; it is the
@@ -224,7 +234,7 @@ CONFIGS = {
         diagonal_in=None),
     "p4_1024x600_fs2_windowed": dict(
         sys_size=(1024, 600), font_scale=2, windowed=True, variant="dark",
-        diagonal_in=None),
+        diagonal_in=7.0),
 }
 
 # The config test_editor_tabs_render_independently sweeps. The largest one: every

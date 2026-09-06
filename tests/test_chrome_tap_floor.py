@@ -40,11 +40,12 @@ from runtime.chrome import CodeLayout, Layout, chrome_scale_floor
 # silence is a decision rather than an oversight.
 PANELS = (
     ("t-deck", 320, 240, 2.8, 2, False,
-     "keyboard + trackball: it makes no touch-first claim"),
+     "DECLINED 2026-09-06 on the rendered frames: its floor IS 2, and at 320px "
+     "wide that leaves the bar's lent zone too narrow for the tab ladder"),
     ("guition-s3", 480, 320, 3.5, 2, True,
      "touch-only 3.5in glass -- the board the floor exists for"),
-    ("p4", 1024, 600, 7.0, 2, False,
-     "its FONT scale ships at 1, so opting in would double its chrome"),
+    ("p4", 1024, 600, 7.0, 2, True,
+     "declared 2026-09-06 over a shipped FONT_SCALE of 1: 1024px absorbs it"),
 )
 
 
