@@ -151,8 +151,8 @@ class CartManager:
     def rehydrate(self, cart):
         """Load a slimmed cart's full payloads back from the store IN PLACE (the
         launcher/picker hold the same dict, so every reference fattens at once).
-        No-op for fat/embedded carts; a failed load leaves the cart slim and the
-        caller's error handling surfaces it (missing src -> the crash panel)."""
+        No-op for fat/embedded carts; a failed load leaves the cart slim, which
+        `_open_workspace` reads as NOT OPENABLE and refuses on the spot."""
         ws = self.ws
         if not cart.get("lazy") or ws.carts_store is None or not cart.get("path"):
             return cart

@@ -2249,6 +2249,8 @@ class Workstation:
         # shared by open() [RUN, from a launcher tap, uses the launcher selection] and
         # open_in_editor() [EDIT, from the project-picker, which passes the PICKED cart].
         # Leaves the cart STARTED so PLAY can run it and the editors have live data.
+        # Returns True iff the workspace opened; False leaves ws.cart None with
+        # cart_error set (see the rehydrate guard below).
         # Deferred pmem (#66): persist the OUTGOING project's unsaved cells before
         # the fresh Project replaces it -- a re-open otherwise reloads pmem.json
         # over progress that only ever reached RAM.
@@ -2285,6 +2287,22 @@ class Workstation:
         if prev is not None and prev is not cart:
             self.carts.reslim(prev)            # at most ~one fat cart stays live (#66)
         self.carts.rehydrate(cart)
+        # FAIL CLOSED (#66): a cart whose SOURCE did not come back is not
+        # openable, and the refusal belongs here -- everything below assumes
+        # cart["src"], so a slim dict that got this far reached Player.start and
+        # died on a KeyError two frames later, leaving ws.cart on the half-loaded
+        # dict. rehydrate() leaves a cart slim when the store said no: a missing
+        # folder, or (the case this was written from) a heap with no block big
+        # enough for the source. The kid gets the panel a crashing cart gets --
+        # open()/play() run() straight to it -- and the launcher stays usable.
+        if cart is None or "src" not in cart:
+            self._fat_cart = None
+            self.player.release_world()    # the outgoing run's world is dead too,
+                                           # and this is the heap that had no room
+            self.cart_error = ("Couldn't open %.24s. Try again."
+                               % ((cart or {}).get("title") or "that cart"))
+            self.crash_line = None
+            return False
         self._fat_cart = cart
         self.cart = cart
         self.config = dict(self.cart["cfg"])
@@ -2320,6 +2338,7 @@ class Workstation:
         # distinct carts is "Cart Explorer". Key by the cart's path/title so it's
         # the SAME identity the launcher uses (distinct carts, not repeat opens).
         self.ach.note("open", self.cart.get("path") or self.cart.get("title"))
+        return True
 
     def app_context(self, app_id, needs=(), prefs_ns=None):
         """Build the narrowed shell interface for one system app
@@ -2510,7 +2529,11 @@ class Workstation:
         # owns the screen until PLAY runs it. Reached from the Editor's PROJECT-PICKER, which
         # passes the PICKED cart -- never a launcher tap (a launcher tap always RUNS).
         self._ensure_desk()            # make verbs live in the make world (#105)
-        self._open_workspace(cart)
+        if not self._open_workspace(cart):
+            # No source, nothing to edit: land on the same error panel a crashed
+            # cart lands on rather than opening the Editor over an empty project.
+            self.run(self.project, self.launcher_layer)
+            return
         self.editor_app.open(self.project)
 
     def launch_selected(self):

@@ -10,6 +10,7 @@
 # host-testable against a temp dir. SD shares the SPI bus with the display, so
 # the caller mounts SD (moybyte_sd) with the LoRa/TFT CS deselected first.
 
+import gc
 import json
 
 try:
@@ -959,6 +960,24 @@ def embedded_floor(seed):
     return [dict(c) for c in seed]
 
 
+def _read_main(path, name):
+    """A cart's source, read once more after a collect if the heap said no.
+
+    The source is the largest single allocation a load makes -- tens of KB as
+    one contiguous string -- so on a fragmented heap it is the read that fails
+    while the memory to serve it exists: the caller that re-opens a cart drops
+    the previous one's payloads a few statements earlier (CartManager.reslim)
+    and nothing has collected since. A `big=75k` heap against a 77KB source is
+    what this was written from (#66).
+    """
+    full = path + "/" + name
+    try:
+        return _read_recover(full)
+    except MemoryError:
+        gc.collect()
+        return _read_recover(full)
+
+
 def load(path):
     """Load one .moy folder into a cart dict, or None on error.
 
@@ -989,8 +1008,7 @@ def load(path):
         # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
         spec = man.get("format") == "moy-1"
         try:
-            src = _read_recover(path + "/" +
-                                man.get("main", "main.lua" if spec else "main.py"))
+            src = _read_main(path, man.get("main", "main.lua" if spec else "main.py"))
         except OSError as exc:
             print("Moybyte cart main missing:", path, exc)
             return None
