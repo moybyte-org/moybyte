@@ -44,6 +44,14 @@ try:
 except ImportError:  # pragma: no cover - host fallback
     from runtime.cart_verbs import CART_VERBS as _CART_VERBS
 
+# The console-wide editor MODE table (docs/text_editing_2026-09.md): this tab
+# edits a cart's MAIN file, so its language and its parse gate are the `code`
+# mode's, asked here rather than re-derived.
+try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - host fallback
+    from runtime import text_modes as _modes
+
 # The shared pre-literate glyph vocabulary (#89 icon pass): the TLS toggle + the tool
 # palette row draw a 12x12 chrome glyph per button instead of the terse 2-3 char
 # label. Looked up LAZILY (not a top-level import): chrome.py imports THIS module for
@@ -303,10 +311,11 @@ class CodeLayer:
 
     def _is_lua(self):
         """The open project's cart language (#67 Phase 5): drives the symbol
-        palette + the highlighter's comment/keyword rules."""
+        palette + the highlighter's comment/keyword rules. Asked of the mode
+        table, which is where the shell's other text surfaces ask too."""
         proj = self.ws.project
         cart = proj.cart if proj is not None else None
-        return cart is not None and cart.get("runtime") == "lua"
+        return cart is not None and _modes.cart_lang(cart) == "lua"
 
     def _symbols(self):
         return _LUA_SYMBOLS if self._is_lua() else _CODE_SYMBOLS

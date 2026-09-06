@@ -43,6 +43,11 @@ try:
 except ImportError:  # pragma: no cover - direct host import
     from runtime.op_history import History, TextEditCodec, text_diff_op
 
+try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - direct host import
+    from runtime import text_modes as _modes
+
 
 MAX_CHARS = 8000        # per doc -- bounds the SD write + device memory
 PAPER = 7               # white -- same paper index Paint uses
@@ -54,6 +59,10 @@ INK = 0                 # black
 # the live burst before it saves, so "pause to let it autosave" IS "pause to
 # get an undo step", no second timer needed).
 _BURST_BREAK = ".,!?;:"
+
+# The badge a mode's gate raises (the SYNTAX badge's twin on the code side,
+# #154): a document the mode cannot parse, named in the status line.
+INVALID = "INVALID"
 
 # #111 phase 3 -> phase 4: the typing-burst diff + codec are SHARED with the
 # Code editor tab (both edit the same CodeEditor buffer), so they live in
@@ -152,6 +161,8 @@ class WriterAppLayer(ListShellApp):
         self._idle = 0.0
         self.rename_text = ""
         self._pending_open = None     # a name to open on the next open() (Files jump)
+        self._pending_mode = None     # the mode that jump asked for (None = the kind's)
+        self.doc_mode = _modes.TEXT   # the open doc's mode name (the table, never a guess)
         self._save_failed = False
         self.history = None           # op_history.History over the open doc (#111)
         self._burst_before = None     # text() snapshot at the live burst's start
@@ -159,18 +170,31 @@ class WriterAppLayer(ListShellApp):
     # -- store ---------------------------------------------------------------
     # (is_app / _store_ready / _load_json / _persist / _edge_key: ListShellApp)
 
-    def open_named(self, name):
+    def open_named(self, name, mode=None):
         """Point Writer at a named doc to open on its next open() -- the Files
-        app's OPEN verb (docs open in Writer)."""
-        self._pending_open = name
+        app's OPEN verb, which routes a text file here.
 
-    def flush(self, force=False):
+        `mode` is the router's answer from `text_modes`; None means the docs
+        kind's own, which is markdown. It is a parameter and not a lookup
+        because the ROUTER is what knows where the file came from -- the same
+        page edits a vault note and, once the ADVANCED row exists, a project's
+        JSON."""
+        self._pending_open = name
+        self._pending_mode = mode
+
+    def flush(self, force=False, soft=False):
         """Persist the open doc to its files/docs/<name>.md file. The
         autosave verb: cheap to call, no-ops when nothing changed. Closes any
         live typing/delete burst into a #111 op FIRST (the idle debounce is
         the natural burst edge, so this is also where an in-progress burst
         becomes one committed undo step) -- even on a no-op text save, so a
-        burst is never left dangling across a mode switch."""
+        burst is never left dangling across a mode switch.
+
+        `soft` is the #154 split, and only the idle debounce passes it: a
+        document its MODE cannot parse is refused there (never published
+        half-typed) and badged. Every other caller is an exit -- leaving the
+        page, deleting, the app's commit/close hooks -- and writes anyway,
+        keeping the badge, because a kid's text is theirs."""
         self._close_burst()
         ed = self.editor
         if ed is None or self.doc_name is None:
@@ -179,6 +203,12 @@ class WriterAppLayer(ListShellApp):
             return True
         body = ed.text()[:MAX_CHARS]
         name = self.doc_name
+        good, why = _modes.check(self.doc_mode, body)
+        if not good:
+            self.status = INVALID + " " + why
+            if soft:
+                self._idle = 0.0      # re-check on the next debounce, not next frame
+                return False
         ok = self._persist(self._store.save("docs", name, body))
         if ok:
             ed.dirty = False
@@ -186,6 +216,8 @@ class WriterAppLayer(ListShellApp):
             self._idle = 0.0
             self.grid.invalidate(name)
             self._commit_history(name)
+            if good and self.status.startswith(INVALID):
+                self.status = name.upper()
         return ok
 
     def commit(self):
@@ -302,9 +334,11 @@ class WriterAppLayer(ListShellApp):
         self._store.migrate("docs")       # best-effort, err ignored by design
         self.grid.refresh()
         pending = self._pending_open
+        mode = self._pending_mode
         self._pending_open = None
+        self._pending_mode = None
         if pending and pending in self.grid.names:
-            self._open_doc(pending)
+            self._open_doc(pending, mode)
         else:
             self.mode = "list"
             self.editor = None
@@ -316,11 +350,12 @@ class WriterAppLayer(ListShellApp):
 
     # -- doc verbs -----------------------------------------------------------
 
-    def _open_doc(self, name):
+    def _open_doc(self, name, mode=None):
         self.flush()
         blob = None
         if self._store_ready():
             blob = self._store.load("docs", name)[0]
+        self.doc_mode = mode or _modes.mode_for_kind("docs", name)
         lay = self.layout
         self.editor = CodeEditor(blob or "", lay.cols, lay.rows,
                                  clip=self._clip)
@@ -340,6 +375,7 @@ class WriterAppLayer(ListShellApp):
         name = None
         if self._store_ready():
             name = self._store.new_name("docs")[0]
+        self.doc_mode = _modes.mode_for_kind("docs", name or "")
         lay = self.layout
         self.editor = CodeEditor("", lay.cols, lay.rows,
                                  clip=self._clip)
@@ -534,7 +570,7 @@ class WriterAppLayer(ListShellApp):
         if self.mode == "edit" and self._unsaved:
             self._idle += dt
             if self._idle >= self.AUTOSAVE_S:
-                self.flush()
+                self.flush(soft=True)
         cv.cls(th["panel"])
         _ui.toolbar(cv, th, (0, lay.bar_h, lay.w, lay.toolbar_h))
         if self.mode == "list":
