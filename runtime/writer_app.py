@@ -5,16 +5,16 @@ Presented exactly like Paint: a `.moy` cartridge identity on the launcher
 responsive SYSTEM process the console spawns instead of the Player -- a text app
 must reflow to a P4/web window, while Player is the fixed 320x240 contract.
 
-Docs are USER FILES (#108): named ``files/docs/*.moytext`` items in the store,
+Docs are USER FILES (#108): named ``files/docs/*.md`` items in the store,
 auto-named (`doc_1`, ...), browsed through the SHARED ``FileGridView`` picker
 (the exact widget Paint's OPEN mode + the Files app use) and AUTOSAVED on an
 idle debounce -- a kid never presses save. The legacy single-file `notes.json`
 notebook is migrated once (`moy_carts.migrate_docs`) into one doc file per note.
 
 The buffer/caret core is the shared `CodeEditor` (the same editing behavior a
-kid already knows from the Code tab), drawn as a ruled paper page. A doc's body
-persists as a tiny `moytext-v1` blob, so copying it into a cart reads back
-unchanged through the `text(name)` cart verb (#78). Titling is optional
+kid already knows from the Code tab), drawn as a ruled paper page. A doc is
+PLAIN MARKDOWN -- the file's text is the page's text, nothing wraps it -- so the
+card in a PC's reader opens the same folder in any editor. Titling is optional
 (RENAME); the auto-name is always visible under the thumbnail."""
 
 try:
@@ -22,8 +22,6 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime import ui as _ui
 
-
-import json
 
 try:
     from editors import CodeEditor
@@ -60,23 +58,6 @@ _BURST_BREAK = ".,!?;:"
 # #111 phase 3 -> phase 4: the typing-burst diff + codec are SHARED with the
 # Code editor tab (both edit the same CodeEditor buffer), so they live in
 # op_history now (text_diff_op / TextEditCodec) instead of a private copy here.
-
-
-def _body_of(blob):
-    """The body string of a moytext-v1 blob (empty on anything malformed)."""
-    try:
-        data = json.loads(blob)
-    except (ValueError, TypeError):
-        return ""
-    if isinstance(data, dict):
-        b = data.get("body", "")
-        if isinstance(b, str):
-            return b
-    return ""
-
-
-def _encode(body):
-    return json.dumps({"format": "moytext-v1", "body": body})
 
 
 class WriterLayout(ListShellLayout):
@@ -132,7 +113,7 @@ class WriterLayout(ListShellLayout):
 
 class WriterAppLayer(ListShellApp):
     """A doc picker (shared FileGridView) + a ruled-paper text page over the
-    shared CodeEditor core, on named files/docs/*.moytext user files (#108)."""
+    shared CodeEditor core, on named files/docs/*.md user files (#108)."""
 
     id = "writer"
     domain = "system"
@@ -184,7 +165,7 @@ class WriterAppLayer(ListShellApp):
         self._pending_open = name
 
     def flush(self, force=False):
-        """Persist the open doc to its files/docs/<name>.moytext file. The
+        """Persist the open doc to its files/docs/<name>.md file. The
         autosave verb: cheap to call, no-ops when nothing changed. Closes any
         live typing/delete burst into a #111 op FIRST (the idle debounce is
         the natural burst edge, so this is also where an in-progress burst
@@ -198,7 +179,7 @@ class WriterAppLayer(ListShellApp):
             return True
         body = ed.text()[:MAX_CHARS]
         name = self.doc_name
-        ok = self._persist(self._store.save("docs", name, _encode(body)))
+        ok = self._persist(self._store.save("docs", name, body))
         if ok:
             ed.dirty = False
             self._unsaved = False
@@ -341,7 +322,7 @@ class WriterAppLayer(ListShellApp):
         if self._store_ready():
             blob = self._store.load("docs", name)[0]
         lay = self.layout
-        self.editor = CodeEditor(_body_of(blob) if blob else "", lay.cols, lay.rows,
+        self.editor = CodeEditor(blob or "", lay.cols, lay.rows,
                                  clip=self._clip)
         self.doc_name = name
         self.mode = "edit"

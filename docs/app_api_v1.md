@@ -86,7 +86,7 @@ roles it declared:
 | `ctx.damage` | `all()` -- repaint the whole system surface next frame |
 | `ctx.surface` | `canvas()`, `size()`, `font_scale()`, `windowed()`, `pointer()`, `glyph()` |
 | `ctx.theme` | `colors()`, `light()`, `name()`, `variant()`, `set()`, `set_variant()` |
-| `ctx.files` | the USER-FILES store (#108): named documents, the trash, history sidecars, the image codec |
+| `ctx.files` | the USER-FILES store (#108): named documents (`docs` is plain Markdown — `files/docs/<name>.md`, the file's body IS the document), the trash, history sidecars, the image codec |
 | `ctx.carts` | the CART store: projects, decks, cart images, `create`/`scan`/`hydrate` |
 | `ctx.nav` | `app()`, `open_app()`, `play()`, `open_workspace()`, `text_mode()`, `is_system_app()` |
 | `ctx.prefs` | `get`/`set`/`clear` on `system.json`, namespaced per app |

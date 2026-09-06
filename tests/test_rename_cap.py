@@ -39,7 +39,7 @@ def _type_one(app, ch):
 
 def _writer(tmp_path):
     carts = str(tmp_path / "carts")
-    moy_carts.save_file("docs", LONG, '{"format": "moytext-v1", "body": "x"}', carts)
+    moy_carts.save_file("docs", LONG, "x", carts)
     ws = host_app.build_workstation(carts)
     _open(ws, "Writer")
     app = ws.writer_app
@@ -61,7 +61,7 @@ def _sheets(tmp_path):
 
 def _files(tmp_path):
     carts = str(tmp_path / "carts")
-    moy_carts.save_file("docs", LONG, '{"format": "moytext-v1", "body": "x"}', carts)
+    moy_carts.save_file("docs", LONG, "x", carts)
     ws = host_app.build_workstation(carts)
     _open(ws, "Files")
     app = ws.files_app

@@ -276,11 +276,9 @@ def test_files_app_use_action_lists_and_resends(tmp_path):
 
 
 def test_docs_and_tables_kinds_get_the_open_action(tmp_path):
-    import json
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
-    moy_carts.save_file("docs", "note",
-                        json.dumps({"format": "moytext-v1", "body": "hi"}), carts)
+    moy_carts.save_file("docs", "note", "hi", carts)
     app = ws.files_app
     _open_app(ws, "Files")
     app._enter_kind("docs")

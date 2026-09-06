@@ -241,12 +241,16 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     assert ws.player.cart_error is None, ws.player.cart_error
     assert ns["status"].startswith("SAVED"), ns["status"]
     # It is a real user-files document, in the kind Writer and Files browse --
-    # and a `moytext-v1` blob, not a bare string (a bare string decodes to
-    # nothing, silently, and looks exactly like a save that never happened).
+    # and a plain `.md` on the card, holding exactly what the cart typed.
     names = moy_carts.list_files("docs", ws.carts_root)
     assert names, "nothing landed in files/docs"
     blob = moy_carts.load_file("docs", names[0], ws.carts_root)
-    assert moy_carts.decode_text(blob) == ["HELLO", "WORLD"]
+    assert blob == "HELLO\nWORLD"
+    assert moy_carts.file_path("docs", names[0], ws.carts_root).endswith(".md")
+    # ...and the cart reads its own note back out of that `.md`.
+    ns["lines"][:] = [""]
+    ns["_open"](names[0])
+    assert ns["lines"] == ["HELLO", "WORLD"]
     # ...and its own prefs slot remembers it, namespaced under the app id.
     assert ws.system["notes_last"] == names[0]
 

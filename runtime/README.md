@@ -100,7 +100,9 @@ Content + tooling:
   `web_canvas`), which a board has neither of — see `wallpaper.draw_preview` for the history.
   `writer.moy` (title: Writer) opens the kid notebook (`runtime/writer_app.py`):
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
-  one crash-safe `notes.json` beside `artwork.moyimg`.
+  each doc as a named `files/docs/<name>.md` user file (#108) — plain Markdown,
+  UTF-8, LF, no envelope, so the card opens in any editor on a PC.
+  `system_carts/notes.moy` is the cart-side notepad over the SAME files.
   `storybook.moy` (title: Storybook, #78) opens `runtime/storybook_app.py`:
   decks of art+words pages that COMPILE to real story carts (`deck.json` + a
   generated, readable `main.py`; Paint art attaches per page). Hand-editing the

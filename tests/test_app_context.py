@@ -608,18 +608,18 @@ def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
     assert value is None and "nope" in str(err) and err is not _ac.NO_STORE
 
 
-def test_decode_text_reads_a_stored_document_and_never_a_bare_string(tmp_path):
-    """A `.moytext` holds a `moytext-v1` blob, not a string. The codec is on the
-    role so a USER APP writes what Writer and Files can read back -- a bare
-    string decodes to nothing, silently, and looks exactly like a save that did
-    not happen."""
+def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
+    """A document is plain Markdown, so the bare string IS the document. The
+    codec stays on the role because that is where a USER APP reaches it, and a
+    legacy `moytext-v1` wrapper still unwraps rather than showing its JSON."""
     ws, files = _files(tmp_path)
     blob = files.encode_text("HELLO\nWORLD")
     assert files.save("docs", "greeting", blob)[1] is None
     stored, err = files.load("docs", "greeting")
-    assert err is None and stored == blob
+    assert err is None and stored == "HELLO\nWORLD"
     assert files.decode_text(stored) == ["HELLO", "WORLD"]
-    assert files.decode_text("HELLO\nWORLD") == []       # the bare-string trap
+    assert files.decode_text("HELLO\nWORLD") == ["HELLO", "WORLD"]
+    assert files.decode_text('{"format": "moytext-v1", "body": "hi"}') == ["hi"]
     assert files.decode_text(files.encode_text("")) == []
     assert files.decode_text("") == [] and files.decode_text(None) == []
     ws.carts_store = None

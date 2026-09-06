@@ -228,6 +228,141 @@ def test_migrate_docs_and_tables_are_one_shot(tmp_path):
     assert moy_carts.migrate_tables(root) is None
 
 
+# -- documents are plain Markdown (2026-09-07) -------------------------------
+
+WRAPPED = '{"format": "moytext-v1", "body": "line one\\nline two"}'
+
+
+def _docs_dir(root):
+    return Path(moy_carts.file_kind_dir("docs", root))
+
+
+def _wrapper(root, stem, body="line one\nline two"):
+    """Write a legacy `.moytext` the way the old store did."""
+    d = _docs_dir(root)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (stem + ".moytext")).write_text(
+        json.dumps({"format": "moytext-v1", "body": body}))
+    return d / (stem + ".moytext")
+
+
+def test_a_document_is_the_file_and_nothing_wraps_it(tmp_path):
+    root = _root(tmp_path)
+    name = moy_carts.save_file("docs", "story", "# Title\n\nA line.", root)
+    p = _docs_dir(root) / (name + ".md")
+    assert p.read_text() == "# Title\n\nA line."
+    assert moy_carts.load_file("docs", name, root) == "# Title\n\nA line."
+    assert moy_carts.list_files("docs", root) == [name]
+
+
+def test_migrate_doc_format_rewrites_wrappers_as_markdown(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    _wrapper(root, "one")
+    _wrapper(root, "two", "solo")
+    moy_carts.save_file("docs", "native", "already md", root)
+    assert moy_carts.migrate_doc_format(root) == 2
+    d = _docs_dir(root)
+    assert not list(d.glob("*.moytext"))
+    assert (d / "one.md").read_text() == "line one\nline two"
+    assert (d / "two.md").read_text() == "solo"
+    assert (d / "native.md").read_text() == "already md"
+    assert sorted(moy_carts.list_files("docs", root)) == ["native", "one", "two"]
+
+
+def test_migrate_doc_format_is_one_shot_and_idempotent(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    _wrapper(root, "one")
+    assert moy_carts.migrate_doc_format(root) == 1
+    assert moy_carts.load_docs_version(root) == moy_carts.DOCS_GEN
+    # A store already at this generation costs one read and rewrites nothing.
+    _wrapper(root, "late")
+    assert moy_carts.migrate_doc_format(root) == 0
+    assert (_docs_dir(root) / "late.moytext").exists()
+    # A fresh store with nothing to move still marks itself swept.
+    fresh = str(tmp_path / "fresh")
+    moy_carts.ensure_dirs(fresh)
+    assert moy_carts.migrate_doc_format(fresh) == 0
+    assert moy_carts.load_docs_version(fresh) == moy_carts.DOCS_GEN
+
+
+def test_an_existing_md_wins_over_an_older_wrapper(tmp_path):
+    """The `.md` is either a NEWER note or the finished half of an interrupted
+    pass, and neither may be overwritten by the wrapper beside it."""
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    moy_carts.save_file("docs", "note", "the newer text", root)
+    _wrapper(root, "note", "the older text")
+    assert moy_carts.migrate_doc_format(root) == 1
+    d = _docs_dir(root)
+    assert (d / "note.md").read_text() == "the newer text"
+    assert not (d / "note.moytext").exists()
+
+
+def test_a_crash_between_the_two_writes_loses_nothing(tmp_path):
+    """`_write_atomic` publishes the `.md` whole BEFORE the wrapper is removed,
+    so a power cut between them leaves both -- and the next pass finishes."""
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    legacy = _wrapper(root, "half", "recovered")
+    d = _docs_dir(root)
+    real_remove = moy_carts._remove
+
+    def _die(path):
+        if path.endswith(".moytext"):
+            raise KeyboardInterrupt("power cut")
+        real_remove(path)
+
+    moy_carts._remove = _die
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            moy_carts.migrate_doc_format(root)
+    finally:
+        moy_carts._remove = real_remove
+    assert (d / "half.md").read_text() == "recovered"    # step one completed
+    assert legacy.exists()                               # step two did not
+    assert moy_carts.load_docs_version(root) == 0        # so the pass re-runs
+    assert moy_carts.migrate_doc_format(root) == 1
+    assert (d / "half.md").read_text() == "recovered"
+    assert not legacy.exists()
+
+
+def test_a_stray_wrapper_after_the_sweep_is_absorbed_on_listing(tmp_path):
+    """A `.moytext` pushed by an older peer, or carried in on a card, arrives
+    after the one-shot pass -- so the docs listing absorbs it in place."""
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    assert moy_carts.migrate_doc_format(root) == 0
+    _wrapper(root, "from_a_card", "hello there")
+    assert moy_carts.list_files("docs", root) == ["from_a_card"]
+    assert moy_carts.load_file("docs", "from_a_card", root) == "hello there"
+    assert not (_docs_dir(root) / "from_a_card.moytext").exists()
+
+
+def test_a_trashed_wrapper_migrates_with_the_live_ones(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    moy_carts.save_file("docs", "gone", "x", root)
+    moy_carts.delete_file("docs", "gone", root)
+    trash = Path(moy_carts.files_root(root)) / "trash" / "docs"
+    (trash / "gone.md").rename(trash / "gone.moytext")
+    (trash / "gone.moytext").write_text(WRAPPED)
+    assert moy_carts.migrate_doc_format(root) == 1
+    assert ("docs", "gone") in moy_carts.trash_list(root)
+    assert (trash / "gone.md").read_text() == "line one\nline two"
+
+
+def test_sweep_store_runs_both_one_shot_passes(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    _wrapper(root, "one")
+    assert moy_carts.sweep_store(root) == (0, 1)
+    assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
+    assert moy_carts.load_docs_version(root) == moy_carts.DOCS_GEN
+    assert moy_carts.sweep_store(root) == (0, 0)
+
+
 def test_sprite_export_lands_in_files_sprites(tmp_path):
     from runtime.editors_sheet import SpriteSheet
     root = _root(tmp_path)

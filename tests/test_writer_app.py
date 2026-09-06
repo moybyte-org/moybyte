@@ -1,13 +1,13 @@
-"""Writer app (#108): the kid notebook on named files/docs/*.moytext user
-files -- the shared FileGridView picker, autosave on the idle debounce, rename,
-trash, and the one-shot notes.json -> named-docs migration."""
+"""Writer app (#108): the kid notebook on named files/docs/*.md user files --
+plain Markdown, the shared FileGridView picker, autosave on the idle debounce,
+rename, trash, and the one-shot notes.json -> named-docs migration."""
 
 import json
 from pathlib import Path
 
 from runtime import host_app, moy_carts
 from runtime.op_history import MAX_OPS_PER_SEGMENT
-from runtime.writer_app import WriterAppLayer, WriterLayout, _body_of
+from runtime.writer_app import WriterAppLayer, WriterLayout
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,7 +73,7 @@ def test_writer_opens_in_text_mode_and_exit_restores(tmp_path):
     assert ws.input.text_mode is False    # button mode restored for games
 
 
-def test_new_doc_persists_as_a_named_moytext_file(tmp_path):
+def test_new_doc_persists_as_a_named_markdown_file(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
     app = _open_writer(ws)
@@ -86,11 +86,12 @@ def test_new_doc_persists_as_a_named_moytext_file(tmp_path):
     app._back_to_list()                   # leaving the page flushes
     assert app.mode == "list"
     assert name in app.grid.names         # the doc shows in the picker
+    # The FILE is the document: plain Markdown, no envelope, `.md` on the card.
+    md = Path(moy_carts.file_path("docs", name, carts))
+    assert md.suffix == ".md"
+    assert md.read_text() == "The Dragon Fort\nOnce upon a time."
     blob = moy_carts.load_file("docs", name, carts)
-    data = json.loads(blob)
-    assert data["format"] == "moytext-v1"
-    assert data["body"] == "The Dragon Fort\nOnce upon a time."
-    # It reads back through the #78 text() cart verb decoder too.
+    assert blob == md.read_text()
     assert moy_carts.decode_text(blob) == ["The Dragon Fort", "Once upon a time."]
 
 
@@ -120,7 +121,7 @@ def test_autosave_flushes_on_the_idle_debounce(tmp_path):
     assert app._unsaved is True
     app.draw(app.AUTOSAVE_S + 0.1)        # the debounce alone persists it
     assert app._unsaved is False
-    assert _body_of(moy_carts.load_file("docs", name, carts)) == "no save tap"
+    assert moy_carts.load_file("docs", name, carts) == "no save tap"
 
 
 def test_new_doc_is_unwritten_until_touched(tmp_path):
@@ -175,7 +176,7 @@ def test_migration_turns_notes_json_into_named_docs(tmp_path):
     app = _open_writer(ws)
     names = moy_carts.list_files("docs", carts)
     assert len(names) == 2
-    bodies = {_body_of(moy_carts.load_file("docs", n, carts)) for n in names}
+    bodies = {moy_carts.load_file("docs", n, carts) for n in names}
     assert bodies == {"First note", "Second note"}
     assert set(app.grid.names) == set(names)
 
@@ -183,9 +184,7 @@ def test_migration_turns_notes_json_into_named_docs(tmp_path):
 def test_files_app_open_routes_a_doc_to_writer(tmp_path):
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)
-    moy_carts.save_file("docs", "letter",
-                        json.dumps({"format": "moytext-v1", "body": "dear you"}),
-                        carts)
+    moy_carts.save_file("docs", "letter", "dear you", carts)
     files = ws.files_app
     for i, cart in enumerate(ws.launcher.items):
         if cart.get("title") == "Files":
@@ -224,7 +223,7 @@ def test_bar_x_exit_saves_the_open_page(tmp_path):
     ws.handle_pointer()                   # the ROUTER owns the app bar contract
     ws.pointer.click = False
     assert ws.wm.top_kind() == "launcher"
-    assert _body_of(moy_carts.load_file("docs", name, carts)) == "not lost"
+    assert moy_carts.load_file("docs", name, carts) == "not lost"
 
 
 def test_layout_reflows_and_windowed_drops_the_bar():
@@ -233,8 +232,6 @@ def test_layout_reflows_and_windowed_drops_the_bar():
     assert big.cols > small.cols and big.rows > small.rows
     win = WriterLayout(480, 300, 1, windowed=True)
     assert win.bar_h == 0
-    assert _body_of('{"format": "moytext-v1", "body": "hi"}') == "hi"
-    assert _body_of("garbage") == ""
 
 
 # -- #111 phase 3: op-history undo/redo --------------------------------------

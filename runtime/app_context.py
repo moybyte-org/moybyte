@@ -367,6 +367,7 @@ class _RawFiles:
         `"docs"`/`"tables"` = that kind's own one-shot move."""
         store = self.__ws.carts_store
         if kind == "docs":
+            store.migrate_doc_format(self.__ws.carts_root)
             return store.migrate_docs(self.__ws.carts_root)
         if kind == "tables":
             return store.migrate_tables(self.__ws.carts_root)
@@ -489,12 +490,12 @@ class Files(_StoreRole):
             return blob
         return store.stamp_provenance(blob, kind, name, sig)
 
-    # -- the moytext codec (#181) --------------------------------------------
+    # -- the document codec (#181) -------------------------------------------
     #
-    # Pure functions on the store, same shape as the image codec above. Here
-    # because a USER APP cart saving a note must write the blob Writer and Files
-    # can READ -- a plain string in a `.moytext` decodes to nothing, silently,
-    # and looks exactly like a save that did not happen.
+    # Pure functions on the store, same shape as the image codec above. A
+    # document is plain Markdown, so these are `str` and `splitlines` -- they
+    # stay a named seam so a USER APP cart writing a note goes through the one
+    # place that says what a `.md` holds.
 
     def encode_text(self, body):
         store = self._store()

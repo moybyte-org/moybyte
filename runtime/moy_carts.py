@@ -533,29 +533,32 @@ def decode_table(blob):
 
 
 def encode_text(body):
-    """A doc body string -> the `moytext-v1` blob a `.moytext` file holds.
+    """A doc body string -> the bytes its file holds.
 
-    The inverse of `decode_text`, put here in the store beside it (#181) so a
-    USER APP cart can write a document Writer and Files can actually read --
-    `ctx.files.encode_text` is what reaches it, and `system_api.ScopedFiles`
-    what a cart calls. `writer_app._encode` is the same two lines and predates
-    this; it is a de-duplication waiting for someone who owns that file."""
-    return json.dumps({"format": "moytext-v1", "body": str(body)})
+    A document IS its own text now (`files/docs/<name>.md`), so this is `str`
+    and nothing else. It stays a named seam because `ctx.files.encode_text` and
+    `system_api.ScopedFiles` reach it (#181): a cart writing a document goes
+    through one place wherever the format lands next."""
+    return str(body)
 
 
 def decode_text(blob):
-    """A moytext-v1 blob -> the doc body split into a list of lines. A blank/absent
-    body is []. Anything malformed yields []."""
-    try:
-        data = json.loads(blob) if isinstance(blob, str) else blob
-    except (ValueError, TypeError):
+    """A document's stored text -> its lines ([] when there are none).
+
+    The blob IS the body, which is what a `.md` always holds. A legacy
+    `moytext-v1` wrapper is unwrapped first, so a `.moytext` that outlived
+    `migrate_doc_format` reads as its note rather than as JSON."""
+    if not isinstance(blob, str):
         return []
-    if not isinstance(data, dict):
-        return []
-    body = data.get("body", "")
-    if not isinstance(body, str) or body == "":
-        return []
-    return body.split("\n")
+    body = blob
+    if blob[:1] == "{":
+        try:
+            data = json.loads(blob)
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("body"), str):
+            body = data["body"]
+    return body.split("\n") if body else []
 
 
 def _ref_to_rc(ref):
@@ -998,9 +1001,17 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
     return gone
 
 
+def sweep_store(root=CARTS_DIR):
+    """The once-per-generation passes a store OPENING runs, behind one door.
+
+    Each is gated on its own version sidecar, so the warm path is one small read
+    apiece. Returns (retired folders removed, documents rewritten)."""
+    return (prune_retired(root), migrate_doc_format(root))
+
+
 def seed_any(seed, root=CARTS_DIR, progress=None):
     """Seed a roster of either form. The one call a board's boot makes."""
-    prune_retired(root)
+    sweep_store(root)
     if is_packed(seed):
         return seed_packed(seed, root, progress=progress)
     return seed_builtins(seed, root, progress=progress)
@@ -1979,13 +1990,22 @@ FILES_DIR = "files"
 TRASH_DIR = "trash"
 TRASH_KEEP = 50          # prune the trash's oldest entries beyond this many
 
+# Documents are PLAIN MARKDOWN (2026-09-07): `files/docs/<name>.md`, UTF-8, LF,
+# no envelope and no header -- the file's body IS the document and its stem is
+# the note's name. The point is that a card in a PC's reader opens the same
+# folder in Obsidian with nothing to convert. `.moytext` was the JSON wrapper
+# this replaced; `migrate_doc_format` rewrites a store's copies once, and the
+# readers here absorb a stray for one release.
+DOC_EXT = ".md"
+LEGACY_DOC_EXT = ".moytext"
+
 # kind -> (extension, folder_valued, auto-name base). A folder-valued kind
 # (#70 recordings) holds one DIRECTORY per item (the macOS-bundle model); file
 # kinds hold one flat file per item. Every store verb below validates against
 # this registry, so an unknown kind is a loud ValueError, not a stray dir.
 FILE_KINDS = {
     "drawings":   (IMAGE_EXT, False, "drawing"),
-    "docs":       (TEXT_EXT, False, "doc"),
+    "docs":       (DOC_EXT, False, "doc"),
     "tables":     (TABLE_EXT, False, "table"),
     "sprites":    (".moygfx", False, "sheet"),
     "music":      (".moysong", False, "song"),
@@ -2054,7 +2074,11 @@ def _kind_entries(d, ext, folder_valued):
 def list_files(kind, root=CARTS_DIR):
     """The kind's item names, newest first."""
     ext, folder_valued, _base = _kind_spec(kind)
-    entries = _kind_entries(file_kind_dir(kind, root), ext, folder_valued)
+    d = file_kind_dir(kind, root)
+    if kind == "docs":
+        _absorb_dir(d)     # a stray wrapper is listed as the note it is; the
+                           # trash is the one-shot pass's, never a listing's
+    entries = _kind_entries(d, ext, folder_valued)
     return [n for n, _m in entries]
 
 
@@ -2080,6 +2104,12 @@ def load_file(kind, name, root=CARTS_DIR):
     try:
         return _read(file_path(kind, name, root))
     except OSError:
+        if kind == "docs":            # a stray legacy wrapper (one release)
+            try:
+                return "\n".join(decode_text(_read(
+                    file_kind_dir(kind, root) + "/" + name + LEGACY_DOC_EXT)))
+            except OSError:
+                pass
         return None
 
 
@@ -2487,7 +2517,7 @@ def migrate_user_files(root=CARTS_DIR):
 
 def migrate_docs(root=CARTS_DIR):
     """One-shot #108 migration: the legacy single-file Writer notebook
-    (notes.json, a list of {title, body}) becomes one files/docs/<name>.moytext
+    (notes.json, a list of {title, body}) becomes one files/docs/<name>.md
     per note. Gated on files/docs/ not existing yet (its own marker, like
     drawings/), so an emptied Docs kind is never resurrected. The legacy
     notes.json is left in place (older builds keep reading it). No-op when there
@@ -2517,9 +2547,91 @@ def migrate_docs(root=CARTS_DIR):
                 title = ln.strip()
                 break
         name = new_file_name("docs", root, base=title or None)
-        text = json.dumps({"format": "moytext-v1", "body": body})
-        made.append(save_file("docs", name, text, root))
+        made.append(save_file("docs", name, encode_text(body), root))
     return made or None
+
+
+# -- documents became plain Markdown (2026-09-07) -----------------------------
+#
+# The `.moytext` JSON wrapper is gone, so every store carrying one has to be
+# rewritten -- ONCE, in the `prune_retired` shape a store opening already runs:
+# a generation sidecar beside the carts dir says what a store has been swept
+# for, so the warm path is one small read and the pass never runs twice. Bump
+# DOCS_GEN if the format moves again.
+#
+# CRASH SAFETY is `_write_atomic`'s, used the way the two-write publish intends:
+# the `.md` is whole before the `.moytext` is removed, so a power cut between
+# the two leaves BOTH -- and the next pass finds the `.md` already there, drops
+# the wrapper and is done. That is also why an existing `.md` always wins: it is
+# either the finished half of an interrupted pass or a newer note, and neither
+# may be overwritten by an older wrapper.
+DOCS_GEN = 1
+DOCS_VER_NAME = "docs.ver"
+
+
+def docs_version_path(root=CARTS_DIR):
+    """Sidecar (a sibling of the carts dir, like retired.ver) holding the
+    document-format generation this store has already been rewritten for."""
+    return _sibling_path(root, DOCS_VER_NAME)
+
+
+def load_docs_version(root=CARTS_DIR):
+    """The generation the store's documents were rewritten at -- 0 when
+    absent/unreadable, so a store that predates this migrates once."""
+    try:
+        return int(_read(docs_version_path(root)).strip())
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def _absorb_dir(d):
+    """Rewrite every `<stem>.moytext` under `d` as `<stem>.md`. Returns how many
+    wrappers left. Safe to re-run: an existing `.md` wins and the wrapper simply
+    goes."""
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return 0                       # no docs kind yet -> nothing to move
+    gone = 0
+    for n in names:
+        if not n.endswith(LEGACY_DOC_EXT) or len(n) == len(LEGACY_DOC_EXT):
+            continue
+        legacy = d + "/" + n
+        md = d + "/" + n[:-len(LEGACY_DOC_EXT)] + DOC_EXT
+        try:
+            if not _exists(md):
+                _write_atomic(md, "\n".join(decode_text(_read(legacy))))
+            _remove(legacy)
+            _forget_bak(legacy)
+        except OSError:
+            continue                   # a read-only store: sweep again next boot
+        gone += 1
+    return gone
+
+
+def absorb_legacy_docs(root=CARTS_DIR):
+    """Rewrite any stray `.moytext` in the docs kind AND its trash as `.md`.
+
+    Ungated, so a wrapper that arrives after the one-shot pass -- pushed over
+    the sync RPC by an older peer, or carried in on a card -- still reads as the
+    note it is. Costs one listdir on a directory the caller is about to list."""
+    return (_absorb_dir(file_kind_dir("docs", root))
+            + _absorb_dir(_trash_dir("docs", root)))
+
+
+def migrate_doc_format(root=CARTS_DIR, generation=DOCS_GEN):
+    """Rewrite the store's `.moytext` documents as `.md`, once per store.
+
+    Returns the number of wrappers rewritten (0 on the warm path, which costs
+    one small file read)."""
+    if load_docs_version(root) >= generation:
+        return 0
+    gone = absorb_legacy_docs(root)
+    try:
+        _write(docs_version_path(root), str(int(generation)))
+    except OSError:
+        return gone          # a read-only store: sweep again next boot, harmless
+    return gone
 
 
 def migrate_tables(root=CARTS_DIR):

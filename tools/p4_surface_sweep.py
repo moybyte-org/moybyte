@@ -66,9 +66,8 @@ What the seeding then established, and it is the useful part:
 SEEDING RECIPE (the formats are not guessable -- three wrong guesses cost a run
 each):
 
-  * doc:   save_file('docs', name, json.dumps({"format": "moytext-v1",
-           "body": "<text>"})) -- writer's _open_doc runs the blob through
-           _body_of, which reads ONLY the "body" key.
+  * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
+           (files/docs/<name>.md), so the file's text IS the page's text.
   * table: build a real formula.Sheet (set_cell(col, row, raw), keys are "A1"
            refs via make_ref) and save json.dumps(sheet.to_dict()). A hand-rolled
            {"rows","cols","cells"} dict leaves sheets_app.sheet None.

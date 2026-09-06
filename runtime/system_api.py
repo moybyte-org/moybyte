@@ -324,11 +324,10 @@ class ScopedFiles:
 
     # -- text documents ------------------------------------------------------
     #
-    # A `.moytext` on disk is a `moytext-v1` JSON blob, not a bare string, and a
-    # cart that writes the string instead produces a file Writer and Files
-    # decode to NOTHING -- silently, looking exactly like a save that did not
-    # happen. So the codec lives on this side of the boundary and a cart deals
-    # in text. `save`/`load` above stay raw for the kinds that are not text.
+    # A document on disk is plain Markdown (`files/docs/<name>.md`), so these
+    # two are thin -- but they stay the verbs a cart calls, because they are
+    # what says a document is TEXT and not a blob. `save`/`load` above stay raw
+    # for the kinds that are not text.
 
     def save_text(self, name, text):
         """Write `text` as a document. `(name, err)` -- the name it was saved

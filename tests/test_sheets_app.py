@@ -517,6 +517,8 @@ def test_decode_table_trims_to_populated_extent():
 
 
 def test_decode_text_splits_body_into_lines():
+    assert moy_carts.decode_text("line one\nline two") == ["line one", "line two"]
+    # The deprecated wrapper still unwraps, for a `.moytext` carried in on a card.
     blob = json.dumps({"format": "moytext-v1", "body": "line one\nline two"})
     assert moy_carts.decode_text(blob) == ["line one", "line two"]
 
@@ -524,7 +526,12 @@ def test_decode_text_splits_body_into_lines():
 def test_decoders_degrade_on_garbage():
     for bad in ("", "not json", "{}", '{"cells": null}', "[]", None):
         assert moy_carts.decode_table(bad) == []
-        assert moy_carts.decode_text(bad) == []
+    # decode_text has no garbage: a document IS its text, so anything that is
+    # not a legacy wrapper reads back as the lines it holds.
+    for empty in ("", None, 7):
+        assert moy_carts.decode_text(empty) == []
+    assert moy_carts.decode_text("not json") == ["not json"]
+    assert moy_carts.decode_text("{}") == ["{}"]
 
 
 def test_cart_reads_table_and_text_at_runtime(tmp_path):

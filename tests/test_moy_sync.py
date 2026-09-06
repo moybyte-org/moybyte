@@ -619,7 +619,7 @@ def test_a_files_batch_never_dirties_the_shelf(tmp_path):
     root = _files_store(tmp_path)
     for ops in ([{"p": "drawings/new.moyimg", "t": "0,"}],
                 [{"p": "drawings/sunset.moyimg", "d": 1}],
-                [{"p": "docs/story.moytext", "t": "hi"}]):
+                [{"p": "docs/story.md", "t": "hi"}]):
         _, errors, shelf = apply_ops(str(root), ops, FILES_ROOT_ID)
         assert not errors and not shelf
 
@@ -663,6 +663,27 @@ def test_the_files_watcher_stamps_the_rooted_protocol(tmp_path):
     ops, pin, root_id = parse_batch(json.dumps(doc))
     assert (pin, root_id) == ("1234", FILES_ROOT_ID)
     assert ops == [{"p": "drawings/sunset.moyimg", "t": "2,"}]
+
+
+def test_a_markdown_document_crosses_the_wire_both_ways(tmp_path):
+    """Documents are plain `.md` (2026-09-07). The wire has no extension table
+    -- `_skip` refuses `.bak`/`.tmp` and the kind allowlist does the rest -- so
+    the file the board holds is the file the browser gets, byte for byte."""
+    root = _files_store(tmp_path)
+    applied, errors, shelf = apply_ops(
+        str(root), [{"p": "docs/story.md", "t": "# Chapter one\n\nIt began."}],
+        FILES_ROOT_ID)
+    assert (applied, errors, shelf) == (1, [], False)
+    p = root / "docs" / "story.md"
+    assert p.read_text() == "# Chapter one\n\nIt began."
+    w = StoreWatcher(str(root), root_id=FILES_ROOT_ID)
+    w.sweep()                                  # the first sweep is the baseline
+    p.write_text("# Chapter two")
+    _bump_mtime(p)
+    assert w.sweep()
+    ops, _pin, root_id = parse_batch(w.take_json("1234"))
+    assert root_id == FILES_ROOT_ID
+    assert ops == [{"p": "docs/story.md", "t": "# Chapter two"}]
 
 
 def test_a_missing_files_root_is_an_empty_watcher_not_a_crash(tmp_path):
