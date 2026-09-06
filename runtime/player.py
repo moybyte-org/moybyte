@@ -1174,6 +1174,7 @@ class Player:
             rate = 30
         ws = self.ws
         self.sched.start(rate, getattr(ws, "steady", True))
+        self.sched.uncapped = bool(getattr(ws, "_uncap", False))
         self.tick_ms = self.sched.tick_ms
         self._keyp_latch = 0
         inp = ws.input
@@ -1199,6 +1200,12 @@ class Player:
 
     def steady_mode(self, on):
         self.sched.steady_mode(on)
+
+    def uncap_mode(self, on):
+        """The DIAG uncap (serial `uncap 0|1`): every loop frame draws, logic
+        keeps its rate. Reaches a running cart here; the next run reads
+        ws._uncap at start."""
+        self.sched.uncap_mode(on)
 
     def frame_plan(self, dt):
         """What this loop frame is for the running cart (#217): schedules its

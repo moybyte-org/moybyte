@@ -306,6 +306,7 @@ def _remote_state(ws):
         pl = ws.player
         st["tick"] = ([pl.sched.rate, pl.sched.div, pl.sched.misses,
                        bool(pl.sched.steady)] if pl.tick_ms else None)
+        st["uncap"] = bool(pl.sched.uncapped) if pl.tick_ms else None
     except Exception as exc:  # noqa: BLE001
         st["tick_err"] = str(exc)
     try:
@@ -352,6 +353,9 @@ class DevChannel:
                       not branches written here; a board whose capability gate
                       says no declines the word. Neither persists, so a
                       measurement session cannot leave the board off-default.
+      uncap 0|1       DIAG: every loop frame draws while logic keeps its rate
+                      -- the draw+present path flat out, the game at its own
+                      speed. Never persists; `fps=` is the answer
       skip, gov       retired with FRAMESKIP and the governor (#217); both
                       decline and name `steady`
       mem             a forced collect + the live/free split
@@ -779,6 +783,14 @@ class DevChannel:
             getattr(ws, setter)(on, persist=False)
             print("REMOTE %s %s"
                   % (cmd, "on" if getattr(ws, key, on) else "off"))
+            return
+        if cmd == "uncap":
+            on = not (len(parts) == 2 and parts[1] == "0")
+            ws._uncap = on                    # the next run starts uncapped
+            pl = getattr(ws, "player", None)
+            if pl is not None and getattr(pl, "tick_ms", 0):
+                pl.uncap_mode(on)             # ...and the running one flips now
+            print("REMOTE uncap %s" % ("on" if on else "off"))
             return
         if cmd in ("skip", "gov"):
             print("REMOTE %s: retired by the tick model (#217) -- the Player "

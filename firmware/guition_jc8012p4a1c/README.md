@@ -180,8 +180,13 @@ for the C6/audio pins, which agree with the BSP.
   frame is **~11ms** (Star Catcher fullscreen, 960×720 output: the one-op
   scale+rotate of the game canvas plus the bar strip) — 358 of them against
   58 full frames over the tour, 0 stale-rect copies, 0 PPA timeouts, 0 DSI
-  underruns. An idle desk rotates nothing. The lever left is WM-side (chrome
-  dirty rects, so drags and scrolls could drop to rect cost) — tracker #220.
+  underruns. An idle desk rotates nothing. **Uncapped** (serial `uncap 1`:
+  every loop frame draws, logic at its rate — the draw+present path flat
+  out) the same carts run at 46 / 42 / 38 / 38 fps (Star Catcher, Brick
+  Siege, Sky Run, Sakura Lua) against the Waveshare's 64 / 58 / 50 / 65: the
+  rotate is a flat ~11ms on every frame. The levers left — tracker #220 —
+  are an async rotate fenced at the next present (hides it under a 30-tick
+  cart's pacing idle) and WM dirty rects for chrome frames.
 - The console: 36 carts seeded on first boot, PPA registered, Lua runtime on,
   the desktop under `WindowedWM` at 1280×800 landscape; the first frame lands ~300ms
   after the desktop is built, and the desktop is built ~27s after reset on a

@@ -46,6 +46,12 @@ class TickScheduler:
         self.period = 0.0
         self.tick_ms = 0
         self.steady = True
+        # UNCAPPED (a DIAG knob, serial `uncap 1`, never persisted): every
+        # loop frame draws while logic keeps its rate. The game runs at its
+        # own speed and the draw+present path runs flat out -- the number a
+        # board's "free-running fps" question is asking for, without the
+        # governor that makes the answer 30. Off, this file is unchanged.
+        self.uncapped = False
         self.div = 1
         self.n = 0            # plan()'s answer: logic ticks this frame
         self.draw = False     # plan()'s answer: this frame draws
@@ -93,6 +99,10 @@ class TickScheduler:
 
     def steady_mode(self, on):
         self.steady = bool(on)
+        self._reset_window()
+
+    def uncap_mode(self, on):
+        self.uncapped = bool(on)
         self._reset_window()
 
     def note_tick(self, seconds):
@@ -146,6 +156,18 @@ class TickScheduler:
                 draw = True
                 ph %= self.div
             self.phase = ph
+        if self.uncapped:
+            # DIAG: draw this frame whatever the divisor says, and teach the
+            # divisor nothing -- the cycles it would measure are not cycles.
+            self.draws += 1
+            self.draw = True
+            self._drew = True
+            self._ticked = False
+            self._win_s += dt
+            if self._win_s >= (STEADY_S if self.steady else FREE_S):
+                self._warm = False
+                self._reset_window()
+            return True
         if draw:
             self.draws += 1
             # A draw cycle is N ticks by design. Ticks beyond that ran as

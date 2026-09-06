@@ -668,3 +668,25 @@ def test_the_rate_comes_from_the_manifest_and_junk_is_thirty(tmp_path):
         assert pl.sched.rate == rate, fps
     pl._arm_pacing({})
     assert pl.sched.rate == 30
+
+
+def test_uncapped_draws_every_frame_while_logic_keeps_its_rate():
+    """The DIAG uncap (serial `uncap 1`): a 30-cart on a 120Hz loop still
+    ticks 30 times a second, but every loop frame draws -- the draw path
+    flat out, the game at its own speed -- and the divisor learns nothing."""
+    s = TickScheduler()
+    s.start(30)
+    s.uncap_mode(True)
+    draws = ticks = 0
+    for _ in range(120):
+        draws += 1 if s.plan(1 / 120) else 0
+        ticks += s.n
+    assert draws == 120
+    assert ticks == 30
+    assert s.div == 1
+    # Off again: the ordinary schedule, drawing only on ticks.
+    s.uncap_mode(False)
+    draws = 0
+    for _ in range(120):
+        draws += 1 if s.plan(1 / 120) else 0
+    assert draws == 30

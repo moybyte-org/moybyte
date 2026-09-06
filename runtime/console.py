@@ -1023,6 +1023,8 @@ class Workstation:
         # jitter. This tells us whether the wall is the SPI flush or the per-frame
         # MicroPython draw cost on device. Measurement only -- no render-path change.
         self.perf_hud = False         # frame-time breakdown HUD shown? (tap FPS to toggle)
+        self._uncap = False           # the serial `uncap` diag (tick_model): a cart
+                                      # started while it is on draws every loop frame
         # perf_capture decouples the per-frame timing MEASUREMENT from drawing the
         # HUD: when either perf_hud OR perf_capture is set, frame() records the
         # flush/draw split (the two cheap ticks calls below). The device backend
