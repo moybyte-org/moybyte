@@ -3251,3 +3251,97 @@ def test_both_boards_service_the_web_console_every_frame():
         assert "poll_webhost(ws)" in src, (
             "%s never polls ws.webhost -- a bound listener with no accept() "
             "times out instead of refusing, which reads as a dead server" % rel)
+
+
+def test_the_raw_to_ascii_revert_drains_the_byte_it_produces():
+    """The keyboard mode switch swallows what the C3 was holding.
+
+    Reverting to ASCII happens because a TEXT surface just took the keyboard
+    (the Code tab, a password field), and the byte the C3 hands over at that
+    moment was typed while the matrix was streaming -- before the surface
+    existed. Delivered, it is a letter the kid never typed appearing in the
+    code buffer, which is what the owner saw on entering the Code tab.
+
+    The matrix decodes only sixteen keys, so this byte is not always the one
+    the console already holds -- ws._set_text_mode's seed covers that one and
+    cannot cover this. Both halves, or the letter still lands.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    reads = []
+    pending = [ord("m"), 0, 0, 0, 0]
+
+    class FakeI2C:
+        def __init__(self):
+            self.writes = []
+
+        def writeto(self, _addr, data):
+            self.writes.append(bytes(data))
+
+        def readfrom(self, _addr, size):
+            reads.append(size)
+            return bytes([pending.pop(0) if pending else 0])
+
+    kbd = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    kbd.input = module.InputState()
+    kbd.available = True
+    kbd.raw_mode = True
+    kbd._i2c = FakeI2C()
+    kbd._held_buttons = ("left",)
+    kbd._held_until_ms = module._ticks_ms() + 10_000
+    kbd._err_run = 0
+    kbd.src = None
+    kbd._poller_owned = False
+    kbd._want_game = None
+
+    kbd.set_game_mode(False)
+
+    assert kbd._i2c.writes == [module.TDeckKeyboard.KEY_MODE_CMD], \
+        "the 0x04 revert must still be the first thing sent"
+    assert reads, "the revert read nothing -- a queued byte would survive it"
+    assert pending[0] == 0, "the queued 'm' was left for the text surface"
+    # The latch goes with it: a held-key window opened by the matrix must not
+    # keep firing a button into the surface that just took the keyboard.
+    assert kbd._held_buttons == ()
+    assert kbd._held_until_ms == 0
+
+    # ...and it STOPS at the first quiet read rather than draining the cap.
+    assert len(reads) == 2, reads
+
+
+def test_the_ascii_revert_drain_is_bounded():
+    """A keyboard that answers with a byte forever must not hold the bus."""
+    spec = importlib.util.spec_from_file_location(
+        "moybyte_firmware_input", DEVICE / "moybyte" / "input.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    n = [0]
+
+    class ChattyI2C:
+        def writeto(self, _addr, _data):
+            pass
+
+        def readfrom(self, _addr, _size):
+            n[0] += 1
+            return b"x"
+
+    kbd = module.TDeckKeyboard.__new__(module.TDeckKeyboard)
+    kbd.input = module.InputState()
+    kbd.available = True
+    kbd.raw_mode = True
+    kbd._i2c = ChattyI2C()
+    kbd._held_buttons = ()
+    kbd._held_until_ms = 0
+    kbd._err_run = 0
+    kbd.src = None
+    kbd._poller_owned = False
+    kbd._want_game = None
+
+    kbd.set_game_mode(False)
+    assert n[0] == module.TDeckKeyboard.DRAIN_READS

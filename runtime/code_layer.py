@@ -269,10 +269,23 @@ class CodeLayer:
         self._jump_items = []         # (name, row) for every def/class line
         self._jump_sel = 0            # the highlighted symbol row
 
+    def seed_key(self, k):
+        """The byte that was live when this surface took the keyboard is NOT a
+        keystroke of its own. Called by ws._set_text_mode on the switch into
+        text mode -- the key that entered the Code tab is still in last_key when
+        the editor's first frame reads it, and a zeroed edge tracker types it.
+        Seeding, not resetting: an already-down byte has to look like the
+        PREVIOUS one, so releasing and pressing it again still types."""
+        self._ekey.prev = k
+
     def reset(self):
         """Reset the keyboard edge tracker (called by ws.set_menu_view when the editor
         is (re)built) so the first key press after opening registers. Also drops the
-        transient #89 modes so a freshly-opened editor is in a clean state."""
+        transient #89 modes so a freshly-opened editor is in a clean state.
+
+        set_tab runs this BEFORE ws._set_text_mode, whose seed_key then supplies
+        the live byte -- so a fresh editor still starts clean and still does not
+        type the key that opened it."""
         self._ekey.reset()
         self._sel_drag = False
         self._find_open = False

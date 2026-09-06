@@ -2733,6 +2733,29 @@ class Workstation:
         # clear it on every other screen (on=False) so it can never leak past the cart
         # /editor that asked for it -- the desktop frame re-derives keyboard mode from
         # input.text_mode (#38/#42). No-op on the host (no keyboard); harmless flag set.
+        #
+        # THE SWITCH SWALLOWS THE BYTE THAT CAUSED IT. Taking the keyboard for a
+        # text surface is a screen change, and the key that made it happen is
+        # still in last_key when the surface's first frame runs -- so the code
+        # editor typed it. On glass that is a letter appearing in the buffer on
+        # entering the Code tab, at the caret, whichever key was used. Every
+        # other typed surface already seeded its edge with the live byte by hand
+        # (cards_layer's meta prompt, block_editor_ui's keypads); the code
+        # editor RESET its tracker to 0 instead, which is the same statement
+        # with the opposite meaning. Seeding here makes it the rule rather than
+        # a habit, and it is the one place every text surface passes through.
+        #
+        # EVERY on=True call, not only an off->on transition: re-entering the
+        # Code tab while already on it is the case the owner hit, and text mode
+        # is already set there. `on=True` MEANS "this surface is taking the
+        # keyboard now" -- a tab entry, a prompt opening, an app switch -- and
+        # nothing calls it per frame (a cart's own `textmode()` writes the flag
+        # directly, cart_api.py). Do not add a per-frame caller: it would seed
+        # away the keystroke it was called during.
+        if on:
+            k = getattr(self.input, "last_key", 0) or 0
+            self._ekey_prev = k
+            self.code_layer.seed_key(k)
         self.input.text_mode = bool(on)
         kb = self.keyboard
         if kb is not None:

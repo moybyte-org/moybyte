@@ -707,6 +707,11 @@ class TDeckKeyboard:
         else:
             self._disable_raw_mode()     # sends 0x04; back to 1-byte ASCII
 
+    # How many 1-byte reads the raw->ASCII revert drains before giving up. Two
+    # or three is what a real switch produces; the cap is only so a keyboard
+    # that answers with a byte forever cannot hold the bus.
+    DRAIN_READS = 4
+
     def _disable_raw_mode(self):
         try:
             self._i2c.writeto(self.KEYBOARD_ADDR, self.KEY_MODE_CMD)
@@ -714,6 +719,20 @@ class TDeckKeyboard:
             print("Moybyte keyboard mode revert failed:", exc)
         self.raw_mode = False
         self._held_buttons = ()
+        # THE SWITCH DRAINS ITS OWN BYTE. This revert happens because a TEXT
+        # surface just took the keyboard (the Code tab, a password field), and
+        # what the C3 has to hand over at that moment was typed while the matrix
+        # was streaming -- before the surface existed. Delivered, it is a letter
+        # the kid did not type appearing in the buffer. The matrix decodes only
+        # sixteen keys, so the byte the console already holds is not always the
+        # one that arrives here, which is why the seed on the console side
+        # (Workstation._set_text_mode) does not cover this and neither covers
+        # the other. Kbd-INTERNAL, like every other _read_stage-side write: it
+        # touches the bus this thread owns and never InputState.
+        for _ in range(self.DRAIN_READS):
+            if self._read_key() == 0:
+                break
+        self._held_until_ms = 0
 
     def _timed_read(self, nbytes):
         """The one place a keyboard I2C transaction happens: readfrom + #69 latency
