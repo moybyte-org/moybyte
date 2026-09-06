@@ -169,10 +169,13 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
 the same P4 + C6-over-SDIO as the Waveshare on the same pins. **That dir's README
 is the authority**; what bites:
 
-- **The console runs PORTRAIT (800×1280), the panel's native scan.** Landscape
-  would be a full-frame rotate per chrome frame on a DSI that scans PSRAM
-  continuously; the README carries the bill and the two knobs that flip the
-  image (`MOY_DSI_MIRROR_XY`, the touch knobs). Owner call, deferred.
+- **The desk is LANDSCAPE (1280×800) on glass that scans PORTRAIT (800×1280).**
+  `device/dsi_panel.RotatedCompositor`: the console paints one persistent
+  landscape buffer, the PPA rotates it onto the panel — whole-frame for any
+  chrome paint, one rect for a quiet game frame, with per-buffer stale-rect
+  bookkeeping so a ping-pong buffer is never shown behind (owner call
+  2026-09-06; `tests/test_p4_display.py` pins it). Which way is up is
+  `guition_p4_display.ROTATION` (90/270), live as `py comp.set_angle(270)`.
 - **The GSL3680 is RAM-loaded**: `device/gsl3680.py` uploads the panel's firmware
   (`modules/gsl_fw_jc8012.py`, 1.3 s) after every reset. Its axes are
   UNCALIBRATED — bring-up was hands-off; `run_touch_calibrate()` is the first

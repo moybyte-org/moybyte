@@ -7,11 +7,12 @@ compositor (`device/dsi_panel.py`), the SYSTEM canvas with its PPA composite
 hooks (`device/p4_canvas.py`) and the four C modules (`native/p4/`) are TAKEN,
 so what this file owns is exactly what this glass decides --
 
-  * the SYSTEM canvas is 800x1280 PORTRAIT. The glass is portrait-native and
-    the P4's DSI scans the framebuffer continuously (no per-frame flush to
-    fold a rotation into), so landscape would cost a full-frame rotate per
-    painted frame; the console runs the orientation the panel has and the
-    README carries the decision and the numbers behind it.
+  * the SYSTEM canvas is 1280x800 LANDSCAPE on portrait-native glass (owner
+    call 2026-09-06). The P4's DSI scans the framebuffer continuously, so the
+    rotation is the compositor's: `device/dsi_panel.RotatedCompositor` paints
+    a persistent landscape buffer and rotates it onto the panel with the PPA
+    -- the whole frame when chrome painted, one rect on a quiet game frame.
+    Its header carries the design; the README the measured costs.
   * the touch driver is the GSL3680 (`guition_p4_input.py` over the shared
     `device/gsl3680.py`, firmware upload at boot) instead of a GT911.
   * the backlight is GPIO23 active-high (`guition_p4_display.py`).
@@ -141,9 +142,10 @@ POWER_SAVE_MS = 300000          # 5 minutes
 
 def run_desktop(fps_cap=60):
     """Boot the shared console on the Guition P4: launcher-as-desktop under
-    WindowedWM on the 800x1280 portrait glass, GSL3680 touch as the pointer, a
-    BLE HID keyboard over the companion C6, and carts on internal flash. Ctrl-C
-    over the USB-Serial/JTAG REPL interrupts the loop."""
+    WindowedWM, 1280x800 landscape rotated onto the portrait glass, GSL3680
+    touch as the pointer, a BLE HID keyboard over the companion C6, and carts
+    on internal flash. Ctrl-C over the USB-Serial/JTAG REPL interrupts the
+    loop."""
     from guition_p4_display import P4Compositor, set_backlight
     from guition_p4_input import Touch
     from ble_keyboard import BleHidKeyboard
@@ -203,6 +205,10 @@ def run_desktop(fps_cap=60):
     boot.note("building the desktop")
     ws = Workstation(comp, game, inp, carts,
                      sys_canvas=sys_canvas, font_scale=FONT_SCALE)
+    # The chrome strip a quiet frame rotates besides the game rect (the top
+    # bar is stamped by an ungated blit every play frame, so the gates cannot
+    # see it change): the bar's own height, once the console knows it.
+    comp.strip_h = ws.bar_layer._bar_h("tool")
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own off-screen canvas -- the exact constructor the
     # boot `game` canvas uses -- and P4SystemCanvas.blit_game (PPA) upscales it

@@ -78,8 +78,9 @@ Git history has the rest — do not reintroduce the format.)
 - `firmware/lilygo_t_deck_plus_mainline/` · `firmware/esp32_p4_wifi6_touch_lcd_7b/`
   · `firmware/guition_jc3248w535/` · `firmware/guition_jc8012p4a1c/` — the four
   console board ports (MicroPython); the last is the 10.1" ESP32-P4 (2026-09-06),
-  a variant of the Waveshare's over the shared `native/p4/` silicon tier, running
-  its portrait glass portrait.
+  a variant of the Waveshare's over the shared `native/p4/` silicon tier, a
+  landscape desk rotated onto its portrait glass by the PPA
+  (`device/dsi_panel.RotatedCompositor`).
   `firmware/seeed_xiao_esp32s3_zero/` is the fourth build target and the odd one:
   HEADLESS (#41), the kid's cart store the browser console pairs with, promoted
   out of its stock-MicroPython/pushed-modules arrangement on 2026-08-29. Each

@@ -291,3 +291,273 @@ class P4Compositor:
             return self._dsi.underruns()
         except Exception:
             return None
+
+
+# ---------------------------------------------------------------------------
+# A LANDSCAPE console on a PORTRAIT DSI panel (the Guition JC8012P4A1C, owner
+# call 2026-09-06: "we want it landscape").
+#
+# The DSI peripheral scans a portrait framebuffer (800 wide, 1280 tall) from
+# PSRAM continuously; there is no per-frame flush to fold a rotation into. So
+# the console paints a persistent LANDSCAPE buffer (1280x800, `framebuffer()`)
+# and flush() ROTATES it into a portrait scan buffer on the PPA, then switches
+# scan-out to that buffer. Two costs, and the design is about paying the small
+# one as often as possible:
+#
+#   * a FULL frame -- anything the WM painted that it did not describe -- is a
+#     whole-buffer rotate, 2MB in and 2MB out over the same PSRAM the DSI is
+#     reading at ~123MB/s. Tens of milliseconds. Every painted chrome frame
+#     pays it; an idle desk paints nothing and pays nothing.
+#   * a QUIET game frame -- the game composite was the frame's only write
+#     (the canvas's draw gates did not move; both the windowed WM's quiet
+#     stack and a fullscreen play frame look like this) -- is ONE PPA op: the
+#     game canvas scaled AND rotated straight into the scan buffer, plus the
+#     top bar's strip rotated from the paint buffer. A few ms, not tens.
+#
+# The catch is ping-pong: a rect-only frame lands in a scan buffer that was
+# last shown two frames ago and may lack what the frame between painted. So
+# every scan buffer carries a STALE list -- the portrait rects it has missed
+# since it was last fully current -- and before a rect frame is rotated into a
+# buffer, the stale rects it does not cover are copied 1:1 from the buffer on
+# glass (angle 0). For a game at a fixed rect that list is the same rect every
+# frame, already covered, and costs nothing. A buffer whose stale list has
+# grown past a handful, or that missed a full frame, is brought current by a
+# full rotate instead: correctness by construction, and the bound on the
+# bookkeeping. Two scan buffers, not three: the third bought the Waveshare an
+# async-overlap lever this path does not use (every rotate is blocking), and a
+# third buffer to keep current would be a third full rotate after every change.
+#
+# RETAINED_FRAMES on the root is 1 here -- the paint buffer persists across
+# frames -- which the WM's `_retained_n` floors to its conservative 2.
+# ---------------------------------------------------------------------------
+
+
+def rotate_rect(x, y, w, h, angle, lw, lh):
+    """The portrait (x, y, w, h) a landscape rect lands on after a
+    counter-clockwise rotation of the lw x lh landscape picture by `angle`
+    (90 or 270 -- the PPA's convention). Pure arithmetic, pinned by
+    tests/test_p4_display.py."""
+    if angle == 90:
+        # landscape (x, y) -> portrait (y, lw - 1 - x)
+        return (y, lw - x - w, h, w)
+    if angle == 270:
+        # landscape (x, y) -> portrait (lh - 1 - y, x)
+        return (lh - y - h, x, h, w)
+    raise ValueError("angle 90 or 270")
+
+
+def _covered(r, rects):
+    """Whether rect r lies entirely inside one of `rects`."""
+    x, y, w, h = r
+    for (qx, qy, qw, qh) in rects:
+        if qx <= x and qy <= y and x + w <= qx + qw and y + h <= qy + qh:
+            return True
+    return False
+
+
+class RotatedCompositor:
+    """The landscape compositor over a portrait moy_dsi panel -- see the block
+    comment above. The compositor interface (size/framebuffer/back_buffer/
+    gfx/flush/sync + the P4 extras the canvas and the PERF sampler read)."""
+
+    STALE_LIMIT = 6         # more distinct stale rects than this -> full rotate
+
+    def __init__(self, set_backlight=None, angle=90):
+        import moy_dsi
+        if set_backlight is not None:
+            set_backlight(False)
+        moy_dsi.init()
+        self._dsi = moy_dsi
+        self._pw = moy_dsi.WIDTH          # the panel's scan geometry (portrait)
+        self._ph = moy_dsi.HEIGHT
+        self._w = self._ph                # the console's (landscape)
+        self._h = self._pw
+        self.angle = angle
+        try:
+            import moy_gfx
+            self._gfx = moy_gfx
+        except ImportError:
+            self._gfx = None
+        import moy_ppa
+        if not moy_ppa.init():
+            raise OSError("moy_ppa init failed: a portrait panel needs the rotate")
+        self._ppa = moy_ppa
+        # Two scan buffers of the panel's (the third exists; unused here).
+        self._fbs = [moy_dsi.fb(0), moy_dsi.fb(1)]
+        self._paint = self._alloc(self._w * self._h * 2)
+        if self._gfx is not None:
+            for f in self._fbs:
+                self._gfx.fill(f, self._pw * self._ph, 0)
+            self._gfx.fill(self._paint, self._w * self._h, 0)
+        moy_dsi.show(0)
+        self._front = 0
+        self._back = 1
+        # None = "missed a full frame": the next frame into it is a full rotate.
+        self._stale = [[], None]
+        # This frame's game composite, registered by the canvas (mark_game),
+        # or None: decided at flush -- a quiet frame goes straight to the scan
+        # buffer as one scale+rotate, anything else composites into the paint
+        # buffer and rotates the whole frame.
+        self._game = None
+        # The chrome strip a quiet frame carries besides the game rect: the
+        # top bar, stamped by an UNGATED blit every play frame (so the gates
+        # cannot see it change). Landscape rows; run_desktop sets the height
+        # from the bar once the console exists. 0 = none.
+        self.strip_h = 18
+        # Meters (overlap_stats keeps the PERF line's 7-slot ppa= shape).
+        self._full_n = 0
+        self._full_us = 0
+        self._rect_n = 0
+        self._rect_us = 0
+        self._copies = 0
+        # Compatibility attributes the shared canvas/WM may poke; inert here.
+        self._composite_pending = False
+        self._stamp_pending = None
+        self.retained_frames = 1
+        self.rotated = True
+
+    @staticmethod
+    def _alloc(nbytes):
+        try:
+            import moy_alloc
+            buf = moy_alloc.malloc_dma(
+                nbytes, moy_alloc.MEMORY_SPIRAM | moy_alloc.MEMORY_DMA)
+            if buf is not None:
+                return buf
+        except Exception:  # noqa: BLE001 -- host / no allocator
+            pass
+        return bytearray(nbytes)
+
+    def size(self):
+        return (self._w, self._h)
+
+    def framebuffer(self):
+        return self._paint
+
+    def back_buffer(self):
+        return self._paint
+
+    def gfx(self):
+        return self._gfx
+
+    def set_angle(self, angle):
+        """Flip the desk the other way up, live: the next frame is a full
+        rotate into every buffer."""
+        rotate_rect(0, 0, 1, 1, angle, self._w, self._h)   # validates
+        self.angle = angle
+        self._stale = [None, None]
+
+    def mark_game(self, src, sw, sh, ox, oy, scale, paint, quiet, direct):
+        """The canvas's word about THIS frame's game composite (one per frame):
+        `src` the game canvas's RGB565 buffer (sw x sh) to land at landscape
+        (ox, oy) scaled by `scale`; `paint()` composites it into the paint
+        buffer the ordinary way (the full-frame path, and crisp mode);
+        `quiet()` answers at flush time whether anything ELSE drew this
+        frame (the canvas's draw gates); `direct` allows the one-op
+        scale+rotate straight into the scan buffer (bilinear -- crisp mode
+        says no and takes the paint route)."""
+        self._game = (src, int(sw), int(sh), int(ox), int(oy), int(scale),
+                      paint, quiet, bool(direct))
+
+    def _strip(self):
+        h = self.strip_h
+        if h <= 0:
+            return None
+        return (0, 0, self._w, min(h, self._h))
+
+    def _rotate(self, fb, x, y, w, h):
+        px, py, pw, ph = rotate_rect(x, y, w, h, self.angle, self._w, self._h)
+        self._ppa.rotate(fb, self._pw, self._ph, px, py,
+                         self._paint, self._w, self._h, x, y, w, h, self.angle)
+        return (px, py, pw, ph)
+
+    def flush(self):
+        back = self._back
+        fb = self._fbs[back]
+        stale = self._stale[back]
+        game = self._game
+        self._game = None
+        t0 = _ticks_us()
+        # Two separate questions. What did THIS FRAME change (relative to the
+        # frame on glass)? -- everything, or the game rect (+ the chrome
+        # strip). And what does the target buffer need to become current? --
+        # a full rotate if the frame was full OR the buffer missed one, else
+        # its missed rects copied plus this frame's rects rotated. Conflating
+        # them made every buffer "behind" forever and the ping-pong never
+        # converged.
+        quiet_rects = None
+        if game is not None:
+            src, sw, sh, ox, oy, scale, paint, quiet, direct = game
+            if quiet():
+                quiet_rects = [(ox, oy, sw * scale, sh * scale)]
+                strip = self._strip()
+                if strip is not None:
+                    quiet_rects.append(strip)
+            else:
+                paint()                       # the paint buffer needs it too
+        changed = None if quiet_rects is None else [
+            rotate_rect(x, y, w, h, self.angle, self._w, self._h)
+            for (x, y, w, h) in quiet_rects]
+        if changed is None or stale is None or len(stale) > self.STALE_LIMIT:
+            if changed is not None:
+                paint()                       # this buffer is behind: full
+            self._rotate(fb, 0, 0, self._w, self._h)
+            self._full_n += 1
+            self._full_us += _ticks_diff(_ticks_us(), t0)
+            # `changed` stays what the FRAME changed: a full rotate made THIS
+            # buffer current, the other one still lacks only the rects.
+        else:
+            front = self._fbs[self._front]
+            for r in stale:
+                if not _covered(r, changed):
+                    self._ppa.rotate(fb, self._pw, self._ph, r[0], r[1],
+                                     front, self._pw, self._ph,
+                                     r[0], r[1], r[2], r[3], 0)
+                    self._copies += 1
+            if direct:
+                px, py, _pw, _ph = changed[0]
+                self._ppa.rotate_scale(fb, self._pw, self._ph, px, py,
+                                       src, sw, sh, scale, self.angle)
+            else:
+                paint()
+                self._rotate(fb, ox, oy, sw * scale, sh * scale)
+            for (x, y, w, h) in quiet_rects[1:]:
+                self._rotate(fb, x, y, w, h)
+            self._rect_n += 1
+            self._rect_us += _ticks_diff(_ticks_us(), t0)
+        self._stale[back] = []
+        other = self._front
+        if changed is None:
+            self._stale[other] = None
+        elif self._stale[other] is not None:
+            lst = self._stale[other]
+            for r in changed:
+                if r not in lst:
+                    lst.append(r)
+        self._dsi.show(back)
+        self._front = back
+        self._back = 1 - back
+
+    def present_pending(self):
+        pass                          # every rotate is blocking: nothing pends
+
+    def sync(self):
+        pass
+
+    def overlap_stats(self):
+        """The PERF line's ppa= slots, re-purposed for this path:
+        (rect frames, copies, full frames, full_us, rect frames, rect_us,
+        ppa timeouts) -- fence_ms is the full-rotate cost, gfence_ms the
+        rect-rotate cost."""
+        try:
+            timeouts = self._ppa.stats()[2]
+        except Exception:  # noqa: BLE001
+            timeouts = 0
+        return (self._rect_n, self._copies, self._full_n, self._full_us,
+                self._rect_n, self._rect_us, timeouts)
+
+    def underruns(self):
+        try:
+            return self._dsi.underruns()
+        except Exception:  # noqa: BLE001
+            return None

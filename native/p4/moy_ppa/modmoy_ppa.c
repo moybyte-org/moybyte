@@ -215,6 +215,180 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     return mp_const_none;
 }
 
+// rotate(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle)
+//   Copy the w x h block at (sx, sy) of the sw x sh RGB565 source into dst
+//   (dw x dh) at (dx, dy), ROTATED by `angle` degrees counter-clockwise (0,
+//   90, 180, 270 -- the PPA's own convention) at 1:1 scale. The output block
+//   is h x w for 90/270 and (dx, dy) is its top-left. Blocking. The landscape
+//   console on a portrait DSI panel (the Guition P4, device/dsi_panel.py's
+//   RotatedCompositor) is the consumer: the whole paint buffer per full
+//   frame, one game rect per quiet frame, and angle 0 to bring a ping-pong
+//   framebuffer up to date from its sibling.
+static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
+    if (s_srm == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t sx = mp_obj_get_int(args[8]);
+    mp_int_t sy = mp_obj_get_int(args[9]);
+    mp_int_t w = mp_obj_get_int(args[10]);
+    mp_int_t h = mp_obj_get_int(args[11]);
+    mp_int_t angle = mp_obj_get_int(args[12]);
+    ppa_srm_rotation_angle_t rot;
+    switch (angle) {
+        case 0: rot = PPA_SRM_ROTATION_ANGLE_0; break;
+        case 90: rot = PPA_SRM_ROTATION_ANGLE_90; break;
+        case 180: rot = PPA_SRM_ROTATION_ANGLE_180; break;
+        case 270: rot = PPA_SRM_ROTATION_ANGLE_270; break;
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("angle 0/90/180/270"));
+    }
+    if (w <= 0 || h <= 0 || sx < 0 || sy < 0 || sx + w > sw || sy + h > sh
+            || dx < 0 || dy < 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotate block"));
+    }
+    mp_int_t ow = (angle == 90 || angle == 270) ? h : w;
+    mp_int_t oh = (angle == 90 || angle == 270) ? w : h;
+    if (dx + ow > dw || dy + oh > dh) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotate dst block"));
+    }
+    ppa_srm_oper_config_t op = {
+        .in = {
+            .buffer = src.buf,
+            .pic_w = (uint32_t)sw,
+            .pic_h = (uint32_t)sh,
+            .block_w = (uint32_t)w,
+            .block_h = (uint32_t)h,
+            .block_offset_x = (uint32_t)sx,
+            .block_offset_y = (uint32_t)sy,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = dst.buf,
+            .buffer_size = (uint32_t)dst.len,
+            .pic_w = (uint32_t)dw,
+            .pic_h = (uint32_t)dh,
+            .block_offset_x = (uint32_t)dx,
+            .block_offset_y = (uint32_t)dy,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = rot,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        .mirror_x = false,
+        .mirror_y = false,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    // The same dst writeback srm_blit does (the driver invalidates the whole
+    // out picture at submit); the driver writes back the in block itself.
+    esp_cache_msync(dst.buf, dst.len,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    s_submitted++;
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    if (err != ESP_OK) {
+        s_submitted--;
+        mp_raise_msg_varg(&mp_type_OSError,
+                          MP_ERROR_TEXT("ppa rotate failed: %d"), (int)err);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 13, moy_ppa_rotate);
+
+// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle)
+//   The whole sw x sh RGB565 source, integer-upscaled by `scale` AND rotated
+//   by `angle` degrees counter-clockwise, into dst (dw x dh) at (dx, dy) --
+//   the quiet game frame of a landscape console on portrait glass in ONE
+//   PPA op: the game canvas goes straight to the scan buffer (150KB read,
+//   the scaled block written) instead of through the 2MB paint buffer.
+//   Bilinear like blit_scale (the PPA has no nearest mode; crisp mode takes
+//   the paint-buffer path). Blocking.
+static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
+    if (s_srm == NULL) {
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
+    }
+    mp_buffer_info_t dst, src;
+    mp_get_buffer_raise(args[0], &dst, MP_BUFFER_WRITE);
+    mp_int_t dw = mp_obj_get_int(args[1]);
+    mp_int_t dh = mp_obj_get_int(args[2]);
+    mp_int_t dx = mp_obj_get_int(args[3]);
+    mp_int_t dy = mp_obj_get_int(args[4]);
+    mp_get_buffer_raise(args[5], &src, MP_BUFFER_READ);
+    mp_int_t sw = mp_obj_get_int(args[6]);
+    mp_int_t sh = mp_obj_get_int(args[7]);
+    mp_int_t scale = mp_obj_get_int(args[8]);
+    mp_int_t angle = mp_obj_get_int(args[9]);
+    if (scale < 1) {
+        scale = 1;
+    }
+    ppa_srm_rotation_angle_t rot;
+    switch (angle) {
+        case 0: rot = PPA_SRM_ROTATION_ANGLE_0; break;
+        case 90: rot = PPA_SRM_ROTATION_ANGLE_90; break;
+        case 180: rot = PPA_SRM_ROTATION_ANGLE_180; break;
+        case 270: rot = PPA_SRM_ROTATION_ANGLE_270; break;
+        default:
+            mp_raise_ValueError(MP_ERROR_TEXT("angle 0/90/180/270"));
+    }
+    mp_int_t ow = (angle == 90 || angle == 270) ? sh * scale : sw * scale;
+    mp_int_t oh = (angle == 90 || angle == 270) ? sw * scale : sh * scale;
+    if (dx < 0 || dy < 0 || dx + ow > dw || dy + oh > dh) {
+        mp_raise_ValueError(MP_ERROR_TEXT("rotate_scale dst block"));
+    }
+    ppa_srm_oper_config_t op = {
+        .in = {
+            .buffer = src.buf,
+            .pic_w = (uint32_t)sw,
+            .pic_h = (uint32_t)sh,
+            .block_w = (uint32_t)sw,
+            .block_h = (uint32_t)sh,
+            .block_offset_x = 0,
+            .block_offset_y = 0,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = dst.buf,
+            .buffer_size = (uint32_t)dst.len,
+            .pic_w = (uint32_t)dw,
+            .pic_h = (uint32_t)dh,
+            .block_offset_x = (uint32_t)dx,
+            .block_offset_y = (uint32_t)dy,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = rot,
+        .scale_x = (float)scale,
+        .scale_y = (float)scale,
+        .mirror_x = false,
+        .mirror_y = false,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    esp_cache_msync(dst.buf, dst.len,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    s_submitted++;
+    esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
+    if (err != ESP_OK) {
+        s_submitted--;
+        mp_raise_msg_varg(&mp_type_OSError,
+                          MP_ERROR_TEXT("ppa rotate_scale failed: %d"), (int)err);
+    }
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 10,
+                                           moy_ppa_rotate_scale);
+
 // sync(): block until every submitted transaction has completed (the fence for a
 // non-blocking composite). The PPA DMA runs on its own; this is a short busy-wait
 // only reached when the caller deliberately overlaps then fences.
@@ -511,6 +685,8 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_fill), MP_ROM_PTR(&moy_ppa_fill_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_async), MP_ROM_PTR(&moy_ppa_blit_async_obj) },
     { MP_ROM_QSTR(MP_QSTR_blit_crisp), MP_ROM_PTR(&moy_ppa_blit_crisp_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rotate), MP_ROM_PTR(&moy_ppa_rotate_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
     { MP_ROM_QSTR(MP_QSTR_done), MP_ROM_PTR(&moy_ppa_done_obj) },

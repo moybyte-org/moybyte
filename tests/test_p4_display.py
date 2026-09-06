@@ -531,3 +531,243 @@ def test_state_reports_ppa_as_None_on_a_board_with_no_overlap():
 # question -- that the overlap tuple this file exercises is what the line's
 # ppa=/fence_ms= fields carry -- is pinned there against this board's own
 # declaration.
+
+
+# -- the ROTATED compositor: a landscape desk on portrait glass -----------------
+#
+# device/dsi_panel.RotatedCompositor (the Guition P4, 2026-09-06). Executed
+# against the same doubles: a portrait FakeDsi, a FakePpa that RECORDS every
+# rotate so the tests can say which buffer got which rect, at what angle.
+
+
+class PortraitDsi(FakeDsi):
+    WIDTH, HEIGHT = 800, 1280
+
+
+class RotatingPpa(FakePpa):
+    def __init__(self):
+        FakePpa.__init__(self, done=True)
+        self.rotates = []          # (dst, dx, dy, src, sx, sy, w, h, angle)
+        self.direct = []           # (dst, dx, dy, src, sw, sh, scale, angle)
+
+    def init(self):
+        return True
+
+    def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle):
+        self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
+
+    def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle):
+        self.direct.append((dst, dx, dy, src, sw, sh, scale, angle))
+
+
+@contextlib.contextmanager
+def rotated(angle=90):
+    dsi, ppa = PortraitDsi(3), RotatingPpa()
+    keys = ("dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "moy_alloc")
+    saved = {k: sys.modules.get(k) for k in keys}
+    sys.modules["moy_dsi"] = dsi
+    sys.modules["moy_ppa"] = ppa
+    sys.modules["moy_gfx"] = FakeGfx()
+    sys.modules.pop("moy_alloc", None)          # -> the bytearray fallback
+    spec = importlib.util.spec_from_file_location("dsi_panel", DEVICE / "dsi_panel.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["dsi_panel"] = mod
+    try:
+        spec.loader.exec_module(mod)
+        lit = []
+        comp = mod.RotatedCompositor(lit.append, angle=angle)
+        comp.strip_h = 0                          # the strip has its own test
+        yield mod, comp, dsi, ppa, lit
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+GAME = bytearray(4)          # the game canvas double (identity is what matters)
+
+
+def game(comp, ox=100, oy=50, quiet=True, direct=True, painted=None):
+    """Register a 320x240 game composite at 3x like the canvas does."""
+    painted = [] if painted is None else painted
+    comp.mark_game(GAME, 320, 240, ox, oy, 2, lambda: painted.append(1),
+                   lambda: quiet, direct)
+    return painted
+
+
+def test_rotate_rect_maps_the_landscape_corners_onto_portrait_glass():
+    from device.dsi_panel import rotate_rect
+    lw, lh = 1280, 800
+    # 90 CCW: landscape top-left -> portrait bottom-left, top-right -> top-left.
+    assert rotate_rect(0, 0, 1, 1, 90, lw, lh) == (0, 1279, 1, 1)
+    assert rotate_rect(1279, 0, 1, 1, 90, lw, lh) == (0, 0, 1, 1)
+    assert rotate_rect(0, 799, 1, 1, 90, lw, lh) == (799, 1279, 1, 1)
+    # a rect's width and height swap, and the whole frame maps onto the whole panel
+    assert rotate_rect(0, 0, lw, lh, 90, lw, lh) == (0, 0, 800, 1280)
+    assert rotate_rect(100, 50, 640, 480, 90, lw, lh) == (50, 1280 - 100 - 640, 480, 640)
+    # 270: landscape top-left -> portrait top-right.
+    assert rotate_rect(0, 0, 1, 1, 270, lw, lh) == (799, 0, 1, 1)
+    assert rotate_rect(0, 0, lw, lh, 270, lw, lh) == (0, 0, 800, 1280)
+    with pytest.raises(ValueError):
+        rotate_rect(0, 0, 1, 1, 180, lw, lh)
+
+
+def test_the_rotated_compositor_is_landscape_over_a_portrait_panel():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        assert comp.size() == (1280, 800)
+        assert comp.framebuffer() is comp.back_buffer()
+        assert len(comp.framebuffer()) == 1280 * 800 * 2
+        assert comp.rotated is True and comp.retained_frames == 1
+        assert lit == [False], "dark until the first composed frame"
+        assert dsi.shown == [0]
+
+
+def test_a_full_frame_rotates_the_whole_paint_buffer_and_ping_pongs():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        assert dsi.shown == [0, 1]
+        assert ppa.rotates == [(dsi.fb(1), 0, 0, comp.framebuffer(), 0, 0, 1280, 800, 90)]
+        comp.flush()
+        assert dsi.shown == [0, 1, 0]
+        assert ppa.rotates[-1][0] is dsi.fb(0)
+        assert comp.overlap_stats()[2] == 2         # two full frames
+
+
+def test_a_quiet_game_after_a_change_is_full_once_then_direct():
+    """Ping-pong: the buffer a rect frame lands in missed the last full frame,
+    so the first quiet game frame after a change composites into the paint
+    buffer and rotates it whole; the second lands in a buffer whose only
+    stale rect IS the game rect -- ONE scale+rotate straight from the game
+    canvas, and the paint buffer is not touched."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()                                   # full -> fb1
+        painted = game(comp)
+        comp.flush()                                   # fb0 missed a full: full again
+        assert painted == [1]
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+        assert comp.overlap_stats()[2] == 2 and comp.overlap_stats()[0] == 0
+        painted = game(comp)
+        comp.flush()                                   # fb1: stale == the rect
+        assert painted == [], "a quiet direct frame never touches the paint buffer"
+        assert len(ppa.direct) == 1
+        dst, dx, dy, src, sw, sh, scale, angle = ppa.direct[0]
+        assert dst is dsi.fb(1) and src is GAME and (sw, sh, scale, angle) == (320, 240, 2, 90)
+        assert (dx, dy) == (50, 1280 - 100 - 640)
+        assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[1] == 0
+        painted = game(comp)
+        comp.flush()                                   # fb0 likewise
+        assert painted == [] and len(ppa.direct) == 2
+        assert comp.overlap_stats()[0] == 2 and comp.overlap_stats()[1] == 0
+        assert dsi.shown == [0, 1, 0, 1, 0]
+
+
+def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()                                   # now converged: direct
+        assert len(ppa.direct) == 1
+        painted = game(comp, quiet=False)              # the gates moved
+        comp.flush()
+        assert painted == [1]
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+        assert len(ppa.direct) == 1
+
+
+def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp, direct=False)
+        comp.flush()
+        painted = game(comp, direct=False)
+        comp.flush()
+        assert painted == [1]
+        assert ppa.direct == []
+        assert ppa.rotates[-1][3] is comp.framebuffer()
+        assert ppa.rotates[-1][4:] == (100, 50, 640, 480, 90)
+        assert comp.overlap_stats()[0] == 1
+
+
+def test_the_chrome_strip_rides_every_quiet_frame():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.strip_h = 18
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()                                   # direct + the strip
+        strip = [r for r in ppa.rotates if r[4:] == (0, 0, 1280, 18, 90)]
+        assert len(strip) == 1 and strip[0][0] is dsi.fb(1)
+        assert strip[0][1:3] == (0, 0)                 # 90 CCW: the top bar lands at the panel's left
+
+
+def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()                                   # full -> fb1
+        game(comp)
+        comp.flush()                                   # full -> fb0 (missed one)
+        game(comp)
+        comp.flush()                                   # direct -> fb1
+        # The game window MOVED (a windowed drag would be a full frame; a
+        # popup-sized change is the shape): fb0 lacks the old rect the last
+        # frame put into fb1 -> copied 1:1 from fb1 first.
+        game(comp, ox=0, oy=0)
+        comp.flush()
+        copy = [r for r in ppa.rotates if r[8] == 0]
+        assert len(copy) == 1
+        dst, dx, dy, src, sx, sy, w, h, angle = copy[0]
+        assert dst is dsi.fb(0) and src is dsi.fb(1)
+        assert (dx, dy, w, h) == (sx, sy, w, h) == (50, 1280 - 100 - 640, 480, 640)
+        assert ppa.direct[-1][1:3] == (0, 1280 - 640)
+        assert comp.overlap_stats()[1] == 1
+
+
+def test_a_trail_of_moved_rects_costs_one_copy_a_frame_never_a_full():
+    """Ping-pong bounds the bookkeeping by itself: each buffer is visited every
+    other frame, so it can only ever lack the ONE rect the frame between
+    painted."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp, ox=0)
+        comp.flush()
+        n = comp.STALE_LIMIT + 2
+        for i in range(n):
+            game(comp, ox=i * 20)
+            comp.flush()
+            assert all(len(st) <= 1 for st in comp._stale if st is not None)
+        assert comp.overlap_stats()[2] == 2
+        assert comp.overlap_stats()[0] == n
+        assert comp.overlap_stats()[1] == n - 1      # the first repeats its predecessor
+
+
+def test_set_angle_forces_every_buffer_current_the_other_way_up():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()                                   # direct
+        comp.set_angle(270)
+        game(comp)
+        comp.flush()
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 270)
+        game(comp)
+        comp.flush()
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 270)
+        game(comp)
+        comp.flush()
+        assert ppa.direct[-1][7] == 270
+        assert ppa.direct[-1][1:3] == (800 - 50 - 480, 100)
+
+
+def test_present_and_sync_are_inert_on_the_rotated_path():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.present_pending()
+        comp.sync()
+        assert ppa.syncs == 0
+        assert len(comp.overlap_stats()) == 7          # the PERF line's ppa= shape

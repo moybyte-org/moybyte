@@ -15,27 +15,43 @@ define, `moy_ppa`, `moy_ble_hid`, `moy_c6`), the DSI compositor became
 `device/dsi_panel.py`, the PPA system canvas `device/p4_canvas.py`, and the
 two P4 patches moved to `patches/p4_*.patch` behind two shared build-lib
 functions. This directory owns what this glass decides: the panel define, the
-backlight, the touch driver + its firmware, and the portrait system canvas.
+backlight, the touch driver + its firmware, and the rotated (landscape) desk.
 `docs/board_ports_2026-08.md` carries the checklist this port walked.
 
 ## What this glass decided (read before touching the board)
 
-- **The console runs PORTRAIT, 800×1280, the panel's native scan.** The glass
-  is portrait tablet glass and the P4's DSI scans the PSRAM framebuffer
-  continuously — there is no per-frame flush to fold a rotation into (the trick
-  that made the Guition S3's 320×480 landscape free). Landscape would cost
-  either rotate-at-draw (scattered-stride writes through every kernel) or a
-  full-frame PPA rotate per painted frame — 2MB in, 2MB out, against a scan-out
-  that already reads ~123MB/s from the same PSRAM; the Waveshare measured a
-  1:1 full-screen PPA copy at ~26ms for 1.2MB, so ~45ms here per chrome
-  frame. The game composite could be rotated for free (the PPA SRM scales and
-  rotates in one op), chrome could not without dirty-rect plumbing the WM
-  does not expose. That is a design, not a bring-up, so the board ships
-  portrait and the decision is the owner's — the doc that framed this board as
-  "a size/legibility testbed, not a tier" predicted exactly this.
-  **Two knobs flip the image without code**: `MOY_DSI_MIRROR_XY` in
-  `mpconfigboard.cmake` (1 = the factory demo's 180° image, 0 = the panel's
-  raw scan) and the three touch knobs in `guition_p4_input.py`.
+- **The console runs LANDSCAPE, 1280×800, on glass that scans PORTRAIT** (owner
+  call 2026-09-06: "we want it landscape"). The P4's DSI scans the PSRAM
+  framebuffer continuously — there is no per-frame flush to fold a rotation
+  into — so the rotation is the compositor's: `device/dsi_panel.py`'s
+  `RotatedCompositor` paints a persistent 1280×800 landscape buffer and
+  rotates it onto the panel with the PPA. Two costs, and the design is about
+  paying the small one as often as possible:
+  - a FULL frame (any chrome paint) is a whole-buffer rotate, 2MB in and 2MB
+    out over the PSRAM the DSI is reading at ~123MB/s — the measured cost is
+    in the section below. An idle desk paints nothing and pays nothing.
+  - a QUIET game frame — the game composite was the frame's only write, which
+    the canvas's draw gates can tell (rect/rectb/print/pix are gated; a play
+    frame moves none of them — measured over 34 frames) — is ONE PPA op: the
+    320×240 game canvas scaled AND rotated straight into the scan buffer,
+    plus the top bar's strip (an ungated blit every play frame) rotated from
+    the paint buffer. Both the windowed player and fullscreen play take it;
+    crisp pixels (bilinear PPA declined) composite into the paint buffer
+    first and rotate the rect from there.
+  Ping-pong scan buffers make rect frames dangerous — the buffer a rect lands
+  in was last shown two frames ago — so each buffer keeps a STALE list of the
+  portrait rects it has missed and is brought current (1:1 copies from the
+  buffer on glass, or a full rotate when it missed a full frame) before a
+  rect frame is rotated into it. `tests/test_p4_display.py` pins the
+  bookkeeping. Window drags and content scrolls are full frames here (no
+  stamp-defer: the PPA is the rotator), so they run at the full-rotate rate.
+  `RETAINED_FRAMES` on the root is 1 (the paint buffer persists), which the
+  WM floors to its conservative 2.
+  **Which way is up is ONE knob**: `guition_p4_display.ROTATION` (90 or 270,
+  the PPA's counter-clockwise), live for a session as `py comp.set_angle(90)`
+  over the dev channel — the panel is driven UNMIRRORED
+  (`MOY_DSI_MIRROR_XY=0`) so that knob is the only one. **270 is up on the
+  desk** (owner, 2026-09-06: the first build's 90 came up flipped).
 - **The GSL3680 is RAM-LOADED**: it has no flash, so `device/gsl3680.py`
   streams the vendor firmware (`modules/gsl_fw_jc8012.py`, 4587 records
   transcribed by `tools/gen_gsl_fw.py`) into it over I2C after every reset —
@@ -46,11 +62,14 @@ backlight, the touch driver + its firmware, and the portrait system canvas.
   (`gsl_point_id.c`) is deliberately NOT carried: raw register 0x80 gives one
   finger's position, which is all a console pointer needs.
 - **Touch axes are UNCALIBRATED.** Bring-up was hands-off (no finger on the
-  glass), so `guition_p4_input.py` ships the factory demo's net mapping
-  (`FLIP_X=False, FLIP_Y=True, SWAP_XY=False` against the mirrored panel) as
-  the starting guess. First thing to do with a finger:
-  `import moy_runtime; moy_runtime.run_touch_calibrate()` from the REPL, tap
-  the five targets, set the knobs so mapped == tapped, bake them in.
+  glass). The controller reports in the portrait panel frame, so the driver
+  SWAPS the axes for the landscape desk and then flips (`SWAP_XY=True,
+  FLIP_X=False, FLIP_Y=True` is the arithmetic inverse of the 270° rotation,
+  before the controller's own sense is known). First thing to do with a
+  finger: `import moy_runtime; moy_runtime.run_touch_calibrate()` from the
+  REPL, tap the five targets, set the knobs so mapped == tapped, bake them
+  in — or flip them live over the dev channel (`py touch.flip_x = False`).
+  Changing ROTATION flips both axes' sense.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
   the one fact the two boards' display modules differ on). The vendor BSP
   drives it as an LEDC PWM channel, so a duty is one line away the day
@@ -153,11 +172,21 @@ for the C6/audio pins, which agree with the BSP.
   ~16.6ms (2MB).
 - GSL3680: firmware upload 1.34s, `0xB0 == 5A5A5A5A`, clean polling. Axes
   uncalibrated (above).
+- **The rotation, measured** (the compositor's `overlap_stats()` meters, read
+  over the dev channel after a tour with a running cart; 2026-09-06): a
+  FULL-frame rotate is **~48ms** (4MB of PSRAM traffic against the DSI's own
+  ~123MB/s read — chrome, drags and scrolls move at ~20fps); a QUIET game
+  frame is **~11ms** (Star Catcher fullscreen, 960×720 output: the one-op
+  scale+rotate of the game canvas plus the bar strip) — 358 of them against
+  58 full frames over the tour, 0 stale-rect copies, 0 PPA timeouts, 0 DSI
+  underruns. An idle desk rotates nothing. The lever left is WM-side (chrome
+  dirty rects, so drags and scrolls could drop to rect cost) — tracker #220.
 - The console: 36 carts seeded on first boot, PPA registered, Lua runtime on,
-  the desktop under `WindowedWM` at 800×1280; the first frame lands ~250ms
+  the desktop under `WindowedWM` at 1280×800 landscape; the first frame lands ~300ms
   after the desktop is built, and the desktop is built ~27s after reset on a
   seeded store — ~10s of which is the C6 (below). **On-glass suite 18/18**
-  (`tests/test_guition_p4_on_glass.py`: state, portrait canvas, GSL3680 up,
+  (`tests/test_guition_p4_on_glass.py`: state, landscape canvas on portrait glass,
+  the rect-rotate fast path under a running game, GSL3680 up,
   PPA live, settings window, picker, a Python cart and a Lua cart run and
   exit, idle blank + wake, PERF lines, 0 underruns after the tour).
 - **WiFi/BLE against Guition's factory C6 slave**: BLE comes up (the keyboard
@@ -173,8 +202,7 @@ for the C6/audio pins, which agree with the BSP.
 ## Open items (what a human with a finger and a desk decides)
 
 1. **Touch calibration** — `run_touch_calibrate()`, five taps, bake the knobs.
-2. **Orientation** — portrait is the zero-cost answer; whether the desk wants
-   landscape is the owner's call, and the numbers above are the bill.
+2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
 3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): `moy_espnow`
    fails into an inactive link by design. The Waveshare's `c6_slave/` image is
    the same chip and the same SDIO; flashing it here is Phase D of

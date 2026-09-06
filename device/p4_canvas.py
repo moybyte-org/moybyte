@@ -75,7 +75,12 @@ class P4SystemCanvas(SystemCanvas):
         # (3 with the #58 render-overlap triple buffer, 2 on an older moy_dsi
         # build, 1 in the single-buffer degrade). Every partial-paint streak
         # (_retained_n in wm_windowed/launcher_layer) reads this.
-        n = len(getattr(comp, "_fbs", ()) or ())
+        # A compositor whose paint target PERSISTS (the rotated one: the
+        # console paints one landscape buffer and the scan buffers are its
+        # rotated copies) says so; otherwise the horizon is the ping-pong.
+        n = getattr(comp, "retained_frames", None)
+        if n is None:
+            n = len(getattr(comp, "_fbs", ()) or ())
         if n:
             self.RETAINED_FRAMES = n
 
@@ -176,6 +181,45 @@ class P4SystemCanvas(SystemCanvas):
         oy = int(oy)
         scale = int(scale)
         ppa = self._ppa
+        # A ROTATED compositor (a landscape desk on portrait glass) presents by
+        # rotating the paint buffer, so the composite lands in the paint buffer
+        # synchronously -- there is no scan-out switch to defer -- and a quiet
+        # frame instead tells the compositor which rect it may rotate alone.
+        if getattr(self._comp, "rotated", False):
+            # Register the composite and let the compositor decide at flush:
+            # a quiet frame (nothing else drew -- the gates below) goes to the
+            # scan buffer directly, anything else takes the paint route. The
+            # PPA only wins bilinear; crisp pixels take the paint route too.
+            comp = self._comp
+            direct = (ppa is not None and P4SystemCanvas._smooth
+                      and ox >= 0 and oy >= 0
+                      and ox + gc.w * scale <= self.w
+                      and oy + gc.h * scale <= self.h)
+            comp.mark_game(gc._buf, gc.w, gc.h, ox, oy, scale,
+                           lambda: self._composite_paint(gc, ox, oy, scale),
+                           self._gates_unchanged, direct)
+            return
+        self._composite_paint(gc, ox, oy, scale, defer)
+
+    def sync_back(self):
+        SystemCanvas.sync_back(self)
+        # The frame's gate snapshot (rotated compositors): rect/rectb/print/
+        # pix are the native gates; a play frame that draws nothing but the
+        # game and the (ungated) bar strip leaves them untouched -- measured
+        # on the Guition P4, 34 frames, not one count moved.
+        if getattr(self._comp, "rotated", False):
+            self._q_gate = self.gate_counts()[:2]
+
+    def _gates_unchanged(self):
+        if self._gate_state is None:
+            return False              # no gates installed: never claim quiet
+        return self.gate_counts()[:2] == getattr(self, "_q_gate", None)
+
+    def _composite_paint(self, gc, ox, oy, scale, defer=False):
+        """The composite into THIS canvas's buffer: PPA (crisp or bilinear)
+        with the CPU kernel as the fallback. `defer` is the Waveshare's async
+        kick (never on a rotated compositor)."""
+        ppa = self._ppa
         # The PPA needs the scaled block to fit INSIDE the output picture (it
         # can't clip like the CPU kernel). The game->window composite always
         # fits (scale is derived from the window rect); only the cover-crop
@@ -248,9 +292,10 @@ class P4SystemCanvas(SystemCanvas):
         ppa = self._ppa
         x = int(x)
         y = int(y)
-        if (ppa is None or x < 0 or y < 0
+        if (ppa is None or getattr(self._comp, "rotated", False)
+                or x < 0 or y < 0
                 or x + layer.w > self.w or y + layer.h > self.h):
-            return False
+            return False              # rotated: the sync CPU stamp, no defer
         fb = getattr(layer, "flush_batch", None)
         if fb is not None:
             fb()

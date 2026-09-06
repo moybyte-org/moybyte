@@ -41,13 +41,17 @@ def test_boots_to_the_desk(board):
     assert not st.get("order")
 
 
-def test_the_system_canvas_is_the_portrait_glass(board):
-    """The board's one structural novelty: the first console whose system
-    canvas is PORTRAIT (800x1280, the panel's native scan -- the README
-    carries why it is not rotated) over the same 320x240 game canvas."""
+def test_the_system_canvas_is_landscape_on_portrait_glass(board):
+    """The board's one structural novelty: a LANDSCAPE desk (1280x800) on a
+    panel that scans PORTRAIT (800x1280) -- the rotated compositor paints one
+    landscape buffer and rotates it onto the glass -- over the same 320x240
+    game canvas."""
     line = board.cmd("py (ws.sys_canvas.w, ws.sys_canvas.h, ws.canvas.w, ws.canvas.h)",
                      wait_for="PY ")
-    assert line == "PY (800, 1280, 320, 240)", line
+    assert line == "PY (1280, 800, 320, 240)", line
+    line = board.cmd("py (comp.rotated, comp.angle, comp._pw, comp._ph, ws.sys_canvas.RETAINED_FRAMES)",
+                     wait_for="PY ")
+    assert line == "PY (True, 270, 800, 1280, 1)", line     # 270 is up (owner-verified)
 
 
 def test_the_pointer_is_the_gsl3680(board):
@@ -56,9 +60,9 @@ def test_the_pointer_is_the_gsl3680(board):
     glass, at this glass's size. Whether its axes are CALIBRATED is a finger's
     question (`py touch.flip_x = ...` from this same channel), not this
     suite's."""
-    line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h)",
+    line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h, touch.swap_xy)",
                      wait_for="PY ")
-    assert line == "PY (True, 0, 800, 1280)", line
+    assert line == "PY (True, 0, 1280, 800, True)", line
 
 
 def test_the_ppa_composite_is_live(board):
@@ -162,6 +166,35 @@ def test_a_lua_cart_runs_and_exits(board):
     """moycore on the second P4: the Lua tier reaches every board by default
     (the shared native staging), so pin it with a real run."""
     _cart_runs_and_exits(board, "sakura lua", title="Sakura Lua")
+
+
+def test_a_quiet_game_frame_rotates_one_rect(board):
+    """The whole point of the rotated compositor: a running game pays ONE
+    scale+rotate of the game canvas per frame, not a whole-frame rotate. Run
+    a cart (fullscreen: the ws.exit() calls first close the tour's windows),
+    let it tick, and read the meters -- rect frames must have grown far more
+    than full frames. Runs after the window tests on purpose: its exits leave
+    the desk, which open_desk() at the end restores."""
+    for _ in range(3):
+        board.cmd("py ws.exit()", wait_for="PY")
+        board.drain(0.5)
+    line = board.cmd("run star", wait_for="REMOTE run")
+    assert line is not None and "no cart match" not in line, line
+    board.drain(2.5)
+    st = board.state()
+    assert st.get("cart"), "the cart never started: %r" % st
+    before = board.pyval("comp.overlap_stats()", strict=True)
+    board.drain(2.0)
+    after = board.pyval("comp.overlap_stats()", strict=True)
+    rect = after[0] - before[0]
+    full = after[2] - before[2]
+    assert rect >= 20, (before, after)
+    assert full <= 3, (before, after)
+    board.cmd("py ws.exit()", wait_for="PY")
+    board.drain(1.5)
+    assert not board.state().get("cart")
+    board.cmd("py ws.open_desk()", wait_for="PY")     # leave the desk for the next test
+    board.drain(0.5)
 
 
 def test_idle_screen_blank_and_wake(board):

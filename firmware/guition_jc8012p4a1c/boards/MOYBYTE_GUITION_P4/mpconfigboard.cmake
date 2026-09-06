@@ -22,8 +22,9 @@ list(APPEND MICROPY_DEF_BOARD
     # 60MHz -- the factory demo's numbers). The panel facts live behind this
     # one name in modmoy_dsi.c.
     MOY_DSI_PANEL_JD9365=1
-    # The factory demo drives the JD9365 mirrored on both axes (MADCTL GS|SS)
-    # -- a 180-degree image. 1 reproduces that; 0 is the panel's native scan.
-    # Which way is "up" on the owner's desk is a glass question (README).
-    MOY_DSI_MIRROR_XY=1
+    # The panel's NATIVE scan, unmirrored: the desk is rotated onto it by the
+    # PPA (device/dsi_panel.py RotatedCompositor), and which way is up is
+    # guition_p4_display.ROTATION (90/270) -- one knob, not two. (The factory
+    # demo mirrors both axes for its portrait image; 1 reproduces that.)
+    MOY_DSI_MIRROR_XY=0
 )
