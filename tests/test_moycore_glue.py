@@ -1496,7 +1496,8 @@ def test_the_executed_body_is_the_file_the_boards_stage():
     finally:
         world.close()
     for board in ("lilygo_t_deck_plus_mainline", "guition_jc3248w535",
-                  "esp32_p4_wifi6_touch_lcd_7b", "web_runner"):
+                  "esp32_p4_wifi6_touch_lcd_7b", "guition_jc8012p4a1c",
+                  "web_runner"):
         toml = (ROOT / "firmware" / board / "board.toml").read_text(
             encoding="utf-8")
         assert "moycore_glue.py" in toml, board

@@ -47,11 +47,13 @@ paths:
     That is why the pacing tests live here (`tests/test_tick_model.py` and the
     btnp pins in `tests/test_import_p8.py`) and are worth keeping.
 
-- **On-glass testing — all three boards have a suite** (#156). Each is gated on
-  its own env var and shares one session in file order, leaving the board where
-  it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
+- **On-glass testing — all four console boards have a suite** (#156). Each is
+  gated on its own env var and shares one session in file order, leaving the
+  board where it found it: `tests/test_p4_on_glass.py` (`MOYBYTE_P4_PORT`),
   `tests/test_tdeck_on_glass.py` (`MOYBYTE_TDECK_PORT`),
-  `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`), over
+  `tests/test_guition_on_glass.py` (`MOYBYTE_GUITION_PORT`),
+  `tests/test_guition_p4_on_glass.py` (`MOYBYTE_GUITION_P4_PORT`, attach-only
+  like the S3 boards — its USB serial is the SoC's), over
   `tools/p4_autotest.py`'s `P4Board` and the shared `tests/on_glass.py` fixture.
   - **The line state at open is per-board and OPPOSITE, and it is DATA.**
     `P4Board(board_dir=…)` reads `dtr`/`rts`/`attach_only`/`chunk` from that

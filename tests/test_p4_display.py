@@ -1,4 +1,5 @@
-"""`P4Compositor`, EXECUTED (`firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py`).
+"""`P4Compositor`, EXECUTED (`device/dsi_panel.py`, bound through
+`firmware/esp32_p4_wifi6_touch_lcd_7b/modules/p4_display.py`).
 
 The P4's compositor is the async-overlap lever (#58) -- the deferred composite,
 the drag stamp-defer, the triple-framebuffer rotation and the fences that hold
@@ -23,6 +24,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 P4_MODULES = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
+DEVICE = ROOT / "device"
 
 from runtime import device_boot                                    # noqa: E402
 from runtime.dev_channel import _remote_state                      # noqa: E402
@@ -160,7 +162,7 @@ def p4_display(dsi, ppa, gfx=None):
     Fresh every time on purpose: `set_backlight` caches its Pin in a module
     global, so a shared import would carry one test's pin into the next.
     """
-    keys = ("p4_display", "moy_dsi", "moy_ppa", "moy_gfx", "machine")
+    keys = ("p4_display", "dsi_panel", "moy_dsi", "moy_ppa", "moy_gfx", "machine")
     saved = {k: sys.modules.get(k) for k in keys}
     machine = types.ModuleType("machine")
     machine.Pin = _FakePin
@@ -171,11 +173,20 @@ def p4_display(dsi, ppa, gfx=None):
         sys.modules.pop("moy_gfx", None)
     else:
         sys.modules["moy_gfx"] = gfx
+    # The compositor BODY is device/dsi_panel.py (one copy for both P4 boards
+    # since 2026-09-06); the board file binds its backlight to it. Load the
+    # body first under the flat device name the board file imports, then the
+    # board file, so `mod.P4Compositor()` is exactly what the board constructs.
+    dspec = importlib.util.spec_from_file_location(
+        "dsi_panel", DEVICE / "dsi_panel.py")
+    dmod = importlib.util.module_from_spec(dspec)
+    sys.modules["dsi_panel"] = dmod
     spec = importlib.util.spec_from_file_location(
         "p4_display", P4_MODULES / "p4_display.py")
     mod = importlib.util.module_from_spec(spec)
     sys.modules["p4_display"] = mod
     try:
+        dspec.loader.exec_module(dmod)
         spec.loader.exec_module(mod)
         yield mod
     finally:
@@ -222,8 +233,11 @@ class StepTicks:
 def stepped(monkeypatch):
     def install(mod, step=1000):
         clock = StepTicks(step)
-        monkeypatch.setattr(mod, "_ticks_us", clock.us)
-        monkeypatch.setattr(mod, "_ticks_diff", StepTicks.diff)
+        # The fences read the clock through dsi_panel's globals (the body),
+        # whichever board file `mod` is.
+        target = sys.modules.get("dsi_panel", mod)
+        monkeypatch.setattr(target, "_ticks_us", clock.us)
+        monkeypatch.setattr(target, "_ticks_diff", StepTicks.diff)
         return clock
     return install
 

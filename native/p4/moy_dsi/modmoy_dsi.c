@@ -1,10 +1,15 @@
-// Moybyte P4 port (#58): EK79007 MIPI-DSI panel backend for the Waveshare
-// ESP32-P4-WIFI6-Touch-LCD-7B (1024x600, 2-lane DSI @ 900Mbps).
+// moy_dsi: the ESP32-P4 MIPI-DSI panel module -- the P4 silicon tier
+// (native/p4), parameterized by the PANEL the board's mpconfigboard.cmake
+// names. Born as the Waveshare 7B's EK79007 backend (#58); the Guition
+// JC8012P4A1C's JD9365 became its second panel on 2026-09-06, which is when
+// the panel facts moved behind the #if ladder below and the module moved out
+// of the Waveshare's tree.
 //
-// DPI mode: the DSI peripheral continuously scans out a PSRAM framebuffer --
-// there is no per-frame flush transfer (the T-Deck's ~28ms tx_color ceiling
-// does not exist here). Python draws into the framebuffer returned by fb()
-// and calls flush() so the DPI DMA sees the CPU's cached writes.
+// DPI mode on either panel: the DSI peripheral continuously scans out a PSRAM
+// framebuffer -- there is no per-frame flush transfer (the T-Deck's ~28ms
+// tx_color ceiling does not exist here). Python draws into the framebuffer
+// returned by fb() and calls flush()/show() so the DPI DMA sees the CPU's
+// cached writes.
 
 #include "py/runtime.h"
 #include "py/objarray.h"
@@ -13,32 +18,77 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_mipi_dsi.h"
-#include "esp_lcd_ek79007.h"
 #include "esp_cache.h"
 #include "esp_attr.h"
 
+// ---------------------------------------------------------------------------
+// The panel: everything a board's glass decides, and nothing else. A board
+// names ONE of these in mpconfigboard.cmake (list(APPEND MICROPY_DEF_BOARD
+// MOY_DSI_PANEL_xxx=1)); the rest of this file is the silicon's.
+// ---------------------------------------------------------------------------
+#if defined(MOY_DSI_PANEL_EK79007)
+// Waveshare ESP32-P4-WIFI6-Touch-LCD-7B: EK79007, 7" 1024x600 landscape,
+// 2-lane DSI @ 900Mbps (the vendored component's own bus config), LCD reset
+// GPIO33, DSI PHY on LDO channel 3 @ 2.5V. Panel mounted 180 degrees --
+// handled on the TOUCH side (p4_input.FLIP_X/Y), never here.
+#include "esp_lcd_ek79007.h"
 #define MOY_DSI_H_RES        1024
 #define MOY_DSI_V_RES        600
+#define MOY_DSI_LCD_RST_GPIO 33
+#define MOY_DSI_MIRROR_XY    0
+#define MOY_DSI_PANEL_QSTR   MP_QSTR_ek79007
+typedef ek79007_vendor_config_t moy_dsi_vendor_config_t;
+#define MOY_DSI_BUS_CONFIG()      EK79007_PANEL_BUS_DSI_2CH_CONFIG()
+#define MOY_DSI_DBI_CONFIG()      EK79007_PANEL_IO_DBI_CONFIG()
+#define MOY_DSI_DPI_CONFIG(fmt)   EK79007_1024_600_PANEL_60HZ_CONFIG(fmt)
+#define moy_dsi_new_panel         esp_lcd_new_panel_ek79007
+#elif defined(MOY_DSI_PANEL_JD9365)
+// Guition JC8012P4A1C: JD9365, 10.1" 800x1280 PORTRAIT-native glass, 2-lane
+// DSI @ 1500Mbps + DPI 60MHz (the factory demo's numbers, verbatim), LCD
+// reset GPIO27, DSI PHY on LDO channel 3 @ 2.5V. The factory demo mirrors
+// both axes after init (MADCTL GS|SS) -- a 180-degree image, which is the
+// orientation its LVGL demo ran in and what MOY_DSI_MIRROR_XY reproduces.
+// Board README carries the portrait-vs-landscape decision; this file only
+// knows the glass is 800 wide.
+#include "esp_lcd_jd9365.h"
+#define MOY_DSI_H_RES        800
+#define MOY_DSI_V_RES        1280
+#define MOY_DSI_LCD_RST_GPIO 27
+#ifndef MOY_DSI_MIRROR_XY
+#define MOY_DSI_MIRROR_XY    1
+#endif
+#define MOY_DSI_PANEL_QSTR   MP_QSTR_jd9365
+typedef jd9365_vendor_config_t moy_dsi_vendor_config_t;
+#define MOY_DSI_BUS_CONFIG()      JD9365_PANEL_BUS_DSI_2CH_CONFIG()
+#define MOY_DSI_DBI_CONFIG()      JD9365_PANEL_IO_DBI_CONFIG()
+#define MOY_DSI_DPI_CONFIG(fmt)   JD9365_800_1280_PANEL_60HZ_DPI_CONFIG(fmt)
+#define moy_dsi_new_panel         esp_lcd_new_panel_jd9365
+#else
+#error "moy_dsi: the board must name its panel in mpconfigboard.cmake (MICROPY_DEF_BOARD MOY_DSI_PANEL_EK79007=1 or MOY_DSI_PANEL_JD9365=1)"
+#endif
+
 #define MOY_DSI_FB_BYTES     (MOY_DSI_H_RES * MOY_DSI_V_RES * 2) // RGB565
-#define MOY_DSI_LCD_RST_GPIO 33   // 7B board (xiaozhi/Waveshare board config)
-#define MOY_DSI_PHY_LDO_CHAN 3    // MIPI DSI PHY power rail
+#define MOY_DSI_PHY_LDO_CHAN 3    // MIPI DSI PHY power rail (both boards)
 #define MOY_DSI_PHY_LDO_MV   2500
+#define MOY_DSI_NUM_FBS      3    // TRIPLE-BUFFER (#58 render overlap), see below
 
 static esp_ldo_channel_handle_t s_phy_ldo;
 static esp_lcd_dsi_bus_handle_t s_bus;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 static void *s_fb;          // fb 0 (kept for the single-buffer flush() compat path)
-static void *s_fbs[3];      // TRIPLE-BUFFER (#58 render overlap): the DPI panel owns
-                            // 3 framebuffers -- scan / DMA-pending / paint -- so a
-                            // deferred async composite never blocks the next paint;
-static int s_nfbs;          // show(n) switches scan-out zero-copy (draw_bitmap with an
-                            // internal fb pointer), so a full redraw never races the
-                            // scan (the "everything visibly refreshes" tearing).
+static void *s_fbs[MOY_DSI_NUM_FBS]; // TRIPLE-BUFFER (#58 render overlap): the DPI
+                            // panel owns 3 framebuffers -- scan / DMA-pending /
+                            // paint -- so a deferred async composite never blocks
+static int s_nfbs;          // the next paint; show(n) switches scan-out zero-copy
+                            // (draw_bitmap with an internal fb pointer), so a full
+                            // redraw never races the scan (the "everything visibly
+                            // refreshes" tearing).
 static volatile uint32_t s_underruns;
 
-// Strong implementation of ESP-IDF's P4-build weak diagnostic hook. ISR-safe:
-// one internal-RAM counter increment, with all Python/serial work deferred.
+// Strong implementation of ESP-IDF's P4-build weak diagnostic hook
+// (patches/p4_esp_lcd_dsi_underrun_hook.patch). ISR-safe: one internal-RAM
+// counter increment, with all Python/serial work deferred.
 IRAM_ATTR void moy_dsi_note_underrun(void) {
     s_underruns++;
 }
@@ -62,16 +112,20 @@ static mp_obj_t moy_dsi_init(void) {
     };
     moy_dsi_check(esp_ldo_acquire_channel(&ldo_cfg, &s_phy_ldo), "phy ldo");
 
-    esp_lcd_dsi_bus_config_t bus_cfg = EK79007_PANEL_BUS_DSI_2CH_CONFIG();
+    esp_lcd_dsi_bus_config_t bus_cfg = MOY_DSI_BUS_CONFIG();
     moy_dsi_check(esp_lcd_new_dsi_bus(&bus_cfg, &s_bus), "dsi bus");
 
-    esp_lcd_dbi_io_config_t dbi_cfg = EK79007_PANEL_IO_DBI_CONFIG();
+    esp_lcd_dbi_io_config_t dbi_cfg = MOY_DSI_DBI_CONFIG();
     moy_dsi_check(esp_lcd_new_panel_io_dbi(s_bus, &dbi_cfg, &s_io), "dbi io");
 
-    esp_lcd_dpi_panel_config_t dpi_cfg = EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
-    dpi_cfg.num_fbs = 3;    // triple-buffer: 3x 1.2MB PSRAM (the board has 32MB) --
-                            // scan + DMA-pending + paint (#58 render overlap)
-    ek79007_vendor_config_t vendor_cfg = {
+    esp_lcd_dpi_panel_config_t dpi_cfg = MOY_DSI_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    dpi_cfg.num_fbs = 3;    // triple-buffer: 3x the frame in PSRAM (both boards
+                            // have 32MB) -- scan + DMA-pending + paint (#58)
+    // Nothing here ever draw_bitmaps a FOREIGN buffer -- show() hands the DPI
+    // driver one of its own framebuffers, which it switches zero-copy -- so the
+    // JD9365 vendor config's DMA2D copy engine has no work and stays off.
+    dpi_cfg.flags.use_dma2d = false;
+    moy_dsi_vendor_config_t vendor_cfg = {
         .mipi_config = {
             .dsi_bus = s_bus,
             .dpi_config = &dpi_cfg,
@@ -84,11 +138,15 @@ static mp_obj_t moy_dsi_init(void) {
         .bits_per_pixel = 16,
         .vendor_config = &vendor_cfg,
     };
-    moy_dsi_check(esp_lcd_new_panel_ek79007(s_io, &panel_cfg, &s_panel), "panel new");
+    moy_dsi_check(moy_dsi_new_panel(s_io, &panel_cfg, &s_panel), "panel new");
     moy_dsi_check(esp_lcd_panel_reset(s_panel), "panel reset");
     moy_dsi_check(esp_lcd_panel_init(s_panel), "panel init");
-    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 3, &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
-    s_nfbs = 3;
+#if MOY_DSI_MIRROR_XY
+    moy_dsi_check(esp_lcd_panel_mirror(s_panel, true, true), "panel mirror");
+#endif
+    moy_dsi_check(esp_lcd_dpi_panel_get_frame_buffer(s_panel, MOY_DSI_NUM_FBS,
+                                                     &s_fbs[0], &s_fbs[1], &s_fbs[2]), "get fbs");
+    s_nfbs = MOY_DSI_NUM_FBS;
     s_fb = s_fbs[0];
     return mp_const_none;
 }
@@ -198,6 +256,7 @@ static const mp_rom_map_elem_t moy_dsi_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_pattern), MP_ROM_PTR(&moy_dsi_set_pattern_obj) },
     { MP_ROM_QSTR(MP_QSTR_WIDTH), MP_ROM_INT(MOY_DSI_H_RES) },
     { MP_ROM_QSTR(MP_QSTR_HEIGHT), MP_ROM_INT(MOY_DSI_V_RES) },
+    { MP_ROM_QSTR(MP_QSTR_PANEL), MP_ROM_QSTR(MOY_DSI_PANEL_QSTR) },
 };
 static MP_DEFINE_CONST_DICT(moy_dsi_module_globals, moy_dsi_module_globals_table);
 

@@ -40,8 +40,9 @@ GUITION = ROOT / "firmware" / "guition_jc3248w535"
 # flash facts -- and none of that cares whether a board has a screen. The two
 # tests that do care about a console say so where they narrow.
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 BOARDS = {"tdeck": TDECK, "tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-          "guition-s3": GUITION, "zero": ZERO}
+          "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4}
 
 try:                                    # 3.11+
     import tomllib as _real_toml
@@ -161,8 +162,10 @@ def test_stage_produces_the_declared_set_and_prunes_strays(tmp_path, board):
         # -- it has no console at all -- which its own row below pins instead.
         assert (dest / "console.py").exists() and (dest / "moy_font.py").exists()
     assert not (dest / "font.py").exists(), "font.py must stage RENAMED only"
-    if board.startswith("tdeck") or board.startswith("guition") or board == "zero":
-        assert not (dest / "wm_windowed.py").exists()
+    if board in ("tdeck", "tdeck-mainline", "guition-s3", "zero"):
+        assert not (dest / "wm_windowed.py").exists()      # no desktop to window
+    else:
+        assert (dest / "wm_windowed.py").exists()          # the two P4 desks
     on_disk = {p.name for p in dest.glob("*.py")} - {generated, "moy_runtime.py"}
     assert on_disk == set(wanted)
 
@@ -358,7 +361,7 @@ def test_the_way_out_of_the_loader_is_declared_where_it_is_not_hard_reset():
     of bug this repo keeps turning declarations into data to avoid."""
     zero = board_config.load(ZERO)["flash"]
     assert zero.get("after") == "watchdog_reset"
-    for name in ("tdeck", "p4", "guition-s3"):
+    for name in ("tdeck", "p4", "guition-s3", "guition-p4"):
         fl = board_config.load(BOARDS[name])["flash"]
         assert fl.get("after", "hard_reset") == "hard_reset", name
 
@@ -430,7 +433,7 @@ def test_every_target_the_makefile_suggests_exists():
 # exactly as much of as the others (it is the module STAGING checks that care
 # whether a board has a console, and they use BOARDS above).
 _DEVICE_BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION,
-                  "zero": ZERO}
+                  "zero": ZERO, "guition-p4": GUITION_P4}
 
 
 @pytest.mark.parametrize("board", sorted(_DEVICE_BOARDS))
@@ -513,7 +516,8 @@ def test_the_on_glass_suites_read_the_declaration_instead_of_retyping_it():
     board.toml already carries, and neither read `attach_only` at all: the fact
     that stops a reset stranding the handle was data with no consumer."""
     for suite, name in (("test_tdeck_on_glass.py", "lilygo_t_deck_plus_mainline"),
-                        ("test_guition_on_glass.py", "guition_jc3248w535")):
+                        ("test_guition_on_glass.py", "guition_jc3248w535"),
+                        ("test_guition_p4_on_glass.py", "guition_jc8012p4a1c")):
         src = (ROOT / "tests" / suite).read_text()
         assert 'board_dir=ROOT / "firmware" / "%s"' % name in src, (
             "%s no longer points P4Board at %s/board.toml" % (suite, name))

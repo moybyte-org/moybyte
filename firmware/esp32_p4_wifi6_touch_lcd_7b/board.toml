@@ -249,10 +249,10 @@ strategy = "denylist"
 why = """
 The C-module twin of [modules.shared] (#161; see the T-Deck's board.toml for
 the mechanism). Every directory under native/ with a micropython.cmake crosses
-unless denied here -- this board's own moy_dsi/moy_ppa/moy_ble_hid live in its
-board tree and are not staged. The two denials below are what the old
-hand-written cp list in build.sh silently encoded; now they are decisions with
-reasons someone can check."""
+unless denied here. The three denials below are what the old hand-written cp
+list in build.sh silently encoded; now they are decisions with reasons someone
+can check. (native/p4/ has no micropython.cmake of its own, so this scan never
+sees it -- that tier is the second source, [native.p4] below.)"""
 
 [[native.shared.deny]]
 module = "moy_sd"
@@ -285,6 +285,25 @@ framebuffer continuously, so there is no per-frame transfer, no band, no
 bounce and no completion ISR. Staging it would compile a FreeRTOS task and a
 DMA-SRAM allocation into the image for code nothing calls. A DSI board that
 ever needs a push path is a new decision, not a flip of this one."""
+
+[native.p4]
+source   = "native/p4"
+strategy = "denylist"
+why = """
+The ESP32-P4 SILICON tier: the C modules an ESP32-P4 board has BECAUSE it is a
+P4 and no S3 board could compile -- moy_dsi (the MIPI-DSI panel, parameterized
+by the board's panel define in mpconfigboard.cmake), moy_ppa (the pixel
+accelerator behind the game composite), moy_ble_hid (the NimBLE-host report
+queue over the C6's hosted radio) and moy_c6 (the ESP-NOW shim + C6 plumbing
+over ESP-Hosted). All four lived in THIS board's tree until 2026-09-06, when
+the Guition JC8012P4A1C became their second consumer -- Phase C's rule
+(docs/board_ports_2026-08.md): a driver moves to a shared tree the day a
+second board carries the hardware, parameterized by board data, not before.
+Declared as a second SOURCE rather than as four denials on every S3 board:
+a board that names this tier has the silicon; one that does not has nothing
+to explain. Nothing is denied here -- every module in the tier is the
+silicon's, not a panel's, except moy_dsi, which each P4 board parameterizes
+(MOY_DSI_PANEL_*) rather than denies."""
 
 # ---------------------------------------------------------------------------
 
@@ -335,6 +354,17 @@ device home of THE make_api -- one body in the shared cart_api.py since
 2026-08-17, re-exported here), moycore's host half (input snapshot in, audio
 queue out, pmem at the #66 boundaries), and the leaf ticks helpers
 device_canvas imports."""
+
+[[modules.device.group]]
+files = ["dsi_panel.py", "p4_canvas.py"]
+why = """
+The P4 silicon tier's Python half (2026-09-06, promoted out of THIS board's
+p4_display.py / moy_runtime.py the day the Guition P4 became their second
+consumer): the DSI compositor over native/p4/moy_dsi (triple-buffer rotation,
+deferred present, fences -- tests/test_p4_display.py executes it) and the
+SYSTEM canvas with the PPA composite hooks the windowed WM probes for. This
+board's p4_display.py adds only its backlight; its moy_runtime.py constructs
+the canvas at this glass's size."""
 
 [[modules.device.group]]
 files = ["ble_keyboard.py"]

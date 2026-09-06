@@ -51,7 +51,7 @@ on:
         description: "Which board(s) to build ('both' = all boards)"
         type: choice
         default: tdeck
-        options: [tdeck, p4, guition_s3, xiao_zero, both]
+        options: [tdeck, p4, guition_s3, xiao_zero, guition_p4, both]
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -90,6 +90,12 @@ jobs:
           - board: xiao_zero
             dir: firmware/seeed_xiao_esp32s3_zero
             make_target: firmware-build-zero
+          # The Guition JC8012P4A1C (2026-09-06): the second ESP32-P4 board,
+          # a variant of the Waveshare's port over the shared native/p4 tier.
+          # Its own IDF clone on a runner (the desk shares the Waveshare's).
+          - board: guition_p4
+            dir: firmware/guition_jc8012p4a1c
+            make_target: firmware-build-guition-p4
     # Only run the boards the dispatcher asked for. A PUSH sets no input, so a
     # branch build does every board in the matrix; a dispatch honours the
     # choice.
@@ -304,6 +310,7 @@ jobs:
           cp dist/p4/ota_build.json out/ 2>/dev/null || true
           cp dist/guition_s3/ota_build.json out/ 2>/dev/null || true
           cp dist/zero/ota_build.json out/ 2>/dev/null || true
+          cp dist/guition_p4/ota_build.json out/ 2>/dev/null || true
           # The C6 slave's identity stamp (P4 job only) -- the publisher reads
           # c6.version out of it; the .bin itself rode the find above.
           cp dist/p4/c6_build.json out/ 2>/dev/null || true

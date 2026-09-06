@@ -1,0 +1,17 @@
+.build/
+# Shared native modules staged by build.sh per board.toml (canonical: native/
+# and native/p4/).
+native/.staged/
+# modules/ mixes board-authored files (tracked, whitelisted below) with copies
+# staged at build time -- board.toml declares which cross. The whitelist is
+# ALSO what the stager's prune reads: a tracked file is board-authored and
+# never deleted; any untracked .py board.toml does not stage is pruned.
+modules/*
+!modules/boot.py
+!modules/main.py
+!modules/moybyte_shell.py
+!modules/guition_p4_display.py
+!modules/guition_p4_input.py
+!modules/guition_p4_smoke.py
+!modules/gsl_fw_jc8012.py
+!modules/moy_runtime.py

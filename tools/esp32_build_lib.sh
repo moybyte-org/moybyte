@@ -182,6 +182,40 @@ moybyte_patch_gc_split_reserve() {
 #
 # ESP32-S3 only: the file it patches is the S3 port of the MSPI timing tuner.
 # Reads IDF_DIR, REPO_ROOT.
+# The two ESP32-P4 SILICON patches, one-shot marker-guarded like the rest --
+# shared by every P4 board since 2026-09-06 (they were the Waveshare's own
+# `patches/` until the Guition P4 became their second consumer):
+#
+#   ble_hid_fastpath  Steady-state BLE keyboard notifications must not wait
+#                     behind MicroPython's synchronous NimBLE IRQ/GIL path.
+#                     native/p4/moy_ble_hid's queue consumes registered HID
+#                     handles before Python dispatch; pairing/bonding/
+#                     discovery stay on the supported synchronous path.
+#                     Patches THIS board's MicroPython checkout.
+#   dsi_underrun      #106: backport current ESP-IDF's dedicated DSI
+#                     bridge-underrun ISR and keep the frame-restart DW-GDMA
+#                     interrupt above ESP-Hosted's SDIO interrupt. IDF v5.5
+#                     checks the bridge only from the DMA callback; if SDIO
+#                     delays that callback the panel has already gone blue.
+#                     Patches the (possibly shared) ESP-IDF checkout, so the
+#                     marker is what makes two P4 builds over one IDF safe.
+moybyte_patch_p4_ble_hid_fastpath() {
+  local f="${MPY_DIR}/extmod/modbluetooth.c"
+  if [ -f "${f}" ] && ! grep -q "moy_ble_hid_queue_on_notify" "${f}"; then
+    echo "== applying P4 BLE-HID native notification fast-path patch"
+    patch -d "${MPY_DIR}" -p1 < "${REPO_ROOT}/patches/p4_modbluetooth_ble_hid_fastpath.patch"
+  fi
+}
+
+moybyte_patch_p4_dsi_underrun() {
+  local f="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
+  if [ -f "${f}" ] && \
+     ! grep -q "Moybyte P4: dedicated DSI bridge underrun IRQ" "${f}"; then
+    echo "== applying P4 DSI bridge IRQ/priority fix (#106)"
+    patch -d "${IDF_DIR}" -p1 < "${REPO_ROOT}/patches/p4_esp_lcd_dsi_underrun_hook.patch"
+  fi
+}
+
 moybyte_patch_psram_retune() {
   local f="${IDF_DIR}/components/esp_hw_support/mspi_timing_tuning/port/esp32s3/mspi_timing_by_mspi_delay.c"
   if [ -f "${f}" ] && ! grep -q "Moybyte #169" "${f}"; then

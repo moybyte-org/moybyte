@@ -68,12 +68,10 @@ def test_boot_apply_does_not_persist_but_reaches_the_canvas(tmp_path):
 def test_device_side_is_wired():
     """Source ratchet for the halves host tests cannot execute: the P4 canvas
     hook + its blit_crisp routing, and the native verb's registration."""
-    p4 = (ROOT / "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"
-          ).read_text()
+    p4 = (ROOT / "device/p4_canvas.py").read_text()
     assert "def set_crisp_scale" in p4
     assert "blit_crisp" in p4
-    ppa = (ROOT / "firmware/esp32_p4_wifi6_touch_lcd_7b/native/moy_ppa/"
-                  "modmoy_ppa.c").read_text()
+    ppa = (ROOT / "native/p4/moy_ppa/modmoy_ppa.c").read_text()
     assert "MP_QSTR_blit_crisp" in ppa
     assert "MP_QSTR_crisp_release" in ppa
     assert "mg_blit565_scale" in ppa       # the ONE expand kernel, not a twin

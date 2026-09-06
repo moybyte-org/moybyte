@@ -25,8 +25,10 @@ from tools import board_config, board_flash                     # noqa: E402
 TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 WEB_RUNNER = ROOT / "firmware" / "web_runner"
-BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION}
+BOARDS = {"tdeck": TDECK, "p4": P4, "guition-s3": GUITION,
+          "guition-p4": GUITION_P4}
 
 SUBCOMMANDS = ("erase_region", "write_flash")
 

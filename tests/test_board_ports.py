@@ -29,6 +29,7 @@ import p4_autotest  # noqa: E402
 P4 = os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b")
 TDECK = os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline")
 GUITION = os.path.join(ROOT, "firmware", "guition_jc3248w535")
+GUITION_P4 = os.path.join(ROOT, "firmware", "guition_jc8012p4a1c")
 
 
 # -- the declarations are data, and their SHAPE is part of the contract ------
@@ -36,7 +37,7 @@ GUITION = os.path.join(ROOT, "firmware", "guition_jc3248w535")
 
 def test_every_flashable_board_declares_a_usb_id():
     import re
-    for d in (P4, TDECK, GUITION):
+    for d in (P4, TDECK, GUITION, GUITION_P4):
         usb = p4_autotest.declared_serial(d)["usb"]
         assert usb and re.match(r"^[0-9a-f]{4}:[0-9a-f]{4}$", usb), (d, usb)
 
@@ -50,12 +51,19 @@ def test_the_s3_twins_share_an_id_and_the_p4_does_not():
     gu = p4_autotest.declared_serial(GUITION)["usb"]
     assert td == gu
     assert p4 != td
+    # The Guition P4 is the P4 that DOES share it: its USB-C goes straight to
+    # the SoC's USB-Serial/JTAG, no CH343 -- so it joins the S3 twins'
+    # ambiguity, and its board.toml declares attach_only for the same reason.
+    gp4 = p4_autotest.declared_serial(GUITION_P4)
+    assert gp4["usb"] == td
+    assert gp4["attach_only"] is True
 
 
 def test_declared_board_ids_are_the_ota_names():
     assert p4_autotest.declared_board_id(P4) == "p4"
     assert p4_autotest.declared_board_id(TDECK) == "tdeck"
     assert p4_autotest.declared_board_id(GUITION) == "guition_s3"
+    assert p4_autotest.declared_board_id(GUITION_P4) == "guition_p4"
 
 
 # -- usb_id_of walks sysfs ---------------------------------------------------

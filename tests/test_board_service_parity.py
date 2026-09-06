@@ -69,6 +69,8 @@ TARGETS = {
            "run_desktop"),
     "guition": ("firmware/guition_jc3248w535/modules/moy_runtime.py",
                 "run_desktop"),
+    "guition_p4": ("firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
+                   "run_desktop"),
     "host": ("runtime/host_app.py", "build_workstation"),
     # The wasm head is the third tier and wires the same console (moycore stage
     # 4), so it belongs in the table: it is the target most likely to be handed
@@ -147,6 +149,40 @@ WIRING = {
         "perf_capture": INJECTED,
     },
     "p4": {
+        "make_api": INJECTED,
+        "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
+                      "on the hardware and unwired; until it is, injecting a "
+                      "backend would give the console an audio path that plays "
+                      "into nothing",
+        "lua_runtime": INJECTED,
+        "make_game_canvas": INJECTED,
+        "carts_store": INJECTED,
+        "carts_root": INJECTED,
+        "can_manage": "derived, not passed -- the store is on internal flash and "
+                      "is always writable, so the carts_root default is already "
+                      "the right answer",
+        "wifi": INJECTED,
+        "pointer": INJECTED,
+        "keyboard": INJECTED,
+        "ble_keyboard": "a paired BLE keyboard IS this board's only keyboard, so it\n                         is attached as `keyboard` above rather than beside it --\n                         one driver, one slot. Settings finds it either way: \n                         settings_layer._bt_service() checks ble_keyboard first,\n                         then keyboard, and gates on settings_capable.",
+        "_with_sd": "no SD card on this console -- the store is internal flash "
+                    "and races nothing, so the Workstation's own call-through "
+                    "default IS the correct gate. A wrapper here would be "
+                    "ceremony around `fn()`",
+        "updater": INJECTED,
+        "c6_updater": INJECTED,
+        "webhost": INJECTED,
+        "reboot_hook": INJECTED,
+        "net": INJECTED,
+        "gpio": "same as the T-Deck: this board's pins are the panel, touch and\n"
+                "the C6, and a cart runs locally. Nothing to expose.",
+        "link": INJECTED,
+        "wm": INJECTED,
+        "perf_capture": INJECTED,
+    },
+    # The Guition P4 is the Waveshare's row: same silicon, same services,
+    # the same three absences for the same reasons.
+    "guition_p4": {
         "make_api": INJECTED,
         "make_audio": "no ES8311 bring-up on this board yet (#82). The codec is "
                       "on the hardware and unwired; until it is, injecting a "
@@ -632,6 +668,13 @@ LIFECYCLE = {
         ("link", "poll"): HERE,
     },
     "guition": {
+        ("keyboard", "start"): HERE,
+        ("keyboard", "poll"): HERE,
+        ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),
+        ("link", "start"): Via("runtime/player.py", "start"),
+        ("link", "poll"): HERE,
+    },
+    "guition_p4": {
         ("keyboard", "start"): HERE,
         ("keyboard", "poll"): HERE,
         ("webhost", "poll"): Via("runtime/device_boot.py", "poll_webhost"),

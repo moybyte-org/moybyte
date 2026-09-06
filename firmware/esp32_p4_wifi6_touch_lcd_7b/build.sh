@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Moybyte P4 port (#58): build mainline MicroPython (ESP32_GENERIC_P4, C6_WIFI
-# variant) + the moy_dsi native module (EK79007 MIPI-DSI panel) for the
-# Waveshare ESP32-P4-WIFI6-Touch-LCD-7B.
+# variant) + the P4 silicon tier (native/p4: moy_dsi over the EK79007 MIPI-DSI
+# panel, moy_ppa, moy_ble_hid, moy_c6) for the Waveshare
+# ESP32-P4-WIFI6-Touch-LCD-7B.
 #
 # A plain mainline build with USER_C_MODULES -- the strategy both boards use
 # now (this board went mainline first, because the deleted lvgl_micropython
@@ -19,7 +20,6 @@ MPY_DIR="${BUILD_DIR}/micropython"
 MPY_TAG="${MPY_TAG:-v1.28.0}"
 BOARD="MOYBYTE_P4"
 BOARD_DIR="${SCRIPT_DIR}/boards/${BOARD}"
-PATCH_DIR="${SCRIPT_DIR}/patches"
 DIST_DIR="${REPO_ROOT}/dist/p4"
 MODULES_DIR="${SCRIPT_DIR}/modules"
 MANIFEST="${BUILD_DIR}/moybyte_p4_manifest.py"
@@ -54,28 +54,13 @@ moybyte_setup_idf esp32p4
 #    because both the .build tree and a reused IDF checkout persist.
 # ---------------------------------------------------------------------------
 
-# 2a) Steady-state BLE keyboard notifications must not wait behind MicroPython's
-#     synchronous NimBLE IRQ/GIL path. The P4-only native queue consumes
-#     registered HID handles before Python dispatch; pairing/bonding/discovery
-#     remain on the supported synchronous path.
-MODBLUETOOTH_C="${MPY_DIR}/extmod/modbluetooth.c"
-if [ -f "${MODBLUETOOTH_C}" ] && \
-   ! grep -q "moy_ble_hid_queue_on_notify" "${MODBLUETOOTH_C}"; then
-  echo "== applying P4 BLE-HID native notification fast-path patch"
-  patch -d "${MPY_DIR}" -p1 < "${PATCH_DIR}/modbluetooth_ble_hid_fastpath.patch"
-fi
-
-# 2b) #106: backport current ESP-IDF's dedicated DSI bridge-underrun ISR and
-#     keep the frame-restart DW-GDMA interrupt above ESP-Hosted's SDIO
-#     interrupt. IDF v5.5 checks the bridge only from the DMA callback; if SDIO
-#     delays that callback, the display has already gone blue and the status
-#     can be cleared unseen.
-DSI_DPI_C="${IDF_DIR}/components/esp_lcd/dsi/esp_lcd_panel_dpi.c"
-if [ -f "${DSI_DPI_C}" ] && \
-   ! grep -q "Moybyte P4: dedicated DSI bridge underrun IRQ" "${DSI_DPI_C}"; then
-  echo "== applying P4 DSI bridge IRQ/priority fix (#106)"
-  patch -d "${IDF_DIR}" -p1 < "${PATCH_DIR}/esp_lcd_dsi_underrun_hook.patch"
-fi
+# 2a) The P4 SILICON patches (shared lib, both P4 boards): the BLE-HID
+#     notification fast path into MicroPython's modbluetooth.c, and the #106
+#     DSI bridge-underrun ISR backport into the (shared) ESP-IDF checkout.
+#     Both were this directory's patches/ until 2026-09-06; they live in
+#     patches/p4_*.patch now.
+moybyte_patch_p4_ble_hid_fastpath
+moybyte_patch_p4_dsi_underrun
 
 # 2c) moy_dsi needs esp_lcd, moy_ppa needs esp_driver_ppa (the P4 pixel
 #     accelerator) in the main component's REQUIRES.
@@ -136,10 +121,11 @@ moybyte_patch_gc_split_reserve
 # entirely (200MHz or the DSI scan-out underruns -- see this dir's README).
 
 # ---------------------------------------------------------------------------
-# 3) Stage: the shared native modules (board.toml [native.shared] -- the two
-#    denials, moy_sd and moy_audio, live there WITH their reasons; all plain C,
-#    the S3-specific pieces are include-guarded, so they compile unchanged on
-#    RISC-V) with the browser console blob generated into the staged copy
+# 3) Stage: the shared native modules (board.toml [native.shared] -- the
+#    denials, moy_sd/moy_audio/moy_flush, live there WITH their reasons; all
+#    plain C, the S3-specific pieces are include-guarded, so they compile
+#    unchanged on RISC-V) plus the P4 silicon tier ([native.p4] over
+#    native/p4/), with the browser console blob generated into the staged copy
 #    (never into the shared native/ tree two builds read -- this used to
 #    generate there and race a concurrent T-Deck build); then the shared
 #    PYTHON modules (#58 console staging, #161 Phase 3 -- board.toml holds the

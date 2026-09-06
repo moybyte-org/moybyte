@@ -38,6 +38,7 @@ BOARD_DIRS = {
     "p4": os.path.join(ROOT, "firmware", "esp32_p4_wifi6_touch_lcd_7b"),
     "tdeck": os.path.join(ROOT, "firmware", "lilygo_t_deck_plus_mainline"),
     "guition_s3": os.path.join(ROOT, "firmware", "guition_jc3248w535"),
+    "guition_p4": os.path.join(ROOT, "firmware", "guition_jc8012p4a1c"),
 }
 
 

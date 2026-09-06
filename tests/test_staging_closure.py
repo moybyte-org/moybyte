@@ -60,10 +60,11 @@ TDECK = ROOT / "firmware" / "lilygo_t_deck_plus_mainline"
 TDECK_MAINLINE = TDECK
 P4 = ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
 GUITION = ROOT / "firmware" / "guition_jc3248w535"
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c"
 ZERO = ROOT / "firmware" / "seeed_xiao_esp32s3_zero"
 WEB = ROOT / "firmware" / "web_runner"
 BOARD_DIR = {"tdeck-mainline": TDECK_MAINLINE, "p4": P4,
-             "guition-s3": GUITION, "zero": ZERO}
+             "guition-s3": GUITION, "zero": ZERO, "guition-p4": GUITION_P4}
 
 # What MicroPython itself provides. Explicit and module-level on purpose: adding
 # a name here is a visible diff that says "the port supplies this", which is a
@@ -98,6 +99,13 @@ NATIVE = {
     # track -- docs/history/espnow_p4_2026-08.md).
     "p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web", "moy_dsi",
            "moy_ppa", "moy_ble_hid", "moy_c6"},
+    # The Guition P4 (2026-09-06): the Waveshare's set exactly, because the
+    # four P4 modules are the SILICON tier (native/p4, a second board.toml
+    # source) since the day this board became their second consumer -- it
+    # authors no native module of its own, and moy_dsi drives its JD9365
+    # through a board define rather than a second panel module.
+    "guition-p4": {"moy_gfx", "moy_alloc", "moy_lua", "moycore", "moy_web",
+                   "moy_dsi", "moy_ppa", "moy_ble_hid", "moy_c6"},
     # The Guition denies moy_sd + moy_audio for now (stage 4/5 of its bring-up,
     # see its board.toml); moy_axs is its board-authored QSPI panel backend,
     # and moy_flush is the engine under it.
@@ -140,6 +148,9 @@ HOST_ONLY = {
     "guition-s3": {"host_app", "host_api", "host_canvas", "lua_host", "input",
                    "audio_binding", "lua_binding", "gfx_binding",
                    "native_build", "simulate_desktop"},
+    "guition-p4": {"host_app", "host_api", "host_canvas", "lua_host", "input",
+                   "audio_binding", "lua_binding", "gfx_binding",
+                   "native_build", "simulate_desktop"},
     # Same list as the console boards, and it is worth having even though the
     # Zero ALLOWLISTS `runtime/` and could not stage one of these by omission:
     # the failure this catches is somebody adding a name to a group, and a
@@ -164,6 +175,7 @@ GENERATED = {
     "tdeck-mainline": {"carts_data", "_ota_build"},
     "p4": {"carts_data", "_ota_build"},
     "guition-s3": {"carts_data", "_ota_build"},
+    "guition-p4": {"carts_data", "_ota_build"},
     # `carts_data` too since 2026-08-30, and it is a DIFFERENT file here: the
     # console boards freeze the plain `CARTS = [...]` (732 KB of source, the
     # fallback for a missing card), and this board freezes the PACKED form
@@ -184,7 +196,8 @@ GENERATED = {
 # other three freeze it whole because they all construct one. This board never
 # does -- its inputs arrive as HTTP requests.
 PACKAGES = {"tdeck-mainline": {"moybyte"}, "p4": {"moybyte"},
-            "guition-s3": {"moybyte"}, "zero": set(), "web": set()}
+            "guition-s3": {"moybyte"}, "zero": set(), "web": set(),
+            "guition-p4": {"moybyte"}}
 
 # Real, reproduced defects that are not fixed here because the FIX is a decision
 # someone has to make, not a line someone forgot. An entry is a tracked gap, not
@@ -394,7 +407,7 @@ def import_groups(src, path):
     return groups
 
 
-TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web")
+TARGETS = ("tdeck-mainline", "p4", "guition-s3", "zero", "web", "guition-p4")
 
 # The floor each target's extraction must clear -- a smoke test on the
 # EXTRACTION, not on the board: a parser that silently found nothing would
@@ -466,7 +479,7 @@ def test_no_known_gap_has_quietly_been_fixed():
         "KNOWN_GAPS entries that no longer reproduce -- delete them: %s" % stale)
 
 
-BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero")
+BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero", "guition-p4")
 # The boards whose `[modules.shared]` is a DENYLIST. The Zero's is an
 # allowlist, on the argument its board.toml makes in full: a denylist is right
 # when the source tree's default answer is YES, and `runtime/` IS the console,
@@ -474,7 +487,7 @@ BOARDS = ("tdeck-mainline", "p4", "guition-s3", "zero")
 # vacuously there, so they name this tuple instead of BOARDS and the Zero gets
 # its own pair further down -- an allowlist's failure mode is the opposite one
 # and needs the opposite test.
-DENYLIST_BOARDS = ("tdeck-mainline", "p4", "guition-s3")
+DENYLIST_BOARDS = ("tdeck-mainline", "p4", "guition-s3", "guition-p4")
 
 
 @pytest.mark.parametrize("target", BOARDS)
@@ -763,7 +776,8 @@ def test_the_native_tripwire_agrees_with_the_native_declaration():
     existing. The web target has no [native] section (its emscripten staging
     is structurally different) and stays hand-listed."""
     for target, board_dir in (("tdeck-mainline", TDECK_MAINLINE), ("p4", P4),
-                              ("guition-s3", GUITION)):
+                              ("guition-s3", GUITION),
+                              ("guition-p4", GUITION_P4)):
         shared = set(board_config.native_modules(board_dir, ROOT))
         authored = {p.name for p in (board_dir / "native").iterdir()
                     if p.is_dir() and not p.name.startswith(".")

@@ -6,7 +6,8 @@ for the rules. Reading it top to bottom is the slow path.
 | you are about to… | read FIRST | the thing that bites |
 |---|---|---|
 | change a draw verb / the raster | `docs/surface_model_v1.md` §4, then `device/device_canvas.py` | ONE canvas class runs on every tier. `tools/p4_conformance.py` is the only check that reaches the real C on real glass. |
-| add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | four shared bodies are taken, not copied; a lever a board lacks is expressed by ABSENCE, never by 0 |
+| add or port a board | `docs/board_ports_2026-08.md` — its stage-6 "TAKE THESE" list | four shared bodies are taken, not copied; a lever a board lacks is expressed by ABSENCE, never by 0; `git add` the board's modules BEFORE its first build or the stager prunes them |
+| touch an ESP32-P4 board | that board's README, then `native/p4/` (the silicon tier both P4 boards take) | the panel is a board DEFINE (`MOY_DSI_PANEL_*`), the compositor is `device/dsi_panel.py`, the PPA canvas `device/p4_canvas.py` — a fix lands once |
 | touch a panel flush | `native/moy_flush/moy_flush.c`'s header | "every clause was a race once". `tests/moy_flush_harness/` compiles it with no board attached |
 | touch SD or the panel bus | that board dir's README | the two drivers share one SPI host; a per-op teardown hangs the board with no panic |
 | change the shell / a WM / an app | `runtime/README.md` (per-file map), `docs/app_api_v1.md` | pixel goldens are the net, and the 320×240/1× row does NOT exercise the toolkit |
@@ -16,7 +17,7 @@ for the rules. Reading it top to bottom is the slow path.
 | touch multiplayer | `docs/netplay_v1.md` | the payload is INPUTS, never state; a missing input STALLS, it never extrapolates |
 | touch the browser build | `firmware/web_runner/`, `docs/moycore_direction.md` | two web modes, no crossover; where a page is SERVED from decides where its carts live |
 | chase a performance number | **#66** (per-cart fps), **#58** (P4), `docs/perf_native_gap_v1.md` (#77) | numbers live in issues, never in this file — see the rule below |
-| drive a board over serial | `tools/p4_autotest.py`, the three `tests/test_*_on_glass.py` | the boards' line-state rules are OPPOSITE; `[serial]` in board.toml is the authority |
+| drive a board over serial | `tools/p4_autotest.py`, the four `tests/test_*_on_glass.py` | the boards' line-state rules are OPPOSITE; `[serial]` in board.toml is the authority |
 | edit any document | — | run `tools/check_docs.py`; it resolves every path AND pins duplication downward |
 
 **Four rules that outrank anything below.** Host and device are ONE codebase, not
@@ -66,7 +67,7 @@ because those are the design, not a measurement of it.
 ## What this repo is
 
 Moybyte is an operating system for ESP32 boards: a console where the software is
-cartridges, running as firmware on three console boards (plus one headless companion)
+cartridges, running as firmware on four console boards (plus one headless companion)
 alongside a host simulator and a browser build.
 Everything is ONE system: **`.moy` is the only cart format.** (A separate
 `.moyproj` SDK was deleted 2026-07-31 because nothing depended on it but its own
@@ -75,7 +76,10 @@ Git history has the rest — do not reintroduce the format.)
 
 - `runtime/` — the **host reference** of the console (launcher → Player → tabbed Editor). Pure host, fast dev loop. See `runtime/README.md` for the per-file map; don't duplicate it.
 - `firmware/lilygo_t_deck_plus_mainline/` · `firmware/esp32_p4_wifi6_touch_lcd_7b/`
-  · `firmware/guition_jc3248w535/` — the three console board ports (MicroPython).
+  · `firmware/guition_jc3248w535/` · `firmware/guition_jc8012p4a1c/` — the four
+  console board ports (MicroPython); the last is the 10.1" ESP32-P4 (2026-09-06),
+  a variant of the Waveshare's over the shared `native/p4/` silicon tier, running
+  its portrait glass portrait.
   `firmware/seeed_xiao_esp32s3_zero/` is the fourth build target and the odd one:
   HEADLESS (#41), the kid's cart store the browser console pairs with, promoted
   out of its stock-MicroPython/pushed-modules arrangement on 2026-08-29. Each

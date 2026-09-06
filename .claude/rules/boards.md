@@ -153,6 +153,37 @@ make firmware-monitor-tdeck-mainline PORT=/dev/ttyACM0             # miniterm @1
     saved), and #159's L2 cache 128→256KB closed the game chapter (512KB does not
     boot — internal/DMA pool 0x101).
   - Status and numbers: **#58**. Open: USB-HID keyboard, audio (ES8311).
+  - **The P4 SILICON is a shared tier since 2026-09-06**: `native/p4/` (`moy_dsi`
+    parameterized by the board's `MOY_DSI_PANEL_*` define, `moy_ppa`, `moy_ble_hid`,
+    `moy_c6`), declared by a P4 board as a SECOND `[native.p4]` source in board.toml
+    — never seen by the S3 scan, never denied by an S3 board — plus
+    `device/dsi_panel.py` (the compositor; the board injects its backlight) and
+    `device/p4_canvas.py` (the PPA system canvas). The two P4 patches are
+    `patches/p4_*.patch` behind `moybyte_patch_p4_ble_hid_fastpath` /
+    `moybyte_patch_p4_dsi_underrun` in the shared build lib.
+
+
+### Fifth build target: the Guition JC8012P4A1C — the second ESP32-P4 (2026-09-06)
+
+`firmware/guition_jc8012p4a1c/` — 10.1″ 800×1280 JD9365 MIPI-DSI, GSL3680 touch,
+the same P4 + C6-over-SDIO as the Waveshare on the same pins. **That dir's README
+is the authority**; what bites:
+
+- **The console runs PORTRAIT (800×1280), the panel's native scan.** Landscape
+  would be a full-frame rotate per chrome frame on a DSI that scans PSRAM
+  continuously; the README carries the bill and the two knobs that flip the
+  image (`MOY_DSI_MIRROR_XY`, the touch knobs). Owner call, deferred.
+- **The GSL3680 is RAM-loaded**: `device/gsl3680.py` uploads the panel's firmware
+  (`modules/gsl_fw_jc8012.py`, 1.3 s) after every reset. Its axes are
+  UNCALIBRATED — bring-up was hands-off; `run_touch_calibrate()` is the first
+  thing to do with a finger.
+- **Serial is the P4's own USB-Serial/JTAG** (`303a:1001`, attach-only, DTR/RTS
+  asserted — the S3 rules, not the Waveshare's CH343 rules). esptool needs no
+  BOOT button. **Backlight GPIO23 is active-HIGH** (the Waveshare's is
+  active-low).
+- **The C6 runs Guition's factory slave**: BLE works, ESP-NOW has no shim to talk
+  to (the link fails inert, by design) until the Waveshare's `c6_slave/` image is
+  flashed to it.
 
 
 ### Fourth build target: the Zero (Seeed XIAO ESP32-S3) — HEADLESS (#41)

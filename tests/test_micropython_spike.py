@@ -3180,6 +3180,8 @@ def test_there_is_one_new_layer_factory_and_it_pins_retained_frames():
     assert "RETAINED_FRAMES = 1" in body, \
         "new_layer must pin RETAINED_FRAMES = 1 (#113)"
     for mod in (Path("firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py"),
+                Path("firmware/guition_jc8012p4a1c/modules/moy_runtime.py"),
+                Path("device/p4_canvas.py"),
                 Path("firmware/web_runner/web_canvas.py"),
                 Path("runtime/host_canvas.py")):
         assert "def new_layer(" not in mod.read_text(encoding="utf-8"), \

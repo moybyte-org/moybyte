@@ -288,11 +288,15 @@ def test_the_fetcher_and_the_workflow_agree_on_artifact_names():
     # compared EXACTLY -- so an entry has to be deleted the day its card lands
     # (this test says so), and a board that silently loses its card is caught.
     #
-    # EMPTY since 2026-08-29, when the Zero got its card: every board CI builds
-    # can be flashed from the page. Its entry sat here from the board's
-    # promotion that morning until the card landed the same day -- which is what
-    # this mechanism is for, and the shape to reuse for board N+1.
-    no_site_card = {}
+    # Was EMPTY from 2026-08-29 (the Zero's card landed the day of its
+    # promotion) until 2026-09-06, when board N+1 arrived exactly as
+    # predicted: the Guition P4 builds in CI and has no site card yet. Its
+    # entry goes the day the card lands.
+    no_site_card = {
+        "guition_p4": "ported 2026-09-06, hands-off; the site card waits on "
+                      "the owner's orientation + touch-calibration verdicts "
+                      "(firmware/guition_jc8012p4a1c/README.md, open items)",
+    }
     assert set(fetch.BOARDS) - set(rows) == set(), (
         "the site offers a board CI does not build: %s"
         % sorted(set(fetch.BOARDS) - set(rows)))

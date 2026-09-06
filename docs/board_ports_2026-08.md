@@ -17,7 +17,7 @@ own board-dir README and in the sections below.
 
 | board | class | why |
 |---|---|---|
-| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. Two further risks: its ESP-Hosted transport to the C6 is unconfirmed while our whole P4 radio stack is the SDIO `moy_c6` shim plus a flashed slave image, and there is no published schematic — which is where several of the Waveshare's hard-won facts came from. |
+| **Guition JC8012P4A1C (P4 + C6)** | desktop tier, 10.1" | **PORTED 2026-09-06** (`firmware/guition_jc8012p4a1c/`, its README is the authority; on-glass suite `tests/test_guition_p4_on_glass.py`). The entry below was written before the port and its architectural call held: the glass IS portrait-native (JD9365 + GSL3680, as predicted), the P4's DSI scans continuously, and the console runs PORTRAIT at 800×1280 because the alternatives cost what this row said they would — the README carries the bill. What the port CHANGED in the tree is the point: the P4-silicon modules became the shared `native/p4/` tier (a second `[native.<name>]` source in board.toml), the DSI compositor and the PPA system canvas moved to `device/`, and the board authors no C. Two risks named below resolved at bring-up: the C6 IS ESP-Hosted over SDIO on the Waveshare's exact pins (BLE scanning on the first boot, WiFi see the README), and the schematic exists (Guition's demo zip, `5-Schematic/`). Original entry: the format test for a larger desktop tier. Same architecture class as the shipped P4 port — P4 + C6-over-SDIO + MIPI-DSI touch — so the software is a **variant port**. **The panel is the problem, and it is architectural.** This glass is 800×1280, **portrait-native** (JD9365 + GSL3680 Silead touch; the model number encodes the portrait resolution), and the P4's DSI **scans the framebuffer continuously** — there is no per-frame flush to fold a rotation into, which is the trick that saved the Guition S3 at 320×480. Landscape on portrait glass therefore costs either rotate-at-draw (scattered-stride writes, kills blit perf) or a full-frame PPA rotate per painted frame (~2MB, PSRAM-bandwidth-bound, 30-40ms class) — which kills the drag path and the quiet-frame model outright. **A landscape-native panel is a hard requirement for any shipping desktop board**; almost the entire cheap 8"/10.1" MIPI catalogue is portrait tablet glass, Waveshare's own P4 HMI family included. So port this board as a **size/legibility testbed**, not as a tier. |
 
 ## What a port costs today (re-stated 2026-08-29)
 
@@ -28,7 +28,7 @@ own board-dir README and in the sections below.
 | `build.sh` | ~40 lib calls + the board's patch ladder | solved (`tools/esp32_build_lib.sh`) |
 | panel backend (native C) | 800+ lines | **the one big irreducible** — unless the panel repeats, and it does more often than expected: a 240×320 ST7789-over-SPI board is `moy_lcd` on pin numbers, and the band engine is `native/moy_flush` on every pushing panel |
 | input drivers | one copy each | `device/gt911.py`, `device/banded_panel.py`, `native/moy_flush` |
-| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines** | the invariant order is `device_boot.FrameLoop`, and all three boards ride it |
+| **`modules/moy_runtime.py`** | **board hardware + hooks; the newest port is 315 lines (the Guition P4's, 2026-09-06: ~450 with its calibrate + smoke wrappers, nearly all of it the Waveshare's `run_desktop` with this board's parts)** | the invariant order is `device_boot.FrameLoop`, and all four console boards ride it |
 | `boot.py` / `main.py` / `moybyte_shell.py` | near-twins (boot.py differs by one string) | rides `FrameLoop` |
 | Makefile targets | two lines, pattern rules over the board list | `[flash]`/`[monitor]` in board.toml |
 | CI legs + cache keys | one include-row per board | derived from the board list |
@@ -70,9 +70,24 @@ were closed.
 The rule: a driver moves from a board tree to the shared `device/` (Python) or
 `native/` (C) the day a SECOND board carries the hardware, parameterized by
 `board.toml` data — and not one day earlier.
-  * **GT911**: the second consumer likely arrives with the Guition P4 (to
-    confirm at bring-up). `device/device_input.py`'s core + `p4_input.py`'s
-    calibration become one driver with per-board (addr, addrsize, flips, size).
+  * **GT911**: the Guition P4 did NOT bring one (it is a GSL3680), so the
+    second consumer has not arrived; the HeldPoint core in `device/gt911.py`
+    is what the GSL3680 driver rides, which is the promotion that DID happen.
+  * **The P4 silicon (2026-09-06, the Guition P4 as second consumer)**: four C
+    modules (`moy_dsi` parameterized by a `MOY_DSI_PANEL_*` board define,
+    `moy_ppa`, `moy_ble_hid`, `moy_c6`) moved to **`native/p4/`**, declared by
+    a P4 board as a SECOND native source (`[native.p4]`) rather than denied by
+    every S3 board — `native/p4/` carries no `micropython.cmake` of its own,
+    so the shared scan never sees it. Two Python halves followed:
+    `device/dsi_panel.py` (the compositor, backlight injected) and
+    `device/p4_canvas.py` (the PPA system canvas + the PPA smoke). The two P4
+    patches became `patches/p4_*.patch` behind two shared build-lib
+    functions. What stayed per board: the backlight (GPIO + polarity), the
+    touch driver, the canvas sizes, `run_desktop`.
+  * **GSL3680**: a NEW part, so it started in `device/gsl3680.py` with the
+    board's pins, firmware and flips passed in — the stage-2 rule, followed.
+    The firmware blob is the BOARD's (`gsl_fw_jc8012.py`): it carries one
+    glass's sensor geometry.
   * **AXS15231 touch**: lands directly as a shared `device/` driver — it is
     new code, so it starts in the right place.
   * **The QSPI panel**: `moy_lcd`'s VALUE is not the ST7789 init table — it is
@@ -140,7 +155,8 @@ The rule: a driver moves from a board tree to the shared `device/` (Python) or
 **Phase D — the port checklist** (below). A checklist, not a generator —
 three data points before any codegen. Drafted from the T-Deck mainline port
 (the most recent board to walk all six stages, 2026-08-16) after Phases A–C
-landed; the first Guition port validates it and corrects it in place.
+landed; the first Guition port validated it, and the Guition P4 (2026-09-06,
+the third walk) corrected it in two places, both recorded at stage 0.
 
 ## The port checklist (Phase D)
 
@@ -162,7 +178,16 @@ guard list), a `native/micropython.cmake` including the board modules +
 `moybyte_shell.py` (MODE string, self-terminating smokes) + `moy_runtime.py`
 (run_desktop). Add the Makefile build target and the CI matrix row. Run
 `make test`: the staging-closure/board-toml suites must pass before any
-hardware exists.
+hardware exists. **`git add` the board-authored modules BEFORE the first
+build** (Guition P4, 2026-09-06): the stager prunes every untracked `.py` in
+`modules/` it did not stage, so an unadded `moy_runtime.py` is deleted by the
+build and the image freezes without it — a board that boots to a bare REPL
+and looks like a dead port. The same git-tracking is what every
+"every board …" host test reads, so an unadded tree also fails those with
+`FileNotFoundError` rather than with a message about the board. **A variant
+of an existing board starts by moving, not copying**: the Guition P4 spent
+its stage 0 promoting the Waveshare's silicon-level modules to shared trees
+(Phase C above) and then wrote ~250 lines of its own.
 
 **Stages 1-6 are SKIPPABLE, all of them, and one board skips all of them.**
 The Zero (`firmware/seeed_xiao_esp32s3_zero/`, promoted to a build target

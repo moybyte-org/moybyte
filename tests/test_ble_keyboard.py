@@ -421,16 +421,21 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
                        / "MOYBYTE_P4" / "sdkconfig.board").read_text()
     build_script = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"
                     / "build.sh").read_text()
-    native_cmake = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                    / "micropython.cmake").read_text()
-    dsi_native = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                  / "moy_dsi" / "modmoy_dsi.c").read_text()
-    native_queue = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "native"
-                    / "moy_ble_hid" / "modmoy_ble_hid.c").read_text()
-    bt_patch = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "patches"
-                / "modbluetooth_ble_hid_fastpath.patch").read_text()
-    underrun_patch = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "patches"
-                      / "esp_lcd_dsi_underrun_hook.patch").read_text()
+    # The P4 silicon tier (2026-09-06): the modules and patches both P4 boards
+    # take live at the repo root, and a board names them through board.toml
+    # ([native.p4]) and the shared build lib, never by path.
+    native_cmake = "\n".join(
+        "%s/micropython.cmake" % m for m in
+        board_config.native_modules(
+            ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b"))
+    dsi_native = (ROOT / "native" / "p4" / "moy_dsi" / "modmoy_dsi.c").read_text()
+    native_queue = (ROOT / "native" / "p4" / "moy_ble_hid"
+                    / "modmoy_ble_hid.c").read_text()
+    bt_patch = (ROOT / "patches"
+                / "p4_modbluetooth_ble_hid_fastpath.patch").read_text()
+    underrun_patch = (ROOT / "patches"
+                      / "p4_esp_lcd_dsi_underrun_hook.patch").read_text()
+    build_lib = (ROOT / "tools" / "esp32_build_lib.sh").read_text()
     runtime = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / "modules"
                / "moy_runtime.py").read_text()
     sdkconfig = (ROOT / "firmware" / "esp32_p4_wifi6_touch_lcd_7b" / ".build"
@@ -452,10 +457,12 @@ def test_p4_board_enables_hosted_ble_and_runtime_polls_before_edge_snapshot():
     assert "moy_ble_hid/micropython.cmake" in native_cmake
     assert "moy_ble_hid_queue_on_notify" in native_queue
     assert "moy_ble_hid_queue_on_notify" in bt_patch
-    assert "modbluetooth_ble_hid_fastpath.patch" in build_script
+    assert "moybyte_patch_p4_ble_hid_fastpath" in build_script
+    assert "p4_modbluetooth_ble_hid_fastpath.patch" in build_lib
     assert "moy_dsi_note_underrun" in dsi_native
     assert "moy_dsi_note_underrun" in underrun_patch
-    assert "esp_lcd_dsi_underrun_hook.patch" in build_script
+    assert "moybyte_patch_p4_dsi_underrun" in build_script
+    assert "p4_esp_lcd_dsi_underrun_hook.patch" in build_lib
     assert ".intr_priority = 3" in underrun_patch
     assert "ETS_DSI_BRIDGE_INTR_SOURCE" in underrun_patch
     assert "CONFIG_LCD_DSI_ISR_IRAM_SAFE=y" in board_sdkconfig

@@ -17,4 +17,8 @@ list(APPEND MICROPY_DEF_BOARD
     MICROPY_PY_NETWORK_WLAN=1
     MICROPY_PY_BLUETOOTH=1
     MICROPY_HW_MOYBYTE_P4_BLE_HID_QUEUE=1
+    # The PANEL the shared native/p4/moy_dsi drives: the 7B's EK79007
+    # (1024x600, reset GPIO33). The panel facts live behind this one name in
+    # modmoy_dsi.c; the Guition P4 names MOY_DSI_PANEL_JD9365 instead.
+    MOY_DSI_PANEL_EK79007=1
 )

@@ -598,7 +598,9 @@ def _calls_on(fn, receiver):
     return out
 
 
-BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py"}
+GUITION_P4 = ROOT / "firmware" / "guition_jc8012p4a1c" / "modules"
+BOARDS = {"tdeck": TDECK / "moy_runtime.py", "p4": P4 / "moy_runtime.py",
+          "guition_p4": GUITION_P4 / "moy_runtime.py"}
 
 
 @pytest.mark.parametrize("board", sorted(BOARDS))
@@ -627,6 +629,7 @@ def test_both_boards_run_the_boot_steps_in_ONE_order():
     seqs = {name: [m for m, _ in _calls_on(_run_desktop(path), "boot")]
             for name, path in BOARDS.items()}
     assert seqs["tdeck"] == seqs["p4"], seqs
+    assert seqs["p4"] == seqs["guition_p4"], seqs
     assert seqs["tdeck"] == ["note", "note", "load_carts", "note",
                              "lua_runtime", "start_frames"], seqs["tdeck"]
 
@@ -1239,6 +1242,7 @@ PERF_BOARDS = {
     "tdeck": (TDECK, False),
     "p4": (P4, True),
     "guition": (ROOT / "firmware" / "guition_jc3248w535" / "modules", False),
+    "guition_p4": (GUITION_P4, True),
 }
 
 # The console meters + loop accumulators one sample was taken from, per board,

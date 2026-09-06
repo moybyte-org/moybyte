@@ -330,8 +330,9 @@ cost a debugging session.
 | `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
 | `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Sheets, Writer, Storybook, Calc) |
 | `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
-| `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the ESP32-P4 port (mainline MicroPython + a vendored DSI driver) |
+| `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the Waveshare 7″ ESP32-P4 port (mainline MicroPython; the P4-silicon C modules live in repo-root `native/p4/`) |
 | `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |
+| `firmware/guition_jc8012p4a1c/` | the Guition 10.1″ ESP32-P4 port (a variant of the Waveshare's over the shared `native/p4/` silicon tier; portrait glass) |
 | `firmware/seeed_xiao_esp32s3_zero/` | the Zero: a headless companion, not a console — it stores and serves a kid's carts to the browser build |
 | `firmware/web_runner/` | the MicroPython-WASM build; `build.sh` fetches emsdk itself |
 | `tools/` | simulator, GIF recorder, p8 importers, on-glass test drivers |

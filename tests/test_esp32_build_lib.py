@@ -627,7 +627,7 @@ def test_every_board_build_sources_this_library(board):
     does; the tests above run it. Both are aimed at the same file only for as
     long as every board still sources it."""
     for sub in ("lilygo_t_deck_plus_mainline", "esp32_p4_wifi6_touch_lcd_7b",
-                "guition_jc3248w535"):
+                "guition_jc3248w535", "guition_jc8012p4a1c"):
         src = (ROOT / "firmware" / sub / "build.sh").read_text(encoding="utf-8")
         assert "tools/esp32_build_lib.sh" in src
         assert "moybyte_sdkconfig_guard" in src

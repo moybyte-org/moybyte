@@ -138,7 +138,10 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   slots — the default 4MiBplus table's ~1.94MB app can't hold the frozen
   console — with the ~24MB tail left unlisted so mainline auto-builds the vfs
   over it).
-- `native/moy_dsi/` — the panel module: vendored `esp_lcd_ek79007` v2.0.2
+- `native/p4/moy_dsi/` (repo root — the P4 SILICON tier since 2026-09-06, shared
+  with the Guition JC8012P4A1C and staged here by `board.toml` `[native.p4]`;
+  this board names `MOY_DSI_PANEL_EK79007` in its `mpconfigboard.cmake`) — the
+  panel module: vendored `esp_lcd_ek79007` v2.0.2
   (Apache-2.0, ESP component registry) + `modmoy_dsi.c` exposing
   `init() / fb() / flush() / set_pattern() / deinit()` and `WIDTH/HEIGHT`.
   DPI mode: the DSI peripheral **continuously scans a PSRAM framebuffer** —
@@ -164,7 +167,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
   - `moybyte_shell.py` — boot entry (`main()`); `RUN_PANEL_SMOKE` flips to the
     DSI hardware test pattern. Ctrl-C in the desktop loop drops to the REPL
     (no native-takeover USB starvation on this board).
-  - `p4_display.py` — `P4Compositor`: the compositor shim over `moy_dsi`
+  - `p4_display.py` — this board's backlight (GPIO32 active-low) bound to the
+    shared `device/dsi_panel.py` `P4Compositor` (promoted 2026-09-06): the compositor shim over `moy_dsi`
     (size/framebuffer/back_buffer/gfx/flush/sync; single-buffered, flush =
     cache msync) + the active-low GPIO32 backlight (held dark until the first
     composed frame).
@@ -178,7 +182,8 @@ make firmware-monitor-p4 PORT=/dev/ttyACM0         # miniterm @115200
     `InputState`/`last_key` mapping. Settings can enable/disable, scan/pick and
     forget; the preferred address + gate + bond keys persist in
     `/moy/ble_keyboard.json`. Radio or protocol failures degrade to touch-only.
-  - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (a `DeviceCanvas` over
+  - `moy_runtime.py` — the P4 backend: `P4SystemCanvas` (`device/p4_canvas.py`
+    since 2026-09-06, shared with the Guition P4; a `DeviceCanvas` over
     the DSI framebuffer + the system-surface contract: `font_scale` text via
     the native text kernel, font-scale window layers, and the `blit_game` /
     `blit_cover` native composite hooks `wm_windowed`/`wallpaper` probe for)

@@ -285,6 +285,7 @@ _BOARDS = {
     "lilygo_t_deck_plus_mainline": "moy_runtime.py",
     "esp32_p4_wifi6_touch_lcd_7b": "moy_runtime.py",
     "guition_jc3248w535": "moy_runtime.py",
+    "guition_jc8012p4a1c": "moy_runtime.py",
 }
 
 

@@ -36,6 +36,7 @@ BOARDS = [
     ("firmware/esp32_p4_wifi6_touch_lcd_7b", "firmware-flash-p4"),
     ("firmware/guition_jc3248w535", "firmware-flash-guition-s3"),
     ("firmware/seeed_xiao_esp32s3_zero", "firmware-flash-zero"),
+    ("firmware/guition_jc8012p4a1c", "firmware-flash-guition-p4"),
 ]
 
 # The S3 ROM loader's id. Shared with the console boards' running USB-Serial/JTAG,

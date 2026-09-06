@@ -374,6 +374,7 @@ def test_the_native_module_hands_out_a_read_only_view():
 BOARDS = (
     ("lilygo_t_deck_plus_mainline", TDECK),
     ("esp32_p4_wifi6_touch_lcd_7b", P4),
+    ("guition_jc8012p4a1c", ROOT / "firmware" / "guition_jc8012p4a1c"),
 )
 
 

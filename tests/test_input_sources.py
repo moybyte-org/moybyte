@@ -262,6 +262,7 @@ BOARD_RUNTIMES = {
     "guition": "firmware/guition_jc3248w535/modules/moy_runtime.py",
     "p4": "firmware/esp32_p4_wifi6_touch_lcd_7b/modules/moy_runtime.py",
     "tdeck": "firmware/lilygo_t_deck_plus_mainline/modules/moy_runtime.py",
+    "guition_p4": "firmware/guition_jc8012p4a1c/modules/moy_runtime.py",
 }
 
 # Everything that WRITES an InputSource inside a board's _poll_inputs. The

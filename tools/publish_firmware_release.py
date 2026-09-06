@@ -100,6 +100,10 @@ OTA_IMAGES = {
     # The Zero (#41), OTA-wired 2026-08-29 and given its flasher card the same
     # day, so it publishes both halves like every other board.
     "xiao_zero": "moybyte_zero_app.bin",
+    # The Guition P4 (2026-09-06): OTA-shaped from its first flash like the
+    # Waveshare; its site card is the open half (tests/test_site_flash.py
+    # names it).
+    "guition_p4": "moybyte_guition_p4_app.bin",
 }
 OTA_STAMP = "ota_build.json"     # build.sh's baked identity, carried in the artifact
 

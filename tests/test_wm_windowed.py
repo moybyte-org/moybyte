@@ -186,6 +186,9 @@ WINDOWED_INSTALLERS = {
         "P4SystemCanvas overrides blit_game outright (its composite is the "
         "hardware PPA) and paints no bands at all, so the shared flag never "
         "reaches a fill on that board -- and it only ever runs this WM",
+    "firmware/guition_jc8012p4a1c/modules/moy_runtime.py":
+        "the same P4SystemCanvas (device/p4_canvas.py) on the second P4 board "
+        "-- same PPA composite, same absence of bands, same one WM",
 }
 
 
