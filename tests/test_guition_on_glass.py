@@ -125,6 +125,11 @@ def _skip_unparked(board, why):
     The finally at the bottom does this for the paths that reach it."""
     board.cmd("py ws.stop_web_console(); print('WEBOFF')",
               wait_for="WEBOFF", timeout=8.0)
+    # A push that reached the board leaves its handler rescanning the store,
+    # and on this board's TF card that is a minute during which nothing
+    # answers. Skip only once the console is answering again, or the next
+    # test reads a board that looks dead.
+    board.cmd("state", wait_for="STATE ", timeout=120.0)
     pytest.skip(why)
 
 
