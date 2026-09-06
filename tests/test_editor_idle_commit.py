@@ -8,6 +8,7 @@ still working, and that the hard exit paths (test_autosave_exit) keep theirs.
 
 Driven through the same shared console the device runs."""
 
+from runtime.history_router import DRAW_TABS
 from runtime.ticks import _ticks_ms
 from ws_helpers import build_ws as _ws
 
@@ -29,9 +30,17 @@ def _lua_editable(ws):
     return cart["path"]
 
 
+def _quiet_ms(ws):
+    """The quiet window the ACTIVE tab's commit waits out -- the drawing tabs wait
+    far longer than the typed ones (a pause between strokes is not the end of the
+    work), so a test that ages a debounce has to age it past the right one."""
+    return (ws.history.draw_debounce_ms if ws.menu_view in DRAW_TABS
+            else ws.history.edit_debounce_ms)
+
+
 def _go_idle(ws):
-    """Age the debounce past its window and run the frame hook that reads it."""
-    ws.history.edit_ms = _ticks_ms() - ws.history.edit_debounce_ms - 1
+    """Age the debounce past the active tab's window and run the frame hook."""
+    ws.history.edit_ms = _ticks_ms() - _quiet_ms(ws) - 1
     ws.history.idle_tick()
 
 
@@ -75,6 +84,102 @@ def test_the_debounce_does_not_fire_while_the_kid_is_still_painting(tmp_path):
 
     assert ws.sheet.dirty is True                # nothing was written mid-stroke
     assert ws.history.edit_ms is not None        # ...and the debounce is still armed
+
+
+# -- the drawing tabs wait out a LONG pause ---------------------------------
+#
+# Owner, T-Deck 2026-09-06: "paint tab seems slower than before". A kid pauses
+# between strokes constantly, and on the typing window every one of those pauses
+# bought a whole-sheet to_hex plus an SD write -- a freeze per pause, where the
+# commit-on-leave it replaced charged once.
+
+def test_a_pause_between_two_strokes_does_not_commit(tmp_path):
+    """Two seconds of looking at the drawing is not the end of it."""
+    ws = _ws(tmp_path)
+    _editable(ws)
+    _paint_a_pixel(ws)
+
+    ws.history.edit_ms = _ticks_ms() - 2000       # the kid stopped to look
+    ws.history.idle_tick()
+    assert ws.sheet.dirty is True                 # nothing written into the pause
+    assert ws.history.edit_ms is not None         # ...still armed for the real gap
+
+    _paint_a_pixel(ws, color=12)                  # and the next stroke lands
+    ws.history.edit_ms = _ticks_ms()
+    ws.history.idle_tick()
+    assert ws.sheet.dirty is True
+
+
+def test_the_drawing_tabs_wait_longer_than_the_typed_ones(tmp_path):
+    """One quiet window per KIND of tab, and the drawing one is the longer.
+    Pinned as a relation, not as two numbers: what matters is that a stroke gap
+    cannot be mistaken for a typing gap."""
+    ws = _ws(tmp_path)
+    assert ws.history.draw_debounce_ms > ws.history.edit_debounce_ms
+    assert DRAW_TABS == ("paint", "map", "scene", "music")
+
+
+def test_the_long_quiet_period_commits_once(tmp_path):
+    """Past the drawing window the commit lands, exactly once -- the debounce
+    disarms with it, so a static editor screen does not re-write every frame."""
+    from runtime import moy_carts
+    from runtime.editors import SpriteSheet
+    ws = _ws(tmp_path)
+    path = _editable(ws)
+    _paint_a_pixel(ws, color=14)
+
+    writes = []
+    real = moy_carts.save_sprites
+    ws.carts_store.save_sprites = lambda *a: (writes.append(1), real(*a))[1]
+
+    ws.history.edit_ms = _ticks_ms() - ws.history.draw_debounce_ms - 1
+    ws.history.idle_tick()
+    ws.history.idle_tick()                        # the frames that follow it
+    ws.history.idle_tick()
+
+    assert writes == [1]
+    assert ws.history.edit_ms is None
+    sheet = SpriteSheet.from_hex(moy_carts.load(path)["sprites"])
+    assert sheet.tget(0, 0, 0) == 14
+
+
+def test_a_held_finger_holds_the_commit_off_until_the_release(tmp_path):
+    """A quiet window can elapse UNDER a finger -- a kid holding still mid-stroke
+    is not idle, and a commit there is a freeze in the middle of the drawing. The
+    tick stays armed and lands the write once the finger comes up."""
+    ws = _ws(tmp_path)
+    _editable(ws)
+    _paint_a_pixel(ws)
+
+    ws.history.pointer_down = True
+    ws.history.edit_ms = _ticks_ms() - ws.history.draw_debounce_ms - 1
+    ws.history.idle_tick()
+    assert ws.sheet.dirty is True                 # nothing written under the finger
+    assert ws.history.edit_ms is not None         # ...and it did NOT disarm
+
+    ws.history.pointer_down = False               # the finger comes up
+    ws.history.idle_tick()
+    assert ws.sheet.dirty is False
+
+
+def test_the_pointer_frame_is_what_stores_the_held_finger(tmp_path):
+    """The flag is the kernel's one attribute store per pointer frame, and it is
+    written whether or not the Editor is up -- a gesture that ended somewhere else
+    must not leave it stale True, which would stall every later commit."""
+    ws = _ws(tmp_path)
+    _editable(ws)
+    ws._open_paint()
+
+    ws.pointer.x, ws.pointer.y = 40, 120
+    ws.pointer.down = True
+    ws.pointer.click = True
+    ws.handle_pointer()
+    assert ws.history.pointer_down is True
+
+    ws.pointer.down = False
+    ws.pointer.click = False
+    ws.handle_pointer()
+    assert ws.history.pointer_down is False
 
 
 def test_the_whole_ladder_commits_on_the_debounce(tmp_path):

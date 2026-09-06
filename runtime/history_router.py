@@ -86,6 +86,11 @@ try:
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.ticks import _ticks_ms, _ticks_diff
 
+# The Editor tabs a kid DRAWS on rather than types on: they take the long quiet
+# window in `idle_tick`. Code/blocks/config are typed or tapped a field at a time,
+# so a short gap there really is the end of an edit.
+DRAW_TABS = ("paint", "map", "scene", "music")
+
 
 class HistoryRouter:
     """The kid-facing UNDO/REDO verbs, the code tab's typing burst, and the
@@ -113,13 +118,26 @@ class HistoryRouter:
         # a PLAIN PUBLIC ATTRIBUTE because `Workstation.handle_input` stores to
         # it on every keypress that reaches the code tab -- one attribute store,
         # never a call, never a forward (doc 3e). `idle_tick()` below fires a
-        # durable, INVISIBLE autosave-commit once `edit_debounce_ms` of no
-        # keystroke elapse, so the SD write lands in a typing GAP (never
+        # durable, INVISIBLE autosave-commit once the tab's quiet window of no
+        # keystroke elapses, so the SD write lands in a typing GAP (never
         # mid-burst, where it would stall the keystroke echo) -- the soft
-        # trigger alongside the hard SAVE/PLAY/tab-leave commits. The ~1.5s
-        # default is v1.1's pinned starting point.
+        # trigger alongside the hard SAVE/PLAY/tab-leave commits.
         self.edit_ms = None
+        # The two quiet windows, and why they differ (owner, T-Deck 2026-09-06).
+        # CODE is a TYPING gap; the ~1.5s is v1.1's pinned starting point.
         self.edit_debounce_ms = 1500
+        # The DRAWING tabs wait far longer. A kid paints in strokes and pauses
+        # between them constantly, and a sprite commit is a whole-sheet to_hex
+        # plus an SD write -- on the typing window that is a freeze at every
+        # pause, which is what made the paint tab feel slower than the commit-on-
+        # leave it replaced. Five seconds is a pause that means "done", not
+        # "thinking"; every hard exit path still commits immediately.
+        self.draw_debounce_ms = 5000
+        # True while a finger is on the glass -- stored by Workstation.
+        # handle_pointer every pointer frame (one attribute store, doc 3e, the
+        # same contract as `edit_ms`). A commit under a held finger is a freeze
+        # in the middle of a stroke, so `idle_tick` stays armed instead.
+        self.pointer_down = False
 
     # -- which History is in front of the kid --------------------------------
 
@@ -486,7 +504,7 @@ class HistoryRouter:
 
     def idle_tick(self):
         """Fire the idle autosave-commit once the ACTIVE EDITOR TAB has sat quiet for
-        `edit_debounce_ms`. Called every frame by `Workstation.frame` BEFORE the
+        that tab's window. Called every frame by `Workstation.frame` BEFORE the
         redraw gate so it runs even while a static editor screen is skipping its
         redraw -- the exact idle moment the between-frames store write should land.
         Cheap: one early-out on the common no-pending-edit path.
@@ -495,15 +513,25 @@ class HistoryRouter:
         does, and on the other six tabs it used to fall on a TAB SWITCH or PLAY --
         i.e. inside the interaction, where the kid feels all of it. Riding the
         debounce moves it into the gap the kid already left, and it also lands
-        SOONER: a paint edit was durable only once the tab was left."""
+        SOONER: a paint edit was durable only once the tab was left.
+
+        The window is the TAB's, not one number: a drawing tab's pause between
+        strokes is not the end of the work (see the constants), and a finger still
+        on the glass is not a pause at all -- under one the tick stays ARMED, so
+        the commit lands after the release instead of inside the stroke."""
         if self.edit_ms is None:
             return
-        if _ticks_diff(_ticks_ms(), self.edit_ms) < self.edit_debounce_ms:
+        view = self.ws.menu_view
+        quiet = (self.draw_debounce_ms if view in DRAW_TABS
+                 else self.edit_debounce_ms)
+        if _ticks_diff(_ticks_ms(), self.edit_ms) < quiet:
             return                        # not idle long enough -- still editing
+        if self.pointer_down:
+            return                        # mid-stroke: stay armed, commit on release
         self.edit_ms = None
         if not self.ws.wm.top_is("menu"):
             return                        # the Editor is no longer the surface
-        if self.ws.menu_view == "code":
+        if view == "code":
             self._autosave_code()         # the compile gate is code's alone
         else:
             self._autosave_tab()

@@ -3365,7 +3365,11 @@ class Workstation:
         self._ptr_last_x = px
         self._ptr_last_y = py
         # ...and a touch in an editor tab re-arms that same debounce. Past the idle
-        # fast-path above, so a frame the pointer did nothing in pays nothing.
+        # fast-path above, so a frame the pointer did nothing in pays nothing. The
+        # held-finger flag is stored UNCONDITIONALLY (the pointer is global, not a
+        # tab's) so it can never be left stale True by a gesture that ended
+        # somewhere else; the router refuses to commit under it.
+        self.history.pointer_down = p.down
         if (click or p.down) and self.menu_view in COMMIT_TABS and self.wm.top_is("menu"):
             self.history.edit_ms = _ticks_ms()
         # THE APP BAR CONTRACT, input half (docs/app_api_v1.md): a tap in a
