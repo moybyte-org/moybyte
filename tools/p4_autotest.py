@@ -416,7 +416,17 @@ class P4Board:
         CH343-ONLY. On a board whose USB-Serial/JTAG is on the SoC the pulse
         re-enumerates the USB device under this open handle and every read
         afterwards returns nothing, forever -- indistinguishable from a dead
-        board. Those boards declare attach_only in their [serial] block."""
+        board. Those boards declare attach_only in their [serial] block.
+
+        WHEN THERE IS NO RESET TO GIVE. An attach-only board that has gone
+        silent is normally revived with a Ctrl-D soft reset, but ONLY once
+        `>>>` has appeared -- sent into a desktop that has not reached the
+        prompt yet (straight after `quit`) it is swallowed, and the board then
+        answers nothing, Ctrl-C included. That wedge is not a serial state this
+        driver can talk its way out of: close the port and run
+        `esptool --port <port> --after hard_reset read_mac`, which drives the
+        SoC's USB-JTAG rather than the running app -- the port node survives,
+        the open handle does not, so re-attach afterwards."""
         if self.attach_only:
             raise RuntimeError(
                 "this board declares attach_only: it is attached to, never "

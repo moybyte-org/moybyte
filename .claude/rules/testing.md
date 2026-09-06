@@ -78,8 +78,16 @@ paths:
   - **`quit` exits the DESKTOP to the REPL, not the running cart**
     (`REMOTE quit -> REPL`). Using it to end a cart leaves the board at `>>>`,
     after which every suite errors with "did not answer `state`" and reads like a
-    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py` and
-    does NOT re-enumerate USB, which is what makes it safe on an attach-only board.
+    dead board. Recover with a **Ctrl-D soft reset** — it re-runs `main.py`
+    without re-enumerating USB, which is what makes it safe on an attach-only
+    board — but only once `>>>` has actually appeared, which is why the driver
+    sends `\r\x03` and waits before it sends `\x04`. Sent into a desktop that has
+    not reached the prompt yet (straight after `quit`), the Ctrl-D is SWALLOWED:
+    no banner, no prompt, no answer to Ctrl-C, indistinguishable from the dead
+    board it was meant to revive. That wedge clears with `esptool --port
+    /dev/ttyACMn --after hard_reset read_mac`, which drives the SoC's USB-JTAG
+    instead of the app — the port node survives, the open handle does not, so
+    reopen it afterwards.
   - **Never put a call that blocks on FLASH inside a `pyexec` snippet.** `pyexec`
     uploads in chunks while `cmd` sends one line, so a real file write stalls the
     loop long enough for a streaming PERF line to interleave into the exchange;
