@@ -623,7 +623,9 @@ class EditorApp:
         _open_workspace, reached from PROJECTS -> pick a project) and going home
         (console.py's go_home), and a window/context-X close (wm_windowed.py's
         close_window_kind)). Each tab keeps its own persist verb; this just routes
-        to whichever tab is up. Config persists via commit_config (no re-run -- PLAY
+        to whichever tab is up. Because it is the hard path, the code tab's save is
+        FORCED here: half-typed Python is written rather than lost (#154). Config
+        persists via commit_config (no re-run -- PLAY
         runs, handled separately in leave() so a crash can't overwrite good config).
         The theme (EDIT ICONS) tab has no bar zone, so it's never routed here -- its
         own CLOSE/leave hard-commits via ws.look.save_icons()
@@ -633,7 +635,10 @@ class EditorApp:
         if self._tab_is_clean(tab):
             return                   # nothing changed -> nothing to persist
         if tab == "code":
-            ws.save_code()
+            # force: this verb IS the hard-exit path (#154). A kid who goes home or
+            # switches tab mid-line keeps the line even though it does not parse
+            # yet -- the debounce is where the compile gate still refuses.
+            ws.save_code(force=True)
         elif tab == "paint":
             ws.save_sprites()
         elif tab == "map":

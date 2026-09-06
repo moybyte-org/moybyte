@@ -240,6 +240,27 @@ def test_a_code_edit_still_waits_for_source_that_parses(tmp_path):
     assert "cls(7)" in moy_carts.load(path)["src"]
 
 
+def test_the_debounce_still_refuses_source_that_does_not_parse(tmp_path):
+    """The SOFT half of the split gate (#154). The hard exits write half-typed
+    Python (test_autosave_exit); the debounce must not, or every pause inside a
+    line would publish a broken cart -- and it must not move the caret either."""
+    from runtime import moy_carts
+    ws = _ws(tmp_path)
+    path = _editable(ws)
+    ws.set_menu_view("code")
+    ws.editor.set_text("def _draw():\n    cls(3)\n")
+    assert ws.save_code() is True
+    good = moy_carts.load(path)["src"]
+
+    ws.editor.set_text("def _draw():\n    cls(3)\n    x = (\n")
+    ws.editor.dirty = True
+    ws.editor.row, ws.editor.col = 0, 3
+    _go_idle(ws)
+
+    assert moy_carts.load(path)["src"] == good   # the good file still stands
+    assert (ws.editor.row, ws.editor.col) == (0, 3)
+
+
 # -- the gate is the cart's RUNTIME's (#154/#67) ----------------------------
 
 def test_the_parse_gate_answers_per_runtime(tmp_path):

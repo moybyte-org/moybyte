@@ -2794,11 +2794,20 @@ class Workstation:
         # block/code surfaces + host_app.escape + tests dispatch to it).
         self.editor_app.leave()
 
-    def save_code(self):
-        """Persist the edited source. Returns True iff it was written. A source
-        that won't compile is REFUSED (the good file is left intact) and the
-        syntax error is surfaced via self.save_status / cart_error rather than
-        silently writing garbage. Non-SD carts (no path) just no-op True."""
+    def save_code(self, force=False):
+        """Persist the edited source. Returns True iff it was written.
+
+        The gate is SPLIT (#154, owner 2026-09-06). A source that won't compile is
+        REFUSED on the soft paths -- the idle debounce and PLAY's run gate -- so a
+        half-typed line is never published mid-typing and a broken cart is never
+        RUN; the syntax error surfaces via save_status/cart_error and the caret
+        moves onto the bad line. `force` is what every HARD EXIT passes
+        (EditorApp.save_current): going home, a tab switch, a window close, the OTA
+        reboot. Those write anyway -- a kid who quits mid-line must not lose the
+        line for not having finished it -- and keep the syntax badge, WITHOUT
+        yanking the caret, because leaving is not a request to be taken to the
+        error. Broken code that reaches disk is caught at the next run, as
+        crash-to-code. Non-SD carts (no path) just no-op True."""
         if not (self.editor and self.cart):
             return False
         src = self.editor.text()
@@ -2809,19 +2818,23 @@ class Workstation:
         ok, msg = self.carts_store.runtime_compile_check(self.cart, src)
         if not ok:
             self.save_status = "SYNTAX " + msg
-            self.cart_error = "Syntax error -- " + msg
-            self._set_code_error(msg)        # mark the bad line in the editor (#24)
-            return False
-        self.code_err = None                 # parses now -> clear the inline marker
-        self.code_err_row = None
-        self.crash_line = None               # a re-run will re-detect any runtime crash
+            if not force:
+                self.cart_error = "Syntax error -- " + msg
+                self._set_code_error(msg)    # mark the bad line in the editor (#24)
+                return False
+            self._set_code_error(msg, move=False)   # badge it, leave the caret alone
+        else:
+            self.code_err = None             # parses now -> clear the inline marker
+            self.code_err_row = None
+            self.crash_line = None           # a re-run will re-detect any crash
         if not (self.cart.get("path") and self.can_manage):
-            self.save_status = None             # nothing to persist, but src is valid
-            self.ach.note("code_save")          # "Code Wizard": valid code saved (#21)
+            if ok:
+                self.save_status = None      # nothing to persist, but src is valid
+                self.ach.note("code_save")   # "Code Wizard": valid code saved (#21)
             return True
         # The store-write half moved to Project.commit_code (Stage 1b); the compile-
         # check + code-UI half above stays here (the code surface).
-        return self.project.commit_code(src)
+        return self.project.commit_code(src, force=force)
 
     def _set_code_error(self, msg, move=True):
         """Record a syntax error so the code view can mark the offending line

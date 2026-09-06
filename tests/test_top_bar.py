@@ -717,7 +717,7 @@ def test_play_hard_commits_the_active_tab(tmp_path):
     ws.editor.set_text("def _draw():\n    cls(3)\n")     # a valid edit to persist
     calls = []
     orig = ws.save_code
-    ws.save_code = lambda: (calls.append(1), orig())[-1]
+    ws.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
     drv.click(*_sys_zone_center(ws, None))                # PLAY
     drv.frame(1 / 30)
     assert calls == [1], "PLAY must hard-commit the code tab via save_code"
@@ -737,7 +737,7 @@ def test_tab_switch_hard_commits_the_outgoing_tab(tmp_path):
     ws.editor.set_text("def _draw():\n    cls(5)\n")
     calls = []
     orig = ws.save_code
-    ws.save_code = lambda: (calls.append(1), orig())[-1]
+    ws.save_code = lambda **kw: (calls.append(1), orig(**kw))[-1]
     drv.click(*_sys_zone_center(ws, "paint"))             # switch away from CODE
     drv.frame(1 / 30)
     assert calls == [1], "leaving the code tab must hard-commit it via save_code"

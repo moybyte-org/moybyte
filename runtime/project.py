@@ -465,7 +465,7 @@ class Project:
             return False
         return True
 
-    def commit_code(self, src, quiet=False):
+    def commit_code(self, src, quiet=False, force=False):
         """Persist validated source through the store -- the store-write half of the
         old Workstation.save_code. The compile-check + code-UI half stays on the code
         surface (ws.save_code), which calls this once the source is known to parse.
@@ -474,7 +474,14 @@ class Project:
         `quiet` is set by the Stage-7 idle-debounce autosave (ws.history.idle_tick): that
         save is INVISIBLE (spec Section 7), so it must NOT pop the "Code Wizard"
         achievement toast -- a visible side effect on a nominally-invisible save. The
-        badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False)."""
+        badge stays earnable via the explicit SAVE / PLAY paths (quiet defaults False).
+
+        `force` is the hard-exit paths' (#154): write source that does not parse
+        rather than lose the kid's half-typed line. The write then comes back
+        SAVE_KEPT -- persisted, still broken -- so the two things a GOOD commit
+        also does are skipped: the stale crash text stands (nothing was fixed) and
+        the crash guard is NOT forgiven, which would otherwise re-arm a `type:
+        "app"` cart that still cannot compile."""
         ws = self.ws
         # #183 stage split. On glass a single commit frame took 37.3 SECONDS with the
         # store write measured at 355ms and the whole in-frame draw breakdown summing
@@ -486,18 +493,23 @@ class Project:
         _t_write = _t_burst = _t_ops = 0
         try:
             # moy_carts.save_code always returns a (status, message) 2-tuple.
-            status, smsg = ws._with_sd(lambda: ws.carts_store.save_code(self.cart, src))
+            status, smsg = ws._with_sd(
+                lambda: ws.carts_store.save_code(self.cart, src, force))
             _t_write = _ticks_diff(_ticks_ms(), _t0)
-            if status != ws.carts_store.SAVE_OK:
+            if status == ws.carts_store.SAVE_BAD_SYNTAX:
                 ws.save_status = "CAN'T SAVE " + str(smsg)
                 ws.cart_error = "Could not save -- " + str(smsg)
                 return False
+            parsed = status == ws.carts_store.SAVE_OK
             ws.editor.dirty = False
             # Save is invisible (spec Section 7 / #111): no "SAVED" happy path --
             # save_status carries FAILURES only, so a successful commit just
             # CLEARS any stale failure text (the old "SAVED" write also did the
-            # clearing, by overwrite; same across every commit_* verb).
-            ws.save_status = None
+            # clearing, by overwrite; same across every commit_* verb). A KEPT
+            # write leaves the syntax badge the code surface just wrote standing:
+            # the line is safe on disk AND it still does not parse.
+            if parsed:
+                ws.save_status = None
             # #111 phase 4: close any live typing burst, drain the code History's op
             # batch into this commit's journal line (mirrors commit_sprites/map), then
             # re-baseline (clear) -- the CLEAN boundary: in-RAM undo covers edits SINCE
@@ -527,12 +539,16 @@ class Project:
             # any stale crash text so returning to the desktop re-runs the fixed
             # cart instead of re-painting the old "crashed" panel. (run_code/the
             # _leave_menu re-_start() then actually re-exec it.)
-            ws.cart_error = None
             # ...and the same for a `type: "app"` cart the crash guard struck
             # out (#160). The refusal panel says "EDIT it"; this is the line
             # that makes that true. Code is the ONLY edit that clears strikes
             # -- see Workstation.forgive_app for why not every commit_* verb.
-            ws.forgive_app(self.cart)
+            # Neither is true of a KEPT write: the code is on disk and still
+            # broken, so a stale crash panel is not stale and re-arming the guard
+            # would just let the same cart strike out again.
+            if parsed:
+                ws.cart_error = None
+                ws.forgive_app(self.cart)
             return True
         except Exception as exc:  # noqa: BLE001
             txt = _err_text(exc)

@@ -2048,11 +2048,13 @@ def test_code_editor_wired_into_device_shell():
     # builder that constructs the CodeEditor moved to EditorApp.set_tab (Stage 3,
     # editor_app.py); ws.save_code (the compile-check/UI half) stays on the console.
     assert 'ws.editor = CodeEditor(ws.cart["src"],' in editor_app
-    assert "def save_code(self):" in console
+    # `force` is the split gate (#154): the soft paths refuse source that will not
+    # parse, the hard exits keep the kid's half-typed line. It rides the whole chain.
+    assert "def save_code(self, force=False):" in console
     # The store-write half moved to Project.commit_code (Stage 1b, project.py -- also
     # staged onto the device); ws.save_code keeps the compile-check/UI half + delegates.
-    assert "ws.carts_store.save_code(self.cart, src)" in project
-    assert "def save_code(cart, src):" in carts
+    assert "ws.carts_store.save_code(self.cart, src, force)" in project
+    assert "def save_code(cart, src, force=False):" in carts
     # run_desktop injects the device make_api + SD cart store into the shared console.
     assert "wire_workstation_core(ws, moy_carts, carts_root, make_api" in runtime
 

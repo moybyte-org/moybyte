@@ -124,8 +124,10 @@ class HistoryRouter:
         # trigger alongside the hard SAVE/PLAY/tab-leave commits.
         self.edit_ms = None
         # The two quiet windows, and why they differ (owner, T-Deck 2026-09-06).
-        # CODE is a TYPING gap; the ~1.5s is v1.1's pinned starting point.
-        self.edit_debounce_ms = 1500
+        # CODE is a TYPING gap. v1.1 pinned 1.5s, which fires mid-sentence on a
+        # slow typist -- and a code commit is two SD sessions (#154), so the gap
+        # has to outlast the pause inside a thought, not just between words.
+        self.edit_debounce_ms = 3000
         # The DRAWING tabs wait far longer. A kid paints in strokes and pauses
         # between them constantly, and a sprite commit is a whole-sheet to_hex
         # plus an SD write -- on the typing window that is a freeze at every

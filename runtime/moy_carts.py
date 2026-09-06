@@ -1237,6 +1237,8 @@ def save_manifest_meta(cart_dir, title=None, author=None):
 # save_code() outcomes -- the caller (Workstation) surfaces these to the kid:
 SAVE_OK = "ok"            # source parsed and was written atomically
 SAVE_BAD_SYNTAX = "bad"   # source won't compile; the good file was left untouched
+SAVE_KEPT = "kept"        # source won't compile but was written ANYWAY (`force`):
+                          # it was written, and it still carries a syntax message
 
 
 def compile_check(src):
@@ -1275,18 +1277,25 @@ def runtime_compile_check(cart, src):
     return compile_check(src)
 
 
-def save_code(cart, src):
+def save_code(cart, src, force=False):
     """Persist edited source to the cart's main file, ATOMICALLY and only if it
     passes its runtime's gate. Returns (status, message): status is SAVE_OK on
     success, or SAVE_BAD_SYNTAX with a message (and the previous good file is
     left intact) when `src` won't parse, so a kid's broken edit can never
-    truncate the cart."""
+    truncate the cart.
+
+    `force` is the HARD-EXIT half of the split gate (#154): a kid who goes home
+    or powers off mid-line must not lose the line for not having finished it, so
+    the exit paths write regardless and get SAVE_KEPT plus the syntax message to
+    badge with. The gate still refuses on every SOFT path -- the idle debounce
+    and the PLAY gate -- so half-typed source is never published mid-typing and
+    a broken cart is never RUN; it surfaces at the next run as crash-to-code."""
     ok, msg = runtime_compile_check(cart, src)
-    if not ok:
+    if not ok and not force:
         return SAVE_BAD_SYNTAX, msg
     _write_atomic(cart["path"] + "/" + cart.get("main", "main.py"), src)
     cart["src"] = src
-    return SAVE_OK, ""
+    return (SAVE_OK, "") if ok else (SAVE_KEPT, msg)
 
 
 def save_sprites(cart, hex_text):

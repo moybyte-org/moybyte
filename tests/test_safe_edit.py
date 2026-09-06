@@ -57,6 +57,30 @@ def test_save_code_rejects_invalid_python_keeps_original(tmp_path):
     assert moy_carts.compile_check("def _draw(:\n")[0] is False
 
 
+def test_forced_save_code_keeps_unparseable_source_and_still_reports_it(tmp_path):
+    """The hard-exit half of the split gate (#154): a kid who quits mid-line keeps
+    the line. It is still written ATOMICALLY -- the file is never truncated, it
+    just holds source that does not parse -- and the status says so, so the caller
+    can badge it instead of pretending the save was clean."""
+    from runtime import moy_carts
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    c = moy_carts.create("Half Typed", root, src="def _draw():\n    cls(3)\n",
+                         type="app")
+    half = "def _draw():\n    cls(3)\n    x = (\n"
+
+    status, msg = moy_carts.save_code(c, half, force=True)
+
+    assert status == moy_carts.SAVE_KEPT
+    assert msg                                   # the syntax reason rides along
+    assert moy_carts.load(c["path"])["src"] == half
+    assert c["src"] == half                      # in-RAM source follows the file
+    assert not (Path(c["path"]) / "main.py.tmp").exists()
+    # A forced save of source that DOES parse is an ordinary save.
+    good = "def _draw():\n    cls(7)\n"
+    assert moy_carts.save_code(c, good, force=True) == (moy_carts.SAVE_OK, "")
+
+
 def test_save_sprites_is_atomic(tmp_path):
     from runtime import moy_carts
     root = str(tmp_path / "carts")
