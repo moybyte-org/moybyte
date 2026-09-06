@@ -332,6 +332,11 @@ _HOLD_EXIT_MS = 700         # sustained BACKSPACE hold to exit
 _CODE_CACHE = {}
 
 
+# A `"fps": "free"` game's longest single tick, seconds: two 30Hz periods and a
+# bit. Longer gaps are stalls, and a stall slows time rather than jumping it
+# (the tick model's rule for paced carts, kept for the unpaced ones).
+FREE_DT_MAX = 0.1
+
 class Player:
     """Runs one cart: start -> tick every frame -> guarantee exit (Stage 2). Holds a
     `ws` back-ref (the shared draw toolkit + services seam every surface uses) and is
@@ -365,6 +370,7 @@ class Player:
         # chain) on the sacred play path. Combined with the live cart_error check at
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
+        self._free = False            # a `"fps": "free"` game: unpaced, real dt (SPEC 5)
         # USER APP state (#181), all per-run and all reset in start():
         self._app_layout = None       # the cart's `_layout(w, h, fs)`, when it opted into
                                       # the RESPONSIVE canvas -- None for every game and
@@ -1168,8 +1174,18 @@ class Player:
         loop it serves, so it is not paced."""
         if self._is_tool:
             return
+        fps = cart.get("fps")
+        if fps == "free":
+            # SPEC 5's opt-out: the cart says its logic is dt-scaled and asks
+            # to run with the loop -- the tool path, real dt, every loop frame
+            # draws. What a board can draw is what it gets (a P4 desk ~60, the
+            # Guition ~45); a frame-counting cart must never say this. The one
+            # thing the tick model still owes it is stall protection: dt is
+            # clamped (FREE_DT_MAX) so a radio scan slows time, never jumps it.
+            self._free = True
+            return
         try:
-            rate = int(cart.get("fps") or 30)
+            rate = int(fps or 30)
         except (TypeError, ValueError):
             rate = 30
         ws = self.ws
@@ -1181,8 +1197,18 @@ class Player:
         self._tick_edges = getattr(inp, "tick_edges", None)
         self._keep_edges = getattr(inp, "keep_edges", None)
 
+    def _loop_dt(self, dt):
+        """The dt an UNPACED tick gets: the loop's own for a tool/app, and for
+        a `"fps": "free"` game the same CLAMPED at FREE_DT_MAX -- a stall (a
+        radio scan, a cart load) slows its time instead of teleporting every
+        dt-scaled body across the screen."""
+        if self._free and dt > FREE_DT_MAX:
+            return FREE_DT_MAX
+        return dt
+
     def _disarm_pacing(self):
         self.tick_ms = 0
+        self._free = False
         self._n_ticks = 1
         self._tick_edges = None
         self._keep_edges = None
@@ -1432,7 +1458,7 @@ class Player:
                 elif self.tick_ms:
                     self._run_ticks(self._n_ticks, self.sched.period, render)
                 else:
-                    self._run_ticks(1, dt, render)
+                    self._run_ticks(1, self._loop_dt(dt), render)
                 _tm = _ticks_us() if _perf else 0
                 if render and self._draw:
                     self._draw()

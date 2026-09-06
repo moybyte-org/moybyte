@@ -143,6 +143,16 @@ Tools/apps and all console screens tick with the loop. `_update(dt)` gets the
 tick period as `dt`, so movement written as `speed * dt` is right at either
 rate.
 
+A game whose logic is ALL `speed * dt` can say so — `"fps": "free"` in its
+manifest — and then it is not paced at all: it ticks and draws with the loop,
+`dt` is the real time since the last frame (clamped to 0.1s, so a stall slows
+the game rather than teleporting it), and it draws as often as the board can
+(a P4 desk ~60, the 10.1" one ~45, a browser whatever its display does).
+Declare it only if nothing in the cart counts frames: a `x += 1` runs at a
+different speed on every board the moment it is free. Most seed games
+declare it; the two that hold a real 60 (Hop Quest, Sky Run) stay at 60, and
+an imported PICO-8 cart always carries its own 30 or 60.
+
 ## The canvas
 
 - **320×240**, indexed. `W` = 320, `H` = 240 are globals (read them; don't assume).

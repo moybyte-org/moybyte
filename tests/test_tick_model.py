@@ -349,6 +349,12 @@ def _count(ws):
     return calls
 
 
+# The paced-game fixture. It was Star Catcher until 2026-09-06, when that cart
+# declared `"fps": "free"` (SPEC 5's opt-out: dt-scaled logic, unpaced) -- so
+# a seed game that still carries the guaranteed 30 stands in.
+PACED_GAME = "Coin Quest"
+
+
 def _ws(tmp_path):
     from runtime import host_app
     return host_app.build_workstation(str(tmp_path / "carts"))
@@ -362,7 +368,7 @@ def _frames(ws, n, dt):
 
 def test_a_game_holds_its_rate_on_a_faster_loop(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     assert ws.cart["type"] == "game" and ws.player.tick_ms == 33
     calls = _count(ws)
     drawn0 = ws._frames_drawn
@@ -385,7 +391,7 @@ def test_a_sixty_cart_runs_two_ticks_per_draw_on_a_thirty_loop(tmp_path):
 
 def test_the_fps_chip_reads_the_drawn_rate(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     _frames(ws, 240, 1 / 60)
     assert 29 <= ws._fps <= 31
 
@@ -406,7 +412,7 @@ def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
 
 def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
 
     def boom(dt):
         raise RuntimeError("kaboom")
@@ -423,7 +429,7 @@ def test_a_crash_disarms_the_pacing_and_the_panel_paints_every_frame(tmp_path):
 
 def test_exit_disarms_the_pacing_and_the_launcher_paces_to_the_loop(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     assert ws.player.tick_ms == 33
     ws.go_home()
     assert ws.player.tick_ms == 0 and not ws.input._kept
@@ -439,7 +445,7 @@ def test_a_press_between_ticks_reaches_the_next_tick_exactly_once(tmp_path):
     (half of all presses), and two ticks inside one frame must not both see
     it (one tap moved two menu slots)."""
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     btnp = ws.player.ns["btnp"]
     seen = []
     u0 = ws.player._update
@@ -473,7 +479,7 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
     stepped twice when a stale latch survived), and the game must not resume
     on a press made before it was covered."""
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     _frames(ws, 2, 1 / 60)
     ws.input.set_held("a", True)
     ws.input.begin_frame()
@@ -491,7 +497,7 @@ def test_a_game_parked_under_a_menu_keeps_no_edges_for_later(tmp_path):
 
 def test_a_typed_key_edge_latches_to_the_tick(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     keyp = ws.player.ns["keyp"]
     seen = []
     u0 = ws.player._update
@@ -515,7 +521,7 @@ def test_a_typed_key_edge_latches_to_the_tick(tmp_path):
 def test_steady_persists_and_reaches_the_running_cart(tmp_path):
     ws = _ws(tmp_path)
     assert ws.steady is True                      # the kid default
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     assert ws.player.sched.steady is True
     ws.set_steady(False)
     assert ws.system.get("steady") is False
@@ -563,7 +569,7 @@ def test_lockstep_owns_the_tick_and_pins_the_divisor(tmp_path):
     due for neither simulates nor draws (it re-sends), a due frame advances
     once and draws once, and the scheduler's divisor stays out of it."""
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     np = _FakeSession()
     ws.player._netplay = np
     calls = _count(ws)
@@ -660,7 +666,7 @@ def test_an_imported_p8_cart_is_paced_by_the_host_now(tmp_path):
 
 def test_the_rate_comes_from_the_manifest_and_junk_is_thirty(tmp_path):
     ws = _ws(tmp_path)
-    _open(ws, "Star Catcher")
+    _open(ws, PACED_GAME)
     pl = ws.player
     for fps, rate in ((60, 60), (30, 30), (0, 30), (None, 30), ("junk", 30),
                       (45, 30)):
@@ -690,3 +696,17 @@ def test_uncapped_draws_every_frame_while_logic_keeps_its_rate():
     for _ in range(120):
         draws += 1 if s.plan(1 / 120) else 0
     assert draws == 30
+
+
+def test_a_free_seed_game_runs_with_the_loop(tmp_path):
+    """Star Catcher declares `"fps": "free"`: no tick, every loop frame ticks
+    AND draws, and dt is the loop's own -- the whole point of the opt-out."""
+    ws = _ws(tmp_path)
+    _open(ws, "Star Catcher")
+    assert ws.player.tick_ms == 0 and ws.player._free is True
+    calls = _count(ws)
+    drawn0 = ws._frames_drawn
+    _frames(ws, 20, 1 / 45)
+    assert calls["upd"] == 20 and calls["draw"] == 20
+    assert ws._frames_drawn - drawn0 == 20
+    assert set(calls["dts"]) == {1 / 45}
