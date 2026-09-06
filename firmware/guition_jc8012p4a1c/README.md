@@ -61,15 +61,16 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
   once its firmware runs (glass-confirmed). Silead's GPL finger-id algorithm
   (`gsl_point_id.c`) is deliberately NOT carried: raw register 0x80 gives one
   finger's position, which is all a console pointer needs.
-- **Touch axes are UNCALIBRATED.** Bring-up was hands-off (no finger on the
-  glass). The controller reports in the portrait panel frame, so the driver
-  SWAPS the axes for the landscape desk and then flips (`SWAP_XY=True,
-  FLIP_X=False, FLIP_Y=True` is the arithmetic inverse of the 270° rotation,
-  before the controller's own sense is known). First thing to do with a
-  finger: `import moy_runtime; moy_runtime.run_touch_calibrate()` from the
-  REPL, tap the five targets, set the knobs so mapped == tapped, bake them
-  in — or flip them live over the dev channel (`py touch.flip_x = False`).
-  Changing ROTATION flips both axes' sense.
+- **Touch is CALIBRATED (2026-09-06, three corner holds with the raw packets
+  sampled over the dev channel).** The controller reports LANDSCAPE, aligned
+  with the desk as mounted (ROTATION 270) — no swap, no flips — but in the
+  firmware's OWN coordinate space, 1664×896 (the resolution in its config
+  block), not the glass's 1280×800: top-left read (33, 17), top-right
+  (1632, 27), bottom-right (1640, 875). So the driver SCALES
+  (`RAW_W`/`RAW_H` in `guition_p4_input.py`, `raw_w`/`raw_h` on the shared
+  driver); `tests/test_gsl3680.py` pins the decode against those packets. The
+  knobs stay live (`py touch.flip_x = True` over the dev channel); turning
+  the desk the other way up (ROTATION 90) means both flips go True.
 - **Backlight is GPIO23, ACTIVE-HIGH** (the Waveshare's is GPIO32 active-low —
   the one fact the two boards' display modules differ on). The vendor BSP
   drives it as an LEDC PWM channel, so a duty is one line away the day
@@ -201,7 +202,7 @@ for the C6/audio pins, which agree with the BSP.
 
 ## Open items (what a human with a finger and a desk decides)
 
-1. **Touch calibration** — `run_touch_calibrate()`, five taps, bake the knobs.
+1. ~~Touch calibration~~ — done on glass, 2026-09-06 (above).
 2. ~~Orientation~~ — landscape, 270 up, owner-verified on the desk.
 3. **The C6 runs Guition's factory slave** (no ESP-NOW shim): `moy_espnow`
    fails into an inactive link by design. The Waveshare's `c6_slave/` image is

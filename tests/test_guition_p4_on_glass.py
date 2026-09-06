@@ -57,12 +57,14 @@ def test_the_system_canvas_is_landscape_on_portrait_glass(board):
 def test_the_pointer_is_the_gsl3680(board):
     """The touch driver came up: firmware uploaded and running (the chip's
     0xB0 signature -- `available`), the poll answering with no finger on the
-    glass, at this glass's size. Whether its axes are CALIBRATED is a finger's
-    question (`py touch.flip_x = ...` from this same channel), not this
-    suite's."""
-    line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h, touch.swap_xy)",
+    glass, at this glass's size, with the calibrated mapping (three corner
+    holds, 2026-09-06)."""
+    line = board.cmd("py (touch.available, touch.fingers, touch.w, touch.h, "
+                     "touch.swap_xy, touch.flip_x, touch.flip_y, touch.raw_w, touch.raw_h)",
                      wait_for="PY ")
-    assert line == "PY (True, 0, 1280, 800, True)", line
+    # The 2026-09-06 calibration: landscape as mounted, no swap, no flips,
+    # the firmware's 1664x896 scaled onto the glass.
+    assert line == "PY (True, 0, 1280, 800, False, False, False, 1664, 896)", line
 
 
 def test_the_ppa_composite_is_live(board):
