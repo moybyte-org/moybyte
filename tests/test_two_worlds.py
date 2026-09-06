@@ -174,7 +174,7 @@ def test_library_shelf_hides_system_apps_but_keeps_kid_carts(tmp_path):
     for app_cart in ("Files", "Paint", "Writer", "Storybook", "Calc"):
         assert app_cart not in titles
     assert "Star Catcher" in titles               # games stay
-    assert "Beeper" in titles                     # kid-style app carts stay
+    assert "Notes" in titles                      # kid-style app carts stay
     # The fullscreen tier keeps EVERYTHING on its launcher.
     ws2 = host_app.build_workstation(str(tmp_path / "carts2"))
     titles2 = [c.get("title") for c in ws2.launcher.items]

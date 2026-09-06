@@ -504,8 +504,11 @@ def test_the_fps_chip_reads_the_drawn_rate(tmp_path):
 
 def test_a_tool_ticks_with_the_loop_it_serves(tmp_path):
     ws = _ws(tmp_path)
+    # A tool/app cart the PLAYER runs -- one a registered system app claims
+    # opens that app's layer instead, and ticks nothing here.
     tool = next(c["title"] for c in ws.launcher.items
-                if c.get("type") in ("tool", "app"))
+                if c.get("type") in ("tool", "app")
+                and not ws.is_system_app(c))
     _open(ws, tool)
     assert ws.player.tick_ms == 0
     calls = _count(ws)

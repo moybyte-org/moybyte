@@ -524,8 +524,8 @@ class Player:
             self.ws.app_guard.release()
         # Nor may its SOUND. The device mixer is a global the cart only ever
         # posts notes to -- libmoy keeps sequencing a looping sfx or music track
-        # long after the run that started it is gone, so beeper's tones and
-        # celeste's music went on playing over whatever the kid did next
+        # long after the run that started it is gone, so a demo cart's tones
+        # and celeste's music went on playing over whatever the kid did next
         # (owner, T-Deck). Same category as the view and the palette above:
         # state the run set on a shared surface, cleared where the run ends
         # rather than wherever the next one happens to overwrite it.

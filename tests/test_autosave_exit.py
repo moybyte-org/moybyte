@@ -178,9 +178,10 @@ def _writes_during(ws, fn):
 def test_untouched_tab_switch_writes_nothing(tmp_path):
     """Walking the tab ladder without editing must not touch the store."""
     ws = _ws(tmp_path)
-    _open_in_editor_by_title(ws, ws.launcher.items[1]["title"]
-                             if ws.launcher.items[1].get("path")
-                             else ws.launcher.items[2]["title"])
+    # A cart with real assets on every tab, named rather than indexed off the
+    # shelf -- and NOT one whose `_init` authors its own map (Bench msets
+    # there, so its map is legitimately dirty before the walk starts).
+    _open_in_editor_by_title(ws, "Hop Quest")
     ws.editor_app.set_tab("code")
     hits = _writes_during(ws, lambda: [ws.editor_app.set_tab(t)
                                        for t in ("paint", "map", "scene",

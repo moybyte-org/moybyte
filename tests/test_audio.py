@@ -1,8 +1,8 @@
 """Headless tests for the v0.4 audio core (#16): the shared sound data model +
 the engine surface (runtime/audio.py), the host audio API surface
 (host_app.make_api + FakeAudio), the .moy sounds.json store (moy_carts), and
-the Beeper demo cart making sound through the fake backend on the shared
-console (host == device).
+a cart making sound through the fake backend on the shared console
+(host == device).
 
 No sound hardware: FakeAudio records calls AND drives the real AudioEngine, so
 the mixer is exercised under SDL_VIDEODRIVER=dummy. Since moycore stage 0
@@ -276,30 +276,55 @@ def test_moy_carts_saves_and_loads_sounds(tmp_path):
     assert moy_carts.load(c["path"])["sounds"] is None
 
 
-# -- the Beeper demo cart, on the shared console ----------------------------
+# -- a cart making sound on the shared console -------------------------------
 
-def test_beeper_demo_cart_makes_sound(tmp_path):
-    from runtime import host_app
-    ws = host_app.build_workstation(str(tmp_path / "carts"))
+# The fixture cart: music on entry, then an SFX from its own bank and a raw
+# tone. `AudioBank.default()` supplies the bank, so the sounds.json this writes
+# is real bank data rather than a hand-rolled blob.
+_NOISY_SRC = """\
+n = 0
+
+
+def _init():
+    music(0)
+
+
+def _update(dt):
+    global n
+    n += 1
+    if n == 2:
+        sfx(0)
+    if n == 4:
+        beep(660, 0.12)
+
+
+def _draw():
+    cls(col("black"))
+"""
+
+
+def test_a_cart_plays_music_sfx_and_a_raw_tone_through_the_console(tmp_path):
+    from runtime import host_app, moy_carts
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Noise Maker", root, src=_NOISY_SRC)
+    moy_carts.save_sounds(cart, audio.AudioBank.default().to_dict())
+    ws = host_app.build_workstation(root)
     for i, c in enumerate(ws.launcher.items):
-        if c["title"] == "Beeper":
+        if c["title"] == "Noise Maker":
             ws.launcher.sel = i
             break
     else:
-        raise AssertionError("Beeper demo cart was not seeded")
+        raise AssertionError("the fixture cart was not scanned")
     ws.open()
     assert ws.screen == "desktop" and ws.cart_error is None
     assert isinstance(ws.audio, host_app.FakeAudio)
-    # _init() should have started the looping music (music_on defaults to 1)
-    assert ("music", 0, True) in ws.audio.calls
-    # Enable the cart's attract mode (off by default since it auto-cycles the pads)
-    # so the demo audibly exercises sfx + beep through the console + mixer.
-    ws.config["autoplay"] = 1
-    for _ in range(120):
+    assert ("music", 0, True) in ws.audio.calls   # _init started the track
+    for _ in range(8):
         ws.frame(1 / 30)
     kinds = [c[0] for c in ws.audio.calls]
     assert "sfx" in kinds and "beep" in kinds
-    assert ws.audio.rendered > 0                    # tick() pulled PCM each frame
+    assert ws.audio.rendered > 0                  # tick() pulled PCM each frame
 
 
 def test_cart_without_audio_backend_still_runs(tmp_path):

@@ -354,9 +354,8 @@ pure-host-verifiable addition the same way the paint editor was.
 - `runtime/host_app.py`: `sfx`/`beep`/`music`/`music_stop`/`sound_stop`/`volume`
   in `make_api`, bound to a `FakeAudio` backend (records calls + drives the mixer).
 - `runtime/moy_carts.py`: `sounds.json` load + `save_sounds` (atomic) + seed.
-- `system_carts/beeper.moy`: a tiny demo cart that plays a beep + an SFX on tap.
 - `tests/test_audio.py`: headless tests of the model, mixer, API surface, store
-  round-trip, and the demo cart making sound through the fake backend.
+  round-trip, and a cart making sound through the fake backend.
 
 **Deferred (clearly flagged):**
 

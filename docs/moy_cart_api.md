@@ -730,6 +730,26 @@ reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
 `beep()` plays at the exact frequency you ask for, on the engine's own
 oscillator — it never takes a channel away from music or an effect.
 
+Four tappable pads: three play a sound from the cart's own bank, the fourth is
+the no-data escape hatch. A cart's `config.json` decides whether the background
+track runs, so the kid can turn it off without touching code.
+
+```python
+PADS = ["COIN", "JUMP", "THUD", "BEEP"]   # ids 0/1/2 in sounds.json, then a tone
+
+def _init():
+    if cfg("music_on", 1):
+        music(0)              # start the looping background track
+    else:
+        music_stop()
+
+def _hit(i):
+    if i < 3:
+        sfx(i)                # play SFX i from this cart's bank
+    else:
+        beep(660, 0.12)       # a raw tone -- no bank entry needed
+```
+
 The sound bank lives in the cart's `sounds.json` (authored in the Music tab).
 Since #170 the model is PICO-8-parity:
 

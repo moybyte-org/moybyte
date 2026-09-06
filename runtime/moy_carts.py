@@ -828,11 +828,12 @@ def is_packed(seed):
 # The list is the 2026-09-06 bench fold (three benches became phases of Bench
 # and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
 # folders as well as the titles, so every board seeded before it has carried a
-# second, stale copy of Brick Siege and Harpoon Pop ever since. Sheets is the
-# 2026-09-07 deletion of the spreadsheet app.
+# second, stale copy of Brick Siege and Harpoon Pop ever since. Sheets and
+# Beeper are the 2026-09-07 deletions: the spreadsheet app, and the audio demo
+# whose verbs the cart API now shows off instead.
 RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
-           "Sheets")
-RETIRED_GEN = 2
+           "Sheets", "Beeper")
+RETIRED_GEN = 3
 RETIRED_VER_NAME = "retired.ver"
 
 
