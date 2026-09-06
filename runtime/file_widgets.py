@@ -1,6 +1,6 @@
 # The user-files (#108) shared visual vocabulary: the thumbnail-grid picker
 # every file surface reuses -- the Files app's gallery, Paint's OPEN mode, and
-# any later save/open flow (Writer/Sheets/#70/#110). One widget so "browse your
+# any later save/open flow (Writer/#70/#110). One widget so "browse your
 # stuff" is a single learned gesture; it is, quietly, an Open dialog in icon
 # view. Kid rules baked in: thumbnails first, names ALWAYS visible under them
 # (names are identity -- the desktop concept we refuse to hide), newest first,

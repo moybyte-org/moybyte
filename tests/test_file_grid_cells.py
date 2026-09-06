@@ -1,8 +1,8 @@
 """Phase 3c: the shared thumbnail grid and the app toolbars speak `runtime/ui.py`.
 
-`file_widgets.FileGridView` is the widget Files, Writer, Sheets and Paint's OPEN
-mode all embed, so converting it pays four times; the two private button copies
-this phase absorbed (`writer_app._hist_btn`, `sheets_app._icon_btn`) are the
+`file_widgets.FileGridView` is the widget Files, Writer and Paint's OPEN
+mode all embed, so converting it pays three times; the private button copy
+this phase absorbed (`writer_app._hist_btn`) is the
 duplication the refactor exists to end. What is pinned here is what the shell
 goldens cannot see:
 
@@ -210,12 +210,12 @@ def test_every_grid_embedder_pumps_on_non_click_samples():
     """A press cue that only appeared on the CLICK frame would never be seen:
     the pump has to run before each app's `if not click: return`.
 
-    Writer and Sheets no longer own that head -- their list/rename modes are
+    Writer no longer owns that head -- its list/rename mode is
     `app_shell.ListShellApp._list_pointer`, one copy of what was 13 verbatim
     lines in each. The ratchet FOLLOWS the delegation rather than pinning a
     copy back into place: what must stay true is that the pump precedes the
     early return, wherever the head lives."""
-    for mod in ("files_app", "writer_app", "sheets_app"):
+    for mod in ("files_app", "writer_app"):
         head = _pointer_head(mod)
         if "_list_pointer(" in head:
             head = _pointer_head("app_shell", "_list_pointer")
@@ -224,18 +224,18 @@ def test_every_grid_embedder_pumps_on_non_click_samples():
 
 # --- the private button copies ---------------------------------------------------
 
-def test_the_two_private_button_copies_are_gone():
-    """`writer_app._hist_btn` and `sheets_app._icon_btn` were two hand-rolled
-    copies of `ui.chip` that disagreed with each other about what an enabled
-    icon button looks like. Both are absorbed; `disabled` is the toolkit's.
+def test_the_private_button_copies_are_gone():
+    """`writer_app._hist_btn` was a hand-rolled copy of `ui.chip` that
+    disagreed with its siblings about what an enabled icon button looks
+    like. It is absorbed; `disabled` is the toolkit's.
 
-    The two-line DELEGATE they left behind was itself duplicated (Writer,
-    Sheets, and Storybook's argument-poorer twin) and is now one method,
+    The two-line DELEGATE it left behind was itself duplicated (Writer and
+    Storybook's argument-poorer twin) and is now one method,
     `app_shell.ListShellApp._button`. So the chip call is asserted THERE, and
     the apps are asserted not to have re-grown one."""
     shell = (ROOT / "runtime" / "app_shell.py").read_text(encoding="utf-8")
     assert "disabled=not enabled" in shell, "the shared chip lost `disabled`"
-    for mod, gone in (("writer_app", "_hist_btn"), ("sheets_app", "_icon_btn")):
+    for mod, gone in (("writer_app", "_hist_btn"),):
         src = (ROOT / "runtime" / (mod + ".py")).read_text(encoding="utf-8")
         assert ("def " + gone) not in src, mod
         assert gone not in src.replace("`" + gone + "`", ""), mod
@@ -281,16 +281,14 @@ def test_the_disabled_history_chip_dims_through_the_theme_role():
 # --- the row conversions ---------------------------------------------------------
 
 def test_the_converted_row_draws_go_through_the_toolkit():
-    """The three list surfaces in this file group draw rows with `ui.row`; the
-    two whose pixels are frozen OFF-token pass `colors=`, which is what that
+    """The two list surfaces in this file group draw rows with `ui.row`; the
+    one whose pixels are frozen OFF-token passes `colors=`, which is what that
     escape hatch is for."""
-    from runtime import files_app, sheets_app, storybook_app
+    from runtime import files_app, storybook_app
 
     assert "_ui.row(" in inspect.getsource(files_app.FilesAppLayer._draw_rows)
-    attach = inspect.getsource(sheets_app.SheetsAppLayer._draw_attach)
-    assert "_ui.row(" in attach and "colors=" in attach
     deck = inspect.getsource(storybook_app.StorybookAppLayer._draw_rows)
     assert "_ui.row(" in deck and "colors=" in deck
-    for src in (inspect.getsource(files_app.FilesAppLayer._draw_rows), attach,
+    for src in (inspect.getsource(files_app.FilesAppLayer._draw_rows),
                 deck):
         assert "cv.rectb(" not in src and "cv.rect(" not in src

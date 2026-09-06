@@ -257,7 +257,7 @@ FEATURES = [
      "directly and the project graduates &mdash; the blocks go read-only rather "
      "than silently disagreeing with the source."),
     ("Apps",
-     "Paint, Files, Writer, Sheets, Storybook, Calc, Settings, Appearance, WiFi. "
+     "Paint, Files, Writer, Storybook, Calc, Settings, Appearance, WiFi. "
      "Drawings, documents and tables land in a shared file layer that carts can "
      "read back. They sit on the launcher as carts; their code still lives in the "
      "shell rather than in an editable cart, which is the next piece of work."),

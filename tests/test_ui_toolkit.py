@@ -511,8 +511,8 @@ def test_cell_edge_last_paints_the_frame_over_the_content():
 
 
 def test_chip_colors_bypasses_the_skin_like_row_and_cell():
-    """Parity: absorbing a private button (writer's history pair, sheets' icon
-    button) must be able to keep that site's exact palette."""
+    """Parity: absorbing a private button (writer's history pair) must be
+    able to keep that site's exact palette."""
     cv = SystemCanvas(80, 40)
     ui.chip(cv, TH, (0, 0, 60, 20), "X", colors=(19, 0, 22))
     assert cv.pix(1, 1) == 19

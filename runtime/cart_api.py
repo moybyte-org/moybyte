@@ -490,7 +490,7 @@ def make_api(canvas, input, config, sheet=None, audio=None, tilemap=None,
         return Image.from_ascii(a, mapping, transparent)
 
     def table(name):
-        # Desk Lab interop (#78): a Sheets sheet placed in the cart's folder
+        # Desk Lab interop (#78): a sheet placed in the cart's folder
         # (tables/<name>.moysheet) read as ROWS -- a list of lists of computed
         # values. Missing name -> [] (image()'s degrade-don't-throw contract).
         # The rows were decoded once at cart-load (moy_carts.decode_table).

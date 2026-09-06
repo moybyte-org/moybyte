@@ -793,8 +793,6 @@ _FROZEN_HATCH = {
     "storybook_app.py": (1,
         "a deck row is cream paper with black ink -- frozen off-token, the "
         "case the hatch is documented for"),
-    "sheets_app.py": (1,
-        "the attach list's rows, same cream paper; only the edge is themed"),
     "music_editor_ui.py": (1,
         "the title-strip nudge ticks: a frozen blue/black/white trio with no "
         "token behind any of the three"),

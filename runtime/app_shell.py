@@ -1,5 +1,5 @@
-# The Desk Lab apps' shared "list shell" (#78 family: Sheets / Writer /
-# Storybook -- written in sequence, so each had hand-copied the same
+# The Desk Lab apps' shared "list shell" (#78 family: Writer / Storybook --
+# written in sequence, so each had hand-copied the same
 # scaffolding). Two small bases, extracted MECHANICALLY so every derived
 # number and drawn pixel stays byte-identical (#39):
 #
@@ -125,9 +125,9 @@ class ListShellApp:
         dimmed sprite -- only a dimmed colour).
 
         Three private copies of this collapsed into one over two passes.
-        Phase 3a absorbed `writer._hist_btn` and `sheets._icon_btn` into
-        `ui.chip` itself (whose `disabled` state ended the divergence where
-        Sheets ringed an enabled icon in `accent` and Writer's identical pair
+        Phase 3a absorbed the apps' private icon buttons into `ui.chip`
+        itself (whose `disabled` state ended the divergence where one app
+        ringed an enabled icon in `accent` and another's identical pair
         in `dim`), which left three byte-identical two-line DELEGATES -- and
         Storybook's, which was the same call with the two arguments it never
         passes left off. They are this one method now."""
@@ -138,12 +138,12 @@ class ListShellApp:
 
     def _list_pointer(self, px, py, click, on_new, on_open):
         """The LIST and RENAME modes' pointer handling, shared by the two apps
-        whose list view is a `FileGridView` (Writer, Sheets). True when it
+        whose list view is a `FileGridView`. True when it
         handled the event; False when the host is in one of its OWN modes and
         should carry on.
 
-        `on_new` / `on_open` are the host's verbs (`_new_doc`/`_open_doc` vs
-        `_new_sheet`/`_open_file`) -- passed rather than renamed, because a
+        `on_new` / `on_open` are the host's verbs (`_new_doc`/`_open_doc`)
+        -- passed rather than renamed, because a
         thumbnail grid of documents is generic and "make a new sheet" is not.
         Bound methods are built on a pointer EVENT, never per frame."""
         lay = self.layout

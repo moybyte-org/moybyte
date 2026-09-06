@@ -27,7 +27,6 @@ memos (c422a12). Painted-frame distribution over three drag gestures:
   | editor:paint  | 19 chrome glyphs      |   52   |  56 |  116  |  0 |
   | writer        | 200-line doc          |   52   |  52 |  128  |  0 |
   | editor:code   | 302-line cart         |   52   |  60 |  130  |  2 |
-  | sheets        | 360-cell table        |   48   |  52 |   99  |  1 |
   | picker        | 29 carts, covers warm |   48   |  60 |   89  |  0 |
   | settings      | full row set          |   24   |  28 |   42  |  0 |
 
@@ -35,9 +34,8 @@ The first version of this table measured EMPTY surfaces and drew a conclusion th
 had to be withdrawn. The deltas are why seeding is not optional:
 
   * writer   20ms (empty file GRID) -> 40 (empty text area) -> 52 (200 lines)
-  * sheets   16ms (empty file GRID) -> 48 (360 cells)
 
-With no file open, Writer and Sheets show a file grid rather than a text surface,
+With no file open, Writer shows a file grid rather than a text surface,
 so an unseeded measurement is not a slow version of the real thing -- it is a
 different screen.
 
@@ -68,11 +66,6 @@ each):
 
   * doc:   save_file('docs', name, "<text>") -- a document is plain Markdown
            (files/docs/<name>.md), so the file's text IS the page's text.
-  * table: build a real formula.Sheet (set_cell(col, row, raw), keys are "A1"
-           refs via make_ref) and save json.dumps(sheet.to_dict()). A hand-rolled
-           {"rows","cols","cells"} dict leaves sheets_app.sheet None.
-  * ORDER MATTERS for Sheets: open_named(name) only sets _pending_open, which is
-           consumed by the app's open(). Call it BEFORE open_app(), not after.
   * cart:  carts_store.create(title, root, src=...) then
            ws.carts.apply(store.scan(root)).
   * There is no load_code(path); reading a cart's source goes through load(path).
@@ -100,7 +93,6 @@ OPEN = {
     "sprites":   "ws._g['_edit']('paint')",
     "map":       "ws._g['_edit']('map')",
     "writer":    "ws.open_app(ws.writer_app)",
-    "sheets":    "ws.open_app(ws.sheets_app)",
     "files":     "ws.open_app(ws.files_app)",
     "storybook": "ws.open_app(ws.storybook_app)",
 }

@@ -34,7 +34,7 @@ source is what gets journaled -- walking one without the other would desync
 them, and it is also how a graduated cart's read-only Blocks tab reaches the
 graduating commit whose rider un-graduates it.
 
-## Writer, Sheets and the Desk Lab apps are NOT routed here
+## Writer and the Desk Lab apps are NOT routed here
 
 They keep their own `History` on their own app object and their own persistence
 (`files/.history/` op sidecars, a different mechanism from the per-project

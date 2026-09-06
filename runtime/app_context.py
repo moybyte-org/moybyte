@@ -45,8 +45,8 @@ it hides which apps can write executable content.
 and zero consumers" and deferred it. That reading came from grepping for
 `ws` followed by a dot,
 which cannot see `getattr(self.ws, "clipboard", None)` -- and that is how all
-FIVE of its live consumers are written (Sheets' Ctrl+C/Ctrl+V cell verbs, plus
-the `clip=` argument Writer, Sheets and Storybook hand their CodeEditor). The
+its live consumers are written (the `clip=` argument Writer and Storybook hand
+their CodeEditor). The
 same blind spot hid Storybook's `getattr(self.ws, "artwork", None)`. When a
 count says zero and the feature ships, suspect the grep.
 
@@ -364,13 +364,11 @@ class _RawFiles:
 
     def migrate(self, kind=None):
         """The `files/` migrations. `None` = the whole user-files layer;
-        `"docs"`/`"tables"` = that kind's own one-shot move."""
+        `"docs"` = that kind's own one-shot move."""
         store = self.__ws.carts_store
         if kind == "docs":
             store.migrate_doc_format(self.__ws.carts_root)
             return store.migrate_docs(self.__ws.carts_root)
-        if kind == "tables":
-            return store.migrate_tables(self.__ws.carts_root)
         return store.migrate_user_files(self.__ws.carts_root)
 
     # -- the #111 op-history sidecars ---------------------------------------
@@ -547,9 +545,6 @@ class _RawCarts:
     def save_image(self, cart, name, blob):
         return self.__ws.carts_store.save_image(cart, name, blob)
 
-    def save_table(self, cart, name, blob):
-        return self.__ws.carts_store.save_table(cart, name, blob)
-
     def journal_append(self, path, main, src, grad=0):
         return self.__ws.carts_store.journal_append(path, main, src, grad=grad)
 
@@ -560,7 +555,7 @@ class Carts(_StoreRole):
     Deliberately a SEPARATE role from `ctx.files`: a cart is executable
     content, and an app that can author one is doing something categorically
     different from an app that saves a drawing. Storybook is the only shipped
-    consumer of the authoring half; Sheets and Paint use only the
+    consumer of the authoring half; Paint uses only the
     copy-into-a-project verbs. Same `(value, err)` contract as `Files`, off the
     same `_StoreRole` machinery."""
 
@@ -605,9 +600,6 @@ class Carts(_StoreRole):
     def save_image(self, cart, name, blob):
         return self._write(self.raw.save_image, cart, name, blob)
 
-    def save_table(self, cart, name, blob):
-        return self._write(self.raw.save_table, cart, name, blob)
-
     # The .moyimg ENCODER, mirrored from `Files`. Deliberately on both roles: a
     # `.moyimg` blob is the same bytes whether it lands in `files/drawings/` or
     # in a cart's `images/`, and Storybook (which needs it to put a painting on a
@@ -628,7 +620,7 @@ class Nav:
     `app()`/`open_app()` are the APP-TO-APP seam. `docs/app_api_v1.md` listed
     app-to-app as an explicit v1 NON-GOAL and it shipped anyway -- `files_app`
     reaches `ws.writer_app.open_named(...)` across five sites, because "open
-    this table in Sheets" is a real product need and there was no seam for it.
+    this doc in Writer" is a real product need and there was no seam for it.
     This is the seam. It resolves by registered ID, so an app never holds a
     hard reference to another app's class."""
 

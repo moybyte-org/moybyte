@@ -178,7 +178,7 @@ Two things follow for an app author:
   band height instead.
 - **Optional `commit(self)`** — the host calls it just before routing a bar
   tap, because the X there is an exit path. An app that persists on an idle
-  debounce (#111) implements it (`writer_app`, `sheets_app`, `storybook_app`
+  debounce (#111) implements it (`writer_app`, `storybook_app`
   do); forgetting it costs an autosave, never the exit.
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
@@ -319,7 +319,7 @@ free, and a game that always crashes shows the panel and is not a brick.
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
 anyway: `files_app` reached `ws.writer_app.open_named(...)` across five sites,
-because "open this table in Sheets" is a real product need and there was no seam
+because "open this doc in Writer" is a real product need and there was no seam
 for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam -- resolution is
 by REGISTERED ID, so no app holds a reference to another app's class and a build
 without the target degrades to a status line. IPC beyond "open that, pointed

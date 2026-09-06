@@ -84,8 +84,8 @@ per-project journal, so undo/redo walks fine-grained edits and then whole
 commits, scoped to the tab you are in. A crash drops you into the code on the
 offending line.
 
-**Apps** — Paint, Files, Writer, Sheets, Storybook, Calc, Settings, Appearance,
-WiFi setup. Drawings, documents and tables live in a shared file layer that carts
+**Apps** — Paint, Files, Writer, Storybook, Calc, Settings, Appearance,
+WiFi setup. Drawings and documents live in a shared file layer that carts
 can read back. They sit on the launcher as carts and behave like the rest of the
 system. An app can now BE a cartridge — declared by manifest permissions, with
 no shell module, no registration and no reflash
@@ -96,7 +96,7 @@ are big, and the capability is there for what *you* write.
 **Two cart languages** — Python and Lua, one verb table, valid verbatim in both.
 On device, Lua carts run on a vendored Lua 5.4 VM whose heap lives *outside*
 MicroPython's GC and is freed wholesale at exit. Drawing, input, sprites,
-tilemaps, layers, audio, scenes, spreadsheets and documents, persistent memory —
+tilemaps, layers, audio, scenes and documents, persistent memory —
 [the full table](docs/moy_cart_api.md) is about 60 verbs and no imports.
 
 **Graphics** — an indexed 64-colour palette end to end, every draw verb landing
@@ -328,7 +328,7 @@ cost a debugging session.
 | path | |
 |---|---|
 | `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
-| `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Sheets, Writer, Storybook, Calc) |
+| `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Writer, Storybook, Calc) |
 | `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the Waveshare 7″ ESP32-P4 port (mainline MicroPython; the P4-silicon C modules live in repo-root `native/p4/`) |
 | `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |

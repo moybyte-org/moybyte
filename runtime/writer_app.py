@@ -474,7 +474,7 @@ class WriterAppLayer(ListShellApp):
         # The clipboard lane (#132, code_layer's byte convention): Ctrl+A
         # selects all (Writer has no selection UI of its own -- this is the
         # copy source), Ctrl+C/X/V copy/cut/paste through ctx.clipboard so text
-        # travels between Writer, the code tab and Sheets.
+        # travels between Writer and the code tab.
         if k == 0x01:
             ed.select_all()
             self.status = "ALL SELECTED"
@@ -513,8 +513,8 @@ class WriterAppLayer(ListShellApp):
 
 
     def handle_pointer(self, px, py, click):
-        # The LIST + RENAME modes are the shared shell's (app_shell), verbatim
-        # in Sheets too; what is left below is this app's own edit view.
+        # The LIST + RENAME modes are the shared shell's (app_shell); what is
+        # left below is this app's own edit view.
         if self._list_pointer(px, py, click, self._new_doc, self._open_doc):
             return True
         lay = self.layout

@@ -403,11 +403,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.storybook_app import StorybookAppLayer
 
 try:
-    from sheets_app import SheetsAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.sheets_app import SheetsAppLayer
-
-try:
     from files_app import FilesAppLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.files_app import FilesAppLayer
@@ -937,7 +932,7 @@ class Workstation:
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
         # The system clipboard (#132): the one typed holder every editor writes
-        # through (code tab / Writer / Sheets v1), so copy in one app pastes in
+        # through (code tab / Writer), so copy in one app pastes in
         # another. Console-side end-to-end -- works identically over the web
         # transport, never touches a host OS clipboard (parity trap).
         self.clipboard = Clipboard()
@@ -1201,8 +1196,8 @@ class Workstation:
         self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
-        # chrome, Writer's notebook, Storybook's compiling decks, Sheets'
-        # formula grids, Files' user-files gallery and Calc. Each is a
+        # chrome, Writer's notebook, Storybook's compiling decks, Files'
+        # user-files gallery and Calc. Each is a
         # `system_carts/<folder>/manifest.json` "app" block, not a line here.
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
@@ -2322,7 +2317,7 @@ class Workstation:
         # Player, building the cart namespace -- goes through self.project.
         self.project.flags = self._build_flags()
         self.images = self.cart.get("images") or {}   # paint-image assets (#63)
-        self.tables = self.cart.get("tables") or {}    # Sheets docs, table() (#78)
+        self.tables = self.cart.get("tables") or {}    # cart tables/, table() (#78)
         self.texts = self.cart.get("texts") or {}      # Writer docs, text() (#78)
         self.pmem = self._build_pmem()
         self.scenes = self._build_scenes()             # placed-actor scenes (#85)
@@ -3246,7 +3241,7 @@ class Workstation:
         game + open it), then every editable cart (wallpapers + built-ins included).
 
         SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
-        2026-07-31). Files/Paint/Writer/Sheets/Calc/Appearance are not really
+        2026-07-31). Files/Paint/Writer/Calc/Appearance are not really
         carts: the app is a shell MODULE (runtime/*_app.py, frozen on device),
         and the `.moy` only carries identity, icon art and a few-line fallback
         body for an older shell. Listing them offered a project whose "code" was

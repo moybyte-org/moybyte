@@ -24,7 +24,7 @@ def _select(ws, title):
 def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
-    assert kinds == ["artwork", "appearance", "writer", "storybook", "sheets",
+    assert kinds == ["artwork", "appearance", "writer", "storybook",
                      "files", "calc"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
@@ -181,7 +181,7 @@ import pytest
 
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6
-_SHIPPED_APPS = ("artwork", "appearance", "writer", "storybook", "sheets",
+_SHIPPED_APPS = ("artwork", "appearance", "writer", "storybook",
                  "files", "calc")
 
 
@@ -350,6 +350,6 @@ def test_no_app_module_carries_the_bar_ritual():
     """The old road is closed: the strip/tap pair lives in the router, so no
     app module may reach the bar surface at all."""
     for name in ("calc_app", "artwork", "appearance_app", "files_app",
-                 "storybook_app", "writer_app", "sheets_app"):
+                 "storybook_app", "writer_app"):
         src = (ROOT / "runtime" / (name + ".py")).read_text(encoding="utf-8")
         assert "bar_layer" not in src, name + " still reaches ws.bar_layer"

@@ -171,7 +171,7 @@ def test_library_shelf_hides_system_apps_but_keeps_kid_carts(tmp_path):
     ws = _ws(tmp_path)
     _drv(ws)
     titles = [c.get("title") for c in ws.launcher.items]
-    for app_cart in ("Files", "Paint", "Writer", "Sheets", "Storybook", "Calc"):
+    for app_cart in ("Files", "Paint", "Writer", "Storybook", "Calc"):
         assert app_cart not in titles
     assert "Star Catcher" in titles               # games stay
     assert "Beeper" in titles                     # kid-style app carts stay

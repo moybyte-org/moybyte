@@ -210,22 +210,17 @@ def test_content_sig_changes_when_the_blob_changes():
     assert moy_carts.content_sig("") == 0
 
 
-# -- migrate docs / tables -------------------------------------------------------
+# -- migrate docs ----------------------------------------------------------------
 
-def test_migrate_docs_and_tables_are_one_shot(tmp_path):
+def test_migrate_docs_is_one_shot(tmp_path):
     import json
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     moy_carts.save_notes(json.dumps({"notes": [{"body": "hello"}]}), root)
-    moy_carts.save_sheets(json.dumps(
-        {"sheets": [{"format": "moysheet-v1", "name": "S", "cells": {}}]}), root)
     assert moy_carts.migrate_docs(root)
-    assert moy_carts.migrate_tables(root)
     assert len(moy_carts.list_files("docs", root)) == 1
-    assert len(moy_carts.list_files("tables", root)) == 1
-    # Both are gated on their kind dir existing -> never re-run.
+    # Gated on the kind dir existing -> never re-runs.
     assert moy_carts.migrate_docs(root) is None
-    assert moy_carts.migrate_tables(root) is None
 
 
 # -- documents are plain Markdown (2026-09-07) -------------------------------
@@ -420,7 +415,7 @@ def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
 
 
 def test_ops_since_keyframe_is_the_one_sidecar_window():
-    """The ONE reader every undo-seeding app goes through (Writer, Sheets, the
+    """The ONE reader every undo-seeding app goes through (Writer, the
     Files role's history_ops): everything after the LAST keyframe, in order."""
     kf = {"t": "kf", "doc": "X"}
     seg = lambda *ops: {"t": "seg", "ops": list(ops)}
@@ -536,3 +531,24 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
     assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
     on_disk = moy_carts.load_history("docs", "story", root)
     assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
+
+
+# -- the stored-blob decoders ----------------------------------------------------
+
+def test_decode_table_trims_to_populated_extent():
+    blob = json.dumps({"format": "moysheet-v1", "name": "wave",
+                       "cells": {"A1": {"f": "", "v": 1},
+                                 "B1": {"f": "=A1+1", "v": 2},
+                                 "A2": {"f": "", "v": "hello"}}})
+    assert moy_carts.decode_table(blob) == [[1, 2], ["hello", ""]]
+
+
+def test_decode_text_splits_body_into_lines():
+    blob = json.dumps({"format": "moytext-v1", "body": "line one\nline two"})
+    assert moy_carts.decode_text(blob) == ["line one", "line two"]
+
+
+def test_decoders_degrade_on_garbage():
+    for bad in ("", "not json", "{}", '{"cells": null}', "[]", None):
+        assert moy_carts.decode_table(bad) == []
+        assert moy_carts.decode_text(bad) == []

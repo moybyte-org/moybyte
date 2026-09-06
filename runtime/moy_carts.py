@@ -147,18 +147,14 @@ NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
 # Desk Lab interop assets (#78): the tiny cart-folder documents a game reads back
-# through the table(name)/text(name) cart verbs -- the Sheets + Writer analogue of
+# through the table(name)/text(name) cart verbs -- the document analogue of
 # Paint's images/<name>.moyimg. A .moysheet is the moysheet-v1 JSON blob (formula +
-# computed value per cell, from Sheets); a .moytext is the moytext-v1 blob (a
-# Writer doc's body). Kid-greppable, engine-free (the v0.4 portability contract).
+# computed value per cell); a .moytext is the moytext-v1 blob (a document's body).
+# Kid-greppable, engine-free (the v0.4 portability contract).
 TABLES_DIR = "tables"
 TABLE_EXT = ".moysheet"
 TEXTS_DIR = "docs"
 TEXT_EXT = ".moytext"
-# The Sheets app's own workbook (a list of sheets), beside the carts dir exactly
-# like Writer's notes.json / Paint's artwork.moyimg.
-SHEETS_NAME = "sheets.json"
-
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
@@ -483,7 +479,7 @@ def save_notes(text, root=CARTS_DIR):
 
 # --- Desk Lab interop (#78): table(name) / text(name) cart-folder documents ---
 #
-# A game reads a Sheets sheet or a Writer doc placed in ITS OWN cart folder, the
+# A game reads a sheet or a doc placed in ITS OWN cart folder, the
 # exact mirror of Paint's image(name) -> images/<name>.moyimg. The decoders turn a
 # tiny JSON blob into the plain-Python shape the cart verb hands the kid (rows of
 # values / lines of text); both are guarded so a missing/bad file degrades to an
@@ -584,14 +580,14 @@ def _ref_to_rc(ref):
 
 
 def load_tables(path):
-    """A cart's Sheets assets: {name: rows} for every tables/<name>.moysheet blob
+    """A cart's table assets: {name: rows} for every tables/<name>.moysheet blob
     (name = filename without the extension), decoded to rows. {} when the cart has
     no tables/ dir. Mirrors load_images' degrade-don't-throw contract."""
     return _load_docs(path, TABLES_DIR, TABLE_EXT, decode_table)
 
 
 def load_texts(path):
-    """A cart's Writer assets: {name: lines} for every docs/<name>.moytext blob,
+    """A cart's doc assets: {name: lines} for every docs/<name>.moytext blob,
     decoded to lines. {} when the cart has no docs/ dir."""
     return _load_docs(path, TEXTS_DIR, TEXT_EXT, decode_text)
 
@@ -612,33 +608,11 @@ def _load_docs(path, subdir, ext, decode):
     return out
 
 
-def save_table(cart, name, text):
-    """Attach a sheet to a cart as tables/<name>.moysheet (atomically, like
-    save_image). `text` is the moysheet-v1 JSON blob; the cart then reads it via
-    the table(name) verb."""
-    _mkdir(cart["path"] + "/" + TABLES_DIR)
-    _write_atomic(cart["path"] + "/" + TABLES_DIR + "/" + name + TABLE_EXT, text)
-
-
 def save_text(cart, name, text):
     """Attach a Writer doc to a cart as docs/<name>.moytext (atomically). `text`
     is the moytext-v1 JSON blob; the cart reads it via the text(name) verb."""
     _mkdir(cart["path"] + "/" + TEXTS_DIR)
     _write_atomic(cart["path"] + "/" + TEXTS_DIR + "/" + name + TEXT_EXT, text)
-
-
-# --- the Sheets app's own workbook (a list of sheets), beside the carts dir ---
-
-def sheets_path(root=CARTS_DIR):
-    return _sibling_path(root, SHEETS_NAME)
-
-
-def load_sheets(root=CARTS_DIR):
-    return _read_sibling(root, SHEETS_NAME)
-
-
-def save_sheets(text, root=CARTS_DIR):
-    _write_sibling(root, SHEETS_NAME, text)
 
 
 def slug(title):
@@ -960,9 +934,11 @@ def is_packed(seed):
 # The list is the 2026-09-06 bench fold (three benches became phases of Bench
 # and Bench Lua) plus the 2026-07-29 RENAME's leftovers: b4cc0d8 renamed the
 # folders as well as the titles, so every board seeded before it has carried a
-# second, stale copy of Brick Siege and Harpoon Pop ever since.
-RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble")
-RETIRED_GEN = 1
+# second, stale copy of Brick Siege and Harpoon Pop ever since. Sheets is the
+# 2026-09-07 deletion of the spreadsheet app.
+RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
+           "Sheets")
+RETIRED_GEN = 2
 RETIRED_VER_NAME = "retired.ver"
 
 
@@ -1112,7 +1088,7 @@ def load(path):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
         scenes = load_scenes(path)                # scene assets (#85), {} if none
-        tables = load_tables(path)                # Sheets docs (#78), {name: rows}, {} if none
+        tables = load_tables(path)                # cart tables/ (#78), {name: rows}, {} if none
         texts = load_texts(path)                  # Writer docs (#78), {name: lines}, {} if none
         return {
             "path": path,
@@ -1196,7 +1172,7 @@ def load(path):
             # manifest are appended sorted, so a hand-added scene still loads).
             "scenes": scenes,
             "scene_names": scene_names(man, scenes),
-            # Desk Lab interop (#78): Sheets sheets ({name: rows}) + Writer docs
+            # Desk Lab interop (#78): sheets ({name: rows}) + docs
             # ({name: lines}) placed in the cart folder, read via table()/text().
             "tables": tables,
             "texts": texts,
@@ -2150,7 +2126,7 @@ def save_file(kind, name, text, root=CARTS_DIR):
 
 # --- op-history sidecars (#111): keyframe + op segments per user file --------
 #
-# The #111 keyframe+ops undo model for Desk Lab apps (Paint/Writer/Sheets). A
+# The #111 keyframe+ops undo model for Desk Lab apps (Paint/Writer). A
 # per-file history lives in a HIDDEN sibling of the kind dirs --
 # files/.history/<kind>/<name>.jsonl -- one append-only JSONL of records:
 #
@@ -2632,35 +2608,6 @@ def migrate_doc_format(root=CARTS_DIR, generation=DOCS_GEN):
     except OSError:
         return gone          # a read-only store: sweep again next boot, harmless
     return gone
-
-
-def migrate_tables(root=CARTS_DIR):
-    """One-shot #108 migration: the legacy single-file Sheets workbook
-    (sheets.json, a list of moysheet-v1 dicts) becomes one
-    files/tables/<name>.moysheet per sheet. Gated on files/tables/ not existing
-    yet. Each entry is already a moysheet-v1 blob, so it is written verbatim (it
-    stays readable by table() unchanged). No-op when there is nothing to
-    migrate; returns the list of made names, or None."""
-    if _exists(file_kind_dir("tables", root)):
-        return None
-    blob = load_sheets(root)
-    if not blob:
-        return None
-    try:
-        data = json.loads(blob)
-    except (ValueError, TypeError):
-        return None
-    sheets = data.get("sheets") if isinstance(data, dict) else None
-    if not isinstance(sheets, list) or not sheets:
-        return None
-    made = []
-    for entry in sheets:
-        if not isinstance(entry, dict):
-            continue
-        base = entry.get("name") if isinstance(entry.get("name"), str) else None
-        name = new_file_name("tables", root, base=base)
-        made.append(save_file("tables", name, json.dumps(entry), root))
-    return made or None
 
 
 # --- provenance stamps (#108 phase 2): a copy remembers its source ----------

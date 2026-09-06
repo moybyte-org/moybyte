@@ -7,7 +7,6 @@ tail could be backspaced away but never typed back."""
 from runtime import host_app, moy_carts
 from runtime.app_shell import ListShellApp
 from runtime.files_app import FilesAppLayer
-from runtime.sheets_app import SheetsAppLayer
 from runtime.writer_app import WriterAppLayer
 
 
@@ -48,17 +47,6 @@ def _writer(tmp_path):
     return app
 
 
-def _sheets(tmp_path):
-    carts = str(tmp_path / "carts")
-    moy_carts.save_file("tables", LONG, '{"format": "moysheet-v1", "cells": {}}', carts)
-    ws = host_app.build_workstation(carts)
-    _open(ws, "Sheets")
-    app = ws.sheets_app
-    app._open_file(LONG)
-    app._begin_rename()
-    return app
-
-
 def _files(tmp_path):
     carts = str(tmp_path / "carts")
     moy_carts.save_file("docs", LONG, "x", carts)
@@ -70,7 +58,7 @@ def _files(tmp_path):
     return app
 
 
-OPENERS = (("writer", _writer), ("sheets", _sheets), ("files", _files))
+OPENERS = (("writer", _writer), ("files", _files))
 
 
 def test_every_rename_seed_is_typable(tmp_path):
@@ -93,13 +81,13 @@ def test_every_rename_seed_is_typable(tmp_path):
 def test_rename_cap_lives_only_on_the_class(tmp_path):
     """No second copy of the cap: each app declares RENAME_MAX (or inherits the
     base's) and the seed slices THAT, so the two cannot drift apart."""
-    for cls in (WriterAppLayer, SheetsAppLayer, FilesAppLayer):
+    for cls in (WriterAppLayer, FilesAppLayer):
         assert isinstance(cls.RENAME_MAX, int) and cls.RENAME_MAX > 0
-    # All three inherit the base's cap. Files carried its own 20 until
-    # 2026-08-22 and renames the same docs and tables the other two do, so it
+    # Both inherit the base's cap. Files carried its own 20 until
+    # 2026-08-22 and renames the same docs the other does, so it
     # silently truncated names they accept.
-    for cls in (WriterAppLayer, SheetsAppLayer, FilesAppLayer):
+    for cls in (WriterAppLayer, FilesAppLayer):
         assert cls.RENAME_MAX == ListShellApp.RENAME_MAX
-    import runtime.files_app, runtime.sheets_app, runtime.writer_app
-    for mod in (runtime.files_app, runtime.sheets_app, runtime.writer_app):
+    import runtime.files_app, runtime.writer_app
+    for mod in (runtime.files_app, runtime.writer_app):
         assert not hasattr(mod, "MAX_NAME"), mod.__name__

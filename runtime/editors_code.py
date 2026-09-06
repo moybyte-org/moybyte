@@ -51,7 +51,7 @@ class CodeEditor:
         # set_text() (a reload) so a copy survives switching what you view.
         # `clip` (#132) is the OPTIONAL system clipboard (widgets.Clipboard):
         # copy/cut write THROUGH it and paste prefers it, so a copy here lands
-        # in Writer/Sheets and vice versa. None (unit tests, embedding) keeps
+        # in Writer and vice versa. None (unit tests, embedding) keeps
         # the local-only behavior exactly.
         self.clipboard = ""
         self.clip = clip

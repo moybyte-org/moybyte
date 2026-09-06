@@ -18,7 +18,7 @@ Labels are applied on four orthogonal axes plus a `tracker` marker.
 | `area:player` | The `run(cart)` player black box + exit model |
 | `area:blocks` | Block language → Python compiler and block UX |
 | `area:carts` | Cart runtime, the `.moy` format, the cart API, seed games, runtimes (Lua) |
-| `area:apps` | Non-game apps: Desk Lab (Writer/Storybook/Sheets), quest system |
+| `area:apps` | Non-game apps: Desk Lab (Writer/Storybook), quest system |
 | `area:audio` | AudioEngine, sfx/music, sound packs, codec bring-up |
 | `area:input` | Keyboard/trackball/touch/BLE/USB-HID, on-screen + unified input model |
 | `area:multiplayer` | ESP-NOW, local co-op, sharing, `net.*` |

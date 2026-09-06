@@ -180,7 +180,7 @@ GOLDEN_EXCLUDE = {
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "appearance", "writer", "storybook", "sheets", "files", "calc")
+APPS = ("artwork", "appearance", "writer", "storybook", "files", "calc")
 
 # The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
 # service, for two reasons that are both about not moving the other 87 hashes:

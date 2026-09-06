@@ -2302,8 +2302,6 @@ class WindowedWM(FullscreenStackWM):
             ws.writer_app.flush(force=True)   # the strip X must never lose typed notes
         if kind == "storybook":
             ws.storybook_app._commit_deck()   # same rule for an open story
-        if kind == "sheets":
-            ws.sheets_app.flush(force=True)   # same rule for an open sheet
         if kind == "artwork":
             ws.artwork_app._save()            # same rule for the open drawing
         if kind == "menu":

@@ -196,7 +196,7 @@ _HOT = {
     # observed value, so a canvas() call added inside a per-widget helper fails
     # here instead of costing a hop per widget on glass.
     "calc": 1, "artwork": 1, "appearance": 1, "writer": 1,
-    "storybook": 1, "sheets": 1, "files": 1,
+    "storybook": 1, "files": 1,
 }
 
 
@@ -271,8 +271,8 @@ def test_the_no_store_sentinel_survives_the_dual_import(tmp_path):
     ws = _ws(tmp_path)
     ws.carts_store = None
     _v, err = ws.app_context("demo", ("files",)).files.load("docs", "x")
-    assert ws.sheets_app._persist((None, err)) is False
-    assert ws.sheets_app.status == "CAN'T SAVE HERE"
+    assert ws.writer_app._persist((None, err)) is False
+    assert ws.writer_app.status == "CAN'T SAVE HERE"
 
 
 # -- PERF: the roles are built at BOOT, never per frame ------------------------
@@ -319,7 +319,7 @@ def test_role_objects_are_allocated_once_at_boot_and_never_per_frame(tmp_path,
                                                           sorted(set(built)))
 
 
-@pytest.mark.parametrize("kind", ("calc", "files", "sheets", "writer"))
+@pytest.mark.parametrize("kind", ("calc", "files", "writer"))
 def test_an_open_app_still_paints_only_on_damage(tmp_path, kind):
     """The redraw gate, per app. `ctx.damage.all()` replaced ~90 `ws._dirty =
     True` assignments, and a role verb called where a bare assignment was not
@@ -402,7 +402,7 @@ def test_the_persist_status_contract_still_distinguishes_the_two(tmp_path):
     CAN'T SAVE <why>. Those strings are DRAWN, so this pins the seam that used
     to be three hand-rolled try/excepts."""
     ws = _ws(tmp_path)
-    app = ws.sheets_app
+    app = ws.writer_app
     ws.carts_store = None
     assert app._persist((None, _ac.NO_STORE)) is False
     assert app.status == "CAN'T SAVE HERE"
@@ -922,7 +922,7 @@ def test_the_host_calls_close_on_every_registered_app(tmp_path):
     assert Demo.closed == 1, "the host did not call close() on the way home"
 
 
-@pytest.mark.parametrize("kind", ("writer", "sheets", "storybook", "artwork"))
+@pytest.mark.parametrize("kind", ("writer", "storybook", "artwork"))
 def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
     ws = _ws(tmp_path)
     app = ws._apps_by_id[kind]
@@ -937,7 +937,7 @@ def test_every_persisting_app_implements_the_leaving_hook(kind, tmp_path):
 # and host_app.py -- neither is a system app and neither is in Phase 6's scope,
 # so that condition is unsatisfiable as written.
 MIGRATED = ("calc_app", "appearance_app", "writer_app", "storybook_app",
-            "sheets_app", "files_app", "artwork", "app_shell")
+            "files_app", "artwork", "app_shell")
 
 
 @pytest.mark.parametrize("mod", MIGRATED)
@@ -960,8 +960,7 @@ def test_no_migrated_module_reaches_the_workstation(mod):
 # shared FileGridView widget still duck-types on ws.carts_store / ws.carts_root /
 # ws._with_sd. This set may only SHRINK -- giving that widget the files role is
 # what deletes the escape hatch, and Phase 7 must never grant it to a cart.
-SHELL_CONSUMERS = {"PaintAppLayer", "WriterAppLayer", "SheetsAppLayer",
-                   "FilesAppLayer"}
+SHELL_CONSUMERS = {"PaintAppLayer", "WriterAppLayer", "FilesAppLayer"}
 
 
 def test_the_shell_escape_hatch_has_a_pinned_consumer_list():

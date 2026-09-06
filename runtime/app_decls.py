@@ -28,7 +28,6 @@ APPS = [
     {'id': 'appearance', 'entry': 'appearance_app:AppearanceAppLayer', 'text_mode': False, 'order': 20, 'folder': 'theme_picker', 'title': 'Appearance'},
     {'id': 'writer', 'entry': 'writer_app:WriterAppLayer', 'text_mode': True, 'order': 30, 'folder': 'writer', 'title': 'Writer'},
     {'id': 'storybook', 'entry': 'storybook_app:StorybookAppLayer', 'text_mode': False, 'order': 40, 'folder': 'storybook', 'title': 'Storybook'},
-    {'id': 'sheets', 'entry': 'sheets_app:SheetsAppLayer', 'text_mode': True, 'order': 50, 'folder': 'sheets', 'title': 'Sheets'},
     {'id': 'files', 'entry': 'files_app:FilesAppLayer', 'text_mode': True, 'order': 60, 'folder': 'files', 'title': 'Files'},
     {'id': 'calc', 'entry': 'calc_app:CalcAppLayer', 'text_mode': False, 'order': 70, 'folder': 'calc', 'title': 'Calc'},
 ]

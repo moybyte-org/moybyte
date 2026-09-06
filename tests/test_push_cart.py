@@ -677,7 +677,7 @@ def _sub(cart, rel, data):
 
 
 def test_a_carts_subfolders_travel_with_it(monkeypatch, tmp_path):
-    """A cart is a TREE. `scenes/`, `images/` and `sheets/` are as much the
+    """A cart is a TREE. `scenes/`, `images/` and `tables/` are as much the
     cart as main.py is, and a listdir walk left every one of them on the host:
     the cart landed on the board without the assets it needs, and the folders
     were never made there either."""

@@ -282,7 +282,7 @@ word — it's a deliberate mapping that mirrors the product journey:
 |---|---|---|
 | **cartridge / cart** | The object on the shelf — the thing you play and own. The universal noun; "everything is a cartridge" is the product | Library, `CART INFO`, `RESTART CART`, crash panel |
 | **project** | The *same* cartridge while open in the Studio — yours, in progress | Picker (`PICK A PROJECT`), `YOUR PROJECTS`, MAKE captions |
-| **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs, sheets attach |
+| **game** | Only cartridges that are actually games (attach-to-game flows, `NO GAMES YET`) | Files app verbs |
 | **app** | System tools (Files, Paint, Writer, Settings) | Docs, taskbar |
 
 A cartridge *becomes* a project when you open it and goes back to being a

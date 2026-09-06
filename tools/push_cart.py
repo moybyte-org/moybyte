@@ -311,7 +311,7 @@ def push_file_raw(b, src, dst, window, verbose=False):
 def cart_files(cart):
     """Every file in the cart folder, RELATIVE to it, forward-slashed.
 
-    A cart is a TREE, not a flat list: `scenes/`, `images/` and `sheets/` are
+    A cart is a TREE, not a flat list: `scenes/`, `images/` and `tables/` are
     as much the cart as main.py is, and a listdir walk left every one of them
     on the host -- the cart arrived on the board without the assets it needs,
     and `--only scenes/x.moyscene` could not name one. Forward slashes because

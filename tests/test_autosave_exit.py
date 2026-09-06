@@ -128,19 +128,6 @@ def test_windowed_make_window_close_commits_code_edit(tmp_path):
         "closing the Make window must hard-commit the Editor's active tab (#111)"
 
 
-def test_windowed_sheets_window_close_commits_the_open_sheet(tmp_path):
-    """Same #111 gap, the Sheets app: closing its window via the strip X must
-    flush the open sheet (sheets_app.flush), matching writer/storybook."""
-    ws = _ws(tmp_path, sys_size=(1024, 600), font_scale=2, windowed=True)
-    ws.open_app(ws.sheets_app)
-    app = ws.sheets_app
-    app._new_sheet()
-    app.sheet.set_cell(0, 0, "42")
-    app._unsaved = True
-    ws.wm.close_window_kind("sheets")
-    assert app._unsaved is False, "closing the Sheets window must flush the open sheet"
-
-
 def test_windowed_artwork_window_close_commits_the_drawing(tmp_path):
     """Same #111 gap, the Paint app (#108 user drawings): closing its window via
     the strip X must flush the open drawing (artwork_app._save)."""

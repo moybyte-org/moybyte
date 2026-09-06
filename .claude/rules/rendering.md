@@ -133,7 +133,7 @@ left:
 - **A user can add an app.** `runtime/system_api.py` maps manifest permissions to
   roles as an ALLOWLIST; never grantable: `shell`, `carts`, `wallpaper`, `artwork`,
   `damage`, `surface`, `clipboard`, `notify`. **An ungranted verb is ABSENT, not
-  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Sheets/Files/Paint
+  stubbed** (`system_carts/notes.moy` is the proof). Storybook/Files/Paint
   STAY shell code; Calc is portable today.
 - **The windowed DESK world must NOT bind the system canvas** — a cart there lives
   in a window whose blit source IS `ws.canvas`, so binding makes the desktop blit

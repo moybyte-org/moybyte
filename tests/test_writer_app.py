@@ -353,8 +353,8 @@ def _blocked_prune(*_a, **_k):
 
 def test_reopen_seeds_only_the_ops_after_the_last_keyframe(tmp_path, monkeypatch):
     """One on-disk format, one reader: a keyframe supersedes every record before
-    it, so a reopen seeds from it forward -- the same window Sheets reads from
-    the same bytes. Flattening EVERY segment instead looks right only while
+    it, so a reopen seeds from it forward. Flattening EVERY segment instead
+    looks right only while
     prune_history keeps dropping the superseded ones on each append."""
     carts = str(tmp_path / "carts")
     ws = host_app.build_workstation(carts)

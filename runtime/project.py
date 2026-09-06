@@ -78,7 +78,7 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 
 class _ConfigOps(OpCodec):
     """OpCodec for the CONFIG tab (#111 phase 4): an op is `{"k":key,"o":old,
-    "n":new}` -- one field's old/new value, the exact Sheets cell-codec shape
+    "n":new}` -- one field's old/new value, a single-cell codec shape
     (invert is O(1): write `o`/`n` straight back). The doc is the Project
     itself (config lives directly in `doc.config`, a plain dict -- there is no
     separate ConfigEditor instance the way paint/map/scene/music each have
@@ -115,7 +115,7 @@ class Project:
         self.flags = None             # 512 tile flag bytes (SPEC.md 3.5, built on open)
         self.images = None            # {name: .moyimg text} for the open cart (#63);
                                       # make_api decodes each lazily via image(name)
-        self.tables = None            # {name: rows} Sheets docs, read via table() (#78)
+        self.tables = None            # {name: rows} cart tables/, read via table() (#78)
         self.texts = None             # {name: lines} Writer docs, read via text() (#78)
         self.pmem = None              # Pmem (persistent cart store) for the open cart
         self.scenes = None            # Scenes (#85): the open cart's placed-actor
@@ -402,7 +402,7 @@ class Project:
         """Record one field's old/new value (#111): called by every config
         mutation point (Workstation.adjust's left/right stepper, the CardsLayer
         choice-cell tap) AFTER the field is already written, mirroring the
-        paint/map/scene/sheets record() contract. A same-value set records
+        paint/map/scene record() contract. A same-value set records
         nothing."""
         if old != new:
             self.config_hist.record({"k": key, "o": old, "n": new})

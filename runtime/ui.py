@@ -395,7 +395,7 @@ _CHIP_STATES = {
     ON:       (_ACCENT, _BLACK, _EDGE),
     HOT:      (_DANGER, _WHITE, _DIM),
     PRESSED:  (_PRESS, _PRESS_INK, _EDGE),
-    # What `writer_app._hist_btn` and `sheets_app._icon_btn` hand-roll: the
+    # What the apps' private icon buttons hand-roll: the
     # quiet chip shell with the ink (and the edge) carrying the affordance,
     # because there is no dimmed sprite -- only a dimmed colour.
     DISABLED: (_PANEL, _DIS_INK, _DIS_EDGE),
@@ -945,9 +945,9 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE).
 
     `disabled` + `state` are the six-state model (see `widget_state`), and both
-    default to the exact pixels the goldens pin. `disabled` is what the three
-    live private copies -- `writer_app._hist_btn`, `sheets_app._icon_btn`,
-    `code_layer._panel_btn` -- each dim by hand today.
+    default to the exact pixels the goldens pin. `disabled` is what the two
+    live private copies -- `writer_app._hist_btn` and `code_layer._panel_btn`
+    -- each dim by hand today.
 
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
     (field, ink, edge) triple bypassing the skin, for a site whose pixels are
@@ -1124,7 +1124,7 @@ def row(cv, th, rect, label, kind="row", on=False, hot=False, disabled=False,
         if label:
             cv.print(label, tx, ty, ink, scale)
     # A DISABLED row registers nothing: "dim ink, non-registering" is the whole
-    # point of the state -- the three sites that hand-roll disabled ink today
+    # point of the state -- the sites that hand-roll disabled ink today
     # all still accept taps, which is the bug the state absorbs.
     if hits is not None and verb is not None and st != DISABLED:
         hits.add(rect, verb, arg)
