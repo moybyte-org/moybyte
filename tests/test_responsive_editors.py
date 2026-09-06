@@ -301,6 +301,121 @@ def test_font_scale_change_reflows_open_code_editor(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Entering a tab RE-DERIVES its geometry (#216) -- and must not move the view.
+#
+# Owner on the T-Deck: "code tab is now buggy while moving around the menu".
+# _relayout_tab runs on EVERY entry into a tab, and the Code tab's relayout handed
+# the editor a view size unconditionally; set_view_size re-runs the caret-follow
+# scroll, so walking the tab ladder (or re-tapping CODE while already on it) yanked
+# the view back to the caret. Driven at the T-Deck's own 320x240/1x.
+# ---------------------------------------------------------------------------
+
+_LONG_SRC = "\n".join("# line %d" % i for i in range(90))
+
+
+def _scrolled_code_ws(tmp_path, **kw):
+    """The Code tab, open in the EDITOR, with the caret on one line and the view
+    panned AWAY from it -- what a kid has after tapping a line and drag-scrolling."""
+    from runtime import host_app
+    ws = host_app.build_workstation(str(tmp_path / "carts"), **kw)
+    ws.launcher.sel = 0
+    ws.open_in_editor()
+    ws.set_menu_view("code")
+    ed = ws.editor
+    ed.set_text(_LONG_SRC)
+    ed.row, ed.col = 20, 3
+    ed.scroll(40, 0)                        # the drag-scroll verb: view only
+    assert ed.top >= ed.row + ed.ROWS, "the caret must be off-screen for this test"
+    return ws, ed
+
+
+def _view(ed):
+    return (ed.row, ed.col, ed.top, ed.left)
+
+
+def test_leaving_and_re_entering_code_keeps_the_view(tmp_path):
+    ws, ed = _scrolled_code_ws(tmp_path)
+    was = _view(ed)
+
+    ws.set_menu_view("paint")
+    ws.set_menu_view("code")
+
+    assert ws.editor is ed                  # the same buffer came back...
+    assert _view(ed) == was, "entering the Code tab must not move the view (#216)"
+
+
+def test_re_entering_the_tab_already_shown_keeps_the_view(tmp_path):
+    """Tapping CODE while already on CODE is a set_tab call like any other -- it
+    re-derives the layout, and that is not a reason to scroll."""
+    ws, ed = _scrolled_code_ws(tmp_path)
+    was = _view(ed)
+
+    ws.set_menu_view("code")
+
+    assert _view(ed) == was
+
+
+def test_re_entry_keeps_the_view_with_the_gutter_on(tmp_path):
+    """The line-number gutter NARROWS the editor's own window every draw, so a gate
+    that compared the editor's live window against the layout would re-widen it on
+    entry and scroll after all. The gate compares LAYOUTS."""
+    ws, ed = _scrolled_code_ws(tmp_path)
+    ws.code_layer._gutter = True
+    ws.code_layer._apply_gutter(ws.code_layout, ed)
+    ed.scroll(40, 0)                        # _apply_gutter re-clamped; pan away again
+    narrowed = ed.COLS
+    was = _view(ed)
+
+    ws.set_menu_view("map")
+    ws.set_menu_view("code")
+
+    assert _view(ed) == was
+    assert ed.COLS == narrowed              # ...and the gutter's window survived
+
+
+def test_a_pending_commit_does_not_move_the_view_either(tmp_path):
+    """Moving around the ladder with an edit still inside its debounce window: the
+    tab switch commits it (it is a hard exit path) and nothing about the view jumps
+    -- neither the caret nor the scroll. The edit is HALF-TYPED, which is what a kid
+    moving around the menu actually has: it is kept (#154) and badged, and badging
+    must not walk the caret onto the error the way the run gate does."""
+    from runtime import moy_carts
+    ws, ed = _scrolled_code_ws(tmp_path)
+    path = ws.cart["path"]
+    ed.row, ed.col = len(ed.lines) - 1, len(ed.lines[-1])
+    for ch in b"\nx = (":                   # a line the kid has not finished
+        ed.key(ch)
+    ed.scroll(-40, 0)                       # ...then look somewhere else
+    was = _view(ed)
+
+    ws.set_menu_view("music")
+    ws.set_menu_view("code")
+
+    assert _view(ed) == was
+    assert moy_carts.load(path)["src"] == ed.text()
+    assert (ws.save_status or "").startswith("SYNTAX"), ws.save_status
+
+
+def test_the_code_tab_still_reflows_when_the_window_really_changes(tmp_path):
+    """The gate must not cost the reflow it guards: a font-scale change is a REAL
+    new window, so the editor adopts it and re-clamps onto the caret. (The 320x240
+    tier cannot show this -- its effective font scale degrades back to 1.)"""
+    ws = _ws(tmp_path, sys_size=(960, 600))
+    _enter(ws, "code")
+    ed = ws.editor
+    ed.set_text(_LONG_SRC)
+    ed.row, ed.col = 80, 0
+    ed._scroll()
+    rows1 = ed.ROWS
+    assert ed.top > 0
+
+    ws.look.set_font_scale(2, persist=False)
+
+    assert ed.ROWS != rows1                 # the window really reflowed
+    assert ed.top <= ed.row < ed.top + ed.ROWS, "a reflow re-clamps onto the caret"
+
+
+# ---------------------------------------------------------------------------
 # Step 3: the PAINT + MAP editors are system-domain responsive too.
 # ---------------------------------------------------------------------------
 

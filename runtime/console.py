@@ -1459,12 +1459,26 @@ class Workstation:
         """Rebuild the Code tab's geometry and let an open editor adopt it live (so a
         font/size change reflows without losing the buffer). The ONE author of
         `code_layout` after __init__ -- _relayout above and EditorApp._relayout_tab
-        (entering the tab, #216) both come through here."""
-        self.code_layout = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
-                                      self.look.effective_font_scale(),
-                                      self.look.effective_chrome_scale())
-        if self.editor is not None:
-            self.editor.set_view_size(self.code_layout.cols, self.code_layout.rows)
+        (entering the tab, #216) both come through here.
+
+        Adopting is gated on the LAYOUT's window actually changing, because
+        `set_view_size` re-runs the caret-follow scroll and this now runs on EVERY
+        entry into the tab. A kid who scrolled away from the caret and came back
+        through the tab ladder -- or re-tapped CODE while already on it -- had the
+        view snapped back to the caret. Re-deriving geometry must not move what the
+        kid is looking at; only a real reflow may. The gate compares LAYOUTS, not
+        the editor's live window, because the line-number gutter narrows that
+        window itself (code_layer._apply_gutter) and re-widening it here would
+        yank the view on every entry with the gutter on."""
+        prev = getattr(self, "code_layout", None)
+        lay = CodeLayout(self.sys_canvas.w, self.sys_canvas.h,
+                         self.look.effective_font_scale(),
+                         self.look.effective_chrome_scale())
+        self.code_layout = lay
+        ed = self.editor
+        if ed is not None and (prev is None
+                               or (prev.cols, prev.rows) != (lay.cols, lay.rows)):
+            ed.set_view_size(lay.cols, lay.rows)
 
 
     # -- WEB CONSOLE (#197): forwards to the `web` collaborator ---------------
