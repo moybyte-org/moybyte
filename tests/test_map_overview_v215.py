@@ -3,14 +3,20 @@
 `spr` upscales by whole numbers only, so 8px is the floor of the detail rungs: a
 tile cannot shrink into a smaller cell, it spills over its neighbours. Below the
 tile the editor stops drawing tiles and paints each cell as a solid block of its
-tile's DOMINANT COLOUR -- a minimap that fits any map at 1-7px per cell.
+tile's DOMINANT COLOUR -- a minimap, at 4-7px per cell.
+
+The 4px FLOOR is the owner's call from T-Deck glass (2026-09-06): fitting Sky Run's
+100 columns into the 192px view took a 1px cell, and a 1px minimap is not a picture
+of a level. So the rung stops shrinking at `_MV_FIT_MIN` and PANS below it, on the
+same camera and clamp every other rung uses.
 
 Three layers:
   * the dominant colour itself (`SpriteSheet.tile_color`) and its invalidation,
-  * the fit arithmetic against every SHIPPED map on every tier's view rectangle,
+  * the fit arithmetic against every SHIPPED map on every tier's view rectangle --
+    which maps fit whole at the floor and which pan,
   * the rung through the shared console the device runs -- cycling, drawing,
-    hit-testing, the keyboard/trackball path, and a relayout (#216 re-enters the
-    tab through `relayout`, so the rung has to survive one).
+    hit-testing, panning, the keyboard/trackball path, and a relayout (#216
+    re-enters the tab through `relayout`, so the rung has to survive one).
 """
 
 import json
@@ -126,36 +132,80 @@ def test_the_seed_store_still_ships_a_map_bigger_than_the_view():
                for _n, w, h in maps)
 
 
-def test_every_shipped_map_fits_whole_at_overview_on_every_tier():
+# The maps that do NOT fit whole at the 4px floor, per tier -- the exhaustive
+# complement of "everything else fits". Sky Run's 100 columns need 400px and
+# layer_test's 64 need 256; the 320x240 view has 192, the 480x320 one 352.
+PANS_AT_THE_FLOOR = {
+    (320, 240, 1): {"layer_test.moy", "scroll_demo.moy"},
+    (480, 320, 1): {"scroll_demo.moy"},
+    (800, 480, 3): set(),
+    (1024, 600, 2): set(),
+}
+
+
+def test_every_shipped_map_reaches_overview_at_a_readable_cell():
+    # Every map reaches the rung, and none of them reaches it below the readability
+    # floor -- that is what the rung promises now. Fitting whole is the second
+    # promise and only where the view can afford it (below).
     from runtime import map_editor_ui as M
     for w, h, fs in TIERS:
         lay = M.MapLayout(w, h, fs)
         for name, mw, mh in _shipped_maps():
             cell = M._mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h, mw, mh)
             where = "%s %dx%d on %dx%d fs%d" % (name, mw, mh, w, h, fs)
-            assert 1 <= cell <= M._MV_FIT_MAX, where
-            assert cell * mw <= lay.mv_avail_w, where
-            assert cell * mh <= lay.mv_avail_h, where
+            assert M._MV_FIT_MIN <= cell <= M._MV_FIT_MAX, where
 
 
-def test_the_resize_ceiling_fits_at_overview_on_the_smallest_view():
-    # A kid cannot make a map the overview rung would fail to show whole: the DIM
-    # panel stops at _MAP_MAX_DIM, which fits at 1px on the tightest view.
+def test_the_maps_that_fit_at_the_floor_fit_whole_and_the_rest_pan():
+    from runtime import map_editor_ui as M
+    for w, h, fs in TIERS:
+        lay = M.MapLayout(w, h, fs)
+        pans = PANS_AT_THE_FLOOR[(w, h, fs)]
+        for name, mw, mh in _shipped_maps():
+            cell = M._mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h, mw, mh)
+            where = "%s %dx%d on %dx%d fs%d" % (name, mw, mh, w, h, fs)
+            whole = (cell * mw <= lay.mv_avail_w and cell * mh <= lay.mv_avail_h)
+            assert whole == (name not in pans), where
+            if not whole:
+                # A map that does not fit sits exactly ON the floor: the fit is what
+                # the floor overrode, never a cell the view could have afforded.
+                assert cell == M._MV_FIT_MIN, where
+
+
+def test_the_floor_shows_far_more_of_a_wide_map_than_the_detail_rung():
+    # The owner's complaint in one assertion: OVERVIEW has to be worth cycling to
+    # for the maps that pan, or it is just the 8px rung with worse pixels.
+    from runtime import map_editor_ui as M
+    lay = M.MapLayout(320, 240, 1)
+    cols_at_8 = lay.mv_avail_w // M._MV_ZOOMS[0]
+    cols_at_ov = lay.mv_avail_w // M._mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h,
+                                                  100, 30)
+    assert cols_at_ov >= 2 * cols_at_8
+
+
+def test_the_resize_ceiling_lands_on_the_floor_and_pans():
+    # A kid CAN now make a map the overview rung cannot show whole -- the DIM panel
+    # goes to _MAP_MAX_DIM, which would need a 2px cell on the tightest view. It
+    # draws at the floor and pans instead.
     from runtime import map_editor_ui as M
     lay = M.MapLayout(320, 240, 1)
     d = M._MAP_MAX_DIM
     cell = M._mv_fit_cell(lay.mv_avail_w, lay.mv_avail_h, d, d)
-    assert cell >= 1
-    assert cell * d <= lay.mv_avail_w and cell * d <= lay.mv_avail_h
+    assert cell == M._MV_FIT_MIN
+    assert cell * d > lay.mv_avail_w
 
 
-def test_fit_cell_never_reaches_the_tile_and_never_divides_by_zero():
+def test_fit_cell_stays_between_its_two_bounds_and_never_divides_by_zero():
     from runtime import map_editor_ui as M
     assert M._mv_fit_cell(192, 164, 1, 1) == M._MV_FIT_MAX      # a 1x1 map
     assert M._mv_fit_cell(192, 164, 0, 0) == M._MV_FIT_MAX      # a map with no cells
     assert M._MV_FIT_MAX < 8                                    # always sub-tile
-    # A map wider in cells than the view is in pixels floors at 1 and pans.
-    assert M._mv_fit_cell(192, 164, 400, 2) == 1
+    assert M._MV_FIT_MIN <= M._MV_FIT_MAX
+    # A map wider in cells than the view can afford stops at the floor and pans.
+    assert M._mv_fit_cell(192, 164, 400, 2) == M._MV_FIT_MIN
+    assert M._mv_fit_cell(192, 164, 4000, 2) == M._MV_FIT_MIN
+    # ...and the fit is still the fit wherever it lands between the bounds.
+    assert M._mv_fit_cell(192, 164, 32, 32) == 5
 
 
 # -- the rung, through the shared console ------------------------------------
@@ -218,9 +268,9 @@ def _cell_px(ws, cx, cy):
             y0 + (cy - me.cam_y) * cell + cell // 2)
 
 
-def test_overview_shows_the_whole_map_and_pins_the_camera(tmp_path):
-    # Sky Run's 100x30 is the widest shipped map and pans at every detail rung.
-    ws, _drv = _open_map(tmp_path, "Sky Run")
+def test_overview_shows_a_fitting_map_whole_and_pins_the_camera(tmp_path):
+    # Hop Quest's 40x26 pans at every detail rung and fits whole at the 4px floor.
+    ws, _drv = _open_map(tmp_path, "Hop Quest")
     tm = ws.project.tilemap
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
     assert cols < tm.w                                   # ...it pans at the default
@@ -230,6 +280,44 @@ def test_overview_shows_the_whole_map_and_pins_the_camera(tmp_path):
     assert cols >= tm.w and rows >= tm.h                 # the whole level, at once
     ws.map_ui._map_pan(1, 1)                             # nowhere left to pan to
     assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)
+
+
+def test_overview_pans_and_clamps_a_map_too_wide_for_the_floor(tmp_path):
+    # Sky Run's 100 columns need 400px at the floor and the 320x240 view has 192,
+    # so the rung PANS -- the same camera and the same clamp as the detail rungs
+    # (owner call, 2026-09-06: most of a level at 4px beats all of it at 1px).
+    from runtime import map_editor_ui as M
+    ws, _drv = _open_map(tmp_path, "Sky Run")
+    tm = ws.project.tilemap
+    _to_overview(ws)
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+    me = ws.map_ui.mapedit
+    assert cell == M._MV_FIT_MIN
+    assert cols < tm.w                                   # wider than the view...
+    assert rows >= tm.h                                  # ...but not taller
+    ws.map_ui._map_pan(10, 0)
+    assert (me.cam_x, me.cam_y) == (10, 0)
+    ws.map_ui._map_pan(0, 5)                             # no vertical room to give
+    assert (me.cam_x, me.cam_y) == (10, 0)
+    ws.map_ui._map_pan(999, 0)                           # clamped to the right edge
+    assert me.cam_x == tm.w - cols
+    ws.map_ui._map_pan(-999, 0)
+    assert me.cam_x == 0
+
+
+def test_overview_hit_tests_through_the_pan_offset(tmp_path):
+    # The far edge of a panning map is only reachable after a pan, and the cell
+    # under the pointer has to account for the camera at a 4px cell too.
+    ws, drv = _open_map(tmp_path, "Sky Run")
+    tm = ws.project.tilemap
+    _to_overview(ws)
+    ws.map_ui._map_pan(tm.w, 0)                          # clamp to the right edge
+    target = (tm.w - 1, tm.h - 1)
+    px, py = _cell_px(ws, *target)
+    assert ws.map_ui._map_cell_at(px, py) == target
+    ws.map_ui.mapedit.n = 5
+    drv.touch(px, py); drv.frame(1 / 30); drv.touch_up(); drv.frame(1 / 30)
+    assert tm.mget(*target) == 5
 
 
 def test_overview_is_the_default_rung_for_nobody(tmp_path):
@@ -363,7 +451,7 @@ def test_overview_hit_tests_and_paints_the_cell_under_the_pointer(tmp_path):
 def test_overview_marquee_selects_the_dragged_cells(tmp_path):
     # SELECT (#91) at sub-8px cells: the marquee is cell-space, so it rubber-bands
     # over the whole level here rather than over one screenful of it.
-    ws, drv = _open_map(tmp_path, "Sky Run")
+    ws, drv = _open_map(tmp_path, "Hop Quest")
     me = ws.map_ui.mapedit
     _to_overview(ws)
     ws.map_ui.map_tool = "select"
@@ -393,17 +481,23 @@ def test_overview_ignores_a_tap_past_the_map_edge(tmp_path):
     assert bytes(tm.cells) == before
 
 
-def test_keyboard_cycles_into_overview_and_the_dpad_still_clamps(tmp_path):
-    # The T-Deck path: A cycles the zoom, the trackball/arrows pan. At overview the
-    # map fits, so a pan is a no-op rather than a scroll off the level.
+def test_keyboard_cycles_into_overview_and_the_dpad_pans_and_clamps(tmp_path):
+    # The T-Deck path: A cycles the zoom, the trackball/arrows pan. Sky Run does not
+    # fit at the floor, so the d-pad scrolls it and clamps at the edges; the
+    # vertical axis fits, so up/down are no-ops.
     ws, drv = _open_map(tmp_path, "Sky Run")
+    me = ws.map_ui.mapedit
     rungs = len(ws.map_ui.layout.zooms)
     for _ in range(rungs - 1):
         _tap_button(drv, "a")
     assert ws.map_ui._mv_overview()
-    for name in ("right", "down", "left", "up"):
-        _tap_button(drv, name)
-    assert (ws.map_ui.mapedit.cam_x, ws.map_ui.mapedit.cam_y) == (0, 0)
+    _tap_button(drv, "right")
+    assert me.cam_x > 0 and me.cam_y == 0
+    _tap_button(drv, "down")
+    assert me.cam_y == 0                      # the map is shorter than the view
+    _tap_button(drv, "left")
+    _tap_button(drv, "up")
+    assert (me.cam_x, me.cam_y) == (0, 0)     # ...and back, clamped at the origin
     _tap_button(drv, "a")                     # ...and it wraps back to the default
     assert ws.map_ui.map_zoom == 0
 
@@ -434,13 +528,17 @@ def test_a_map_resize_refits_the_overview_cell(tmp_path):
     ws, _drv = _open_map(tmp_path, "Brick Siege")
     tm = ws.project.tilemap
     _to_overview(ws)
+    from runtime import map_editor_ui as M
     small = ws.map_ui._mv_metrics()[2]
-    tm.resize(96, 96)
+    tm.resize(40, 26)
     ws.map_ui._map_clamp_cam()
-    big = ws.map_ui._mv_metrics()[2]
-    assert big < small
     x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+    assert cell < small                              # re-fitted, still whole
     assert cols >= tm.w and rows >= tm.h
+    tm.resize(96, 96)                                # ...and past what fits
+    ws.map_ui._map_clamp_cam()
+    x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
+    assert cell == M._MV_FIT_MIN and cols < tm.w
 
 
 def test_overview_is_the_only_sub_tile_rung(tmp_path):
@@ -455,6 +553,7 @@ def test_overview_is_the_only_sub_tile_rung(tmp_path):
 def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
     # The draw itself, on the tiers whose layouts are not the frozen baseline.
     from runtime import host_app
+    from runtime import map_editor_ui as M
     import ws_helpers
     for w, h, fs in TIERS:
         ws = host_app.build_workstation(
@@ -465,7 +564,10 @@ def test_the_map_editor_renders_at_overview_on_every_tier(tmp_path):
         _to_overview(ws)
         tm = ws.project.tilemap
         x0, y0, cell, cols, rows = ws.map_ui._mv_metrics()
-        assert cols >= tm.w and rows >= tm.h, "%dx%d fs%d" % (w, h, fs)
+        where = "%dx%d fs%d" % (w, h, fs)
+        assert M._MV_FIT_MIN <= cell <= M._MV_FIT_MAX, where
+        whole = "scroll_demo.moy" not in PANS_AT_THE_FLOOR[(w, h, fs)]
+        assert (cols >= tm.w and rows >= tm.h) == whole, where
         _paint(ws, drv)
         assert ws.sys_canvas.pix(x0 + cell // 2, y0 + cell // 2) >= 0
 

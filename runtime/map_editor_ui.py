@@ -81,16 +81,22 @@ _MV_AVAIL_H = 164      # usable map-view height (32 .. 196)
 # into bigger cells rather than more map.
 _MV_ZOOMS = [8, 16, 24, 32]
 # The OVERVIEW rung (#215), appended to `layout.zooms` AFTER the detail sizes: the
-# sentinel is not a cell size but "compute one that fits the WHOLE map", resolved by
-# _mv_fit_cell against the live map + view. It is the only rung that draws a cell as
-# a solid block of its tile's dominant colour instead of the tile -- a minimap. The
-# detail rungs are untouched, and the rung the editor OPENS on is still zooms[0], the
-# 8px field size: overview is where you find yourself in a level, not where you paint
-# it, and a tap on a 2px cell is not an edit gesture. Cycling reaches it in one wrap.
+# sentinel is not a cell size but "compute the largest cell that shows the most map",
+# resolved by _mv_fit_cell against the live map + view. It is the only rung that draws
+# a cell as a solid block of its tile's dominant colour instead of the tile -- a
+# minimap. The detail rungs are untouched, and the rung the editor OPENS on is still
+# zooms[0], the 8px field size: overview is where you find yourself in a level, not
+# where you paint it, and a tap on a 2px cell is not an edit gesture. Cycling reaches
+# it in one wrap.
 #
-# _MV_FIT_MAX is one below the tile, so the overview rung is ALWAYS sub-8 and always
-# draws blocks -- a map small enough to fit at 12px still gets the block view rather
-# than a fifth, near-identical tile rung.
+# The cell lives BETWEEN the two constants. _MV_FIT_MAX is one below the tile, so the
+# rung is ALWAYS sub-8 and always draws blocks -- a map small enough to fit at 12px
+# still gets the block view rather than a fifth, near-identical tile rung. _MV_FIT_MIN
+# is the READABILITY floor (owner call on T-Deck glass, 2026-09-06): Sky Run's 100
+# columns fit the 192px view only at 1px per cell, and a 1px minimap is not a picture
+# of a level. Below the floor the rung stops shrinking and PANS like every other rung
+# -- same camera, same clamp, and the cursor/tap/trackball paths already work at
+# sub-8px cells. Seeing most of a level at 4px beats seeing all of it at 1px.
 #
 # This is a FIT TARGET, not a survey of shipped maps. The constants it replaced
 # (_MV_FIT_COLS = 20 "widest shipped map") were read as a survey and went stale the
@@ -98,6 +104,7 @@ _MV_ZOOMS = [8, 16, 24, 32]
 # target is the whole map, whatever its size.
 _MV_OVERVIEW = 0
 _MV_FIT_MAX = 7
+_MV_FIT_MIN = 4
 # The rung's badge, in the title ("zOV") and on the ZOOM button. Two chars, because
 # the 24px button prints at 8px per glyph and "Z" + a three-char label overflows it.
 _MV_OV_LABEL = "OV"
@@ -177,9 +184,9 @@ _MAP_PAN_THRESH = 6
 
 def _mv_fit_cell(avail_w, avail_h, mw, mh):
     """The largest whole-pixel cell at which an mw x mh map fits an avail_w x
-    avail_h view, capped at _MV_FIT_MAX and floored at 1 (#215). A map wider or
-    taller in CELLS than the view is in PIXELS cannot fit at all; it floors at 1 and
-    pans, which _MAP_MAX_DIM (96) keeps out of reach of the editor's own resize."""
+    avail_h view, capped at _MV_FIT_MAX and floored at _MV_FIT_MIN (#215). A map
+    that needs a smaller cell than the floor does not fit whole: it draws at the
+    floor and PANS, exactly as the detail rungs do."""
     if mw < 1 or mh < 1:
         return _MV_FIT_MAX
     cell = avail_w // mw
@@ -188,7 +195,7 @@ def _mv_fit_cell(avail_w, avail_h, mw, mh):
         cell = ch
     if cell > _MV_FIT_MAX:
         return _MV_FIT_MAX
-    return cell if cell > 1 else 1
+    return cell if cell > _MV_FIT_MIN else _MV_FIT_MIN
 
 
 class MapLayout(LayoutBase):
