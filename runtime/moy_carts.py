@@ -146,10 +146,6 @@ COVER_IMAGE = "cover"
 NOTES_NAME = "notes.json"
 DECK_NAME = "deck.json"
 
-# A .moytext is the moytext-v1 blob (a document's body) -- the stored form of
-# every doc in the user-files vault. Kid-greppable, engine-free (the v0.4
-# portability contract).
-TEXT_EXT = ".moytext"
 # A single shared sprite sheet lives alongside the carts dir (one level up, so
 # it sits beside every <name>.moy folder). Tiles painted here are reusable
 # across carts; the import-tile primitive copies tiles between any two sheets.
@@ -472,13 +468,11 @@ def save_notes(text, root=CARTS_DIR):
     _write_sibling(root, NOTES_NAME, text)
 
 
-# --- Desk Lab interop (#78): text(name) cart-folder documents ---
+# --- the document codec ---
 #
-# A game reads a doc placed in ITS OWN cart folder, the exact mirror of Paint's
-# image(name) -> images/<name>.moyimg. The decoder turns a tiny JSON blob into
-# the plain-Python shape the cart verb hands the kid (lines of text), guarded so
-# a missing/bad file degrades to an empty list, never a crash (image()'s
-# degrade-don't-throw contract).
+# One doc in the #108 user-files vault, encoded and decoded. The decoder is
+# guarded so a missing/bad file degrades to an empty list, never a crash
+# (image()'s degrade-don't-throw contract).
 
 def encode_text(body):
     """A doc body string -> the bytes its file holds.
