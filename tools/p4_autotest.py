@@ -642,6 +642,17 @@ class P4Board:
 
         return cx, row_y, lay[3]
 
+    def swipe_settings(self, st=None, rows=2.5, frames=25):
+        """Drag the Settings list up by `rows` rows, starting from the last
+        row INSIDE the view. The row height follows the chrome scale (52px on
+        a board that declares its glass, 26 without), so a fixed start row can
+        sit below the view and move nothing."""
+        st = st or self.state()
+        cx, row_y, row_h = self.settings_geometry(st)
+        start = max(1, st["settings"]["view"][3] // row_h - 1)
+        y0 = row_y(start)
+        self.swipe(cx, y0, cx, y0 - int(rows * row_h), frames=frames)
+
 
 # ---------------------------------------------------------------------------
 # Standalone tour

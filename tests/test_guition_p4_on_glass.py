@@ -108,8 +108,7 @@ def test_settings_rows_fit_or_scroll(board):
     st = board.state()
     view_h = st["settings"]["view"][3]
     content = st["settings"]["content"]
-    cx, row_y, row_h = board.settings_geometry(st)
-    board.swipe(cx, row_y(4), cx, row_y(4) - int(2.5 * row_h), frames=25)
+    board.swipe_settings(st)
     st = board.state()
     if content <= view_h:
         assert (st["settings"]["set_top"] or 0) == 0, st["settings"]

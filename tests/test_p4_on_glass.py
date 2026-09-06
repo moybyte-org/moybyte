@@ -77,8 +77,7 @@ def test_open_settings_window(board):
 
 def test_settings_rows_scroll_on_swipe(board):
     st = board.state()
-    cx, row_y, row_h = board.settings_geometry(st)
-    board.swipe(cx, row_y(4), cx, row_y(4) - int(2.5 * row_h), frames=25)
+    board.swipe_settings(st)
     st = board.state()
     assert (st["settings"]["set_top"] or 0) > 0, st["settings"]
 
