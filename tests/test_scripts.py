@@ -298,4 +298,8 @@ def test_the_router_sends_a_script_to_the_text_page_not_the_editor(tmp_path):
     app._enter_kind("docs")
     assert app.door("hi.py", "docs") == (text_modes.CODE, "hi.py")
     assert app.route("hi.py", kind="docs") == text_modes.CODE
-    assert not ws.wm.top_is_player(), "OPEN edits a script, it does not run it"
+    # OPEN edits the script: the Player is running Notes' editor skin over it
+    # (a cart, since step 3), not the script itself.
+    assert ws.wm.top_is_player()
+    assert ws.cart.get("title") == "Notes", ws.cart.get("title")
+    assert ws.script_console is None or ws.cart.get("type") != "script"
