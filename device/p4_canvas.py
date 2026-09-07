@@ -83,6 +83,12 @@ class P4SystemCanvas(SystemCanvas):
             n = len(getattr(comp, "_fbs", ()) or ())
         if n:
             self.RETAINED_FRAMES = n
+        # A compositor that presents DESCRIBED frames (the rotated one) takes
+        # the WM's damage rects straight; the root's coordinates are the paint
+        # buffer's. Absent otherwise, so the WM's probe finds nothing to feed.
+        nd = getattr(comp, "note_damage", None)
+        if nd is not None:
+            self.note_damage = nd
 
     def set_crisp_scale(self, on):
         """Settings -> CRISP PIXELS (probed by the console's crisp-pixels setter): route

@@ -549,15 +549,25 @@ class RotatingPpa(FakePpa):
         FakePpa.__init__(self, done=True)
         self.rotates = []          # (dst, dx, dy, src, sx, sy, w, h, angle)
         self.direct = []           # (dst, dx, dy, src, sw, sh, scale, angle)
+        self.nbs = []              # the nb flag of every rotate/rotate_scale
+        self.waits = []            # every wait(keep)
 
     def init(self):
         return True
 
-    def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle):
+    def rotate(self, dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle,
+               nb=False):
         self.rotates.append((dst, dx, dy, src, sx, sy, w, h, angle))
+        self.nbs.append(nb)
 
-    def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle):
+    def rotate_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale, angle,
+                     nb=False):
         self.direct.append((dst, dx, dy, src, sw, sh, scale, angle))
+        self.nbs.append(nb)
+
+    def wait(self, keep):
+        self.waits.append(keep)
+        return True
 
 
 @contextlib.contextmanager
@@ -653,14 +663,24 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         assert painted == [], "a quiet direct frame never touches the paint buffer"
         assert len(ppa.direct) == 1
         dst, dx, dy, src, sw, sh, scale, angle = ppa.direct[0]
-        assert dst is dsi.fb(1) and src is GAME and (sw, sh, scale, angle) == (320, 240, 2, 90)
+        assert dst is dsi.fb(1) and src is comp._scratch
+        assert (sw, sh, scale, angle) == (320, 240, 2, 90)
         assert (dx, dy) == (50, 1280 - 100 - 640)
+        # ...from a 1:1 copy of the game canvas queued just before it
+        gcopy = ppa.rotates[-1]
+        assert gcopy[0] is comp._scratch and gcopy[3] is GAME and gcopy[8] == 0
+        assert ppa.nbs[-2:] == [True, True]
         assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[1] == 0
+        assert dsi.shown == [0, 1, 0], "the show is deferred to the present"
+        comp.present_pending()
+        assert ppa.waits == [1] and dsi.shown == [0, 1, 0, 1]
         painted = game(comp)
         comp.flush()                                   # fb0 likewise
+        comp.present_pending()
         assert painted == [] and len(ppa.direct) == 2
         assert comp.overlap_stats()[0] == 2 and comp.overlap_stats()[1] == 0
         assert dsi.shown == [0, 1, 0, 1, 0]
+        assert comp.async_stats()[:3] == (2, 2, 0)
 
 
 def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
@@ -717,7 +737,7 @@ def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
         # frame put into fb1 -> copied 1:1 from fb1 first.
         game(comp, ox=0, oy=0)
         comp.flush()
-        copy = [r for r in ppa.rotates if r[8] == 0]
+        copy = [r for r in ppa.rotates if r[8] == 0 and r[3] is not GAME]
         assert len(copy) == 1
         dst, dx, dy, src, sx, sy, w, h, angle = copy[0]
         assert dst is dsi.fb(0) and src is dsi.fb(1)
@@ -771,3 +791,240 @@ def test_present_and_sync_are_inert_on_the_rotated_path():
         comp.sync()
         assert ppa.syncs == 0
         assert len(comp.overlap_stats()) == 7          # the PERF line's ppa= shape
+
+
+# -- damage frames: the WM describes what it painted (the desktop lever) -------
+
+
+def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
+    """A drag frame: the WM notes the gesture union; the compositor rotates
+    that rect (and the bar strip) from the paint buffer instead of 4MB."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.strip_h = 18
+        comp.flush()                                   # full -> fb1
+        comp.note_damage(200, 100, 700, 500)
+        comp.flush()                                   # fb0 missed a full: full
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+        comp.note_damage(210, 100, 700, 500)
+        comp.flush()                                   # fb1: rect frame
+        rot = [r for r in ppa.rotates if r[0] is dsi.fb(1) and r[8] == 90]
+        # the sibling owed the first union: the rect GREW 10px to cover it
+        assert [r[4:8] for r in rot[-2:]] == [(200, 100, 710, 500), (0, 0, 1280, 18)]
+        assert ppa.direct == []
+        assert comp.damage_stats() == (2, 2, 0, 1)
+        assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[2] == 2
+
+
+def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too():
+    """A drag beside a running game window: the game's composite reaches the
+    paint buffer (never direct), and its rect is one of the frame's rects."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()                                   # converged: direct
+        assert len(ppa.direct) == 1
+        painted = game(comp, quiet=True)               # gates unmoved (blit-only WM)...
+        comp.note_damage(900, 300, 300, 200)           # ...but the WM says it drew
+        comp.flush()
+        assert painted == [1], "noted damage means the game is not the only write"
+        assert len(ppa.direct) == 1
+        rects = [r[4:8] for r in ppa.rotates if r[0] is dsi.fb(0) and r[8] == 90]
+        assert rects[-2:] == [(100, 50, 640, 480), (900, 300, 300, 200)]
+
+
+def test_damage_is_clipped_and_an_empty_rect_is_nothing():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(0, 0, 1, 1)
+        comp.flush()                                   # both buffers current
+        comp.note_damage(-50, -20, 100, 60)
+        comp.note_damage(1250, 780, 100, 100)
+        comp.note_damage(10, 10, 0, 40)
+        comp.flush()
+        rects = [r[4:8] for r in ppa.rotates if r[8] == 90 and r[7] != 800]
+        assert rects == [(0, 0, 50, 40), (1250, 780, 30, 20)]
+
+
+def test_too_many_rects_take_their_bounding_box_and_a_covered_one_is_dropped():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(0, 0, 1, 1)
+        comp.flush()                                   # both buffers current
+        comp.note_damage(0, 0, 100, 100)
+        comp.note_damage(10, 10, 20, 20)               # inside the first
+        comp.note_damage(300, 300, 50, 50)
+        comp.note_damage(600, 600, 50, 50)
+        comp.note_damage(800, 100, 50, 50)             # a fourth distinct: bbox
+        comp.flush()
+        rects = [r[4:8] for r in ppa.rotates if r[8] == 90 and r[7] != 800]
+        assert rects == [(0, 0, 850, 650)]
+        assert comp.damage_stats()[:3] == (2, 2, 0)
+
+
+def test_a_description_dearer_than_the_full_rotate_is_declined():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(0, 0, 1, 1)
+        comp.flush()
+        comp.note_damage(0, 0, 1280, 700)              # > 60% of the frame
+        comp.flush()
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+        assert comp.damage_stats()[:3] == (1, 1, 1)
+
+
+def test_a_damage_frame_leaves_the_other_buffer_a_stale_rect_it_copies_next():
+    """Ping-pong: the buffer that did not get this frame's rect lacks it, and
+    the next frame into that buffer copies it 1:1 before its own rects."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()                                   # full -> fb1
+        comp.note_damage(100, 100, 200, 200)
+        comp.flush()                                   # fb0 missed a full: full; fb1 owes the rect
+        comp.note_damage(400, 400, 200, 200)
+        comp.flush()                                   # fb1: copy (100,100) from fb0, rotate (400,400)
+        copies = [r for r in ppa.rotates if r[8] == 0]
+        assert len(copies) == 1 and copies[0][0] is dsi.fb(1) and copies[0][3] is dsi.fb(0)
+        assert copies[0][4:8] == mod.rotate_rect(100, 100, 200, 200, 90, 1280, 800)
+        assert comp.overlap_stats()[1] == 1
+
+
+def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(100, 100, 200, 200)
+        comp.flush()
+        comp.note_damage(100, 100, 200, 200)
+        comp.flush()                                   # -> fb1, a rect frame
+        assert comp.overlap_stats()[0] == 1
+        comp.flush()                                   # -> fb0, nothing noted: full
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+        assert comp._stale[1] is None                  # the other missed a full
+        comp.note_damage(100, 100, 200, 200)
+        comp.flush()                                   # -> fb1: must be full again
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+
+
+# -- the async quiet frame -----------------------------------------------------
+
+
+def test_a_quiet_frame_queues_strip_then_copy_then_rotate_and_presents_later():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.strip_h = 18
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        n = len(ppa.rotates)
+        comp.flush()                                   # the async direct frame
+        tail = ppa.rotates[n:]
+        assert [r[4:8] for r in tail][0] == (0, 0, 1280, 18), "the strip first"
+        assert tail[-1][3] is GAME and tail[-1][0] is comp._scratch, "then the game copy"
+        assert ppa.direct[-1][3] is comp._scratch, "then the rotate from the scratch"
+        assert all(ppa.nbs[-3:])
+        assert comp._pending == 1 and dsi.shown[-1] == 0
+        comp.present_pending()
+        assert ppa.waits[-1] == 1 and dsi.shown[-1] == 1 and comp._pending is None
+
+
+def test_a_flush_that_finds_a_deferred_frame_fences_and_shows_it_first():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()                                   # deferred into fb1
+        assert comp._pending == 1
+        comp.flush()                                   # a chrome frame, no present between
+        assert ppa.syncs == 1
+        assert dsi.shown[-2:] == [1, 0], "the late show, then the full frame into fb0"
+        assert comp.async_stats() == (1, 0, 1, 0)
+        assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
+
+
+def test_a_present_whose_rotate_still_flies_leaves_the_show_for_later():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()
+        ppa.done_flag = False
+        comp.present_pending()
+        assert ppa.waits == [1] and comp._pending == 1 and dsi.shown[-1] == 0
+        ppa.done_flag = True
+        comp.present_pending()
+        assert comp._pending is None and dsi.shown[-1] == 1
+
+
+def test_sync_drains_a_deferred_frame():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        game(comp)
+        comp.flush()
+        game(comp)
+        comp.flush()
+        comp.sync()
+        assert ppa.syncs == 1 and comp._pending is None and dsi.shown[-1] == 1
+        comp.sync()
+        assert ppa.syncs == 1
+
+
+def test_a_ppa_without_wait_keeps_the_blocking_direct_frame():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        del RotatingPpa.wait
+        try:
+            comp._async = hasattr(ppa, "wait")
+            assert comp._async is False
+            comp.flush()
+            game(comp)
+            comp.flush()
+            game(comp)
+            comp.flush()
+            assert ppa.direct[-1][3] is GAME and ppa.nbs[-1] is False
+            assert comp._pending is None and dsi.shown[-1] == 1
+        finally:
+            RotatingPpa.wait = lambda self, keep: (self.waits.append(keep), True)[1]
+
+
+def test_unrotate_rect_inverts_rotate_rect():
+    from device.dsi_panel import rotate_rect, unrotate_rect
+    lw, lh = 1280, 800
+    for angle in (90, 270):
+        for r in ((0, 0, 1, 1), (100, 50, 640, 480), (1279, 799, 1, 1), (0, 0, lw, lh)):
+            assert unrotate_rect(*rotate_rect(*r, angle, lw, lh), angle, lw, lh) == r
+
+
+def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
+    """Frame N's union lands in fb1; fb0 lacks it. Frame N+1's union overlaps
+    it almost entirely, so growing N+1's rect by a few px to cover N's beats
+    a copy the size of the whole window."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(200, 100, 700, 500)
+        comp.flush()                                   # fb0: full
+        for i in range(1, 6):
+            comp.note_damage(200 + 6 * i, 100, 700, 500)
+            comp.flush()
+        copies = [r for r in ppa.rotates if r[8] == 0]
+        assert copies == [], "every stale union was swallowed, none copied"
+        assert comp.damage_stats()[3] == 5
+        # the last rotate is the grown rect: the union plus ONE frame's 6px
+        # trail -- the growth never compounds, the sibling owes only real damage
+        last = [r for r in ppa.rotates if r[8] == 90 and r[7] != 800][-1]
+        assert last[4:8] == (200 + 6 * 4, 100, 706, 500)
+        assert all(st is None or all(r[2:4] == (500, 700) for r in st) for st in comp._stale)
+        assert comp.overlap_stats()[1] == 0
+
+
+def test_a_far_stale_rect_is_still_copied_not_grown_over():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.flush()
+        comp.note_damage(0, 0, 200, 200)
+        comp.flush()
+        comp.note_damage(0, 0, 200, 200)
+        comp.flush()                                   # fb1 rect; fb0 owes it
+        comp.note_damage(1000, 600, 200, 200)          # far corner
+        comp.flush()                                   # fb0: copy the old, rotate the new
+        copies = [r for r in ppa.rotates if r[8] == 0]
+        assert len(copies) == 1 and comp.damage_stats()[3] == 0

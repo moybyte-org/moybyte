@@ -38,15 +38,33 @@ backlight, the touch driver + its firmware, and the rotated (landscape) desk.
     the paint buffer. Both the windowed player and fullscreen play take it;
     crisp pixels (bilinear PPA declined) composite into the paint buffer
     first and rotate the rect from there.
+  - a DAMAGE frame (2026-09-08) — the WM painted and DESCRIBED what: a
+    drag's gesture union, the window a scroll or a keystroke re-rendered
+    (`WindowedWM._hand_damage` → the root canvas's `note_damage`, which only
+    this compositor exposes) — rotates those landscape rects from the paint
+    buffer plus the bar strip. The paint buffer is one persistent picture,
+    so what the frame changed is exactly what the WM wrote, the same trust
+    the WM's own backdrop restore places in its union. A frame the WM cannot
+    describe (a window opening, a theme change, a toast in the stack, a
+    visible cursor) notes nothing and pays the full rotate; a description
+    dearer than 60% of the frame is declined for one.
   Ping-pong scan buffers make rect frames dangerous — the buffer a rect lands
   in was last shown two frames ago — so each buffer keeps a STALE list of the
-  portrait rects it has missed and is brought current (1:1 copies from the
-  buffer on glass, or a full rotate when it missed a full frame) before a
-  rect frame is rotated into it. `tests/test_p4_display.py` pins the
-  bookkeeping. Window drags and content scrolls are full frames here (no
-  stamp-defer: the PPA is the rotator), so they run at the full-rotate rate.
-  `RETAINED_FRAMES` on the root is 1 (the paint buffer persists), which the
-  WM floors to its conservative 2.
+  portrait rects it has missed and is brought current before a rect frame is
+  rotated into it: a stale rect this frame's rects do not cover is either
+  copied 1:1 from the buffer on glass or, when growing one of the frame's
+  paint-buffer rects to swallow it moves fewer pixels than the copy, rotated
+  as part of that rect (a drag's union moves a few px a frame, so the grown
+  rect is a few px larger and the window-sized copy is gone). A buffer that
+  missed a full frame gets a full rotate. `tests/test_p4_display.py` pins the
+  bookkeeping. **The quiet game frame is ASYNC**: its ops are queued (stale
+  copies, the strip, a 1:1 copy of the game canvas into a scratch, the
+  scale+rotate from the scratch) and the show waits for the next present,
+  which fences everything but the scale+rotate (`moy_ppa.wait(1)`) before
+  the cart's tick can write the game canvas; the rotate then overlaps the
+  whole next frame. Full and damage frames stay blocking — their source is
+  the paint buffer the WM writes next. `RETAINED_FRAMES` on the root is 1
+  (the paint buffer persists), which the WM floors to its conservative 2.
   **Which way is up is ONE knob**: `guition_p4_display.ROTATION` (90 or 270,
   the PPA's counter-clockwise), live for a session as `py comp.set_angle(90)`
   over the dev channel — the panel is driven UNMIRRORED
@@ -186,15 +204,11 @@ for the C6/audio pins, which agree with the BSP.
   frame is **~11ms** (Star Catcher fullscreen, 960×720 output: the one-op
   scale+rotate of the game canvas plus the bar strip) — 358 of them against
   58 full frames over the tour, 0 stale-rect copies, 0 PPA timeouts, 0 DSI
-  underruns. An idle desk rotates nothing. **Uncapped** (serial `uncap 1`:
-  every loop frame draws, logic at its rate — the draw+present path flat
-  out) the same carts run at 46 / 42 / 38 / 38 fps (Star Catcher, Brick
-  Siege, Sky Run, Sakura Lua) against the Waveshare's 64 / 58 / 50 / 65: the
-  rotate is a flat ~11ms on every frame. The seed games that declare
-  `"fps": "free"` (SPEC 5's opt-out, same day) run that way by default:
-  Star Catcher 46 fps here, 62 on the Waveshare. The levers left — tracker #220 —
-  are an async rotate fenced at the next present (hides it under a 30-tick
-  cart's pacing idle) and WM dirty rects for chrome frames.
+  underruns. An idle desk rotates nothing. Those were the blocking-rotate
+  numbers; the async quiet frame and the WM's damage frames (2026-09-08)
+  moved every one of them, and the current figures live in **#220** — the
+  compositor's `damage_stats()` / `async_stats()` over the dev channel are
+  how they are read.
 - The console: 36 carts seeded on first boot, PPA registered, Lua runtime on,
   the desktop under `WindowedWM` at 1280×800 landscape; the first frame lands ~300ms
   after the desktop is built, and the desktop is built ~27s after reset on a

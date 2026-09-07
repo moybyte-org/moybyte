@@ -88,11 +88,14 @@ static mp_obj_t moy_ppa_init(void) {
     ppa_client_config_t cfg = {
         .oper_type = PPA_OPERATION_SRM,
         // A few pending slots: enough for the composite-overlap lever (double
-        // buffer + slack). Sprite BATCHING via the queue was measured a dead end
+        // buffer + slack) and for the rotated compositor's async game frame
+        // (stale copies + strip + game copy + rotate, all queued at once; a
+        // full queue blocks the submitter, which is correct and merely slow).
+        // Sprite BATCHING via the queue was measured a dead end
         // -- 64x 16x16 queued = 4.57ms vs 0.70ms for the CPU (~10x vs spr_batch);
         // per-op submit overhead dwarfs a tiny blit. The PPA is a SCALE
         // accelerator (the upscale composite), not a sprite compositor.
-        .max_pending_trans_num = 3,
+        .max_pending_trans_num = 6,
     };
     esp_err_t err = ppa_register_client(&cfg, &s_srm);
     if (err != ESP_OK) {
@@ -215,11 +218,13 @@ static mp_obj_t srm_blit(const mp_obj_t *args, ppa_trans_mode_t mode) {
     return mp_const_none;
 }
 
-// rotate(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle)
+// rotate(dst, dw, dh, dx, dy, src, sw, sh, sx, sy, w, h, angle[, nb])
 //   Copy the w x h block at (sx, sy) of the sw x sh RGB565 source into dst
 //   (dw x dh) at (dx, dy), ROTATED by `angle` degrees counter-clockwise (0,
 //   90, 180, 270 -- the PPA's own convention) at 1:1 scale. The output block
-//   is h x w for 90/270 and (dx, dy) is its top-left. Blocking. The landscape
+//   is h x w for 90/270 and (dx, dy) is its top-left. Blocking unless `nb`
+//   is true, when it is queued and returns at once (the caller fences with
+//   wait()/sync() before touching either buffer). The landscape
 //   console on a portrait DSI panel (the Guition P4, device/dsi_panel.py's
 //   RotatedCompositor) is the consumer: the whole paint buffer per full
 //   frame, one game rect per quiet frame, and angle 0 to bring a ping-pong
@@ -242,6 +247,7 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     mp_int_t w = mp_obj_get_int(args[10]);
     mp_int_t h = mp_obj_get_int(args[11]);
     mp_int_t angle = mp_obj_get_int(args[12]);
+    bool nb = n_args > 13 && mp_obj_is_true(args[13]);
     ppa_srm_rotation_angle_t rot;
     switch (angle) {
         case 0: rot = PPA_SRM_ROTATION_ANGLE_0; break;
@@ -257,9 +263,16 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     }
     mp_int_t ow = (angle == 90 || angle == 270) ? h : w;
     mp_int_t oh = (angle == 90 || angle == 270) ? w : h;
-    if (dx + ow > dw || dy + oh > dh) {
+    if (dx + ow > dw || dy + oh > dh || (mp_int_t)dst.len < dw * dh * 2) {
         mp_raise_ValueError(MP_ERROR_TEXT("rotate dst block"));
     }
+    // The out picture is the ROWS the block lands on, not the whole dst: the
+    // driver writes back and invalidates the whole out picture per submit,
+    // and so does the msync below, so a 2MB scan buffer cost ~2MB of cache
+    // walking per op whatever the block. A row span of an RGB565 picture
+    // whose width is a multiple of 32px starts cache-line aligned.
+    uint8_t *rows = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2;
+    size_t rows_len = (size_t)oh * (size_t)dw * 2;
     ppa_srm_oper_config_t op = {
         .in = {
             .buffer = src.buf,
@@ -272,12 +285,12 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .out = {
-            .buffer = dst.buf,
-            .buffer_size = (uint32_t)dst.len,
+            .buffer = rows,
+            .buffer_size = (uint32_t)rows_len,
             .pic_w = (uint32_t)dw,
-            .pic_h = (uint32_t)dh,
+            .pic_h = (uint32_t)oh,
             .block_offset_x = (uint32_t)dx,
-            .block_offset_y = (uint32_t)dy,
+            .block_offset_y = 0,
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .rotation_angle = rot,
@@ -288,11 +301,11 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
         .rgb_swap = false,
         .byte_swap = false,
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
-        .mode = PPA_TRANS_MODE_BLOCKING,
+        .mode = nb ? PPA_TRANS_MODE_NON_BLOCKING : PPA_TRANS_MODE_BLOCKING,
     };
     // The same dst writeback srm_blit does (the driver invalidates the whole
     // out picture at submit); the driver writes back the in block itself.
-    esp_cache_msync(dst.buf, dst.len,
+    esp_cache_msync(rows, rows_len,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
@@ -303,16 +316,16 @@ static mp_obj_t moy_ppa_rotate(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 13, moy_ppa_rotate);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_obj, 13, 14, moy_ppa_rotate);
 
-// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle)
+// rotate_scale(dst, dw, dh, dx, dy, src, sw, sh, scale, angle[, nb])
 //   The whole sw x sh RGB565 source, integer-upscaled by `scale` AND rotated
 //   by `angle` degrees counter-clockwise, into dst (dw x dh) at (dx, dy) --
 //   the quiet game frame of a landscape console on portrait glass in ONE
 //   PPA op: the game canvas goes straight to the scan buffer (150KB read,
 //   the scaled block written) instead of through the 2MB paint buffer.
 //   Bilinear like blit_scale (the PPA has no nearest mode; crisp mode takes
-//   the paint-buffer path). Blocking.
+//   the paint-buffer path). Blocking unless `nb` (see rotate).
 static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     if (s_srm == NULL) {
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("moy_ppa not init"));
@@ -328,6 +341,7 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     mp_int_t sh = mp_obj_get_int(args[7]);
     mp_int_t scale = mp_obj_get_int(args[8]);
     mp_int_t angle = mp_obj_get_int(args[9]);
+    bool nb = n_args > 10 && mp_obj_is_true(args[10]);
     if (scale < 1) {
         scale = 1;
     }
@@ -342,9 +356,12 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     }
     mp_int_t ow = (angle == 90 || angle == 270) ? sh * scale : sw * scale;
     mp_int_t oh = (angle == 90 || angle == 270) ? sw * scale : sh * scale;
-    if (dx < 0 || dy < 0 || dx + ow > dw || dy + oh > dh) {
+    if (dx < 0 || dy < 0 || dx + ow > dw || dy + oh > dh
+            || (mp_int_t)dst.len < dw * dh * 2) {
         mp_raise_ValueError(MP_ERROR_TEXT("rotate_scale dst block"));
     }
+    uint8_t *rows = (uint8_t *)dst.buf + (size_t)dy * (size_t)dw * 2;   // see rotate()
+    size_t rows_len = (size_t)oh * (size_t)dw * 2;
     ppa_srm_oper_config_t op = {
         .in = {
             .buffer = src.buf,
@@ -357,12 +374,12 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .out = {
-            .buffer = dst.buf,
-            .buffer_size = (uint32_t)dst.len,
+            .buffer = rows,
+            .buffer_size = (uint32_t)rows_len,
             .pic_w = (uint32_t)dw,
-            .pic_h = (uint32_t)dh,
+            .pic_h = (uint32_t)oh,
             .block_offset_x = (uint32_t)dx,
-            .block_offset_y = (uint32_t)dy,
+            .block_offset_y = 0,
             .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
         },
         .rotation_angle = rot,
@@ -373,9 +390,9 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
         .rgb_swap = false,
         .byte_swap = false,
         .alpha_update_mode = PPA_ALPHA_NO_CHANGE,
-        .mode = PPA_TRANS_MODE_BLOCKING,
+        .mode = nb ? PPA_TRANS_MODE_NON_BLOCKING : PPA_TRANS_MODE_BLOCKING,
     };
-    esp_cache_msync(dst.buf, dst.len,
+    esp_cache_msync(rows, rows_len,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_submitted++;
     esp_err_t err = ppa_do_scale_rotate_mirror(s_srm, &op);
@@ -386,8 +403,18 @@ static mp_obj_t moy_ppa_rotate_scale(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 10,
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_ppa_rotate_scale_obj, 10, 11,
                                            moy_ppa_rotate_scale);
+
+// wait(keep) -> bool: block until at most `keep` queued transactions remain
+// in flight -- sync() with a tail left flying. Completion is FIFO, so a caller
+// that submits the op it must not outrun FIRST and `keep` ops after it can
+// fence that one op alone. False = the fence gave up (stats()[2] counts it).
+static mp_obj_t moy_ppa_wait(mp_obj_t keep_in) {
+    mp_int_t keep = mp_obj_get_int(keep_in);
+    return mp_obj_new_bool(ppa_wait(keep < 0 ? 0 : (uint32_t)keep));
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_ppa_wait_obj, moy_ppa_wait);
 
 // sync(): block until every submitted transaction has completed (the fence for a
 // non-blocking composite). The PPA DMA runs on its own; this is a short busy-wait
@@ -689,6 +716,7 @@ static const mp_rom_map_elem_t moy_ppa_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_rotate_scale), MP_ROM_PTR(&moy_ppa_rotate_scale_obj) },
     { MP_ROM_QSTR(MP_QSTR_crisp_release), MP_ROM_PTR(&moy_ppa_crisp_release_obj) },
     { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&moy_ppa_sync_obj) },
+    { MP_ROM_QSTR(MP_QSTR_wait), MP_ROM_PTR(&moy_ppa_wait_obj) },
     { MP_ROM_QSTR(MP_QSTR_done), MP_ROM_PTR(&moy_ppa_done_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&moy_ppa_stats_obj) },
 };

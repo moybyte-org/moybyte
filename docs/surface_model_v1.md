@@ -296,6 +296,21 @@ window's drag explicitly** (the last silent-disable bug lived exactly there).
 Games: fullscreen in the play world; windowed via the PPA upscale composite
 (PPA is upscale-only — §8).
 
+**The rotated P4 (Guition 10.1″, 2026-09-08) adds nothing to the contract
+and one verb to the backend.** Its paint target is ONE persistent landscape
+buffer, presented by rotating it onto portrait scan buffers, so the
+placement-changed cell above is *the same* backdrop restore followed by a
+rect rotate instead of a full one — provided the compositor knows the rect.
+`WindowedWM._hand_damage` hands it the gesture union and the extents of the
+windows it rendered live (`note_damage` on the root canvas, absent on every
+other backend), the same set the union restore already trusts; a frame it
+cannot describe is a full rotate. This is not a second invalidation
+mechanism: no new dirty state, no new producer class — the backdrop layer
+and the window loop say what they painted, once, on the frame they painted
+it. `end_frame()`'s ordering rule holds there too: the quiet game frame's
+rotate is queued at flush and fenced at the next present, before the cart's
+tick can write the canvas it was copied from.
+
 ### 5.3 Host sim — reference implementation
 
 pygame; buffers are cheap, so this backend implements the contract in its

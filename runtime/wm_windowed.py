@@ -285,6 +285,7 @@ class _BackdropLayer(Layer):
         # over the cached blit instead of invalidating it.
         sig = self._desk_sig()
         stale = sig != wm._desk_sig
+        wm._damage_rects = None               # opened below where describable
         # A change to the window SHAPE (open/close/minimize/move/resize) uncovers
         # desk the departed window was covering -- pixels the skip's own
         # justification ("fully covered by the window's stamp") no longer holds
@@ -349,15 +350,18 @@ class _BackdropLayer(Layer):
                 if not (cursor_live and ptr != last) \
                         and wm._desk_streak >= wm._retained_n():
                     wm._desk_painted = False   # untouched: windows may skip too
+                    wm._damage_rects = []      # the desk changed nowhere
                     self.ws.bar_layer.redraw_clock("desk")
                     return
                 wm._desk_streak += 1
             wm._desk_painted = True
             _perf = getattr(self.ws, "perf_capture", False)
             _t0 = _wt() if _perf else 0
-            wm._blit_backdrop_cache()
+            union = wm._blit_backdrop_cache()
             if _perf:
                 self.ws._pf_wm_restore = _wt() - _t0
+            if union is not None:
+                wm._damage_rects = [union]     # the desk changed inside the gesture
             self.ws.bar_layer.redraw_clock("desk")
             return
         wm._desk_streak = 0
@@ -615,6 +619,17 @@ class WindowedWM(FullscreenStackWM):
         # holds its pre-gesture stamp).
         self._gesture_hist = []
         self._union_disabled = False      # A/B measurement knob (P4 remote `union`)
+        # DAMAGE (the rotated-compositor lever, Guition P4 2026-09-08): on a
+        # painted frame the WM can DESCRIBE -- a gesture's union, the windows
+        # whose pixels it changed -- it hands those root rects to a canvas
+        # that asks for them (`note_damage`; only the rotated DSI compositor
+        # has one), and the compositor presents the rects instead of the whole
+        # frame. The backdrop layer opens the description (None = it painted
+        # the desk live, undescribable), each window's draw marks itself
+        # touched when its pixels changed, and _hand_damage closes it once
+        # per frame. Same trust as the backdrop restore places in its union.
+        self._damage_rects = None
+        self._win_touched = False
 
     # -- layout-context plumbing ----------------------------------------------
 
@@ -1137,7 +1152,10 @@ class WindowedWM(FullscreenStackWM):
             if ext is not None:
                 self._gesture_hist = (self._gesture_hist + [ext])[-n:] \
                     if self._gesture_hist else [ext] * n
-            return
+            # A whole-cache copy still CHANGES only the gesture's footprint:
+            # outside it the cache is the desk that was already there, and the
+            # other windows re-stamp over it identically.
+            return self._union_bbox(self._gesture_hist)
         rects = self._gesture_hist + [ext]
         x0 = min(r[0] for r in rects)
         y0 = min(r[1] for r in rects)
@@ -1178,6 +1196,48 @@ class WindowedWM(FullscreenStackWM):
             if bx1 < x1:                                       # right strip
                 stamp(self._backdrop, 0, 0, bx1, by0, x1 - bx1, by1 - by0)
         self._gesture_hist = (self._gesture_hist + [ext])[-n:]
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    @staticmethod
+    def _union_bbox(rects):
+        if not rects:
+            return None
+        x0 = min(r[0] for r in rects)
+        y0 = min(r[1] for r in rects)
+        x1 = max(r[0] + r[2] for r in rects)
+        y1 = max(r[1] + r[3] for r in rects)
+        return (x0, y0, x1 - x0, y1 - y0)
+
+    @staticmethod
+    def _win_extent(win):
+        """Everything a window's draw touches: body, border, the 3px drop
+        shadow, padded like _gesture_extent."""
+        return (win.x - 2, win.y - 2, win.w + 7, win.h + 7)
+
+    def _hand_damage(self, touched):
+        """Close this frame's damage description: hand the backdrop's rects and
+        the touched windows' extents to a root canvas that takes them. Nothing
+        is handed when the frame cannot be described -- the backdrop painted
+        live, an overlay (toast/notice/menu/splash) is in the stack, or the
+        cursor sprite is visible (it moves every frame and is drawn by a layer
+        above this one) -- and the compositor then presents the whole frame."""
+        rects = self._damage_rects
+        self._damage_rects = None
+        if rects is None:
+            return
+        nd = getattr(self._root_canvas, "note_damage", None)
+        if nd is None:
+            return
+        if (self._cache_sig & ~2) != 0:
+            return
+        if getattr(self.ws.pointer, "visible", False):
+            return
+        if not rects and not touched:
+            return                        # nothing to say: the safe full frame
+        for r in rects:
+            nd(*r)
+        for r in touched:
+            nd(*r)
 
     # -- game viewport == the player window (#39 mapping) ----------------------
 
@@ -1469,6 +1529,7 @@ class WindowedWM(FullscreenStackWM):
         # scroll: 8.2ms of a 70ms frame, every frame, for an unchanged title bar.
         # _lowest_dirty_window sets _sig_stable (window shape/order/focus).
         self._chrome_quiet = self._sig_stable and self._frame_is_quiet(dt)
+        touched = []
         for i in range(n):
             key = self._order[i]
             win = self._wins[key]
@@ -1499,6 +1560,7 @@ class WindowedWM(FullscreenStackWM):
             if _surf is not None:
                 _surf(sid, "system")
             win._stamp_streak = getattr(win, "_stamp_streak", 0) + 1
+            self._win_touched = False
             if win.kind == "desktop":
                 # The Player TICKS whenever its window is open, independent of
                 # input focus AND of what sits above it on the back-stack -- a
@@ -1506,9 +1568,17 @@ class WindowedWM(FullscreenStackWM):
                 # while Settings floats over it (wifi setup mid-game, #38). The
                 # one exception: the crash-editor flow keeps the frozen frame
                 # (cart_error -> tick just repaints the error panel, harmless).
+                # Its composite is the canvas's word (mark_game), not this
+                # loop's: only a moved/re-chromed player window is touched.
                 self._draw_player_window(win, True, focused, dt)
             else:
                 self._draw_app_window(win, focused, dt)
+            if self._win_touched:
+                touched.append(self._win_extent(win))
+        # The chips live on the OS bar, which the compositor carries as its
+        # strip on every partial frame; the resize outline lies inside the
+        # gesture union. Neither is a rect of its own.
+        self._hand_damage(touched)
         if _skip is not None and not self._kf_active:
             # The chips residual skips like a window: its content moves on
             # focus/order/minimize (dirty -> epoch) and on a resize outline
@@ -1566,6 +1636,8 @@ class WindowedWM(FullscreenStackWM):
                self._win_title(win), self.ws.look.theme_name,
                self.ws.look.theme_variant,
                self._fs())
+        if sig != getattr(win, "_chrome_sig", None):
+            self._win_touched = True      # the chrome's pixels differ from last frame's
         if not quiet or sig != getattr(win, "_chrome_sig", None):
             win._chrome_sig = sig
             win._chrome_streak = 0
@@ -1806,6 +1878,7 @@ class WindowedWM(FullscreenStackWM):
                 and self._wins.get(self._resize[0]) is win \
                 and self._live_resize_ok():
             # Live-body resize: the frame follows the grip, content crops.
+            self._win_touched = True
             self._draw_resizing_window(win, focused,
                                        self._resize[5], self._resize[6])
             return
@@ -1813,6 +1886,8 @@ class WindowedWM(FullscreenStackWM):
                    and self._wins.get(self._drag[0]) is win)
                   or (self._resize is not None
                       and self._wins.get(self._resize[0]) is win))
+        if moving:
+            self._win_touched = True
         if focused and not moving:
             # DIRECT RENDER (#155): while this window's content is being scrolled
             # or flung, draw it STRAIGHT into the framebuffer through a viewport
@@ -1829,6 +1904,7 @@ class WindowedWM(FullscreenStackWM):
                     and (self._content_gesture or self._content_flinging())
                     and self._order and self._wins.get(self._order[-1]) is win
                     and self._direct_render(win, dt)):
+                self._win_touched = True
                 self._win_chrome(win, focused, quiet=self._chrome_quiet)
                 return
             # CONTENT FREEZE (docs/surface_model_v1.md §14.1, first slice): on a
@@ -1839,6 +1915,7 @@ class WindowedWM(FullscreenStackWM):
             if not self._content_static(win):
                 # Live: render the focused app into its buffer at the window's
                 # layout.
+                self._win_touched = True
                 self._install(win.ctx)
                 try:
                     self._content_for(win.kind).draw(dt)

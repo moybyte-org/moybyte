@@ -313,6 +313,16 @@ class P4Compositor:
 #     stack and a fullscreen play frame look like this) -- is ONE PPA op: the
 #     game canvas scaled AND rotated straight into the scan buffer, plus the
 #     top bar's strip rotated from the paint buffer. A few ms, not tens.
+#   * a DAMAGE frame -- the WM painted, and said WHAT it painted
+#     (`note_damage`: a drag's gesture union, the window a keystroke or a
+#     scroll re-rendered) -- rotates those landscape rects from the paint
+#     buffer, plus the bar strip and the game rect if a game drew. The paint
+#     buffer is ONE persistent picture, so "what this frame changed" is
+#     exactly what the WM wrote, and the WM already reasons about that set
+#     for its own backdrop restore. A frame the WM cannot describe -- a
+#     window opening, a theme change, a toast -- notes nothing and pays the
+#     full rotate; a description that would cost more than the full rotate
+#     is declined for one.
 #
 # The catch is ping-pong: a rect-only frame lands in a scan buffer that was
 # last shown two frames ago and may lack what the frame between painted. So
@@ -326,6 +336,19 @@ class P4Compositor:
 # bookkeeping. Two scan buffers, not three: the third bought the Waveshare an
 # async-overlap lever this path does not use (every rotate is blocking), and a
 # third buffer to keep current would be a third full rotate after every change.
+#
+# THE QUIET GAME FRAME IS ASYNC (2026-09-08). A blocking scale+rotate of the
+# game canvas is ~11ms of a play frame the CPU spends waiting. Instead the
+# frame's ops are QUEUED -- stale copies, the strip, a 1:1 copy of the game
+# canvas into a scratch, and the scale+rotate FROM the scratch -- and the
+# show waits for the next present. The scratch is what makes it safe: the
+# cart's next tick may write the game canvas the moment the copy is done,
+# and the WM may write the strip rows once the strip rotate is done, so the
+# present fences with wait(keep=1): everything but the scale+rotate itself,
+# which reads only the scratch. The rotate then overlaps the whole next
+# frame (poll, logic, draw). If it is still flying at the next flush, that
+# flush fences and shows first. Full and damage frames stay blocking: their
+# source is the paint buffer the WM writes next frame.
 #
 # RETAINED_FRAMES on the root is 1 here -- the paint buffer persists across
 # frames -- which the WM's `_retained_n` floors to its conservative 2.
@@ -353,6 +376,24 @@ def _covered(r, rects):
         if qx <= x and qy <= y and x + w <= qx + qw and y + h <= qy + qh:
             return True
     return False
+
+
+def unrotate_rect(px, py, pw, ph, angle, lw, lh):
+    """The landscape rect a portrait (px, py, pw, ph) came from: rotate_rect's
+    inverse, pinned by the same test."""
+    if angle == 90:
+        return (lw - py - ph, px, ph, pw)
+    if angle == 270:
+        return (py, lh - px - pw, ph, pw)
+    raise ValueError("angle 90 or 270")
+
+
+def _bbox(a, b):
+    x0 = min(a[0], b[0])
+    y0 = min(a[1], b[1])
+    x1 = max(a[0] + a[2], b[0] + b[2])
+    y1 = max(a[1] + a[3], b[1] + b[3])
+    return (x0, y0, x1 - x0, y1 - y0)
 
 
 class RotatedCompositor:
@@ -404,12 +445,31 @@ class RotatedCompositor:
         # cannot see it change). Landscape rows; run_desktop sets the height
         # from the bar once the console exists. 0 = none.
         self.strip_h = 18
-        # Meters (overlap_stats keeps the PERF line's 7-slot ppa= shape).
+        # This frame's damage, in landscape rects, as the WM described it
+        # (note_damage); None = nothing described. Consumed at flush.
+        self._damage = None
+        # Meters (overlap_stats keeps the PERF line's 7-slot ppa= shape; a
+        # damage frame counts as a rect frame there and separately below).
         self._full_n = 0
         self._full_us = 0
         self._rect_n = 0
         self._rect_us = 0
         self._copies = 0
+        self._grown = 0               # stale rects swallowed by a grown rect
+        self._dmg_n = 0
+        self._dmg_rects = 0
+        self._dmg_declined = 0
+        # The async quiet frame: a moy_ppa that can fence a queue tail
+        # (`wait`) runs it; an older one keeps every rotate blocking.
+        self._async = hasattr(moy_ppa, "wait")
+        self._scratch = None          # the game canvas's copy the rotate reads
+        self._scratch_n = 0
+        self._pending = None          # the scan buffer whose show is deferred
+        self._keep = 0                # ops the present may leave in flight
+        self._def_n = 0               # deferred frames
+        self._pres_n = 0              # ...shown at a present
+        self._late_n = 0              # ...shown by the following flush
+        self._wait_us = 0             # time the present spent fencing
         # Compatibility attributes the shared canvas/WM may poke; inert here.
         self._composite_pending = False
         self._stamp_pending = None
@@ -459,17 +519,87 @@ class RotatedCompositor:
         self._game = (src, int(sw), int(sh), int(ox), int(oy), int(scale),
                       paint, quiet, bool(direct))
 
+    def note_damage(self, x, y, w, h):
+        """The WM's word that THIS frame changed the paint buffer inside this
+        landscape rect (and, over the frame, only inside the noted rects plus
+        the bar strip and the game rect). Clipped to the frame; an empty rect
+        is nothing. A frame that notes nothing rotates whole."""
+        x0 = max(0, int(x))
+        y0 = max(0, int(y))
+        x1 = min(self._w, int(x) + int(w))
+        y1 = min(self._h, int(y) + int(h))
+        if x1 <= x0 or y1 <= y0:
+            return
+        if self._damage is None:
+            self._damage = []
+        self._damage.append((x0, y0, x1 - x0, y1 - y0))
+
+    # More distinct rects than this in one frame -> one bounding box (each
+    # rotate op carries a fixed cost: the driver writes back and invalidates
+    # the whole out picture per submit).
+    DAMAGE_RECTS = 3
+    # A description whose area exceeds this share of the frame is declined
+    # for the full rotate (same bytes moved, one op instead of several).
+    DAMAGE_SHARE = 0.6
+
+    def _damage_rects(self, rects):
+        """Coalesce noted rects: drop rects covered by another, and above
+        DAMAGE_RECTS distinct ones take their bounding box. Returns None when
+        rotating the description would not beat the full rotate."""
+        out = []
+        for r in rects:
+            if _covered(r, out):
+                continue
+            out = [q for q in out if not _covered(q, [r])]
+            out.append(r)
+        if len(out) > self.DAMAGE_RECTS:
+            x0 = min(r[0] for r in out)
+            y0 = min(r[1] for r in out)
+            x1 = max(r[0] + r[2] for r in out)
+            y1 = max(r[1] + r[3] for r in out)
+            out = [(x0, y0, x1 - x0, y1 - y0)]
+        area = 0
+        for (_x, _y, w, h) in out:
+            area += w * h
+        if area > self._w * self._h * self.DAMAGE_SHARE:
+            return None
+        return out
+
+    def damage_stats(self):
+        """(damage frames, rects rotated on them, descriptions declined,
+        stale rects swallowed by growing a rect instead of copying)."""
+        return (self._dmg_n, self._dmg_rects, self._dmg_declined, self._grown)
+
     def _strip(self):
         h = self.strip_h
         if h <= 0:
             return None
         return (0, 0, self._w, min(h, self._h))
 
-    def _rotate(self, fb, x, y, w, h):
+    def _rotate(self, fb, x, y, w, h, nb=False):
         px, py, pw, ph = rotate_rect(x, y, w, h, self.angle, self._w, self._h)
         self._ppa.rotate(fb, self._pw, self._ph, px, py,
-                         self._paint, self._w, self._h, x, y, w, h, self.angle)
+                         self._paint, self._w, self._h, x, y, w, h, self.angle,
+                         nb)
         return (px, py, pw, ph)
+
+    def _scratch_for(self, n):
+        if self._scratch is None or self._scratch_n < n:
+            self._scratch = self._alloc(n)
+            self._scratch_n = n
+        return self._scratch
+
+    def _present(self, late):
+        """Show the deferred buffer (every op landed) and swap."""
+        back = self._pending
+        self._pending = None
+        self._dsi.show(back)
+        self._front = back
+        self._back = 1 - back
+        if late:
+            self._late_n += 1
+        else:
+            self._pres_n += 1
 
     def flush(self):
         back = self._back
@@ -477,30 +607,58 @@ class RotatedCompositor:
         stale = self._stale[back]
         game = self._game
         self._game = None
+        damage = self._damage
+        self._damage = None
+        if self._pending is not None:
+            # The last quiet frame's rotate outlived a whole loop: fence and
+            # show it before this frame's ops go to its sibling buffer.
+            self._ppa.sync()
+            self._present(True)
+            back = self._back
+            fb = self._fbs[back]
+            stale = self._stale[back]
         t0 = _ticks_us()
         # Two separate questions. What did THIS FRAME change (relative to the
         # frame on glass)? -- everything, or the game rect (+ the chrome
-        # strip). And what does the target buffer need to become current? --
-        # a full rotate if the frame was full OR the buffer missed one, else
-        # its missed rects copied plus this frame's rects rotated. Conflating
+        # strip), or the rects the WM described (+ strip, + game rect). And
+        # what does the target buffer need to become current? -- a full
+        # rotate if the frame was full OR the buffer missed one, else its
+        # missed rects copied plus this frame's rects rotated. Conflating
         # them made every buffer "behind" forever and the ping-pong never
         # converged.
-        quiet_rects = None
+        rects = None            # this frame's landscape rects, game first
+        direct_game = False     # rects[0] is the game, straight from its canvas
+        painted = False         # the game composite reached the paint buffer
+        grect = None
         if game is not None:
             src, sw, sh, ox, oy, scale, paint, quiet, direct = game
-            if quiet():
-                quiet_rects = [(ox, oy, sw * scale, sh * scale)]
-                strip = self._strip()
-                if strip is not None:
-                    quiet_rects.append(strip)
+            grect = (ox, oy, sw * scale, sh * scale)
+            # Noted damage means the WM drew, whatever the gates say (a
+            # blit-only window render moves none of them).
+            if damage is None and quiet():
+                rects = [grect]
+                direct_game = direct
             else:
                 paint()                       # the paint buffer needs it too
-        changed = None if quiet_rects is None else [
+                painted = True
+        if rects is None and damage:
+            dr = self._damage_rects(damage)
+            if dr is None:
+                self._dmg_declined += 1
+            else:
+                rects = ([grect] if grect is not None else []) + dr
+                self._dmg_n += 1
+                self._dmg_rects += len(dr)
+        if rects is not None:
+            strip = self._strip()
+            if strip is not None:
+                rects.append(strip)
+        changed = None if rects is None else [
             rotate_rect(x, y, w, h, self.angle, self._w, self._h)
-            for (x, y, w, h) in quiet_rects]
+            for (x, y, w, h) in rects]
         if changed is None or stale is None or len(stale) > self.STALE_LIMIT:
-            if changed is not None:
-                paint()                       # this buffer is behind: full
+            if game is not None and not painted:
+                paint()                       # a full rotate reads the paint buffer
             self._rotate(fb, 0, 0, self._w, self._h)
             self._full_n += 1
             self._full_us += _ticks_diff(_ticks_us(), t0)
@@ -508,23 +666,75 @@ class RotatedCompositor:
             # buffer current, the other one still lacks only the rects.
         else:
             front = self._fbs[self._front]
+            nb = direct_game and self._async
+            # A stale rect this frame's rects do not cover is either COPIED
+            # 1:1 from the buffer on glass or, when growing one of this
+            # frame's paint-buffer rects to swallow it moves fewer pixels
+            # than the copy would, ROTATED as part of that rect (a drag's
+            # union barely moves between frames, so the grown rect is a
+            # few px larger and the copy -- as large as the rect itself --
+            # is gone). Never the game rect: its source is the game canvas.
+            # `changed` stays the frame's OWN damage (what the sibling buffer
+            # will owe); the grown rects live in `cover`/`rects` only, or a
+            # drag's trail would compound frame over frame.
+            cover = list(changed)
             for r in stale:
-                if not _covered(r, changed):
-                    self._ppa.rotate(fb, self._pw, self._ph, r[0], r[1],
-                                     front, self._pw, self._ph,
-                                     r[0], r[1], r[2], r[3], 0)
-                    self._copies += 1
-            if direct:
+                if _covered(r, cover):
+                    continue
+                best = None
+                for i in range(1 if direct_game else 0, len(rects)):
+                    grown = _bbox(rects[i], unrotate_rect(
+                        r[0], r[1], r[2], r[3], self.angle, self._w, self._h))
+                    cost = grown[2] * grown[3] - rects[i][2] * rects[i][3]
+                    if cost < r[2] * r[3] and (best is None or cost < best[0]):
+                        best = (cost, i, grown)
+                if best is not None:
+                    rects[best[1]] = best[2]
+                    cover[best[1]] = rotate_rect(
+                        best[2][0], best[2][1], best[2][2], best[2][3],
+                        self.angle, self._w, self._h)
+                    self._grown += 1
+                    continue
+                self._ppa.rotate(fb, self._pw, self._ph, r[0], r[1],
+                                 front, self._pw, self._ph,
+                                 r[0], r[1], r[2], r[3], 0, nb)
+                self._copies += 1
+            if direct_game:
+                # The strip and the copies go FIRST: wait(keep=1) at the
+                # present then covers everything but the scale+rotate.
+                for (x, y, w, h) in rects[1:]:
+                    self._rotate(fb, x, y, w, h, nb)
                 px, py, _pw, _ph = changed[0]
-                self._ppa.rotate_scale(fb, self._pw, self._ph, px, py,
-                                       src, sw, sh, scale, self.angle)
+                if nb:
+                    n = sw * sh * 2
+                    scr = self._scratch_for(n)
+                    self._ppa.rotate(scr, sw, sh, 0, 0, src, sw, sh,
+                                     0, 0, sw, sh, 0, True)
+                    self._ppa.rotate_scale(fb, self._pw, self._ph, px, py,
+                                           scr, sw, sh, scale, self.angle,
+                                           True)
+                    self._keep = 1
+                else:
+                    self._ppa.rotate_scale(fb, self._pw, self._ph, px, py,
+                                           src, sw, sh, scale, self.angle)
             else:
-                paint()
-                self._rotate(fb, ox, oy, sw * scale, sh * scale)
-            for (x, y, w, h) in quiet_rects[1:]:
-                self._rotate(fb, x, y, w, h)
+                if game is not None and not painted:
+                    paint()                   # crisp quiet: composite, then rotate
+                for (x, y, w, h) in rects:
+                    self._rotate(fb, x, y, w, h)
             self._rect_n += 1
             self._rect_us += _ticks_diff(_ticks_us(), t0)
+            if nb:
+                self._stale[back] = []
+                other = self._front
+                if self._stale[other] is not None:
+                    lst = self._stale[other]
+                    for r in changed:
+                        if r not in lst:
+                            lst.append(r)
+                self._pending = back
+                self._def_n += 1
+                return                        # shown at the next present
         self._stale[back] = []
         other = self._front
         if changed is None:
@@ -539,10 +749,27 @@ class RotatedCompositor:
         self._back = 1 - back
 
     def present_pending(self):
-        pass                          # every rotate is blocking: nothing pends
+        """The loop's pre-frame hook, BEFORE the cart's tick: fence the
+        deferred frame's copies (the game canvas and the strip rows are about
+        to be written), and show it if its rotate has landed too."""
+        if self._pending is None:
+            return
+        t0 = _ticks_us()
+        self._ppa.wait(self._keep)
+        self._wait_us += _ticks_diff(_ticks_us(), t0)
+        if self._ppa.done():
+            self._present(False)
 
     def sync(self):
-        pass
+        """Leave no op in flight and no deferred show unpresented."""
+        if self._pending is not None:
+            self._ppa.sync()
+            self._present(True)
+
+    def async_stats(self):
+        """(deferred frames, shown at a present, shown by the next flush,
+        present fence us)."""
+        return (self._def_n, self._pres_n, self._late_n, self._wait_us)
 
     def overlap_stats(self):
         """The PERF line's ppa= slots, re-purposed for this path:
