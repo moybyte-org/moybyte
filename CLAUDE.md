@@ -148,6 +148,18 @@ python tools/simulate_desktop.py --demo --gif demo.gif            # headless tou
   - `moybyte_console_plan_2026-07.md` is the current design doc;
     `docs/shell_ux_v1.md` is the shell's UX reference, corrected to as-built.
     Superseded plans live under `docs/history/` and are history, not direction.
+- **No store migrations until there are users (2026-09-07).** A `.moy` store
+  FORMAT change therefore ships as strict readers plus a seed version bump and
+  nothing else: one format is read, seed content re-seeds off the packed roster,
+  and a legacy file left on a developer's card reads as ABSENT (`None`, the
+  placeholder every picture and document caller already draws) until it is wiped
+  by hand. Three one-shot passes were deleted for this — the `.moytext`→`.md`
+  rewrite, the `notes.json` notebook, and the RLE→deflate picture job — with
+  their generation sidecars and every legacy reader that existed only to feed
+  them, leaving `sweep_store` as `prune_retired` alone. That door is where a
+  migration would go if one ever earns it, and the bar is `prune_retired`'s —
+  gated on a generation counter, one small read warm and bounded work cold — a
+  bar the picture pass missed by costing a Guition a 196-second boot.
 - **Issue mirror (`docs/issues/`, gitignored):** a local, un-committed snapshot of
   every GitHub issue (`open/`, `closed/`, `INDEX.md`), so an issue number in a
   commit or a chat resolves with no network. GitHub is the source of truth and

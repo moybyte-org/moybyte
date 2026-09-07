@@ -103,8 +103,9 @@ QWERTY is planned.
 
 ## The six steps, each shippable alone
 
-1. Notes' files become `.md` in one flat vault, a one-shot migration from
-   `.moytext`.
+1. Notes' files become `.md` in one flat vault. **No migration**: the reader
+   is strict, so a `.moytext` left on a developer's card is simply not a
+   document any more (CLAUDE.md's no-migration policy).
 2. The editor mode table and the Files router.
 3. The editor handle verb; Notes rebuilt as the thin cart over it. **Built as
    `open_editor(name)` on the `files` grant** (`runtime/editor_handle.py`): the
