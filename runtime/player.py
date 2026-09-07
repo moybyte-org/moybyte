@@ -160,6 +160,14 @@ except ImportError:                     # host: the runtime package
     from runtime.system_api import (make_system_api, manifest_error,
                                      wants_layout)
 
+# The cart-facing text editor (docs/text_editing_2026-09.md step 3). Imported
+# here rather than reached through the shell for the same reason as the module
+# above: it is a leaf over the Files role and the cart's canvas.
+try:
+    from editor_handle import EditorHandle
+except ImportError:                     # host: the runtime package
+    from runtime.editor_handle import EditorHandle
+
 
 def _safe_len(obj):
     try:
@@ -422,6 +430,62 @@ class Player:
         self._keyp_latch = 0          # a keyp edge waiting for a logic tick
         self._tick_edges = None       # ws.input.tick_edges, bound while paced
         self._keep_edges = None       # ws.input.keep_edges, bound while paced
+        # The editor handles this run opened (#181/#112). A per-run list, like
+        # the Lua tier's layer pins: they die with the world, flushed HARD on
+        # the way out so a kid who taps X never loses a note (#154).
+        self._editors = []
+        self._focus_editor = None     # the handle holding the keyboard, if any
+
+    # -- the cart-facing text editor (#181/#112) ----------------------------
+
+    def _open_cart_editor(self, files, kind, name, mode, canvas, clip=None):
+        """Build one editor handle and PIN it to this run.
+
+        Handed to `make_system_api` as its `editor` factory, so a cart reaches
+        it only through the `open_editor` its manifest earned."""
+        ed = EditorHandle(files, kind, name, mode, canvas, self._theme_colors,
+                          clip=clip, host=self.ws)
+        self._editors.append(ed)
+        return ed
+
+    def _theme_colors(self):
+        # The flat kernel token dict every shell surface reads per draw.
+        return self.ws.theme_colors
+
+    def set_editor_focus(self, handle):
+        """The handle the keyboard belongs to, or None. Written by
+        `Workstation.cart_editor_focus`, which also flips the T-Deck. The one
+        it replaces is blurred here, so two handles can never both believe
+        they are being typed into."""
+        prev = self._focus_editor
+        if prev is not None and prev is not handle:
+            prev._blur()
+        self._focus_editor = handle
+
+    def seed_cart_key(self, code):
+        """Swallow the byte that took the keyboard, on the CART tier.
+
+        `b2ff7de`'s rule, one rung down: handing the keyboard to a text surface
+        is a screen change, and the key that caused it is still in `last_key`
+        when the surface's first frame reads it. The shell's own text surfaces
+        are seeded in `_set_text_mode`; this is the same call for a cart's
+        editor handle, and it is a SEED and not a mute -- releasing the key and
+        pressing it again still types."""
+        self._cart_key_prev = code or 0
+        self._keyp_latch = 0
+
+    def _release_editors(self):
+        """Hard-flush and drop every handle this run opened."""
+        eds = self._editors
+        self._focus_editor = None
+        if not eds:
+            return
+        self._editors = []
+        for ed in eds:
+            try:
+                ed.close()
+            except Exception:  # noqa: BLE001 -- teardown must never raise
+                pass
 
     def _layout_args(self):
         """`(w, h, fs)` for a responsive app cart's `_layout` (#181).
@@ -525,6 +589,11 @@ class Player:
         # on the boot raster, so the small canvas dies with the run. (Also the
         # RESPONSIVE app-cart bind, #181: same field, same release.)
         self.ws.release_run_canvas()
+        # A dirty EDITOR HANDLE is written HERE and nowhere else (#154): this
+        # is the one place every exit path passes -- the tap on X, the hold
+        # gesture, quit(), a workspace swap, a crash -- so a kid's note is
+        # saved by leaving, exactly as a code tab's half-typed Python is.
+        self._release_editors()
         # A USER APP's crash-guard arming dies with its run. Any STRIKE it took
         # stands -- an exit before the heal is precisely the evidence kept.
         self._app_layout = None
@@ -819,6 +888,7 @@ class Player:
         self._app_layout = None
         self._app_wh = None
         self._app_id = None
+        self._release_editors()        # a RE-RUN is an exit too: flush, then drop
         ws.input.game_view = None      # the `view(w, h)` verb is per-run (cart_quit
                                        # pattern): a cart re-declares it each start
         # #85: a fresh run resets the active scene to the default, so a load_scene()
@@ -1067,7 +1137,9 @@ class Player:
         # anything (system_api.NEVER_GRANTED).
         if self._app_id is not None or self._script:
             ns.update(make_system_api(ws.app_context, cart, ws.canvas,
-                                      ws.app_bar_h))
+                                      ws.app_bar_h,
+                                      editor=self._open_cart_editor,
+                                      request=ws.take_text_request()))
         if console is not None:
             ns.update(console.api())
         t_api = _ticks_diff(_ticks_ms(), t2)
@@ -1397,9 +1469,18 @@ class Player:
             # independent of whether the backend sets last_key before or after
             # begin_frame().
             k = ws.input.last_key
-            ws.input.cart_key = k
-            if k and k != self._cart_key_prev:
-                self._keyp_latch = k
+            fed = self._focus_editor
+            if fed is None:
+                ws.input.cart_key = k
+                if k and k != self._cart_key_prev:
+                    self._keyp_latch = k
+            else:
+                # A FOCUSED editor handle owns the keyboard: the byte goes to
+                # it and the cart's own key()/keyp() read nothing, so a skin
+                # never has to filter the text its editor is eating.
+                ws.input.cart_key = 0
+                if k and k != self._cart_key_prev:
+                    fed.key(k)
             self._cart_key_prev = k
             try:
                 # A RESPONSIVE app cart follows its surface (#181): a window

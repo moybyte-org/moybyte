@@ -696,10 +696,12 @@ you, and it can ask for a few of the console's own powers by naming them in
 
 | permission | what the cart gets |
 |---|---|
-| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Writer and Files show) |
+| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
+| `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
+| `editor` | a marker, not a power: the cart carrying it is where the console opens a text file from Files. `system_carts/notes.moy` is that cart |
 
 Every app cart also gets four names with no permission needed, because they are
 how an app draws rather than what it may touch: **`screen()`** (the canvas),
@@ -712,9 +714,88 @@ Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
 
 `system_carts/notes.moy` is a small worked example: it types, saves, and lists
-what it saved. The full rules (what is never grantable, and how to make an app
-reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
-320×240) are in `docs/app_api_v1.md`.
+what it saved. The full rules
+(what is never grantable, and how to make an app reflow to a big screen with
+`_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
+`docs/app_api_v1.md`.
+
+### The editor handle (`#112`)
+
+`open_editor` hands your cart the console's **own** text editor over one
+document. You draw it into a rect and forward taps; it does the text, the
+caret, the selection, wrap, undo, the clipboard, the Markdown rendering and
+the saving. There is no SAVE button to build: it writes on an idle pause and
+again when the cart exits, so a note is never lost by tapping X.
+
+| call | does |
+|---|---|
+| `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind — you cannot name one |
+| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files), or `None` when there is none. Call it once in `_init` |
+
+Everything else is on the handle you get back:
+
+| call | does |
+|---|---|
+| `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen |
+| `ed.tap(x, y, click)` | forward a pointer. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
+| `ed.focus(on)` / `ed.focused()` | take or release the keyboard. While a handle has it, the console types into it and your own `key()`/`keyp()` read nothing |
+| `ed.key(code)` | feed one byte yourself (an on-screen key), focused or not |
+| `ed.undo()` / `ed.redo()` | one step. `ed.can_undo()` / `ed.can_redo()` for dimming a button |
+| `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the clipboard. It is the CONSOLE's clipboard when your manifest asks for `clipboard`, and the document's own otherwise |
+| `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
+| `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
+| `ed.dirty()` | are there edits no save has taken yet |
+| `ed.text()` / `ed.set_text(s)` | the whole document as one string |
+| `ed.caret()` | `(row, col)` — for a "Ln 3, Col 12" strip |
+| `ed.scroll(rows, cols)` | pan the view without moving the caret |
+| `ed.name()` / `ed.mode()` | the document's name, and how it is being edited: `"md"` / `"code"` / `"json"` / `"text"` |
+| `ed.close()` | save and let it go (going back to a list) |
+
+**Markdown** is what a note is, and the handle renders it: `#` headings, `- [ ]`
+checkboxes you tick by tapping, `[[another note]]` links, and `![[a drawing]]`
+which puts one of Paint's pictures inline — by NAME, so your cart never handles
+the picture. Prose wraps; code and JSON scroll sideways instead.
+
+```python
+def _init():
+    global ed
+    ed = open_editor() or open_editor("my notes")
+
+def _draw():
+    cls(0)
+    ed.draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+
+def _update(dt):
+    t = touch()
+    if t:
+        hit = ed.tap(t[0], t[1], t[2])
+        if hit and hit[0] == "link":
+            open_note(hit[1])                 # your skin decides what that means
+```
+
+```lua
+function _init()
+  ed = open_editor() or open_editor("my notes")
+end
+
+function _draw()
+  cls(0)
+  ed:draw(4, bar_h() + 4, W - 8, H - bar_h() - 8)
+end
+
+function _update(dt)
+  local x, y, click = touch()
+  if x ~= nil then
+    local verb, arg = ed:tap(x, y, click)
+    if verb == "link" then open_note(arg) end
+  end
+end
+```
+
+In Lua the handle is a table with the same verbs as methods (`ed:draw(...)`,
+`ed:tap(...)`), `nil` where Python returns `None`, and `ed:tap` answering two
+values rather than a pair — the same shape `make_layer` takes, for the same
+reason: only numbers and strings cross the Lua boundary.
 
 ## Scripts — a cart with no folder
 

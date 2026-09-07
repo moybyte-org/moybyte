@@ -904,6 +904,10 @@ class Workstation:
         # "theme" -- lives on self.editor_app.tab now (Stage 3); ws.menu_view is a
         # forwarding projection of it, so every reader/writer is unchanged.)
         self.editor = None            # CodeEditor while menu_view == "code"
+        # The document the console has been asked to open, parked for the text
+        # cart's namespace build (take_text_request). One slot: it is set and
+        # consumed inside a single launch.
+        self._text_request = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -1355,6 +1359,52 @@ class Workstation:
         older-shell fallback body."""
         return (cart is not None and cart.get("type") == "app"
                 and not self.is_system_app(cart))
+
+    def cart_editor_focus(self, handle):
+        """A cart's editor handle takes (`handle`) or releases (None) the
+        keyboard -- `editor_handle.EditorHandle.focus`.
+
+        The flip is the shell's and not the cart's because `_set_text_mode`
+        does two things no cart can: it puts the T-Deck keyboard into clean
+        ASCII, and it seeds the typed-key edge with the byte already down, so
+        the key that opened the note is not typed into it (`b2ff7de`)."""
+        self.player.set_editor_focus(handle)
+        self._set_text_mode(handle is not None)
+
+    def take_text_request(self):
+        """POP the `(kind, name, mode)` document the console was asked to open,
+        or None. Read once, by the namespace build of the run that answers it,
+        so a re-run never re-opens what the person has since navigated away
+        from."""
+        req = self._text_request
+        self._text_request = None
+        return req
+
+    def open_text_cart(self, name, kind=None, mode=None):
+        """RUN the text app on one document -- the Files router's door for
+        anything textual (docs/text_editing_2026-09.md).
+
+        The text app is a CART, claimed by the `editor` marker permission
+        (`system_api.is_text_app`), so this is an ordinary launch with the
+        request parked for its namespace. False when this build carries no
+        such cart, which the router reports on its status line."""
+        cart = None
+        for c in self.carts.all:
+            if system_api.is_text_app(c):
+                cart = c
+                break
+        if cart is None:
+            return False
+        self._text_request = (kind or system_api.DEFAULT_FILE_KIND,
+                              str(name), mode)
+        # Back to whoever asked, not home: Files opened this, so its X returns
+        # to the shelf the person was standing on.
+        caller = self._apps_by_id.get(self.wm.top_kind()) or self.launcher_layer
+        if not self._open_workspace(cart):
+            self._text_request = None
+            return False
+        self.run(self.project, caller)
+        return True
 
     def app_bar_h(self):
         """Rows the exitable "tool" strip owns on top of a running app cart's
@@ -2098,7 +2148,10 @@ class Workstation:
         (hold-BACKSPACE) calls this. The Editor is the second caller
         (Stage 3b): a cart run from PLAY returns to the Editor on the tab it left
         (screen -> "menu"; editor_app.tab is preserved -> the SAME tab), proving the
-        Player has zero knowledge of who launched it. Any other caller (the launcher
+        Player has zero knowledge of who launched it. A registered APP is the
+        third (Files opening a note in the Notes cart, step 3 of
+        docs/text_editing_2026-09.md): it pops back to that app's own surface,
+        on the shelf the person was standing on. Any other caller (the launcher
         home root, or None) pops all the way home."""
         # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
         # next cart must build into a compact heap, not around this one's corpse
@@ -2123,8 +2176,17 @@ class Workstation:
             # map but the sym layer doesn't exist (sym+digit typed NOTHING in
             # the code editor after a PLAY). Restore the returned-to tab's mode.
             self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
-        else:
-            self.go_home()
+            return
+        caller_id = getattr(self._run_caller, "id", None)
+        if caller_id is not None and self._apps_by_id.get(caller_id) \
+                is self._run_caller:
+            # An APP launched this run. Its layer is still on the stack under
+            # the Player, so this is a RETURN, not a re-open -- it comes back
+            # on the row it was showing.
+            self._dirty = True
+            self.wm.goto(caller_id)
+            return
+        self.go_home()
 
     def _crash_to_code(self):
         """A crashed cart run throws the kid STRAIGHT into the code editor on
@@ -2846,6 +2908,7 @@ class Workstation:
             k = getattr(self.input, "last_key", 0) or 0
             self._ekey_prev = k
             self.code_layer.seed_key(k)
+            self.player.seed_cart_key(k)   # a cart's editor handle, same rule
         self.input.text_mode = bool(on)
         kb = self.keyboard
         if kb is not None:

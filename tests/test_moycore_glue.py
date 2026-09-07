@@ -810,12 +810,29 @@ def test_the_prelude_is_the_shared_source_and_omits_the_fastmath_half(w):
 
 def test_every_handle_the_prelude_consumes_is_registered(w):
     """The two halves are one source (`lua_ext`) precisely because a rename on
-    one side is a layer cart dying on "index a nil value"."""
+    one side is a layer cart dying on "index a nil value".
+
+    The editor family (#112) is the one GATED set: `open_editor` rides the
+    `files` permission, so its trampolines exist only for a cart that earned
+    it and the prelude guards its whole block on their presence. Asserted in
+    both states below rather than exempted, because "registered when granted"
+    is the actual invariant and a rename would still break it."""
     from runtime.lua_ext import PRELUDE_HANDLES
 
     w.run()
     wanted = set(re.findall(r"__\w+", PRELUDE_HANDLES)) - {"__id", "__img"}
-    assert wanted == {n for n in w.core.registered if n.startswith("__")}
+    gated = {n for n in wanted if n.startswith("__ed_")}
+    assert gated, "the editor handles vanished from the prelude"
+    got = {n for n in w.core.registered if n.startswith("__")}
+    assert wanted - gated == got, "an UNGATED handle is missing"
+
+
+def test_the_editor_handles_are_registered_for_a_cart_that_earned_them(w):
+    from runtime.lua_ext import PRELUDE_HANDLES
+
+    w.run(ns=make_ns(open_editor=lambda name=None, mode=None: None))
+    wanted = set(re.findall(r"__ed_\w+", PRELUDE_HANDLES))
+    assert wanted <= {n for n in w.core.registered if n.startswith("__")}
 
 
 def test_a_layer_made_through_a_handle_is_pinned_by_the_run(w):

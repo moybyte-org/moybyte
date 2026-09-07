@@ -1,12 +1,14 @@
 """The Lua-side glue for moybyte's OBJECT-valued cart verbs -- one definition.
 
-Two families of the moybyte cart API return objects: `make_layer` (a Layer),
-`image` (a paint image), and the placement verbs of #85/#109 (`scene`,
-`actors` and the actor they hand out). No Lua runtime here marshals objects
-across its boundary -- moy_lua passes scalars, moycore passes scalars and
-tuples, and the host's ctypes binding passes ints and strings -- so all of them
-solve it the same way: an int-handle registry on the Python side, and Lua
-wrappers that hide the handles from the cart.
+Several families of the moybyte cart API return objects: `make_layer` (a
+Layer), `image` (a paint image), the placement verbs of #85/#109 (`scene`,
+`actors` and the actor they hand out), and `open_editor` (#112, a text editor
+over one document). No Lua runtime here marshals objects across its boundary --
+moy_lua passes scalars, moycore passes scalars and tuples, and the host's
+ctypes binding passes ints and strings -- so all of them solve it the same way:
+an int-handle registry on the Python side, and Lua wrappers that hide the
+handles from the cart. A verb that answers a PAIR encodes it as one string and
+splits it in Lua, for the same reason the scene rows do.
 
 This module is that solution, once. It used to live in moy_lua_glue.py, which
 made it reachable from the two DEVICE runtimes and invisible to the host's --
@@ -122,6 +124,7 @@ NOT_REGISTRABLE = frozenset((
     "Image",                               # a constructor, likewise
     "scene", "load_scene", "actors",       # rows of actors: prelude + handles
     "touching", "move_actor", "move_actor_to", "remove_actor",
+    "open_editor",                         # an editor handle: prelude + handles
 ))
 
 # The prelude in two chunks, because moycore takes only one of them.
@@ -391,6 +394,81 @@ do
 end
 """
 
+PRELUDE_EDITOR = """
+do
+  -- The EDITOR HANDLE (#112, docs/text_editing_2026-09.md) for Lua carts. Same
+  -- route as a layer: an int handle Python-side, a wrapper table here, and only
+  -- numbers and strings across the boundary. The two verbs that answer a PAIR
+  -- -- tap and save -- encode it as one comma-joined string and split it here,
+  -- because a tuple crosses moycore and does not cross the other two bindings.
+  --
+  -- Defined ONLY when the cart earned it. `open_editor` rides the `files`
+  -- permission; without it there is no trampoline and therefore no global, so a
+  -- Lua cart that reaches for it dies on a nil call -- the same answer a Python
+  -- cart gets from a NameError, which is the whole point of the gate.
+  local ed_open, ed_draw, ed_tap = __ed_open, __ed_draw, __ed_tap
+  local ed_focus, ed_key, ed_do = __ed_focus, __ed_key, __ed_do
+  local ed_save, ed_scroll, ed_settext = __ed_save, __ed_scroll, __ed_settext
+  __ed_open, __ed_draw, __ed_tap = nil, nil, nil
+  __ed_focus, __ed_key, __ed_do = nil, nil, nil
+  __ed_save, __ed_scroll, __ed_settext = nil, nil, nil
+  local find, sub, tonum = string.find, string.sub, tonumber
+
+  local function pair(s)
+    local e = find(s, ",", 1, true)
+    if e == nil then return s, nil end
+    return sub(s, 1, e - 1), sub(s, e + 1)
+  end
+
+  local function flag(v)
+    if v == nil or v then return 1 end
+    return 0
+  end
+
+  if ed_open ~= nil then
+    function open_editor(name, mode)
+      local id = ed_open(name or "", mode or "")
+      if id < 0 then return nil end
+      local e = { __id = id }
+      function e:draw(x, y, w, h, scale)
+        ed_draw(self.__id, x, y, w, h, scale or 1)
+      end
+      function e:tap(x, y, click)
+        local got = ed_tap(self.__id, x, y, flag(click))
+        if got == "" then return nil end
+        local verb, arg = pair(got)
+        if verb == "check" then return verb, tonum(arg) end
+        if verb == "caret" then return verb, nil end
+        return verb, arg
+      end
+      function e:focus(on) return ed_focus(self.__id, flag(on)) == 1 end
+      function e:key(code) return ed_key(self.__id, code or 0) == 1 end
+      function e:save(soft)
+        local ok, why = pair(ed_save(self.__id, soft and 1 or 0))
+        return ok == "1", why
+      end
+      function e:caret()
+        local r, c = pair(ed_do(self.__id, "caret"))
+        return tonum(r), tonum(c)
+      end
+      function e:scroll(rows, cols)
+        ed_scroll(self.__id, rows or 0, cols or 0)
+      end
+      function e:set_text(body) ed_settext(self.__id, body or "") end
+      for _, v in ipairs({"focused", "can_undo", "can_redo", "undo", "redo",
+                          "select_all", "copy", "cut", "paste", "dirty"}) do
+        e[v] = function(self) return ed_do(self.__id, v) == 1 end
+      end
+      for _, v in ipairs({"text", "badge", "name", "mode"}) do
+        e[v] = function(self) return ed_do(self.__id, v) end
+      end
+      function e:close() ed_do(self.__id, "close") end
+      return e
+    end
+  end
+end
+"""
+
 PRELUDE_FASTMATH = """
 do
   -- #66 M0: rnd/flr as pure Lua. The registered trampolines cost a full
@@ -405,6 +483,11 @@ do
   function flr(x) return mfloor(x) end
 end
 """
+
+# One name for everything the handle registry backs, because every runtime
+# feeds `PRELUDE_HANDLES` to its VM alongside one `install_handles` call and a
+# second name would be a second thing to remember to send.
+PRELUDE_HANDLES = PRELUDE_HANDLES + PRELUDE_EDITOR
 
 _LUA_PRELUDE = PRELUDE_HANDLES + PRELUDE_FASTMATH
 
@@ -567,4 +650,84 @@ def install_handles(ns, reg):
     reg("__actor_tag", _actor_tag)
     reg("__actor_flag", _actor_flag)
     reg("__actor_remove", _actor_remove)
+    _install_editor(ns, reg, layers)
     return layers, images
+
+
+# The verbs the prelude reaches through ONE `__ed_do` trampoline: no arguments,
+# and an answer that is already a scalar. Split by what they answer, because
+# Lua compares the booleans against 1 and takes the strings as they are.
+_ED_FLAGS = ("focused", "can_undo", "can_redo", "undo", "redo", "select_all",
+             "copy", "cut", "paste", "dirty")
+_ED_TEXTS = ("text", "badge", "name", "mode")
+
+
+def _install_editor(ns, reg, pins):
+    """The editor handle's int-handle half (#112).
+
+    Registered only when the cart's manifest earned `open_editor`, so a Lua
+    cart without the grant has no global rather than one that answers nil --
+    see PRELUDE_EDITOR. `pins` is the same list the layers ride: it keeps the
+    handles alive for the run and drops them with it."""
+    open_editor = ns.get("open_editor")
+    if open_editor is None:
+        return
+    editors = []
+
+    def _ed_open(name, mode):
+        # "" is the PARAMETERLESS form -- a document has a name, so the empty
+        # string cannot collide with one, and the trampoline speaks scalars.
+        ed = open_editor(str(name) or None, str(mode) or None)
+        if ed is None:
+            return -1
+        editors.append(ed)
+        pins.append(ed)
+        return len(editors) - 1
+
+    def _ed_draw(h, x, y, w, ht, scale):
+        editors[int(h)].draw(int(x), int(y), int(w), int(ht), int(scale))
+
+    def _ed_tap(h, x, y, click):
+        got = editors[int(h)].tap(int(x), int(y), bool(int(click)))
+        if got is None:
+            return ""
+        return got[0] + "," + ("" if got[1] is None else str(got[1]))
+
+    def _ed_focus(h, on):
+        return 1 if editors[int(h)].focus(bool(int(on))) else 0
+
+    def _ed_key(h, code):
+        return 1 if editors[int(h)].key(int(code)) else 0
+
+    def _ed_do(h, verb):
+        ed = editors[int(h)]
+        if verb == "caret":
+            row, col = ed.caret()
+            return str(row) + "," + str(col)
+        if verb in _ED_TEXTS:
+            return str(getattr(ed, verb)())
+        if verb in _ED_FLAGS:
+            return 1 if getattr(ed, verb)() else 0
+        if verb == "close":
+            ed.close()
+        return 0
+
+    def _ed_save(h, soft):
+        ok, why = editors[int(h)].save(soft=bool(int(soft)))
+        return ("1," if ok else "0,") + str(why)
+
+    def _ed_scroll(h, rows, cols):
+        editors[int(h)].scroll(int(rows), int(cols))
+
+    def _ed_settext(h, body):
+        editors[int(h)].set_text(str(body))
+
+    reg("__ed_open", _ed_open)
+    reg("__ed_draw", _ed_draw)
+    reg("__ed_tap", _ed_tap)
+    reg("__ed_focus", _ed_focus)
+    reg("__ed_key", _ed_key)
+    reg("__ed_do", _ed_do)
+    reg("__ed_save", _ed_save)
+    reg("__ed_scroll", _ed_scroll)
+    reg("__ed_settext", _ed_settext)

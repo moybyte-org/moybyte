@@ -53,11 +53,18 @@ here changes that, and no amount of wrapper would.
 
     permission        cart globals                    AppContext role
     ---------------   -----------------------------   ---------------
-    "files"           files.*  (kind "docs")          ctx.files
-    "files:<kind>"    files.*  (that kind only)       ctx.files
+    "files"           files.*  + open_editor()        ctx.files
+    "files:<kind>"    the same, that kind only        ctx.files
+    "clipboard"       (the editor handle's cut/copy)  ctx.clipboard
     "prefs"           prefs.get / prefs.set           ctx.prefs (namespaced)
     "appearance"      set_theme() / themes()          ctx.theme
     "launch"          open_app(id)                    ctx.nav
+
+`open_editor` rides the `files` grant because a text editor IS a document
+handle: it opens `(kind, name)` through the same role `files.*` narrows, and
+the cart can never NAME a kind -- it gets the one it was granted, or the one
+the console was already asked to open (the Files router's door). The engine
+behind it stays in the shell; `runtime/editor_handle.py` is the whole of it.
 
 Every `type: "app"` cart also gets `ui`, `theme()`, `screen()` and `bar_h()` --
 see UNGATED below. Everything else a manifest lists (`"graphics"`, `"input"`,
@@ -89,8 +96,11 @@ lost feature rather than a granted capability.)
   * `damage` / `surface` -- the shell's invalidation epoch and its live canvas
     plumbing. A cart repaints because the Player ticked it; a cart that could
     dirty the shell every frame would defeat the redraw gate on every tier.
-  * `clipboard` / `notify` -- not refused on principle, just not mapped yet. A
-    grant with no consumer is a capability granted for nothing.
+  * `notify` -- not refused on principle, just not mapped yet. A grant with no
+    consumer is a capability granted for nothing. `clipboard` sat here for the
+    same reason until the editor handle became its consumer; it is mapped now,
+    and a cart still never touches the buffer -- the handle's `cut`/`copy`/
+    `paste` are the only things that read it.
   * Firmware update and reboot are not roles at all -- they live on
     `ws.updater` / `machine`, reachable only through `shell`.
 
@@ -143,14 +153,28 @@ _ROLE_FOR = {
     "prefs": "prefs",
     "appearance": "theme",
     "launch": "nav",
+    "clipboard": "clipboard",
 }
+
+
+# The marker permission the console's TEXT APP claims its cart with -- the
+# `.md`/`.json`/`.txt` door the Files router opens (docs/text_editing_2026-09).
+# NOT in `_ROLE_FOR`, so it grants nothing; it only says which cart this is,
+# the way a shipped app claims its cart by title + `APP_PERM`.
+TEXT_APP_PERM = "editor"
+
+
+def is_text_app(cart):
+    """True when `cart` is the console's text app."""
+    perms = (cart.get("permissions") or ()) if cart else ()
+    return TEXT_APP_PERM in perms
 
 
 # Roles a cart is never handed, whatever its manifest says. Enforced by
 # `_ROLE_FOR` being an allowlist; named here so the refusal is READABLE and so
 # `tests/test_user_apps.py` can pin it against `app_context.ROLES`.
 NEVER_GRANTED = ("shell", "carts", "wallpaper", "artwork",
-                 "damage", "surface", "clipboard", "notify")
+                 "damage", "surface", "notify")
 
 
 # The user-files kinds a `"files:<kind>"` permission may name. A closed set, and
@@ -349,7 +373,8 @@ class ScopedFiles:
 
 # -- the factory -------------------------------------------------------------
 
-def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
+def make_system_api(ctx_factory, cart, canvas=None, bar_h=None,
+                    editor=None, request=None):
     """The extra globals `cart` (a `type: "app"` cart) gets, or `{}`.
 
     `ctx_factory(app_id, needs, prefs_ns)` is `Workstation.app_context` -- the
@@ -363,7 +388,12 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
     passed rather than read off `ctx.surface`, because `ctx.surface.canvas()` is
     always the SYSTEM canvas and a fixed app draws on the game one. `bar_h` is a
     zero-argument callable for the host strip's height, for the same reason: it
-    is chrome geometry, not a shell role."""
+    is chrome geometry, not a shell role.
+
+    `editor` is the shell's editor-handle factory (`Player._open_cart_editor`)
+    and `request` is the `(kind, name, mode)` the console was asked to open --
+    both passed the same way and for the same reason: they are the running
+    shell, not a role. Without them `open_editor` simply has no name."""
     roles, kind = granted_roles(cart)
     # `theme` is always needed: `theme()` is ungated. Requesting it twice is
     # harmless (AppContext just attaches the role), but keep the tuple clean so
@@ -400,6 +430,26 @@ def make_system_api(ctx_factory, cart, canvas=None, bar_h=None):
     # -- GATED ----------------------------------------------------------------
     if "files" in roles:
         ns["files"] = ScopedFiles(ctx.files, kind)
+        if editor is not None:
+            # The editor handle (docs/text_editing_2026-09.md step 3). The cart
+            # passes a NAME and never a kind: with one it edits an item of the
+            # kind it was granted; with none it picks up whatever document the
+            # console was already asked to open, which may be another kind
+            # because a PERSON chose that file in Files.
+            files = ctx.files
+            clip = getattr(ctx, "clipboard", None)
+
+            def _open_editor(name=None, mode=None):
+                """An editor over one document, or None when there is none."""
+                if name is None:
+                    if not request:
+                        return None
+                    r_kind, r_name, r_mode = request
+                    return editor(files, r_kind, r_name, mode or r_mode,
+                                  canvas, clip)
+                return editor(files, kind, str(name), mode, canvas, clip)
+
+            ns["open_editor"] = _open_editor
     if "prefs" in roles:
         ns["prefs"] = ctx.prefs
     if "theme" in roles:

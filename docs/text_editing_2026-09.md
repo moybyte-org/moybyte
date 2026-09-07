@@ -64,11 +64,17 @@ QWERTY is planned.
 1. Notes' files become `.md` in one flat vault, a one-shot migration from
    `.moytext`.
 2. The editor mode table and the Files router.
-3. The editor handle verb; Notes rebuilt as the thin cart over it.
+3. The editor handle verb; Notes rebuilt as the thin cart over it. **Built as
+   `open_editor(name)` on the `files` grant** (`runtime/editor_handle.py`): the
+   handle is identified by `(kind, name)` through the Files role, the cart draws
+   it into a rect and forwards taps, and the SHELL feeds the focused handle the
+   keyboard — because the switch that takes the keyboard is also the one that
+   swallows the byte that caused it, and no cart can make that call.
 4. Writer's shell process removed.
 5. The Config tab's ADVANCED files row, with JSON mode's rule.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —
-settled by the handle, not by a verb), #114/#115 (the terminal), #120 (the
-capability gate).
+SETTLED by step 3: the handle carries `undo`/`redo` over the op-history, so
+there is no cart-facing undo VERB and none is wanted), #114/#115 (the
+terminal), #120 (the capability gate).
