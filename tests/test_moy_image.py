@@ -4,8 +4,8 @@ Paint used to write a second codec -- uncompressed `count, value` run pairs,
 `codec: "rle"` -- chosen because saving needed no compressor on a board. It cost
 2.5-10x the bytes of the compressed form every other writer already used (one
 320x240 cover 72 KB against 26), and a big flat string is the allocation an S3
-heap refuses first. So: one format, the compressed one, and the RLE reader lives
-only inside the store's one-shot migration.
+heap refuses first. So: one format, the compressed one, and NO RLE reader
+anywhere -- a blob still in the retired codec reads as an absent picture.
 
 Four ways that goes wrong, each pinned below:
 
@@ -123,6 +123,19 @@ def test_a_blob_that_is_not_a_picture_reads_as_absent(bad):
     cannot read as one that is not there."""
     assert moy_image.decode_moyimg(bad) is None
     assert moy_image.moyimg_runs(bad) is None
+
+
+def test_a_retired_rle_blob_reads_as_absent():
+    """The strict reader, on the one legacy form that ever shipped. Paint's RLE
+    blob is built here because nothing in the tree writes one any more -- and
+    there is no migration that will (CLAUDE.md, 2026-09-07): a card carrying one
+    reads as a picture that is not there, which is what every caller already
+    draws as a placeholder."""
+    packed = moy_image.pack_runs(_art(64, 48))
+    blob = json.dumps({"format": "moyimg-v1", "w": 64, "h": 48, "codec": "rle",
+                       "data": moy_image._b64_encode(packed)})
+    assert moy_image.decode_moyimg(blob) is None
+    assert moy_image.moyimg_runs(blob) is None
 
 
 def test_extra_header_keys_survive_a_decode():
@@ -262,7 +275,7 @@ def _starved_chunks(raw, chunk=1024):
 
 @pytest.mark.parametrize("chunk", [1, 7, 1024, 100000])
 def test_the_streaming_compressor_writes_a_picture_anything_can_read(chunk):
-    """`_deflate_pieces` is what the migration writes through, and what it
+    """`_deflate_pieces` is the writer half of the streaming pair, and what it
     produces has to be a picture every reader already reads, at a size the
     format was chosen for -- however the pieces fell.
 
@@ -356,7 +369,7 @@ hgot = moy_image.decode_moyimg(host)
 assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the host's"
 
 # The two STREAMING halves, on the implementation that actually runs them: the
-# shelf reads a cover through DeflateIO.read(n) and the picture migration writes
+# shelf reads a cover through DeflateIO.read(n) and `_deflate_pieces` writes
 # one through repeated DeflateIO.write(). Neither is CPython's decompressobj/
 # compressobj, and this is the only place either is driven by the real thing --
 # which is how we know `deflate` closes a block per write and CPython does not.
@@ -403,11 +416,11 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
     got = json.loads(line[0][len("RESULT "):])
     assert got["wbits"] == moy_image.MOYIMG_WBITS
     assert got["runs"] > 0
-    # The picture migration writes through the piecewise compressor, so what it
-    # costs a board is a RATIO question, not a byte-identity one -- `deflate`
-    # closes a block per write where CPython's compressobj does not. Measured
-    # here rather than assumed, because a migration that inflated its own output
-    # would undo the size argument the one-format decision rests on.
+    # A writer that streams its raster into the compressor pays a RATIO, not a
+    # byte-identity -- `deflate` closes a block per write where CPython's
+    # compressobj does not. Measured here rather than assumed, because a writer
+    # that inflated its own output would undo the size argument the one-format
+    # decision rests on.
     assert got["piecewise"] <= got["bytes"] * 1.05 + 64
     # Not asserted EQUAL: two deflate implementations may pick different
     # matches for the same input and both be right. What must hold is that each

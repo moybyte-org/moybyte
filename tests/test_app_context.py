@@ -610,8 +610,9 @@ def test_the_raw_view_runs_the_same_verbs_inside_one_session(tmp_path):
 
 def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
     """A document is plain Markdown, so the bare string IS the document. The
-    codec stays on the role because that is where a USER APP reaches it, and a
-    legacy `moytext-v1` wrapper still unwraps rather than showing its JSON."""
+    codec stays on the role because that is where a USER APP reaches it, and it
+    is a SPLIT and nothing else -- a note that happens to be JSON is that text,
+    not a wrapper to unpack."""
     ws, files = _files(tmp_path)
     blob = files.encode_text("HELLO\nWORLD")
     assert files.save("docs", "greeting", blob)[1] is None
@@ -619,7 +620,8 @@ def test_decode_text_reads_a_stored_document_and_a_bare_string_is_one(tmp_path):
     assert err is None and stored == "HELLO\nWORLD"
     assert files.decode_text(stored) == ["HELLO", "WORLD"]
     assert files.decode_text("HELLO\nWORLD") == ["HELLO", "WORLD"]
-    assert files.decode_text('{"format": "moytext-v1", "body": "hi"}') == ["hi"]
+    wrapped = '{"format": "moytext-v1", "body": "hi"}'
+    assert files.decode_text(wrapped) == [wrapped]
     assert files.decode_text(files.encode_text("")) == []
     assert files.decode_text("") == [] and files.decode_text(None) == []
     ws.carts_store = None

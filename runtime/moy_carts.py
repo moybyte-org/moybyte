@@ -191,16 +191,15 @@ def flags_to_hex(flags):
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, _deflate,
-                           _deflate_pieces, encode_moyimg, moyimg_runs,
-                           decode_moyimg, cover_sig, _thumb_file)
+                           encode_moyimg, moyimg_runs, decode_moyimg,
+                           cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
                         set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
-                                   _deflate, _deflate_pieces, encode_moyimg,
-                                   moyimg_runs, decode_moyimg, cover_sig,
-                                   _thumb_file)
+                                   _deflate, encode_moyimg, moyimg_runs,
+                                   decode_moyimg, cover_sig, _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
                                 _forget_bak, set_publish_root)
@@ -488,20 +487,11 @@ def encode_text(body):
 def decode_text(blob):
     """A document's stored text -> its lines ([] when there are none).
 
-    The blob IS the body, which is what a `.md` always holds. A legacy
-    `moytext-v1` wrapper is unwrapped first, so a `.moytext` that outlived
-    `migrate_doc_format` reads as its note rather than as JSON."""
+    The blob IS the body, which is what a `.md` always holds -- so this splits
+    and nothing else. It stays a named seam for `encode_text`'s reason."""
     if not isinstance(blob, str):
         return []
-    body = blob
-    if blob[:1] == "{":
-        try:
-            data = json.loads(blob)
-        except ValueError:
-            data = None
-        if isinstance(data, dict) and isinstance(data.get("body"), str):
-            body = data["body"]
-    return body.split("\n") if body else []
+    return blob.split("\n") if blob else []
 
 
 def slug(title):
@@ -870,28 +860,19 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
 
 
 def sweep_store(root=CARTS_DIR):
-    """The one-shot passes a store OPENING runs, behind one door.
+    """The one-shot pass a store OPENING runs, behind one door. Returns the
+    number of retired folders removed.
 
-    Each is gated on its own marker -- a generation sidecar, or the kind dir's
-    own existence -- so the warm path is one small read apiece. Returns
-    (retired folders removed, notes migrated, documents rewritten).
-
-    `migrate_docs` runs HERE rather than from a text app because it builds the
-    vault a note is picked from: it has to have run before anything lists it.
-    It also runs before `migrate_doc_format`, so a legacy notebook lands and is
-    normalised in the same boot.
-
-    THE PICTURE PASS IS NOT HERE. It was, for one day, and it cost a Guition
-    196 seconds of boot and then the boot itself; it is `ImageMigration` now and
-    the console drives it a file per idle frame. The rule the three passes above
-    still satisfy and that one does not: a store-opening pass is a small read on
-    the warm path and bounded work on the cold one."""
-    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root))
+    The door is kept for the next sweep that earns it, and the bar it has to
+    clear is `prune_retired`'s: gated on a generation sidecar, so the warm path
+    is one small read and the cold one is bounded. A FORMAT change does not
+    clear it and does not belong here -- readers are strict and a bumped seed
+    version re-seeds the content (CLAUDE.md, 2026-09-07)."""
+    return prune_retired(root)
 
 
 def seed_any(seed, root=CARTS_DIR, progress=None):
     """Seed a roster of either form. The one call a board's boot makes."""
-    note_seed_folders(seed_folders(seed))   # what the picture pass steps over
     sweep_store(root)
     if is_packed(seed):
         return seed_packed(seed, root, progress=progress)
@@ -1906,11 +1887,10 @@ TRASH_KEEP = 50          # prune the trash's oldest entries beyond this many
 # Documents are PLAIN MARKDOWN (2026-09-07): `files/docs/<name>.md`, UTF-8, LF,
 # no envelope and no header -- the file's body IS the document and its stem is
 # the note's name. The point is that a card in a PC's reader opens the same
-# folder in Obsidian with nothing to convert. `.moytext` was the JSON wrapper
-# this replaced; `migrate_doc_format` rewrites a store's copies once, and the
-# readers here absorb a stray for one release.
+# folder in Obsidian with nothing to convert. The reader is STRICT: a `.md` is
+# the only thing the docs kind lists, so the `.moytext` wrapper this replaced is
+# not a document any more, it is a file the vault does not know.
 DOC_EXT = ".md"
-LEGACY_DOC_EXT = ".moytext"
 
 # SCRIPTS live in the vault beside the notes (docs/text_editing_2026-09.md): a
 # bare `.py` or `.lua` file is a cart with no folder, and RUN wraps it on the
@@ -2194,9 +2174,6 @@ def list_files(kind, root=CARTS_DIR):
         return list_project_files(kind, root)
     ext, folder_valued, _base = _kind_spec(kind)
     d = file_kind_dir(kind, root)
-    if kind == "docs":
-        _absorb_dir(d)     # a stray wrapper is listed as the note it is; the
-                           # trash is the one-shot pass's, never a listing's
     entries = _kind_entries(d, ext, folder_valued, _whole_exts(kind))
     return [n for n, _m in entries]
 
@@ -2230,12 +2207,6 @@ def load_file(kind, name, root=CARTS_DIR):
     try:
         return _read(file_path(kind, name, root))
     except OSError:
-        if kind == "docs":            # a stray legacy wrapper (one release)
-            try:
-                return "\n".join(decode_text(_read(
-                    file_kind_dir(kind, root) + "/" + name + LEGACY_DOC_EXT)))
-            except OSError:
-                pass
         return None
 
 
@@ -2670,414 +2641,6 @@ def migrate_user_files(root=CARTS_DIR):
     if not blob:
         return None
     return save_file("drawings", "my_art", blob, root)
-
-
-def migrate_docs(root=CARTS_DIR):
-    """One-shot #108 migration: the legacy single-file Writer notebook
-    (notes.json, a list of {title, body}) becomes one files/docs/<name>.md
-    per note. Gated on files/docs/ not existing yet (its own marker, like
-    drawings/), so an emptied Docs kind is never resurrected. The legacy
-    notes.json is left in place (older builds keep reading it). No-op when there
-    is nothing to migrate; returns the list of made names, or None."""
-    if _exists(file_kind_dir("docs", root)):
-        return None
-    blob = load_notes(root)
-    if not blob:
-        return None
-    try:
-        data = json.loads(blob)
-    except (ValueError, TypeError):
-        return None
-    notes = data.get("notes") if isinstance(data, dict) else None
-    if not isinstance(notes, list) or not notes:
-        return None
-    made = []
-    for n in notes:
-        if not isinstance(n, dict):
-            continue
-        body = str(n.get("body", ""))
-        if not body.strip():
-            continue
-        title = ""
-        for ln in body.split("\n"):
-            if ln.strip():
-                title = ln.strip()
-                break
-        name = new_file_name("docs", root, base=title or None)
-        made.append(save_file("docs", name, encode_text(body), root))
-    return made or None
-
-
-# -- documents became plain Markdown (2026-09-07) -----------------------------
-#
-# The `.moytext` JSON wrapper is gone, so every store carrying one has to be
-# rewritten -- ONCE, in the `prune_retired` shape a store opening already runs:
-# a generation sidecar beside the carts dir says what a store has been swept
-# for, so the warm path is one small read and the pass never runs twice. Bump
-# DOCS_GEN if the format moves again.
-#
-# CRASH SAFETY is `_write_atomic`'s, used the way the two-write publish intends:
-# the `.md` is whole before the `.moytext` is removed, so a power cut between
-# the two leaves BOTH -- and the next pass finds the `.md` already there, drops
-# the wrapper and is done. That is also why an existing `.md` always wins: it is
-# either the finished half of an interrupted pass or a newer note, and neither
-# may be overwritten by an older wrapper.
-DOCS_GEN = 1
-DOCS_VER_NAME = "docs.ver"
-
-
-def docs_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like retired.ver) holding the
-    document-format generation this store has already been rewritten for."""
-    return _sibling_path(root, DOCS_VER_NAME)
-
-
-def load_docs_version(root=CARTS_DIR):
-    """The generation the store's documents were rewritten at -- 0 when
-    absent/unreadable, so a store that predates this migrates once."""
-    try:
-        return int(_read(docs_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
-
-
-def _absorb_dir(d):
-    """Rewrite every `<stem>.moytext` under `d` as `<stem>.md`. Returns how many
-    wrappers left. Safe to re-run: an existing `.md` wins and the wrapper simply
-    goes."""
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return 0                       # no docs kind yet -> nothing to move
-    gone = 0
-    for n in names:
-        if not n.endswith(LEGACY_DOC_EXT) or len(n) == len(LEGACY_DOC_EXT):
-            continue
-        legacy = d + "/" + n
-        md = d + "/" + n[:-len(LEGACY_DOC_EXT)] + DOC_EXT
-        try:
-            if not _exists(md):
-                _write_atomic(md, "\n".join(decode_text(_read(legacy))))
-            _remove(legacy)
-            _forget_bak(legacy)
-        except OSError:
-            continue                   # a read-only store: sweep again next boot
-        gone += 1
-    return gone
-
-
-def absorb_legacy_docs(root=CARTS_DIR):
-    """Rewrite any stray `.moytext` in the docs kind AND its trash as `.md`.
-
-    Ungated, so a wrapper that arrives after the one-shot pass -- pushed over
-    the sync RPC by an older peer, or carried in on a card -- still reads as the
-    note it is. Costs one listdir on a directory the caller is about to list."""
-    return (_absorb_dir(file_kind_dir("docs", root))
-            + _absorb_dir(_trash_dir("docs", root)))
-
-
-def migrate_doc_format(root=CARTS_DIR, generation=DOCS_GEN):
-    """Rewrite the store's `.moytext` documents as `.md`, once per store.
-
-    Returns the number of wrappers rewritten (0 on the warm path, which costs
-    one small file read)."""
-    if load_docs_version(root) >= generation:
-        return 0
-    gone = absorb_legacy_docs(root)
-    try:
-        _write(docs_version_path(root), str(int(generation)))
-    except OSError:
-        return gone          # a read-only store: sweep again next boot, harmless
-    return gone
-
-
-# -- pictures became one format (2026-09-07) ---------------------------------
-#
-# Paint used to save an uncompressed RLE `.moyimg` (`codec: "rle"`) because
-# saving needed no compressor on a board. It is 2.5-10x bigger than the
-# compressed form every other writer already used -- one 320x240 cover 72 KB
-# against 26 -- and a big flat string is the allocation an S3 heap refuses
-# first. So there is ONE format now (runtime/moy_image.py), and the RLE reader
-# below is the LAST one: no live decoder speaks two formats, and this pass
-# exists to make that true of every store rather than only of new files.
-#
-# IT IS NOT A BOOT PASS, and that is the whole shape of it. The first version
-# ran inside `sweep_store` like the two passes above it, and on a Guition
-# reproducing a first boot after the flash it took 196 SECONDS before the
-# "loading cartridges" lines even began -- about 15s per 320x240 cover on the
-# S3's compressor -- and then fragmented the heap past recovery: six carts
-# failed to load ("allocating 8448 bytes") and the desktop itself died asking
-# for 76,800 (on glass, 2026-09-07). Three things follow, and all three are
-# load-bearing:
-#
-#   * The rewrite is STREAMED. The retired raster is expanded into the
-#     compressor a KB at a time (`_rle_pieces` -> `_deflate_pieces`) and never
-#     exists whole, so the pass no longer asks a loaded heap for the one block
-#     it cannot serve.
-#   * It runs on the IDLE TICK, after the desk is up, one file per tick
-#     (`ImageMigration`). A picture still in the retired codec reads as ABSENT
-#     until its turn comes -- the shelf draws its placeholder -- which is what
-#     makes deferring it cost a thumbnail rather than a crash.
-#   * A SEED cart's pictures are not rewritten at all. The seed pass owns those
-#     folders and replaces them wholesale on the next version bump, so paying
-#     15s a cover to rewrite what a re-seed overwrites is work with a negative
-#     return. What is left on a real store is the kid's own content -- the only
-#     picture here that nothing else can replace. The cost, stated: a seed cart
-#     whose cover is STILL in the retired codec draws its glyph fallback until
-#     that bump lands.
-#
-# Same one-shot shape as the two passes above: a generation sidecar, written
-# LAST and only when nothing is still pending, so an interrupted pass leaves the
-# finished files finished and the next session completes the rest. Each rewrite
-# is `_write_atomic` and each is independent, so there is no half-converted file
-# to reason about, and the pass is idempotent -- a blob with no `codec` key is
-# already the one format and is not decoded or rewritten.
-#
-# The rewrite keeps the WHOLE header and replaces only `data`, because a picture
-# copied into a cart carries the #108 provenance stamp (`src`/`sig`) and losing
-# it would silently retire the "your drawing changed -> UPDATE" affordance.
-IMAGES_GEN = 1
-IMAGES_VER_NAME = "images.ver"
-# How much raster is in hand while a picture is rewritten. A piece ends on a RUN
-# boundary rather than an exact byte count, which costs at most 254 bytes of
-# slack and removes the only fiddly case -- a run straddling the cut.
-IMAGES_PIECE = 1024
-
-
-def images_version_path(root=CARTS_DIR):
-    """Sidecar (a sibling of the carts dir, like retired.ver) holding the
-    picture-format generation this store has already been rewritten for."""
-    return _sibling_path(root, IMAGES_VER_NAME)
-
-
-def load_images_version(root=CARTS_DIR):
-    """The generation the store's pictures were rewritten at -- 0 when
-    absent/unreadable, so a store that predates this migrates once."""
-    try:
-        return int(_read(images_version_path(root)).strip())
-    except (OSError, ValueError, AttributeError):
-        return 0
-
-
-def _rle_pieces(packed, total, chunk=IMAGES_PIECE):
-    """`(count, value)` byte pairs -> the raster, in pieces of ~`chunk` bytes.
-
-    The retired codec's reader, kept for one generation and reached ONLY from
-    the rewrite below -- and a STREAM, because the entire point is that the
-    raster it describes is never assembled anywhere.
-
-    NATIVE per piece where the board has a compositor, for the reason the
-    retired whole-raster reader carried and that the 196-second boot confirmed:
-    interpreted, one 320x240 picture is the 0.5-1.7s the whole time-sliced cover
-    builder was designed around, and a kid with thirty drawings would meet that
-    as half a minute of hitching. Only the DESTINATION changed -- a reused
-    kilobyte instead of a 76,800-byte block -- so the C loop still does the
-    expanding and nothing large is ever allocated for it.
-
-    The piece it yields is therefore a VIEW of that reused buffer: write it and
-    move on, never keep it. Raises ValueError for a stream that does not
-    describe exactly `total` pixels, which the caller reads as "not a picture
-    this pass can rewrite"."""
-    if len(packed) & 1:
-        raise ValueError("odd run stream")
-    try:
-        import moy_gfx
-        native = getattr(moy_gfx, "decode_runs", None)
-    except ImportError:
-        native = None
-    src = memoryview(packed)
-    buf = bytearray(chunk + 255) if native is not None else None
-    n = len(packed)
-    seen = 0
-    i = 0
-    while i < n:
-        # Take whole pairs until the piece is at least `chunk` pixels wide, so
-        # the cut always lands on a run boundary -- which costs at most 254
-        # bytes of slack and removes the only fiddly case there was.
-        j = i
-        span = 0
-        while j < n and span < chunk:
-            count = packed[j]
-            if count < 1 or packed[j + 1] > 63:
-                raise ValueError("bad run")
-            span += count
-            j += 2
-        if seen + span > total:
-            raise ValueError("bad run")
-        if native is not None:
-            if native(buf, span, src[i:j]) != span:
-                raise ValueError("bad run")
-            yield memoryview(buf)[:span]
-        else:
-            out = bytearray()
-            for k in range(i, j, 2):
-                out += bytes((packed[k + 1],)) * packed[k]
-            yield out
-        seen += span
-        i = j
-    if seen != total:
-        raise ValueError("short picture")
-
-
-def _rewrite_image(path):
-    """Rewrite one `.moyimg` out of the retired RLE codec.
-
-    1 when the file was rewritten, 0 when there was nothing to do, and -1 when a
-    retired-codec picture was left alone for a reason that MAY NOT HOLD NEXT
-    TIME -- no memory, or the card going away mid-rewrite. Only -1 holds the
-    generation stamp back, because only -1 is worth another pass: a blob that
-    will not parse was unreadable before this pass and would be unreadable after
-    every future one, so blocking the stamp on it would re-walk the whole store
-    every boot forever and still not fix it. It is left exactly as it is, for a
-    person to find.
-
-    The intermediates are dropped as they are consumed, in order, because the
-    peak is the whole subject here: the retired blob and its base64 are ~72KB
-    apiece and neither is needed once the runs are in hand."""
-    try:
-        text = _read(path)
-        meta = json.loads(text)
-        if meta.get("codec") != "rle":
-            return 0
-        text = None
-        w = int(meta["w"])
-        h = int(meta["h"])
-        if w <= 0 or h <= 0:
-            return 0
-        packed = _b64_decode(meta["data"])
-        meta["data"] = ""
-        gc.collect()             # the two ~72KB strings above are dead HERE, and
-                                 # the compressor window is the next allocation
-        data = _b64_encode(_deflate_pieces(_rle_pieces(packed, w * h)))
-        packed = None
-        del meta["codec"]
-        meta["format"] = "moyimg-v1"
-        meta["data"] = data
-        data = None
-        _write_atomic(path, json.dumps(meta))
-    except (MemoryError, OSError) as exc:
-        print("Moybyte picture not rewritten:", path, exc)
-        return -1
-    except (ValueError, KeyError, TypeError):
-        return 0
-    return 1
-
-
-def seed_folders(seed):
-    """The store folders the SEED pass owns -- `slug(title) + ".moy"` for every
-    entry, whichever roster form this is. What the picture pass steps over."""
-    if not seed:
-        return ()
-    if is_packed(seed):
-        return tuple(slug(entry[0]) + ".moy" for entry in seed)
-    return tuple(slug(cart["title"]) + ".moy" for cart in seed)
-
-
-# The folders the seed pass owns this session, recorded by whichever door did
-# the seeding -- `seed_any` on a board, `host_app._seed_system_carts` on the
-# host, and they are the only two places the roster is in hand. A parameter
-# would have to be carried from there through the console to an idle frame
-# minutes later; this is read as a DEFAULT, so a caller with its own answer (a
-# test, a tool) still passes one.
-_SEED_FOLDERS = ()
-
-
-def note_seed_folders(names):
-    """Record the store folders the seed pass owns (see `_SEED_FOLDERS`)."""
-    global _SEED_FOLDERS
-    _SEED_FOLDERS = tuple(names)
-
-
-def _images_in(d):
-    """Every `.moyimg` path directly under `d` (nothing when there is no `d`)."""
-    try:
-        names = os.listdir(d)
-    except OSError:
-        return
-    for n in names:
-        if n.endswith(IMAGE_EXT) and len(n) > len(IMAGE_EXT):
-            yield d + "/" + n
-
-
-def _image_paths(root, skip):
-    """Every picture the migration owns, KID CONTENT FIRST.
-
-    The order is the priority. A drawing is the only picture here that nothing
-    else can replace, so it is rewritten before any cart's -- including the
-    trash, which is restorable and would otherwise hand back a picture nothing
-    can read. Folders in `skip` (the seed pass's) are never walked."""
-    art = _sibling_path(root, ARTWORK_NAME)
-    if _exists(art):
-        yield art
-    for d in (file_kind_dir("drawings", root), _trash_dir("drawings", root)):
-        for p in _images_in(d):
-            yield p
-    try:
-        folders = os.listdir(root)
-    except OSError:
-        return
-    for name in folders:
-        if name.endswith(".moy") and name not in skip:
-            for p in _images_in(root + "/" + name + "/" + IMAGES_DIR):
-                yield p
-
-
-class ImageMigration:
-    """The picture rewrite as a JOB: one file per `step()`, off the boot path.
-
-    The console drives it from the idle branch of its frame loop, so the work
-    lands on frames where nobody is waiting -- and one whole FILE at a time,
-    because a slice smaller than a file would mean holding an open deflate
-    stream across frames for the sake of a job that runs once per store.
-
-    `done` is True from construction on a store already at this generation, so
-    the warm path is one small read and the caller stops asking."""
-
-    def __init__(self, root=CARTS_DIR, skip=None, generation=IMAGES_GEN):
-        self.root = root
-        self.generation = generation
-        self.rewritten = 0
-        self.failed = 0
-        self.done = load_images_version(root) >= generation
-        self._paths = None if self.done else _image_paths(
-            root, _SEED_FOLDERS if skip is None else skip)
-
-    def step(self):
-        """Rewrite at most ONE picture. False once the store has converged.
-
-        The collect is not hygiene: this runs after a session has fragmented the
-        heap, and it is about to allocate a compressor window."""
-        if self.done:
-            return False
-        gc.collect()
-        for path in self._paths:
-            got = _rewrite_image(path)
-            if got > 0:
-                self.rewritten += 1
-            elif got < 0:
-                self.failed += 1     # said once, at the site that knows why
-            return True
-        self.done = True
-        self._paths = None
-        if self.failed:
-            return False        # still pending: sweep again next session
-        try:
-            _write(images_version_path(self.root), str(int(self.generation)))
-        except OSError:
-            pass                # a read-only store: sweep again next boot
-        return False
-
-
-def migrate_images(root=CARTS_DIR, generation=IMAGES_GEN, skip=None):
-    """Run the whole picture pass to completion. Returns the number rewritten.
-
-    The host's door and the tests'. A CONSOLE does not call this -- it drives
-    `ImageMigration` a file per idle frame instead, because on a board this is
-    seconds per picture and a boot has no frames to spend on it."""
-    job = ImageMigration(root, skip=skip, generation=generation)
-    while job.step():
-        pass
-    return job.rewritten
 
 
 # --- provenance stamps (#108 phase 2): a copy remembers its source ----------

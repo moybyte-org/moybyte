@@ -91,9 +91,10 @@ def _b64_decode(text):
 # format, since 2026-09-07: Paint used to write a second, uncompressed RLE codec
 # (`codec: "rle"`) because saving needed no compressor, and measured on every
 # shipped image that form is 2.5-10x BIGGER -- a 320x240 cover 72 KB against 26,
-# and big flat strings are what the S3 heap fails on first. The RLE reader
-# survives for exactly one generation, inside `moy_carts.migrate_images`, and
-# nowhere else: no live decoder speaks two formats.
+# and big flat strings are what the S3 heap fails on first. There is no RLE
+# READER anywhere: the decoders below speak one format, and a blob still in the
+# retired codec reads as an absent picture (None), which every caller on every
+# tier already draws as a placeholder.
 #
 # The compressor is the same two-tier seam the packed seed roster reads through
 # (`moy_carts._packed_stream`): MicroPython replaced `zlib` with `deflate` in
@@ -388,9 +389,9 @@ def moyimg_runs(text):
     appended into a growing buffer, so the one big contiguous allocation this
     makes is the result itself, at exactly its size.
 
-    A picture STILL IN THE RETIRED CODEC reads as absent here (the stream it
-    carries is not a zlib one), which is what the migration below leans on: an
-    unrewritten drawing draws the placeholder and never an exception."""
+    A picture in the RETIRED RLE codec reads as absent here (the stream it
+    carries is not a zlib one) rather than raising -- the shelf draws its
+    placeholder for a blob no reader in the tree speaks."""
     got = _blob_header(text)
     if got is None:
         return None

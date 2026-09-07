@@ -213,14 +213,10 @@ def _seed_system_carts(carts_dir):
     matching the device's seed_builtins, so a bumped cart actually propagates on the host
     (it used to seed once and ignore version bumps)."""
     os.makedirs(carts_dir, exist_ok=True)
-    moy_carts.sweep_store(carts_dir)     # a retired seed leaves the store and a
-                                         # `.moytext` doc becomes `.md`, once
+    moy_carts.sweep_store(carts_dir)     # a retired seed leaves the store, once
     if not os.path.isdir(SYSTEM_CARTS):
         return
     names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
-    # What the picture migration steps over -- the device records the same thing
-    # from its roster in `seed_any`, and this is the host's equivalent door.
-    moy_carts.note_seed_folders(names)
     for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
         dst = os.path.join(carts_dir, name)

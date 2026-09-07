@@ -561,6 +561,27 @@ def test_a_cover_the_heap_refuses_draws_the_placeholder(tmp_path):
     assert cart["path"] in ws.covers._none
 
 
+def test_a_cover_in_the_retired_codec_draws_the_placeholder(tmp_path):
+    """The strict reader reaches the shelf. There is no migration that rewrites
+    a legacy cover (CLAUDE.md, 2026-09-07), so a card carrying one has to read
+    as a cover that is not there -- a placeholder, on a prefetch that keeps
+    walking, and never an exception out of the idle frame."""
+    import json
+    from runtime import host_app, moy_image
+    root, carts = _mk_carts_with_covers(tmp_path, 2, with_cover=1)
+    ws = host_app.build_workstation(root)
+    cart = next(c for c in ws.carts.all if c.get("path") == carts[0]["path"])
+    packed = moy_image.pack_runs(bytes(((i * 37) & 63) for i in range(64 * 48)))
+    moy_carts.save_image(cart, "cover", json.dumps({
+        "format": "moyimg-v1", "w": 64, "h": 48, "codec": "rle",
+        "data": moy_carts._b64_encode(packed)}))
+    ws.covers.invalidate_all()
+    assert ws.covers.cover_for(cart, 40, 30) is None
+    for _ in range(200):
+        ws.covers.prefetch_tick()          # must not raise
+    assert cart["path"] in ws.covers._none
+
+
 def test_a_build_that_cannot_allocate_is_one_missing_cover(tmp_path):
     """The blob read fine; it is the build's OWN allocations -- the ~77KB decode
     scratch and the card-sized crop -- that a fragmented heap refuses, and they

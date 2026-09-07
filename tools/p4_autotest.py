@@ -415,9 +415,8 @@ class P4Board:
     # when a boot gets slower. A picture-format migration was added to the store
     # door on 2026-09-07 and a Guition reproducing its first boot after the flash
     # spent 196 SECONDS in it before the "loading cartridges" lines even began --
-    # about 15s per 320x240 cover on the S3's compressor. The fix was to take
-    # that work off the boot (moy_carts.ImageMigration runs it on the console's
-    # idle frames), not to widen this: a boot that outgrows a minute has stopped
+    # about 15s per 320x240 cover on the S3's compressor. The fix was to delete
+    # the pass, not to widen this: a boot that outgrows a minute has stopped
     # being a boot, and a budget wide enough to hide it is also wide enough to
     # make a dead board take two minutes to say so.
     def reset(self, boot_timeout=60.0, settle=3.0):

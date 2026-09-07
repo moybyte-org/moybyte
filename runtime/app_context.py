@@ -364,16 +364,11 @@ class _RawFiles:
     def empty_trash(self):
         return self.__ws.carts_store.empty_trash(self.__ws.carts_root)
 
-    # -- one-shot layout migrations (#108) -----------------------------------
+    # -- the one-shot layout move (#108) --------------------------------------
 
-    def migrate(self, kind=None):
-        """The `files/` migrations. `None` = the whole user-files layer;
-        `"docs"` = that kind's own one-shot move."""
-        store = self.__ws.carts_store
-        if kind == "docs":
-            store.migrate_doc_format(self.__ws.carts_root)
-            return store.migrate_docs(self.__ws.carts_root)
-        return store.migrate_user_files(self.__ws.carts_root)
+    def migrate(self):
+        """The legacy single-slot `artwork.moyimg` becomes a `drawings` file."""
+        return self.__ws.carts_store.migrate_user_files(self.__ws.carts_root)
 
     # -- the #111 op-history sidecars ---------------------------------------
 
@@ -443,8 +438,8 @@ class Files(_StoreRole):
     def empty_trash(self):
         return self._write(self.raw.empty_trash)
 
-    def migrate(self, kind=None):
-        return self._write(self.raw.migrate, kind)
+    def migrate(self):
+        return self._write(self.raw.migrate)
 
     # -- the #111 op-history sidecars ---------------------------------------
 
