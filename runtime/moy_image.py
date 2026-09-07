@@ -9,6 +9,7 @@
 #
 # MicroPython-safe (json + binascii + deflate; _mkdir from the moy_fs leaf).
 
+import gc
 import json
 
 try:
@@ -130,8 +131,41 @@ def _deflate(data):
     return buf.getvalue()
 
 
+def _deflate_pieces(pieces):
+    """The same stream from a raster handed over PIECE BY PIECE.
+
+    A compressor is a stream on both tiers -- DeflateIO takes repeated writes,
+    compressobj repeated compress() calls -- so a writer that can produce its
+    raster incrementally never has to hold one. That is what lets the picture
+    migration rewrite a 320x240 drawing without the 76,800-byte block whose
+    absence, on a store-loaded S3 heap, is what took a boot down."""
+    try:
+        import deflate
+    except ImportError:                  # CPython (host suites, the tools)
+        import zlib
+        comp = zlib.compressobj(9, zlib.DEFLATED, MOYIMG_WBITS)
+        out = bytearray()
+        for piece in pieces:
+            got = comp.compress(piece)
+            if got:
+                out.extend(got)
+        out.extend(comp.flush())
+        return bytes(out)
+    import io as _io
+    buf = _io.BytesIO()
+    stream = deflate.DeflateIO(buf, deflate.ZLIB, MOYIMG_WBITS)
+    for piece in pieces:
+        stream.write(piece)
+    stream.close()
+    return buf.getvalue()
+
+
 def _inflate(raw):
-    """A zlib stream -> its bytes, with the window the STREAM declares."""
+    """A zlib stream -> its bytes, with the window the STREAM declares.
+
+    ONE allocation the size of the whole raster -- 76,800 bytes for a 320x240
+    picture. Only a reader that genuinely needs pixels calls this; the cover
+    shelf streams instead (`_inflate_chunks`)."""
     try:
         import deflate
     except ImportError:                  # CPython
@@ -139,6 +173,80 @@ def _inflate(raw):
         return zlib.decompress(raw)
     import io as _io
     return deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB).read()
+
+
+# How much raster the streaming reader holds at once. 1 KB: the piece and the
+# runs it packs into are both transient, so the whole read lives in a couple of
+# KB against a 76,800-byte raster -- and the per-piece overhead is one native
+# call, so a larger chunk buys nothing measurable and costs working set.
+_INFLATE_CHUNK = 1024
+
+
+def _inflate_chunks(raw, chunk=_INFLATE_CHUNK):
+    """The same zlib stream, yielded in pieces of at most `chunk` bytes.
+
+    The other half of the compressor seam, and it exists because of a heap. A
+    320x240 cover inflates to a CONTIGUOUS 76,800-byte block, and an S3 that has
+    loaded a store has hundreds of KB free with no run that size (#66) -- so the
+    reader that runs once per cover per session was asking for exactly the block
+    the heap refuses first, on the launcher's idle prefetch, where the
+    MemoryError took the loop down rather than one thumbnail.
+
+    Both tiers can hand their output back a piece at a time and neither
+    advertises it the same way: MicroPython's DeflateIO is a stream, so `read(n)`
+    is the whole story, while CPython's decompressobj needs `max_length` to bound
+    its OUTPUT -- feeding it bounded INPUT bounds nothing, because a KB of
+    deflate expands to a megabyte of flat colour, which is exactly the picture a
+    kid draws first."""
+    try:
+        import deflate
+    except ImportError:                  # CPython
+        import zlib
+        d = zlib.decompressobj()
+        pos = 0
+        n = len(raw)
+        while True:
+            if d.unconsumed_tail:
+                src = d.unconsumed_tail
+            elif pos < n:
+                src = raw[pos:pos + chunk]
+                pos += chunk
+            else:
+                src = b""
+            out = d.decompress(src, chunk)
+            if out:
+                yield out
+            elif not src:
+                return
+        return
+    import io as _io
+    stream = deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB)
+    while True:
+        out = stream.read(chunk)
+        if not out:
+            return
+        yield out
+
+
+def _blob_header(text):
+    """A ``.moyimg``'s ``(w, h, zlib stream)``, or None when it is not one.
+
+    Both readers share it, so the header is parsed once -- and the base64 STRING
+    (as big again as the stream it carries) is dropped HERE rather than held
+    alive across the inflate. MemoryError is the one exception that goes on
+    through: "this board could not read it just now" and "this is not a picture"
+    are different answers, and only the second one is permanent."""
+    try:
+        meta = json.loads(text)
+        w = int(meta["w"])
+        h = int(meta["h"])
+        if w <= 0 or h <= 0:
+            return None
+        return (w, h, _b64_decode(meta["data"]))
+    except MemoryError:
+        raise
+    except Exception:  # noqa: BLE001 -- a corrupt or foreign blob is not a picture
+        return None
 
 
 def encode_moyimg(width, height, indices):
@@ -158,20 +266,38 @@ def encode_moyimg(width, height, indices):
 def decode_moyimg(text):
     """Decode a ``.moyimg`` into ``(w, h, bytes)``, or None when it is not one.
 
-    None rather than a raise all the way down: a corrupt or foreign blob is
-    treated as an absent picture by every caller, on every tier."""
+    None rather than a raise: a corrupt or foreign blob is treated as an absent
+    picture by every caller, on every tier. MemoryError is the exception, and
+    deliberately so -- it is the one failure that says nothing about the file.
+    Swallowed as None it becomes "your drawing is gone", which the Paint and
+    `image()` callers would then cache and act on; raised, it is a caller's
+    choice to skip this one picture and try again later, which is what the cover
+    shelf does.
+
+    The whole raster is still built here, because a caller that asks for pixels
+    needs pixels -- and the retry after a collect is `moy_carts._read_main`'s
+    idiom for the same reason: it is one big CONTIGUOUS allocation on a heap that
+    fragments over a session, so the run that serves it routinely exists and is
+    merely not free yet. Costing nothing when the heap is fine is the point of
+    doing it on the failure rather than before the attempt."""
+    got = _blob_header(text)
+    if got is None:
+        return None
+    w, h, raw = got
+    got = None                           # drop the tuple's hold on the stream
     try:
-        meta = json.loads(text)
-        w = int(meta["w"])
-        h = int(meta["h"])
-        if w <= 0 or h <= 0:
-            return None
-        pix = _inflate(_b64_decode(meta["data"]))
-        if len(pix) != w * h:
-            return None
-        return (w, h, pix)
+        try:
+            pix = _inflate(raw)
+        except MemoryError:
+            gc.collect()
+            pix = _inflate(raw)
+    except MemoryError:
+        raise
     except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
         return None
+    if len(pix) != w * h:
+        return None
+    return (w, h, pix)
 
 
 def pack_runs(pix):
@@ -218,6 +344,26 @@ def _encode_runs():
     return _ENCODE_RUNS
 
 
+def _run_bytes(count, value):
+    """A run of `count` `value`s as 255-capped ``(count, value)`` pairs.
+
+    Byte-identical to what a whole-raster scan produces for the same run, which
+    is the property the streaming reader below exists to keep."""
+    if count <= 0:
+        return b""
+    if count <= 255:
+        return bytes((count, value))
+    out = bytearray()
+    while count > 255:
+        out.append(255)
+        out.append(value)
+        count -= 255
+    if count:
+        out.append(count)
+        out.append(value)
+    return bytes(out)
+
+
 def moyimg_runs(text):
     """A ``.moyimg`` as ``(w, h, packed_run_bytes)``, or None.
 
@@ -226,17 +372,66 @@ def moyimg_runs(text):
     caching was measured and rejected. `decode_moyimg` stays the one-shot
     decoder for everything that wants pixels.
 
-    The runs used to be READ off the file and are derived from the raster now,
-    which costs a 77KB transient per cover LOAD. Accepted, not overlooked: a
-    load happens once per cart per session, on an idle prefetch frame, beside a
-    ~47ms flash read on the same call -- where the 116ms this size of allocation
-    measured on P4 glass was a per-BUILD cost, every cover at every size, which
-    is why _CoverJob reuses an off-heap scratch and this does not. If it ever
-    shows up, that scratch is the lever."""
-    got = decode_moyimg(text)
+    STREAMED (2026-09-07), and that is the whole point of it. This runs once per
+    cover per session on the launcher's idle prefetch, and the version that
+    inflated the raster whole asked a fragmented S3 heap for 76,800 contiguous
+    bytes to derive 15KB of runs from -- the allocation that heap refuses first,
+    on the tick with the least right to raise. Now at most a KB of raster is in
+    hand at a time and the runs accumulate as they are read.
+
+    A run that spans a piece boundary is what makes this a merge rather than a
+    concatenation, and the merge is why the output is byte-identical to the
+    whole-raster one: the OPEN run is held as a plain count instead of being
+    written down, so it is packed once, when it ends, at whatever length it
+    reached. Everything between the first and last run of a piece is already
+    final and goes out in one copy. The pieces are joined at the end rather than
+    appended into a growing buffer, so the one big contiguous allocation this
+    makes is the result itself, at exactly its size.
+
+    A picture STILL IN THE RETIRED CODEC reads as absent here (the stream it
+    carries is not a zlib one), which is what the migration below leans on: an
+    unrewritten drawing draws the placeholder and never an exception."""
+    got = _blob_header(text)
     if got is None:
         return None
-    return (got[0], got[1], pack_runs(got[2]))
+    w, h, raw = got
+    got = None
+    parts = []
+    value = -1                # the run left OPEN across a piece boundary
+    count = 0                 # ...and its length, which may exceed 255
+    seen = 0
+    try:
+        for piece in _inflate_chunks(raw):
+            seen += len(piece)
+            packed = pack_runs(piece)
+            n = len(packed)
+            i = 0
+            # A 255-capped run arrives as several pairs, so the leading ones are
+            # walked, not peeked at.
+            while i < n and packed[i + 1] == value:
+                count += packed[i]
+                i += 2
+            if i >= n:
+                continue                   # this whole piece continued one run
+            if count > 0:
+                parts.append(_run_bytes(count, value))
+            value = packed[n - 1]
+            count = 0
+            j = n
+            while j > i and packed[j - 1] == value:
+                count += packed[j - 2]
+                j -= 2
+            if j > i:
+                parts.append(packed[i:j])
+    except MemoryError:
+        raise
+    except Exception:  # noqa: BLE001 -- a corrupt or retired blob is not a picture
+        return None
+    if seen != w * h:
+        return None
+    if count > 0:
+        parts.append(_run_bytes(count, value))
+    return (w, h, b"".join(parts))
 
 
 # --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------

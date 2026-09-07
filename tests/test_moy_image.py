@@ -154,6 +154,133 @@ def test_a_run_never_exceeds_the_byte_it_is_counted_in():
     assert packed == bytes((255, 9, 45, 9))
 
 
+def _whole_raster_runs(text):
+    """What `moyimg_runs` did before it streamed: inflate the lot, then scan it.
+    The reference the streaming reader has to match byte for byte."""
+    got = moy_image.decode_moyimg(text)
+    return None if got is None else (got[0], got[1], moy_image.pack_runs(got[2]))
+
+
+@pytest.mark.parametrize("asset", sorted(
+    (ROOT / "system_carts").glob("**/*.moyimg")), ids=lambda p: p.parent.parent.name)
+def test_streamed_runs_are_the_whole_raster_runs(asset):
+    """The reader the launcher's idle prefetch runs once per cover. It reads the
+    deflate stream a kilobyte at a time instead of inflating a 76,800-byte
+    raster to derive 15KB of runs from -- and the ONLY thing that makes that a
+    safe swap is that the bytes are identical, because a run that spans a piece
+    boundary is an invitation to emit two runs where the scan emitted one."""
+    text = asset.read_text()
+    assert moy_image.moyimg_runs(text) == _whole_raster_runs(text)
+
+
+@pytest.mark.parametrize("name,pix", [
+    ("one flat colour", bytes((5,)) * 76800),
+    ("a run longer than a piece", bytes((3,)) * 5000 + bytes(range(64)) * 10),
+    ("runs that land exactly on 255", b"".join(bytes((v & 63,)) * 255 for v in range(40))),
+    ("runs that land exactly on a piece", b"".join(bytes((v & 63,)) * 1024 for v in range(12))),
+    ("one pixel", bytes((1,))),
+    ("no run longer than one", bytes((i & 63) for i in range(9000))),
+])
+def test_a_run_across_a_piece_boundary_packs_as_one_run(name, pix):
+    """The cases the boundary merge exists for. A 600-long run must come out
+    255/255/90 wherever the reader happened to cut, never 255/255/255/35."""
+    blob = moy_image.encode_moyimg(len(pix), 1, pix)
+    got = moy_image.moyimg_runs(blob)
+    assert got == _whole_raster_runs(blob), name
+    out = bytearray()
+    for i in range(0, len(got[2]), 2):
+        assert 1 <= got[2][i] <= 255 and got[2][i + 1] <= 63
+        out.extend(bytes((got[2][i + 1],)) * got[2][i])
+    assert bytes(out) == pix, name
+
+
+def test_the_runs_reader_never_inflates_a_whole_raster():
+    """The allocation that took both S3 boards to the REPL a few minutes after a
+    flash: 76,800 CONTIGUOUS bytes, asked for on an idle prefetch frame, on a
+    heap with hundreds of KB free and no run that size (#66). The one-shot
+    inflater must not be on this path at all."""
+    art = _art(320, 240)
+    blob = moy_image.encode_moyimg(320, 240, art)
+    sizes = []
+    real = moy_image._inflate_chunks
+
+    def watched(raw, chunk=moy_image._INFLATE_CHUNK, _r=real):
+        for piece in _r(raw, chunk):
+            sizes.append(len(piece))
+            yield piece
+
+    moy_image._inflate_chunks = watched
+    moy_image._inflate = _no_inflate
+    try:
+        got = moy_image.moyimg_runs(blob)
+    finally:
+        moy_image._inflate_chunks = real
+        moy_image._inflate = _REAL_INFLATE
+    assert got == (320, 240, moy_image.pack_runs(art))
+    assert sum(sizes) == 320 * 240 and max(sizes) <= moy_image._INFLATE_CHUNK
+    assert len(sizes) > 60, "one piece is a whole raster by another name"
+
+
+_REAL_INFLATE = moy_image._inflate
+
+
+def _no_inflate(raw):
+    raise AssertionError("the streaming reader inflated the whole raster")
+
+
+def test_a_heap_that_says_no_is_not_a_missing_picture():
+    """MemoryError is the one exception these readers pass on. Swallowed as
+    None it becomes "your drawing is gone" -- which Paint and `image()` would
+    then cache and act on -- where raised it is a caller's choice to skip one
+    picture and come back to it, which is exactly what the cover shelf does."""
+    art = _art(16, 16)
+    blob = moy_image.encode_moyimg(16, 16, art)
+    real = moy_image._inflate
+    moy_image._inflate = _starved
+    try:
+        with pytest.raises(MemoryError):
+            moy_image.decode_moyimg(blob)
+    finally:
+        moy_image._inflate = real
+    real_chunks = moy_image._inflate_chunks
+    moy_image._inflate_chunks = _starved_chunks
+    try:
+        with pytest.raises(MemoryError):
+            moy_image.moyimg_runs(blob)
+    finally:
+        moy_image._inflate_chunks = real_chunks
+
+
+def _starved(raw):
+    raise MemoryError("memory allocation failed, allocating 76800 bytes")
+
+
+def _starved_chunks(raw, chunk=1024):
+    raise MemoryError("memory allocation failed, allocating 76800 bytes")
+    yield b""                      # noqa -- makes this a generator like the real one
+
+
+@pytest.mark.parametrize("chunk", [1, 7, 1024, 100000])
+def test_the_streaming_compressor_writes_a_picture_anything_can_read(chunk):
+    """`_deflate_pieces` is what the migration writes through, and what it
+    produces has to be a picture every reader already reads, at a size the
+    format was chosen for -- however the pieces fell.
+
+    NOT byte-identity, and that is measured rather than conceded. CPython's
+    compressobj happens to emit the same stream either way; a board's `deflate`
+    does NOT (it closes a block per write), and the size that costs is +0.2% at
+    this chunk on a photo-like picture and NEGATIVE on the flat fills a kid
+    actually draws. Two deflate implementations may pick different matches for
+    the same input and both be right; what must hold is that either reads the
+    other's, which is what this asserts."""
+    art = _art(320, 240)
+    pieces = [art[i:i + chunk] for i in range(0, len(art), chunk)]
+    got = moy_image._deflate_pieces(pieces)
+    assert moy_image._inflate(got) == art
+    whole = moy_image._deflate(art)
+    assert len(got) <= len(whole) * 1.05 + 64
+
+
 def test_the_native_run_scanner_agrees_with_the_python_one():
     """moy_gfx.encode_runs is the host's Python loop in C. On a build without
     it (the host) this asserts the fallback against itself, which is worth the
@@ -228,11 +355,25 @@ host = open("host.moyimg").read()
 hgot = moy_image.decode_moyimg(host)
 assert hgot is not None and bytes(hgot[2]) == art, "a board could not read the host's"
 
+# The two STREAMING halves, on the implementation that actually runs them: the
+# shelf reads a cover through DeflateIO.read(n) and the picture migration writes
+# one through repeated DeflateIO.write(). Neither is CPython's decompressobj/
+# compressobj, and this is the only place either is driven by the real thing --
+# which is how we know `deflate` closes a block per write and CPython does not.
+pieces = [art[i:i + 1024] for i in range(0, len(art), 1024)]
+streamed_blob = moy_image._deflate_pieces(pieces)
+assert moy_image._inflate(streamed_blob) == art, \\
+    "a board could not read the picture it wrote piece by piece"
+piecewise = len(streamed_blob)
+streamed = moy_image.moyimg_runs(blob)
+whole = moy_image.pack_runs(moy_image.decode_moyimg(blob)[2])
+assert bytes(streamed[2]) == bytes(whole), "the streamed runs are not the runs"
+
 meta = json.loads(blob)
 raw = moy_image._b64_decode(meta["data"])
 print("RESULT " + json.dumps({
-    "bytes": len(blob), "same_as_host": blob == host,
-    "wbits": (raw[0] >> 4) + 8, "runs": len(moy_image.moyimg_runs(blob)[2]),
+    "bytes": len(blob), "same_as_host": blob == host, "piecewise": piecewise,
+    "wbits": (raw[0] >> 4) + 8, "runs": len(streamed[2]),
 }))
 """
 
@@ -262,9 +403,16 @@ def test_the_codec_round_trips_on_the_interpreter_the_board_runs(tmp_path):
     got = json.loads(line[0][len("RESULT "):])
     assert got["wbits"] == moy_image.MOYIMG_WBITS
     assert got["runs"] > 0
+    # The picture migration writes through the piecewise compressor, so what it
+    # costs a board is a RATIO question, not a byte-identity one -- `deflate`
+    # closes a block per write where CPython's compressobj does not. Measured
+    # here rather than assumed, because a migration that inflated its own output
+    # would undo the size argument the one-format decision rests on.
+    assert got["piecewise"] <= got["bytes"] * 1.05 + 64
     # Not asserted EQUAL: two deflate implementations may pick different
     # matches for the same input and both be right. What must hold is that each
     # reads the other, which the driver checked before printing this.
-    print("\nunix MicroPython: 320x240 -> %d B (host %d B, identical: %s)"
+    print("\nunix MicroPython: 320x240 -> %d B (host %d B, identical: %s); "
+          "written piece by piece %d B"
           % (got["bytes"], len(moy_image.encode_moyimg(320, 240, art)),
-             got["same_as_host"]))
+             got["same_as_host"], got["piecewise"]))
