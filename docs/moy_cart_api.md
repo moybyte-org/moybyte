@@ -716,6 +716,64 @@ what it saved. The full rules (what is never grantable, and how to make an app
 reflow to a big screen with `_layout(w, h, fs)` instead of drawing at a fixed
 320×240) are in `docs/app_api_v1.md`.
 
+## Scripts — a cart with no folder
+
+A **script** is a bare `.py` or `.lua` file in your NOTES (the vault the Files
+app and Notes both show). It has no folder, no manifest and no sprites: Files
+shows a **RUN** button beside it, and the console wraps it in a manifest on the
+spot and runs it like any other cart.
+
+Its screen is the **text console**: a scrollback, a prompt line and the same
+symbol palette the Code tab has, with the top bar's X to leave.
+
+```python
+# hello.py, in NOTES
+print("what is 6 x 7?")
+
+def _update(dt):
+    answer = input("> ")
+    if answer is not None:
+        print("you said " + answer)
+        quit()
+```
+
+Three things are different from a game, and nothing else is:
+
+* **`print(...)` writes a LINE to the console.** In a script it is the ordinary
+  Python/Lua `print`, not the drawing verb of the same name — a script has no
+  raster to draw on, it has words.
+* **`input(prompt)` never waits.** The console cannot stop the frame loop, so
+  `input` shows the prompt and answers **`None`** on every tick until a whole
+  line has been typed and entered — then it answers that line, once. So a
+  script that reads writes an `_update(dt)` and checks for `None`, exactly as
+  above. A script that only prints needs no `_update` at all: its body runs
+  once when it starts, like any cart's.
+* **`_update` may be a generator**, which is the linear way to write the same
+  thing — `yield` means "wait a frame", and the script ends when it does:
+
+  ```python
+  def _update(dt):
+      name = None
+      while name is None:
+          name = input("your name? ")
+          yield
+      print("hello " + name)
+  ```
+
+A script may use `files` and `prefs` (the same two an app cart asks for, above)
+and nothing else — no `carts`, no network. Those names are simply not there,
+and the console says so in plain words if a script asks. If it stops with an
+error, the error is printed into its own console: there is no folder to open in
+the Editor, so the traceback goes where you can read it.
+
+Lua scripts work the same way, with the same two verbs:
+
+```lua
+-- countdown.lua
+for i = 3, 1, -1 do print(i) end
+print("go!")
+```
+
 ## Audio
 
 | call | does |

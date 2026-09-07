@@ -110,6 +110,14 @@ def _nativize(src):
 # hitch cadence -- keep it a minute, not seconds.
 PMEM_FLUSH_MS = 60000
 
+# The cart TYPES that run with the shell's minimal exitable bar rather than
+# owning the whole raster, and the one of them with no folder. `console.py`
+# imports both -- the two files decided this in parallel with two literal
+# tuples until scripts made it three types, and a bar the Player draws but the
+# shell does not route taps to is a cart nobody can leave.
+SCRIPT_TYPE = "script"
+BAR_TYPES = ("tool", "app", SCRIPT_TYPE)
+
 # The optional features this build implements (moy SPEC.md 10). A cart whose
 # manifest "extensions" lists anything else is REFUSED at start -- the clean
 # §10 decline, never a mid-frame crash on a missing verb.
@@ -369,6 +377,8 @@ class Player:
         # chain) on the sacred play path. Combined with the live cart_error check at
         # each use site it answers exactly what _running_cart_shows_bar answers.
         self._is_tool = False
+        self._script = False          # a `type: "script"` run: the shell's text console
+                                      # is its screen (docs/text_editing_2026-09.md)
         self._free = False            # a `"fps": "free"` game: unpaced, real dt (SPEC 5)
         # USER APP state (#181), all per-run and all reset in start():
         self._app_layout = None       # the cart's `_layout(w, h, fs)`, when it opted into
@@ -826,8 +836,13 @@ class Player:
         self._slow_logic_next = 0
         # #75: cache the bar-visibility-by-type rule for this run (see __init__).
         cart = project.cart
-        self._is_tool = (cart is not None
-                         and cart.get("type") in ("tool", "app"))
+        self._is_tool = cart is not None and cart.get("type") in BAR_TYPES
+        # A SCRIPT (docs/text_editing_2026-09.md): a cart with no folder whose
+        # screen is the shell's text console. Tool-shaped -- one unpaced tick
+        # per loop frame, the minimal bar's X to leave. Its responsive bind is
+        # below, WITH the app one: `release_run_canvas` sits between here and
+        # there and would drop it.
+        self._script = cart is not None and cart.get("type") == SCRIPT_TYPE
         # Required-extension gate (moy SPEC.md 10): a cart listing an extension
         # this build doesn't implement is refused cleanly -- the normal error
         # panel -- instead of crashing partway into a frame on a missing verb.
@@ -895,6 +910,14 @@ class Player:
             # over it -- see system_api.wants_layout.
             if wants_layout(cart.get("src")):
                 ws.bind_app_canvas()
+        # A SCRIPT is responsive by construction -- the SHELL draws it, and text
+        # is the one thing an integer upscale of the 320x240 raster serves worst
+        # -- so it takes the same whole-surface bind an app opts into, with no
+        # opt-in to make. (Refused in the windowed desk world for the reason the
+        # bind's own docstring gives, where it stays the fixed raster in a
+        # window like any cart.)
+        elif self._script:
+            ws.bind_app_canvas()
         # #63 leak fix: the PREVIOUS cart is dead -- return its pooled layer buffers
         # (make_layer worlds, the Fold-2 map cache) for reuse before the new run
         # allocates. Probe: the host Canvas has no pool (gc reclaims its layers).
@@ -955,6 +978,12 @@ class Player:
         # could move a pin nobody declared. The pin ALLOWLIST bounds which pins,
         # never which carts.
         gpio = ws.gpio if ws._cart_has_perm("pins") else None
+        # The TEXT CONSOLE, gated on the "console" permission exactly as wifi is
+        # on "network": a cart that never declares it keeps `print` as the DRAW
+        # verb, and a script -- whose synthesized manifest DOES declare it --
+        # gets the scrollback instead. The terminal (#115) declares it too.
+        console = (getattr(ws, "script_console", None)
+                   if ws._cart_has_perm("console") else None)
         if net is not None:
             net.reset()
         self._net = net
@@ -1032,9 +1061,15 @@ class Player:
         # `needs` tuple differs (a manifest here, a class constant there). The
         # ungated riders (`ui`, `theme()`, `screen()`, `bar_h()`) are how an app
         # draws, not what it may reach -- see runtime/system_api.py.
-        if self._app_id is not None:
+        # A SCRIPT is handed the same filter by the same call: its permissions
+        # come from the manifest `run_script` synthesized, so the refusing is
+        # the machinery that already refuses, and `carts` is not grantable to
+        # anything (system_api.NEVER_GRANTED).
+        if self._app_id is not None or self._script:
             ns.update(make_system_api(ws.app_context, cart, ws.canvas,
                                       ws.app_bar_h))
+        if console is not None:
+            ns.update(console.api())
         t_api = _ticks_diff(_ticks_ms(), t2)
         # Compile with the "<cart>" filename so a runtime traceback carries cart
         # line numbers (_exc_cart_line reads them to mark the bad line). #67 spike:

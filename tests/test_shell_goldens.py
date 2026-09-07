@@ -193,6 +193,21 @@ APPS = ("artwork", "appearance", "writer", "storybook", "files", "calc")
 GOLDEN_PIN = "4821"
 GOLDEN_URL = "http://192.168.1.151/"
 
+# The TEXT CONSOLE (docs/text_editing_2026-09.md step 6), rendered as a real
+# SCRIPT RUN. It is the one running cart in this matrix, and the exception is
+# principled: a script has no `_draw`, so every pixel on it is the SHELL's --
+# the scrollback, the prompt and the symbol palette -- and none of it reads a
+# clock or `rnd()`. The script prints two fixed lines and then waits on
+# `input()`, which is the state the surface is interesting in.
+GOLDEN_SCRIPT_NAME = "say_hello.py"
+GOLDEN_SCRIPT = (
+    "print('a script is a cart with no folder')\n"
+    "print('RUN wraps it on the fly')\n"
+    "def _update(dt):\n"
+    "    name = input('your name? ')\n"
+    "    if name is not None:\n"
+    "        print('hello ' + name)\n")
+
 
 class _GoldenWebHost:
     """The `serving`/`start`/`stop`/`url`/`paired_url` contract the console's
@@ -368,6 +383,19 @@ def _surface_plan(ws, cfg):
         park()
         ws.web.ui.show_address = True
 
+    def run_script():
+        # From HOME, so the windowed tier runs it in the play world (where a
+        # script takes the whole responsive surface) rather than cascaded under
+        # the six app windows every surface before this one left open.
+        ws.go_home()
+        # Written through the store the workstation was built on: the script
+        # lives in the vault like any note, and RUN synthesizes its manifest.
+        ws.carts_store.save_file("docs", GOLDEN_SCRIPT_NAME, GOLDEN_SCRIPT,
+                                 ws.carts_root)
+        ok, why = ws.run_script("docs", GOLDEN_SCRIPT_NAME)
+        assert ok, "the golden script did not run: " + why
+
+    plan.append(("script_console", run_script))
     plan.append(("web_console", park))
     plan.append(("web_console_address", park_revealed))
     return plan
@@ -382,6 +410,7 @@ def surface_names(config_name):
     names += ["launcher", "picker", "settings"]
     names += ["editor_" + t for t in TABS]
     names += ["app_" + a for a in APPS]
+    names += ["script_console"]
     names += ["web_console", "web_console_address"]
     return names
 

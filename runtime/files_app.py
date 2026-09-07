@@ -125,6 +125,10 @@ class FilesAppLayer(ListShellApp):
 
     GRID_ACTIONS = ("OPEN", "NAME", "COPY", "WALL", "GAME", "USE", "DEL")
     DOC_ACTIONS = ("OPEN", "NAME", "COPY", "DEL")   # the kinds the router opens
+    # A vault SCRIPT is a PROGRAM, so RUN leads (docs/text_editing_2026-09.md
+    # step 6). OPEN stays beside it: a script is still text, and editing it is
+    # the other thing you do with one.
+    SCRIPT_ACTIONS = ("RUN", "OPEN", "NAME", "COPY", "DEL")
     PLAIN_ACTIONS = ("NAME", "COPY", "DEL")     # kinds with no opener/reuse yet
 
     def __init__(self, ctx, names, in_rect):
@@ -231,6 +235,8 @@ class FilesAppLayer(ListShellApp):
         if kind == "drawings":
             return self.GRID_ACTIONS
         if kind == "docs":
+            if _modes.is_script(self.grid.sel_name() or ""):
+                return self.SCRIPT_ACTIONS
             return self.DOC_ACTIONS
         return self.PLAIN_ACTIONS
 
@@ -257,7 +263,10 @@ class FilesAppLayer(ListShellApp):
         door, subject = self.door(name, kind, cart)
         if door == "editor":
             return self._to_editor(subject)
-        if door == "code":
+        if door == "code" and cart is not None:
+            # The cart-main door, NOT the `code` MODE a standalone `.py` edits
+            # in -- `text_modes.CODE` is the same string, and only a project
+            # file reaches the Editor.
             return self._to_editor(subject, tab="code")
         if door == "paint":
             return self._to_paint(subject)
@@ -320,6 +329,12 @@ class FilesAppLayer(ListShellApp):
 
     def _act(self, verb, name):
         art = self._art
+        if verb == "RUN":
+            ok, why = self._nav.run_script(self.grid.kind, name)
+            if not ok:
+                self.status = why
+                self._damage.all()
+            return
         if verb == "OPEN":
             self._pick(name)
             return

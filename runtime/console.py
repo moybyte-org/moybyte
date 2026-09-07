@@ -439,9 +439,24 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
 # reason. Exit is hold-BACKSPACE (games) / the bar X (tools) -- the #71 pause
 # machinery is retired, do not reintroduce it.
 try:
-    from player import Player
+    from player import Player, BAR_TYPES, SCRIPT_TYPE
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.player import Player
+    from runtime.player import Player, BAR_TYPES, SCRIPT_TYPE
+
+# The TEXT CONSOLE (text_console.py): the surface a `type: "script"` cart runs
+# on -- scrollback + prompt, drawn by the shell as the run's `_draw` so a
+# script cannot paint over the line it is reading from.
+try:
+    from text_console import TextConsole
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime.text_console import TextConsole
+
+# The editor MODE table (text_modes.py): here for `script_runtime`, which is
+# what says a vault file is a program and which tier runs it.
+try:
+    import text_modes as _modes
+except ImportError:  # pragma: no cover - host fallback when not yet aliased
+    from runtime import text_modes as _modes
 
 # EditorApp (editor_app.py): the tab ladder + PLAY. ws.menu_view is a
 # forwarding projection of EditorApp.tab; ws.set_menu_view/_open_*/_leave_menu
@@ -865,6 +880,11 @@ class Workstation:
         # properties (below), so every surface file + test reading ws.cart_error/
         # ws._update/... is unchanged. (Stage 5 retired the #71 cart_paused/_bks_prev.)
         self.player = Player(self, NAMES, _in)
+        # The TEXT CONSOLE (text_console.py): a script's screen, and #115's
+        # terminal scrollback after it. One instance for the console's life
+        # (its ring is preallocated, so a run costs no allocation); `run_script`
+        # below is what starts a script on it.
+        self.script_console = TextConsole(self, NAMES)
         # The EDITOR app (Stage 3, editor_app.py): owns the tab ladder + the active-tab
         # state (EditorApp.tab). Built idle here (BEFORE anything can set menu_view,
         # which is now a forwarding projection of editor_app.tab -- see below). The tab
@@ -2197,7 +2217,7 @@ class Workstation:
         cart's job -- see docs/moy_cart_api.md "A text-mode cart must provide its own exit"."""
         return (self.wm.top_is_player() and self.cart_error is None  # Stage 6d
                 and self.cart is not None
-                and self.cart.get("type") in ("tool", "app"))
+                and self.cart.get("type") in BAR_TYPES)
 
     def _draw_tool_bar(self):
         """Draw the minimal TOOL bar over a running tool/app (Part 4). Same shell-owned
@@ -2461,6 +2481,76 @@ class Workstation:
                 return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
+
+    def run_script(self, kind, name):
+        """RUN a SCRIPT: a bare `.py`/`.lua` file in the vault, which is a cart
+        with NO FOLDER (step 6 of docs/text_editing_2026-09.md).
+
+        The file is read through the store, wrapped in a manifest synthesized
+        HERE and written nowhere -- no folder is created, nothing is saved --
+        and started down the ordinary Player path. `type: "script"` is
+        tool-shaped (`player.BAR_TYPES`): one unpaced tick per loop frame, the
+        minimal bar's X to leave. Its screen is `self.script_console`, and the
+        SHELL keeps the pen: the console's draw becomes the run's `_draw` and
+        its driver wraps the script's `_update`, so a script cannot paint over
+        the prompt it is reading from, and a raise lands in the scrollback
+        (there is no folder for crash-to-code to open).
+
+        THE CAPABILITY GATE (#120) is that manifest and nothing more: `files`,
+        `prefs`, `console`. `carts` is ungrantable to any cart at all
+        (`system_api.NEVER_GRANTED`) and the network is gated on a `network`
+        permission this manifest does not carry, so a script naming either has
+        no such NAME -- and the console says which one it wanted.
+
+        `(True, "")` when the script is running; `(False, why)` -- a kid-facing
+        line -- when there was nothing to run."""
+        store = self.carts_store
+        src = None
+        if store is not None and self.store.ready():
+            try:
+                src = self.store.call(
+                    lambda: store.load_file(kind, name, self.carts_root))
+            except Exception as exc:  # noqa: BLE001 -- a bad card is not a crash
+                print("Moybyte script read failed:", exc)
+        if src is None:
+            return (False, "CAN'T READ IT")
+        runtime = _modes.script_runtime(name)
+        if not runtime:
+            return (False, "NOT A SCRIPT")
+        title = str(name)
+        cut = title.rfind(".")
+        cart = {"title": title[:cut] if cut > 0 else title,
+                # The FILE is the path: a script has no folder, and the loader
+                # never opens this -- it is the run's identity, and what keeps
+                # `_open_workspace`'s pathless-cart guard from substituting a
+                # real cart for it.
+                "path": store.file_path(kind, name, self.carts_root),
+                "type": SCRIPT_TYPE,
+                "runtime": runtime,
+                "permissions": ["files", "prefs", "console"],
+                "src": src,
+                "cfg": {},
+                "version": 0}
+        con = self.script_console
+        con.start(cart["title"], runtime)
+        caller = self._content_layer()
+        if not self._open_workspace(cart):
+            return (False, "CAN'T RUN IT")
+        player = self.player
+        if player.cart_error is not None:
+            # The body did not survive its own exec. The console IS this run's
+            # error surface, so the traceback goes there and the run continues
+            # as a readable, exitable screen instead of an error panel over a
+            # cart with nothing to edit.
+            con.crash(player.cart_error)
+            player.cart_error = None
+            player.crash_line = None
+        player._draw = con.draw
+        player._update = con.driver(player._update)
+        self._set_text_mode(True)      # a script TYPES; this is the surface taking
+        con.seed_key(getattr(self.input, "last_key", 0) or 0)
+        self.run(self.project, caller)
+        return (True, "")
 
     def open_app(self, app, cart=None):
         """Spawn a registered system app on `cart` (default: the cart its

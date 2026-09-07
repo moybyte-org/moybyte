@@ -697,6 +697,18 @@ class Nav:
         ws._open_workspace(cart)
         ws.run(ws.project, caller)
 
+    def run_script(self, kind, name):
+        """RUN a vault SCRIPT -- a bare `.py`/`.lua` file, which is a cart with
+        no folder (step 6 of docs/text_editing_2026-09.md). The Files router's
+        RUN door.
+
+        `(ok, why)`: the shell synthesizes the manifest, starts it on the text
+        console and returns True, or answers a kid-facing line the caller shows
+        on its status. Navigation and not `carts`, for the same reason
+        `projects()` is: RUNNING something is going somewhere, and it is
+        emphatically not permission to AUTHOR a cart."""
+        return self.__ws.run_script(kind, name)
+
     def text_mode(self, on):
         """Flip the keyboard between typing (clean ASCII) and game (raw
         matrix) mode. A TYPING app gets this from its registration; this is for
