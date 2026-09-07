@@ -161,6 +161,8 @@ class FilesAppLayer(ListShellApp):
         self._ekey_prev = 0
         self.project_names = ()
         self.project_carts = ()       # the PROJECTS root's .moy folders
+        self._rows_scroll = None      # the row list's touch model (ListShellApp)
+        self._rows_taps = None
         self.used_rows = ()           # provenance "used in:" rows (#108 phase 2)
         self.used_name = None
 
@@ -228,6 +230,8 @@ class FilesAppLayer(ListShellApp):
         else:
             self._rows = tuple(self.project_names)
             self._rows_empty = "NO PROJECTS"
+        if self._rows_scroll is not None:
+            self._rows_scroll.invalidate()   # a different list under the pixels
         self._damage.all()
 
     def _action_labels(self):
@@ -484,6 +488,15 @@ class FilesAppLayer(ListShellApp):
         if self.mode in ("grid", "rename") and self.grid.pointer_frame(
                 px, py, self._surf.pointer()):
             self._damage.all()
+        # ...and so does the row list's drag: a scroll is made of samples that
+        # are not clicks, and the tap it may end in fires on the RELEASE.
+        if self.mode in ("trash", "game", "used", PROJECTS) \
+                and not self._in(px, py, lay.head) and not self._in(px, py, lay.head2):
+            row = self._rows_pointer(px, py, click, len(self._rows))
+            if row is not None:
+                self._tap_row(row)
+                self._damage.all()
+            return True
         if not click:
             return True
         if self._in(px, py, lay.head):
@@ -494,15 +507,11 @@ class FilesAppLayer(ListShellApp):
         elif self.mode == "grid":
             self._grid_tap(px, py)
         elif self.mode == "trash":
-            if self._in(px, py, lay.head2):
-                if self._persist(self._store.empty_trash()):
-                    self.status = "TRASH EMPTY"
-                    self._refresh_counts()
-                    self._enter_rows("trash")
-            else:
-                self._rows_tap(px, py)
-        elif self.mode in ("game", "used", PROJECTS):
-            self._rows_tap(px, py)
+            if self._in(px, py, lay.head2) \
+                    and self._persist(self._store.empty_trash()):
+                self.status = "TRASH EMPTY"
+                self._refresh_counts()
+                self._enter_rows("trash")
         elif self.mode == "rename":
             if self._in(px, py, lay.head2):
                 self._rename_commit()
@@ -537,16 +546,6 @@ class FilesAppLayer(ListShellApp):
             self._pick(hit[1])
         elif hit[0] == "sel":
             self.status = hit[1].upper()
-
-    def _rows_tap(self, px, py):
-        lay = self.layout
-        for row in range(lay.list_rows):
-            i = self.top + row
-            if i >= len(self._rows):
-                break
-            if self._in(px, py, lay.row_rect(row)):
-                self._tap_row(i)
-                return
 
     # -- draw -----------------------------------------------------------------
 
@@ -641,3 +640,4 @@ class FilesAppLayer(ListShellApp):
                 break
             _ui.row(cv, th, lay.row_rect(row), self._rows[i], on=(i == self.sel),
                     pad=4 * fs, text_dy=6 * fs, fs=fs)
+        self._rows_bar(cv, th, len(self._rows))

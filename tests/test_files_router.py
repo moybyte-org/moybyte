@@ -292,3 +292,117 @@ def test_going_home_from_inside_ends_the_return(tmp_path):
     ws.open_settings()
     ws.exit()
     assert ws.wm.top_kind() == "launcher"
+
+
+# -- scrolling the roots ------------------------------------------------------
+
+def _drag(app, x, y0, y1, steps=6):
+    """A finger drag over the app, sample by sample -- a scroll is made of
+    samples that are not clicks, so it can only be driven this way."""
+    app._surf.pointer().down = True
+    app.handle_pointer(x, y0, True)
+    for k in range(1, steps + 1):
+        app.handle_pointer(x, y0 + (y1 - y0) * k // steps, False)
+    app._surf.pointer().down = False
+    app.handle_pointer(x, y1, False)
+
+
+def _key(ws, app, name):
+    """One press edge, with the key-up frame the device always produces."""
+    ws.input.set_held(name, True)
+    ws.input.begin_frame()
+    app.handle_input(ws.input)
+    ws.input.set_held(name, False)
+    ws.input.begin_frame()
+
+
+def _tap_row_rect(app, row):
+    r = app.layout.row_rect(row)
+    x, y = r[0] + r[2] // 2, r[1] + r[3] // 2
+    app._surf.pointer().down = True
+    app.handle_pointer(x, y, True)
+    app._surf.pointer().down = False
+    app.handle_pointer(x, y, False)
+
+
+def test_the_projects_root_scrolls_by_drag_and_clamps(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    lay = app.layout
+    assert len(app._rows) > lay.list_rows, "the seeded store overflows one screen"
+    last = len(app._rows) - lay.list_rows
+
+    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
+    assert app.top == 7                       # 140px / a 20px row
+    assert app.top <= app.sel < app.top + lay.list_rows   # dragged along
+
+    for _ in range(9):                        # past the end
+        _drag(app, 160, lay.list_y + 170, lay.list_y + 10)
+    assert app.top == last
+
+    for _ in range(9):                        # and back past the start
+        _drag(app, 160, lay.list_y + 10, lay.list_y + 170)
+    assert app.top == 0
+
+
+def test_a_drag_never_opens_the_row_it_let_go_of(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    lay = app.layout
+    _drag(app, 160, lay.list_y + 150, lay.list_y + 10)
+    assert ws.wm.top_kind() == "files"         # scrolled, not opened
+    _tap_row_rect(app, 1)                      # a clean tap still does open
+    assert ws.wm.top_kind() == "menu"
+
+
+def test_the_projects_root_scrolls_by_key_with_the_selection(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    vis = app.layout.list_rows
+    for _ in range(vis + 2):
+        _key(ws, app, "down")
+    assert app.sel == vis + 2
+    assert app.top == app.sel - vis + 1        # the window followed it
+    _key(ws, app, "up")
+    assert app.sel == vis + 1
+
+
+def test_a_shrinking_list_never_strands_the_window(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    app.top = len(app._rows)                   # as if the list had shrunk under it
+    app._clamp_list(len(app._rows))
+    assert app.top == len(app._rows) - app.layout.list_rows
+
+
+def test_the_notes_and_drawings_grids_page_through_everything(tmp_path):
+    """NOTES and DRAWINGS are the shared thumbnail GRID, which pages rather
+    than scrolls -- so what has to hold there is that every item is reachable:
+    the page chips and the arrow keys both walk the whole kind."""
+    carts = str(tmp_path / "carts")
+    for i in range(8):
+        moy_carts.save_file("docs", "note_%d" % i, "hi", carts)
+    ws = host_app.build_workstation(carts)
+    app = _open_files(ws)
+    app._enter_kind("docs")
+    grid = app.grid
+    assert grid._pages() > 1, "8 notes overflow one page at 320x240"
+
+    seen = set()
+    for _ in range(len(grid.names)):
+        ws.input.set_held("right", True)
+        ws.input.begin_frame()
+        seen.add(grid.nav(ws.input)[1])
+        ws.input.set_held("right", False)
+        ws.input.begin_frame()
+    assert seen == set(grid.names)             # the arrows reach every item
+
+    prev_r, next_r = grid._page_rects()
+    pages = grid._pages()
+    for _ in range(pages):
+        assert grid.tap(next_r[0] + 2, next_r[1] + 2)[0] == "page"
+    assert grid.page == grid.sel // grid._per_page()

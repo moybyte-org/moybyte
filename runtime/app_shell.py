@@ -61,6 +61,13 @@ class ListShellLayout:
         return (4 * self.fs, self.list_y + i * self.row_h,
                 self.w - 8 * self.fs, self.row_h - 2 * self.fs)
 
+    def rows_view(self):
+        """The list's VIEWPORT -- the band row_rect fills, as one rect. The
+        scroll model needs the whole band where the draw needs a slot, and both
+        must come off the same numbers."""
+        return (4 * self.fs, self.list_y, self.w - 8 * self.fs,
+                self.list_rows * self.row_h)
+
 
 class ListShellApp:
     """Mixin for the app layers. Expects the host class to provide `_store`
@@ -172,6 +179,13 @@ class ListShellApp:
         elif self.sel >= self.top + rows:
             self.top = self.sel - rows + 1
 
+    def _clamp_list(self, count):
+        """Keep the scroll window inside a list that changed under it (a
+        refresh, a delete, a font-scale relayout). Range only -- it must never
+        nudge the selection, which is the drag's to move."""
+        self.top = max(0, min(self.top,
+                              max(0, count - self.layout.list_rows)))
+
     def _list_nav(self, inp, count):
         """The list mode's trackball verbs: up/down wrap the selection (keeping
         the scroll window on it), A opens the row. Always handled (True)."""
@@ -183,4 +197,64 @@ class ListShellApp:
             self._scroll_list()
         elif inp.pressed("a"):
             self._tap_row(self.sel)
+        self._clamp_list(count)
         return True
+
+    # -- the list view's TOUCH model (#113) --------------------------------------
+    #
+    # `top` stays the row-slot state of record -- draw and hit-test both read
+    # it -- and the shared `ui.ScrollRegion` is the interaction model over it:
+    # the drag, the clamp and the slim scrollbar. Row-SNAPPED like the Settings
+    # rows (a fling is stopped on release), so the two row lists a kid meets
+    # behave identically; #113 Phase 5 converts both to pixel-smooth at once.
+
+    def _rows_region(self, count):
+        """The row list's ScrollRegion + its tap/drag machine, built lazily and
+        re-synced to the live layout each sample. The sub-row remainder is kept
+        while a drag is live: re-snapping from `top` every sample would discard
+        normal 3-5px finger travel, so a gradual drag could never cross a row."""
+        if self._rows_scroll is None:
+            self._rows_scroll = _ui.ScrollRegion()
+            self._rows_taps = _ui.DragTap(self._rows_scroll)
+        lay = self.layout
+        self._rows_scroll.set(lay.rows_view(), count * lay.row_h)
+        if not self._rows_scroll.drag_active:
+            self._rows_scroll.offset = self.top * lay.row_h
+        return self._rows_scroll
+
+    def _rows_pointer(self, px, py, click, count):
+        """One pointer sample over the row list. A held drag SCROLLS (`top`
+        snapped from the region's offset, the selection dragged along so the
+        next key press does not yank the view back to it); a row activates only
+        on a clean tap RELEASE, so letting go of a scroll can never open
+        whatever the finger stopped on. Returns the tapped row index, else
+        None."""
+        lay = self.layout
+        sr = self._rows_region(count)
+        press = self._rows_taps.frame(px, py, click, self._surf.pointer().down,
+                                      slop=4 * lay.fs + 2)
+        if self._rows_taps.dragging:
+            vis = lay.list_rows
+            self.top = max(0, min(max(0, count - vis), sr.offset // lay.row_h))
+            if self.sel < self.top:
+                self.sel = self.top
+            elif self.sel >= self.top + vis:
+                self.sel = self.top + vis - 1
+            self._damage.all()
+        else:
+            sr.stop()      # row-snapped: a released flick must not coast, and
+                           # a live fling would swallow the NEXT tap as a catch
+        if press is None:
+            return None
+        for row in range(lay.list_rows):
+            i = self.top + row
+            if i >= count:
+                break
+            if _ui.rect_in(press[0], press[1], lay.row_rect(row)):
+                return i
+        return None
+
+    def _rows_bar(self, cv, th, count):
+        """The list's scrollbar, drawn from the same region the drag moves."""
+        if count > self.layout.list_rows:
+            self._rows_region(count).draw_bar(cv, th)
