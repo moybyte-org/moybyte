@@ -5,7 +5,10 @@
 # is a game or an app: the ray/tetra/scroll/layer scenes below were separate
 # carts (Ray Test, Ray Lua, Layer Test) until 2026-09-06, which meant four
 # carts to run, four report shapes to read and three of them measured by eye
-# off an on-screen fps counter.
+# off an on-screen fps counter. The float/table phases came the same way on
+# 2026-09-07, off the boards' own diagnostic shelf (membench, membench_lua,
+# opbench): what those measured and nothing here did was the language away
+# from the draw verbs -- the float lane, and an indexed container plus a call.
 #
 # A micro pass, then a scene per thing worth timing, then a report:
 #
@@ -33,7 +36,9 @@ PHASE_RAY = 6         # the software 3D frame (#167)
 PHASE_TETRA = 7       # the same frame's tri() half
 PHASE_SCROLL = 8      # a scrolling level re-rendered by map() every frame
 PHASE_LAYER = 9       # the SAME pixels window-copied from a layer (#54)
-PHASE_DONE = 10
+PHASE_FLOAT = 10      # IDLE + float arithmetic only
+PHASE_TABLE = 11      # IDLE + an indexed container and a call
+PHASE_DONE = 12
 
 GAME_FRAMES = 400          # ~10s at 40fps (the "GAME FRAMES" card overrides)
 SCENE_FRAMES = 200         # the three isolation phases (~5s each)
@@ -57,6 +62,15 @@ TARGET_MS = 25             # grow a batch until it costs at least this
 # the map() call or the layer copy and nothing else.
 LOGIC_ITERS = 3000         # per frame, in the LOGIC phase
 DRAW_OPS = 300             # per frame, in the DRAW phase
+FLOAT_ITERS = 3000         # per frame, in the FLOAT phase -- LOGIC's count on
+                           # purpose: same loop, different lane, so the two
+                           # deltas are read against each other directly
+TABLE_ITERS = 3000         # per frame, in the TABLE phase
+TABLE_N = 1024             # entries in the container that phase walks. Big
+                           # enough that the indices miss cache, small enough
+                           # that holding it does not move the heap under the
+                           # phases that come first (it is built at its own
+                           # phase's first frame, like the layer, anyway)
 
 # -- the RAY/TETRA scenes (were ray_test.moy / ray_lua.moy, #167) -------------
 #
@@ -242,6 +256,7 @@ def _init():
     state["rc"] = 1.0          # the tetra turntable's cos/sin, advanced one
     state["rs"] = 0.0          # fixed step per frame -- O(1), never recomputed
     state["lay"] = None        # the scroll layer, built at its phase's first frame
+    state["tab"] = None        # the TABLE phase's container, same arrangement
     pmem(3, 0)                 # arm the pmem report: a PREVIOUS run's done
                                # flag persists (pmem is the save file), and a
                                # harness polling cell 3 must not read it
@@ -521,6 +536,57 @@ def _layer_scene(f):
     print("LAYER", 8, 6, 7)
 
 
+def _float_scene(f):
+    """Float arithmetic only, drawn over the same IDLE floor, so FLOAT - IDLE
+    is the FLOAT lane alone -- the one LOGIC dilutes on purpose (its chain is
+    mostly small integers, and the two VMs differ most here: LUA_32BITS floats
+    against MicroPython's packed ones, which is the lane #66's float-boxing
+    work moved). The rotate is the raycaster's own, at its own constants, so
+    what this prices is the arithmetic the ray and tetra scenes are made of."""
+    cls(1)
+    x = 0.5 + (f & 7)
+    y = 1.25
+    a = 1.0
+    n = 0
+    i = 0
+    while i < FLOAT_ITERS:
+        x, y = x * TC - y * TS, x * TS + y * TC
+        a = a * 1.0001
+        if a > 100.0:
+            a = a * 0.01
+        if x * a > y:
+            n = n + 1
+        i += 1
+    state["sink"] = n                # keep the loop from being dead code
+    print("FLOAT", 8, 6, 7)
+
+
+def _bump(v):
+    return v + 1
+
+
+def _table_scene(f):
+    """An indexed container and a call, over the same IDLE floor: TABLE - IDLE
+    is what a store, a load and one function crossing cost, which LOGIC (all
+    locals) never touches. It is the retired mem shelf's own question -- what a
+    PICO-8 style memory map costs as a table -- and #63's call-frame spill in
+    the same row. Built at this phase's first frame, like the layer."""
+    cls(1)
+    t = state["tab"]
+    if t is None:
+        t = [0] * TABLE_N
+        state["tab"] = t
+    s = 0
+    i = 0
+    while i < TABLE_ITERS:
+        j = i & (TABLE_N - 1)
+        t[j] = _bump(i)
+        s = s + t[j]
+        i += 1
+    state["sink"] = s
+    print("TABLE", 8, 6, 7)
+
+
 def _pct(s, p):
     return s[min(len(s) - 1, (p * len(s)) // 100)]
 
@@ -545,7 +611,7 @@ def _stats_of(raw):
 
 def _scenes():
     """phase -> (label, scene fn, frames). One table instead of a chain of
-    branches, because there are nine timed phases now and the Lua twin has to
+    branches, because there are eleven timed phases now and the Lua twin has to
     match this structure line for line."""
     n = cfg("frames", GAME_FRAMES)
     return {
@@ -558,6 +624,8 @@ def _scenes():
         PHASE_TETRA: ("tetra", _tetra_scene, FOLD_FRAMES),
         PHASE_SCROLL: ("scroll", _scroll_scene, FOLD_FRAMES),
         PHASE_LAYER: ("layer", _layer_scene, FOLD_FRAMES),
+        PHASE_FLOAT: ("float", _float_scene, SCENE_FRAMES),
+        PHASE_TABLE: ("table", _table_scene, SCENE_FRAMES),
     }
 
 
@@ -615,8 +683,8 @@ def _report():
         us = (best * 1000.0) / k
         print(name + " x" + str(k) + " = " + str(best) + "-" + str(mx)
               + "ms  (" + str(int(us * 10) / 10.0) + "us/op)", 8, y, 7)
-        y += 9                       # 17 verbs and four folded scenes: 240px
-    y += 4
+        y += 9                       # 17 verbs, five scene lines and the
+                                     # exit hint: 240px exactly
     # The scenes as delta lines: the floor absolute, everything else as its
     # distance from the floor, because the delta is the whole point and 320px
     # is 40 characters. Full percentiles go to serial and to pmem.
@@ -631,6 +699,15 @@ def _report():
             line1 += "  DRAW +" + _f1(dr["p50"] - fl["p50"])
         print(line1, 8, y, 14)
         y += 10
+        line1b = ""
+        for label, key in (("FLOAT", "float"), ("TABLE", "table")):
+            sc = st.get(key)
+            if sc is not None:
+                line1b += ("  " if line1b else "") + label + " +" \
+                    + _f1(sc["p50"] - fl["p50"])
+        if line1b:
+            print(line1b, 8, y, 14)
+            y += 10
         line2 = ""
         for label, key in (("RAY", "ray"), ("TET", "tetra"),
                            ("MAP", "scroll"), ("LAY", "layer")):
@@ -652,7 +729,6 @@ def _report():
         print(label + " n=" + str(sc["n"]) + " fps=" + _f1(sc["fps"])
               + " p50=" + _f1(sc["p50"]) + " w=" + _f1(sc["worst"]), 8, y, 11)
         y += 10
-    y += 4
     print("HOLD BACK TO EXIT", 8, y, 6)
     if not state["reported"]:
         state["reported"] = True
@@ -670,7 +746,7 @@ def _serial_report():
         _p("BENCHCART verb=" + name + " k=" + str(k) + " best_ms=" + str(best)
            + " med_ms=" + str(med) + " max_ms=" + str(mx))
     for label in ("idle", "logic", "draw", "silent", "sound",
-                  "ray", "tetra", "scroll", "layer"):
+                  "ray", "tetra", "scroll", "layer", "float", "table"):
         s = state["stats"].get(label)
         if s is None:
             continue
@@ -697,7 +773,7 @@ _VERB_ID = {"cls": 0, "rect": 1, "circ": 2, "line": 3, "pix": 4, "print": 5,
             "oval_p": 16}
 _PHASE_ORDER = (("idle", 0), ("logic", 1), ("draw", 2),
                 ("silent", 3), ("sound", 4), ("ray", 5), ("tetra", 6),
-                ("scroll", 7), ("layer", 8))
+                ("scroll", 7), ("layer", 8), ("float", 9), ("table", 10))
 
 
 def _pmem_report():

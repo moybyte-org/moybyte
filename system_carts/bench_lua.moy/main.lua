@@ -13,7 +13,10 @@
 -- These two carts are the WHOLE bench shelf since 2026-09-06: ray_lua.moy
 -- folded in as the ray/tetra scenes, and layer_test.moy (which had no Lua
 -- twin) as the scroll/layer pair. Everything else in the store is a game or
--- an app.
+-- an app. The float/table phases came the same way on 2026-09-07, off the
+-- boards' own diagnostic shelf (membench, membench_lua, opbench): what those
+-- measured and nothing here did was the language away from the draw verbs --
+-- the float lane, and an indexed container plus a call.
 --
 -- PMEM REPORT LAYOUT v1 (int32 cells; keep the three copies in lock-step --
 -- this cart, bench.moy/main.py, tools/p4_cart_bench.py):
@@ -21,7 +24,7 @@
 --   8 + i*3:  verb_id, k, best_ms          (verb ids in VERB_ID below)
 --   64 + i*8: phase_id, n, p50*10, p90*10, p99*10, worst*10, fps*10
 --             (phases in order: idle=0 logic=1 draw=2 silent=3 sound=4
---              ray=5 tetra=6 scroll=7 layer=8)
+--              ray=5 tetra=6 scroll=7 layer=8 float=9 table=10)
 
 local PHASE_MICRO = 0
 local PHASE_IDLE = 1        -- the floor: a frame where the cart does nothing
@@ -33,7 +36,9 @@ local PHASE_RAY = 6         -- the software 3D frame (#167)
 local PHASE_TETRA = 7       -- the same frame's tri() half
 local PHASE_SCROLL = 8      -- a scrolling level re-rendered by map() every frame
 local PHASE_LAYER = 9       -- the SAME pixels window-copied from a layer (#54)
-local PHASE_DONE = 10
+local PHASE_FLOAT = 10      -- IDLE + float arithmetic only
+local PHASE_TABLE = 11      -- IDLE + an indexed container and a call
+local PHASE_DONE = 12
 
 local GAME_FRAMES = 400     -- ~10s at 40fps (the "GAME FRAMES" card overrides)
 local SCENE_FRAMES = 200    -- the three isolation phases (~5s each)
@@ -50,6 +55,12 @@ local TARGET_MS = 25        -- grow a batch until it costs at least this
 -- the floor leaves the scene's own work and nothing else.
 local LOGIC_ITERS = 3000    -- per frame, in the LOGIC phase
 local DRAW_OPS = 300        -- per frame, in the DRAW phase
+local FLOAT_ITERS = 3000    -- per frame, in the FLOAT phase -- LOGIC's count on
+                            -- purpose: same loop, different lane, so the two
+                            -- deltas are read against each other directly
+local TABLE_ITERS = 3000    -- per frame, in the TABLE phase
+local TABLE_N = 1024        -- entries in the container that phase walks, built
+                            -- at its own phase's first frame like the layer
 
 -- The RAY/TETRA scenes (#167), the Python twin's header carries the full why:
 -- a DDA march per screen column, each wall one sspr(), the ceiling and floor
@@ -173,6 +184,7 @@ function _init()
   st.plx, st.ply = 0.66, 0.0        -- camera plane (66 degree FOV)
   st.rc, st.rs = 1.0, 0.0           -- the tetra turntable's cos/sin
   st.lay = nil                      -- the scroll layer, built at its own phase
+  st.tab = nil                      -- the TABLE phase's container, likewise
   pmem(3, 0)              -- arm the pmem report: a PREVIOUS run's done flag
                           -- persists (pmem is the save file), and a harness
                           -- polling cell 3 must not read it
@@ -412,6 +424,55 @@ local function layer_scene(f)
   print("LAYER", 8, 6, 7)
 end
 
+local function float_scene(f)
+  -- Float arithmetic only, drawn over the same IDLE floor, so FLOAT - IDLE is
+  -- the FLOAT lane alone -- the one LOGIC dilutes on purpose (its chain is
+  -- mostly small integers, and the two VMs differ most here: LUA_32BITS floats
+  -- against the Python twin's packed ones, which is the lane #66's float-boxing
+  -- work moved). The rotate is the raycaster's own, at its own constants, so
+  -- what this prices is the arithmetic the ray and tetra scenes are made of.
+  cls(1)
+  local x = 0.5 + (f & 7)
+  local y = 1.25
+  local a = 1.0
+  local n = 0
+  for i = 0, FLOAT_ITERS - 1 do
+    x, y = x * TC - y * TS, x * TS + y * TC
+    a = a * 1.0001
+    if a > 100.0 then a = a * 0.01 end
+    if x * a > y then n = n + 1 end
+  end
+  st.sink = n                        -- keep the loop from being dead code
+  print("FLOAT", 8, 6, 7)
+end
+
+local function bump(v)
+  return v + 1
+end
+
+local function table_scene(f)
+  -- An indexed container and a call, over the same IDLE floor: TABLE - IDLE is
+  -- what a store, a load and one function crossing cost, which LOGIC (all
+  -- locals) never touches. It is the retired mem shelf's own question -- what a
+  -- PICO-8 style memory map costs as a table -- and #63's call-frame spill in
+  -- the same row. Built at this phase's first frame, like the layer.
+  cls(1)
+  if st.tab == nil then
+    local t = {}
+    for i = 0, TABLE_N - 1 do t[i] = 0 end
+    st.tab = t
+  end
+  local t = st.tab
+  local s = 0
+  for i = 0, TABLE_ITERS - 1 do
+    local j = i & (TABLE_N - 1)
+    t[j] = bump(i)
+    s = s + t[j]
+  end
+  st.sink = s
+  print("TABLE", 8, 6, 7)
+end
+
 local function pct(s, p)
   local i = (p * #s) // 100 + 1
   if i > #s then i = #s end
@@ -453,6 +514,8 @@ local function scenes()
     [PHASE_TETRA] = { "tetra", tetra_scene, FOLD_FRAMES },
     [PHASE_SCROLL] = { "scroll", scroll_scene, FOLD_FRAMES },
     [PHASE_LAYER] = { "layer", layer_scene, FOLD_FRAMES },
+    [PHASE_FLOAT] = { "float", float_scene, SCENE_FRAMES },
+    [PHASE_TABLE] = { "table", table_scene, SCENE_FRAMES },
   }
 end
 
@@ -496,7 +559,8 @@ local VERB_ID = { cls = 0, rect = 1, circ = 2, line = 3, pix = 4, print = 5,
                   oval_p = 16 }
 local PHASE_ORDER = { { "idle", 0 }, { "logic", 1 }, { "draw", 2 },
                       { "silent", 3 }, { "sound", 4 }, { "ray", 5 },
-                      { "tetra", 6 }, { "scroll", 7 }, { "layer", 8 } }
+                      { "tetra", 6 }, { "scroll", 7 }, { "layer", 8 },
+                      { "float", 9 }, { "table", 10 } }
 
 local function pmem_report()
   pmem(0, 45948)
@@ -539,9 +603,9 @@ local function report()
     local us = (m.best * 1000.0) / m.k
     print(m.name .. " x" .. m.k .. " = " .. m.best .. "ms  ("
           .. f1(us) .. "us/op)", 8, y, 7)
-    y = y + 9                        -- 17 verbs and four folded scenes: 240px
+    y = y + 9                        -- 17 verbs, five scene lines and the
+                                     -- exit hint: 240px exactly
   end
-  y = y + 4
   -- The scenes as delta lines: the floor absolute, everything else as its
   -- distance from the floor, because the delta is the whole point and 320px
   -- is 40 characters.
@@ -552,6 +616,19 @@ local function report()
     if dr ~= nil then line1 = line1 .. "  DRAW +" .. f1(dr.p50 - fl.p50) end
     print(line1, 8, y, 14)
     y = y + 10
+    local lanes = { { "FLOAT", "float" }, { "TABLE", "table" } }
+    local line1b = ""
+    for i = 1, #lanes do
+      local s = st.stats[lanes[i][2]]
+      if s ~= nil then
+        if line1b ~= "" then line1b = line1b .. "  " end
+        line1b = line1b .. lanes[i][1] .. " +" .. f1(s.p50 - fl.p50)
+      end
+    end
+    if line1b ~= "" then
+      print(line1b, 8, y, 14)
+      y = y + 10
+    end
     local folded = { { "RAY", "ray" }, { "TET", "tetra" },
                      { "MAP", "scroll" }, { "LAY", "layer" } }
     local line2 = ""
@@ -580,7 +657,6 @@ local function report()
       y = y + 10
     end
   end
-  y = y + 4
   print("HOLD BACK TO EXIT", 8, y, 6)
 end
 

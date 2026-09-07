@@ -20,7 +20,7 @@ SYSTEM_CARTS = ROOT / "system_carts"
 # tools/p4_cart_bench.py's PHASE_NAMES and both carts' PHASE_ORDER move with it
 # (tests/test_bench_pmem_report.py is the lock-step guard on those three).
 PHASES = ("idle", "logic", "draw", "silent", "sound",
-          "ray", "tetra", "scroll", "layer")
+          "ray", "tetra", "scroll", "layer", "float", "table")
 
 
 def _run_bench(tmp_path, title, frames):
@@ -62,7 +62,8 @@ def test_bench_python_runs_every_folded_scene(tmp_path):
     from runtime import host_app
     drv = host_app.ConsoleDriver(ws)
     ns = ws.player.ns
-    for phase, label in ((6, "ray"), (7, "tetra"), (8, "scroll"), (9, "layer")):
+    for phase, label in ((6, "ray"), (7, "tetra"), (8, "scroll"), (9, "layer"),
+                         (10, "float"), (11, "table")):
         ns["state"]["phase"] = phase
         ns["state"]["frame"] = 0
         ns["state"]["dts"] = []
@@ -73,6 +74,7 @@ def test_bench_python_runs_every_folded_scene(tmp_path):
             assert ws.cart_error is None, label + ": " + str(ws.cart_error)
         assert ns["state"]["dts"], label + " recorded no frame times"
     assert ns["state"]["lay"], "the layer scene never built its layer"
+    assert ns["state"]["tab"], "the table scene never built its container"
 
 
 def test_bench_python_reports_every_phase(tmp_path):

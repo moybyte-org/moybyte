@@ -47,7 +47,7 @@ VERB_NAMES = ("cls", "rect", "circ", "line", "pix", "print", "rectb",
               "circb", "tri", "spr", "map", "sspr", "tline", "trib",
               "oval", "ovalb", "oval_p")
 PHASE_NAMES = ("idle", "logic", "draw", "silent", "sound",
-               "ray", "tetra", "scroll", "layer")
+               "ray", "tetra", "scroll", "layer", "float", "table")
 
 
 def pmem_lines(cells):
@@ -56,7 +56,8 @@ def pmem_lines(cells):
     the Python cart's serial lines do. Rows are id-checked because only the
     done FLAG is zeroed at cart start -- a stale row from an older layout
     must read as absent, not as a number."""
-    if len(cells) < 128 or cells[0] != PMEM_MAGIC or cells[1] != 1:
+    if (len(cells) < 64 + len(PHASE_NAMES) * 8
+            or cells[0] != PMEM_MAGIC or cells[1] != 1):
         return []
     out = []
     for i in range(min(cells[2], len(VERB_NAMES))):
@@ -96,7 +97,8 @@ def run_bench(board, title, secs, log):
     while time.time() < end:
         board.drain(1.0)
         # the LAST phase's serial line -- the Python twin's "run is over" mark
-        if any(l.startswith("BENCHCART phase=layer") for l in board.lines[n0:]):
+        last = "BENCHCART phase=%s" % PHASE_NAMES[-1]
+        if any(l.startswith(last) for l in board.lines[n0:]):
             board.drain(1.0)
             break
         if board.pyval(poll, timeout=8.0) == 1:
