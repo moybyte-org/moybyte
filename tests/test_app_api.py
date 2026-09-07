@@ -24,7 +24,7 @@ def _select(ws, title):
 def test_builtin_apps_are_registered(tmp_path):
     ws = _ws(tmp_path)
     kinds = [app.id for app, _t in ws._apps]
-    assert kinds == ["artwork", "appearance", "writer", "storybook",
+    assert kinds == ["artwork", "appearance", "storybook",
                      "files", "calc"]
     for kind in kinds:
         assert ws._content_layers[kind] is not None       # router wired
@@ -92,11 +92,11 @@ def test_late_app_metadata_reaches_windowed_wm(tmp_path):
     assert ws.wm._win_title(win) == "Story Editor"
 
 
-def test_writer_registration_keeps_text_mode(tmp_path):
+def test_files_registration_keeps_text_mode(tmp_path):
     ws = _ws(tmp_path)
-    _select(ws, "Writer")
+    _select(ws, "Files")
     ws.launch_selected()
-    assert ws.screen == "writer"
+    assert ws.screen == "files"
     assert ws.input.text_mode                             # typing app
 
 
@@ -181,7 +181,7 @@ import pytest
 
 _DT = 1.0 / 30.0
 _MAX_FRAMES = 6
-_SHIPPED_APPS = ("artwork", "appearance", "writer", "storybook",
+_SHIPPED_APPS = ("artwork", "appearance", "storybook",
                  "files", "calc")
 
 
@@ -350,6 +350,6 @@ def test_no_app_module_carries_the_bar_ritual():
     """The old road is closed: the strip/tap pair lives in the router, so no
     app module may reach the bar surface at all."""
     for name in ("calc_app", "artwork", "appearance_app", "files_app",
-                 "storybook_app", "writer_app"):
+                 "storybook_app"):
         src = (ROOT / "runtime" / (name + ".py")).read_text(encoding="utf-8")
         assert "bar_layer" not in src, name + " still reaches ws.bar_layer"

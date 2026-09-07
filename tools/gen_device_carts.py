@@ -380,7 +380,7 @@ APP_DECLS_HEADER = (
     "\n"
     "  id         the process kind (router / back-stack / window key)\n"
     "  entry      \"module:Class\" -- a runtime/ module staged to every target\n"
-    "  text_mode  True = a TYPING app (clean ASCII keyboard, Writer precedent)\n"
+    "  text_mode  True = a TYPING app (the clean ASCII keyboard)\n"
     "  order      registration precedence (NOT the cart's shelf order)\n"
     "  folder     the identity cart it rides on, in system_carts/\n"
     "  title      that cart's title (what the device names its seeded folder from)\n"

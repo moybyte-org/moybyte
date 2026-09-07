@@ -51,7 +51,8 @@ class CodeEditor:
         # set_text() (a reload) so a copy survives switching what you view.
         # `clip` (#132) is the OPTIONAL system clipboard (widgets.Clipboard):
         # copy/cut write THROUGH it and paste prefers it, so a copy here lands
-        # in Writer and vice versa. None (unit tests, embedding) keeps
+        # in a cart's editor handle and vice versa. None (unit tests,
+        # embedding) keeps
         # the local-only behavior exactly.
         self.clipboard = ""
         self.clip = clip
@@ -324,7 +325,8 @@ class CodeEditor:
 
     def select_all(self):
         """Select the whole buffer: anchor at the start, caret at the end
-        (#132: gives selection-less surfaces like Writer a copy source)."""
+        (#132: gives selection-less surfaces like the editor handle a copy
+        source)."""
         self.sel = (0, 0)
         self.row = len(self.lines) - 1
         self.col = len(self.lines[self.row])

@@ -84,7 +84,7 @@ per-project journal, so undo/redo walks fine-grained edits and then whole
 commits, scoped to the tab you are in. A crash drops you into the code on the
 offending line.
 
-**Apps** — Paint, Files, Writer, Storybook, Calc, Settings, Appearance,
+**Apps** — Paint, Files, Storybook, Calc, Settings, Appearance,
 WiFi setup. Drawings and documents live in a shared file layer that carts
 can read back. They sit on the launcher as carts and behave like the rest of the
 system. An app can now BE a cartridge — declared by manifest permissions, with
@@ -328,7 +328,7 @@ cost a debugging session.
 | path | |
 |---|---|
 | `runtime/` | the system: kernel, WMs, player, editor app, every surface. **[Its README](runtime/README.md) is a per-file map.** |
-| `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Writer, Storybook, Calc) |
+| `system_carts/` | the seed cartridges — games, wallpapers, and the system apps (Paint, Files, Storybook, Calc) |
 | `firmware/lilygo_t_deck_plus_mainline/` | the ESP32-S3 (T-Deck) port; the shared native C modules live in repo-root `native/` |
 | `firmware/esp32_p4_wifi6_touch_lcd_7b/` | the Waveshare 7″ ESP32-P4 port (mainline MicroPython; the P4-silicon C modules live in repo-root `native/p4/`) |
 | `firmware/guition_jc3248w535/` | the Guition 3.5″ S3 port (its own QSPI panel driver, `native/moy_axs`) |

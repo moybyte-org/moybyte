@@ -687,9 +687,10 @@ check plus a case per leg of the gate.
 **The caret invariant this gate is designed around.** The one way a
 surface-granularity freeze breaks is a surface that animates without
 signalling: it silently stops moving. The 2026-07-27 audit found the feared
-case does not exist here — **both carets, the code editor's and Writer's, are
-deliberately SOLID** (Writer's own comment says so). A blinking caret added
-later without a Class B declaration is exactly how this freeze breaks.
+case does not exist here — **both carets, the code editor's and the editor
+handle's, are deliberately SOLID** (`runtime/editor_handle.py` paints its caret
+unconditionally). A blinking caret added later without a Class B declaration is
+exactly how this freeze breaks.
 
 **MEASURED on P4 glass, 2026-07-27** (before the #159 L2-cache flag, which
 moved every surface median; #58 carries the post-flag sweep):

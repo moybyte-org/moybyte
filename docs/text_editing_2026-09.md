@@ -70,7 +70,9 @@ QWERTY is planned.
    it into a rect and forwards taps, and the SHELL feeds the focused handle the
    keyboard — because the switch that takes the keyboard is also the one that
    swallows the byte that caused it, and no cart can make that call.
-4. Writer's shell process removed.
+4. Writer's shell process removed. **Deleted, not deprecated**: the app, its
+   identity cart and its layer are out of the tree, and the launcher's text
+   door is Notes over the handle.
 5. The Config tab's ADVANCED files row, with JSON mode's rule.
 6. The script runner with the text console surface.
 

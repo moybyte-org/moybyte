@@ -21,7 +21,7 @@ existed) -- opportunistically detects + GRADUATES it into the real mechanism
 right here on open (`_graduate_hand_edit`), so "leveled up to code" is never a
 transient, un-persisted, un-undoable guess again.
 
-Same app pattern as Paint/Appearance/Writer: a `.moy` cartridge identity
+Same app pattern as Paint/Appearance: a `.moy` cartridge identity
 (`storybook.moy`) backed by this responsive system process."""
 
 try:
@@ -130,7 +130,7 @@ class StorybookLayout(ListShellLayout):
         self.btn3 = (x + 118 * fs, y, 72 * fs, bh)           # MY ART
         self.btn4 = (x + 194 * fs, y, 66 * fs, bh)           # NO ART / TEAR OUT
         self.status_x = x
-        # Row lists (shelf + pages), Writer-style (geometry: ListShellLayout).
+        # Row lists (shelf + pages); geometry: ListShellLayout.
         self._init_list(self.bar_h + self.band_h)
         # Page view: the text box (the kid types the page's words here) above a
         # live-ish preview strip.

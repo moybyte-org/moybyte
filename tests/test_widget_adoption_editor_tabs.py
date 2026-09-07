@@ -76,7 +76,7 @@ def _frame(ws):
 
 def test_the_private_panel_button_copy_is_gone(tmp_path):
     """`_panel_btn` was one of the private button copies Phase 3a set out
-    to absorb (`writer_app._hist_btn`, this one). It is
+    to absorb (the notebook app's history pair, this one). It is
     not a method any more, and its body is not hiding under another name: the
     module draws no filled+bordered button of its own."""
     from runtime.code_layer import CodeLayer

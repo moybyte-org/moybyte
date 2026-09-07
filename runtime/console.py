@@ -324,11 +324,6 @@ except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.appearance_app import AppearanceAppLayer
 
 try:
-    from writer_app import WriterAppLayer
-except ImportError:  # pragma: no cover - host fallback when not yet aliased
-    from runtime.writer_app import WriterAppLayer
-
-try:
     from calc_app import CalcAppLayer
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.calc_app import CalcAppLayer
@@ -379,8 +374,8 @@ def _resolve_app_entry(entry):
     """Resolve an app declaration's "module:Class" to the class itself.
 
     Two namespaces, as everywhere in this tree: the boards and the wasm head
-    freeze `runtime/` FLAT (`import writer_app`), the host imports the package
-    (`runtime.writer_app`). Same ladder every module header here writes by
+    freeze `runtime/` FLAT (`import files_app`), the host imports the package
+    (`runtime.files_app`). Same ladder every module header here writes by
     hand -- resolved from data instead of once per app.
     """
     mod_name, _, cls_name = entry.partition(":")
@@ -956,9 +951,10 @@ class Workstation:
         # (The launcher's trackball-hover state (_lhover) lives on self.launcher_layer.)
         self.pointer = None           # set by run_desktop
         # The system clipboard (#132): the one typed holder every editor writes
-        # through (code tab / Writer), so copy in one app pastes in
-        # another. Console-side end-to-end -- works identically over the web
-        # transport, never touches a host OS clipboard (parity trap).
+        # through (the code tab, a cart's editor handle), so copy in one
+        # app pastes in another. Console-side end-to-end -- works identically
+        # over the web transport, never touches a host OS clipboard (parity
+        # trap).
         self.clipboard = Clipboard()
         # system.json (#209 landing B): the store owns the dict and every
         # persist funnel; `self.system` is a plain ALIAS of it and neither name
@@ -1220,9 +1216,9 @@ class Workstation:
         self.settings_layer = SettingsLayer(self, NAMES, _in, _clamp_scroll)
         # The system APPS are constructed AND registered below, from the
         # declarations (`_init_apps`) -- Paint's indexed document + reflowing
-        # chrome, Writer's notebook, Storybook's compiling decks, Files'
-        # user-files gallery and Calc. Each is a
-        # `system_carts/<folder>/manifest.json` "app" block, not a line here.
+        # chrome, Storybook's compiling decks, Files' user-files gallery and
+        # Calc. Each is a `system_carts/<folder>/manifest.json` "app" block,
+        # not a line here.
         # The Python code editor (#24/#39): the full-screen text view. Owns the drawing
         # + code-UI state (keyboard edge / drag / highlight memo); the shared ws.editor
         # handle + save_code/run_code + code-error state + code_layout stay on ws.
@@ -2417,8 +2413,8 @@ class Workstation:
         from the `app` blocks in `system_carts/*/manifest.json`, so adding an
         app is a manifest plus a module -- never an edit here
         (docs/app_api_v1.md). The `<id>_app` attributes are kept because the
-        shell and the apps address each other by them (`files_app` opens
-        `ws.writer_app`), and because 100+ call sites use them.
+        shell and the apps address each other by them (`settings_layer` opens
+        `ws.appearance_app`), and because 100+ call sites use them.
 
         Declaration order IS dispatch precedence, which is why `order` lives in
         the manifest rather than being implied by a dict.
@@ -2441,9 +2437,9 @@ class Workstation:
           open()        -- (re)enter the app on every launch
           relayout(w, h, fs)  -- adopt a new canvas size / font scale
 
-        `text_mode=True` marks a TYPING app (clean ASCII keyboard, the Writer
-        precedent); `min_size=(w, h)` is the windowed-WM resize minimum in
-        fs-scaled units (the ui.py convention). When omitted, MIN_W/MIN_H on
+        `text_mode=True` marks a TYPING app (clean ASCII keyboard);
+        `min_size=(w, h)` is the windowed-WM resize minimum in fs-scaled
+        units (the ui.py convention). When omitted, MIN_W/MIN_H on
         the app's layout are adopted. TITLE supplies window/taskbar text. A
         launcher tap on the claimed cart opens the app instead of the Player;
         everything else (window chrome, theme tokens, toolkit) comes free."""
@@ -2618,10 +2614,10 @@ class Workstation:
         """Spawn a registered system app on `cart` (default: the cart its
         is_app claims) -- the ONE app-launch dispatch, used by the launcher
         tap above and by app-to-app jumps (e.g. Files' OPEN -> Paint). A
-        TYPING app (register_app text_mode=True, the Writer precedent) gets
-        the clean ASCII keyboard after it opens; the rest are set to button
-        mode BOTH ways, so a jump out of a typing app restores the raw
-        keyboard. Returns False when no cart carries the app's identity."""
+        TYPING app (register_app text_mode=True) gets the clean ASCII
+        keyboard after it opens; the rest are set to button mode BOTH ways, so
+        a jump out of a typing app restores the raw keyboard. Returns False
+        when no cart carries the app's identity."""
         if cart is None:
             for c in self.carts.all:
                 if app.is_app(c):
@@ -2761,7 +2757,7 @@ class Workstation:
         """The desk's PLAY icon: drop to the fullscreen Library (the play
         world). Leaving the desk closes its windows (v1 -- autosave means
         nothing is lost); go_home also runs the leave-make-world cleanup
-        (flushes Writer/Storybook, releases the world, re-slims the cart)."""
+        (flushes the open app, releases the world, re-slims the cart)."""
         self.go_home()
 
     def _ensure_desk(self):
@@ -3376,7 +3372,7 @@ class Workstation:
         game + open it), then every editable cart (wallpapers + built-ins included).
 
         SYSTEM-APP carts are the one exclusion, and it is TEMPORARY (owner call
-        2026-07-31). Files/Paint/Writer/Calc/Appearance are not really
+        2026-07-31). Files/Paint/Calc/Appearance are not really
         carts: the app is a shell MODULE (runtime/*_app.py, frozen on device),
         and the `.moy` only carries identity, icon art and a few-line fallback
         body for an older shell. Listing them offered a project whose "code" was

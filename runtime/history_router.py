@@ -34,9 +34,9 @@ source is what gets journaled -- walking one without the other would desync
 them, and it is also how a graduated cart's read-only Blocks tab reaches the
 graduating commit whose rider un-graduates it.
 
-## Writer and the Desk Lab apps are NOT routed here
+## The Desk Lab apps and a cart's editor handle are NOT routed here
 
-They keep their own `History` on their own app object and their own persistence
+They keep their own `History` on their own object and their own persistence
 (`files/.history/` op sidecars, a different mechanism from the per-project
 journal). This object resolves the ACTIVE EDITOR surface only; the bar pair it
 serves is unreachable outside the Editor. Nothing here should grow an app case

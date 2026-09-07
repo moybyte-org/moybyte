@@ -10,15 +10,12 @@ from runtime import host_app, moy_carts, text_modes
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _open_writer(ws):
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Writer":
-            ws.launcher.sel = i
-            break
-    ws.open()
-    ws.input.begin_frame()
-    ws.frame(1 / 30)
-    return ws.writer_app
+def _handle(ws, name, mode=None):
+    """The shell's text page as a CART reaches it (`runtime/editor_handle.py`)
+    -- the table's second consumer since the notebook app was deleted."""
+    ctx = ws.app_context("probe", ("files", "clipboard"))
+    return ws.player._open_cart_editor(ctx.files, "docs", name, mode,
+                                       ws.canvas, ctx.clipboard)
 
 
 # -- the table ---------------------------------------------------------------
@@ -125,14 +122,12 @@ def test_a_vault_note_opens_in_markdown_mode(tmp_path):
     carts = str(tmp_path / "carts")
     moy_carts.save_file("docs", "story", "hello", carts)
     ws = host_app.build_workstation(carts)
-    app = _open_writer(ws)
-    app._open_doc("story")
-    assert app.doc_mode == text_modes.MD
-    assert text_modes.MODES[app.doc_mode].wrap is True
+    ed = _handle(ws, "story")
+    assert ed.mode() == text_modes.MD
+    assert text_modes.MODES[ed.mode()].wrap is True
     # markdown has no gate: an idle debounce publishes whatever was typed
-    app.editor.set_text("# heading {{{ not json")
-    app._unsaved = True
-    assert app.flush(soft=True) is True
+    ed.set_text("# heading {{{ not json")
+    assert ed.save(soft=True)[0] is True
     assert moy_carts.load_file("docs", "story", carts) == "# heading {{{ not json"
 
 
@@ -140,33 +135,28 @@ def test_an_invalid_json_document_is_refused_softly_and_kept_on_the_way_out(tmp_
     carts = str(tmp_path / "carts")
     moy_carts.save_file("docs", "settings", '{"a": 1}', carts)
     ws = host_app.build_workstation(carts)
-    app = _open_writer(ws)
-    app._open_doc("settings", text_modes.JSON)
-    assert app.doc_mode == text_modes.JSON
+    ed = _handle(ws, "settings", text_modes.JSON)
+    assert ed.mode() == text_modes.JSON
 
-    app.editor.set_text('{"a": 1,')
-    app._unsaved = True
-    assert app.flush(soft=True) is False              # the debounce refuses
-    assert app.status.startswith("INVALID")
+    ed.set_text('{"a": 1,')
+    assert ed.save(soft=True)[0] is False             # the debounce refuses
+    assert ed.badge().startswith("INVALID")
     assert moy_carts.load_file("docs", "settings", carts) == '{"a": 1}'
 
-    app.close()                                       # a hard exit writes anyway
+    ed.close()                                        # a hard exit writes anyway
     assert moy_carts.load_file("docs", "settings", carts) == '{"a": 1,'
-    assert app.status.startswith("INVALID")           # and keeps the badge
+    assert ed.badge().startswith("INVALID")           # and keeps the badge
 
 
 def test_a_repaired_json_document_clears_the_badge(tmp_path):
     carts = str(tmp_path / "carts")
     moy_carts.save_file("docs", "settings", "{}", carts)
     ws = host_app.build_workstation(carts)
-    app = _open_writer(ws)
-    app._open_doc("settings", text_modes.JSON)
-    app.editor.set_text("{oops")
-    app._unsaved = True
-    app.flush(soft=True)
-    assert app.status.startswith("INVALID")
-    app.editor.set_text('{"ok": true}')
-    app._unsaved = True
-    assert app.flush(soft=True) is True
-    assert not app.status.startswith("INVALID")
+    ed = _handle(ws, "settings", text_modes.JSON)
+    ed.set_text("{oops")
+    ed.save(soft=True)
+    assert ed.badge().startswith("INVALID")
+    ed.set_text('{"ok": true}')
+    assert ed.save(soft=True)[0] is True
+    assert ed.badge() == ""
     assert moy_carts.load_file("docs", "settings", carts) == '{"ok": true}'

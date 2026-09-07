@@ -34,8 +34,9 @@ The first version of this table measured EMPTY surfaces and drew a conclusion th
 had to be withdrawn. The deltas are why seeding is not optional:
 
   * writer   20ms (empty file GRID) -> 40 (empty text area) -> 52 (200 lines)
+    (the notebook app this measured is gone; the shape of its lesson is not)
 
-With no file open, Writer shows a file grid rather than a text surface,
+With no file open, that app showed a file grid rather than a text surface,
 so an unseeded measurement is not a slow version of the real thing -- it is a
 different screen.
 
@@ -92,7 +93,6 @@ OPEN = {
     "blocks":    "ws._g['_edit']('blocks')",
     "sprites":   "ws._g['_edit']('paint')",
     "map":       "ws._g['_edit']('map')",
-    "writer":    "ws.open_app(ws.writer_app)",
     "files":     "ws.open_app(ws.files_app)",
     "storybook": "ws.open_app(ws.storybook_app)",
 }

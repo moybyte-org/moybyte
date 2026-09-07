@@ -930,7 +930,7 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
          glyph=None, glyph_draw=None, disabled=False, state=None,
          colors=None):
     """The app-toolbar CHIP -- the one implementation of the `_button` the
-    Appearance/Writer/Storybook/Artwork apps each used to carry a local copy
+    Appearance/Storybook/Artwork apps each used to carry a local copy
     of (pixel-identical to those). A quiet field on the panel color with the
     theme's title ink; `on` swaps to the accent toggle look (edge border);
     `hot` to danger red with light ink (an armed destructive action).
@@ -945,9 +945,8 @@ def chip(cv, th, rect, label, on=False, hot=False, fs=None,
     vocabulary (dark-edged verb chips -- PLAY/CHANGE/SAVE).
 
     `disabled` + `state` are the six-state model (see `widget_state`), and both
-    default to the exact pixels the goldens pin. `disabled` is what the two
-    live private copies -- `writer_app._hist_btn` and `code_layer._panel_btn`
-    -- each dim by hand today.
+    default to the exact pixels the goldens pin. `disabled` is what the one
+    live private copy -- `code_layer._panel_btn` -- dims by hand today.
 
     `colors` is the same escape hatch `row` and `cell` carry: an explicit
     (field, ink, edge) triple bypassing the skin, for a site whose pixels are
@@ -1451,7 +1450,7 @@ def mini_btn(cv, rect, label, fill, label_rect=None):
 
 
 def toolbar(cv, th, rect):
-    """The app toolbar band (Writer/Storybook): the theme's title surface --
+    """The app toolbar band (Storybook): the theme's title surface --
     chips and status text draw over it in title_ink."""
     x, y, w, h = rect
     field, _ink, _edge = state_colors(th, "toolbar", REST)

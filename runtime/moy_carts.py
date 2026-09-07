@@ -824,10 +824,12 @@ def is_packed(seed):
 # folders as well as the titles, so every board seeded before it has carried a
 # second, stale copy of Brick Siege and Harpoon Pop ever since. Sheets and
 # Beeper are the 2026-09-07 deletions: the spreadsheet app, and the audio demo
-# whose verbs the cart API now shows off instead.
+# whose verbs the cart API now shows off instead. Writer is the same day's: the
+# notebook app is gone and Notes -- a CART over the shell's editor handle --
+# is the one text app (docs/text_editing_2026-09.md).
 RETIRED = ("Ray Test", "Ray Lua", "Layer Test", "Battle City", "Bubble Trouble",
-           "Sheets", "Beeper")
-RETIRED_GEN = 3
+           "Sheets", "Beeper", "Writer")
+RETIRED_GEN = 4
 RETIRED_VER_NAME = "retired.ver"
 
 
@@ -867,11 +869,17 @@ def prune_retired(root=CARTS_DIR, titles=RETIRED, generation=RETIRED_GEN):
 
 
 def sweep_store(root=CARTS_DIR):
-    """The once-per-generation passes a store OPENING runs, behind one door.
+    """The one-shot passes a store OPENING runs, behind one door.
 
-    Each is gated on its own version sidecar, so the warm path is one small read
-    apiece. Returns (retired folders removed, documents rewritten)."""
-    return (prune_retired(root), migrate_doc_format(root))
+    Each is gated on its own marker -- a generation sidecar, or the kind dir's
+    own existence -- so the warm path is one small read apiece. Returns
+    (retired folders removed, notes migrated, documents rewritten).
+
+    `migrate_docs` runs HERE rather than from a text app because it builds the
+    vault a note is picked from: it has to have run before anything lists it.
+    It also runs before `migrate_doc_format`, so a legacy notebook lands and is
+    normalised in the same boot."""
+    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root))
 
 
 def seed_any(seed, root=CARTS_DIR, progress=None):
@@ -1835,7 +1843,7 @@ def _rmtree(path):
 
 # --- user files (#108): the kid's creations as real files -------------------
 #
-# Creations that outlive any one app or cart (a Paint drawing, a Writer doc, a
+# Creations that outlive any one app or cart (a Paint drawing, a note, a
 # recorded voice set) live under ONE visible root BESIDE the carts dir --
 # files/<kind>/<name><ext> -- real folders with real names on the card, so the
 # same stuff a File Manager shows is what a PC sees on the mounted SD. Kinds
@@ -2063,7 +2071,8 @@ def save_file(kind, name, text, root=CARTS_DIR):
 
 # --- op-history sidecars (#111): keyframe + op segments per user file --------
 #
-# The #111 keyframe+ops undo model for Desk Lab apps (Paint/Writer). A
+# The #111 keyframe+ops undo model for the document surfaces (Paint, the
+# editor handle). A
 # per-file history lives in a HIDDEN sibling of the kind dirs --
 # files/.history/<kind>/<name>.jsonl -- one append-only JSONL of records:
 #

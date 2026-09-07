@@ -182,7 +182,7 @@ GOLDEN_EXCLUDE = {}
 # test_every_registered_app_is_covered), so adding a tab or an app without
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
-APPS = ("artwork", "appearance", "writer", "storybook", "files", "calc")
+APPS = ("artwork", "appearance", "storybook", "files", "calc")
 
 # Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
 # so what these hash is the app bar over a cart's own 320x240 raster, composited

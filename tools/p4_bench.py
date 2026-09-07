@@ -203,7 +203,7 @@ def bench_all(b, out_path):
     bench.stop("window drag (settings)")
 
     # -- desk apps ----------------------------------------------------------
-    for app in ("files", "artwork", "writer", "calc", "storybook",
+    for app in ("files", "artwork", "calc", "storybook",
                 "appearance"):
         ok = pyval(b, "ws.open_app(ws._apps_by_id['%s'])" % app)
         if not ok:

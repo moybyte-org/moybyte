@@ -348,14 +348,27 @@ def test_a_trashed_wrapper_migrates_with_the_live_ones(tmp_path):
     assert (trash / "gone.md").read_text() == "line one\nline two"
 
 
-def test_sweep_store_runs_both_one_shot_passes(tmp_path):
+def test_sweep_store_runs_its_one_shot_passes(tmp_path):
+    """The store-opening door: retire, migrate the legacy notebook, rewrite the
+    doc format. `migrate_docs` runs HERE since the notebook app was deleted --
+    it builds the vault a note is picked from, so nothing can list it first."""
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     _wrapper(root, "one")
-    assert moy_carts.sweep_store(root) == (0, 1)
+    assert moy_carts.sweep_store(root) == (0, None, 1)
     assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
     assert moy_carts.load_docs_version(root) == moy_carts.DOCS_GEN
-    assert moy_carts.sweep_store(root) == (0, 0)
+    assert moy_carts.sweep_store(root) == (0, None, 0)
+
+
+def test_sweep_store_migrates_a_legacy_notebook(tmp_path):
+    """The pass the notebook app used to trigger on its own open. Its own
+    marker is the docs dir, so a store that already has one is left alone."""
+    root = _root(tmp_path)
+    moy_carts.ensure_dirs(root)
+    moy_carts.save_notes('{"notes": [{"body": "my first note"}]}', root)
+    _retired, made, _fmt = moy_carts.sweep_store(root)
+    assert made and moy_carts.load_file("docs", made[0], root) == "my first note"
 
 
 def test_sprite_export_lands_in_files_sprites(tmp_path):
@@ -415,8 +428,9 @@ def test_history_prune_keeps_last_keyframe_plus_n_segments(tmp_path):
 
 
 def test_ops_since_keyframe_is_the_one_sidecar_window():
-    """The ONE reader every undo-seeding app goes through (Writer, the
-    Files role's history_ops): everything after the LAST keyframe, in order."""
+    """The ONE reader every undo-seeding surface goes through (the editor
+    handle, the Files role's history_ops): everything after the LAST keyframe,
+    in order."""
     kf = {"t": "kf", "doc": "X"}
     seg = lambda *ops: {"t": "seg", "ops": list(ops)}
     assert moy_carts.ops_since_keyframe([]) == []

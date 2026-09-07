@@ -131,7 +131,6 @@ class _LayoutCtx:
                 ctx.app_layouts[_app.id] = _lay
         ctx.artwork_layout = ctx.app_layouts.get("artwork")
         ctx.appearance_layout = ctx.app_layouts.get("appearance")
-        ctx.writer_layout = ctx.app_layouts.get("writer")
         ctx.storybook_layout = ctx.app_layouts.get("storybook")
         return ctx
 
@@ -758,7 +757,7 @@ class WindowedWM(FullscreenStackWM):
             return (self.ws.canvas.w * s + 2, self.ws.canvas.h * s + 2 + th)
         if key in ("make", "menu", "picker"):
             return (full.w - full.w // 8, full.h - full.h // 10)
-        if key in ("artwork", "appearance", "writer", "storybook"):
+        if key in ("artwork", "appearance", "storybook"):
             return (full.w - full.w // 8, full.h - full.h // 10)
         if key == "update":
             return (full.w // 2, full.h // 2)
@@ -931,7 +930,7 @@ class WindowedWM(FullscreenStackWM):
         top"). _animating's own wallpaper leg keys on the TOP process kind --
         `kind in ("launcher", "settings", "desk")` -- a list written before apps
         were windows, so Settings kept the desk alive and Appearance (or Files,
-        Paint, Writer...) silently froze it. On THIS tier the desk backdrop is
+        Paint, Storybook...) silently froze it. On THIS tier the desk backdrop is
         visible behind every window, so its liveness cannot depend on who is on
         top. Unlike the gesture leg, re-rendering here is CORRECT: a live
         wallpaper's desk pixels really do change every frame, which is exactly
@@ -2298,8 +2297,6 @@ class WindowedWM(FullscreenStackWM):
         the same real kinds close_window_kind always has."""
         ws = self.ws
         ws._dirty = True
-        if kind == "writer":
-            ws.writer_app.flush(force=True)   # the strip X must never lose typed notes
         if kind == "storybook":
             ws.storybook_app._commit_deck()   # same rule for an open story
         if kind == "artwork":

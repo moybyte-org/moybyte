@@ -9,7 +9,7 @@ WALL / GAME (the copy-on-use reuse actions, via the ArtworkService), and
 DELETE -- which moves to the restorable trash, never destroys (trash trains
 recovery; confirms train click-through).
 
-Presented exactly like Paint/Writer: a `.moy` cartridge identity on the
+Presented exactly like Paint: a `.moy` cartridge identity on the
 launcher (`files.moy`) backed by a responsive SYSTEM process. The grid itself
 is the shared `file_widgets.FileGridView` -- the same widget Paint's OPEN mode
 embeds, so browsing your stuff is one learned gesture everywhere. Selection

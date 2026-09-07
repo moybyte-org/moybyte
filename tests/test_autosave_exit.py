@@ -109,7 +109,7 @@ def test_code_edit_survives_a_workspace_swap_via_projects(tmp_path):
 
 def test_windowed_make_window_close_commits_code_edit(tmp_path):
     """#111 regression: the Make window's title-strip X used to route through
-    wm_windowed.close_window_kind, which only flushed writer/storybook -- an
+    wm_windowed.close_window_kind, which only flushed the Desk Lab apps -- an
     Editor mid-idle-debounce closed by dragging the window shut (rather than
     using PROJECTS/PLAY) would silently lose the edit. close_window_kind must
     now hard-commit the Editor too."""

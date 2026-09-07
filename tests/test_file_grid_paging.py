@@ -1,6 +1,6 @@
 """`FileGridView`'s page chips and its ("page", +/-1) tap protocol.
 
-The one body behind Files, Writer and Paint's OPEN dialog. Nothing in
+The one body behind Files and Paint's OPEN dialog. Nothing in
 the suite ever filled more than one page, so `_page_rects` and every paging
 branch of `tap` had never executed -- verified 2026-08-22 by raising inside the
 body and running all 2819 tests without a hit.

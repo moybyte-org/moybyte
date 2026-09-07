@@ -3,7 +3,7 @@ permissions its manifest declares (#181, ui_refactor_2026-08 Phase 7).
 
 ## What this is, and what it deliberately is NOT
 
-A SHIPPED system app (Calc, Files, Writer ...) is shell code: a Layer class in
+A SHIPPED system app (Calc, Files, Paint ...) is shell code: a Layer class in
 `runtime/` that declares a `NEEDS` tuple and is handed an `AppContext`
 (`runtime/app_context.py`) carrying exactly those roles. A USER APP is a
 `.moy` CART -- editable in the project picker like any other cart, written by
@@ -183,7 +183,7 @@ NEVER_GRANTED = ("shell", "carts", "wallpaper", "artwork",
 FILE_KINDS = ("docs", "drawings", "sprites", "music")
 
 # `"files"` with no kind means the kid's DOCUMENTS -- the same `docs` kind
-# Writer authors and Files browses, so an app's notes show up where a kid would
+# Notes authors and Files browses, so an app's notes show up where a kid would
 # look for them.
 DEFAULT_FILE_KIND = "docs"
 

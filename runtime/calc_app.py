@@ -91,7 +91,7 @@ class CalcAppLayer:
 
     @staticmethod
     def is_app(cart):
-        """True only for the shipped Calc identity cart (the Writer pattern:
+        """True only for the shipped Calc identity cart (the shipped-identity pattern:
         title + a marker permission + the slug, never a renamed copy)."""
         if (not cart or cart.get("title") != "Calc"
                 or "calc" not in (cart.get("permissions") or ())):

@@ -45,7 +45,8 @@ it hides which apps can write executable content.
 and zero consumers" and deferred it. That reading came from grepping for
 `ws` followed by a dot,
 which cannot see `getattr(self.ws, "clipboard", None)` -- and that is how all
-its live consumers are written (the `clip=` argument Writer and Storybook hand
+its live consumers are written (the `clip=` argument the editor handle and
+Storybook hand
 their CodeEditor). The
 same blind spot hid Storybook's `getattr(self.ws, "artwork", None)`. When a
 count says zero and the feature ships, suspect the grep.
@@ -619,8 +620,8 @@ class Nav:
 
     `app()`/`open_app()` are the APP-TO-APP seam. `docs/app_api_v1.md` listed
     app-to-app as an explicit v1 NON-GOAL and it shipped anyway -- `files_app`
-    reaches `ws.writer_app.open_named(...)` across five sites, because "open
-    this doc in Writer" is a real product need and there was no seam for it.
+    reached the notebook app's `open_named(...)` across five sites, because
+    "open this doc" is a real product need and there was no seam for it.
     This is the seam. It resolves by registered ID, so an app never holds a
     hard reference to another app's class."""
 

@@ -1,7 +1,7 @@
 # The console APP API v1 — cartridge identity, system process
 
-**Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance,
-Writer and Storybook grew organically ("a cartridge identity backed by a
+**Status:** SHIPPED (2026-07-12). This formalizes the pattern Paint, Appearance
+and Storybook grew organically ("a cartridge identity backed by a
 responsive system process") into one public seam, aligned with
 `docs/shell_architecture_v1.md`'s privileged-system-carts direction. **Calc**
 (`runtime/calc_app.py` + `system_carts/calc.moy`) is the reference app — small
@@ -48,7 +48,7 @@ A system APP is two artifacts:
    ```python
    ws.register_app(MyAppLayer(ws.app_context("myapp", MyAppLayer.NEEDS),
                               NAMES, _in),
-                   text_mode=False,        # True = typing app (Writer precedent)
+                   text_mode=False,        # True = typing app (Files precedent)
                    min_size=(310, 230))    # windowed resize floor, fs-scaled
    ```
 
@@ -178,8 +178,8 @@ Two things follow for an app author:
   band height instead.
 - **Optional `commit(self)`** — the host calls it just before routing a bar
   tap, because the X there is an exit path. An app that persists on an idle
-  debounce (#111) implements it (`writer_app`, `storybook_app`
-  do); forgetting it costs an autosave, never the exit.
+  debounce (#111) implements it (`storybook_app` does); forgetting it costs an
+  autosave, never the exit.
 
 ## Checklist for a new shipped app (2026-08-19: it is two files)
 
@@ -283,7 +283,7 @@ calculator or a notepad, fixed is the right answer.
 ### What a user app costs to write
 
 `system_carts/notes.moy` is the worked example: a notepad that types, saves into
-the kid's documents (the same `docs` kind Writer and Files browse -- open one
+the kid's documents (the same `docs` kind Files browses -- open one
 there and it is really the same file), lists what it saved and remembers which
 note was open. **200 lines of cart, no shell code, no registration, no
 `runtime/` module** -- and no C, no build, no reflash: it is a cart, so it edits
@@ -318,12 +318,12 @@ free, and a game that always crashes shows the panel and is not a brick.
 - Multiple instances of one app.
 
 **App-to-app is no longer a non-goal (2026-08-19).** It was one, and it shipped
-anyway: `files_app` reached `ws.writer_app.open_named(...)` across five sites,
-because "open this doc in Writer" is a real product need and there was no seam
-for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam -- resolution is
-by REGISTERED ID, so no app holds a reference to another app's class and a build
-without the target degrades to a status line. IPC beyond "open that, pointed
-here" is still out.
+anyway: `files_app` reached straight into the notebook app's layer across five
+sites, because "open this doc in the text app" is a real product need and there
+was no seam for it. `ctx.nav.app(id)` / `ctx.nav.open_app(id)` is the seam --
+resolution is by REGISTERED ID, so no app holds a reference to another app's
+class and a build without the target degrades to a status line. IPC beyond
+"open that, pointed here" is still out.
 
 The Files ROUTER (docs/text_editing_2026-09.md) is the seam's second customer,
 and it added three verbs that are all "open that, pointed here":

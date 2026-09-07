@@ -1,4 +1,4 @@
-# The Desk Lab apps' shared "list shell" (#78 family: Writer / Storybook --
+# The Desk Lab apps' shared "list shell" (#78 family: Files / Storybook --
 # written in sequence, so each had hand-copied the same
 # scaffolding). Two small bases, extracted MECHANICALLY so every derived
 # number and drawn pixel stays byte-identical (#39):
@@ -66,12 +66,11 @@ class ListShellApp:
     """Mixin for the app layers. Expects the host class to provide `_store`
     (its AppContext storage role), `_damage`, layout, sel, top, status
     (+ _save_failed where _persist is used) and a _tap_row verb for the A
-    button. `_button` and `_list_pointer` additionally want `_theme`,
-    `_surf` and (for the pointer) `_in` + a `grid`."""
+    button. `_button` additionally wants `_theme` and `_surf`."""
 
-    APP_TITLE = None            # the shipped cart's title ("Writer", ...)
-    APP_PERM = None             # its identity permission ("notebook", ...)
-    APP_FOLDER = None           # its store folder ("writer.moy", ...)
+    APP_TITLE = None            # the shipped cart's title ("Files", ...)
+    APP_PERM = None             # its identity permission ("browse", ...)
+    APP_FOLDER = None           # its store folder ("files.moy", ...)
 
     @classmethod
     def is_app(cls, cart):
@@ -133,39 +132,6 @@ class ListShellApp:
         passes left off. They are this one method now."""
         _ui.chip(cv, self._theme.colors(), r, label, hot=hot, fs=self.layout.fs,
                  glyph=glyph, glyph_draw=self._surf.glyph, disabled=not enabled)
-
-    # -- the list/rename pointer head ---------------------------------------------
-
-    def _list_pointer(self, px, py, click, on_new, on_open):
-        """The LIST and RENAME modes' pointer handling, shared by the two apps
-        whose list view is a `FileGridView`. True when it
-        handled the event; False when the host is in one of its OWN modes and
-        should carry on.
-
-        `on_new` / `on_open` are the host's verbs (`_new_doc`/`_open_doc`)
-        -- passed rather than renamed, because a
-        thumbnail grid of documents is generic and "make a new sheet" is not.
-        Bound methods are built on a pointer EVENT, never per frame."""
-        lay = self.layout
-        if self.mode == "list":
-            # The grid's hover/pressed pump runs on every sample, not just the
-            # click frame -- a press cue nobody sees is not a cue.
-            if self.grid.pointer_frame(px, py, self._surf.pointer()):
-                self._damage.all()
-            if not click:
-                return True
-            if self._in(px, py, lay.new_btn):
-                on_new()
-                return True
-            hit = self.grid.tap(px, py)
-            if hit and hit[0] in ("pick", "sel"):
-                on_open(hit[1])              # the picker opens on ONE tap
-            return True
-        if self.mode == "rename":
-            if click and self._in(px, py, lay.del_btn):
-                self._rename_commit()
-            return True
-        return False
 
     # -- typed keys ------------------------------------------------------------
 
