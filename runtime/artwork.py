@@ -526,6 +526,12 @@ class PaintAppLayer:
         an untouched drawing costs no write."""
         self._save()
 
+    # The bar's hard-commit hook is the SAME write. The context-X is an exit
+    # path that does not always end in go_home's close sweep -- a cart image
+    # returns into its project's Editor instead -- so the pop must not be the
+    # only thing that saves.
+    commit = close
+
     def _mark_changed(self):
         self._unsaved = True
         self._idle = 0.0

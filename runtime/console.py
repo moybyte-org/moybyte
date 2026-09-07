@@ -2282,11 +2282,16 @@ class Workstation:
     def _note_app_caller(self):
         """Record the registered APP this navigation is leaving, so whatever it
         opens comes back to it. Called at the app-to-app jumps -- `open_app`
-        and the two `ctx.nav` editor doors -- and NOT by `_return_to_project`,
-        which is a return INTO an Editor an app may already own. A jump from
-        anywhere else (the launcher, the picker) clears the slot."""
+        and the two `ctx.nav` editor doors.
+
+        It only ever SETS. A jump from somewhere that is not an app deepens a
+        journey rather than starting one (Files -> a project's Editor -> that
+        cart's cover in Paint is still on its way back to Files), and clearing
+        there would strand the shelf. `go_home` is the one reset, because the
+        launcher root is where every return path ends."""
         app = self._apps_by_id.get(self.wm.top_kind())
-        self._app_return = app.id if app is not None else None
+        if app is not None:
+            self._app_return = app.id
 
     def _crash_to_code(self):
         """A crashed cart run throws the kid STRAIGHT into the code editor on
@@ -2766,13 +2771,22 @@ class Workstation:
         app = self._apps_by_id.get("artwork")
         if app is None:
             return False
+        into_project = None
         if cart is not None:
             path = (cart or {}).get("path")
             if not path:
                 return False
             kind = self.carts_store.project_kind(path)
+            if self.project is not None and self.project.cart is cart:
+                into_project = cart      # opened FROM this project's Editor
         self.artwork.open_named(name, kind)
-        return bool(self.open_app(app))
+        if not self.open_app(app):
+            return False
+        # Leaving Paint comes back to the Config tab THROUGH the loader, the
+        # same contract a project TEXT file has: the folder is re-read, so an
+        # edited cover is the cover the shelf shows.
+        self._project_return = into_project
+        return True
 
     def is_system_app(self, cart):
         """True when a registered system app's identity claims `cart` -- the

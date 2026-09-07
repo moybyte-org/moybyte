@@ -482,3 +482,29 @@ def test_a_picture_paint_cannot_read_opens_read_only_from_files(tmp_path):
     assert ws.wm.top_kind() == "artwork"        # opened, not refused
     assert not ws.artwork.editable()
     assert ws.artwork.why_read_only()
+
+
+def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
+    """Files -> a project -> that cart's cover -> Paint. Every X walks one step
+    back out: the Editor's Config tab, then the Files shelf, then the launcher.
+    The app return has to survive the two hops that are not apps."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    app._tap_row(0)
+    cart = ws.project.cart
+    assert ws.wm.top_kind() == "menu"
+
+    name = _cart_image(cart)
+    ws.carts.reload(cart)
+    ws.cards_layer._open_files()
+    ws.cards_layer._files_open(name)
+    assert ws.wm.top_kind() == "artwork"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "menu"          # back into the project
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "files"         # ...and on to the shelf
+    assert app.mode == files_app.PROJECTS
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "launcher"

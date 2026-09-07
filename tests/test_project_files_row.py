@@ -380,3 +380,29 @@ def test_a_project_kind_has_no_files_history_sidecar(tmp_path):
     assert moy_carts.history_commit(kind, "config.json", [{"a": 1}],
                                     root=ws.carts_root) is None
     assert not (Path(ws.carts_root).parent / "files" / ".history").exists()
+
+
+def test_leaving_paint_returns_to_the_config_tab_through_the_loader(tmp_path):
+    """The picture door keeps the loader in the loop exactly as the text door
+    does: the cover is written, the folder is re-read, and the Editor is where
+    the X lands."""
+    ws = build_ws(tmp_path)
+    cart = _project(ws, "Cover2")
+    path = Path(cart["path"])
+    (path / "images").mkdir()
+    (path / "images" / "cover.moyimg").write_text(
+        moy_carts.encode_moyimg(4, 4, bytes((12,)) * 16))
+    cart = ws.carts.reload(cart)
+    cl = _on_config(ws, cart)
+    cl._open_files()
+    cl._files_open("images/cover.moyimg")
+    assert ws.wm.top_kind() == "artwork"
+    assert ws._project_return is cart
+
+    ws.artwork.save(bytes((5,)) * 16, 4, 4)
+    ws._exit_to_caller()                       # the context-X out of Paint
+
+    assert ws.wm.top_kind() == "menu" and ws.editor_app.tab == "cards"
+    assert ws.project.cart.get("path") == cart["path"]
+    blob = (path / "images" / "cover.moyimg").read_text()
+    assert moy_carts.decode_moyimg(blob) == (4, 4, bytes((5,)) * 16)
