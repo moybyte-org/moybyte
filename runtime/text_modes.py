@@ -19,9 +19,10 @@ theirs and a broken document is caught the next time something loads it. Code
 asks the cart's runtime (`moy_carts.runtime_compile_check`); JSON asks
 `json.loads`, which every tier has.
 
-`wrap` is DECLARED here and is not yet pixels: today's text page has no
-wrapping view, so nothing reads it but the tests. The editor handle (step 3 of
-docs/text_editing_2026-09.md) is what consumes it.
+`wrap` is what the editor handle draws: PROSE wraps (`md` and plain `text`, so
+a sentence never runs off a 320px screen) and a document whose LINES mean
+something -- code, JSON -- scrolls sideways instead, because breaking a line
+there would lie about the file.
 """
 
 import json as _json
@@ -55,8 +56,15 @@ MODES = {
     MD:   Mode(MD, True, None, None),
     CODE: Mode(CODE, False, "python", "runtime"),
     JSON: Mode(JSON, False, None, "json"),
-    TEXT: Mode(TEXT, False, None, None),
+    TEXT: Mode(TEXT, True, None, None),
 }
+
+# The BADGE a listing puts beside a name -- three or four characters, so the
+# vault's one row says what the file IS. It is the mode's, except that a
+# script's RUNTIME is the useful thing to see (PY / LUA), which is the same
+# reason `lang_for` exists.
+_BADGE = {MD: "MD", CODE: "CODE", JSON: "JSON", TEXT: "TXT"}
+_EXT_BADGE = {".py": "PY", ".lua": "LUA"}
 
 
 # A file whose NAME decides, whatever its extension. A cart's manifest and
@@ -122,12 +130,19 @@ def file_name(kind, name):
     `moy_carts.FILE_KINDS`. An unknown kind contributes no extension, so a
     caller that already holds a real file name can pass `kind=None`.
 
-    A vault SCRIPT already carries its extension in its name (the store lists
-    it whole -- `moy_carts.script_ext`), so nothing is appended to it."""
-    if is_script(name):
+    A WHOLE-named vault item -- a script, a `.txt`, a `.json` -- already
+    carries its extension (`moy_carts.vault_ext`), so nothing is appended to
+    it; that is what makes `todo.txt` plain text rather than `todo.txt.md`."""
+    if is_whole_name(name):
         return str(name)
     spec = _store.FILE_KINDS.get(kind) if kind else None
     return str(name) + (spec[0] if spec else "")
+
+
+def is_whole_name(filename):
+    """True when `filename` already carries the extension it is stored under
+    -- the vault's whole-named items."""
+    return bool(_store.vault_ext(filename))
 
 
 def is_script(filename):
@@ -149,6 +164,53 @@ def mode_for_kind(kind, name=""):
     """The mode a user-files kind's items edit in -- `docs` is markdown because
     DOC_EXT says so, not because anything here spells `.md`."""
     return mode_for(file_name(kind, name))
+
+
+def badge_for_kind(kind, name=""):
+    """The short label a LISTING puts beside one item of `kind` -- MD, TXT,
+    JSON, PY, LUA. Three or four characters, because the vault shows notes,
+    plain text, data and scripts side by side and the name alone stops saying
+    which is which as soon as `.md` is the one extension a name may omit."""
+    whole = file_name(kind, name)
+    ext = ext_of(whole)
+    return _EXT_BADGE.get(ext) or _BADGE[mode_for(whole)]
+
+
+def pretty(mode_name, text):
+    """`text` laid out the way its MODE reads, or `text` unchanged.
+
+    Only JSON has a layout: a document a program wrote is one long line, which
+    on a 320px screen is unreadable and unfixable, so opening one INDENTS it
+    at 2 and the kid edits what they can see. A document that does not parse
+    opens exactly as it is -- the reason to open it is to repair it, and
+    re-flowing broken text would move the error.
+
+    Hand-rolled because MicroPython's `json.dumps` takes no `indent`, and
+    "every tier has json.loads" is the whole reason JSON is a mode."""
+    if MODES[mode_name].gate != "json":
+        return text
+    try:
+        doc = _json.loads(text)
+    except Exception:  # noqa: BLE001 -- MicroPython raises ValueError
+        return text
+    return _indent(doc, 0)
+
+
+def _indent(value, depth):
+    pad = " " * (2 * (depth + 1))
+    close = " " * (2 * depth)
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        body = [pad + _json.dumps(str(k)) + ": " + _indent(value[k], depth + 1)
+                for k in value]
+        return "{\n" + ",\n".join(body) + "\n" + close + "}"
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return "[]"
+        body = [pad + _indent(v, depth + 1) for v in value]
+        return "[\n" + ",\n".join(body) + "\n" + close + "]"
+    return _json.dumps(value)
 
 
 def is_image(filename):

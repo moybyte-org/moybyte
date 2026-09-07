@@ -343,8 +343,29 @@ class ScopedFiles:
     def duplicate(self, name):
         return self.__files.duplicate(self.kind, name)
 
-    def new_name(self):
-        return self.__files.new_name(self.kind)
+    def new_name(self, title=None):
+        """A free name for a NEW item. With no `title` the kind auto-names, so
+        making a thing is never gated on naming it; with one it is that title,
+        slugged and unique-ified by the STORE -- which is also what keeps an
+        extension a person typed (`todo.txt`, `hi.py`) and so picks the mode
+        the editor opens it in."""
+        return self.__files.new_name(self.kind, title)
+
+    def badge(self, name):
+        """The short label a LISTING puts beside `name` -- MD / TXT / JSON /
+        PY / LUA. The console-wide mode table's answer (`text_modes`), not a
+        second reading of the extension: the vault holds notes, plain text,
+        data and scripts side by side, and the skin that lists them may not
+        have its own opinion about which is which.
+
+        Imported at the CALL, like `_themes` below and for the same reason:
+        this module is a leaf on the Player's start path for every cart, and
+        the mode table reaches the store behind it."""
+        try:
+            import text_modes
+        except ImportError:  # pragma: no cover - host fallback
+            from runtime import text_modes
+        return text_modes.badge_for_kind(self.kind, name)
 
     # -- text documents ------------------------------------------------------
     #
@@ -354,13 +375,14 @@ class ScopedFiles:
     # for the kinds that are not text.
 
     def save_text(self, name, text):
-        """Write `text` as a document. `(name, err)` -- the name it was saved
-        under, so a caller that passed a fresh `new_name()` can remember it."""
+        """Write `text` as a document. `(name, err)` -- the name it was
+        actually saved under, which is the STORE's answer and not the one that
+        was passed: a title is slugged on the way in, so a caller that typed
+        one has to be told what it became."""
         blob = self.__files.encode_text(text)
         if blob is None:
             return (None, NO_STORE)
-        value, err = self.__files.save(self.kind, name, blob)
-        return (name if err is None else value, err)
+        return self.__files.save(self.kind, name, blob)
 
     def load_text(self, name):
         """Read a document back as ONE string (lines joined by newlines).

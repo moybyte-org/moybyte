@@ -56,11 +56,16 @@ def test_a_drawing_is_not_text_and_says_so():
 
 
 def test_prose_wraps_and_code_does_not():
+    """PROSE wraps -- markdown and plain text both, because a sentence that
+    runs off a 320px screen is unreadable. A document whose LINES mean
+    something scrolls sideways instead: breaking a line in code or JSON would
+    lie about the file."""
     assert text_modes.MODES[text_modes.MD].wrap is True
+    assert text_modes.MODES[text_modes.TEXT].wrap is True
     assert text_modes.MODES[text_modes.CODE].wrap is False
     assert text_modes.MODES[text_modes.JSON].wrap is False
-    assert text_modes.MODES[text_modes.TEXT].wrap is False
     assert text_modes.mode("story" + moy_carts.DOC_EXT).wrap is True
+    assert text_modes.mode("todo.txt").wrap is True
 
 
 def test_the_language_comes_from_the_runtime_for_a_cart_and_the_extension_alone():

@@ -347,8 +347,11 @@ class _RawFiles:
         return self.__ws.carts_store.rename_file(kind, name, new,
                                                 self.__ws.carts_root)
 
-    def new_name(self, kind):
-        return self.__ws.carts_store.new_file_name(kind, self.__ws.carts_root)
+    def new_name(self, kind, title=None):
+        store = self.__ws.carts_store
+        if title:
+            return store.free_file_name(kind, title, self.__ws.carts_root)
+        return store.new_file_name(kind, self.__ws.carts_root)
 
     # -- the restorable trash ------------------------------------------------
 
@@ -423,8 +426,11 @@ class Files(_StoreRole):
     def rename(self, kind, name, new):
         return self._write(self.raw.rename, kind, name, new)
 
-    def new_name(self, kind):
-        return self._read(self.raw.new_name, kind)
+    def new_name(self, kind, title=None):
+        """A free name for a NEW item. With a `title` it is that title, slugged
+        the kind's way and unique-ified (so a typed `todo.txt` stays
+        `todo.txt`); without one it is the kind's auto-name."""
+        return self._read(self.raw.new_name, kind, title)
 
     # -- the restorable trash ------------------------------------------------
 

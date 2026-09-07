@@ -1912,12 +1912,35 @@ LEGACY_DOC_EXT = ".moytext"
 # two different things that must not shadow each other.
 SCRIPT_EXTS = (".py", ".lua")
 
+# The vault holds more than notes. A `.txt`, a `.json` and a script are all
+# things a person makes ON the console (the NEW prompt in Notes takes a name
+# and honours the extension it carries), and every one of them is listed and
+# addressed under its WHOLE name -- `todo.txt`, never `todo` -- because the
+# extension is what picks the editing MODE, and because two files that differ
+# only by it must not shadow each other.
+#
+# `.md` is the ONE extension a vault name may leave off: it is what a bare
+# name MEANS. So a note stays `story`, and the list shows what each item is
+# through its badge (text_modes.badge) rather than by spelling `.md` on every
+# row.
+VAULT_EXTS = SCRIPT_EXTS + (".txt", ".json")
+
 
 def script_ext(name):
     """The script extension `name` carries, or "" -- the one place that says a
     vault item is a PROGRAM and not prose."""
+    return _ext_from(name, SCRIPT_EXTS)
+
+
+def vault_ext(name):
+    """The extension `name` keeps in the VAULT, or "" -- what says the name is
+    already whole and nothing is appended to it on disk."""
+    return _ext_from(name, VAULT_EXTS)
+
+
+def _ext_from(name, exts):
     name = str(name)
-    for ext in SCRIPT_EXTS:
+    for ext in exts:
         if name.endswith(ext) and len(name) > len(ext):
             return ext
     return ""
@@ -1925,25 +1948,31 @@ def script_ext(name):
 
 def _item_ext(kind, name):
     """The on-disk extension for one item of `kind`. The kind's own, except for
-    a vault script, which already carries its extension in its name."""
-    if kind == "docs":
-        ext = script_ext(name)
-        if ext:
-            return ""
+    a whole-named vault item, which already carries its extension."""
+    if kind == "docs" and vault_ext(name):
+        return ""
     return _kind_spec(kind)[0]
 
 
 def _whole_exts(kind):
-    """Extensions `kind` lists under their whole name -- the vault's scripts."""
-    return SCRIPT_EXTS if kind == "docs" else ()
+    """Extensions `kind` lists under their whole name -- the vault's."""
+    return VAULT_EXTS if kind == "docs" else ()
+
+
+def _split_item(kind, name):
+    """`(stem, ext)` for a whole-named vault item, `(name, "")` otherwise --
+    where a uniquifying counter goes, so a collision yields `todo_2.txt` and
+    not `todo.txt_2` (which would be stored as `todo.txt_2.md`)."""
+    ext = vault_ext(name) if kind == "docs" else ""
+    return (str(name)[:-len(ext)], ext) if ext else (str(name), "")
 
 
 def _slug_item(kind, name):
-    """`slug` for a file item, keeping a vault script's extension (slug drops
-    the dot, so slugging the whole name would turn `hello.py` into `hellopy`
-    and lose the runtime with it)."""
-    ext = script_ext(name) if kind == "docs" else ""
-    return (slug(str(name)[:-len(ext)]) + ext) if ext else slug(name)
+    """`slug` for a file item, keeping a whole-named vault item's extension
+    (slug drops the dot, so slugging the whole name would turn `hello.py` into
+    `hellopy` and lose the runtime with it)."""
+    stem, ext = _split_item(kind, name)
+    return (slug(stem) + ext) if ext else slug(name)
 
 # kind -> (extension, folder_valued, auto-name base). A folder-valued kind
 # (#70 recordings) holds one DIRECTORY per item (the macOS-bundle model); file
@@ -2209,10 +2238,11 @@ def _unique_name(kind, name, root, path=None):
     path = path or file_path
     if not _exists(path(kind, name, root)):
         return name
+    stem, ext = _split_item(kind, name)
     i = 2
-    while _exists(path(kind, name + "_" + str(i), root)):
+    while _exists(path(kind, stem + "_" + str(i) + ext, root)):
         i += 1
-    return name + "_" + str(i)
+    return stem + "_" + str(i) + ext
 
 
 def new_file_name(kind, root=CARTS_DIR, base=None):
@@ -2224,6 +2254,19 @@ def new_file_name(kind, root=CARTS_DIR, base=None):
     while _exists(file_path(kind, base + "_" + str(i), root)):
         i += 1
     return base + "_" + str(i)
+
+
+def free_file_name(kind, title, root=CARTS_DIR):
+    """The name a TYPED title lands on: slugged the kind's way (a vault
+    extension survives), then unique-ified -- so NEW never silently overwrites
+    a file that is already there, and a name a person can no longer read is
+    auto-named instead."""
+    for ch in str(title):
+        if ch.isalpha() or ch.isdigit():
+            break
+    else:
+        return new_file_name(kind, root)
+    return _unique_name(kind, _slug_item(kind, title), root)
 
 
 def save_file(kind, name, text, root=CARTS_DIR):
@@ -2553,7 +2596,11 @@ def trash_list(root=CARTS_DIR):
     out = []
     for kind in FILE_KINDS:
         ext, folder_valued, _base = FILE_KINDS[kind]
-        for n, m in _kind_entries(_trash_dir(kind, root), ext, folder_valued):
+        # `_whole_exts` here too, or a trashed `todo.txt` (or a script) is
+        # invisible in the trash and can never be restored: the listing is what
+        # `restore_file` is offered from.
+        for n, m in _kind_entries(_trash_dir(kind, root), ext, folder_valued,
+                                  _whole_exts(kind)):
             out.append((kind, n, m))
     out.sort(key=lambda e: (-e[2], e[0], e[1]))
     return [(k, n) for k, n, _m in out]

@@ -545,3 +545,73 @@ def test_an_unpruned_sidecar_still_reads_the_right_window(tmp_path):
     assert moy_carts.ops_since_keyframe(recs) == [["new", 2]]
     on_disk = moy_carts.load_history("docs", "story", root)
     assert moy_carts.ops_since_keyframe(on_disk) == [["new", 2]]
+
+
+# ---------------------------------------------------------------------------
+# the VAULT holds more than notes (docs/text_editing_2026-09.md)
+# ---------------------------------------------------------------------------
+
+def test_the_vault_lists_every_file_it_holds_under_its_whole_name(tmp_path):
+    """`.md` is the one extension a vault name may leave off -- it is what a
+    bare name MEANS. Everything else keeps it, because the extension is what
+    picks the editing mode and what stops two files shadowing each other."""
+    root = _root(tmp_path)
+    for name in ("story", "todo.txt", "data.json", "hi.py", "hi.lua"):
+        moy_carts.save_file("docs", name, "x", root)
+    assert set(moy_carts.list_files("docs", root)) == {
+        "story", "todo.txt", "data.json", "hi.py", "hi.lua"}
+    assert moy_carts.count_files("docs", root) == 5
+    # ...and each is on the card under exactly that name.
+    assert moy_carts.file_path("docs", "story", root).endswith("story.md")
+    for name in ("todo.txt", "data.json", "hi.py"):
+        assert moy_carts.file_path("docs", name, root).endswith("/" + name)
+
+
+def test_a_typed_title_keeps_its_extension_through_the_slug(tmp_path):
+    root = _root(tmp_path)
+    assert moy_carts.save_file("docs", "My Notes!.txt", "x", root) == \
+        "my_notes.txt"
+    assert moy_carts.load_file("docs", "my_notes.txt", root) == "x"
+
+
+def test_a_free_name_is_the_title_when_it_is_free_and_numbered_when_not(tmp_path):
+    root = _root(tmp_path)
+    assert moy_carts.free_file_name("docs", "todo.txt", root) == "todo.txt"
+    moy_carts.save_file("docs", "todo.txt", "x", root)
+    # The counter goes BEFORE the extension: `todo.txt_2` would be stored as
+    # `todo.txt_2.md` and stop being a text file at all.
+    assert moy_carts.free_file_name("docs", "todo.txt", root) == "todo_2.txt"
+    assert moy_carts.free_file_name("docs", "story", root) == "story"
+    # A title with nothing readable in it auto-names rather than becoming
+    # `slug`'s "cart" fallback.
+    assert moy_carts.free_file_name("docs", "  ", root) == "doc_1"
+
+
+def test_rename_and_duplicate_keep_a_vault_extension(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "todo.txt", "x", root)
+    assert moy_carts.rename_file("docs", "todo.txt", "shopping.txt", root) == \
+        "shopping.txt"
+    assert moy_carts.load_file("docs", "shopping.txt", root) == "x"
+    assert moy_carts.duplicate_file("docs", "shopping.txt", root) == \
+        "shopping_2.txt"
+
+
+def test_a_note_and_a_file_named_after_it_do_not_shadow_each_other(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "todo", "the note", root)
+    moy_carts.save_file("docs", "todo.txt", "the text file", root)
+    assert moy_carts.load_file("docs", "todo", root) == "the note"
+    assert moy_carts.load_file("docs", "todo.txt", root) == "the text file"
+    assert set(moy_carts.list_files("docs", root)) == {"todo", "todo.txt"}
+
+
+def test_a_vault_file_goes_to_the_trash_and_comes_back_whole(tmp_path):
+    root = _root(tmp_path)
+    moy_carts.save_file("docs", "data.json", "{}", root)
+    assert moy_carts.delete_file("docs", "data.json", root) == "data.json"
+    assert moy_carts.list_files("docs", root) == []
+    assert ("docs", "data.json") in [
+        (k, n) for k, n, *_ in moy_carts.trash_list(root)]
+    moy_carts.restore_file("docs", "data.json", root)
+    assert moy_carts.load_file("docs", "data.json", root) == "{}"
