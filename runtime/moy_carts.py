@@ -1858,6 +1858,47 @@ TRASH_KEEP = 50          # prune the trash's oldest entries beyond this many
 DOC_EXT = ".md"
 LEGACY_DOC_EXT = ".moytext"
 
+# SCRIPTS live in the vault beside the notes (docs/text_editing_2026-09.md): a
+# bare `.py` or `.lua` file is a cart with no folder, and RUN wraps it on the
+# fly. They are the ONE kind of vault item listed under its WHOLE name --
+# `hello.py`, not `hello` -- because the extension is what says which runtime
+# runs it, and because a note called `hello` and a script called `hello.py` are
+# two different things that must not shadow each other.
+SCRIPT_EXTS = (".py", ".lua")
+
+
+def script_ext(name):
+    """The script extension `name` carries, or "" -- the one place that says a
+    vault item is a PROGRAM and not prose."""
+    name = str(name)
+    for ext in SCRIPT_EXTS:
+        if name.endswith(ext) and len(name) > len(ext):
+            return ext
+    return ""
+
+
+def _item_ext(kind, name):
+    """The on-disk extension for one item of `kind`. The kind's own, except for
+    a vault script, which already carries its extension in its name."""
+    if kind == "docs":
+        ext = script_ext(name)
+        if ext:
+            return ""
+    return _kind_spec(kind)[0]
+
+
+def _whole_exts(kind):
+    """Extensions `kind` lists under their whole name -- the vault's scripts."""
+    return SCRIPT_EXTS if kind == "docs" else ()
+
+
+def _slug_item(kind, name):
+    """`slug` for a file item, keeping a vault script's extension (slug drops
+    the dot, so slugging the whole name would turn `hello.py` into `hellopy`
+    and lose the runtime with it)."""
+    ext = script_ext(name) if kind == "docs" else ""
+    return (slug(str(name)[:-len(ext)]) + ext) if ext else slug(name)
+
 # kind -> (extension, folder_valued, auto-name base). A folder-valued kind
 # (#70 recordings) holds one DIRECTORY per item (the macOS-bundle model); file
 # kinds hold one flat file per item. Every store verb below validates against
@@ -1889,8 +1930,7 @@ def file_kind_dir(kind, root=CARTS_DIR):
 
 
 def file_path(kind, name, root=CARTS_DIR):
-    ext = _kind_spec(kind)[0]
-    return file_kind_dir(kind, root) + "/" + name + ext
+    return file_kind_dir(kind, root) + "/" + name + _item_ext(kind, name)
 
 
 def _ensure_kind_dir(kind, root):
@@ -1908,11 +1948,14 @@ def _mtime(path):
         return 0
 
 
-def _kind_entries(d, ext, folder_valued):
+def _kind_entries(d, ext, folder_valued, whole=()):
     """[(name, mtime)] of the kind's items in `d`, newest first (mtime is
     best-effort -- 0 on filesystems without one, leaving alphabetical order).
     Skips the atomic-write machinery's .tmp/.bak orphans by construction: a
-    file item must end with the kind's extension exactly."""
+    file item must end with the kind's extension exactly.
+
+    `whole` names extra extensions the kind holds whose items keep their WHOLE
+    name -- the vault's scripts, and nothing else so far."""
     try:
         names = os.listdir(d)
     except OSError:
@@ -1923,10 +1966,19 @@ def _kind_entries(d, ext, folder_valued):
         if folder_valued:
             if _is_dir(p):
                 out.append((n, _mtime(p)))
+        elif _ends_any(n, whole) and not _is_dir(p):
+            out.append((n, _mtime(p)))
         elif n.endswith(ext) and len(n) > len(ext) and not _is_dir(p):
             out.append((n[:-len(ext)] if ext else n, _mtime(p)))
     out.sort(key=lambda e: (-e[1], e[0]))
     return out
+
+
+def _ends_any(name, exts):
+    for ext in exts:
+        if name.endswith(ext) and len(name) > len(ext):
+            return True
+    return False
 
 
 def list_files(kind, root=CARTS_DIR):
@@ -1936,7 +1988,7 @@ def list_files(kind, root=CARTS_DIR):
     if kind == "docs":
         _absorb_dir(d)     # a stray wrapper is listed as the note it is; the
                            # trash is the one-shot pass's, never a listing's
-    entries = _kind_entries(d, ext, folder_valued)
+    entries = _kind_entries(d, ext, folder_valued, _whole_exts(kind))
     return [n for n, _m in entries]
 
 
@@ -1951,7 +2003,10 @@ def count_files(kind, root=CARTS_DIR):
         return 0
     if folder_valued:
         return sum(1 for n in names if _is_dir(d + "/" + n))
-    return sum(1 for n in names if n.endswith(ext) and len(n) > len(ext))
+    whole = _whole_exts(kind)
+    return sum(1 for n in names
+               if _ends_any(n, whole)
+               or (n.endswith(ext) and len(n) > len(ext)))
 
 
 def load_file(kind, name, root=CARTS_DIR):
@@ -2000,7 +2055,7 @@ def save_file(kind, name, text, root=CARTS_DIR):
     their own tools, never through this). Returns the (slugged) stored name."""
     if _kind_spec(kind)[1]:
         raise ValueError(kind + " items are folders; write them in place")
-    name = slug(name)
+    name = _slug_item(kind, name)
     _ensure_kind_dir(kind, root)
     _write_atomic(file_path(kind, name, root), text)
     return name
@@ -2239,7 +2294,7 @@ def rename_file(kind, name, new_title, root=CARTS_DIR):
             break
     else:
         return name
-    new = slug(new_title)
+    new = _slug_item(kind, new_title)
     if new == name:
         return name
     new = _unique_name(kind, new, root)
@@ -2282,7 +2337,7 @@ def _trash_dir(kind, root):
 
 
 def _trash_path(kind, name, root):
-    return _trash_dir(kind, root) + "/" + name + _kind_spec(kind)[0]
+    return _trash_dir(kind, root) + "/" + name + _item_ext(kind, name)
 
 
 def delete_file(kind, name, root=CARTS_DIR):

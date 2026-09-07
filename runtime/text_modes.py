@@ -120,9 +120,29 @@ def mode(filename):
 def file_name(kind, name):
     """A user-files item's on-disk file name: the kind's own extension from
     `moy_carts.FILE_KINDS`. An unknown kind contributes no extension, so a
-    caller that already holds a real file name can pass `kind=None`."""
+    caller that already holds a real file name can pass `kind=None`.
+
+    A vault SCRIPT already carries its extension in its name (the store lists
+    it whole -- `moy_carts.script_ext`), so nothing is appended to it."""
+    if is_script(name):
+        return str(name)
     spec = _store.FILE_KINDS.get(kind) if kind else None
     return str(name) + (spec[0] if spec else "")
+
+
+def is_script(filename):
+    """True when `filename` is a SCRIPT -- a bare `.py`/`.lua` file, which is a
+    cart with no folder (docs/text_editing_2026-09.md). The store owns the
+    extension set, the way `is_image` asks it for the drawings kind's."""
+    return bool(_store.script_ext(filename))
+
+
+def script_runtime(filename):
+    """The cart `runtime` a script file declares by its extension -- what the
+    synthesized manifest carries, so `.lua` runs on moycore and `.py` on the
+    Python tier. "" when `filename` is not a script."""
+    ext = _store.script_ext(filename)
+    return {".lua": "lua", ".py": "python"}.get(ext, "")
 
 
 def mode_for_kind(kind, name=""):

@@ -112,6 +112,17 @@ class MoycoreHostRun:
             if err:
                 self._run.close()
                 raise RuntimeError(err)
+            # A namespace may carry ONE more prelude of its own -- today the
+            # text console's, which binds `print`/`input` over the registered
+            # `__moy_say`/`__moy_ask` because libmoy owns the NAME `print` (it
+            # is the draw verb) and lua_ext denies registering over it. A plain
+            # string in the namespace, so the registration loop above skips it.
+            extra = ns.get("_moy_prelude")
+            if extra:
+                err = self._run.exec(extra, "prelude")
+                if err:
+                    self._run.close()
+                    raise RuntimeError(err)
         err = self._run.load(src, "@cart")
         if err:
             self._run.close()

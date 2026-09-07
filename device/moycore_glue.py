@@ -225,6 +225,14 @@ class MoycoreRun:
             err = _moycore.exec(PRELUDE_HANDLES, "prelude")
             if err:
                 raise RuntimeError(err)
+            # The namespace's OWN prelude, if it brought one (the text console's
+            # `print`/`input` binding -- see runtime/lua_host.py's twin of this).
+            # A string, so the registration loop above skipped it.
+            extra = ns.get("_moy_prelude")
+            if extra:
+                err = _moycore.exec(extra, "prelude")
+                if err:
+                    raise RuntimeError(err)
         except Exception:  # noqa: BLE001 -- a bad verb must not strand the VM
             _moycore.close()
             raise
