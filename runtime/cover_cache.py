@@ -389,6 +389,25 @@ class CoverCache:
             return None
         self._built = True
         t0 = _ticks_ms()
+        try:
+            return self._build(path, key, w, h, t0)
+        except (MemoryError, ValueError, OSError) as exc:
+            # The build's own allocations -- the ~77KB decode scratch and the
+            # card-sized crop -- are outside _CoverJob.step's fence, and they are
+            # the ones a fragmented S3 heap refuses (#66). Same answer as an
+            # unreadable blob: no cover for this cart this session, placeholder
+            # drawn, loop alive. `_finish` still runs so the (path, w, h) key
+            # caches the miss rather than retrying it every frame.
+            print("Moybyte cover build failed:", path, exc)
+            self._none[path] = True
+            self._spend(t0)
+            self._jobs.pop(key, None)
+            return self._finish(key, None)
+
+    def _build(self, path, key, w, h, t0):
+        """One step of a cover build, from `cover_for`'s budget gate. Split out
+        so the fence above wraps the whole of it, allocations included."""
+        ws = self.ws
         jobs = self._jobs
         job = jobs.get(key)
         if job is None:
@@ -759,14 +778,28 @@ class CoverCache:
         # from the launcher's draw and the idle prefetch, i.e. around a repaint,
         # where the T-Deck has a flush in flight over the SPI host its card
         # shares -- an sdspi transaction there is the documented hang.
-        blob = ws._with_sd(
-            lambda: loader(path, cover_name)) if loader is not None else None
-        runs = None
-        sig = None
-        if blob:
-            parse = getattr(store, "moyimg_runs", None)
-            runs = parse(blob) if parse is not None else None
-            sig = sig_fn(blob) if sig_fn is not None else None
+        #
+        # AND IT CANNOT RAISE. Reading a cover is flash I/O plus a decode, so it
+        # can fail for reasons that are nothing to do with this cart -- a card
+        # pulled, a heap with no room left -- and it runs from the idle
+        # prefetch, where a MemoryError escaping took both S3 boards to the REPL
+        # a few minutes after a flash (2026-09-07). A cover that cannot be read
+        # is treated as one that is not there, for this session: the card draws
+        # its sprite/glyph fallback, `_none` stops it being re-probed every idle
+        # frame, and a store re-scan clears that and tries again.
+        try:
+            blob = ws._with_sd(
+                lambda: loader(path, cover_name)) if loader is not None else None
+            runs = None
+            sig = None
+            if blob:
+                parse = getattr(store, "moyimg_runs", None)
+                runs = parse(blob) if parse is not None else None
+                sig = sig_fn(blob) if sig_fn is not None else None
+        except (MemoryError, ValueError, OSError) as exc:
+            print("Moybyte cover unreadable:", path, exc)
+            self._none[path] = True
+            return None, None
         if runs is None:
             self._none[path] = True
             return None, None
