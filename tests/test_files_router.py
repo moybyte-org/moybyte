@@ -508,3 +508,13 @@ def test_the_deep_chain_still_finds_its_way_back_to_files(tmp_path):
     assert app.mode == files_app.PROJECTS
     _tap_x(ws)
     assert ws.wm.top_kind() == "launcher"
+
+
+def test_b_leaves_a_row_list_instead_of_being_swallowed(tmp_path):
+    """A row list that eats B is a room with no door on a keyboard board: the
+    `<` chip was the only way back to the shelf."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    _key(ws, app, "b")
+    assert app.mode == "kinds"

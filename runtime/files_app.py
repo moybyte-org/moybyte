@@ -457,7 +457,11 @@ class FilesAppLayer(ListShellApp):
             self._typed_rename(inp)
             return True
         if self.mode in ("trash", "game", "used", PROJECTS):
-            if self._rows:
+            # B leads, because a row list that swallows it is a room with no
+            # door on a keyboard board -- the `<` chip was the only way out.
+            if inp.pressed("b"):
+                self._back()
+            elif self._rows:
                 return self._list_nav(inp, len(self._rows))
             return True
         if self.mode == "grid":
