@@ -921,8 +921,17 @@ def _project_title(path):
     return name[:-4] if name.endswith(".moy") else (name or "cart")
 
 
-def load(path):
+def load(path, src=True):
     """Load one .moy folder into a cart dict, or None on error.
+
+    `src=False` reads everything BUT the source -- what a shelf scan wants.
+    The source is the one allocation that fails on a fragmented heap while the
+    memory to serve it exists (tens of KB as one string), and a scan never
+    uses it: the manager slims every scanned cart straight away and the
+    source is read back at open (rehydrate). A mid-session rescan that read
+    it dropped every big cart from the shelf until the next boot (the Guition
+    S3, 2026-09-08: ten of forty-four carts "unreadable" at 79KB apiece). The
+    file must still EXIST, or the cart is as broken as it ever was.
 
     A corrupt cart (bad manifest.json, missing main.py, or anything else
     unexpected) returns None instead of throwing, so one broken folder can never
@@ -973,13 +982,19 @@ def load(path):
                 if _exists(path + "/" + alt):
                     mainf = alt
                     break
-        try:
-            src = _read_main(path, mainf)
-        except OSError as exc:
-            if not broken:
-                print("Moybyte cart main missing:", path, exc)
-                return None
-            src = ""            # a broken cart still opens; it just cannot run
+        if src:
+            try:
+                src = _read_main(path, mainf)
+            except OSError as exc:
+                if not broken:
+                    print("Moybyte cart main missing:", path, exc)
+                    return None
+                src = ""        # a broken cart still opens; it just cannot run
+        elif not broken and not _exists(path + "/" + mainf):
+            print("Moybyte cart main missing:", path)
+            return None
+        else:
+            src = None          # not read: the cart carries no "src" key
         cfg = dict(man.get("config", {}))
         try:
             cfg.update(json.loads(_read(path + "/config.json")))
@@ -1094,13 +1109,15 @@ def load(path):
             # Set ONLY on a cart whose manifest would not parse, so every reader
             # is a `.get` and a repaired cart simply stops carrying the key.
             cart["broken"] = broken
+        if src is None:
+            del cart["src"]     # absent, never "": the open path reads absent as slim
         return cart
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)
         return None
 
 
-def scan(root=CARTS_DIR):
+def scan(root=CARTS_DIR, src=True):
     """All carts found under root, sorted by folder name. Corrupt carts are
     skipped (load() returns None), and any per-entry surprise is swallowed so a
     single bad folder can't break the launcher.
@@ -1119,7 +1136,7 @@ def scan(root=CARTS_DIR):
     for name in names:
         if name.endswith(".moy") and _is_dir(root + "/" + name):
             try:
-                c = load(root + "/" + name)
+                c = load(root + "/" + name, src)
             except Exception as exc:  # noqa: BLE001  -- belt-and-braces over load()
                 print("Moybyte cart scan skipped:", name, exc)
                 c = None

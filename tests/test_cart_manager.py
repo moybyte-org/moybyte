@@ -459,3 +459,45 @@ def test_the_cover_prefetch_walks_the_collaborators_list(tmp_path):
     ws.covers._pf_i = 0
     ws.covers.prefetch_tick()               # an empty roster: nothing to warm
     assert ws.covers._pf_i == 0
+
+
+# -- the shelf scan reads no source (2026-09-08) ------------------------------
+
+def test_a_shelf_scan_carries_no_source_but_still_needs_the_file(tmp_path):
+    """The source is the one allocation a fragmented heap refuses mid-session,
+    and nothing on the shelf reads it: `scan(src=False)` leaves the key ABSENT
+    (the open path reads absent as slim and rehydrates), while a cart whose
+    main file is missing is skipped exactly as before."""
+    root = str(tmp_path / "carts")
+    (tmp_path / "carts").mkdir()
+    _mk(root, "Whole")
+    gone = _mk(root, "Headless")
+    (Path(gone["path"]) / gone["main"]).unlink()
+    carts = moy_carts.scan(root, src=False)
+    assert [c["title"] for c in carts] == ["Whole"]
+    assert "src" not in carts[0]
+    assert carts[0]["main"] == "main.py"
+    fat = moy_carts.scan(root)
+    assert fat[0]["src"].startswith("def _draw")
+
+
+def test_rescan_reads_no_source_and_the_open_path_rehydrates_it(tmp_path):
+    ws = build_ws(tmp_path)
+    reads = []
+    real = ws.carts_store.load
+
+    def counting_load(path, src=True):
+        reads.append(src)
+        return real(path, src)
+
+    _mk(str(ws.carts_root), "Synced")
+    ws.carts_store.load = counting_load
+    try:
+        ws.carts.rescan()
+    finally:
+        ws.carts_store.load = real
+    assert reads and not any(reads), "a rescan read a cart's source"
+    cart = next(c for c in ws.carts.all if c.get("title") == "Synced")
+    assert cart.get("lazy") is True and "src" not in cart
+    ws.carts.rehydrate(cart)
+    assert cart["src"].startswith("def _draw") and cart["lazy"] is False

@@ -112,9 +112,12 @@ class CartManager:
         if not self.store.ready():
             return
         ws = self.ws
+        # src=False on every scan here: the shelf is slimmed straight after, the
+        # source comes back at open, and reading it mid-session is the one
+        # allocation a fragmented heap refuses (see moy_carts.load).
         try:
             self.apply(self.store.call(
-                lambda: ws.carts_store.scan(ws.carts_root)))
+                lambda: ws.carts_store.scan(ws.carts_root, src=False)))
         except Exception as exc:  # noqa: BLE001 -- a failed scan keeps the old shelf
             print("Moybyte rescan failed:", exc)
         ws._dirty = True
@@ -219,7 +222,7 @@ class CartManager:
         try:
             new, items = self.store.call(lambda: (
                 ws.carts_store.new_from_template(ws.carts_root),
-                ws.carts_store.scan(ws.carts_root)))
+                ws.carts_store.scan(ws.carts_root, src=False)))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte new cart failed:", exc)
             return None
@@ -238,7 +241,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.duplicate(sel, ws.carts_root),
-                ws.carts_store.scan(ws.carts_root))[1]))
+                ws.carts_store.scan(ws.carts_root, src=False))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte duplicate failed:", exc)
 
@@ -256,7 +259,7 @@ class CartManager:
         try:
             self.apply(self.store.call(lambda: (
                 ws.carts_store.delete(target),
-                ws.carts_store.scan(ws.carts_root))[1]))
+                ws.carts_store.scan(ws.carts_root, src=False))[1]))
         except Exception as exc:  # noqa: BLE001
             print("Moybyte delete failed:", exc)
 

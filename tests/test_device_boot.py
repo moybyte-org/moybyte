@@ -121,8 +121,8 @@ class FakeStore:
     def embedded_floor(self, seed):
         return [dict(c) for c in seed]
 
-    def scan(self, root):
-        self.calls.append(("scan", root))
+    def scan(self, root, src=True):
+        self.calls.append(("scan", root, src))
         return list(self.carts)
 
 
