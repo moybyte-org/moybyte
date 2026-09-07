@@ -237,7 +237,10 @@ def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path
     _open(ws, "Notes")
     _frames(ws)
     ns = ws.player.ns
-    x, y, w, h = _hit_rect(ns, "new")
+    x, y, w, h = _hit_rect(ns, "new")          # NEW opens the name prompt...
+    _tap(ws, x + w // 2, y + h // 2)
+    _frames(ws)
+    x, y, w, h = _hit_rect(ns, "make")         # ...and MAKE takes the auto-name
     _tap(ws, x + w // 2, y + h // 2)
     _frames(ws)
     ed = ns["ed"]

@@ -69,6 +69,16 @@ def _tap(ws, rect):
     _frames(ws, 1)
 
 
+def _new(ws, ns, typed=""):
+    """NEW, through the prompt a kid actually gets: the button opens it, the
+    name is typed, MAKE commits."""
+    _tap(ws, _hit(ns, "new"))
+    assert ns["naming"] is True, "NEW asks for a name"
+    for ch in typed:
+        ns["typed"] = ns["typed"] + ch
+    _tap(ws, _hit(ns, "make"))
+
+
 def _tap_xy(ws, x, y):
     ws.pointer.place(x, y)
     ws.pointer.click = True
@@ -124,7 +134,7 @@ def test_the_shelf_lists_the_vault_newest_first(tmp_path):
 def test_new_makes_a_note_types_into_it_and_back_saves_it(tmp_path):
     ws = build_ws(tmp_path)
     ns = _open_notes(ws)
-    _tap(ws, _hit(ns, "new"))
+    _new(ws, ns)
     ed = ns["ed"]
     assert ed is not None and ed.focused()
     name = ed.name()
@@ -240,7 +250,7 @@ def test_the_request_is_taken_once_and_a_re_run_lands_on_the_shelf(tmp_path):
 def test_the_bar_x_exits_and_writes_the_open_note(tmp_path):
     ws = build_ws(tmp_path)
     ns = _open_notes(ws)
-    _tap(ws, _hit(ns, "new"))
+    _new(ws, ns)
     name = ns["ed"].name()
     for ch in "not lost":
         ns["ed"].key(ord(ch))
@@ -252,3 +262,210 @@ def test_the_bar_x_exits_and_writes_the_open_note(tmp_path):
     assert ws.wm.top_kind() == "launcher"
     assert moy_carts.load_file("docs", name, ws.carts_root) == "not lost"
     assert ws.input.text_mode is False
+
+
+# ---------------------------------------------------------------------------
+# the T-Deck: the shelf and the note under the BOARDS' input state
+#
+# `_device_ws` puts `device/moybyte/input.py` under the console -- the class the
+# boards actually run, where a keyboard SOURCE writes `last_key` and the merge
+# is what the shell reads. It is the lane the owner's findings came from, so the
+# key paths are asserted through it and not through the host's.
+# ---------------------------------------------------------------------------
+
+def _device_ws(tmp_path):
+    from device.moybyte.input import InputState as DeviceInputState
+
+    ws = build_ws(tmp_path)
+    inp = DeviceInputState()
+    inp.cart_start_ms = 0
+    inp.pointer = ws.pointer    # what `touch()` reads (wire_workstation_core's)
+    ws.input = inp              # before the cart starts: make_api binds it once
+    return ws, inp.source("kbd")
+
+
+def _dframe(ws, n=1):
+    for _ in range(n):
+        ws.input.begin_frame()
+        ws.handle_input()
+        ws.handle_pointer()
+        ws.frame(DT)
+
+
+def _dtap(ws, rect):
+    """A tap in the DEVICE lane. `_tap` above cannot serve it: the boards'
+    InputState carries `game_pointer`, the published game-space tuple a cart's
+    `touch()` prefers, and only `handle_pointer` refreshes it -- so a tap here
+    has to go through the frame the board actually runs."""
+    x, y, w, h = rect
+    ws.pointer.place(x + w // 2, y + h // 2)
+    ws.pointer.click = True
+    _dframe(ws)
+    ws.pointer.click = False
+    _dframe(ws)
+
+
+def _press(ws, src, name):
+    src.set_button(name, True)
+    _dframe(ws)
+    src.set_button(name, False)
+    _dframe(ws)
+
+
+def _type(ws, src, code):
+    src.last_key = code
+    _dframe(ws)
+    src.last_key = 0            # the 0 gap IS the press edge keyp() reads
+    _dframe(ws)
+
+
+def test_new_is_visible_on_the_shelf_and_a_key_reaches_it(tmp_path):
+    """Finding 1. NEW is drawn (so a finger can reach it) AND it is the shelf
+    cursor's first stop, so ENTER -- the launcher's own activate key -- opens
+    it on a board being driven from the keyboard."""
+    ws, src = _device_ws(tmp_path)
+    moy_carts.save_file("docs", "one", "x", ws.carts_root)
+    ns = _open_notes(ws)
+    _dframe(ws, 2)
+    assert _hit(ns, "new"), "NEW draws a tap rect"
+    assert ns["sel"] == 0, "...and the cursor starts on it"
+    _press(ws, src, "run")                      # ENTER
+    assert ns["naming"] is True
+
+
+def test_the_shelf_cursor_walks_the_vault_and_a_key_opens_a_note(tmp_path):
+    ws, src = _device_ws(tmp_path)
+    moy_carts.save_file("docs", "first", "hello", ws.carts_root)
+    ns = _open_notes(ws)
+    _dframe(ws, 2)
+    _press(ws, src, "down")
+    assert ns["sel"] == 1
+    _press(ws, src, "a")                        # L / SPACE, the other one
+    assert ns["ed"] is not None and ns["ed"].name() == "first"
+
+
+def test_a_name_is_typed_on_the_board_keyboard_and_its_extension_sticks(tmp_path):
+    """The prompt is the ONE place this cart types, so it asks for the text
+    keyboard itself (`textmode`) and reads clean bytes off `keyp()` -- and the
+    key that OPENED it must not land in the field."""
+    ws, src = _device_ws(tmp_path)
+    ns = _open_notes(ws)
+    _dframe(ws, 2)
+    _press(ws, src, "run")
+    assert ws.input.text_mode is True
+    for ch in "todo.txt":
+        _type(ws, src, ord(ch))
+    assert ns["typed"] == "todo.txt"
+    _type(ws, src, 0x0D)                        # ENTER commits
+    assert ns["naming"] is False
+    assert (ns["ed"].name(), ns["ed"].mode()) == ("todo.txt", "text")
+
+
+def test_new_keeps_the_extension_a_name_carries_and_the_shelf_lists_it(tmp_path):
+    """Finding 3. Nothing on the console made a `.txt` or a `.json` before
+    this: NEW auto-named, and the vault listed only `.md` and scripts."""
+    ws = build_ws(tmp_path)
+    ns = _open_notes(ws)
+    for name, mode in (("todo.txt", "text"), ("data.json", "json"),
+                       ("hi.py", "code"), ("plain", "md")):
+        _new(ws, ns, name)
+        ed = ns["ed"]
+        assert (ed.name(), ed.mode()) == (name, mode), name
+        ed.key(ord("x"))                        # something to save
+        _tap(ws, _hit(ns, "back"))
+    assert set(ns["names"]) == {"todo.txt", "data.json", "hi.py", "plain"}
+    for name in ("todo.txt", "data.json", "hi.py"):
+        assert moy_carts.file_path("docs", name, ws.carts_root).endswith(name)
+
+
+def test_the_shelf_badges_what_each_file_is(tmp_path):
+    ws = build_ws(tmp_path)
+    for name, body in (("story", "prose"), ("todo.txt", "flat"),
+                       ("data.json", "{}"), ("hi.py", "print(1)"),
+                       ("hi.lua", "print(1)")):
+        moy_carts.save_file("docs", name, body, ws.carts_root)
+    ns = _open_notes(ws)
+    assert set(ns["names"]) == {"story", "todo.txt", "data.json",
+                                "hi.py", "hi.lua"}
+    badge = ns["files"].badge
+    assert [badge(n) for n in ("story", "todo.txt", "data.json", "hi.py",
+                               "hi.lua")] == ["MD", "TXT", "JSON", "PY", "LUA"]
+
+
+def test_the_note_toolbar_selects_copies_pastes_and_undoes(tmp_path):
+    """Finding 2. The handle always had the verbs and the skin exposed none of
+    them. Everything here goes through the drawn buttons -- the only path a
+    T-Deck has, because that keyboard cannot make a Ctrl chord."""
+    ws, _src = _device_ws(tmp_path)
+    moy_carts.save_file("docs", "clip", "abcdef", ws.carts_root)
+    ns = _open_notes(ws)
+    _dframe(ws, 2)
+    _dtap(ws, _hit(ns, "open", 0))
+    ed = ns["ed"]
+    _dtap(ws, _hit(ns, "sel"))
+    assert ed.selecting() is True, "SEL turns the selection mode on"
+    ed.nav(3, 0)                        # a roll of the ball EXTENDS it
+    _dframe(ws)
+    assert ed.has_selection()
+    _dtap(ws, _hit(ns, "copy"))
+    ed.select_mode(False)
+    ed.nav(3, 0)                        # ...to the end of the line
+    _dtap(ws, _hit(ns, "paste"))
+    assert ed.text() == "abcdefabc"
+    _dtap(ws, _hit(ns, "undo"))
+    assert ed.text() == "abcdef"
+    _dtap(ws, _hit(ns, "redo"))
+    assert ed.text() == "abcdefabc"
+
+
+def test_cut_takes_the_selection_out_and_a_dead_button_is_not_tappable(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "cutme", "keepdrop", ws.carts_root)
+    ns = _open_notes(ws)
+    _tap(ws, _hit(ns, "open", 0))
+    ed = ns["ed"]
+    # Nothing selected: CUT and COPY draw DISABLED and register no tap rect, so
+    # a kid cannot press a button that would do nothing.
+    assert ns["_tool_off"]("cut") and ns["_tool_off"]("copy")
+    assert not any(v == "cut" for _r, v, _a in ns["hits"]._items)
+    ed.select_mode(True)
+    ed.nav(4, 0)
+    _frames(ws)
+    _tap(ws, _hit(ns, "cut"))
+    assert ed.text() == "drop"
+
+
+def test_the_trackball_reaches_the_caret_of_the_focused_note(tmp_path):
+    """Findings 4 and 5, the input half. On the T-Deck the ball IS the arrow
+    keys, so the shell routes it to a cart's focused handle exactly as it does
+    to the Editor's Code tab -- `ws.nav` is the one place that decides, and it
+    says whether it spent the roll."""
+    ws, _src = _device_ws(tmp_path)
+    moy_carts.save_file("docs", "roll", "one\ntwo\nthree", ws.carts_root)
+    ns = _open_notes(ws)
+    _dframe(ws, 2)
+    _dtap(ws, _hit(ns, "open", 0))
+    ed = ns["ed"]
+    assert ws.focused_cart_editor() is ed
+    assert ws.nav(0, 2) is True, "the roll is CONSUMED by the note"
+    assert ed.caret()[0] == 2
+    # ...and with no note open it is the cursor's again, so the shelf can still
+    # be pointed at.
+    _dtap(ws, _hit(ns, "back"))
+    assert ws.nav(0, 1) is False
+
+
+def test_the_name_prompt_is_modal_over_the_shelf(tmp_path):
+    """A finger landing beside the box must not open a note out from under the
+    prompt: while it is up the shelf's own tap rects are not registered."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "behind", "x", ws.carts_root)
+    ns = _open_notes(ws)
+    row = _hit(ns, "open", 0)
+    _tap(ws, _hit(ns, "new"))
+    assert [v for _r, v, _a in ns["hits"]._items] == ["make", "cancel"]
+    _tap(ws, row)                       # the note behind the box
+    assert ns["ed"] is None and ns["naming"] is True
+    _tap(ws, _hit(ns, "cancel"))
+    assert ns["naming"] is False and ns["ed"] is None
+    assert ws.input.text_mode is False, "the prompt hands the keyboard back"
