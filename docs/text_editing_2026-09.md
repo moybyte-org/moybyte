@@ -41,8 +41,9 @@ on the next open), plain text.
 
 ## Scripts
 
-A script is a cart with no folder: a bare `.py` or `.lua` in the vault or a
-`scripts/` root. RUN (from Files, later `run name.py` at the terminal prompt) wraps
+A script is a cart with no folder: a bare `.py` or `.lua` in the vault, listed
+under its whole name so a note and a script never shadow each other (a
+separate `scripts/` root waits for the terminal's `run`, #115). RUN (from Files, later `run name.py` at the terminal prompt) wraps
 it on the fly — a synthesized manifest of `type: "script"`, the same portable
 subset every cart gets, a TEXT CONSOLE as its surface (`print` to scrollback,
 `input` on the prompt's line editor). Default grants are `files`, `prefs` and the
