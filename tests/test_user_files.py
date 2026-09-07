@@ -350,15 +350,17 @@ def test_a_trashed_wrapper_migrates_with_the_live_ones(tmp_path):
 
 def test_sweep_store_runs_its_one_shot_passes(tmp_path):
     """The store-opening door: retire, migrate the legacy notebook, rewrite the
-    doc format. `migrate_docs` runs HERE since the notebook app was deleted --
-    it builds the vault a note is picked from, so nothing can list it first."""
+    doc format, rewrite the pictures. `migrate_docs` runs HERE since the notebook
+    app was deleted -- it builds the vault a note is picked from, so nothing can
+    list it first."""
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     _wrapper(root, "one")
-    assert moy_carts.sweep_store(root) == (0, None, 1)
+    assert moy_carts.sweep_store(root) == (0, None, 1, 0)
     assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
     assert moy_carts.load_docs_version(root) == moy_carts.DOCS_GEN
-    assert moy_carts.sweep_store(root) == (0, None, 0)
+    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+    assert moy_carts.sweep_store(root) == (0, None, 0, 0)
 
 
 def test_sweep_store_migrates_a_legacy_notebook(tmp_path):
@@ -367,7 +369,7 @@ def test_sweep_store_migrates_a_legacy_notebook(tmp_path):
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     moy_carts.save_notes('{"notes": [{"body": "my first note"}]}', root)
-    _retired, made, _fmt = moy_carts.sweep_store(root)
+    _retired, made, _fmt, _pics = moy_carts.sweep_store(root)
     assert made and moy_carts.load_file("docs", made[0], root) == "my first note"
 
 
@@ -615,3 +617,167 @@ def test_a_vault_file_goes_to_the_trash_and_comes_back_whole(tmp_path):
         (k, n) for k, n, *_ in moy_carts.trash_list(root)]
     moy_carts.restore_file("docs", "data.json", root)
     assert moy_carts.load_file("docs", "data.json", root) == "{}"
+
+
+# -- pictures became one format (2026-09-07) ---------------------------------
+#
+# `migrate_images` is the third one-shot pass behind `sweep_store`, and the only
+# one that rewrites a KID'S OWN files rather than the shell's -- so it is checked
+# for pixel identity, for crash safety, and for being a no-op the second time.
+# The retired codec's WRITER is built here on purpose: nothing in the tree writes
+# one any more, which is the point of the change.
+
+def _pic_store(tmp_path):
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    return root
+
+
+def _pic(w, h):
+    """A picture with every palette index, a long run and a noisy tail."""
+    raw = bytearray(bytes((7,)) * min(700, w * h))
+    raw.extend(bytes(range(64)))
+    raw.extend(bytes(((i * 37) & 63) for i in range(w * h)))
+    return bytes(raw[:w * h])
+
+
+def _rle_blob(w, h, indices, **extra):
+    """What Paint wrote before 2026-09-07 -- built here because nothing in the
+    tree writes it any more, which is the point."""
+    packed = bytearray()
+    pos = 0
+    while pos < len(indices):
+        value = indices[pos] & 63
+        count = 1
+        while (pos + count < len(indices) and count < 255
+               and (indices[pos + count] & 63) == value):
+            count += 1
+        packed.append(count)
+        packed.append(value)
+        pos += count
+    meta = {"format": "moyimg-v1", "w": w, "h": h, "codec": "rle",
+            "data": moy_carts._b64_encode(packed)}
+    meta.update(extra)
+    return json.dumps(meta)
+
+
+def _restored(root):
+    """The binned drawing, read back the way a kid gets it: out of the trash."""
+    moy_carts.restore_file("drawings", "binned", root)
+    return moy_carts.load_file("drawings", "binned", root)
+
+
+def test_the_sweep_rewrites_a_kids_drawing_pixel_for_pixel(tmp_path):
+    root = _pic_store(tmp_path)
+    art = _pic(64, 48)
+    moy_carts.save_file("drawings", "sunset", _rle_blob(64, 48, art), root)
+    assert moy_carts.migrate_images(root) == 1
+    blob = moy_carts.load_file("drawings", "sunset", root)
+    assert "codec" not in json.loads(blob)
+    assert moy_carts.decode_moyimg(blob) == (64, 48, art)
+
+
+def test_the_sweep_reaches_carts_the_trash_and_the_wallpaper_copy(tmp_path):
+    """Everywhere a picture can be. The trash especially: it is restorable, so
+    a wrapper left there hands back a picture nothing can read."""
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    cart = moy_carts.create("Covered", root, src="def _draw():\n    pass\n")
+    moy_carts.save_image(cart, "cover", _rle_blob(16, 16, art))
+    moy_carts.save_artwork(_rle_blob(16, 16, art), root)
+    moy_carts.save_file("drawings", "kept", _rle_blob(16, 16, art), root)
+    moy_carts.save_file("drawings", "binned", _rle_blob(16, 16, art), root)
+    moy_carts.delete_file("drawings", "binned", root)
+
+    assert moy_carts.migrate_images(root) == 4
+    for blob in (moy_carts.load_image(cart["path"], "cover"),
+                 moy_carts.load_artwork(root),
+                 moy_carts.load_file("drawings", "kept", root),
+                 _restored(root)):
+        assert moy_carts.decode_moyimg(blob) == (16, 16, art)
+
+
+def test_the_sweep_keeps_the_provenance_stamp(tmp_path):
+    """`src`/`sig` is what powers "your drawing changed -> UPDATE". Rewriting
+    the picture through the plain encoder would drop it, and the affordance
+    would simply stop appearing with nothing to point at."""
+    root = _pic_store(tmp_path)
+    art = _pic(8, 8)
+    cart = moy_carts.create("Story", root, src="def _draw():\n    pass\n")
+    moy_carts.save_image(cart, "bg", _rle_blob(8, 8, art, src="drawings/sun",
+                                               sig=4242))
+    moy_carts.migrate_images(root)
+    blob = moy_carts.load_image(cart["path"], "bg")
+    assert moy_carts.read_provenance(blob) == ("drawings/sun", 4242)
+
+
+def test_a_picture_already_in_the_one_format_is_not_touched(tmp_path):
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    blob = moy_carts.encode_moyimg(16, 16, art)
+    moy_carts.save_file("drawings", "fine", blob, root)
+    assert moy_carts.migrate_images(root) == 0
+    assert moy_carts.load_file("drawings", "fine", root) == blob
+
+
+def test_the_sweep_runs_once_and_the_warm_path_is_a_read(tmp_path):
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    moy_carts.save_file("drawings", "one", _rle_blob(16, 16, art), root)
+    assert moy_carts.migrate_images(root) == 1
+    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+    # A wrapper that arrives AFTER the pass (pushed by an older peer over the
+    # sync RPC) is not swept -- the gate is the whole point of the gate.
+    moy_carts.save_file("drawings", "two", _rle_blob(16, 16, art), root)
+    assert moy_carts.migrate_images(root) == 0
+
+
+def test_a_crash_between_two_files_leaves_the_finished_ones_finished(tmp_path):
+    """The marker is written LAST, so an interrupted pass has converted some
+    pictures and recorded nothing -- and the next boot finishes the rest and
+    steps over the ones already done."""
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    for name in ("a", "b", "c"):
+        moy_carts.save_file("drawings", name, _rle_blob(16, 16, art), root)
+
+    real = moy_carts._rewrite_image
+    calls = []
+
+    def die_after_two(path):
+        if len(calls) >= 2:
+            raise KeyboardInterrupt("power cut")
+        calls.append(path)
+        return real(path)
+
+    moy_carts._rewrite_image = die_after_two
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            moy_carts.migrate_images(root)
+    finally:
+        moy_carts._rewrite_image = real
+
+    assert moy_carts.load_images_version(root) == 0, "the marker must not be there"
+    assert moy_carts.migrate_images(root) >= 1
+    for name in ("a", "b", "c"):
+        blob = moy_carts.load_file("drawings", name, root)
+        assert moy_carts.decode_moyimg(blob) == (16, 16, art)
+        assert "codec" not in json.loads(blob)
+
+
+def test_a_blob_that_will_not_parse_is_left_exactly_as_it_is(tmp_path):
+    """It was unreadable before the pass and inventing a replacement would be
+    worse than leaving it for a person to find."""
+    root = _pic_store(tmp_path)
+    junk = '{"format": "moyimg-v1", "w": 8, "h": 8, "codec": "rle", "data": "@@"}'
+    moy_carts.save_file("drawings", "broken", junk, root)
+    assert moy_carts.migrate_images(root) == 0
+    assert moy_carts.load_file("drawings", "broken", root) == junk
+
+
+def test_the_store_door_runs_the_pass(tmp_path):
+    """`sweep_store` is what a store OPENING calls; a migration nothing calls
+    is a migration that never happens."""
+    root = _pic_store(tmp_path)
+    moy_carts.save_file("drawings", "one", _rle_blob(8, 8, _pic(8, 8)), root)
+    assert moy_carts.sweep_store(root)[3] == 1

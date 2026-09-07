@@ -131,9 +131,8 @@ def _canvas_str(value):
 # Paint-image assets (#63 Fold 3) live in a per-cart images/ subfolder as
 # <name>.moyimg files -- the THIRD asset type (a 64-colour MOY64 index bitmap from
 # the paint app), alongside sprites.moygfx and map.moymap. A .moyimg is a small JSON
-# header {format,w,h,data}. Existing assets use zlib-compressed indices; Paint writes
-# a MicroPython-safe RLE form selected by `codec:"rle"`. Both remain one byte/pixel
-# after decode and are accepted by the host/device image accessors.
+# header {format,w,h,data} over deflated indices, one byte per pixel -- ONE format,
+# whoever wrote it (runtime/moy_image.py holds the codec and the argument).
 IMAGES_DIR = "images"
 IMAGE_EXT = ".moyimg"
 ARTWORK_NAME = "artwork.moyimg"
@@ -191,15 +190,16 @@ def flags_to_hex(flags):
 # under their pre-extraction names so every caller, test and `store.X` lookup is
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
-    from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, encode_moyimg,
-                           moyimg_runs, decode_moyimg, cover_sig, _thumb_file)
+    from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, _deflate,
+                           encode_moyimg, moyimg_runs, decode_moyimg,
+                           cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
                         set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
-                                   encode_moyimg, moyimg_runs, decode_moyimg,
-                                   cover_sig, _thumb_file)
+                                   _deflate, encode_moyimg, moyimg_runs,
+                                   decode_moyimg, cover_sig, _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
                                 _forget_bak, set_publish_root)
@@ -873,13 +873,17 @@ def sweep_store(root=CARTS_DIR):
 
     Each is gated on its own marker -- a generation sidecar, or the kind dir's
     own existence -- so the warm path is one small read apiece. Returns
-    (retired folders removed, notes migrated, documents rewritten).
+    (retired folders removed, notes migrated, documents rewritten,
+    pictures rewritten).
 
     `migrate_docs` runs HERE rather than from a text app because it builds the
     vault a note is picked from: it has to have run before anything lists it.
     It also runs before `migrate_doc_format`, so a legacy notebook lands and is
-    normalised in the same boot."""
-    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root))
+    normalised in the same boot. `migrate_images` runs after `prune_retired`,
+    which is the cheapest ordering: a retired cart's pictures are deleted rather
+    than rewritten."""
+    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root),
+            migrate_images(root))
 
 
 def seed_any(seed, root=CARTS_DIR, progress=None):
@@ -2781,6 +2785,139 @@ def migrate_doc_format(root=CARTS_DIR, generation=DOCS_GEN):
     except OSError:
         return gone          # a read-only store: sweep again next boot, harmless
     return gone
+
+
+# -- pictures became one format (2026-09-07) ---------------------------------
+#
+# Paint used to save an uncompressed RLE `.moyimg` (`codec: "rle"`) because
+# saving needed no compressor on a board. It is 2.5-10x bigger than the
+# compressed form every other writer already used -- one 320x240 cover 72 KB
+# against 26 -- and a big flat string is the allocation an S3 heap refuses
+# first. So there is ONE format now (runtime/moy_image.py), and the RLE reader
+# below is the LAST one: no live decoder speaks two formats, and this pass
+# exists to make that true of every store rather than only of new files.
+#
+# Same one-shot shape as the two passes above: a generation sidecar, written
+# LAST, so a crash halfway through leaves the finished files finished and the
+# next boot completes the rest. Each rewrite is `_write_atomic` and each is
+# independent, so there is no half-converted file to reason about, and the pass
+# is idempotent -- a blob with no `codec` key is already the one format and is
+# not read, decoded or rewritten.
+#
+# The rewrite keeps the WHOLE header and replaces only `data`, because a picture
+# copied into a cart carries the #108 provenance stamp (`src`/`sig`) and losing
+# it would silently retire the "your drawing changed -> UPDATE" affordance.
+IMAGES_GEN = 1
+IMAGES_VER_NAME = "images.ver"
+
+
+def images_version_path(root=CARTS_DIR):
+    """Sidecar (a sibling of the carts dir, like retired.ver) holding the
+    picture-format generation this store has already been rewritten for."""
+    return _sibling_path(root, IMAGES_VER_NAME)
+
+
+def load_images_version(root=CARTS_DIR):
+    """The generation the store's pictures were rewritten at -- 0 when
+    absent/unreadable, so a store that predates this migrates once."""
+    try:
+        return int(_read(images_version_path(root)).strip())
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def _rle_indices(packed, total):
+    """`(count, value)` byte pairs -> `total` palette indices, or None.
+
+    The retired codec's reader, kept for one generation and reached ONLY from
+    the rewrite below. Native where the board has a compositor: interpreted,
+    one 320x240 picture is the 0.5-1.7s that the whole time-sliced cover builder
+    was designed around, and a kid with thirty drawings would meet that as a
+    minute of dead boot."""
+    if len(packed) & 1:
+        return None
+    try:
+        import moy_gfx
+        out = bytearray(total)
+        if moy_gfx.decode_runs(out, total, packed) == total:
+            return out
+    except (ImportError, AttributeError):
+        pass
+    out = bytearray()
+    for i in range(0, len(packed), 2):
+        count = packed[i]
+        value = packed[i + 1]
+        if count < 1 or value > 63 or len(out) + count > total:
+            return None
+        out.extend(bytes((value,)) * count)
+    return out if len(out) == total else None
+
+
+def _rewrite_image(path):
+    """Rewrite one `.moyimg` from the retired RLE codec. True when it changed.
+
+    False for a picture already in the one format, which is what makes the pass
+    idempotent and its warm cost a read. A blob that will not parse is left
+    exactly as it is: it was not readable before this pass and inventing a
+    replacement for it would be worse than leaving it for a person to find."""
+    try:
+        text = _read(path)
+        meta = json.loads(text)
+        if meta.get("codec") != "rle":
+            return False
+        w = int(meta["w"])
+        h = int(meta["h"])
+        pix = _rle_indices(_b64_decode(meta["data"]), w * h)
+        if w <= 0 or h <= 0 or pix is None:
+            return False
+        del meta["codec"]
+        meta["format"] = "moyimg-v1"
+        meta["data"] = _b64_encode(_deflate(pix))
+        _write_atomic(path, json.dumps(meta))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return True
+
+
+def _rewrite_images_in(d):
+    """Rewrite every `.moyimg` directly under `d`. Returns how many changed."""
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return 0                       # no such folder -> nothing to rewrite
+    done = 0
+    for n in names:
+        if n.endswith(IMAGE_EXT) and len(n) > len(IMAGE_EXT):
+            if _rewrite_image(d + "/" + n):
+                done += 1
+    return done
+
+
+def migrate_images(root=CARTS_DIR, generation=IMAGES_GEN):
+    """Rewrite the store's RLE pictures in the one format, once per store.
+
+    Everywhere a `.moyimg` can be: every cart's `images/` (covers, the
+    wallpaper's copy-on-use bg, a story's pages), the shared Paint document
+    beside the carts dir, and the kid's own drawings -- including the trash,
+    which is restorable and would otherwise hand back a picture nothing can
+    read. Returns the number rewritten (0 on the warm path, one small read)."""
+    if load_images_version(root) >= generation:
+        return 0
+    done = 1 if _rewrite_image(_sibling_path(root, ARTWORK_NAME)) else 0
+    try:
+        folders = os.listdir(root)
+    except OSError:
+        folders = []
+    for name in folders:
+        if name.endswith(".moy"):
+            done += _rewrite_images_in(root + "/" + name + "/" + IMAGES_DIR)
+    done += _rewrite_images_in(file_kind_dir("drawings", root))
+    done += _rewrite_images_in(_trash_dir("drawings", root))
+    try:
+        _write(images_version_path(root), str(int(generation)))
+    except OSError:
+        return done          # a read-only store: sweep again next boot, harmless
+    return done
 
 
 # --- provenance stamps (#108 phase 2): a copy remembers its source ----------
