@@ -2,10 +2,14 @@
 
 DeviceWifi is the injected `wifi` backend the shared Workstation exposes to a cart
 whose manifest opts into the "network" permission (host == device: it mirrors the
-host make_wifi). It is a SYSTEM service -- the connection persists when the manager
-cart exits, so the web editor (#22) and the AI helper (#8) can bind to / make
-requests over the IP it reports (status() -> ip). Credentials persist to the
-moy_carts wifi.json store and are used by autoconnect_wifi() at boot.
+host make_wifi). It is a SYSTEM service, and THE RADIO IS A LEASE (2026-09-07):
+off unless something holds it. `Workstation.wifi_hold(tag)` powers it up and
+the last `wifi_release(tag)` powers it down (radio_off), so a console on a shelf
+spends nothing on WiFi. The holders are the web console, the online update
+screen, the Settings WIFI panel, a cart with the "network" permission for the
+length of its run, and the ESP-NOW link for a match. What persists is the
+CREDENTIAL: the moy_carts wifi.json store, which autoconnect_wifi() replays when
+a holder needs the link.
 
 Radio coexistence caveat: WiFi shares the ESP32-S3 radio with BLE (#26) and is a
 different mode from LoRa / ESP-NOW (#7) -- only one radio user can be active at a
@@ -144,6 +148,32 @@ class DeviceWifi:
                 self.wlan.disconnect()
             except Exception:  # noqa: BLE001
                 pass
+
+    def radio_on(self):
+        """The lease's power-up half: the STA interface up, idempotently.
+        Eager on purpose -- every holder scans or connects right after, and the
+        ESP-NOW link must find THIS service owning the interface it activates,
+        because radio_off() below only ever touches a handle this service
+        holds: constructing network.WLAN is what initialises the driver."""
+        return self._ensure_wlan() is not None
+
+    def radio_off(self):
+        """The power-down half: disconnect, then `active(False)` -- which is
+        esp_wifi_stop: the radio and its task go idle, and the driver's static
+        allocation stays. Never constructs an interface (see radio_on)."""
+        w = self.wlan
+        self.wlan = None
+        self._ssid = None
+        if w is None:
+            return
+        try:
+            w.disconnect()
+        except Exception:  # noqa: BLE001 -- nothing to disconnect is fine
+            pass
+        try:
+            w.active(False)
+        except Exception as exc:  # noqa: BLE001
+            _diag_note("wifi", "radio off failed: %s" % (exc,))
 
     def status(self):
         """(connected, ssid, ip): the live link state #22/#8 read to use the net.

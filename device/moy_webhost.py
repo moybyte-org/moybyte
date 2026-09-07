@@ -515,6 +515,11 @@ class ConsoleUpdate:
         self._want = False
         ws = self.ws
         try:
+            # The update screen's radio lease is taken BEFORE the host's is
+            # let go: the stop below releases "web", and with nothing else
+            # holding it the radio would power down and the screen would pay
+            # a cold association to bring it back for the same network.
+            ws.wifi_hold("update")
             web = getattr(ws, "web", None)
             if web is not None:
                 # THE ONE FUNNEL (web_console.WebConsole.stop): it stops the
@@ -544,6 +549,10 @@ class ConsoleUpdate:
             self.state = "error"
             self.error = "%s" % exc
             print("UPDATE hand-off failed:", exc)
+            try:
+                ws.wifi_release("update")    # no screen opened: nothing holds it
+            except Exception:                # noqa: BLE001
+                pass
         return True
 
     # -- what the page reads -------------------------------------------------
@@ -584,7 +593,7 @@ class WebHost(WebServer):
 
     def __init__(self, carts_root, port=None, with_sd=None,
                  ensure_online=None, pin=None, on_sync=None, pin_source=None,
-                 on_run=None, update=None):
+                 on_run=None, update=None, on_stop=None):
         if port is None:
             WebServer.__init__(self)
         else:
@@ -623,6 +632,10 @@ class WebHost(WebServer):
         # Brought up by start(), because a Settings toggle cannot be asked to
         # connect the WiFi first: the row is the whole UI this feature has.
         self._ensure_online = ensure_online
+        # Fires when the SOCKET closes -- after the goodbye window, not when
+        # `serving` drops -- because that is when the link stops being needed:
+        # the console's radio lease (Workstation.wifi_release) hangs off it.
+        self.on_stop = on_stop
         # The T-Deck's store lives on a shared-SPI SD card that must be touched
         # through moybyte_sd.with_sd_live, never directly (see that module and
         # the hard-constraints section of CLAUDE.md). The P4 has no SD and
@@ -767,6 +780,12 @@ class WebHost(WebServer):
         if why is None:
             WebServer.stop(self)
             self.closing = None
+            hook = getattr(self, "on_stop", None)   # a bare-built test host has none
+            if hook is not None:
+                try:
+                    hook()
+                except Exception as exc:  # noqa: BLE001 -- a hook is never fatal
+                    print("WEBHOST on_stop:", exc)
             return
         self.closing = why
         self.closing_at = _ticks_ms()
@@ -1162,4 +1181,5 @@ def make_webhost(ws, carts_root, autoconnect=None, with_sd=None,
                    pin_source=None if pin else lambda: ws.web_pin(),
                    on_sync=lambda: ws.rescan_carts(),
                    on_run=lambda name: ws.launch_named(name),
+                   on_stop=lambda: ws.wifi_release("web"),
                    update=ConsoleUpdate(ws))

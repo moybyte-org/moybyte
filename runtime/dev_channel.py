@@ -218,6 +218,7 @@ def _remote_state(ws):
         st["settings_err"] = str(exc)
     try:
         st["wifi"] = list(ws.wifi.status()) if ws.wifi is not None else None
+        st["wifi_held"] = sorted(ws._wifi_holders)     # the radio lease's holders
     except Exception as exc:  # noqa: BLE001
         st["wifi_err"] = str(exc)
     try:

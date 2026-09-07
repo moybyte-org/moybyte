@@ -100,6 +100,7 @@ class UpdateUI:
             return
         if self._boot_verdict_phase():
             return
+        self.ws.wifi_hold("update")            # the radio lease: _exit_update lets go
         self._check_armed = False              # gate: draw CHECKING... before the blocking fetch
         self._upd_phase = "checking"
 
@@ -118,6 +119,7 @@ class UpdateUI:
             self._upd_phase = "error"
             self._upd_msg = "no c6 updater"
             return
+        self.ws.wifi_hold("update")            # the same lease: the manifest rides the link
         self._check_armed = False              # CHECKING... paints first
         self._upd_phase = "c6_checking"
 
@@ -171,6 +173,7 @@ class UpdateUI:
                 cu.cancel()
             except Exception:
                 pass
+        self.ws.wifi_release("update")        # the screen was the radio's reason
         self.ws.wm.goto("settings")   # Stage 6e: pop the update screen, back to Settings
         self.ws._dirty = True
 

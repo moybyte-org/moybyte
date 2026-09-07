@@ -178,7 +178,10 @@ class EspNowLink:
             if self.wlan is None:
                 import network
                 self.wlan = network.WLAN(network.STA_IF)
-                self.wlan.active(True)
+            # Every start, not only the first: the console's radio lease
+            # (Workstation.wifi_release) stops the interface between matches,
+            # and ESP-NOW on a stopped WiFi raises. Idempotent when it is up.
+            self.wlan.active(True)
             self.mac = self.wlan.config("mac")
             # Power save off for the session only -- it halves the latency tail
             # and it costs battery, so stop() puts it back.

@@ -241,10 +241,18 @@ class WebConsole:
             wh.error = None
             if getattr(wh, "serving", False):
                 self._stop_saying_why(wh, why)
+                # The radio lease outlives `serving` by the goodbye window: the
+                # page's last round trip rides the link, so a host that is
+                # still CLOSING keeps it and lets go from its own stop (the
+                # `on_stop` make_webhost wires). An immediate stop lets go now.
+                if not getattr(wh, "closing", None):
+                    self.ws.wifi_release("web")
             else:
+                self.ws.wifi_hold("web")
                 wh.start()
         except Exception as exc:  # noqa: BLE001
             wh.error = "%s" % exc
+            self.ws.wifi_release("web")      # a start that failed holds nothing
         self.ws._dirty = True
         if getattr(wh, "serving", False):
             if not self.parked:

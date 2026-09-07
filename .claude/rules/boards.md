@@ -243,6 +243,23 @@ README is the authority**; what belongs here is only what bites:
   instruction placement (`MOY_HOT`), and its allocator is a small-object pool
   (`native/moycore/README.md`).
 
+- **The WiFi radio is a LEASE: off unless something holds it (2026-09-07).**
+  `Workstation.wifi_hold(tag)` powers the STA up at once and the last
+  `wifi_release(tag)` powers it down (`DeviceWifi.radio_off`, which is
+  `esp_wifi_stop`), so a console on a shelf spends nothing on WiFi and the S3's
+  WLAN-vs-LCD-DMA internal-RAM fight is only ever live while someone needs the
+  network. Five holders: `web` (released when the webhost's SOCKET closes —
+  after the goodbye window — through `make_webhost`'s `on_stop`), `update` (the
+  online update screen, taken BEFORE the hand-off releases `web`), `settings`
+  (the WIFI panel, closed on every way out of Settings), `cart` (a run with the
+  "network" permission) and `link` (a match; the hold precedes `link.start()`
+  so the interface ESP-NOW activates is one the service owns). **A new consumer
+  of the network takes a tag and releases it on its way out, or the radio never
+  goes off again** — `tests/test_wifi.py`'s lease section is the guard, and
+  `state`'s `wifi_held` is how a board says who holds it. Constructing
+  `network.WLAN` is what initialises the driver, so `radio_off` never
+  constructs one. The Zero is outside this: WiFi is its only I/O.
+
 - **SD shares the SPI host with the display, and getting it wrong HANGS the
   board** — gray screen, dead USB, no panic. Three rules, each learned on
   hardware:

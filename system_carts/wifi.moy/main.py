@@ -6,9 +6,11 @@
 # key) driving that injected service: scan, pick a network, type the password on
 # the keyboard, CONNECT/FORGET, and a status line with the connected SSID + IP.
 #
-# The connection is system state -- it persists after this cart closes, so the web
-# editor (#22) and AI helper (#8) reuse it. Same code runs on host (FakeWifi) and
-# device (network.WLAN); only the injected backend differs.
+# The CREDENTIAL is what persists (wifi.json): the radio itself is a lease the
+# console holds only while this cart runs, and it powers down when the cart
+# exits -- the web console, the update screen and a match take their own. Same
+# code runs on host (FakeWifi) and device (network.WLAN); only the injected
+# backend differs.
 
 # Screens: "list" picks a network; "pass" types the password for the picked one.
 mode = "list"

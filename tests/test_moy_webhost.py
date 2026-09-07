@@ -1422,6 +1422,84 @@ def test_a_failed_start_does_not_park(tmp_path):
     assert "no wifi" in ws.webhost_label()
 
 
+def test_wasm_mode_holds_the_radio_and_lets_it_go_with_the_socket(tmp_path):
+    """The radio is a LEASE (2026-09-07): off unless something holds it, and
+    the web console is the holder this whole feature exists for. The row ON
+    takes it before the host binds; the row OFF lets it go -- at once for a
+    host that stops at once (this fake, a bare stop), and only when the SOCKET
+    closes for one saying goodbye (the test after this one)."""
+    ws = _mode_ws(tmp_path)
+    assert ws.wifi.radio is False
+    ws.toggle_webhost()
+    assert ws.webhost_serving() and "web" in ws._wifi_holders
+    assert ws.wifi.radio is True
+    ws.toggle_webhost()
+    assert not ws.webhost_serving()
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_a_failed_start_holds_no_radio(tmp_path):
+    """A start that could not bring WiFi up leaves the kid in Settings reading
+    why -- with the radio OFF, because a lease nobody is using is the bug the
+    lease exists to prevent."""
+    ws = _ws(tmp_path)
+    ws.webhost = _ModeHost(fail="no wifi")
+    ws.open_settings()
+    ws.toggle_webhost()
+    assert "no wifi" in ws.webhost_label()
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_the_goodbye_window_keeps_the_radio_until_the_socket_closes(
+        tmp_path, monkeypatch):
+    """The page's last round trip rides the link. `serving` drops at once when
+    the row is switched off, but the socket lingers for the closing window --
+    and so must the radio, or the goodbye is said into a dead radio and the
+    page gets the vanished-board panel this window was written to prevent.
+    `make_webhost` wires the release to the host's own `on_stop`."""
+    ws = _ws(tmp_path)
+    h = wh.WebHost(str(_store(tmp_path)), pin="4321",
+                   on_stop=lambda: ws.wifi_release("web"))
+    h.sock = None
+    h._ws = None
+    h.update = None
+    ws.webhost = h
+    ws.wifi_hold("web")
+    h.serving = True
+    ws.web.park()
+
+    ws.stop_web_console()                   # the connection screen's TURN OFF
+    assert h.serving is False and h.closing == "off"
+    assert not ws.web.parked
+    assert "web" in ws._wifi_holders, "let go before the goodbye was said"
+    assert ws.wifi.radio is True
+
+    clock = [0]
+    monkeypatch.setattr(wh, "_ticks_ms", lambda: clock[0])
+    monkeypatch.setattr(wh, "_ticks_diff", lambda a, b: a - b)
+    h.closing_at = 0
+    clock[0] = h.CLOSING_MS - 1
+    h.poll()
+    assert "web" in ws._wifi_holders
+    clock[0] = h.CLOSING_MS
+    h.poll()
+    assert h.closing is None
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_every_board_wires_the_release_to_the_socket(tmp_path):
+    """make_webhost is the ONE injection every board takes, so the lease's
+    release lives there and not in four board files."""
+    ws = _ws(tmp_path)
+    h = wh.make_webhost(ws, str(_store(tmp_path)))
+    ws.wifi_hold("web")
+    h.serving = True
+    h.sock = None
+    h._ws = None
+    h.stop()                                # a bare stop: the socket is gone
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
 def test_park_sets_the_flag_before_it_hands_the_glass_over(tmp_path):
     """ORDER, not just outcome. `go_home` is what routes to the connection
     screen and it decides by reading the flag, so a park that called it first

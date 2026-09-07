@@ -415,6 +415,7 @@ class SettingsLayer:
         self.wifi_pick = None
         self.wifi_pw = ""
         self._wifi_kprev = 0
+        ws.wifi_hold("settings")      # the radio lease: close_wifi lets go
         self._wifi_rescan()
         ws._dirty = True
 
@@ -424,6 +425,7 @@ class SettingsLayer:
         self.wifi_view = False
         self.wifi_pick = None
         ws._set_text_mode(False)
+        ws.wifi_release("settings")
         ws._dirty = True
 
     def _wifi_rescan(self):

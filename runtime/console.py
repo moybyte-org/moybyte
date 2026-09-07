@@ -730,11 +730,14 @@ class Workstation:
             self.app_context("paint", ArtworkService.NEEDS, prefs_ns="paint"))
         self.make_audio = None      # injected: make_audio(engine)->audio backend (host/device)
         self.audio = None           # the per-cart audio backend (built on open, #16)
-        # WiFi (#38): a SYSTEM service shared across carts (the connection persists
-        # when a cart exits), not per-cart. run_desktop/build_workstation injects
-        # the backend here; it's exposed to a cart's namespace ONLY when the cart's
-        # manifest permissions include "network" (capability-gated -- see _start).
+        # WiFi (#38): a SYSTEM service shared across carts, not per-cart.
+        # run_desktop/build_workstation injects the backend here; it's exposed
+        # to a cart's namespace ONLY when the cart's manifest permissions
+        # include "network" (capability-gated -- see _start). THE RADIO IS A
+        # LEASE (wifi_hold/wifi_release below): the tags holding it, and the
+        # last one out powers it down.
         self.wifi = None            # injected wifi backend (host FakeWifi / device WLAN)
+        self._wifi_holders = set()
         # Multiplayer message service (#65): the transport-neutral net.* seam (a
         # players.LoopbackNet in the host sim, None on the device until the ESP-NOW
         # radio lands). A SYSTEM service like wifi -- exposed to a cart's namespace
@@ -1910,6 +1913,8 @@ class Workstation:
         # Windowed WM (#73): close JUST the Settings window -- whatever else is
         # open (a running game, the Make window) stays. Desk world only (#105):
         # play-world Settings is fullscreen and takes the resume-or-home rules.
+        if self.settings_layer.wifi_view:
+            self.settings_layer.close_wifi()   # its radio lease ends with the visit
         _ck = getattr(self.wm, "close_window_kind", None)
         if _ck is not None and self.wm.desk_open():
             self._dirty = True
@@ -3402,6 +3407,8 @@ class Workstation:
         self.editor = None
         self.paint = None
         self._editing_icons = False    # never carry the theme-editing flag home
+        if self.settings_layer.wifi_view:
+            self.settings_layer.close_wifi()   # its radio lease ends with the visit
         self.map_ui.reset()
         self.scene_ui.reset()
         self.block_ui.reset()
@@ -4881,6 +4888,44 @@ class Workstation:
             return "wifi" if w.status()[0] else "wifi_off"
         except Exception:  # noqa: BLE001 -- a status hiccup must not blank the bar
             return "wifi_off"
+
+    def wifi_hold(self, tag):
+        """Take the radio for `tag` (2026-09-07): the WiFi is OFF unless
+        something holds it, and this is the only way to turn it on. Powers the
+        interface up at once -- every holder scans or connects next, and the
+        ESP-NOW link must find the service owning the interface it activates.
+        Idempotent per tag. The holders: "web" (wasm mode, released when its
+        socket actually closes), "update" (the online update screen), "settings"
+        (the WIFI panel), "cart" (a run with the "network" permission), "link"
+        (a match). A new consumer of the network takes a tag here and releases
+        it on its way out, or the radio never goes off again."""
+        w = self.wifi
+        if w is None:
+            return False
+        self._wifi_holders.add(tag)
+        on = getattr(w, "radio_on", None)
+        if on is None:
+            return True
+        try:
+            return bool(on())
+        except Exception:  # noqa: BLE001 -- a radio that will not start is offline
+            return False
+
+    def wifi_release(self, tag):
+        """Let the radio go for `tag`; the last holder out powers it down.
+        Releasing a tag never held is fine (every exit path releases without
+        asking), and an empty set powers down even so: "off in general" is the
+        rule, and whatever a serial `py` brought up without a lease goes with
+        the next exit."""
+        self._wifi_holders.discard(tag)
+        if self._wifi_holders:
+            return
+        off = getattr(self.wifi, "radio_off", None)
+        if off is not None:
+            try:
+                off()
+            except Exception:  # noqa: BLE001 -- a radio that will not stop is a diag line
+                pass
 
     def _bar_image(self, kind):
         """The cached 16x16 _SheetSprite for top-bar icon `kind`, or None when the

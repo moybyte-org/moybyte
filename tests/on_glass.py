@@ -95,6 +95,18 @@ def wifi_status_is_readable(board):
     assert st.get("wifi") is None or isinstance(st["wifi"], list)
 
 
+def wifi_is_off_at_rest(board):
+    """The radio is a LEASE (2026-09-07): a console that is not serving the
+    web, updating, in the WIFI panel, running a network cart or in a match
+    holds nothing and reports no link. `wifi_held` is the lease's holders;
+    a firmware from before the lease has no such key, and says so here."""
+    st = board.state()
+    assert "wifi_held" in st, "no wifi_held in state: firmware predates the lease"
+    assert st["wifi_held"] == [], "something holds the radio at rest: %r" % (
+        st["wifi_held"],)
+    assert st.get("wifi") is None or st["wifi"][0] is False, st.get("wifi")
+
+
 def every_app_claims_one_cart(board):
     """Every registered system app claims exactly one cart. Naming the wrong
     ones is the point: the failure this catches is seed/title drift in ONE

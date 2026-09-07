@@ -671,6 +671,10 @@ class Player:
                 _link.stop()
             except Exception:  # noqa: BLE001 -- teardown must never block an exit
                 pass
+            self.ws.wifi_release("link")
+        # ...and the run's own lease. Nothing else holds the WiFi at a plain
+        # exit, so this is where a console goes back to radio-off.
+        self.ws.wifi_release("cart")
         self._close_lua()          # #67: the dead run's Lua heap goes with its world
         ws = self.ws
         rl = getattr(ws.canvas, "reclaim_layers", None)
@@ -1037,6 +1041,8 @@ class Player:
         # gets NO `wifi` name (sandbox preserved). make_api injects `wifi` into the
         # cart namespace iff the backend it receives is non-None.
         wifi = ws.wifi if ws._cart_has_perm("network") else None
+        if wifi is not None:
+            ws.wifi_hold("cart")       # the radio lease for this run; release_world lets go
         # Multiplayer message service (#65): gate net.* by the "multiplayer"
         # manifest permission exactly like wifi's "network" gate. reset() drops any
         # handler/inbox from a previous run so a fresh run starts clean; make_api
@@ -1075,6 +1081,7 @@ class Player:
             # console on a shelf has nobody to talk to. Announcing the cart is
             # what lets a peer recognise "we are both in the same game".
             try:
+                ws.wifi_hold("link")   # the STA up, owned by the wifi service, BEFORE the radio
                 link.start()
                 link.announce(cart.get("title") or "", 1)
                 # A DEAD match never survives into the next run (#65). The

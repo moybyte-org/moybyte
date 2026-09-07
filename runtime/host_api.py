@@ -128,10 +128,15 @@ class FakeWifi:
         self._root = root
         self._connected = False
         self._ssid = None
+        # The radio's power state, the DeviceWifi `wlan is not None` twin: up
+        # on first use or on a lease, down when the last holder lets go.
+        self.radio = False
+        self.radio_offs = 0
 
     # -- the injected `wifi` API surface (host == device) ----------------
     def scan(self):
         """List nearby networks as (ssid, signal, locked) tuples."""
+        self.radio = True
         return [tuple(ap) for ap in self.FAKE_APS]
 
     def _stored_password(self, ssid):
@@ -153,8 +158,9 @@ class FakeWifi:
 
     def connect(self, ssid, password=""):
         """'Associate' with `ssid` (fake: always succeeds), remember the creds, and
-        report connected. Returns True. The connection persists across carts (it's
-        system state) and the creds persist to disk for autoconnect. An EMPTY
+        report connected. Returns True. The link lasts as long as the radio's
+        lease does (Workstation.wifi_hold / wifi_release, host == device); the
+        creds persist to disk for autoconnect. An EMPTY
         password resolves to the stored one first (the DeviceWifi contract): the
         panel's known-network reconnect passes "", and remembering that "" used
         to overwrite the saved password in wifi.json.
@@ -164,6 +170,7 @@ class FakeWifi:
         reading, not two -- the fake radio always associates, so it never bites
         here."""
         ok = True                       # the fake radio always associates
+        self.radio = True
         self._ssid = str(ssid)
         stored = self._stored_password(self._ssid)
         if not password and stored:
@@ -180,6 +187,15 @@ class FakeWifi:
     def disconnect(self):
         self._connected = False
         self._ssid = None
+
+    def radio_on(self):
+        self.radio = True
+        return True
+
+    def radio_off(self):
+        self.disconnect()
+        self.radio = False
+        self.radio_offs += 1
 
     def status(self):
         """(connected, ssid, ip): the live link state other features read."""

@@ -322,6 +322,49 @@ def test_a_failed_hand_off_is_readable_and_never_breaks_the_frame(tmp_path):
     assert "no screen today" in json.loads(payload)["error"]
 
 
+def test_the_hand_off_keeps_the_radio_for_the_update_screen(tmp_path):
+    """The radio is a LEASE (2026-09-07). The stop releases the web console's
+    hold, and the update screen takes its own -- in THAT order the radio would
+    power down in between and the screen would pay a cold association for the
+    same network, so the screen's hold is taken first."""
+    ws = _ws(tmp_path)
+    h = _host(ws, tmp_path)
+    ws.wifi_hold("web")                     # what toggle did when the row went on
+    _parked(ws, h)
+    h.handle_http("POST", "/update?pin=1234", '{"action":"check"}')
+    h.update.step()
+    assert ws.wm.top_kind() == "update"
+    assert ws._wifi_holders == {"update"}
+    assert ws.wifi.radio is True
+    assert ws.wifi.radio_offs == 0, "the radio was cycled inside the hand-off"
+
+
+def test_the_update_screen_lets_the_radio_go_on_exit(tmp_path):
+    ws = _ws(tmp_path)
+    ws.open_settings()
+    ws.update_ui.open_update_online()
+    assert ws.update_ui._upd_phase == "checking"
+    assert "update" in ws._wifi_holders and ws.wifi.radio is True
+    ws.update_ui._exit_update()
+    assert ws.wm.top_kind() == "settings"
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
+def test_a_failed_hand_off_holds_no_radio(tmp_path):
+    ws = _ws(tmp_path)
+    h = _host(ws, tmp_path)
+    _parked(ws, h)
+
+    def _boom():
+        raise RuntimeError("no screen today")
+
+    ws.update_ui.open_update_online = _boom
+    h.update.request("check")
+    h.update.step()
+    assert h.update.state == "error"
+    assert ws._wifi_holders == set() and ws.wifi.radio is False
+
+
 # -- the two guards on the asymmetry -----------------------------------------
 
 

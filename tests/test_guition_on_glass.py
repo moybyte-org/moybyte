@@ -113,6 +113,10 @@ def test_mem_reports_the_heap(board):
     on_glass.mem_reports_the_heap(board)
 
 
+def test_wifi_is_off_at_rest(board):
+    on_glass.wifi_is_off_at_rest(board)
+
+
 def _skip_unparked(board, why):
     """Skip this test -- but not with the glass left PARKED.
 

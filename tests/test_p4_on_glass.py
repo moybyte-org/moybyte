@@ -51,6 +51,10 @@ def test_wifi_status_is_readable(board):
     on_glass.wifi_status_is_readable(board)
 
 
+def test_wifi_is_off_at_rest(board):
+    on_glass.wifi_is_off_at_rest(board)
+
+
 def test_appearance_cart_is_claimed(board):
     """The Appearance app must claim its cart on the DEVICE store. The device
     seeds the folder from the TITLE slug (appearance.moy) while the host copies
