@@ -907,6 +907,11 @@ class Workstation:
         # the request, popped by _exit_to_caller, which re-reads the folder on
         # the way back so the loader sees what was written.
         self._project_return = None
+        # The registered APP an app-to-app jump must return INTO (Files opening
+        # a drawing in Paint / a project in the Editor): set by _note_app_caller
+        # with the jump, popped by _go_home_or_back. See its docstring for why
+        # this is a third slot beside _run_caller and _project_return.
+        self._app_return = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -2202,7 +2207,14 @@ class Workstation:
         self.player.release_world()
         back = self._project_return
         self._project_return = None
+        # A run's caller is SPENT by its return. Leaving it set is what wedged
+        # Files (#108, on glass 2026-09-07): the returned-to APP's own context X
+        # routes here too, and a stale caller made it `goto` the app already on
+        # top -- a no-op, so Files could never be left again once it had opened
+        # a note.
+        caller = self._run_caller
         if back is not None:
+            self._run_caller = None
             self._return_to_project(back)
             return
         # Windowed WM (#73): closing the playtest must never truncate unrelated
@@ -2213,9 +2225,11 @@ class Workstation:
         _cp = getattr(self.wm, "close_player", None)
         if _cp is not None and self.wm.desk_open():
             self._dirty = True
-            _cp()
+            _cp()                          # reads _run_caller to refocus
+            self._run_caller = None
             return
-        if self._run_caller is self.editor_app:
+        self._run_caller = None
+        if caller is self.editor_app:
             self._dirty = True             # screen change repaints (#44)
             self.wm.goto("menu")           # Stage 6e: pop the Player, back to the Editor tab
             # #80: returning DIRECTLY to the code tab is not a tab CHANGE, so
@@ -2225,16 +2239,54 @@ class Workstation:
             # the code editor after a PLAY). Restore the returned-to tab's mode.
             self._set_text_mode(getattr(self.editor_app, "tab", None) == "code")
             return
-        caller_id = getattr(self._run_caller, "id", None)
-        if caller_id is not None and self._apps_by_id.get(caller_id) \
-                is self._run_caller:
-            # An APP launched this run. Its layer is still on the stack under
-            # the Player, so this is a RETURN, not a re-open -- it comes back
-            # on the row it was showing.
-            self._dirty = True
-            self.wm.goto(caller_id)
+        caller_id = getattr(caller, "id", None)
+        if caller_id is not None and self._apps_by_id.get(caller_id) is caller \
+                and self._return_to_app(caller_id):
             return
-        self.go_home()
+        self._go_home_or_back()
+
+    def _return_to_app(self, app_id):
+        """Land back on registered app `app_id`'s own surface, on the row it was
+        showing. A back-stack RETURN and never a re-open: `open_app` would call
+        the app's `open()`, which resets it to its root -- and coming back to a
+        different screen than you left is exactly what a return must not do."""
+        app = self._apps_by_id.get(app_id)
+        if app is None:
+            return False
+        self._dirty = True
+        self.wm.goto(app_id)
+        for _app, _text in self._apps:
+            if _app is app:
+                self._set_text_mode(bool(_text))
+                break
+        return True
+
+    def _go_home_or_back(self):
+        """Leave the top surface for the launcher root -- unless an APP opened
+        it, in which case leaving lands back INSIDE that app.
+
+        `_app_return` is the app-to-app half of the launch-and-return contract
+        (#108). `_run_caller` covers a RUN (the Player pops to whoever started
+        it) and `_project_return` a project-file edit (which comes back through
+        the loader); this covers the third shape -- Files opening a drawing in
+        Paint or a project in the Editor, neither of which is a run. It survives
+        a nested run on purpose, so PLAY from a Files-opened Editor still comes
+        home to Files. Going home clears it, so a later unrelated exit can never
+        inherit it."""
+        back = self._app_return
+        self._app_return = None
+        self.go_home()                     # the leaving surface's save + teardown
+        if back is not None and self.wm.top_is("launcher"):
+            self._return_to_app(back)
+
+    def _note_app_caller(self):
+        """Record the registered APP this navigation is leaving, so whatever it
+        opens comes back to it. Called at the app-to-app jumps -- `open_app`
+        and the two `ctx.nav` editor doors -- and NOT by `_return_to_project`,
+        which is a return INTO an Editor an app may already own. A jump from
+        anywhere else (the launcher, the picker) clears the slot."""
+        app = self._apps_by_id.get(self.wm.top_kind())
+        self._app_return = app.id if app is not None else None
 
     def _crash_to_code(self):
         """A crashed cart run throws the kid STRAIGHT into the code editor on
@@ -2286,11 +2338,13 @@ class Workstation:
         here. The launcher IS the back-stack root and never exits (its bar draws no X,
         so this is never reached with screen == "launcher"). A pre-Stage-6 shim over the
         screen strings: Settings closes via its own resume-or-home rule; the Editor (and
-        any other taskbar app) goes home."""
+        any other taskbar app) goes home -- or back into the app that opened it
+        (`_go_home_or_back`: the Editor Files opened on a project returns to the
+        Files shelf, not to the launcher)."""
         if self.wm.top_is("settings"):            # Stage 6d: ask the stack top
             self._exit_settings()
         elif not self.wm.top_is("launcher"):
-            self.go_home()
+            self._go_home_or_back()
 
     def _draw_cart_bar(self):
         """Draw the unified top bar over the CRASH frame (the only cart-path chrome left
@@ -2689,6 +2743,7 @@ class Workstation:
             if _app is app:
                 text = _text
                 break
+        self._note_app_caller()        # a jump OUT of an app comes back to it
         self.cart = cart
         self.input.text_mode = False
         self.search_typing = False     # #105: an app jump ends any in-progress search typing
@@ -3281,6 +3336,10 @@ class Workstation:
     def go_home(self):
         self._dirty = True             # screen change repaints (#44)
         self._set_text_mode(False)    # restore the game-button keyboard mode
+        # The launcher root ends every return path: an app-to-app return that
+        # outlived its journey here would drag an unrelated later exit into
+        # Files. `_go_home_or_back` pops the slot BEFORE calling this.
+        self._app_return = None
         # (#111) autosave-only: going home is an exit path for every persistent
         # system app + the Editor, so each is persisted BEFORE the state below is
         # torn down (self.editor/self.project etc.) -- a HOME-key tap reaches

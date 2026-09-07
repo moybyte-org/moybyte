@@ -664,10 +664,14 @@ class Nav:
         The Files router's door for a `.moy` folder (which opens the project,
         never a listing) and for a cart's own main file (`tab="code"`). False
         when there is nothing to edit -- `open_in_editor` lands a source-less
-        cart on the error panel, and the caller shows its own status instead."""
+        cart on the error panel, and the caller shows its own status instead.
+
+        Leaving the Editor comes back HERE, to the app that opened it, on the
+        row it was showing (`Workstation._go_home_or_back`)."""
         if cart is None:
             return False
         ws = self.__ws
+        ws._note_app_caller()
         ws.open_in_editor(cart)
         if ws.project is None or ws.project.cart is not cart:
             return False
@@ -692,10 +696,13 @@ class Nav:
         The Files router's door for a project file, and deliberately not
         `open_text`: a project file is reached with the loader in the loop
         (docs/text_editing_2026-09.md), which is what going through the Editor
-        buys -- the return re-reads the folder."""
+        buys -- the return re-reads the folder. Leaving THAT Editor then comes
+        back to this app, the same way `edit` does."""
         if cart is None:
             return False
-        return bool(self.__ws.open_project_file(cart, name, mode))
+        ws = self.__ws
+        ws._note_app_caller()
+        return bool(ws.open_project_file(cart, name, mode))
 
     def play(self, cart, caller):
         """Open `cart` as a workspace and RUN it, returning to `caller` on

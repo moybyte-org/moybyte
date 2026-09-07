@@ -177,3 +177,118 @@ def test_a_missing_app_degrades_to_the_status_line(tmp_path):
     assert app.status == "NO PAINT APP"
     assert app.route("gone.moy", kind=files_app.PROJECTS) is None
     assert app.status == "CAN'T OPEN"
+
+
+# -- the return: what Files opens comes back to Files -------------------------
+#
+# Files is a cart app, so everything the router opens REPLACES it. Each door
+# below is driven to its real exit gesture and asserted on where the console
+# ended up plus what Files was still showing -- the return must land on the
+# shelf the person left, never on the app's root and never at home.
+
+def _tap_x(ws):
+    """The OS bar's context-X, through the ROUTER (where the bar contract is)."""
+    x, y, w, h = ws.layout.context_x_btn
+    ws.pointer.place(x + w // 2, y + h // 2)
+    ws.pointer.click = True
+    ws.handle_pointer()
+    ws.pointer.click = False
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+
+
+def test_a_note_comes_back_to_files_and_files_still_exits(tmp_path):
+    """The wedge (T-Deck, 2026-09-07): the note returned fine, and then the X
+    on Files was dead -- the spent run caller made it pop Files back to Files."""
+    carts = str(tmp_path / "carts")
+    moy_carts.save_file("docs", "story", "once upon a time", carts)
+    ws = host_app.build_workstation(carts)
+    app = _open_files(ws)
+    app._enter_kind("docs")
+    app._pick("story")
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.cart.get("title") == "Notes"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "files"
+    assert (app.mode, app.grid.kind) == ("grid", "docs")   # the shelf it left
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_a_drawing_comes_back_from_paint_to_the_same_shelf(tmp_path):
+    carts = str(tmp_path / "carts")
+    _seed_drawing(carts, "dragon")
+    ws = host_app.build_workstation(carts)
+    app = _open_files(ws)
+    app._enter_kind("drawings")
+    app._pick("dragon")
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.wm.top_kind() == "artwork"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "files"
+    assert (app.mode, app.grid.kind) == ("grid", "drawings")
+
+
+def test_a_project_comes_back_from_the_editor_to_the_projects_root(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    app.sel = 1
+    app._tap_row(1)
+    assert ws.wm.top_kind() == "menu"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "files"
+    assert (app.mode, app.sel) == (files_app.PROJECTS, 1)
+
+
+def test_a_project_file_returns_through_the_editor_and_on_to_files(tmp_path):
+    """The full step-5 chain from the Files side: the file comes back to the
+    Config tab THROUGH the loader, and leaving that Editor comes back here."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    app._enter_rows(files_app.PROJECTS)
+    cart = app.project_carts[0]
+    app.route("manifest.json", cart=cart)
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.cart.get("title") == "Notes"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "menu" and ws.menu_view == "cards"
+
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "files"
+    assert app.mode == files_app.PROJECTS
+
+
+def test_files_itself_exits_to_the_launcher(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    _open_files(ws)
+    _tap_x(ws)
+    assert ws.wm.top_kind() == "launcher"
+
+
+def test_going_home_from_inside_ends_the_return(tmp_path):
+    """HOME is HOME: a kid who leaves Paint by the bar's home button lands on
+    the launcher, and the NEXT unrelated exit must not be dragged into Files."""
+    carts = str(tmp_path / "carts")
+    _seed_drawing(carts, "dragon")
+    ws = host_app.build_workstation(carts)
+    app = _open_files(ws)
+    app._enter_kind("drawings")
+    app._pick("dragon")
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+
+    ws.go_home()
+    assert ws.wm.top_kind() == "launcher"
+    assert ws._app_return is None
+    ws.open_settings()
+    ws.exit()
+    assert ws.wm.top_kind() == "launcher"
