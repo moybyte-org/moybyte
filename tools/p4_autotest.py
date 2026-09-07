@@ -410,6 +410,16 @@ class P4Board:
     # 60, not 40: a 75-cart store boots to the desk in 36.2s freshly flashed and
     # 39.2s once anything has been written to it (measured 2026-09-05, dev
     # 5b244b6), so a 40s budget left under a second of margin on a real store.
+    #
+    # AND THAT NUMBER IS A CONTRACT ON WHAT A BOOT MAY DO, not a dial to turn
+    # when a boot gets slower. A picture-format migration was added to the store
+    # door on 2026-09-07 and a Guition reproducing its first boot after the flash
+    # spent 196 SECONDS in it before the "loading cartridges" lines even began --
+    # about 15s per 320x240 cover on the S3's compressor. The fix was to take
+    # that work off the boot (moy_carts.ImageMigration runs it on the console's
+    # idle frames), not to widen this: a boot that outgrows a minute has stopped
+    # being a boot, and a budget wide enough to hide it is also wide enough to
+    # make a dead board take two minutes to say so.
     def reset(self, boot_timeout=60.0, settle=3.0):
         """Hard-reset via the CH343 RTS pulse and wait for the desktop.
 
