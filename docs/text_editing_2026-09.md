@@ -17,13 +17,14 @@ the existing RPC or the card, not an app feature.
 
 ## Three roots, three doors
 
-Roots a person touches: PROJECTS (each cart a folder), NOTES (the vault, flat
-`.md`), and the drawings the Files app owns.
+Roots a person touches: PROJECTS (each cart a folder), NOTES (the vault, one
+flat folder -- `.md` by default, and whatever else a person names), and the
+drawings the Files app owns.
 
 | door | path | what opens |
 |---|---|---|
 | make a game | Launcher → cart → EDIT → tab ladder | the Code tab is the cart's main file: highlight by runtime, parse gate on the debounce, hard exits always write (SYNTAX badge), PLAY, crash-to-code |
-| write | Launcher → Notes | the vault list, NEW, one note in Markdown mode |
+| write | Launcher → Notes | the vault list (whole names, mode badges), NEW → a name prompt, one file open with the SELECT/COPY/CUT/PASTE/UNDO/REDO toolbar over it |
 | any file | Launcher → Files → a root | routed by what it is (below) |
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
@@ -46,14 +47,35 @@ gesture ends in. HOME is still home, and going home clears the return.
 
 **Modes** are the only thing that differs per file: Markdown (wrap, headings and
 checkboxes rendered, `[[note]]` tappable, `![[drawing]]` inline), code (the
-per-runtime highlighter and parse gate), JSON (soft save refuses an invalid
-document; a hard exit writes it with an INVALID badge and the loader re-validates
-on the next open), plain text.
+per-runtime highlighter and parse gate), JSON (pretty-printed at indent 2 on
+open, saved as shown; soft save refuses an invalid document; a hard exit writes
+it with an INVALID badge and the loader re-validates on the next open), plain
+text.
+
+**WRAP is prose, PAN is structure.** Markdown and plain text soft-wrap, because
+a sentence that runs off a 320px screen is unreadable. Code and JSON do not:
+their LINES mean something, so a long line pans sideways instead -- the Code
+tab's gesture, drag or trackball, one rung down.
+
+## What the vault holds, and what a name means
+
+**Every file in the vault is listed, under its whole name, with its mode's
+badge.** `.md` is the ONE extension a vault name may leave off, because a bare
+name IS a note; `todo.txt`, `data.json`, `hi.py` and `hi.lua` keep theirs,
+because the extension is what picks the mode and what stops two files shadowing
+each other. The store's `VAULT_EXTS` is that set and `text_modes.badge_for_kind`
+is the label.
+
+**NEW asks for a name** (Notes' prompt; the Files rename field's pattern) and
+the name decides the mode: a bare name is Markdown, an extension is honoured.
+That is the only thing on the console that MAKES a `.txt` or a `.json` -- before
+it, nothing did, and the vault listed neither. The store slugs and unique-ifies
+what was typed (`moy_carts.free_file_name`), so NEW never overwrites.
 
 ## Scripts
 
 A script is a cart with no folder: a bare `.py` or `.lua` in the vault, listed
-under its whole name so a note and a script never shadow each other (a
+under its whole name like every other vault file (a
 separate `scripts/` root waits for the terminal's `run`, #115). RUN (from Files, later `run name.py` at the terminal prompt) wraps
 it on the fly — a synthesized manifest of `type: "script"`, the same portable
 subset every cart gets, a TEXT CONSOLE as its surface (`print` to scrollback,
@@ -65,7 +87,16 @@ surface with a live prompt, its scrollback is the console.
 ## The board split
 
 The T-Deck is the writing device (keyboard, trackball as caret, the symbol
-palette for the keys it lacks). On the P4 and the Guitions long-form typing goes
+palette for the keys it lacks). **The trackball is the caret in a cart's editor
+handle too, not only in the Code tab**: `Workstation.nav` is the one place that
+decides, and it answers whether it spent the roll so the board loop can give the
+same pulses to the cursor when nothing holds a caret.
+
+**That keyboard has no Ctrl**, so the handle's `Ctrl+C/X/V/Z/Y/A` are a host
+convenience and never the way a note is edited on a board. The device path is a
+TOOLBAR -- SELECT, COPY, CUT, PASTE, UNDO, REDO -- carrying the Code tab's own
+labels and its `select_sticky` gesture, because it is the row a kid's hand has
+already learned. On the P4 and the Guitions long-form typing goes
 through a BLE keyboard or the phone's keyboard in the web view; on glass they
 read, tick checkboxes, make short edits and use the Config cards. No on-screen
 QWERTY is planned.

@@ -696,7 +696,7 @@ you, and it can ask for a few of the console's own powers by naming them in
 
 | permission | what the cart gets |
 |---|---|
-| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
+| `files` / `files:<kind>` | `files.save_text(name, text)` / `load_text` / `list` / `new_name` / `rename` / `delete` / `badge` — one kind only (`docs` = your documents, the ones Files shows) — **and `open_editor`, below** |
 | `clipboard` | nothing by name: it lets an editor handle's `cut`/`copy`/`paste` reach the console's own clipboard, so text travels between your app and the Code tab |
 | `prefs` | `prefs.get(key)` / `prefs.set(key, value)` — settings that survive a reboot, in this app's own corner |
 | `appearance` | `set_theme(name)` / `themes()` |
@@ -744,11 +744,16 @@ Everything else is on the handle you get back:
 | call | does |
 |---|---|
 | `ed.draw(x, y, w, h)` | render the document into that rect of your canvas, this frame. Add a `scale` for a big screen |
-| `ed.tap(x, y, click)` | forward a pointer. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
+| `ed.tap(x, y, click)` | forward a pointer PRESS. Answers what the tap MEANT: `("link", name)` a tapped `[[note]]` — open it — `("check", row)` a checkbox it just ticked, `("caret", None)` a plain place, `None` outside |
+| `ed.drag(x, y, down)` | forward what follows the press. It PANS — down the page, and sideways too in a mode that does not wrap — or, in SELECT mode, grows the selection to the finger |
+| `ed.nav(dx, dy)` | move the caret by cells. The console already feeds this from the T-Deck trackball and the host arrow keys while your handle has focus; call it yourself for an on-screen d-pad |
 | `ed.focus(on)` / `ed.focused()` | take or release the keyboard. While a handle has it, the console types into it and your own `key()`/`keyp()` read nothing |
 | `ed.key(code)` | feed one byte yourself (an on-screen key), focused or not |
 | `ed.undo()` / `ed.redo()` | one step. `ed.can_undo()` / `ed.can_redo()` for dimming a button |
 | `ed.select_all()` / `ed.copy()` / `ed.cut()` / `ed.paste()` | the clipboard. It is the CONSOLE's clipboard when your manifest asks for `clipboard`, and the document's own otherwise |
+| `ed.select_mode(on)` / `ed.selecting()` | turn SELECT mode on or off (no argument toggles). While it is on, a drag and the trackball EXTEND the selection instead of moving the caret — the only way to mark a range on a keyboard with no shift-arrow and no Ctrl |
+| `ed.has_selection()` / `ed.can_paste()` | is there anything to copy or cut, is there anything to paste — for dimming those buttons |
+| `ed.wraps()` | does this mode soft-wrap (`md`, `text`) or pan sideways (`code`, `json`) |
 | `ed.save()` | write it now. `ed.save(soft=True)` is the gentle one: it refuses a document its mode cannot parse and badges it instead |
 | `ed.badge()` | why the last save was refused, `""` when the document is fine. Print it |
 | `ed.dirty()` | are there edits no save has taken yet |
@@ -761,7 +766,10 @@ Everything else is on the handle you get back:
 **Markdown** is what a note is, and the handle renders it: `#` headings, `- [ ]`
 checkboxes you tick by tapping, `[[another note]]` links, and `![[a drawing]]`
 which puts one of Paint's pictures inline — by NAME, so your cart never handles
-the picture. Prose wraps; code and JSON scroll sideways instead.
+the picture. PROSE wraps — a note and a `.txt` both — while code and JSON pan
+sideways instead, because breaking one of their lines would lie about the file.
+A JSON document arrives INDENTED however it was written, and saves the way the
+person sees it.
 
 ```python
 def _init():

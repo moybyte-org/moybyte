@@ -236,7 +236,7 @@ proves it with one cart source opened twice, one manifest line apart.
 
 | permission | cart globals |
 |---|---|
-| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name`, scoped to ONE user-files kind (`docs` by default) |
+| `files` / `files:<kind>` | `files.list/load/save/load_text/save_text/rename/delete/duplicate/new_name/badge`, scoped to ONE user-files kind (`docs` by default). `new_name(title)` takes a name a person typed and answers what it may be stored as; `badge(name)` is the mode table's short label for a row (`MD`/`TXT`/`JSON`/`PY`/`LUA`) |
 | `prefs` | `prefs.get` / `prefs.set`, namespaced under the app's own title slug |
 | `appearance` | `set_theme(name)` / `themes()` |
 | `launch` | `open_app(id)` |
