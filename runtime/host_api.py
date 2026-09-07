@@ -327,6 +327,13 @@ class ConsoleDriver:
     def in_code_editor(self):
         return self.ws.screen == "menu" and self.ws.menu_view == "code"
 
+    def in_caret_surface(self):
+        """A surface where a DIRECTION means the caret, not the cursor: the
+        Editor's Code tab, and a cart's focused editor handle (#181). The one
+        gate, so the host arrows and the T-Deck trackball answer alike."""
+        return (self.in_code_editor()
+                or self.ws.focused_cart_editor() is not None)
+
     def in_text_mode(self):
         # A RUNNING cart that opted into text input via textmode(True) (#38/#42).
         # The pygame loop routes typed unicode to the cart's key() when this is true
@@ -351,7 +358,7 @@ class ConsoleDriver:
         # step here, and swallow them so the shell does not ALSO act on them.
         # (`_pan` stays wired for real trackball backends; the T-Deck's own
         # driver is untouched by this file.)
-        if not (dx or dy) and self._held_ext and self.in_code_editor():
+        if not (dx or dy) and self._held_ext and self.in_caret_surface():
             ndx = (1 if "right" in self._held_ext else 0) \
                 - (1 if "left" in self._held_ext else 0)
             ndy = (1 if "down" in self._held_ext else 0) \
@@ -362,7 +369,7 @@ class ConsoleDriver:
                     self._held_ext.discard(_n)
                     self.input.set_held(_n, False)
         if dx or dy:
-            if self.in_code_editor():
+            if self.in_caret_surface():
                 self.ws.nav(dx, dy)          # arrows move the caret in the editor
             else:
                 self.pointer.move(dx * PAN_SPEED, dy * PAN_SPEED)   # trackball nudge

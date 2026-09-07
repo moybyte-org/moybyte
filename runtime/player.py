@@ -462,6 +462,11 @@ class Player:
             prev._blur()
         self._focus_editor = handle
 
+    def focused_editor(self):
+        """The handle holding the keyboard, or None -- what `ws.nav` asks
+        before it spends a trackball roll on the cursor."""
+        return self._focus_editor
+
     def seed_cart_key(self, code):
         """Swallow the byte that took the keyboard, on the CART tier.
 

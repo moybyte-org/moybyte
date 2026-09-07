@@ -493,3 +493,173 @@ def test_wrapping_breaks_at_spaces_and_keeps_the_column_map(cols, expected):
 def test_an_unbroken_word_is_cut_rather_than_dropped():
     got = editor_handle._wrap("aaaaaaaaaa", 4, True)
     assert "".join(t for t, _c in got) == "aaaaaaaaaa"
+
+
+# ---------------------------------------------------------------------------
+# JSON: read it, edit it, save what the kid saw
+# ---------------------------------------------------------------------------
+
+def test_a_json_document_opens_indented_and_saves_what_the_kid_sees(tmp_path):
+    """A file a program wrote is one long line, which on 320px cannot be read
+    or repaired. Opening one INDENTS it; saving writes exactly what is on the
+    screen, and the loader parses either form."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "data.json", '{"a":[1,2],"b":{"c":true}}',
+                        ws.carts_root)
+    ed = _handle(ws, "data.json")
+    assert ed.mode() == text_modes.JSON
+    assert ed.text() == ('{\n  "a": [\n    1,\n    2\n  ],\n'
+                         '  "b": {\n    "c": true\n  }\n}')
+    assert ed.dirty() is False, "opening is not an EDIT -- nothing is rewritten"
+    ok, badge = ed.save()
+    assert (ok, badge) == (True, "")
+    on_card = moy_carts.load_file("docs", "data.json", ws.carts_root)
+    assert on_card == ed.text(), "what was saved is what was shown"
+    import json
+    assert json.loads(on_card) == {"a": [1, 2], "b": {"c": True}}
+
+
+def test_a_json_document_that_does_not_parse_opens_exactly_as_it_is(tmp_path):
+    """The reason to open a broken document is to repair it, and re-flowing
+    broken text would move the error away from where the badge points."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "bad.json", '{"a": [1,2,}', ws.carts_root)
+    ed = _handle(ws, "bad.json")
+    assert ed.text() == '{"a": [1,2,}'
+    assert ed.save(soft=True)[0] is False and ed.badge().startswith("INVALID")
+
+
+def test_an_empty_container_prints_flat(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "e.json", '{"a":{},"b":[]}', ws.carts_root)
+    assert _handle(ws, "e.json").text() == '{\n  "a": {},\n  "b": []\n}'
+
+
+# ---------------------------------------------------------------------------
+# panning: sideways where the mode does not wrap, down in every mode
+# ---------------------------------------------------------------------------
+
+def test_a_long_line_pans_sideways_where_the_mode_does_not_wrap(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "wide.json", '{"k": "' + "x" * 200 + '"}',
+                        ws.carts_root)
+    ed = _handle(ws, "wide.json")
+    _draw(ws, ed)
+    assert ed.wraps() is False
+    assert ed.ed.left == 0
+    ed.drag(300, 100, True)                 # the press origin
+    assert ed.drag(100, 100, True) is True  # ...dragged LEFT: see further right
+    assert ed.ed.left > 0
+    _draw(ws, ed)
+    assert ed.ed.left > 0, "a pan STAYS -- the caret does not drag it back"
+
+
+def test_a_wrapped_document_never_pans_sideways(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "prose", "word " * 200, ws.carts_root)
+    ed = _handle(ws, "prose")
+    _draw(ws, ed)
+    assert ed.wraps() is True
+    ed.drag(300, 100, True)
+    ed.drag(100, 100, True)
+    _draw(ws, ed)
+    assert ed.ed.left == 0
+
+
+def test_a_long_note_scrolls_down_under_a_drag_and_stays_there(tmp_path):
+    """Finding 5. `_keep_caret` used to PIN the caret on screen every draw, so
+    a pan away from it was undone by the very next frame and a long note could
+    not be read past its first screen."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "long", "\n".join("line %d" % i
+                                                  for i in range(80)),
+                        ws.carts_root)
+    ed = _handle(ws, "long")
+    _draw(ws, ed)
+    first = ed.ed.top
+    ed.drag(100, 180, True)                 # press near the bottom...
+    assert ed.drag(100, 20, True) is True   # ...and drag up: later lines
+    _draw(ws, ed)
+    assert ed.ed.top > first
+    _draw(ws, ed)
+    assert ed.ed.top > first, "and it holds across frames"
+    # ...but an EDIT brings the caret back, wherever the reader had gone.
+    ed.key(ord("!"))
+    _draw(ws, ed)
+    assert ed.ed.top == 0
+
+
+def test_the_caret_is_reachable_at_the_bottom_of_a_long_note(tmp_path):
+    """The 320x240 note page under the toolbar: 20 rows. The caret at line 79
+    has to be one of the rows the draw pass put on the screen."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "deep", "\n".join("l%d" % i for i in range(80)),
+                        ws.carts_root)
+    ed = _handle(ws, "deep")
+    _draw(ws, ed, (4, 40, 312, 186))
+    ed.nav(0, 200)                          # roll to the end
+    _draw(ws, ed, (4, 40, 312, 186))
+    assert ed.caret()[0] == 79
+    assert any(brow == 79 for brow, _si, _y in ed._vis), "the last line is drawn"
+
+
+# ---------------------------------------------------------------------------
+# SELECT mode: the T-Deck's only range gesture
+# ---------------------------------------------------------------------------
+
+def test_select_mode_makes_a_drag_extend_the_selection(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "pick", "abcdefghij", ws.carts_root)
+    ed = _handle(ws, "pick")
+    _draw(ws, ed)
+    assert ed.select_mode() is True
+    x0, _y0, cell, _lh, _s = ed._geom
+    y = _row_y(ed, 0)
+    ed.tap(x0 + cell // 2, y + 2)           # the press ANCHORS here
+    ed.drag(x0 + 5 * cell, y + 2, True)
+    assert ed.has_selection()
+    assert ed.ed.selected_text() == "abcde"
+    assert ed.copy() is True
+    ed.select_mode(False)
+    assert ed.has_selection() is False
+
+
+def test_select_mode_makes_a_roll_of_the_ball_extend_the_selection(tmp_path):
+    """The Code tab's `select_sticky` contract: with SELECT on, the same
+    directional input that moves the caret grows the range instead."""
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "roll", "abcdefghij", ws.carts_root)
+    ed = _handle(ws, "roll")
+    ed.select_mode(True)
+    ed.nav(4, 0)
+    assert ed.ed.selected_text() == "abcd"
+    ed.select_mode(False)
+    ed.nav(2, 0)
+    assert ed.has_selection() is False, "off again, a roll just moves the caret"
+
+
+def test_a_fresh_press_starts_a_fresh_selection(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "again", "abcdefghij", ws.carts_root)
+    ed = _handle(ws, "again")
+    _draw(ws, ed)
+    ed.select_mode(True)
+    x0, _y0, cell, _lh, _s = ed._geom
+    y = _row_y(ed, 0)
+    ed.tap(x0, y + 2)
+    ed.drag(x0 + 6 * cell, y + 2, True)
+    assert ed.ed.selected_text() == "abcdef"
+    ed.tap(x0 + 2 * cell, y + 2)            # press again: collapse + re-anchor
+    ed.drag(x0 + 4 * cell, y + 2, True)
+    assert ed.ed.selected_text() == "cd"
+
+
+def test_the_clipboard_state_the_toolbar_dims_on(tmp_path):
+    ws = build_ws(tmp_path)
+    moy_carts.save_file("docs", "state", "hello", ws.carts_root)
+    ed = _handle(ws, "state")
+    assert (ed.has_selection(), ed.can_paste()) == (False, False)
+    ed.select_all()
+    assert ed.has_selection() is True
+    ed.copy()
+    assert ed.can_paste() is True

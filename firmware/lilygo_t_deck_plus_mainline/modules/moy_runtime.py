@@ -484,9 +484,11 @@ def run_desktop(fps_cap=60):
         counts, click = ball.poll()
         nx = counts[3] - counts[2]              # right - left (raw pulses)
         ny = counts[1] - counts[0]              # down - up
-        if ws.screen == "menu" and ws.menu_view == "code":
-            ws.nav(nx, ny)                      # in the editor the ball moves the caret
-        else:
+        # The ball is this board's arrow keys, so a surface holding a CARET
+        # gets them and everything else gets the cursor. ws.nav owns that
+        # decision (the code editor AND a cart's focused editor handle, #181)
+        # and says whether it spent them.
+        if not ws.nav(nx, ny):
             dx = _cursor_delta(nx)
             dy = _cursor_delta(ny)
             if dx or dy:

@@ -26,6 +26,12 @@ that flips the T-Deck's keyboard, `Workstation._set_text_mode`, which no cart
 can call. Taps have no mode switch and no stray edge, and only the cart knows
 which rect it drew the editor into, so they stay the cart's to forward.
 
+DIRECTIONAL input follows the keyboard for the same reason (`nav`): on the
+T-Deck the trackball IS the arrow keys, and whether a roll is a caret or a
+mouse cursor is a question about which surface holds the keyboard -- so
+`Workstation.nav` answers it once, for the Code tab and for a cart's focused
+handle alike, and reports whether it spent the pulses.
+
 **The layout memo is per LINE, keyed by its text.** A line's laid-out form --
 its wrap segments, its heading level, its checkbox, its `[[link]]` spans -- is
 a pure function of the text and the column count, so an edit invalidates
@@ -177,6 +183,12 @@ class EditorHandle:
         self._m = _modes.MODES[self._mode]
         blob, err = files.load(kind, self._name)
         body = "\n".join(files.decode_text(blob)) if err is None else ""
+        # The mode's own reading layout, applied to the document as OPENED and
+        # not as an edit: JSON arrives from a program as one long line, and a
+        # kid cannot read or repair that on 320px. Nothing is dirty yet, so a
+        # note only opened is never rewritten -- the indented form is what the
+        # next SAVE writes, which is the form the kid was editing.
+        body = _modes.pretty(self._mode, body)
         self.ed = CodeEditor(body, 32, 12, clip=clip)
         self.history = History(self.ed, TextEditCodec())
         self.history.seed(files.history_ops(kind, self._name)[0] or [])
@@ -191,6 +203,8 @@ class EditorHandle:
         self._img = {}               # drawing name -> Image (None when absent)
         self._vis = ()               # the last drawn (buffer row, seg, y) map
         self._geom = (0, 0, CELL, LH, 1)   # x, y, cell, lh, scale
+        self._drag = None            # last pointer cell-origin of a live drag
+        self._caret_at = None        # the caret the last draw scrolled to see
 
     # -- what the skin asks ---------------------------------------------------
 
@@ -219,11 +233,21 @@ class EditorHandle:
 
     def set_text(self, body):
         self.ed.set_text(str(body)[:MAX_CHARS])
+        self._caret_at = None
         self._mark()
 
     def scroll(self, rows=0, cols=0):
-        """Pan the view without moving the caret (a drag, a scrollbar)."""
+        """Pan the view without moving the caret (a drag, a scrollbar).
+
+        A pan STAYS: `draw` scrolls the caret back into view only when the
+        caret itself moved, so reading the end of a long note does not fight
+        the caret left at the top."""
         self.ed.scroll(int(rows), int(cols))
+
+    def wraps(self):
+        """True when this mode soft-wraps prose; False when a long line pans
+        sideways instead (`text_modes.Mode.wrap`)."""
+        return bool(self._m.wrap)
 
     # -- the keyboard ---------------------------------------------------------
 
@@ -288,6 +312,22 @@ class EditorHandle:
             self._close_burst()
         return True
 
+    def nav(self, dx, dy):
+        """Feed DIRECTIONAL input -- the T-Deck trackball, a host arrow key.
+
+        It moves the CARET and the view follows, which is `ws.nav`'s contract
+        for the Code tab held one rung down: on the writing board the ball IS
+        the arrow keys, and a text surface that spent them on a mouse cursor
+        would leave the caret unreachable. In SELECT mode the same motion
+        EXTENDS the selection, because `select_sticky` is what `move` reads.
+        True when it moved something."""
+        dx = int(dx or 0)
+        dy = int(dy or 0)
+        if not (dx or dy):
+            return False
+        self.ed.move(dy, dx)
+        return True
+
     # -- undo / clipboard -----------------------------------------------------
 
     def can_undo(self):
@@ -316,6 +356,35 @@ class EditorHandle:
     def select_all(self):
         self.ed.select_all()
         return True
+
+    def select_mode(self, on=None):
+        """Turn SELECT mode on or off (`None` toggles); returns the new state.
+
+        The Code tab's `sel` tool, one rung down and for the same reason: the
+        T-Deck has no shift-arrow and no Ctrl, so the only way a kid marks a
+        range is a MODE in which the caret -- moved by a drag or the trackball
+        -- extends the selection instead of collapsing it. Turning it on
+        anchors at the caret, so the very next move already selects."""
+        on = (not self.ed.select_sticky) if on is None else bool(on)
+        self.ed.select_sticky = on
+        if on:
+            self.ed.begin_select()
+        else:
+            self.ed.clear_select()
+        return on
+
+    def selecting(self):
+        """True while SELECT mode is on -- what a skin lights its chip on."""
+        return bool(self.ed.select_sticky)
+
+    def has_selection(self):
+        """True when COPY and CUT have something to act on."""
+        return self.ed.has_selection()
+
+    def can_paste(self):
+        """True when there is clipboard text to paste (the system lane's when
+        one is attached, else this handle's own)."""
+        return bool(self.ed.paste_text())
 
     def copy(self):
         return self.ed.copy()
@@ -381,6 +450,7 @@ class EditorHandle:
         self._memo_old = {}
         self._img = {}
         self._vis = ()
+        self._drag = None
 
     # -- drawing --------------------------------------------------------------
 
@@ -402,6 +472,7 @@ class EditorHandle:
             self.ed.set_view_size(cols, rows)
             self._memo = {}
             self._memo_old = {}
+            self._caret_at = None      # a resize re-flows: show the caret again
         self._geom = (int(x), int(y), cell, lh, scale)
         if self._m.wrap:
             self.ed.left = 0              # wrapped prose never scrolls sideways
@@ -425,28 +496,13 @@ class EditorHandle:
         (already toggled), `("caret", None)` a plain place, or None when the
         point is outside the editor. Without `click` the answer is only
         whether the point is INSIDE -- nothing moves and nothing toggles."""
-        x0, y0, cell, lh, _scale = self._geom
-        px = int(px)
-        py = int(py)
-        row = None
-        for brow, seg, yy in self._vis:
-            if yy <= py < yy + lh:
-                row = (brow, seg)
-                break
-        if row is None:
+        got = self._cell_at(px, py)
+        if got is None:
             return None
-        brow, seg = row
-        line = self.ed.lines[brow]
-        laid = self._row(line, self._view[0])
-        text, base = laid.segs[seg] if seg < len(laid.segs) else ("", 0)
-        if not self._m.wrap:
-            base = self.ed.left
-            text = line[base:base + self._view[0]]
-        col = base + max(0, (px - x0) // cell)
-        if col > base + len(text):
-            col = base + len(text)
+        brow, col, laid = got
         if not click:
             return ("caret", None)
+        self._drag = (int(px), int(py))   # a drag pans/selects from HERE
         if self._mode == _modes.MD:
             if laid.check is not None and abs(col - laid.check[0]) <= 1:
                 self._toggle_check(brow, laid)
@@ -454,16 +510,91 @@ class EditorHandle:
             for c0, c1, target in laid.links:
                 if c0 <= col < c1:
                     return ("link", target)
-        self.ed.row = brow
-        self.ed.col = min(col, len(line))
-        self.ed.sel = None
+        # The press edge COLLAPSES even in SELECT mode and re-anchors here --
+        # the Code tab's `_select_pointer` rule, so a fresh drag selects a
+        # fresh range instead of growing the last one.
+        self._place(brow, col, False)
+        if self.ed.select_sticky:
+            self.ed.begin_select()
         return ("caret", None)
 
+    def drag(self, px, py, down):
+        """One pointer frame that is NOT the press edge -- what happens while
+        the finger moves. True when the view or the selection changed.
+
+        In SELECT mode it extends the selection to the finger. Otherwise it
+        PANS, content following the finger, sideways too in the modes that do
+        not wrap -- `code_layer._code_drag`'s gesture, because it is the one a
+        kid's hand already learned in the Code tab."""
+        if not down:
+            self._drag = None
+            return False
+        px = int(px)
+        py = int(py)
+        if self._drag is None:
+            self._drag = (px, py)
+            return False
+        if self.ed.select_sticky:
+            got = self._cell_at(px, py)
+            if got is None:
+                return False
+            self._place(got[0], got[1], True)
+            return True
+        _x, _y, cell, lh, _scale = self._geom
+        drows = (py - self._drag[1]) // lh
+        dcols = 0 if self._m.wrap else (px - self._drag[0]) // cell
+        if not (drows or dcols):
+            return False
+        self._drag = (px, py)
+        self.ed.scroll(-drows, -dcols)
+        return True
+
     # -- internals ------------------------------------------------------------
+
+    def _cell_at(self, px, py):
+        """`(buffer row, column, laid-out row)` under `(px, py)`, or None --
+        the one place a pixel becomes a text cell, for both `tap` and
+        `drag`."""
+        x0, _y0, cell, lh, _scale = self._geom
+        px = int(px)
+        py = int(py)
+        for brow, seg, yy in self._vis:
+            if not (yy <= py < yy + lh):
+                continue
+            line = self.ed.lines[brow]
+            laid = self._row(line, self._view[0])
+            text, base = laid.segs[seg] if seg < len(laid.segs) else ("", 0)
+            if not self._m.wrap:
+                base = self.ed.left
+                text = line[base:base + self._view[0]]
+            col = base + max(0, (px - x0) // cell)
+            if col > base + len(text):
+                col = base + len(text)
+            return (brow, min(col, len(line)), laid)
+        return None
+
+    def _place(self, brow, col, select):
+        """Put the caret on a WHOLE-document cell. `CodeEditor.place` cannot:
+        it takes a row from the top of the view, and a wrapped line is several
+        visual rows, so the mapping is the draw pass's (`_cell_at`) and only
+        the clamping is the editor's."""
+        ed = self.ed
+        if select:
+            ed.begin_select()
+        else:
+            ed.sel = None
+        ed.row = max(0, min(len(ed.lines) - 1, int(brow)))
+        ed.col = max(0, min(len(ed.lines[ed.row]), int(col)))
+        if not self._m.wrap:
+            ed._scroll()          # the sideways window follows the caret
 
     def _mark(self):
         self._unsaved = True
         self._edit_ms = _ticks_ms()
+        # An EDIT always re-shows the caret, wherever the reader had panned to:
+        # the text just changed under it, and an undo can drop lines out from
+        # under the view entirely.
+        self._caret_at = None
 
     def _autosave(self):
         if not self.dirty():
@@ -524,8 +655,18 @@ class EditorHandle:
     def _keep_caret(self, cols, rows):
         """Scroll so the caret's VISUAL row is on screen. A wrapped line is
         several rows, so `CodeEditor.top` (a buffer line) cannot answer this
-        on its own."""
+        on its own.
+
+        FOLLOWS the caret rather than pinning it: a caret that has not moved
+        since the last draw asks for nothing, so a drag or a scrollbar can
+        take the view anywhere and it stays there. Pinning it every frame
+        meant a long note could not be read past its first screen -- the pan
+        landed and the next frame undid it."""
         ed = self.ed
+        here = (ed.row, ed.col)
+        if here == self._caret_at:
+            return
+        self._caret_at = here
         if ed.row < ed.top:
             ed.top = ed.row
             return

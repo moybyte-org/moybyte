@@ -3813,13 +3813,32 @@ class Workstation:
     # draw/tap it needs stay on the shell, reached via _draw_cart_bar / _cart_bar_tap.)
 
     def nav(self, dx, dy):
-        # Directional input (host arrows / device trackball). In the code editor it
-        # moves the CARET (the view follows it); elsewhere the launcher/desktop are
-        # pointer-driven, so this is a no-op there.
+        # Directional input (host arrows / device trackball). It belongs to
+        # whichever surface holds a CARET -- the Editor's code tab, and a
+        # cart's focused editor handle (#181: Notes is a cart, and the T-Deck's
+        # ball IS its arrow keys, so a note whose caret the ball could not
+        # reach would be unwritable past the first screen). Elsewhere the
+        # launcher/desktop are pointer-driven and this is a no-op.
+        #
+        # Returns True when it was CONSUMED, which is the board loop's
+        # question: the same pulses drive the cursor when no caret wants them.
+        if not (dx or dy):
+            return False
         if (self.wm.top_is("menu") and self.menu_view == "code"    # Stage 6d
-                and self.editor is not None and (dx or dy)):
+                and self.editor is not None):
             self.editor.move(dy, dx)
             self._dirty = True             # caret moved -> redraw (#44)
+            return True
+        handle = self.focused_cart_editor()
+        if handle is not None:
+            handle.nav(dx, dy)
+            self._dirty = True
+            return True
+        return False
+
+    def focused_cart_editor(self):
+        """The cart editor handle holding the keyboard, or None."""
+        return self.player.focused_editor()
 
     # -- frame + drawing -----------------------------------------------------
 
