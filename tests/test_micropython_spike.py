@@ -1548,15 +1548,19 @@ def test_paint_image_assets_wired_device_and_carts():
     assert '"images": images,' in carts                 # load() exposes them on the cart
     assert 'images = cart.get("images")' in carts       # seed_builtins writes them back
 
-    # The device make_api takes `images` and exposes the image(name) accessor, decoding
-    # a .moyimg into an Image via the deflate (zlib) inflate mirror of the host.
+    # The device make_api takes `images` and exposes the image(name) accessor.
     assert "pmem=None, wifi=None, images=None, scenes=None," in runtime
     assert "net=None, gpio=None, flags=None, owner=\"cart\"):" in runtime
-    # _decode_moyimg lives in the unified cart_api since 2026-08-17 (one body
-    # for every tier; the MicroPython lane inflates via `deflate`).
+    # _decode_moyimg lives in the unified cart_api since 2026-08-17, and since
+    # 2026-09-07 it is a FORWARD: the drawing tiers used to inflate the envelope
+    # themselves while the store read Paint's second codec, which is how a
+    # picture came back blank on whichever tier held the other half.
     cart_api_src = Path("runtime/cart_api.py").read_text(encoding="utf-8")
     assert "def _decode_moyimg(text):" in cart_api_src
-    assert "deflate.DeflateIO(io.BytesIO(raw), deflate.ZLIB).read()" in cart_api_src
+    assert "return moy_image.decode_moyimg(text)" in cart_api_src
+    assert "deflate" not in cart_api_src and "zlib" not in cart_api_src
+    image_src = Path("runtime/moy_image.py").read_text(encoding="utf-8")
+    assert "deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB).read()" in image_src
     assert 'im._paint = True' in runtime                 # tags the bake/ship fast paths
 
     # DeviceCanvas.spr bakes a paint image index->565 ONCE via blit_indices, then blit565s.

@@ -1767,6 +1767,51 @@ static mp_obj_t moy_gfx_decode_runs(mp_obj_t dst_obj, mp_obj_t npix_obj,
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(moy_gfx_decode_runs_obj, moy_gfx_decode_runs);
 
+// encode_runs(src) -> the (count, value) byte pairs decode_runs reads back.
+//
+// The other half of the pair, and native for the same reason: interpreted, a
+// 320x240 walk is the 0.5-1.7s the time-sliced cover builder was built around.
+// It is reached from moy_image.pack_runs, which is how a cover blob becomes the
+// runs the Library shelf caches -- since 2026-09-07 a .moyimg holds a deflate
+// stream, so the runs are DERIVED from the raster rather than read off the file.
+//
+// Two passes: count the runs, then allocate exactly that. The one-pass version
+// has to size for the worst case (2 bytes per pixel -- 150 KB for one cover on
+// a board that is trying to draw a shelf), which is the allocation this whole
+// pipeline exists to avoid.
+static mp_obj_t moy_gfx_encode_runs(mp_obj_t src_obj) {
+    mp_buffer_info_t sbi;
+    mp_get_buffer_raise(src_obj, &sbi, MP_BUFFER_READ);
+    const uint8_t *src = (const uint8_t *)sbi.buf;
+    size_t total = sbi.len;
+    size_t pairs = 0;
+    for (size_t pos = 0; pos < total; ) {
+        uint8_t value = src[pos] & 63;
+        size_t count = 1;
+        while (pos + count < total && count < 255 && (src[pos + count] & 63) == value) {
+            count++;
+        }
+        pairs++;
+        pos += count;
+    }
+    vstr_t vstr;
+    vstr_init_len(&vstr, pairs * 2);
+    uint8_t *dst = (uint8_t *)vstr.buf;
+    size_t i = 0;
+    for (size_t pos = 0; pos < total; ) {
+        uint8_t value = src[pos] & 63;
+        size_t count = 1;
+        while (pos + count < total && count < 255 && (src[pos + count] & 63) == value) {
+            count++;
+        }
+        dst[i++] = (uint8_t)count;
+        dst[i++] = value;
+        pos += count;
+    }
+    return mp_obj_new_bytes_from_vstr(&vstr);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(moy_gfx_encode_runs_obj, moy_gfx_encode_runs);
+
 // crop_index(dst, dw, dh, src, sw, sh, ox, oy, cw, ch) -- nearest-sample the
 // (ox, oy, cw, ch) window of an INDEXED source (1 byte/pixel) into a dw x dh
 // indexed destination. The cover-art crop (#155).
@@ -2044,6 +2089,7 @@ static const mp_rom_map_elem_t moy_gfx_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_blit_indices), MP_ROM_PTR(&moy_gfx_blit_indices_obj) },
     { MP_ROM_QSTR(MP_QSTR_text),       MP_ROM_PTR(&moy_gfx_text_obj) },
     { MP_ROM_QSTR(MP_QSTR_decode_runs), MP_ROM_PTR(&moy_gfx_decode_runs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_encode_runs), MP_ROM_PTR(&moy_gfx_encode_runs_obj) },
     { MP_ROM_QSTR(MP_QSTR_crop_index), MP_ROM_PTR(&moy_gfx_crop_index_obj) },
     { MP_ROM_QSTR(MP_QSTR_pack_strip), MP_ROM_PTR(&moy_gfx_pack_strip_obj) },
     #ifdef MOY_GFX_HAS_MEMBENCH

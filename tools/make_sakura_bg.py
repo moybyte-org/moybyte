@@ -43,11 +43,11 @@ import math
 import os
 import random
 import sys
-import zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from runtime import moy_image  # noqa: E402
 from runtime.palette import MOY64  # noqa: E402  (preview colours only)
 from tools import pngwrite  # noqa: E402
 
@@ -523,14 +523,13 @@ def write_png(path, buf):
 
 
 def encode_bg(buf):
-    """The legacy zlib .moyimg envelope -- what both carts' bg has always used
-    (a dense 320x240 scene compresses far better than the RLE codec, and every
-    decoder dispatches on the absent `codec` field)."""
-    import base64
-    return json.dumps({
-        "format": "moyimg-v1", "w": W, "h": H,
-        "data": base64.b64encode(zlib.compress(bytes(buf), 9)).decode("ascii"),
-    })
+    """The `.moyimg` envelope, through the codec every writer shares.
+
+    Not a local `zlib.compress`: the window is PINNED (moy_image.MOYIMG_WBITS)
+    so a picture written here and one written by Paint on a board are the same
+    stream, and a tool with its own copy of that number is how they stop being.
+    """
+    return moy_image.encode_moyimg(W, H, bytes(buf))
 
 
 def render():

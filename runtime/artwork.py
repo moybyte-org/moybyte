@@ -949,6 +949,13 @@ class ArtworkService:
     (runtime/app_context.py). Its prefs namespace is "paint" and not its id:
     `paint_doc` has been the key in real cards' system.json since #108."""
 
+    # The largest document Paint holds -- and it is Paint's OWN largest, the
+    # 512x300 desktop wallpaper it seeds and edits, not a number picked for the
+    # gate below. Smaller pictures are editable at every size, because
+    # PaintDocument.load re-sizes to what it is given and the view zooms out to
+    # the half-scale thumb when the panel is narrower than the picture. So
+    # "TOO BIG TO EDIT" is about a picture bigger than anything this system
+    # makes; a 320x240 seed background is ordinary work.
     MAX_W = 512
     MAX_H = 300
     WALL_TITLE = "My Art"
@@ -1096,8 +1103,8 @@ class ArtworkService:
                 self._read_only = True
                 self._why = "CAN'T READ THIS PICTURE"
         elif self._cached[0] > self.MAX_W or self._cached[1] > self.MAX_H:
-            # Too big for Paint's canvas. It still OPENS -- refusing a picture
-            # outright is what "no editor for this" was, and a kid with a
+            # Bigger than Paint's largest document. It still OPENS -- refusing a
+            # picture outright is what "no editor for this" was, and a kid with a
             # picture they cannot look at learns nothing.
             self._read_only = True
             self._why = "TOO BIG TO EDIT"

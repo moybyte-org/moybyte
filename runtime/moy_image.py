@@ -1,14 +1,13 @@
 # The portable moyimg codec + cover-thumb sidecars, extracted from moy_carts.py
 # (which re-exports every name here, so store call sites and tests are unchanged).
 #
-# encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob (Paint's MicroPython-
-# safe RLE codec; legacy zlib assets stay valid -- decoders dispatch on ``codec``).
-# moyimg_runs: the header+runs parse for the time-sliced cover builder.
+# encode/decode_moyimg: the ``moyimg-v1`` indexed-bitmap blob -- ONE format.
+# moyimg_runs: the same blob as (count, value) runs, for the cover builder.
 # The wallpaper-preview sidecar cache (the Appearance monitor's computed frame)
-# reads instead of re-running the 0.5-1.7s RLE decode -- regenerable, plain writes,
+# reads instead of re-rendering the cart -- regenerable, plain writes,
 # readers validate magic + size + stamp.
 #
-# MicroPython-safe (json + binascii only; _mkdir from the moy_fs leaf).
+# MicroPython-safe (json + binascii + deflate; _mkdir from the moy_fs leaf).
 
 import json
 
@@ -84,84 +83,160 @@ def _b64_decode(text):
     return _binascii.a2b_base64(text)
 
 
-def encode_moyimg(width, height, indices):
-    """Encode an indexed bitmap as a portable ``moyimg-v1`` blob.
+# --- the one wire form -------------------------------------------------------
+#
+# A ``.moyimg`` is a JSON header {format, w, h, data} where `data` is base64 of
+# a ZLIB stream of w*h MOY64 palette indices, one byte per pixel. ONE
+# format, since 2026-09-07: Paint used to write a second, uncompressed RLE codec
+# (`codec: "rle"`) because saving needed no compressor, and measured on every
+# shipped image that form is 2.5-10x BIGGER -- a 320x240 cover 72 KB against 26,
+# and big flat strings are what the S3 heap fails on first. The RLE reader
+# survives for exactly one generation, inside `moy_carts.migrate_images`, and
+# nowhere else: no live decoder speaks two formats.
+#
+# The compressor is the same two-tier seam the packed seed roster reads through
+# (`moy_carts._packed_stream`): MicroPython replaced `zlib` with `deflate` in
+# v1.21, so a board has DeflateIO and no zlib, and CPython has zlib and no
+# deflate. Unlike the roster's raw stream this one is standard ZLIB-framed,
+# which is what makes the pre-2026-09 assets already in this format rather than
+# a legacy of it -- nothing had to be rewritten to make them the one form.
+#
+# WBITS is pinned on the WRITE side only: a zlib header carries its own window
+# size, so a reader that asks for none takes the stream's. That is what lets a
+# 15-bit stream written by an old CPython tool and a 12-bit one written by Paint
+# on a board read identically on every tier. 12 is measured, not chosen: across
+# every image this repo ships it lands within 0.4% of the best ratio any window
+# reaches (92,081 B total against 91,745 at 13 and 92,321 at 15) for a 4 KB
+# window instead of 32 KB -- and the window is a live heap allocation on a board
+# that is compressing a kid's drawing.
+MOYIMG_WBITS = 12
 
-    Paint uses a tiny RLE codec instead of zlib so saving works in the shared
-    runtime without depending on a board-specific compressor. Existing zlib
-    assets remain valid; decoders dispatch on the optional ``codec`` field.
-    Runs are stored as ``count, palette_index`` byte pairs.
-    """
+
+def _deflate(data):
+    """`data` -> a zlib stream at MOYIMG_WBITS. `deflate` first: it is the one
+    a board has, and the browser build freezes a decompress-only `zlib` shim
+    that would answer the import and then have no `compress`."""
+    try:
+        import deflate
+    except ImportError:                  # CPython (host suites, the tools)
+        import zlib
+        comp = zlib.compressobj(9, zlib.DEFLATED, MOYIMG_WBITS)
+        return comp.compress(data) + comp.flush()
+    import io as _io
+    buf = _io.BytesIO()
+    stream = deflate.DeflateIO(buf, deflate.ZLIB, MOYIMG_WBITS)
+    stream.write(data)
+    stream.close()                       # the deflate tail; `buf` stays open
+    return buf.getvalue()
+
+
+def _inflate(raw):
+    """A zlib stream -> its bytes, with the window the STREAM declares."""
+    try:
+        import deflate
+    except ImportError:                  # CPython
+        import zlib
+        return zlib.decompress(raw)
+    import io as _io
+    return deflate.DeflateIO(_io.BytesIO(raw), deflate.ZLIB).read()
+
+
+def encode_moyimg(width, height, indices):
+    """Encode an indexed bitmap as a portable ``moyimg-v1`` blob."""
     w = int(width)
     h = int(height)
     if w <= 0 or h <= 0 or len(indices) != w * h:
         raise ValueError("bad artwork size")
-    packed = bytearray()
-    pos = 0
-    total = len(indices)
-    while pos < total:
-        value = int(indices[pos]) & 63
-        count = 1
-        while pos + count < total and count < 255 \
-                and (int(indices[pos + count]) & 63) == value:
-            count += 1
-        packed.append(count)
-        packed.append(value)
-        pos += count
+    if not isinstance(indices, (bytes, bytearray, memoryview)):
+        indices = bytes(bytearray(indices))   # a list of ints from a cart
     return json.dumps({
         "format": "moyimg-v1", "w": w, "h": h,
-        "codec": "rle", "data": _b64_encode(packed),
+        "data": _b64_encode(_deflate(indices)),
     })
 
 
-def moyimg_runs(text):
-    """Parse a ``.moyimg`` into ``(w, h, packed_rle_bytes)`` WITHOUT decoding
-    the pixels -- the JSON header + base64 only. The Library shelf's
-    time-sliced cover builder (console._CoverJob) walks the returned
-    (count, value) run pairs incrementally across frames; ``decode_moyimg``
-    below stays the one-shot decoder. None on any malformed input."""
-    try:
-        meta = json.loads(text)
-        w = int(meta["w"])
-        h = int(meta["h"])
-        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
-            return None
-        packed = _b64_decode(meta["data"])
-        if len(packed) & 1:
-            return None
-        return (w, h, packed)
-    except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
-        return None
-
-
 def decode_moyimg(text):
-    """Decode Paint's RLE ``.moyimg`` form into ``(w, h, bytes)``.
+    """Decode a ``.moyimg`` into ``(w, h, bytes)``, or None when it is not one.
 
-    The host/device drawing backends retain their legacy-zlib fallback. Keeping
-    the shared-store decoder focused on RLE avoids importing compression support
-    merely to load Paint's own persisted artwork.
-    """
+    None rather than a raise all the way down: a corrupt or foreign blob is
+    treated as an absent picture by every caller, on every tier."""
     try:
         meta = json.loads(text)
         w = int(meta["w"])
         h = int(meta["h"])
-        if w <= 0 or h <= 0 or meta.get("codec") != "rle":
+        if w <= 0 or h <= 0:
             return None
-        packed = _b64_decode(meta["data"])
-        out = bytearray()
-        if len(packed) & 1:
+        pix = _inflate(_b64_decode(meta["data"]))
+        if len(pix) != w * h:
             return None
-        for i in range(0, len(packed), 2):
-            count = packed[i]
-            value = packed[i + 1]
-            if count < 1 or value > 63 or len(out) + count > w * h:
-                return None
-            out.extend(bytes((value,)) * count)
-        if len(out) != w * h:
-            return None
-        return (w, h, bytes(out))
+        return (w, h, pix)
     except Exception:  # noqa: BLE001 -- a corrupt drawing is treated as absent
         return None
+
+
+def pack_runs(pix):
+    """An indexed raster -> ``(count, value)`` byte pairs, count 1..255.
+
+    The mirror of moy_gfx's `decode_runs`, and native for the same reason: a
+    320x240 walk costs 0.5-1.7s interpreted on a board, which is the whole
+    history of the time-sliced cover builder. The Python body below is the host
+    path and the fallback, and produces identical bytes."""
+    native = _encode_runs()
+    if native is not None:
+        got = native(pix)
+        if got is not None:
+            return got
+    out = bytearray()
+    pos = 0
+    total = len(pix)
+    while pos < total:
+        value = pix[pos] & 63
+        count = 1
+        while pos + count < total and count < 255 \
+                and (pix[pos + count] & 63) == value:
+            count += 1
+        out.append(count)
+        out.append(value)
+        pos += count
+    return bytes(out)
+
+
+_ENCODE_RUNS = False       # False = not looked up yet; None = this build has none
+
+
+def _encode_runs():
+    """moy_gfx.encode_runs when this build has one. Looked up LAZILY: moy_image
+    is staged to targets with no compositor at all (the headless Zero), and on
+    the host `moy_gfx` is not an importable module -- gfx_binding is."""
+    global _ENCODE_RUNS
+    if _ENCODE_RUNS is False:
+        try:
+            import moy_gfx
+            _ENCODE_RUNS = getattr(moy_gfx, "encode_runs", None)
+        except ImportError:
+            _ENCODE_RUNS = None
+    return _ENCODE_RUNS
+
+
+def moyimg_runs(text):
+    """A ``.moyimg`` as ``(w, h, packed_run_bytes)``, or None.
+
+    What the Library shelf caches per cart (cover_cache._runs_load): the
+    size-INDEPENDENT half of a cover build, ~15KB against the 77KB raster whose
+    caching was measured and rejected. `decode_moyimg` stays the one-shot
+    decoder for everything that wants pixels.
+
+    The runs used to be READ off the file and are derived from the raster now,
+    which costs a 77KB transient per cover LOAD. Accepted, not overlooked: a
+    load happens once per cart per session, on an idle prefetch frame, beside a
+    ~47ms flash read on the same call -- where the 116ms this size of allocation
+    measured on P4 glass was a per-BUILD cost, every cover at every size, which
+    is why _CoverJob reuses an off-heap scratch and this does not. If it ever
+    shows up, that scratch is the lever."""
+    got = decode_moyimg(text)
+    if got is None:
+        return None
+    return (got[0], got[1], pack_runs(got[2]))
 
 
 # --- cover thumbnails (#66 launcher shelf): decoded-crop sidecars -------------

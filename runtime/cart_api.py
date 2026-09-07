@@ -28,7 +28,6 @@ frozen name is unchanged. tests/test_cart_api_unified.py pins the identity:
 one function OBJECT, not three agreeing copies.
 """
 
-import json
 import random
 
 try:                                    # staged/frozen flat namespace (boards, web)
@@ -84,35 +83,18 @@ def color(name_or_index):
 
 def _decode_moyimg(text):
     """Decode a .moyimg paint-image asset (#63 Fold 3) into (w, h, index_bytes),
-    or None on any error (a bad image just doesn't draw). The blob is a JSON
-    header {w, h, data} where `data` is base64 of the zlib-compressed MOY64
-    index bitmap (1 byte/pixel). The shared moy_carts.decode_moyimg handles the
-    current codec on every target; the legacy envelope inflates through zlib
-    where CPython provides it and MicroPython's `deflate` where it doesn't."""
+    or None on any error (a bad image just doesn't draw).
+
+    A forward, not a decoder. There was a second body here -- the drawing tiers
+    inflated the compressed envelope themselves while the store read Paint's RLE
+    one -- and a picture whose format the caller had not thought of came back as
+    a silently blank image on whichever tier held the other half."""
     try:
         try:
-            import moy_carts
+            import moy_image
         except ImportError:
-            from runtime import moy_carts
-        shared = moy_carts.decode_moyimg(text)
-        if shared is not None:
-            return shared
-        import binascii
-        meta = json.loads(text)
-        w = int(meta["w"])
-        h = int(meta["h"])
-        raw = binascii.a2b_base64(meta["data"])
-        try:
-            import zlib
-            idx = zlib.decompress(raw)
-        except ImportError:
-            # MicroPython target: `deflate` is its zlib. Without this the
-            # legacy zlib envelope (sakura's bg) silently decoded to None,
-            # so the Lua/paint background never drew in the browser.
-            import deflate
-            import io
-            idx = deflate.DeflateIO(io.BytesIO(raw), deflate.ZLIB).read()
-        return (w, h, idx)
+            from runtime import moy_image
+        return moy_image.decode_moyimg(text)
     except Exception:  # noqa: BLE001 -- bad/absent image -> caller gets None
         return None
 

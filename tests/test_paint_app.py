@@ -42,7 +42,7 @@ def test_paint_and_my_art_are_well_formed_system_carts():
     assert json.loads((wall / "manifest.json").read_text())["type"] == "wallpaper"
 
 
-def test_rle_moyimg_roundtrip_handles_long_runs_and_all_palette_indices():
+def test_moyimg_roundtrip_handles_long_runs_and_all_palette_indices():
     raw = bytearray()
     raw.extend(bytes((7,)) * 700)
     raw.extend(bytes(range(64)))
@@ -50,7 +50,7 @@ def test_rle_moyimg_roundtrip_handles_long_runs_and_all_palette_indices():
     blob = moy_carts.encode_moyimg(40, 20, raw)
     meta = json.loads(blob)
     assert meta["format"] == "moyimg-v1"
-    assert meta["codec"] == "rle"
+    assert "codec" not in meta, "one format -- there is nothing to dispatch on"
     assert moy_carts.decode_moyimg(blob) == (40, 20, bytes(raw))
     assert host_app._decode_moyimg(blob) == (40, 20, bytes(raw))
 
@@ -171,3 +171,52 @@ def test_desktop_paint_reflows_and_wallpaper_maps_512x300_exactly_2x(tmp_path):
         assert out.pix(dx, dy) == c
         assert out.pix(dx + 1, dy) == c
         assert out.pix(dx, dy + 1) == c
+
+
+def test_a_saved_drawing_reopens_as_the_same_pixels(tmp_path):
+    """Paint's own round trip, through the store and back into the editor --
+    the pair of verbs the one-format change moved. Anything that survives
+    `encode_moyimg` but not the decoder on the way back reads as a blank canvas
+    with a kid's drawing gone, which is not a failure anything else would catch.
+    """
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    app = _open_paint(ws)
+    doc = app.doc
+    for i in range(0, len(doc.pix), 7):
+        doc.pix[i] = (i // 7) & 63
+    painted = bytes(doc.pix)
+    assert app._save() is True
+    name = ws.artwork.doc_name()
+
+    fresh = host_app.build_workstation(carts)
+    fresh.artwork.open_named(name, "drawings")
+    reopened = _open_paint(fresh)
+    reopened.open()
+    assert bytes(reopened.doc.pix) == painted
+    assert (reopened.doc.W, reopened.doc.H) == (doc.W, doc.H)
+    assert fresh.artwork.editable(), fresh.artwork.why_read_only()
+
+
+def test_the_seed_background_opens_in_paint_and_is_editable(tmp_path):
+    """Sakura's `images/bg.moyimg` is a 320x240 picture inside a cart, and it
+    is the one every kid meets: the wallpaper they can take apart. It used to
+    open READ-ONLY saying "CAN'T READ THIS PICTURE" -- not because of its size
+    but because the store's decoder spoke a different codec than the tool that
+    wrote it, which is the whole argument for there being one format."""
+    carts = str(tmp_path / "carts")
+    ws = host_app.build_workstation(carts)
+    cart = next(c for c in ws.carts.all if c.get("title") == "Sakura")
+    assert ws.open_image("images/bg.moyimg", cart=cart)
+
+    art = ws.artwork
+    got = art.load()
+    assert got is not None, art.why_read_only()
+    assert (got[0], got[1]) == (320, 240) and len(got[2]) == 320 * 240
+    assert art.editable() and art.why_read_only() == ""
+    assert (320, 240) <= (art.MAX_W, art.MAX_H)
+
+    app = _open_paint(ws)
+    app.open()
+    assert (app.doc.W, app.doc.H) == (320, 240)
+    assert bytes(app.doc.pix) == got[2]

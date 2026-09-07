@@ -72,3 +72,12 @@
 // dozen carts grows the launcher's heap 1.5MB at boot. 3MB keeps the biggest
 // cart loadable behind that. See tools/esp32_build_lib.sh.
 #define MOYBYTE_GC_SPLIT_RESERVE            (3072 * 1024)
+
+// Paint SAVES pictures, and since 2026-09-07 a `.moyimg` is a deflate stream --
+// ONE format, the compressed one (runtime/moy_image.py). The esp32 port sits at
+// MICROPY_CONFIG_ROM_LEVEL_EXTRA_FEATURES, which builds `deflate` READ-ONLY:
+// upstream gates the compressor at FULL_FEATURES, so without this line a board
+// can open every picture on the card and cannot write one.
+// tests/test_moy_image.py pins all five boards, because a board that is missed
+// fails at the moment a kid presses save and nowhere earlier.
+#define MICROPY_PY_DEFLATE_COMPRESS         (1)

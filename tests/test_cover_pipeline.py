@@ -457,3 +457,53 @@ def test_the_cover_blob_read_takes_the_storage_gate(tmp_path):
 
     assert reads, "no cover blob was read -- retarget this test"
     assert 0 not in reads, "a cover blob was read outside the storage gate"
+
+
+def _card_from_runs(packed, sw, sh, w, h):
+    """The card the retired RLE blob's runs would have produced, through the
+    same builder the shelf uses."""
+    from runtime.cover_cache import _CoverJob
+    job = _CoverJob((sw, sh, bytes(packed)), w, h)
+    while not job.done:
+        job.step(0)
+    return bytes(job.img.pix)
+
+
+def test_the_same_picture_makes_the_same_card_whichever_codec_wrote_it(tmp_path):
+    """The one-format change (2026-09-07) moved every cover's BYTES and must
+    have moved no cover's PIXELS. The runs the shelf caches used to be read off
+    the file; they are DERIVED from the raster now, so this compares a card
+    built from a compressed cover against one built from the retired blob of
+    the same picture -- the comparison that tells a re-encoding from a
+    re-drawing."""
+    from runtime import host_app, moy_image
+
+    art = bytearray(64 * 48)
+    for i in range(len(art)):
+        art[i] = ((i // 64) // 3 + (i % 64) // 5) & 63     # bands, not one run
+    art = bytes(art)
+
+    packed = bytearray()
+    pos = 0
+    while pos < len(art):
+        value = art[pos]
+        count = 1
+        while pos + count < len(art) and count < 255 and art[pos + count] == value:
+            count += 1
+        packed += bytes((count, value))
+        pos += count
+    fresh = moy_carts.encode_moyimg(64, 48, art)
+    assert "codec" not in fresh and len(fresh) < len(packed)
+
+    # The runs the shelf caches are the same runs either way...
+    assert moy_carts.moyimg_runs(fresh) == (64, 48, bytes(packed))
+    assert moy_image.decode_moyimg(fresh) == (64, 48, art)
+
+    # ...and so is the card the launcher draws.
+    root = str(tmp_path / "carts")
+    moy_carts.ensure_dirs(root)
+    cart = moy_carts.create("Banded", root, src="def _draw():\n    pass\n")
+    moy_carts.save_image(cart, "cover", fresh)
+    ws = host_app.build_workstation(root)
+    img = _land_cover(ws, cart, 40, 30)
+    assert bytes(img.pix) == _card_from_runs(packed, 64, 48, 40, 30)

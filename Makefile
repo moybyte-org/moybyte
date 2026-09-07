@@ -170,6 +170,14 @@ test:
 # back into a build that does not happen. MICROPY_PY_SSL=0 drops the only
 # submodule it would otherwise want (mbedtls); MICROPY_PY_FFI=0 drops libffi.
 # Nothing on either side of a raster/VM parity check speaks TLS or ctypes.
+#
+# The one ADDITION is the deflate compressor, and it is here to MIRROR the
+# boards: unix `standard` and the esp32 port are both EXTRA_FEATURES, where
+# upstream builds `deflate` read-only, and every board's mpconfigboard.h turns
+# the writer on because Paint saves a compressed `.moyimg`. A binary without it
+# would answer "MicroPython cannot write this format" -- about itself, not about
+# the boards -- which is the sort of false negative this whole target exists to
+# stop.
 UNIX_MP_TAG ?= v1.28.0
 UNIX_MP_DIR ?= .build/unix_micropython
 UNIX_MP_SRC := $(UNIX_MP_DIR)/micropython
@@ -220,6 +228,7 @@ unix-micropython:
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/mpy-cross -j$(UNIX_MP_JOBS)
 	@$(MAKE) --no-print-directory -C $(UNIX_MP_SRC)/ports/unix \
 	    VARIANT=standard MICROPY_PY_SSL=0 MICROPY_PY_FFI=0 BUILD=build-moybyte \
+	    CFLAGS_EXTRA=-DMICROPY_PY_DEFLATE_COMPRESS=1 \
 	    USER_C_MODULES=$(abspath $(UNIX_MP_USERMODS)) -j$(UNIX_MP_JOBS)
 	@echo "desktop MicroPython with the native usermods: $(UNIX_MP)"
 
