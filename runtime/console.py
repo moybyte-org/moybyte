@@ -903,6 +903,10 @@ class Workstation:
         # cart's namespace build (take_text_request). One slot: it is set and
         # consumed inside a single launch.
         self._text_request = None
+        # The project a text run must return INTO (open_project_file): set with
+        # the request, popped by _exit_to_caller, which re-reads the folder on
+        # the way back so the loader sees what was written.
+        self._project_return = None
         # The #111 UNDO ROUTER (#209 landing E, history_router.py): the bar
         # UNDO/REDO pair over both undo mechanisms (each Editor tab's in-RAM op
         # stack, then the tab-scoped durable journal walk), the code tab's typing
@@ -1394,13 +1398,54 @@ class Workstation:
         self._text_request = (kind or system_api.DEFAULT_FILE_KIND,
                               str(name), mode)
         # Back to whoever asked, not home: Files opened this, so its X returns
-        # to the shelf the person was standing on.
-        caller = self._apps_by_id.get(self.wm.top_kind()) or self.launcher_layer
+        # to the shelf the person was standing on, and the Editor's Config tab
+        # (step 5's ADVANCED row) gets back the tab it left.
+        caller = (self.editor_app if self.wm.top_is("menu")
+                  else self._apps_by_id.get(self.wm.top_kind()))
         if not self._open_workspace(cart):
             self._text_request = None
             return False
-        self.run(self.project, caller)
+        self.run(self.project, caller or self.launcher_layer)
         return True
+
+    def open_project_file(self, cart, name, mode=None):
+        """Open one of a PROJECT's own files in the text app -- the Config tab's
+        ADVANCED row, and the Files router's door for a project file reached
+        from the PROJECTS root (step 5 of docs/text_editing_2026-09.md).
+
+        It goes through the EDITOR, not straight into the handle, and that is
+        the whole point of the door: the project is opened first and returned to
+        on exit, so leaving re-READS the folder. That is what keeps the loader in
+        the loop over a file JSON mode is allowed to write invalid -- a manifest
+        the kid just broke comes back with its banner on the Config tab instead
+        of quietly leaving the shelf."""
+        path = (cart or {}).get("path")
+        if not path:
+            return False
+        if self.project is None or self.project.cart is not cart:
+            self.open_in_editor(cart)
+            if self.project is None or self.project.cart is not cart:
+                return False
+        self.editor_app.set_tab("cards")     # the tab the return lands back on
+        if not self.open_text_cart(name, self.carts_store.project_kind(path),
+                                   mode):
+            return False
+        self._project_return = cart
+        return True
+
+    def _return_to_project(self, cart):
+        """Come back from a project-file edit to that project's Editor, THROUGH
+        THE LOADER (`open_project_file`'s contract). Both WM tiers land here:
+        the windowed one closes the playtest window first, exactly as the
+        ordinary exit below does."""
+        _cp = getattr(self.wm, "close_player", None)
+        if _cp is not None and self.wm.desk_open():
+            _cp()
+        self.carts.reload(cart)
+        self.open_in_editor(cart)
+        if self.project is not None and self.project.cart is cart:
+            self.editor_app.set_tab("cards")
+        self._dirty = True
 
     def app_bar_h(self):
         """Rows the exitable "tool" strip owns on top of a running app cart's
@@ -2148,11 +2193,18 @@ class Workstation:
         third (Files opening a note in the Notes cart, step 3 of
         docs/text_editing_2026-09.md): it pops back to that app's own surface,
         on the shelf the person was standing on. Any other caller (the launcher
-        home root, or None) pops all the way home."""
+        home root, or None) pops all the way home. A PROJECT FILE edit (step 5)
+        is the Editor arm with a reload in front of it -- see
+        `_return_to_project`."""
         # Drop the dead run's world NOW (#66 repeat-run fragmentation fix): the
         # next cart must build into a compact heap, not around this one's corpse
         # (see Player.release_world's docstring for the measured mechanism).
         self.player.release_world()
+        back = self._project_return
+        self._project_return = None
+        if back is not None:
+            self._return_to_project(back)
+            return
         # Windowed WM (#73): closing the playtest must never truncate unrelated
         # windows stacked above it (e.g. Settings) -- the WM removes ONLY the
         # player and refocuses the caller's window. Desk world only (#105): a
@@ -2537,6 +2589,13 @@ class Workstation:
             if _app.is_app(selected):
                 self.open_app(_app, selected)
                 return
+        if (selected or {}).get("broken"):
+            # A cart whose manifest will not parse cannot be RUN -- it has no
+            # main, no fps and no permissions. A tap opens it where it can be
+            # fixed instead (step 5 of docs/text_editing_2026-09.md): the
+            # Editor's Config tab, which shows the break and offers the file.
+            self.open_in_editor(selected)
+            return
         self._open_workspace()
         self.run(self.project, self.launcher_layer)   # activate desktop, record caller
 
@@ -3412,7 +3471,10 @@ class Workstation:
     def adjust(self, d):
         # Config mutation stays on Workstation (ws.config is the single source of cart
         # state); the CARD selection lives on cards_layer, so read msel from there.
-        f = self.cart["edit"][self.cards_layer.msel]
+        fields = self.cart.get("edit") or []
+        if self.cards_layer.msel >= len(fields):
+            return                     # the ADVANCED row: a door, not a stepper
+        f = fields[self.cards_layer.msel]
         # #94: a malformed field definition (bad type, min>max, missing/empty
         # choices, ...) must not crash left/right stepping -- this is the ONE
         # call site draw()'s try/except doesn't cover (a d-pad press routes

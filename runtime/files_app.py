@@ -270,7 +270,7 @@ class FilesAppLayer(ListShellApp):
             return self._to_editor(subject, tab="code")
         if door == "paint":
             return self._to_paint(subject)
-        return self._to_text(name, kind, door)
+        return self._to_text(name, kind, door, cart)
 
     def door(self, name, kind=None, cart=None):
         """WHICH door `name` takes, as `(door, subject)` -- the router's rules
@@ -310,14 +310,18 @@ class FilesAppLayer(ListShellApp):
             return None
         return "paint"
 
-    def _to_text(self, name, kind, mode):
+    def _to_text(self, name, kind, mode, cart=None):
         if kind is None:
-            # A project's own text files. Classified (the mode is real), but
-            # the door is not this app's: they are reached through the Config
-            # tab's ADVANCED row, so the loader stays in the loop on a write
-            # -- step 5 of docs/text_editing_2026-09.md.
-            self.status = "NOT YET"
-            return None
+            # A project's own text file. It opens through that project's
+            # EDITOR (`nav.edit_file`), never straight into the handle: the
+            # Config tab's ADVANCED row is the same door, and going through it
+            # is what keeps the loader in the loop -- the return re-reads the
+            # folder, so a manifest JSON mode was allowed to write invalid is
+            # re-validated where the kid can see it.
+            if not self._nav.edit_file(cart, name, mode):
+                self.status = "CAN'T OPEN"
+                return None
+            return mode
         if not self._nav.open_text(name, kind, mode):
             self.status = "NO TEXT APP"
             return None

@@ -73,7 +73,15 @@ QWERTY is planned.
 4. Writer's shell process removed. **Deleted, not deprecated**: the app, its
    identity cart and its layer are out of the tree, and the launcher's text
    door is Notes over the handle.
-5. The Config tab's ADVANCED files row, with JSON mode's rule.
+5. The Config tab's ADVANCED files row, with JSON mode's rule. **Built as a
+   router over the project KIND** (`moy_carts.PROJECT_KIND`, `project:<folder>`,
+   written through `_write_atomic` and journaled into the project's own #111
+   journal): a text file goes through the same request door as Notes and comes
+   BACK to the Config tab, which is what keeps the loader in the loop — and
+   because JSON mode writes an invalid manifest on a hard exit by design,
+   `moy_carts.load` now RECOVERS such a cart instead of dropping it, so the
+   project stays on the shelf carrying the reason and the row leads back to the
+   file that broke it.
 6. The script runner with the text console surface.
 
 Related: #108 (user files), #181 (apps are carts), #112 (cart-facing undo —

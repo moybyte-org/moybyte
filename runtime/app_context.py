@@ -685,6 +685,18 @@ class Nav:
         not learn what draws it. False when the build carries no text app."""
         return self.__ws.open_text_cart(name, kind, mode)
 
+    def edit_file(self, cart, name, mode=None):
+        """Open one of `cart`'s OWN files (`manifest.json`, `config.json`, a
+        script beside the main) in the editor, through that project's Editor.
+
+        The Files router's door for a project file, and deliberately not
+        `open_text`: a project file is reached with the loader in the loop
+        (docs/text_editing_2026-09.md), which is what going through the Editor
+        buys -- the return re-reads the folder."""
+        if cart is None:
+            return False
+        return bool(self.__ws.open_project_file(cart, name, mode))
+
     def play(self, cart, caller):
         """Open `cart` as a workspace and RUN it, returning to `caller` on
         exit -- the Storybook PLAY verb."""

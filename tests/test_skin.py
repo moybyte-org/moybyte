@@ -912,12 +912,12 @@ def test_the_hatch_that_moved_now_names_a_kind_instead():
             named[path.name] = len(k)
     assert named == {
         "achievements_ui.py": 1,        # the achievements list
-        "cards_layer.py": 1,            # the Config tab's cards
+        "cards_layer.py": 3,            # the cards, the ADVANCED row, its file list
         "settings_layer.py": 6,         # the rows, the wifi list, the notes
         "storybook_app.py": 1,          # the + NEW row
         "system_menu_ui.py": 1,         # the popup's rows
     }, named
-    assert sum(named.values()) == 10
+    assert sum(named.values()) == 12
 
 
 def test_every_kind_a_surface_asks_the_catalog_for_exists():

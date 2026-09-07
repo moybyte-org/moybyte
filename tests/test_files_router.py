@@ -134,18 +134,26 @@ def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
 
 
 def test_a_json_file_is_routed_to_json_mode(tmp_path):
-    """A project's own files are CLASSIFIED here -- json for the manifest and
-    the config, by name -- but their door is the Config tab's ADVANCED row
-    (step 5), so the router says so rather than opening the wrong page."""
+    """A project's own files are json by NAME (the manifest and the config) and
+    open through that PROJECT's Editor (step 5) -- never straight into the
+    handle, because the return is what re-reads the folder."""
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
     cart = _a_project(ws)
 
     for name in ("config.json", "manifest.json", "scores.json"):
         assert app.door(name, cart=cart) == (text_modes.JSON, name)
-        assert app.route(name, cart=cart) is None
-        assert app.status == "NOT YET"
-    assert ws.wm.top_kind() == "files"          # and nothing opened
+
+    assert app.route("manifest.json", cart=cart) == text_modes.JSON
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.wm.top_is_player()
+    assert ws.cart.get("title") == "Notes"
+    ed = ws.player.ns["ed"]
+    assert (ed.name(), ed.mode()) == ("manifest.json", text_modes.JSON)
+    assert ed.kind == moy_carts.project_kind(cart["path"])
+    # the project was opened on the way, so leaving comes back to its Config tab
+    assert ws._project_return is cart
 
 
 def test_anything_else_textual_falls_through_to_plain_text(tmp_path):

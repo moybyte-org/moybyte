@@ -730,7 +730,14 @@ again when the cart exits, so a note is never lost by tapping X.
 | call | does |
 |---|---|
 | `open_editor(name)` | an editor over the document `name` in the kind your `files` permission granted. Never a path and never another kind — you cannot name one |
-| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files), or `None` when there is none. Call it once in `_init` |
+| `open_editor()` | the document the console was already ASKED to open (someone tapped a file in Files, or a project's own file on the Editor's Config tab), or `None` when there is none. Call it once in `_init` |
+
+The kind that arrives with `open_editor()` may be one you were never granted —
+a person chose that file, not your cart. One of them is a whole PROJECT:
+`project:<folder>.moy` is a `.moy` folder's own files (`manifest.json`,
+`config.json`, the main program), reached only through the Config tab's
+ADVANCED row so the cart loader re-reads the folder afterwards. You still just
+draw it; nothing about the handle changes.
 
 Everything else is on the handle you get back:
 

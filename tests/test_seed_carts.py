@@ -331,7 +331,7 @@ def test_pet_picker_selects_a_sprite_tile(tmp_path):
     _open_cart(ws, "Pixel Pet")
     ws._open_menu()
     rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 3                               # frog / cat / robot
@@ -408,7 +408,7 @@ def test_space_pet_picker_selects_a_sprite_tile(tmp_path):
     _open_cart(ws, "Space Desktop")
     ws._open_menu()
     rows = ws.cards_layer._card_layout()
-    pet = [r for r in rows if r["f"]["key"] == "pet"][0]
+    pet = [r for r in rows if r["f"] and r["f"]["key"] == "pet"][0]
     assert pet["display"] == "sprite-tiles"
     cells = ws.cards_layer._choice_cells(pet)
     assert len(cells) == 2                               # frog / robot

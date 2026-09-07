@@ -184,11 +184,14 @@ class EditorApp:
     def open(self, project):
         """Open the Editor on `project`, landing on the Config tab (spec Section 6):
         the "Make it mine" cards when the cart exposes an edit schema, else the code
-        editor (there are no cards to show). The old Workstation._open_menu."""
+        editor (there are no cards to show). A cart whose MANIFEST is broken lands
+        on Config whatever its (unreadable) schema says: that tab is where the
+        break is reported and where the file that caused it is offered."""
         self.project = project
         ws = self.ws
         ws.wm.goto("menu")       # Stage 6e: spawn/return the Editor on the back-stack
-        ws.set_menu_view("cards" if ws.cart.get("edit") else "code")
+        ws.set_menu_view("cards" if (ws.cart.get("edit")
+                                     or ws.cart.get("broken")) else "code")
 
     def open_paint(self):
         ws = self.ws

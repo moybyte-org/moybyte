@@ -165,6 +165,29 @@ class CartManager:
             cart["lazy"] = False
         return cart
 
+    def reload(self, cart):
+        """Re-read ONE cart from the store in place, fat or not -- what puts the
+        loader back in the loop after something edited a project's own files
+        (`Workstation._return_to_project`, step 5 of
+        docs/text_editing_2026-09.md). `rehydrate` cannot serve: it is a no-op on
+        the fat cart the Editor is holding, which is exactly the case here.
+
+        `broken` is popped first because it is the one key `load()` omits when
+        it has nothing to say, so a repaired manifest must not leave the old
+        note behind. A failed read keeps the cart as it stands."""
+        ws = self.ws
+        if cart is None or not cart.get("path") or ws.carts_store is None:
+            return cart
+        try:
+            full = self.store.call(lambda: ws.carts_store.load(cart["path"]))
+        except Exception:  # noqa: BLE001 -- SD hiccup: keep what we have
+            full = None
+        if full:
+            cart.pop("broken", None)
+            cart.update(full)
+            cart["lazy"] = False
+        return cart
+
     def reslim(self, cart):
         # Re-slim a previously-opened cart when the workspace moves on (keeps at
         # most ~one fat cart live). Only SD-backed carts that slim() managed.

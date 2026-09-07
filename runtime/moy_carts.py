@@ -924,6 +924,14 @@ def _read_main(path, name):
         return _read_recover(full)
 
 
+def _project_title(path):
+    """A cart folder's own name as a title -- what a cart is called when its
+    manifest can no longer say."""
+    cut = max(path.rfind("/"), path.rfind("\\"))
+    name = path[cut + 1:] if cut >= 0 else path
+    return name[:-4] if name.endswith(".moy") else (name or "cart")
+
+
 def load(path):
     """Load one .moy folder into a cart dict, or None on error.
 
@@ -938,26 +946,51 @@ def load(path):
     from them by `Project`. An absent `flags.moyflags` is `None` here and
     all-zero there, which is SPEC.md 3.5's own reading of a missing file."""
     try:
+        broken = ""
         try:
             # _read_recover falls back to manifest.json.bak so a crash mid-save
             # (or an interrupted atomic write) doesn't make the cart unreadable.
             man = json.loads(_read_recover(path + "/manifest.json"))
         except (OSError, ValueError) as exc:
-            print("Moybyte cart manifest bad:", path, exc)
+            broken = "manifest.json: " + str(exc)[:48]
+        else:
+            if not isinstance(man, dict):
+                broken = "manifest.json: not an object"
+        if broken and not _exists(path + "/manifest.json"):
+            # Nothing to repair: the folder was pulled, or never held a cart.
+            # Only a manifest that IS there and will not parse is recoverable.
+            print("Moybyte cart manifest bad:", path, broken)
             return None
-        if not isinstance(man, dict):
-            print("Moybyte cart manifest not an object:", path)
-            return None
+        if broken:
+            # A manifest a kid BROKE does not take the project off the shelf
+            # (step 5 of docs/text_editing_2026-09.md). JSON mode writes an
+            # invalid document on a hard exit by design, so this is the reload
+            # that design implies: the cart comes back on format defaults,
+            # carrying `broken`, and the Editor opens it on the Config tab with
+            # the repair path. It is not RUNNABLE -- Workstation.open sends a
+            # launcher tap to the Editor instead, and the loader re-validates
+            # every time the folder is read again.
+            print("Moybyte cart manifest bad:", path, broken)
+            man = {"title": _project_title(path)}
         # A moy-spec cart (SPEC.md 3.1, "format": "moy-1") is Lua-by-definition
         # with spec defaults: main.lua, 30fps, a game. Its manifest never carries
         # the moybyte fields, so the defaults below flip on this flag -- moybyte's
         # own carts ("moybyte-cart-v1", or no format at all) keep theirs.
         spec = man.get("format") == "moy-1"
+        mainf = man.get("main", "main.lua" if spec else "main.py")
+        if broken and not _exists(path + "/" + mainf):
+            # No manifest to name the program, so take whichever is there.
+            for alt in ("main.py", "main.lua"):
+                if _exists(path + "/" + alt):
+                    mainf = alt
+                    break
         try:
-            src = _read_main(path, man.get("main", "main.lua" if spec else "main.py"))
+            src = _read_main(path, mainf)
         except OSError as exc:
-            print("Moybyte cart main missing:", path, exc)
-            return None
+            if not broken:
+                print("Moybyte cart main missing:", path, exc)
+                return None
+            src = ""            # a broken cart still opens; it just cannot run
         cfg = dict(man.get("config", {}))
         try:
             cfg.update(json.loads(_read(path + "/config.json")))
@@ -985,7 +1018,7 @@ def load(path):
             blocks = None
         images = load_images(path)                # paint-image assets (#63), {} if none
         scenes = load_scenes(path)                # scene assets (#85), {} if none
-        return {
+        cart = {
             "path": path,
             "title": man.get("title", "cart"),
             # Manifest metadata (#94 -- the Config-tab "CART INFO" editor):
@@ -998,7 +1031,7 @@ def load(path):
             # "lua" via the injected runtime), and which file `src` came from --
             # save_code/duplicate/seed must write THAT file back, never main.py.
             "runtime": man.get("runtime", "lua" if spec else "python"),
-            "main": man.get("main", "main.lua" if spec else "main.py"),
+            "main": mainf,
             # 0 = pre-versioning (re-seedable). SPEC.md 3.1 leaves `version` to
             # the author, so a hand-typed "1.2" must read as unversioned rather
             # than take the cart down with it.
@@ -1068,6 +1101,11 @@ def load(path):
             "scenes": scenes,
             "scene_names": scene_names(man, scenes),
         }
+        if broken:
+            # Set ONLY on a cart whose manifest would not parse, so every reader
+            # is a `.get` and a repaired cart simply stops carrying the key.
+            cart["broken"] = broken
+        return cart
     except Exception as exc:  # noqa: BLE001  -- never let one bad cart escape
         print("Moybyte cart unreadable:", path, exc)
         return None
@@ -1927,6 +1965,130 @@ def _kind_spec(kind):
         raise ValueError("unknown file kind: " + str(kind))
 
 
+# -- a PROJECT's own files, as a files-role KIND ------------------------------
+#
+# The Config tab's ADVANCED row (step 5 of docs/text_editing_2026-09.md) edits a
+# cart's own manifest.json / config.json / main file in the shell's editor
+# handle, and the handle is identified by `(kind, name)` through the Files role.
+# So a project becomes a kind: `project:<folder>.moy`, whose store is that
+# folder under the carts root rather than a `files/<kind>/` directory.
+#
+# It is a KIND and not a path because the handle, the parked text request and
+# the cart-facing `open_editor` all speak `(kind, name)` and none of them may
+# learn about directories. The folder rather than the full path so the token is
+# root-relative: the same request means the same file on the host and on a board
+# whose carts live somewhere else.
+#
+# The two things this kind deliberately does NOT get:
+#   * a `files/.history/` sidecar -- a project file's durable undo is the
+#     project's own JOURNAL (#111), which `save_project_file` appends to. Two
+#     parallel histories over one file would double-count every edit, and
+#     `project:foo.moy` is not a legal FAT directory name anyway.
+#   * the trash / rename / duplicate / auto-name verbs. A cart's own files are
+#     named by the FORMAT, not by a person, so there is nothing to name and
+#     nothing that may go missing.
+PROJECT_KIND = "project:"
+
+# The order the ADVANCED row lists a project in: the two documents a person
+# edits, the program, then its assets. Anything else on disk follows, sorted.
+PROJECT_ORDER = ("manifest.json", "config.json", "main.py", "main.lua",
+                 "sprites.moygfx", "map.moymap", FLAGS_NAME, "sounds.json",
+                 "blocks.json")
+
+# Subfolders whose items the row lists as `<dir>/<name><ext>`.
+PROJECT_SUBDIRS = ((SCENES_DIR, SCENE_EXT), (IMAGES_DIR, IMAGE_EXT))
+
+# The atomic-write machinery's orphans, and the two DIRECTORIES a listing must
+# never wander into (the journal's snapshots are history, not files to edit).
+_PROJECT_SKIP_EXT = (".bak", ".tmp")
+
+
+def project_kind(path_or_folder):
+    """The files-role kind naming the project at `path_or_folder` -- a cart
+    dict's `path` or a bare `.moy` folder name."""
+    name = str(path_or_folder)
+    cut = max(name.rfind("/"), name.rfind("\\"))
+    return PROJECT_KIND + (name[cut + 1:] if cut >= 0 else name)
+
+
+def project_folder(kind):
+    """The `.moy` folder `kind` names, or "" when `kind` is a user-files kind.
+    The ONE predicate that says "this kind is a project", so every store verb
+    branches on the same answer."""
+    k = str(kind)
+    return k[len(PROJECT_KIND):] if k.startswith(PROJECT_KIND) else ""
+
+
+def project_dir(kind, root=CARTS_DIR):
+    folder = project_folder(kind)
+    if not folder:
+        raise ValueError("not a project kind: " + str(kind))
+    return root + "/" + folder
+
+
+def project_file_path(kind, name, root=CARTS_DIR):
+    """The on-disk path of one project file. `name` may carry ONE subfolder
+    (`scenes/opening.moyscene`) and nothing else: a name that climbs, or that
+    is absolute, is refused rather than resolved, because this kind is the one
+    place a NAME chosen elsewhere becomes a path."""
+    parts = str(name).replace("\\", "/").split("/")
+    if len(parts) > 2 or not parts[-1] or parts[0] in ("", ".", ".."):
+        raise ValueError("bad project file name: " + str(name))
+    if len(parts) == 2 and parts[1] in ("", ".", ".."):
+        raise ValueError("bad project file name: " + str(name))
+    return project_dir(kind, root) + "/" + "/".join(parts)
+
+
+def list_project_files(kind, root=CARTS_DIR):
+    """One project's own files, PROJECT_ORDER first and the rest sorted after.
+
+    Lists what is actually on disk rather than what a cart could hold, so a
+    main file the manifest renamed still appears and an absent asset is not a
+    dead row."""
+    d = project_dir(kind, root)
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return []
+    flat = []
+    for n in names:
+        if _ends_any(n, _PROJECT_SKIP_EXT) or _is_dir(d + "/" + n):
+            continue
+        flat.append(n)
+    out = [n for n in PROJECT_ORDER if n in flat]
+    out.extend(n for n in flat if n not in PROJECT_ORDER)
+    for sub, ext in PROJECT_SUBDIRS:
+        try:
+            kids = sorted(os.listdir(d + "/" + sub))
+        except OSError:
+            continue
+        out.extend(sub + "/" + n for n in kids if n.endswith(ext))
+    return out
+
+
+def load_project_file(kind, name, root=CARTS_DIR):
+    """One project file's text, or None -- through `_read_recover`, so a crash
+    mid-save reads the `.bak` exactly as `load()` does for the manifest."""
+    try:
+        return _read_recover(project_file_path(kind, name, root))
+    except OSError:
+        return None
+
+
+def save_project_file(kind, name, text, root=CARTS_DIR):
+    """Write one project file atomically and record it in the project's undo
+    journal (#111), which is the shape `Project.commit_config` already has for
+    config.json. A journal failure never fails the write -- the edit is on
+    disk, the kid just loses one undo step."""
+    path = project_file_path(kind, name, root)
+    _write_atomic(path, text)
+    try:
+        journal_append(project_dir(kind, root), str(name), text)
+    except Exception as exc:  # noqa: BLE001 -- journaling can't fail a save
+        print("Moybyte project journal failed:", exc)
+    return str(name)
+
+
 def files_root(root=CARTS_DIR):
     """The user-files root, beside the carts directory (like shared.moygfx)."""
     return _sibling_path(root, FILES_DIR)
@@ -1991,6 +2153,8 @@ def _ends_any(name, exts):
 
 def list_files(kind, root=CARTS_DIR):
     """The kind's item names, newest first."""
+    if project_folder(kind):
+        return list_project_files(kind, root)
     ext, folder_valued, _base = _kind_spec(kind)
     d = file_kind_dir(kind, root)
     if kind == "docs":
@@ -2003,6 +2167,8 @@ def list_files(kind, root=CARTS_DIR):
 def count_files(kind, root=CARTS_DIR):
     """How many items the kind holds -- a bare listdir filter, so the Files
     kinds screen never pays list_files' per-item stat+sort just for a badge."""
+    if project_folder(kind):
+        return len(list_project_files(kind, root))
     ext, folder_valued, _base = _kind_spec(kind)
     d = file_kind_dir(kind, root)
     try:
@@ -2020,6 +2186,8 @@ def count_files(kind, root=CARTS_DIR):
 def load_file(kind, name, root=CARTS_DIR):
     """A file item's text, or None if missing/unreadable (degrade-don't-throw,
     like every asset loader). Folder-valued kinds have no single blob."""
+    if project_folder(kind):
+        return load_project_file(kind, name, root)
     if _kind_spec(kind)[1]:
         return None
     try:
@@ -2061,6 +2229,10 @@ def new_file_name(kind, root=CARTS_DIR, base=None):
 def save_file(kind, name, text, root=CARTS_DIR):
     """Persist one file item atomically (folder-valued kinds are written by
     their own tools, never through this). Returns the (slugged) stored name."""
+    if project_folder(kind):
+        # A project file keeps its name verbatim -- the FORMAT chose it, so
+        # slugging it would write `manifestjson` and take the cart down.
+        return save_project_file(kind, name, text, root)
     if _kind_spec(kind)[1]:
         raise ValueError(kind + " items are folders; write them in place")
     name = _slug_item(kind, name)
@@ -2160,7 +2332,13 @@ def history_path(kind, name, root=CARTS_DIR):
 def load_history(kind, name, root=CARTS_DIR):
     """Parse a file's history sidecar into a list of records (keyframes +
     segments) in file order. A torn/corrupt line is DROPPED (append-only's only
-    failure mode), every good record before it survives; a missing sidecar -> []."""
+    failure mode), every good record before it survives; a missing sidecar -> [].
+
+    A PROJECT kind has no sidecar by design (see PROJECT_KIND): its durable undo
+    is the cart's own journal, so the handle opens with an empty seed and
+    records live ops from there."""
+    if project_folder(kind):
+        return []
     _kind_spec(kind)
     out = []
     try:
@@ -2244,6 +2422,8 @@ def history_commit(kind, name, ops, keyframe=None, root=CARTS_DIR):
     keyframe that was already on disk, so every later flush wrote another one.
     Leaving records unpruned is safe because ops_since_keyframe reads only the
     window after the last keyframe."""
+    if project_folder(kind):
+        return None            # journaled by save_project_file -- see PROJECT_KIND
     if keyframe is None and not ops:
         return None
     _ensure_history_dir(kind, root)

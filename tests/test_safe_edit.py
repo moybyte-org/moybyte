@@ -119,12 +119,18 @@ def test_scan_skips_corrupt_cart(tmp_path):
     titles = [c["title"] for c in moy_carts.scan(root)]   # must not raise
     assert "Good" in titles
     assert all(t not in ("B2",) for t in titles)
-    # Exactly the good cart survived (system seeds aren't added in this bare root).
-    assert titles == ["Good"]
-    assert moy_carts.load(str(bad1)) is None
-    assert moy_carts.load(str(bad2)) is None
-    assert moy_carts.load(str(bad3)) is None
+    # A cart with no runnable SOURCE is still dropped; a cart whose manifest is
+    # merely UNPARSEABLE is RECOVERED instead (step 5 of
+    # docs/text_editing_2026-09.md) -- it stays on the shelf under its folder
+    # name, carrying the reason, so the kid can reach the file that broke it.
+    assert sorted(titles) == ["Good", "broken1", "broken3"]
+    for bad in (bad1, bad3):
+        cart = moy_carts.load(str(bad))
+        assert cart["broken"].startswith("manifest.json: ")
+        assert cart["title"] == bad.name[:-4]
+    assert moy_carts.load(str(bad2)) is None      # no main.py: nothing to open
     assert good["title"] == "Good"
+    assert "broken" not in good
 
 
 # -- (d) a cart that raises mid-frame shows an error, no exception escapes ---
