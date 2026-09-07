@@ -160,27 +160,6 @@ def test_folder_valued_recordings_ride_the_same_verbs(tmp_path):
     assert moy_carts.trash_list(root) == []
 
 
-def test_artwork_migration_is_one_shot(tmp_path):
-    root = _root(tmp_path)
-    moy_carts.ensure_dirs(root)
-    moy_carts.save_artwork("LEGACY-DRAWING", root)
-    assert moy_carts.migrate_user_files(root) == "my_art"
-    assert moy_carts.load_file("drawings", "my_art", root) == "LEGACY-DRAWING"
-    # The legacy file stays (older builds keep booting against it) ...
-    assert moy_carts.load_artwork(root) == "LEGACY-DRAWING"
-    # ... and the migration never re-runs, even after the kind is emptied.
-    moy_carts.delete_file("drawings", "my_art", root)
-    moy_carts.empty_trash(root)
-    assert moy_carts.migrate_user_files(root) is None
-    assert moy_carts.list_files("drawings", root) == []
-
-
-def test_migration_without_legacy_artwork_is_a_noop(tmp_path):
-    root = _root(tmp_path)
-    assert moy_carts.migrate_user_files(root) is None
-    assert moy_carts.list_files("drawings", root) == []
-
-
 # -- provenance stamps (#108 phase 2) --------------------------------------------
 
 def test_provenance_stamp_roundtrips_and_is_ignored_by_decoders():

@@ -619,9 +619,7 @@ class MusicEditor(OpHistoryMixin):
                 obj.loop, cursor, list(rs) if rs else None)
 
     def _restore(self, snap):
-        """Write a _snapshot() tuple back over the bank + re-point the cursor.
-        Tolerates the pre-#170 6-field song tuple (no row_secs tail) so old
-        journal-embedded ops stay replayable."""
+        """Write a _snapshot() tuple back over the bank + re-point the cursor."""
         kind, idx, data, speed, loop, cursor = snap[:6]
         if kind == "sfx":
             if not (0 <= idx < len(self.bank.sfx)):
@@ -640,8 +638,7 @@ class MusicEditor(OpHistoryMixin):
             obj.pattern = _me_copy_pattern(data)
             obj.speed = speed
             obj.loop = loop
-            if len(snap) > 6:
-                obj.row_secs = list(snap[6]) if snap[6] else None
+            obj.row_secs = list(snap[6]) if snap[6] else None
             self.view = self.SONG_VIEW
             self.track_idx = idx
             self.slot = cursor

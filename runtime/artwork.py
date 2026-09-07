@@ -1081,7 +1081,6 @@ class ArtworkService:
             name = self.doc_name()
             if kind != self.DRAWINGS:
                 return name, f.load(kind, name)
-            f.migrate()
             if name:
                 return name, f.load(kind, name)
             names = f.list(kind)

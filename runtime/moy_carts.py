@@ -2629,20 +2629,6 @@ def empty_trash(root=CARTS_DIR):
     prune_trash(root, keep=0)
 
 
-def migrate_user_files(root=CARTS_DIR):
-    """One-shot #108 migration: the legacy single-slot artwork.moyimg becomes
-    files/drawings/my_art.moyimg. Runs only while files/drawings/ does not
-    exist yet (its existence is the migrated marker), so a kid who later
-    empties the kind never sees the legacy drawing resurrected. The legacy
-    file is left in place -- older builds keep booting against it."""
-    if _exists(file_kind_dir("drawings", root)):
-        return None
-    blob = load_artwork(root)
-    if not blob:
-        return None
-    return save_file("drawings", "my_art", blob, root)
-
-
 # --- provenance stamps (#108 phase 2): a copy remembers its source ----------
 #
 # When a user file is COPIED into a consuming cart (a drawing -> a project's

@@ -50,10 +50,9 @@ def _set_graduated_flag(cart_dir, value):
 #                  for old readers/tools + the reboot-cursor test) and the running total
 #                  snapshot bytes (B, the rotation gate). Written via _write_atomic: a
 #                  tiny fixed-size file whose atomic rename is what makes the cursor
-#                  torn-write-proof. TOLERANT MIGRATION: an OLD single-`seq` cursor
-#                  (pre-#111, no "cursors" key) loads as "each file's cursor = its
-#                  newest entry seq <= the old seq"; a missing/torn cursor defaults
-#                  every file to its newest entry (the safe 'everything applied' state).
+#                  torn-write-proof. A cursor with no "cursors" map, missing or torn,
+#                  defaults every file to its newest entry (the safe 'everything
+#                  applied' state); no older cursor shape is read.
 #   s/000N-<file>  the per-commit full-file snapshots.
 #
 # CADENCE (v1.1 pinned): the line APPEND is a raw open(path, "a") -- O(1), one line
@@ -158,10 +157,8 @@ def _journal_cursors(cur_path, entries):
       * a NEW-format cursor.json ({"cursors": {...}}) -> use it, validated to ints and
         BACKFILLED so any file present in the journal but missing from the map defaults
         to its newest entry (never leaves a file cursor-less);
-      * an OLD single-`seq` cursor (pre-#111) -> TOLERANT MIGRATION: each file's cursor
-        = its newest entry seq <= the old seq (a file with no entry <= old seq falls to
-        the safe default: its newest entry, 'everything applied');
-      * a missing/torn cursor -> every file defaults to its newest entry (safe state).
+      * a cursor with no "cursors" map, missing or torn -> every file defaults to
+        its newest entry (safe state); no older cursor shape is read.
     """
     default = _journal_newest_by_file(entries)
     try:
@@ -180,19 +177,7 @@ def _journal_cursors(cur_path, entries):
             except (TypeError, ValueError):
                 pass
         return out
-    # -- old single-seq cursor: migrate to newest-entry-<=-old per file --------
-    try:
-        old = int(data["seq"])
-    except (KeyError, TypeError, ValueError):
-        return default
-    out = dict(default)                    # files with no entry <= old stay at newest
-    migrated = {}
-    for e in entries:                      # ascending -> newest <= old per file wins
-        if e["seq"] <= old:
-            migrated[e["file"]] = e["seq"]
-    for f, s in migrated.items():
-        out[f] = s
-    return out
+    return default
 
 
 def _journal_max_applied(cursors):

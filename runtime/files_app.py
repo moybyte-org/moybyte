@@ -178,7 +178,6 @@ class FilesAppLayer(ListShellApp):
         self.trash = ()
 
         def _list(f):
-            f.migrate()
             counts = {}
             for kind, _label in KIND_LABELS:
                 if kind != PROJECTS:          # not a files kind -- see above

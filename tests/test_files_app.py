@@ -145,18 +145,6 @@ def test_delete_of_the_open_drawing_cannot_break_paint(tmp_path):
     assert ws.wm.top_kind() == "artwork"
 
 
-def test_migration_surfaces_legacy_artwork_in_the_gallery(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = _ws(tmp_path)
-    blob = moy_carts.encode_moyimg(320, 240, bytes((9,)) * (320 * 240))
-    moy_carts.ensure_dirs(carts)
-    moy_carts.save_artwork(blob, carts)
-    app = ws.files_app
-    _open_app(ws, "Files")
-    app._enter_kind("drawings")
-    assert "my_art" in app.grid.names
-
-
 def test_paint_open_picker_switches_documents(tmp_path):
     carts = str(tmp_path / "carts")
     ws = _ws(tmp_path)
