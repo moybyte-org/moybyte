@@ -434,8 +434,12 @@ class PaintAppLayer:
         art = self._art
         loaded = art.load()
         if self.doc.load(loaded):
-            self.status = (art.doc_name() or "DRAWING").upper()
-        elif self._starter_pending:
+            self.status = (art.why_read_only()
+                           or (art.doc_name() or "DRAWING").upper())
+        elif not art.editable():
+            # A picture that would not decode. It still opens HERE, saying so:
+            # the blank canvas is not a new drawing and is never written back.
+            self.status = art.why_read_only()
             # Build the editable demo lazily on the first Paint launch, not at OS boot.
             self.doc.seed_desktop()
             self.doc.invalidate()
@@ -503,6 +507,8 @@ class PaintAppLayer:
 
     def _save(self):
         art = self._art
+        if not art.editable():
+            return True                # show-only: there is nothing to write back
         if not self._unsaved and art.doc_name() is not None:
             return True                # unchanged since the last flush: no re-encode
         if art.save(self.doc.pix, self.doc.W, self.doc.H):
@@ -660,6 +666,13 @@ class PaintAppLayer:
         return True
 
     def _paint_pointer(self, x, y, tapped, held):
+        if not self._art.editable() and self.tool != 9:
+            # A show-only picture (#108): panning still works, so it can be
+            # looked at; every mark is refused with the reason on the status.
+            if tapped:
+                self.status = self._art.why_read_only() or "READ ONLY"
+                self._damage.all()
+            return
         p = self._screen_to_art(x, y)
         if self.tool == 9:
             if tapped:
@@ -761,9 +774,9 @@ class PaintAppLayer:
             art = self._art
             art.open_named(hit[1])
             if self.doc.load(art.load()):
-                self.status = hit[1].upper()
+                self.status = art.why_read_only() or hit[1].upper()
             else:
-                self.status = "CAN'T OPEN"
+                self.status = art.why_read_only() or "CAN'T OPEN"
             self._unsaved = False
             self._idle = 0.0
             self.view_mode = 0
@@ -951,6 +964,8 @@ class ArtworkService:
         self._wall_key = None
         self._thumb_bitmap = None
         self._thumb_key = None
+        self._read_only = False        # the open picture is show-only
+        self._why = ""
 
     def _ready(self):
         return self._files.ready()
@@ -976,14 +991,49 @@ class ArtworkService:
     def available(self):
         return self._ready()
 
-    # -- the open document (a named files/drawings item) ----------------------
+    # -- the open document (a named files item) -------------------------------
+    #
+    # The doc pointer is a `(kind, name)` PAIR, because a picture is not only a
+    # drawing: a cart's own `images/cover.moyimg` opens here too (#108), on the
+    # project kind (`moy_carts.PROJECT_KIND`), and is written back to the cart's
+    # folder rather than into the gallery. `drawings` is the default and the
+    # only kind the auto-naming, trash and copy-on-use verbs know -- a project
+    # image was NAMED by the format, so there is nothing to auto-name.
+
+    DRAWINGS = "drawings"
 
     def doc_name(self):
-        """The open drawing's file name, or None before the first save."""
+        """The open picture's file name, or None before the first save."""
         return self._prefs.get("doc")
 
-    def _set_doc_name(self, name):
+    def doc_kind(self):
+        """The files kind the open picture lives in ("drawings" by default; a
+        `project:<folder>` kind for a cart's own image)."""
+        return self._prefs.get("doc_kind") or self.DRAWINGS
+
+    def editable(self):
+        """False while the open picture is one Paint can SHOW but not change --
+        a shape it has no editor for. Never a refusal to open: a picture always
+        opens somewhere a kid can look at it."""
+        return not self._read_only
+
+    def why_read_only(self):
+        return self._why
+
+    def _open_drawing(self):
+        """The open picture's name IF it is a gallery drawing, else None. The
+        copy-on-use verbs (WALL / GAME) are about the gallery: a cart's own
+        image was never copied FROM anywhere, so it is not a source."""
+        return self.doc_name() if self.doc_kind() == self.DRAWINGS else None
+
+    def _set_doc_name(self, name, kind=None):
         prefs = self._prefs
+        kind = kind or self.DRAWINGS
+        if prefs.get("doc_kind") != (None if kind == self.DRAWINGS else kind):
+            if kind == self.DRAWINGS:
+                prefs.clear("doc_kind")
+            else:
+                prefs.set("doc_kind", kind)
         if prefs.get("doc") == name:
             return
         if name is None:
@@ -991,27 +1041,39 @@ class ArtworkService:
         else:
             prefs.set("doc", name)
 
-    def open_named(self, name):
-        """Point Paint at another drawing file (the Files app's OPEN verb, and
-        Paint's own picker). The next load() reads it."""
-        self._set_doc_name(name)
+    def open_named(self, name, kind=None):
+        """Point Paint at another picture (the Files app's OPEN verb, Paint's
+        own picker, and the cart-image door). The next load() reads it."""
+        self._set_doc_name(name, kind)
         self._cached = None
+        self._read_only = False
+        self._why = ""
 
     def load(self):
-        """Return ``(w, h, index_bytes)`` for the open drawing, or ``None``.
+        """Return ``(w, h, index_bytes)`` for the open picture, or ``None``.
         Resolves the doc pointer (running the one-shot #108 migration first):
         no pointer -> the newest drawing; an empty kind -> fresh canvas; a
-        pointer at a since-deleted file -> a fresh canvas under that name."""
+        pointer at a since-deleted file -> a fresh canvas under that name.
+
+        A picture Paint cannot EDIT still loads -- it comes back read-only with
+        a reason, and only a blob that will not decode at all comes back None.
+        A cart's own image is asked for by name and never falls back to the
+        gallery: there is exactly one file behind that door."""
         files = self._files
+        kind = self.doc_kind()
+        self._read_only = False
+        self._why = ""
 
         def _load(f):
-            f.migrate()
             name = self.doc_name()
+            if kind != self.DRAWINGS:
+                return name, f.load(kind, name)
+            f.migrate()
             if name:
-                return name, f.load("drawings", name)
-            names = f.list("drawings")
+                return name, f.load(kind, name)
+            names = f.list(kind)
             if names:
-                return names[0], f.load("drawings", names[0])
+                return names[0], f.load(kind, names[0])
             return None, None
 
         got, err = files.batch(_load)
@@ -1021,11 +1083,18 @@ class ArtworkService:
             return None
         name, blob = got
         if name is not None:
-            self._set_doc_name(name)
+            self._set_doc_name(name, kind)
         self._cached = files.decode_image(blob)
-        if (self._cached is not None and (self._cached[0] > self.MAX_W
-                                          or self._cached[1] > self.MAX_H)):
-            self._cached = None
+        if self._cached is None:
+            if blob:
+                self._read_only = True
+                self._why = "CAN'T READ THIS PICTURE"
+        elif self._cached[0] > self.MAX_W or self._cached[1] > self.MAX_H:
+            # Too big for Paint's canvas. It still OPENS -- refusing a picture
+            # outright is what "no editor for this" was, and a kid with a
+            # picture they cannot look at learns nothing.
+            self._read_only = True
+            self._why = "TOO BIG TO EDIT"
         return self._cached
 
     def save(self, indices, width=320, height=240):
@@ -1035,25 +1104,31 @@ class ArtworkService:
         if not self._ready():
             self.last_error = "STORAGE OFF"
             return False
+        if self._read_only:
+            self.last_error = self._why or "READ ONLY"
+            return False
         w = int(width)
         h = int(height)
         if w <= 0 or h <= 0 or w > self.MAX_W or h > self.MAX_H:
             self.last_error = "BAD SIZE"
             return False
         files = self._files
+        kind = self.doc_kind()
         blob = files.encode_image(w, h, indices)
         name = self.doc_name()
 
         def _write(f):
-            n = name or f.new_name("drawings")
-            f.save("drawings", n, blob)
+            # A cart's own image keeps its name: the FORMAT chose it, and an
+            # auto-name would write a file the cart does not look for.
+            n = name or f.new_name(kind)
+            f.save(kind, n, blob)
             return n
 
         got, err = files.batch(_write)
         if err is not None:      # surface failure in the app
             self.last_error = str(err)
             return False
-        self._set_doc_name(got)
+        self._set_doc_name(got, kind)
         self._cached = (w, h, bytes(indices))
         self.last_error = ""
         self._notify.achieve("paint_save")
@@ -1066,11 +1141,15 @@ class ArtworkService:
         if not self._ready():
             self._set_doc_name(None)
             return None
-        name, err = self._files.new_name("drawings")
+        name, err = self._files.new_name(self.DRAWINGS)
         if err is not None:
             self.last_error = str(err)
             return None
-        self._set_doc_name(name)
+        # NEW always lands in the gallery, so it also LEAVES a cart's image --
+        # a fresh canvas is not a new cover.
+        self._set_doc_name(name, self.DRAWINGS)
+        self._read_only = False
+        self._why = ""
         self._cached = None
         return name
 
@@ -1126,8 +1205,8 @@ class ArtworkService:
         # construction: `_with_sd` is a call-through on the host and on the P4,
         # and on the T-Deck `with_sd_live` mounts once and keeps the card
         # resident for the session -- so a second call is a readiness check.
-        n = name or self.doc_name()
-        blob = files.load("drawings", n)[0] if n else None
+        n = name or self._open_drawing()
+        blob = files.load(self.DRAWINGS, n)[0] if n else None
         if not blob:
             self.last_error = "SAVE FIRST"
             return False
@@ -1250,8 +1329,8 @@ class ArtworkService:
             self.last_error = "NO PROJECT"
             return None
         files = self._files
-        n = name or self.doc_name()
-        blob = files.load("drawings", n)[0] if n else None
+        n = name or self._open_drawing()
+        blob = files.load(self.DRAWINGS, n)[0] if n else None
         data = files.decode_image(blob)
         if not blob or data is None:
             self.last_error = "SAVE FIRST"

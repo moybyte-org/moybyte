@@ -273,7 +273,7 @@ class FilesAppLayer(ListShellApp):
             # file reaches the Editor.
             return self._to_editor(subject, tab="code")
         if door == "paint":
-            return self._to_paint(subject)
+            return self._to_paint(subject, kind, cart)
         return self._to_text(name, kind, door, cart)
 
     def door(self, name, kind=None, cart=None):
@@ -288,6 +288,9 @@ class FilesAppLayer(ListShellApp):
         if cart is not None and fname == cart.get("main", "main.py"):
             return "code", cart
         if _modes.is_image(fname):
+            # A cart's own image (`images/cover.moyimg`) is a PICTURE like any
+            # other, so it takes the picture door -- Paint opens it on the
+            # project kind and writes it back into the cart's folder.
             return "paint", name
         return _modes.mode_for(fname), name
 
@@ -306,10 +309,12 @@ class FilesAppLayer(ListShellApp):
             return None
         return "code" if tab else "editor"
 
-    def _to_paint(self, name):
-        self._art.open_named(name)          # the pointer outlives the app layer
-        app = self._nav.app("artwork")
-        if app is None or not self._nav.open_app(app):
+    def _to_paint(self, name, kind=None, cart=None):
+        """Open a picture in Paint -- a gallery drawing, or a cart's OWN image
+        (`cart` set), which Paint reads and writes on that project's kind: the
+        same file, in place, so an edited cover is the cover."""
+        if not self._nav.open_image(name, None if cart is not None else kind,
+                                    cart):
             self.status = "NO PAINT APP"
             return None
         return "paint"

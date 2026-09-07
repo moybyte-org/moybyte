@@ -159,15 +159,64 @@ def test_an_asset_routes_to_its_own_tab(tmp_path):
         assert ws.editor_app.tab == tab, name
         assert ws.wm.top_kind() == "menu", name
 
-    # An image asset has no tab that edits it in place, and the row SAYS so
-    # rather than opening a `.moyimg` blob as text.
-    (path / "images").mkdir()
-    (path / "images" / "sky.moyimg").write_text("x")
+    # A subfolder no tab claims still says so rather than opening a blob as
+    # text. An IMAGE is the exception and has its own test below: a picture is
+    # never refused for its shape.
+    (path / "extras").mkdir()
+    (path / "extras" / "notes.bin").write_text("x")
     cl = _on_config(ws, ws.carts.reload(cart))
     cl._open_files()
-    cl._files_open("images/sky.moyimg")
+    cl._files_open("extras/notes.bin")
     assert cl.files["msg"] == "NO EDITOR FOR THIS"
     assert ws.wm.top_kind() == "menu"
+
+
+def test_a_cart_image_opens_in_paint_on_the_projects_kind(tmp_path):
+    """`cover.moyimg` used to answer NO EDITOR FOR THIS. It is a PICTURE, so it
+    takes the picture door -- Paint, on this project's kind, writing back into
+    the cart's own folder."""
+    ws = build_ws(tmp_path)
+    cart = _project(ws, "Cover")
+    path = Path(cart["path"])
+    (path / "images").mkdir()
+    (path / "images" / "cover.moyimg").write_text(
+        moy_carts.encode_moyimg(4, 4, bytes((12,)) * 16))
+    cart = ws.carts.reload(cart)
+    cl = _on_config(ws, cart)
+    cl._open_files()
+    cl._files_open("images/cover.moyimg")
+
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == "images/cover.moyimg"
+    assert ws.artwork.doc_kind() == moy_carts.project_kind(cart["path"])
+    assert ws.artwork.editable()
+
+    # ...and Paint writes it back to the CART, not into the gallery.
+    ws.artwork.save(bytes((9,)) * 16, 4, 4)
+    blob = (path / "images" / "cover.moyimg").read_text()
+    assert moy_carts.decode_moyimg(blob) == (4, 4, bytes((9,)) * 16)
+    assert not moy_carts.list_files("drawings", ws.carts_root)
+
+
+def test_a_picture_paint_cannot_read_opens_read_only(tmp_path):
+    """The shape rule: a picture Paint has no editor for still OPENS, saying
+    why, instead of being refused."""
+    ws = build_ws(tmp_path)
+    cart = _project(ws, "Odd")
+    path = Path(cart["path"])
+    (path / "images").mkdir()
+    (path / "images" / "sky.moyimg").write_text('{"format":"moyimg-v1","w":8}')
+    cart = ws.carts.reload(cart)
+    cl = _on_config(ws, cart)
+    cl._open_files()
+    cl._files_open("images/sky.moyimg")
+
+    assert ws.wm.top_kind() == "artwork"
+    assert not ws.artwork.editable()
+    assert ws.artwork.why_read_only() == "CAN'T READ THIS PICTURE"
+    assert ws.artwork.save(bytes((9,)) * 16, 4, 4) is False
+    assert (path / "images" / "sky.moyimg").read_text() \
+        == '{"format":"moyimg-v1","w":8}'
 
 
 def test_a_text_file_opens_in_the_handle_in_its_mode(tmp_path):

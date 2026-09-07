@@ -28,7 +28,10 @@ Roots a person touches: PROJECTS (each cart a folder), NOTES (the vault, flat
 
 **The Files router**, in order: a `.moy` folder opens the project Editor, never a
 listing; a cart's own `main.py`/`main.lua` opens the Editor's Code tab (PLAY, the
-journal and crash-to-code live there); an image opens Paint; any other text file
+journal and crash-to-code live there); an image opens Paint -- including a
+cart's own `images/*.moyimg`, edited in place on the project kind, and one
+Paint has no editor for opens READ-ONLY rather than being refused, because a
+picture always has somewhere to open; any other text file
 (`.md`, `.json`, `.txt`, a script `.py`/`.lua`) opens the editor in the mode for
 its extension. A project's own files as files are reached only through the Config
 tab's ADVANCED row, so the loader stays in the loop.

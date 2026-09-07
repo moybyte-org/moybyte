@@ -932,9 +932,20 @@ class CardsLayer:
             self._close_files()
             ws.editor_app.set_tab(tab)
             return
-        if _modes.is_image(name) or "/" in name:
-            # A cart's image assets, and anything else in a subfolder no tab
-            # claims. Saying so beats opening a `.moyimg` blob as text.
+        if _modes.is_image(name):
+            # A cart's OWN image (`images/cover.moyimg`) is a picture, so it
+            # takes the picture door -- the same `ws.open_image` the Files
+            # router takes, opening it in Paint on this project's kind and
+            # writing it back in place. A picture is never refused for its
+            # shape: one Paint cannot edit opens read-only.
+            self._close_files()
+            if not ws.open_image(name, cart=cart):
+                self.files = {"rows": (), "sel": 0, "top": 0,
+                              "msg": "NO PAINT APP"}
+            return
+        if "/" in name:
+            # Anything else in a subfolder no tab claims. Saying so beats
+            # opening a blob as text.
             self.files["msg"] = "NO EDITOR FOR THIS"
             ws._dirty = True
             return

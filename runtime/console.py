@@ -2753,6 +2753,27 @@ class Workstation:
         self.ach.note("open", cart.get("path") or cart.get("title"))
         return True
 
+    def open_image(self, name, kind=None, cart=None):
+        """Open a PICTURE in Paint -- the ONE image door, taken by the Files
+        router and by the Editor's ADVANCED files row alike (#108).
+
+        `cart` names a project whose OWN image this is (`images/cover.moyimg`):
+        Paint then reads and writes it on that project's kind, in place, so an
+        edited cover is the cover. Without one it is a gallery drawing. False
+        when this build carries no Paint app, which each door reports on its
+        own status line -- but a picture is never REFUSED for its shape: one
+        Paint cannot edit opens read-only rather than not at all."""
+        app = self._apps_by_id.get("artwork")
+        if app is None:
+            return False
+        if cart is not None:
+            path = (cart or {}).get("path")
+            if not path:
+                return False
+            kind = self.carts_store.project_kind(path)
+        self.artwork.open_named(name, kind)
+        return bool(self.open_app(app))
+
     def is_system_app(self, cart):
         """True when a registered system app's identity claims `cart` -- the
         registry-side predicate (services use it to keep app carts out of

@@ -679,6 +679,13 @@ class Nav:
             ws.set_menu_view(tab)
         return True
 
+    def open_image(self, name, kind=None, cart=None):
+        """Open a PICTURE in Paint -- the Files router's image door, for a
+        gallery drawing and for a cart's OWN image (`cart` given) alike. The
+        Editor's ADVANCED files row takes the same console verb, so there is
+        one image route and not two. False when the build carries no Paint."""
+        return self.__ws.open_image(name, kind, cart)
+
     def open_text(self, name, kind=None, mode=None):
         """Open a user-files TEXT document in the console's text app, in `mode`.
 

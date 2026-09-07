@@ -406,3 +406,79 @@ def test_the_notes_and_drawings_grids_page_through_everything(tmp_path):
     for _ in range(pages):
         assert grid.tap(next_r[0] + 2, next_r[1] + 2)[0] == "page"
     assert grid.page == grid.sel // grid._per_page()
+
+
+# -- a cart's own image is a PICTURE ------------------------------------------
+
+def _cart_image(cart, name="cover.moyimg", w=4, h=4, value=12):
+    import os
+    d = os.path.join(cart["path"], "images")
+    if not os.path.isdir(d):
+        os.mkdir(d)
+    with open(os.path.join(d, name), "w") as f:
+        f.write(moy_carts.encode_moyimg(w, h, bytes((value,)) * (w * h)))
+    return "images/" + name
+
+
+def test_a_cart_image_opens_in_paint_from_the_projects_root(tmp_path):
+    """`cover.moyimg` answered NO EDITOR FOR THIS. A picture always has one."""
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    cart = _a_project(ws)
+    name = _cart_image(cart)
+
+    assert app.door(name, cart=cart) == ("paint", name)
+    assert app.route(name, cart=cart) == "paint"
+
+    assert ws.wm.top_kind() == "artwork"
+    assert ws.artwork.doc_name() == name
+    assert ws.artwork.doc_kind() == moy_carts.project_kind(cart["path"])
+    assert ws.artwork.editable()
+    assert ws.artwork.load() == (4, 4, bytes((12,)) * 16)
+
+
+def test_paint_writes_a_cart_image_back_into_the_cart(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    cart = _a_project(ws)
+    name = _cart_image(cart)
+    app.route(name, cart=cart)
+
+    assert ws.artwork.save(bytes((3,)) * 16, 4, 4)
+    kind = moy_carts.project_kind(cart["path"])
+    assert moy_carts.decode_moyimg(
+        moy_carts.load_file(kind, name, ws.carts_root)) == (4, 4, bytes((3,)) * 16)
+    assert "cover" not in moy_carts.list_files("drawings", ws.carts_root)
+
+
+def test_a_gallery_drawing_still_opens_on_the_drawings_kind(tmp_path):
+    """The cart-image door must not leak: NEW, and the gallery picker, put the
+    document back where the auto-naming and the trash can reach it."""
+    carts = str(tmp_path / "carts")
+    _seed_drawing(carts, "dragon")
+    ws = host_app.build_workstation(carts)
+    app = _open_files(ws)
+    cart = _a_project(ws)
+    app.route(_cart_image(cart), cart=cart)
+    assert ws.artwork.doc_kind() != "drawings"
+
+    ws.artwork.new_doc(320, 240)
+    assert ws.artwork.doc_kind() == "drawings"
+    app._enter_kind("drawings")
+    app._pick("dragon")
+    assert ws.artwork.doc_kind() == "drawings"
+
+
+def test_a_picture_paint_cannot_read_opens_read_only_from_files(tmp_path):
+    ws = host_app.build_workstation(str(tmp_path / "carts"))
+    app = _open_files(ws)
+    cart = _a_project(ws)
+    import os
+    os.mkdir(os.path.join(cart["path"], "images"))
+    with open(os.path.join(cart["path"], "images", "odd.moyimg"), "w") as f:
+        f.write("not a picture")
+
+    assert app.route("images/odd.moyimg", cart=cart) == "paint"
+    assert ws.wm.top_kind() == "artwork"        # opened, not refused
+    assert not ws.artwork.editable()
+    assert ws.artwork.why_read_only()
