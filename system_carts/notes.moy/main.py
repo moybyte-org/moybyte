@@ -1,172 +1,145 @@
-# Notes -- a USER APP, and it is nothing but a cartridge (#181).
+# Notes -- the console's one text app, and it is nothing but a cartridge (#181).
 #
 # Everything below is ordinary cart code you can open in the Editor and change.
-# What makes it an APP rather than a game is two lines of manifest.json:
+# What makes it an APP rather than a game is its manifest.json:
 #
-#     "type": "app"                            -> the shell runs it WITH the
-#                                                 exitable bar (the X in the top
-#                                                 right), so it can never trap you
-#     "permissions": ["files:docs", "prefs"]   -> the shell hands it `files` and
-#                                                 `prefs`, and NOTHING else
+#     "type": "app"                 -> the shell runs it WITH the exitable bar
+#                                      (the X in the top right), so it can never
+#                                      trap you
+#     "permissions": [...]          -> the shell hands it exactly these, and
+#                                      nothing else. A permission it does not
+#                                      ask for has no NAME here at all: writing
+#                                      `carts` in this file is a NameError, not
+#                                      a locked door. That is the whole sandbox.
 #
-# A permission it does not ask for has no NAME here at all -- writing `carts` in
-# this file is a NameError, not a locked door. That is the whole sandbox.
+# The one that matters here is `files:docs`, which brings BOTH the storage verbs
+# (`files.list()`, `files.new_name()`) and `open_editor(name)` -- a handle onto
+# one note, over the console's own editor. The editor is not in this file: the
+# text, the caret, wrap, undo, the Markdown rendering (headings, checkboxes,
+# `[[links]]`, `![[drawings]]`) and the save all live in the shell and are drawn
+# through the handle, the way `make_layer` hands a cart the layer engine. This
+# file is the SKIN: a list, two buttons and where the page goes.
 #
-# The four extra globals every "app" cart gets, with no permission needed,
-# because they are how an app draws rather than what it may reach:
-#
-#     screen()   the canvas -- what the ui toolkit's `cv` argument wants
-#     theme()    the live panel-theme tokens -- its `th` argument
-#     bar_h()    rows at the top the shell's own bar owns; draw below them
-#     ui         the REAL runtime/ui.py the shipped apps use: rect algebra
-#                (inset/cut_*/hsplit/vsplit), themed widgets, and Hits
-#
-# Kid-facing behaviour: type a note, SAVE it into your documents (the same place
-# Writer keeps its notes -- open one there and it is really the same file), tap a
-# saved name to read it back. NEW starts a fresh one. It remembers which note you
-# had open, in its own corner of the settings (`prefs` is namespaced per app, so
-# it cannot see -- or break -- anybody else's).
+# The handle also owns the keyboard while it is focused, so there is no typing
+# code here and no `textmode()` call -- taking the keyboard is a thing only the
+# shell can do correctly on the T-Deck.
 
-MAX_LINES = 9          # what fits the note panel at 320x240
-MAX_COLS = 26
-MAX_LIST = 6           # saved names the shelf shows
+ROWS = 7               # names the shelf shows
+BTN_H = 18             # the button strip over an open note
 
-lines = [""]           # the note being edited
-name = None            # the file it came from / goes to, None while unsaved
-saved = []             # saved note names
-status = "TYPE A NOTE"
+ed = None              # the open note's editor handle (None = the shelf)
+names = []             # the vault, newest first
+status = "MY NOTES"
 hits = None
 
 
 def _init():
     global hits
-    # Clean ASCII typing (the T-Deck keyboard's text mode). Safe in an app: the
-    # bar's X is the exit, so BACKSPACE stays an ordinary delete key -- which is
-    # exactly why a text-mode GAME has to provide quit() and this does not.
-    textmode(True)
     hits = ui.Hits()
     _refresh()
-    last = prefs.get("last")
-    if last:
-        _open(last)
+    # A note the console was already asked to open -- Files routed a `.md`, a
+    # `.json` or a `.txt` here. `open_editor()` with no name is that request,
+    # and None when there was none.
+    asked = open_editor()
+    if asked is not None:
+        _show(asked)
+    else:
+        last = prefs.get("last")
+        if last in names:
+            _open(last)
 
 
-# -- storage: every verb answers (value, err) and never raises ---------------
+# -- the vault ---------------------------------------------------------------
 
 
 def _refresh():
-    global saved, status
-    names, err = files.list()
+    global names, status
+    got, err = files.list()
+    names = [] if err is not None else got[:ROWS]
     if err is not None:
-        saved = []
         status = "NO STORAGE"
-    else:
-        saved = names[:MAX_LIST]
 
 
-def _open(what):
-    global lines, name, status
-    body, err = files.load_text(what)
-    if err is not None:
-        status = "CAN'T OPEN"
+def _open(name):
+    got = open_editor(name)
+    if got is None:
         return
-    lines = body.split("\n")[:MAX_LINES] if body else [""]
-    name = what
-    status = "OPEN " + what
+    _show(got)
 
 
-def _save():
-    global name, status
-    target = name
-    if target is None:
-        target, err = files.new_name()      # NOTE 1, NOTE 2, ...
-        if err is not None:
-            status = "NO STORAGE"
-            return
-    target, err = files.save_text(target, "\n".join(lines))
-    if err is not None:
-        status = "CAN'T SAVE"
-        return
-    name = target
-    prefs.set("last", target)
-    status = "SAVED " + target
+def _show(handle):
+    global ed, status
+    _close()
+    ed = handle
+    ed.focus()                          # the handle takes the keyboard
+    prefs.set("last", ed.name())
+    status = ed.name()
+
+
+def _close():
+    global ed, status
+    if ed is not None:
+        ed.close()                      # saves on the way out -- no SAVE button
+        ed = None
+    status = "MY NOTES"
     _refresh()
 
 
 def _new():
-    global lines, name, status
-    lines = [""]
-    name = None
-    status = "NEW NOTE"
+    name, err = files.new_name()
+    if err is not None:
+        return
+    _open(name)
 
 
-# -- typing ------------------------------------------------------------------
+# -- frame -------------------------------------------------------------------
 
 
 def _update(dt):
-    _typing()
     _tapping()
-
-
-def _typing():
-    ch = keyp()                             # one edge per press, no autorepeat
-    if not ch:
-        return
-    if ch == 8:                             # BACKSPACE
-        if lines[-1]:
-            lines[-1] = lines[-1][:-1]
-        elif len(lines) > 1:
-            lines.pop()
-    elif ch == 10 or ch == 13:              # ENTER
-        if len(lines) < MAX_LINES:
-            lines.append("")
-    elif 32 <= ch <= 126:
-        if len(lines[-1]) < MAX_COLS:
-            lines[-1] = lines[-1] + chr(ch)
-
-
-# -- drawing: the shell's own toolkit, at the shell's own theme ---------------
 
 
 def _draw():
     cv = screen()
     th = theme()
-    cls(col("black"))
+    cls(th["panel"])
     hits.clear()
     # The shell paints its bar over the top bar_h() rows and swallows taps
     # there, so lay out below it and never hardcode 18.
     body = ui.inset((0, bar_h(), W, H - bar_h()), 4)
-    shelf, note = ui.cut_right(body, 96)
-    _draw_note(cv, th, ui.cut_right(note, 4)[1])
-    _draw_shelf(cv, th, shelf)
-
-
-def _draw_note(cv, th, rect):
-    bar, page = ui.cut_bottom(rect, 20)
-    inner = ui.panel(cv, th, page, name or "NEW NOTE")
-    y = inner[1] + 2
-    for i in range(len(lines)):
-        text = lines[i]
-        if i == len(lines) - 1:
-            text = text + "_"               # the caret, as a character
-        cv.print(text[:MAX_COLS], inner[0] + 2, y, th["ink"], 1)
-        y += 9
-    left, right = ui.hsplit(bar, 2, 4)
-    ui.button(cv, th, left, "SAVE", state=hits.state_of("save"))
-    hits.add(left, "save")
-    ui.button(cv, th, right, "NEW", state=hits.state_of("new"))
-    hits.add(right, "new")
-    cv.print(status[:24], rect[0] + 2, bar[1] - 10, th["ink_dim"], 1)
+    if ed is None:
+        _draw_shelf(cv, th, body)
+    else:
+        _draw_note(cv, th, body)
 
 
 def _draw_shelf(cv, th, rect):
-    inner = ui.panel(cv, th, rect, "SAVED")
-    rows = ui.vsplit(inner, MAX_LIST, 2)
-    for i in range(MAX_LIST):
-        if i >= len(saved):
+    strip, list_rect = ui.cut_bottom(rect, BTN_H)
+    inner = ui.panel(cv, th, list_rect, "MY NOTES")
+    rows = ui.vsplit(inner, ROWS, 2)
+    for i in range(ROWS):
+        if i >= len(names):
             break
-        ui.row(cv, th, rows[i], saved[i], on=(saved[i] == name),
-               hits=hits, verb="open", arg=i)
+        ui.row(cv, th, rows[i], names[i], hits=hits, verb="open", arg=i)
+    new_btn = ui.hsplit(strip, 3, 4)[0]
+    ui.button(cv, th, new_btn, "+ NEW", state=hits.state_of("new"))
+    hits.add(new_btn, "new")
+
+
+def _draw_note(cv, th, rect):
+    strip, page = ui.cut_top(rect, BTN_H)
+    a, b, c = ui.hsplit(strip, 3, 4)
+    ui.button(cv, th, a, "NOTES", state=hits.state_of("back"))
+    hits.add(a, "back")
+    ui.button(cv, th, b, "UNDO", state=hits.state_of("undo"),
+              disabled=not ed.can_undo())
+    hits.add(b, "undo")
+    ui.button(cv, th, c, "REDO", state=hits.state_of("redo"),
+              disabled=not ed.can_redo())
+    hits.add(c, "redo")
+    line, sheet = ui.cut_bottom(page, 10)
+    ed.draw(sheet[0], sheet[1], sheet[2], sheet[3])
+    cv.print((ed.badge() or status)[:38], line[0], line[1] + 1, th["ink_dim"], 1)
 
 
 # -- taps: the draw pass IS the hit map (ui.Hits) -----------------------------
@@ -177,18 +150,33 @@ def _tapping():
     if t is None:
         return
     hits.pointer_frame(t[0], t[1], _Ptr(t[3]))
-    if not t[2]:
-        return
     hit = hits.at(t[0], t[1])
     if hit is None:
+        if ed is not None:
+            _in_page(t[0], t[1], t[2])
+        return
+    if not t[2]:
         return
     verb, arg = hit
-    if verb == "save":
-        _save()
-    elif verb == "new":
+    if verb == "new":
         _new()
-    elif verb == "open" and arg < len(saved):
-        _open(saved[arg])
+    elif verb == "back":
+        _close()
+    elif verb == "undo":
+        ed.undo()
+    elif verb == "redo":
+        ed.redo()
+    elif verb == "open" and arg < len(names):
+        _open(names[arg])
+
+
+def _in_page(x, y, click):
+    # Anything the buttons did not claim belongs to the editor. It answers what
+    # the tap MEANT: a tapped [[link]] is another note, which is the one thing
+    # the skin has to act on -- the checkbox and the caret it handles itself.
+    got = ed.tap(x, y, click)
+    if got is not None and got[0] == "link":
+        _open(got[1])
 
 
 class _Ptr:

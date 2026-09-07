@@ -181,24 +181,6 @@ def test_migration_turns_notes_json_into_named_docs(tmp_path):
     assert set(app.grid.names) == set(names)
 
 
-def test_files_app_open_routes_a_doc_to_writer(tmp_path):
-    carts = str(tmp_path / "carts")
-    ws = host_app.build_workstation(carts)
-    moy_carts.save_file("docs", "letter", "dear you", carts)
-    files = ws.files_app
-    for i, cart in enumerate(ws.launcher.items):
-        if cart.get("title") == "Files":
-            ws.launcher.sel = i
-            break
-    ws.open()
-    ws.frame(1 / 30)
-    files._enter_kind("docs")
-    files._act("OPEN", "letter")
-    assert ws.wm.top_kind() == "writer"
-    assert ws.writer_app.doc_name == "letter"
-    assert ws.writer_app.editor.text() == "dear you"
-
-
 def test_read_only_store_keeps_typing_without_crashing(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_writer(ws)

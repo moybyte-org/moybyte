@@ -135,6 +135,8 @@ from pathlib import Path
 
 import pytest
 
+from ws_helpers import open_cart
+
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR = Path(__file__).resolve().parent / "shell_goldens"
 GOLDEN_FILE = GOLDEN_DIR / "hashes.json"
@@ -168,12 +170,12 @@ _EDITOR_CART = "Star Catcher"
 # measures: no golden here renders a cart's own pixels (a running cart is the
 # game domain, pinned by tests/test_spec_conformance.py), only the tile the
 # shelf draws for it, and 34 tiles already exercise every shelf branch there is.
-GOLDEN_EXCLUDE = {
-    "Notes": "the #181 user-app demo cart, added after the Phase 0 baseline. "
-             "It is content; the shell paths it exercises (the app bar over a "
-             "cart, the permission-gated namespace) are pinned by "
-             "tests/test_user_apps.py.",
-}
+# Empty today, and deliberately kept: the mechanism is what makes the choice
+# above a decision rather than a shrug. Notes lived here as "the #181 demo
+# cart" until step 3 of docs/text_editing_2026-09.md made it the console's ONE
+# text app -- a shipped surface with a golden of its own (`app_notes`), which
+# is exactly the case an exclusion must not cover.
+GOLDEN_EXCLUDE = {}
 
 # The Editor tab ladder and the system-app roster. Both are pinned against the
 # live registries below (test_tab_ladder_is_fully_covered /
@@ -181,6 +183,17 @@ GOLDEN_EXCLUDE = {
 # adding its golden is a red test rather than a silent coverage hole.
 TABS = ("cards", "blocks", "code", "paint", "map", "scene", "music")
 APPS = ("artwork", "appearance", "writer", "storybook", "files", "calc")
+
+# Apps that are CARTS, not registered layers (#181): rendered by RUNNING them,
+# so what these hash is the app bar over a cart's own 320x240 raster, composited
+# and scaled by the tier. `APPS` above is pinned against `ws._apps_by_id`; these
+# deliberately are not in it, and are pinned against the STORE instead
+# (test_every_app_cart_is_covered), which is where a cart's identity lives.
+#
+# The "a running cart is not covered here" note above still holds for GAMES: a
+# game is the spec's domain and free to use rnd(). An app cart draws a settled
+# surface out of stored content, which is what every other row here does.
+APP_CARTS = (("notes", "Notes"),)
 
 # The WEB CONSOLE connection screen (#197) is rendered LAST, and with a fake
 # service, for two reasons that are both about not moving the other 87 hashes:
@@ -370,6 +383,9 @@ def _surface_plan(ws, cfg):
     for app in APPS:
         plan.append(("app_" + app,
                      lambda app=app: ws.open_app(ws._apps_by_id[app])))
+    for surface, title in APP_CARTS:
+        plan.append(("app_" + surface,
+                     lambda title=title: open_cart(ws, title)))
 
     def park():
         ws.system["web_pin"] = GOLDEN_PIN
@@ -411,6 +427,7 @@ def surface_names(config_name):
     names += ["editor_" + t for t in TABS]
     names += ["app_" + a for a in APPS]
     names += ["script_console"]
+    names += ["app_" + a for a, _title in APP_CARTS]
     names += ["web_console", "web_console_address"]
     return names
 
@@ -568,19 +585,34 @@ def test_every_axis_is_actually_exercised():
     assert {bool(c["diagonal_in"]) for c in CONFIGS.values()} == {True, False}
 
 
+# A running APP CART is drawn on the fixed 320x240 GAME raster, and so is the
+# minimal bar over it -- `bar_layer._bar_canvas("tool")` IS `ws.canvas` and its
+# height is the flat `_STATUS_H`, deliberately, because the tier then scales
+# that whole raster and the scale is what carries a 16px icon past the
+# millimetre floor. So these two hash the same on both sides of the declared
+# diagonal, and that is #203 working rather than missing. Asserted BOTH ways
+# below, so an exemption that stops being true goes red instead of widening.
+TAP_FLOOR_EXEMPT = frozenset("app_" + s for s, _title in APP_CARTS)
+
+
 def test_the_tap_floor_moves_chrome_and_leaves_text_alone(request):
     """#203's whole claim, as pixels. Two configs differ ONLY by the declared
-    panel diagonal, so every surface that draws chrome must differ -- and the
-    one surface that draws no OS chrome at all must not."""
+    panel diagonal, so every surface that draws OS chrome must differ -- and the
+    surfaces that draw none must not."""
     if _updating(request):
         pytest.skip("re-baselining: the file is rewritten at module teardown")
     stored = _load_goldens()
     plain = stored["guition_480x320_fs1_dark"]
     floored = stored["guition_tapfloor_dark"]
-    same = [s for s in plain if plain[s] == floored.get(s)]
+    same = [s for s in plain
+            if s not in TAP_FLOOR_EXEMPT and plain[s] == floored.get(s)]
     assert not same, (
         "these surfaces hash IDENTICALLY with and without the tap-target "
         "floor, i.e. the declared diagonal reached nothing: %s" % sorted(same))
+    moved = [s for s in TAP_FLOOR_EXEMPT if plain[s] != floored.get(s)]
+    assert not moved, (
+        "these surfaces are exempt because they draw on the scaled GAME "
+        "raster, and they moved with the diagonal: %s" % sorted(moved))
 
 
 def test_the_light_variant_really_draws_different_pixels(request):
@@ -653,3 +685,13 @@ def test_every_registered_app_is_covered(tmp_path):
     assert sorted(ws._apps_by_id) == sorted(APPS), (
         "the system-app registry changed (%s) -- add the new app here and "
         "re-baseline:\n    %s" % (sorted(ws._apps_by_id), REBASELINE_CMD))
+
+
+def test_every_app_cart_is_covered(tmp_path):
+    """The other half: an app that is a CART is claimed by no registry, so its
+    coverage is pinned against the seeded store."""
+    ws = _build(CONFIGS["tdeck_320x240_fs1_dark"], tmp_path / "carts")
+    carts = {c.get("title") for c in ws.carts.all if ws.is_user_app(c)}
+    assert carts == {title for _s, title in APP_CARTS}, (
+        "the app-cart roster changed (%s) -- add it to APP_CARTS and "
+        "re-baseline:\n    %s" % (sorted(carts), REBASELINE_CMD))

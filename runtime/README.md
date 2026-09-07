@@ -105,7 +105,11 @@ Content + tooling:
   a notes list + ruled text page over the shared `CodeEditor` core, autosaving
   each doc as a named `files/docs/<name>.md` user file (#108) — plain Markdown,
   UTF-8, LF, no envelope, so the card opens in any editor on a PC.
-  `system_carts/notes.moy` is the cart-side notepad over the SAME files.
+  `system_carts/notes.moy` (title: Notes) is the console's ONE text app and it
+  is a CART: a vault list plus one note drawn through the editor handle
+  (`runtime/editor_handle.py`), holding no text of its own. It claims the
+  Files router's text door with the `editor` marker permission, so a `.md` (or
+  a `.json`/`.txt`) opened in Files runs it on that document.
   `storybook.moy` (title: Storybook, #78) opens `runtime/storybook_app.py`:
   decks of art+words pages that COMPILE to real story carts (`deck.json` + a
   generated, readable `main.py`; Paint art attaches per page). Hand-editing the

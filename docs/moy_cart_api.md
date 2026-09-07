@@ -713,8 +713,8 @@ and never crashes, so there is no `try` to write.
 Anything you did not ask for **is not there** — no `carts`, no shell. Writing
 that name is an ordinary "name is not defined" error, like a typo.
 
-`system_carts/notes.moy` is a small worked example: it types, saves, and lists
-what it saved. The full rules
+`system_carts/notes.moy` is the worked example: it lists your notes, opens one
+through the editor handle below, and holds no text of its own. The full rules
 (what is never grantable, and how to make an app reflow to a big screen with
 `_layout(w, h, fs)` instead of drawing at a fixed 320×240) are in
 `docs/app_api_v1.md`.

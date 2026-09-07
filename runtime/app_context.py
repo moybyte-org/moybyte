@@ -675,20 +675,14 @@ class Nav:
         return True
 
     def open_text(self, name, kind=None, mode=None):
-        """Open a user-files TEXT document on the shell's text page, in `mode`.
+        """Open a user-files TEXT document in the console's text app, in `mode`.
 
         The Files router's door for anything that is not a project, a project's
-        main file or a drawing. Resolved by REGISTERED ID like `app()`, so
-        Files holds no reference to whichever app draws the page -- step 3 of
-        docs/text_editing_2026-09.md swaps that app for a cart over the editor
-        handle and this signature does not move. False when the build carries
-        no text app."""
-        app = self.app("writer")
-        point = getattr(app, "open_named", None)
-        if app is None or point is None:
-            return False
-        point(name, mode)
-        return bool(self.open_app(app))
+        main file or a drawing. The text app is a CART now (step 3 of
+        docs/text_editing_2026-09.md) -- Notes, over the editor handle -- and
+        this signature did not move: an app asks to open a document and does
+        not learn what draws it. False when the build carries no text app."""
+        return self.__ws.open_text_cart(name, kind, mode)
 
     def play(self, cart, caller):
         """Open `cart` as a workspace and RUN it, returning to `caller` on

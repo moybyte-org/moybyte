@@ -231,26 +231,29 @@ def test_the_demo_app_opens_and_gets_exactly_what_it_declared(tmp_path):
 
 
 def test_the_demo_app_saves_a_document_the_rest_of_the_console_can_read(tmp_path):
+    """Notes types through the EDITOR HANDLE and its note lands as a plain
+    `.md` the rest of the console reads -- the cart holds no text of its own."""
     ws = _ws(tmp_path)
     _open(ws, "Notes")
     _frames(ws)
     ns = ws.player.ns
-    ns["lines"][:] = ["HELLO", "WORLD"]
-    x, y, w, h = _hit_rect(ns, "save")
+    x, y, w, h = _hit_rect(ns, "new")
     _tap(ws, x + w // 2, y + h // 2)
-    assert ws.player.cart_error is None, ws.player.cart_error
-    assert ns["status"].startswith("SAVED"), ns["status"]
-    # It is a real user-files document, in the kind Writer and Files browse --
-    # and a plain `.md` on the card, holding exactly what the cart typed.
+    _frames(ws)
+    ed = ns["ed"]
+    assert ed is not None and ws.player.cart_error is None, ws.player.cart_error
+    ed.set_text("HELLO\nWORLD")
+    ed.save()
+    # A real user-files document, in the kind Files browses -- a plain `.md` on
+    # the card holding exactly what the handle held.
     names = moy_carts.list_files("docs", ws.carts_root)
     assert names, "nothing landed in files/docs"
     blob = moy_carts.load_file("docs", names[0], ws.carts_root)
     assert blob == "HELLO\nWORLD"
     assert moy_carts.file_path("docs", names[0], ws.carts_root).endswith(".md")
-    # ...and the cart reads its own note back out of that `.md`.
-    ns["lines"][:] = [""]
-    ns["_open"](names[0])
-    assert ns["lines"] == ["HELLO", "WORLD"]
+    # ...and the cart reads its own note back through a fresh handle.
+    again = ns["open_editor"](names[0])
+    assert again.text() == "HELLO\nWORLD"
     # ...and its own prefs slot remembers it, namespaced under the app id.
     assert ws.system["notes_last"] == names[0]
 

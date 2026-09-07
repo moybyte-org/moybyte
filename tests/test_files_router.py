@@ -6,7 +6,8 @@ root sits on the Files shelf beside the user-files kinds.
 Every case here drives the real Workstation: the assertion is where the
 console ended up, not which method was called."""
 
-from runtime import files_app, host_app, moy_carts, text_modes
+from runtime import (files_app, host_app, moy_carts, system_api,
+                     text_modes)
 
 
 def _open_files(ws):
@@ -111,6 +112,9 @@ def test_an_image_lands_in_paint(tmp_path):
 
 
 def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
+    """The text door is the NOTES CART now (step 3), reached by its `editor`
+    marker permission -- so what this asserts is where the console ended up and
+    what the cart's handle holds, not which app was poked."""
     carts = str(tmp_path / "carts")
     moy_carts.save_file("docs", "story", "once upon a time", carts)
     ws = host_app.build_workstation(carts)
@@ -120,11 +124,13 @@ def test_a_note_opens_the_text_page_in_markdown_mode(tmp_path):
     assert app.door("story", kind="docs") == (text_modes.MD, "story")
     assert app.route("story", kind="docs") == text_modes.MD
 
-    assert ws.wm.top_kind() == "writer"
-    writer = ws.writer_app
-    assert writer.doc_name == "story"
-    assert writer.doc_mode == text_modes.MD
-    assert writer.editor.text() == "once upon a time"
+    ws.input.begin_frame()
+    ws.frame(1 / 30)
+    assert ws.wm.top_is_player()
+    assert ws.cart.get("title") == "Notes"
+    ed = ws.player.ns["ed"]
+    assert (ed.name(), ed.mode()) == ("story", text_modes.MD)
+    assert ed.text() == "once upon a time"
 
 
 def test_a_json_file_is_routed_to_json_mode(tmp_path):
@@ -154,7 +160,8 @@ def test_anything_else_textual_falls_through_to_plain_text(tmp_path):
 def test_a_missing_app_degrades_to_the_status_line(tmp_path):
     ws = host_app.build_workstation(str(tmp_path / "carts"))
     app = _open_files(ws)
-    ws._apps_by_id.pop("writer")
+    ws.carts.apply([c for c in ws.carts.all
+                    if not system_api.is_text_app(c)])
     assert app.route("story", kind="docs") is None
     assert app.status == "NO TEXT APP"
     ws._apps_by_id.pop("artwork")
