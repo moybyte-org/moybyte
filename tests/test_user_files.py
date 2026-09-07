@@ -4,6 +4,7 @@ one-shot artwork.moyimg migration. Same shared runtime/moy_carts.py the device
 freezes."""
 
 import json
+import subprocess
 import os
 from pathlib import Path
 
@@ -12,6 +13,16 @@ ROOT = Path(__file__).resolve().parent.parent
 from runtime import moy_carts  # noqa: E402
 
 import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_seed_folders():
+    """`_SEED_FOLDERS` is process state a seeding door writes, so a test that
+    builds a workstation would otherwise leave the picture pass stepping over
+    folders the next test made itself."""
+    moy_carts.note_seed_folders(())
+    yield
+    moy_carts.note_seed_folders(())
 
 
 def _root(tmp_path):
@@ -350,17 +361,18 @@ def test_a_trashed_wrapper_migrates_with_the_live_ones(tmp_path):
 
 def test_sweep_store_runs_its_one_shot_passes(tmp_path):
     """The store-opening door: retire, migrate the legacy notebook, rewrite the
-    doc format, rewrite the pictures. `migrate_docs` runs HERE since the notebook
-    app was deleted -- it builds the vault a note is picked from, so nothing can
-    list it first."""
+    doc format. `migrate_docs` runs HERE since the notebook app was deleted --
+    it builds the vault a note is picked from, so nothing can list it first.
+
+    Three passes, not four: the picture pass left this door on 2026-09-07 and
+    the test below says why."""
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     _wrapper(root, "one")
-    assert moy_carts.sweep_store(root) == (0, None, 1, 0)
+    assert moy_carts.sweep_store(root) == (0, None, 1)
     assert moy_carts.load_retired_version(root) == moy_carts.RETIRED_GEN
     assert moy_carts.load_docs_version(root) == moy_carts.DOCS_GEN
-    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
-    assert moy_carts.sweep_store(root) == (0, None, 0, 0)
+    assert moy_carts.sweep_store(root) == (0, None, 0)
 
 
 def test_sweep_store_migrates_a_legacy_notebook(tmp_path):
@@ -369,7 +381,7 @@ def test_sweep_store_migrates_a_legacy_notebook(tmp_path):
     root = _root(tmp_path)
     moy_carts.ensure_dirs(root)
     moy_carts.save_notes('{"notes": [{"body": "my first note"}]}', root)
-    _retired, made, _fmt, _pics = moy_carts.sweep_store(root)
+    _retired, made, _fmt = moy_carts.sweep_store(root)
     assert made and moy_carts.load_file("docs", made[0], root) == "my first note"
 
 
@@ -775,9 +787,302 @@ def test_a_blob_that_will_not_parse_is_left_exactly_as_it_is(tmp_path):
     assert moy_carts.load_file("drawings", "broken", root) == junk
 
 
-def test_the_store_door_runs_the_pass(tmp_path):
-    """`sweep_store` is what a store OPENING calls; a migration nothing calls
-    is a migration that never happens."""
+def test_the_store_door_does_not_run_the_picture_pass(tmp_path):
+    """It did for one day, and that day it cost a Guition 196 seconds of boot
+    and then the boot. `sweep_store` is a store OPENING -- a small read warm,
+    bounded work cold -- and rewriting every picture on a card is neither."""
+    root = _pic_store(tmp_path)
+    blob = _rle_blob(8, 8, _pic(8, 8))
+    moy_carts.save_file("drawings", "one", blob, root)
+    assert len(moy_carts.sweep_store(root)) == 3
+    assert moy_carts.load_file("drawings", "one", root) == blob
+    assert moy_carts.load_images_version(root) == 0
+
+
+def test_the_job_rewrites_one_picture_per_step(tmp_path):
+    """The console drives this from the idle branch of its frame loop, so a
+    step is a whole FILE and no more: on an S3 one 320x240 picture is seconds
+    of compressor, and a step that took two would double a freeze nobody asked
+    for."""
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    for name in ("a", "b", "c"):
+        moy_carts.save_file("drawings", name, _rle_blob(16, 16, art), root)
+    job = moy_carts.ImageMigration(root)
+    assert job.step() and job.rewritten == 1
+    assert job.step() and job.rewritten == 2
+    assert job.step() and job.rewritten == 3
+    assert job.step() is False               # exhausted: the stamp lands here
+    assert job.done and moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+    for name in ("a", "b", "c"):
+        assert moy_carts.decode_moyimg(
+            moy_carts.load_file("drawings", name, root)) == (16, 16, art)
+
+
+def test_a_store_already_at_this_generation_is_never_walked(tmp_path):
+    """The warm path is the one small read `load_images_version` costs -- the
+    job must not listdir a card it has nothing to do on."""
     root = _pic_store(tmp_path)
     moy_carts.save_file("drawings", "one", _rle_blob(8, 8, _pic(8, 8)), root)
-    assert moy_carts.sweep_store(root)[3] == 1
+    moy_carts.migrate_images(root)
+    listed = []
+    real = moy_carts.os.listdir
+    moy_carts.os.listdir = lambda d, _r=real: (listed.append(d), _r(d))[1]
+    try:
+        job = moy_carts.ImageMigration(root)
+        assert job.done and job.step() is False
+    finally:
+        moy_carts.os.listdir = real
+    assert listed == []
+
+
+def test_a_seed_carts_pictures_are_stepped_over(tmp_path):
+    """The seed pass owns those folders and replaces them wholesale on the next
+    version bump, so paying 15s a cover to rewrite what a re-seed overwrites is
+    work with a negative return. A kid's drawing has no such second author,
+    which is why it is the one thing this pass exists for."""
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    seeded = moy_carts.create("Hop Quest", root, src="def _draw():\n    pass\n")
+    mine = moy_carts.create("My Game", root, src="def _draw():\n    pass\n")
+    moy_carts.save_image(seeded, "cover", _rle_blob(16, 16, art))
+    moy_carts.save_image(mine, "cover", _rle_blob(16, 16, art))
+    moy_carts.save_file("drawings", "sunset", _rle_blob(16, 16, art), root)
+
+    skip = moy_carts.seed_folders([{"title": "Hop Quest", "type": "game"}])
+    assert skip == ("hop_quest.moy",)
+    assert moy_carts.migrate_images(root, skip=skip) == 2
+    assert "codec" in json.loads(moy_carts.load_image(seeded["path"], "cover"))
+    assert "codec" not in json.loads(moy_carts.load_image(mine["path"], "cover"))
+    assert "codec" not in json.loads(
+        moy_carts.load_file("drawings", "sunset", root))
+
+
+def test_a_seed_folder_set_is_read_off_either_roster_form(tmp_path):
+    """A board freezes the PACKED roster and the host carries dicts; the pass
+    steps over the same folders either way."""
+    packed = [("Hop Quest", 3, b""), ("Sky Run", 1, b"")]
+    plain = [{"title": "Hop Quest"}, {"title": "Sky Run"}]
+    assert (moy_carts.seed_folders(packed) == moy_carts.seed_folders(plain)
+            == ("hop_quest.moy", "sky_run.moy"))
+    assert moy_carts.seed_folders([]) == ()
+
+
+def test_the_kids_own_drawings_are_rewritten_first(tmp_path):
+    """The order is the priority. A drawing is the only picture here nothing
+    else can replace, and the pass may be interrupted at any step."""
+    root = _pic_store(tmp_path)
+    art = _pic(8, 8)
+    cart = moy_carts.create("Mine", root, src="def _draw():\n    pass\n")
+    moy_carts.save_image(cart, "cover", _rle_blob(8, 8, art))
+    moy_carts.save_file("drawings", "sunset", _rle_blob(8, 8, art), root)
+    moy_carts.save_artwork(_rle_blob(8, 8, art), root)
+
+    seen = []
+    real = moy_carts._rewrite_image
+    moy_carts._rewrite_image = lambda p, _r=real: (seen.append(p), _r(p))[1]
+    try:
+        moy_carts.migrate_images(root, skip=())
+    finally:
+        moy_carts._rewrite_image = real
+    assert seen[0].endswith(moy_carts.ARTWORK_NAME)
+    assert "/drawings/" in seen[1]
+    assert seen[-1].endswith("/images/cover.moyimg")
+
+
+def test_a_picture_the_heap_refuses_is_skipped_and_holds_the_stamp(tmp_path):
+    """The failure that is not the file's fault. It is skipped, counted, said
+    once, and the generation stamp is NOT written -- so the next session sweeps
+    again and finishes the job, instead of recording a store as converged while
+    a kid's drawing is still in a format nothing can read."""
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    for name in ("a", "b"):
+        moy_carts.save_file("drawings", name, _rle_blob(16, 16, art), root)
+
+    real = moy_carts._deflate_pieces
+    calls = []
+
+    def starved(pieces, _r=real):
+        calls.append(1)
+        if len(calls) == 1:
+            raise MemoryError("memory allocation failed")
+        return _r(pieces)
+
+    moy_carts._deflate_pieces = starved
+    try:
+        job = moy_carts.ImageMigration(root, skip=())
+        while job.step():
+            pass
+    finally:
+        moy_carts._deflate_pieces = real
+    assert (job.rewritten, job.failed) == (1, 1)
+    assert moy_carts.load_images_version(root) == 0, "a partial sweep must not stamp"
+
+    assert moy_carts.migrate_images(root, skip=()) == 1     # the next pass finishes it
+    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+    for name in ("a", "b"):
+        assert moy_carts.decode_moyimg(
+            moy_carts.load_file("drawings", name, root)) == (16, 16, art)
+
+
+def test_a_blob_that_will_not_parse_does_not_hold_the_stamp_forever(tmp_path):
+    """The other half of that rule, and it is a different answer. A corrupt blob
+    fails identically on every future pass, so blocking the stamp on it would
+    re-walk the whole store every boot forever and still not fix it."""
+    root = _pic_store(tmp_path)
+    junk = '{"format": "moyimg-v1", "w": 8, "h": 8, "codec": "rle", "data": "@@"}'
+    moy_carts.save_file("drawings", "broken", junk, root)
+    moy_carts.save_file("drawings", "fine", _rle_blob(8, 8, _pic(8, 8)), root)
+    assert moy_carts.migrate_images(root, skip=()) == 1
+    assert moy_carts.load_file("drawings", "broken", root) == junk
+    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+
+
+def test_a_picture_is_rewritten_without_ever_holding_its_raster(tmp_path):
+    """The reason there is a job at all. Materialising the 320x240 raster is
+    what fragmented a Guition's heap past recovery -- six carts failed to load
+    and the desktop died asking for 76,800 bytes -- so the retired runs are
+    expanded INTO the compressor a piece at a time and the biggest thing this
+    holds is a kilobyte."""
+    root = _pic_store(tmp_path)
+    art = _pic(320, 240)
+    moy_carts.save_file("drawings", "big", _rle_blob(320, 240, art), root)
+
+    biggest = []
+    real = moy_carts._deflate_pieces
+
+    def watched(pieces, _r=real):
+        return _r(_watch(pieces, biggest))
+
+    def _watch(pieces, out):
+        for piece in pieces:
+            out.append(len(piece))
+            yield piece
+
+    moy_carts._deflate_pieces = watched
+    try:
+        assert moy_carts.migrate_images(root, skip=()) == 1
+    finally:
+        moy_carts._deflate_pieces = real
+    assert sum(biggest) == 320 * 240, "the whole picture must reach the compressor"
+    assert len(biggest) > 60, "one piece is a whole raster by another name"
+    assert max(biggest) <= moy_carts.IMAGES_PIECE + 255
+    assert moy_carts.decode_moyimg(
+        moy_carts.load_file("drawings", "big", root)) == (320, 240, art)
+
+
+def test_a_picture_not_yet_rewritten_reads_as_absent(tmp_path):
+    """What makes deferring the pass cost a thumbnail rather than a crash: a
+    drawing still in the retired codec is a picture the shelf does not have
+    YET, and every reader on every tier already answers that with a
+    placeholder."""
+    root = _pic_store(tmp_path)
+    blob = _rle_blob(64, 48, _pic(64, 48))
+    moy_carts.save_file("drawings", "waiting", blob, root)
+    assert moy_carts.decode_moyimg(blob) is None
+    assert moy_carts.moyimg_runs(blob) is None
+
+
+def test_the_consoles_idle_frames_are_what_run_the_picture_pass(tmp_path):
+    """A migration nothing calls is a migration that never happens, and the door
+    it used to have (`sweep_store`, i.e. the boot) is the one door it must not
+    use. This is the wiring: the desk is up, the redraw gate skipped a frame,
+    and one picture is rewritten on it."""
+    from runtime import host_app
+    root = _pic_store(tmp_path)
+    art = _pic(16, 16)
+    moy_carts.save_file("drawings", "sunset", _rle_blob(16, 16, art), root)
+    ws = host_app.build_workstation(root)
+    assert moy_carts.load_images_version(root) == 0, "the boot must not have swept"
+
+    ws._dirty = False
+    ws._quiet_frames = 20
+    for _ in range(60):
+        ws.frame(0.05)
+    assert moy_carts.decode_moyimg(
+        moy_carts.load_file("drawings", "sunset", root)) == (16, 16, art)
+    assert moy_carts.load_images_version(root) == moy_carts.IMAGES_GEN
+    assert ws._pic_migration.rewritten == 1, "only the kid's drawing was pending"
+
+
+# -- and the whole rewrite on the interpreter a board runs --------------------
+
+_REWRITE_DRIVER = """
+import sys
+sys.path.insert(0, ".")
+import gc, json, moy_carts, moy_gfx
+
+art = bytes(((i // 320) // 5 + (i % 320) // 7) & 63 for i in range(320 * 240))
+packed = bytearray()
+pos = 0
+while pos < len(art):
+    value = art[pos]
+    count = 1
+    while pos + count < len(art) and count < 255 and art[pos + count] == value:
+        count += 1
+    packed.append(count)
+    packed.append(value)
+    pos += count
+
+# The retired blob, written here because nothing writes one any more.
+open("pic.moyimg", "w").write(json.dumps({
+    "format": "moyimg-v1", "w": 320, "h": 240, "codec": "rle",
+    "src": "drawings/sun", "sig": 4242,
+    "data": moy_carts._b64_encode(packed)}))
+
+gc.collect()
+before = gc.mem_free()
+assert moy_carts._rewrite_image("pic.moyimg") == 1, "the rewrite refused the picture"
+low = gc.mem_free()
+meta = json.loads(open("pic.moyimg").read())
+assert "codec" not in meta and meta["src"] == "drawings/sun" and meta["sig"] == 4242
+got = moy_carts.decode_moyimg(open("pic.moyimg").read())
+assert got is not None and bytes(got[2]) == art, "the rewrite lost the picture"
+
+# The streamed reader on the same file, and the pieces it hands the compressor.
+biggest = 0
+for piece in moy_carts._rle_pieces(bytes(packed), 320 * 240):
+    if len(piece) > biggest:
+        biggest = len(piece)
+
+print("RESULT " + json.dumps({
+    "held": before - low, "bytes": len(open("pic.moyimg").read()),
+    "rle_bytes": len(packed) + 4, "piece": biggest,
+    "runs": len(moy_carts.moyimg_runs(open("pic.moyimg").read())[2]),
+}))
+"""
+
+
+def test_the_rewrite_runs_on_the_interpreter_the_board_runs(tmp_path):
+    """The path that took a Guition down, on the tier it took down. Nothing on
+    the host reaches it: CPython has no `deflate` to write through piecewise and
+    no `moy_gfx` to expand the retired runs into a kilobyte at a time, so both
+    halves of the streaming rewrite are CPython stand-ins up there."""
+    import unix_mp
+    exe = unix_mp.require_unix_mp("moy_gfx", why=(
+        "The picture migration's two streaming halves -- the board's own\n"
+        "compressor written a piece at a time, and the NATIVE run expander\n"
+        "aimed at a reused kilobyte instead of a 76,800-byte block -- exist\n"
+        "on no other tier."))
+    for name in ("moy_carts.py", "moy_image.py", "moy_fs.py", "moy_journal.py"):
+        (tmp_path / name).write_text(
+            (ROOT / "runtime" / name).read_text(encoding="utf-8"),
+            encoding="utf-8")
+    (tmp_path / "run.py").write_text(_REWRITE_DRIVER)
+
+    r = subprocess.run([exe, "run.py"], cwd=str(tmp_path), capture_output=True,
+                       text=True, timeout=300)
+    assert r.returncode == 0, "%s\n%s" % (r.stdout[-3000:], r.stderr[-3000:])
+    line = [l for l in r.stdout.split("\n") if l.startswith("RESULT ")]
+    assert line, r.stdout[-3000:]
+    got = json.loads(line[0][len("RESULT "):])
+    # The whole subject: no piece of raster anywhere near 76,800 bytes, and the
+    # rewrite's peak hold nowhere near it either. `held` is generous (it counts
+    # the file text and its base64 too, both of which the rewrite must hold at
+    # least briefly) -- what it rules out is the raster on top of them.
+    assert got["piece"] <= moy_carts.IMAGES_PIECE + 255
+    assert got["held"] < 320 * 240, got
+    assert got["runs"] > 0 and got["bytes"] < got["rle_bytes"]
+    print("\nunix MicroPython: 320x240 rewrite held %d B peak, %d B -> %d B"
+          % (got["held"], got["rle_bytes"], got["bytes"]))

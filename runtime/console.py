@@ -984,6 +984,8 @@ class Workstation:
         # Expensive-event counters (2026-07-26). See note_cost.
         self.costs = {}
         self._quiet_frames = 0        # consecutive frames the redraw gate skipped
+        self._idle_warned = False     # the idle branch's backstop has spoken once
+        self._pic_migration = None    # store.ImageMigration, built on first idle use
         # Unified top bar (Stage 1): _bar_img_cache memoises tile_image(slot) per
         # kind so the SAME _SheetSprite is reused every frame -- on the device that
         # keeps its per-Image RGB565 blit cache alive (one cached blit per icon),
@@ -4109,6 +4111,32 @@ class Workstation:
             return True
         return False
 
+    def _migrate_pictures_tick(self):
+        """Rewrite ONE picture still in the retired codec (moy_carts, 2026-09-07).
+
+        The store's own door for this used to be `sweep_store`, i.e. the boot,
+        and on a Guition that measured 196 seconds before the cart-loading lines
+        began and then took the boot down with it. So it is here instead: after
+        the desk is up, on a frame the redraw gate skipped, one file at a time,
+        and only once the cover prefetch has had its two quieter frames first --
+        a picture is seconds of compressor on an S3 and the covers are what the
+        kid is looking at.
+
+        Through `_with_sd` like every other store write from this loop: on the
+        T-Deck the card shares the panel's SPI host, and a transaction there
+        while a flush is in flight is the documented hang."""
+        job = self._pic_migration
+        if job is None:
+            store = self.carts_store
+            if store is None or self.carts_root is None or not self.can_manage:
+                return
+            maker = getattr(store, "ImageMigration", None)
+            if maker is None:
+                return                      # a store build without the pass
+            job = self._pic_migration = maker(self.carts_root)
+        if not job.done:
+            self._with_sd(job.step)
+
     def _needs_redraw(self, dt):
         """Decide whether frame() must repaint+flush this frame. True when something
         marked the UI dirty, an animation source is live, or the pointer state the
@@ -4205,11 +4233,28 @@ class Workstation:
             # built by the draw path, the prefetch is for the ones off-screen.
             self._quiet_frames += 1
             if self._quiet_frames > 2:
-                covers.prefetch_tick()
-                # Mint the home retained-frame buffer off the paint path too
-                # (idempotent after the first call; the device new_layer
-                # pre-collects, ~150ms nobody should wait for).
-                self.launcher_layer.prealloc_retained()
+                # NOTHING HERE MAY RAISE. This branch runs on a frame with no
+                # user waiting on it, which is exactly why it is the wrong place
+                # to end a session: on 2026-09-07 both S3 boards reached the desk
+                # after a flash and dropped to the REPL within minutes, because a
+                # cover the prefetch was warming asked a fragmented heap for a
+                # 76,800-byte raster and the MemoryError walked straight out of
+                # the loop. Each warmer fences its own expected failures (a
+                # cover it cannot build is skipped for the session); this is the
+                # backstop for the unexpected one, and it says so once rather
+                # than every idle frame forever.
+                try:
+                    covers.prefetch_tick()
+                    # Mint the home retained-frame buffer off the paint path too
+                    # (idempotent after the first call; the device new_layer
+                    # pre-collects, ~150ms nobody should wait for).
+                    self.launcher_layer.prealloc_retained()
+                    if self._quiet_frames > 8:
+                        self._migrate_pictures_tick()
+                except Exception as exc:  # noqa: BLE001 -- an idle tick never ends a session
+                    if not self._idle_warned:
+                        self._idle_warned = True
+                        print("Moybyte idle work failed:", _err_text(exc))
             return
         self._quiet_frames = 0
         # The fps the chip shows is the DRAWN rate (#217): an EMA over the

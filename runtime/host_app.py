@@ -217,9 +217,11 @@ def _seed_system_carts(carts_dir):
                                          # `.moytext` doc becomes `.md`, once
     if not os.path.isdir(SYSTEM_CARTS):
         return
-    for name in sorted(os.listdir(SYSTEM_CARTS)):
-        if not name.endswith(".moy"):
-            continue
+    names = [n for n in sorted(os.listdir(SYSTEM_CARTS)) if n.endswith(".moy")]
+    # What the picture migration steps over -- the device records the same thing
+    # from its roster in `seed_any`, and this is the host's equivalent door.
+    moy_carts.note_seed_folders(names)
+    for name in names:
         src = os.path.join(SYSTEM_CARTS, name)
         dst = os.path.join(carts_dir, name)
         if not os.path.exists(dst):

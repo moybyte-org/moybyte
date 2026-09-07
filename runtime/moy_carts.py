@@ -191,15 +191,16 @@ def flags_to_hex(flags):
 # unchanged. Same bare-or-package fallback as every shared module.
 try:
     from moy_image import (THUMBS_DIR, _b64_encode, _b64_decode, _deflate,
-                           encode_moyimg, moyimg_runs, decode_moyimg,
-                           cover_sig, _thumb_file)
+                           _deflate_pieces, encode_moyimg, moyimg_runs,
+                           decode_moyimg, cover_sig, _thumb_file)
     from moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                         _write_atomic, _read_recover, _read_bak, _forget_bak,
                         set_publish_root)
 except ImportError:  # pragma: no cover - host fallback when not yet aliased
     from runtime.moy_image import (THUMBS_DIR, _b64_encode, _b64_decode,
-                                   _deflate, encode_moyimg, moyimg_runs,
-                                   decode_moyimg, cover_sig, _thumb_file)
+                                   _deflate, _deflate_pieces, encode_moyimg,
+                                   moyimg_runs, decode_moyimg, cover_sig,
+                                   _thumb_file)
     from runtime.moy_fs import (_mkdir, _exists, _read, _write, _remove, _copy,
                                 _write_atomic, _read_recover, _read_bak,
                                 _forget_bak, set_publish_root)
@@ -873,21 +874,24 @@ def sweep_store(root=CARTS_DIR):
 
     Each is gated on its own marker -- a generation sidecar, or the kind dir's
     own existence -- so the warm path is one small read apiece. Returns
-    (retired folders removed, notes migrated, documents rewritten,
-    pictures rewritten).
+    (retired folders removed, notes migrated, documents rewritten).
 
     `migrate_docs` runs HERE rather than from a text app because it builds the
     vault a note is picked from: it has to have run before anything lists it.
     It also runs before `migrate_doc_format`, so a legacy notebook lands and is
-    normalised in the same boot. `migrate_images` runs after `prune_retired`,
-    which is the cheapest ordering: a retired cart's pictures are deleted rather
-    than rewritten."""
-    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root),
-            migrate_images(root))
+    normalised in the same boot.
+
+    THE PICTURE PASS IS NOT HERE. It was, for one day, and it cost a Guition
+    196 seconds of boot and then the boot itself; it is `ImageMigration` now and
+    the console drives it a file per idle frame. The rule the three passes above
+    still satisfy and that one does not: a store-opening pass is a small read on
+    the warm path and bounded work on the cold one."""
+    return (prune_retired(root), migrate_docs(root), migrate_doc_format(root))
 
 
 def seed_any(seed, root=CARTS_DIR, progress=None):
     """Seed a roster of either form. The one call a board's boot makes."""
+    note_seed_folders(seed_folders(seed))   # what the picture pass steps over
     sweep_store(root)
     if is_packed(seed):
         return seed_packed(seed, root, progress=progress)
@@ -2797,18 +2801,47 @@ def migrate_doc_format(root=CARTS_DIR, generation=DOCS_GEN):
 # below is the LAST one: no live decoder speaks two formats, and this pass
 # exists to make that true of every store rather than only of new files.
 #
+# IT IS NOT A BOOT PASS, and that is the whole shape of it. The first version
+# ran inside `sweep_store` like the two passes above it, and on a Guition
+# reproducing a first boot after the flash it took 196 SECONDS before the
+# "loading cartridges" lines even began -- about 15s per 320x240 cover on the
+# S3's compressor -- and then fragmented the heap past recovery: six carts
+# failed to load ("allocating 8448 bytes") and the desktop itself died asking
+# for 76,800 (on glass, 2026-09-07). Three things follow, and all three are
+# load-bearing:
+#
+#   * The rewrite is STREAMED. The retired raster is expanded into the
+#     compressor a KB at a time (`_rle_pieces` -> `_deflate_pieces`) and never
+#     exists whole, so the pass no longer asks a loaded heap for the one block
+#     it cannot serve.
+#   * It runs on the IDLE TICK, after the desk is up, one file per tick
+#     (`ImageMigration`). A picture still in the retired codec reads as ABSENT
+#     until its turn comes -- the shelf draws its placeholder -- which is what
+#     makes deferring it cost a thumbnail rather than a crash.
+#   * A SEED cart's pictures are not rewritten at all. The seed pass owns those
+#     folders and replaces them wholesale on the next version bump, so paying
+#     15s a cover to rewrite what a re-seed overwrites is work with a negative
+#     return. What is left on a real store is the kid's own content -- the only
+#     picture here that nothing else can replace. The cost, stated: a seed cart
+#     whose cover is STILL in the retired codec draws its glyph fallback until
+#     that bump lands.
+#
 # Same one-shot shape as the two passes above: a generation sidecar, written
-# LAST, so a crash halfway through leaves the finished files finished and the
-# next boot completes the rest. Each rewrite is `_write_atomic` and each is
-# independent, so there is no half-converted file to reason about, and the pass
-# is idempotent -- a blob with no `codec` key is already the one format and is
-# not read, decoded or rewritten.
+# LAST and only when nothing is still pending, so an interrupted pass leaves the
+# finished files finished and the next session completes the rest. Each rewrite
+# is `_write_atomic` and each is independent, so there is no half-converted file
+# to reason about, and the pass is idempotent -- a blob with no `codec` key is
+# already the one format and is not decoded or rewritten.
 #
 # The rewrite keeps the WHOLE header and replaces only `data`, because a picture
 # copied into a cart carries the #108 provenance stamp (`src`/`sig`) and losing
 # it would silently retire the "your drawing changed -> UPDATE" affordance.
 IMAGES_GEN = 1
 IMAGES_VER_NAME = "images.ver"
+# How much raster is in hand while a picture is rewritten. A piece ends on a RUN
+# boundary rather than an exact byte count, which costs at most 254 bytes of
+# slack and removes the only fiddly case -- a run straddling the cut.
+IMAGES_PIECE = 1024
 
 
 def images_version_path(root=CARTS_DIR):
@@ -2826,98 +2859,225 @@ def load_images_version(root=CARTS_DIR):
         return 0
 
 
-def _rle_indices(packed, total):
-    """`(count, value)` byte pairs -> `total` palette indices, or None.
+def _rle_pieces(packed, total, chunk=IMAGES_PIECE):
+    """`(count, value)` byte pairs -> the raster, in pieces of ~`chunk` bytes.
 
     The retired codec's reader, kept for one generation and reached ONLY from
-    the rewrite below. Native where the board has a compositor: interpreted,
-    one 320x240 picture is the 0.5-1.7s that the whole time-sliced cover builder
-    was designed around, and a kid with thirty drawings would meet that as a
-    minute of dead boot."""
+    the rewrite below -- and a STREAM, because the entire point is that the
+    raster it describes is never assembled anywhere.
+
+    NATIVE per piece where the board has a compositor, for the reason the
+    retired whole-raster reader carried and that the 196-second boot confirmed:
+    interpreted, one 320x240 picture is the 0.5-1.7s the whole time-sliced cover
+    builder was designed around, and a kid with thirty drawings would meet that
+    as half a minute of hitching. Only the DESTINATION changed -- a reused
+    kilobyte instead of a 76,800-byte block -- so the C loop still does the
+    expanding and nothing large is ever allocated for it.
+
+    The piece it yields is therefore a VIEW of that reused buffer: write it and
+    move on, never keep it. Raises ValueError for a stream that does not
+    describe exactly `total` pixels, which the caller reads as "not a picture
+    this pass can rewrite"."""
     if len(packed) & 1:
-        return None
+        raise ValueError("odd run stream")
     try:
         import moy_gfx
-        out = bytearray(total)
-        if moy_gfx.decode_runs(out, total, packed) == total:
-            return out
-    except (ImportError, AttributeError):
-        pass
-    out = bytearray()
-    for i in range(0, len(packed), 2):
-        count = packed[i]
-        value = packed[i + 1]
-        if count < 1 or value > 63 or len(out) + count > total:
-            return None
-        out.extend(bytes((value,)) * count)
-    return out if len(out) == total else None
+        native = getattr(moy_gfx, "decode_runs", None)
+    except ImportError:
+        native = None
+    src = memoryview(packed)
+    buf = bytearray(chunk + 255) if native is not None else None
+    n = len(packed)
+    seen = 0
+    i = 0
+    while i < n:
+        # Take whole pairs until the piece is at least `chunk` pixels wide, so
+        # the cut always lands on a run boundary -- which costs at most 254
+        # bytes of slack and removes the only fiddly case there was.
+        j = i
+        span = 0
+        while j < n and span < chunk:
+            count = packed[j]
+            if count < 1 or packed[j + 1] > 63:
+                raise ValueError("bad run")
+            span += count
+            j += 2
+        if seen + span > total:
+            raise ValueError("bad run")
+        if native is not None:
+            if native(buf, span, src[i:j]) != span:
+                raise ValueError("bad run")
+            yield memoryview(buf)[:span]
+        else:
+            out = bytearray()
+            for k in range(i, j, 2):
+                out += bytes((packed[k + 1],)) * packed[k]
+            yield out
+        seen += span
+        i = j
+    if seen != total:
+        raise ValueError("short picture")
 
 
 def _rewrite_image(path):
-    """Rewrite one `.moyimg` from the retired RLE codec. True when it changed.
+    """Rewrite one `.moyimg` out of the retired RLE codec.
 
-    False for a picture already in the one format, which is what makes the pass
-    idempotent and its warm cost a read. A blob that will not parse is left
-    exactly as it is: it was not readable before this pass and inventing a
-    replacement for it would be worse than leaving it for a person to find."""
+    1 when the file was rewritten, 0 when there was nothing to do, and -1 when a
+    retired-codec picture was left alone for a reason that MAY NOT HOLD NEXT
+    TIME -- no memory, or the card going away mid-rewrite. Only -1 holds the
+    generation stamp back, because only -1 is worth another pass: a blob that
+    will not parse was unreadable before this pass and would be unreadable after
+    every future one, so blocking the stamp on it would re-walk the whole store
+    every boot forever and still not fix it. It is left exactly as it is, for a
+    person to find.
+
+    The intermediates are dropped as they are consumed, in order, because the
+    peak is the whole subject here: the retired blob and its base64 are ~72KB
+    apiece and neither is needed once the runs are in hand."""
     try:
         text = _read(path)
         meta = json.loads(text)
         if meta.get("codec") != "rle":
-            return False
+            return 0
+        text = None
         w = int(meta["w"])
         h = int(meta["h"])
-        pix = _rle_indices(_b64_decode(meta["data"]), w * h)
-        if w <= 0 or h <= 0 or pix is None:
-            return False
+        if w <= 0 or h <= 0:
+            return 0
+        packed = _b64_decode(meta["data"])
+        meta["data"] = ""
+        gc.collect()             # the two ~72KB strings above are dead HERE, and
+                                 # the compressor window is the next allocation
+        data = _b64_encode(_deflate_pieces(_rle_pieces(packed, w * h)))
+        packed = None
         del meta["codec"]
         meta["format"] = "moyimg-v1"
-        meta["data"] = _b64_encode(_deflate(pix))
+        meta["data"] = data
+        data = None
         _write_atomic(path, json.dumps(meta))
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-    return True
+    except (MemoryError, OSError) as exc:
+        print("Moybyte picture not rewritten:", path, exc)
+        return -1
+    except (ValueError, KeyError, TypeError):
+        return 0
+    return 1
 
 
-def _rewrite_images_in(d):
-    """Rewrite every `.moyimg` directly under `d`. Returns how many changed."""
+def seed_folders(seed):
+    """The store folders the SEED pass owns -- `slug(title) + ".moy"` for every
+    entry, whichever roster form this is. What the picture pass steps over."""
+    if not seed:
+        return ()
+    if is_packed(seed):
+        return tuple(slug(entry[0]) + ".moy" for entry in seed)
+    return tuple(slug(cart["title"]) + ".moy" for cart in seed)
+
+
+# The folders the seed pass owns this session, recorded by whichever door did
+# the seeding -- `seed_any` on a board, `host_app._seed_system_carts` on the
+# host, and they are the only two places the roster is in hand. A parameter
+# would have to be carried from there through the console to an idle frame
+# minutes later; this is read as a DEFAULT, so a caller with its own answer (a
+# test, a tool) still passes one.
+_SEED_FOLDERS = ()
+
+
+def note_seed_folders(names):
+    """Record the store folders the seed pass owns (see `_SEED_FOLDERS`)."""
+    global _SEED_FOLDERS
+    _SEED_FOLDERS = tuple(names)
+
+
+def _images_in(d):
+    """Every `.moyimg` path directly under `d` (nothing when there is no `d`)."""
     try:
         names = os.listdir(d)
     except OSError:
-        return 0                       # no such folder -> nothing to rewrite
-    done = 0
+        return
     for n in names:
         if n.endswith(IMAGE_EXT) and len(n) > len(IMAGE_EXT):
-            if _rewrite_image(d + "/" + n):
-                done += 1
-    return done
+            yield d + "/" + n
 
 
-def migrate_images(root=CARTS_DIR, generation=IMAGES_GEN):
-    """Rewrite the store's RLE pictures in the one format, once per store.
+def _image_paths(root, skip):
+    """Every picture the migration owns, KID CONTENT FIRST.
 
-    Everywhere a `.moyimg` can be: every cart's `images/` (covers, the
-    wallpaper's copy-on-use bg, a story's pages), the shared Paint document
-    beside the carts dir, and the kid's own drawings -- including the trash,
-    which is restorable and would otherwise hand back a picture nothing can
-    read. Returns the number rewritten (0 on the warm path, one small read)."""
-    if load_images_version(root) >= generation:
-        return 0
-    done = 1 if _rewrite_image(_sibling_path(root, ARTWORK_NAME)) else 0
+    The order is the priority. A drawing is the only picture here that nothing
+    else can replace, so it is rewritten before any cart's -- including the
+    trash, which is restorable and would otherwise hand back a picture nothing
+    can read. Folders in `skip` (the seed pass's) are never walked."""
+    art = _sibling_path(root, ARTWORK_NAME)
+    if _exists(art):
+        yield art
+    for d in (file_kind_dir("drawings", root), _trash_dir("drawings", root)):
+        for p in _images_in(d):
+            yield p
     try:
         folders = os.listdir(root)
     except OSError:
-        folders = []
+        return
     for name in folders:
-        if name.endswith(".moy"):
-            done += _rewrite_images_in(root + "/" + name + "/" + IMAGES_DIR)
-    done += _rewrite_images_in(file_kind_dir("drawings", root))
-    done += _rewrite_images_in(_trash_dir("drawings", root))
-    try:
-        _write(images_version_path(root), str(int(generation)))
-    except OSError:
-        return done          # a read-only store: sweep again next boot, harmless
-    return done
+        if name.endswith(".moy") and name not in skip:
+            for p in _images_in(root + "/" + name + "/" + IMAGES_DIR):
+                yield p
+
+
+class ImageMigration:
+    """The picture rewrite as a JOB: one file per `step()`, off the boot path.
+
+    The console drives it from the idle branch of its frame loop, so the work
+    lands on frames where nobody is waiting -- and one whole FILE at a time,
+    because a slice smaller than a file would mean holding an open deflate
+    stream across frames for the sake of a job that runs once per store.
+
+    `done` is True from construction on a store already at this generation, so
+    the warm path is one small read and the caller stops asking."""
+
+    def __init__(self, root=CARTS_DIR, skip=None, generation=IMAGES_GEN):
+        self.root = root
+        self.generation = generation
+        self.rewritten = 0
+        self.failed = 0
+        self.done = load_images_version(root) >= generation
+        self._paths = None if self.done else _image_paths(
+            root, _SEED_FOLDERS if skip is None else skip)
+
+    def step(self):
+        """Rewrite at most ONE picture. False once the store has converged.
+
+        The collect is not hygiene: this runs after a session has fragmented the
+        heap, and it is about to allocate a compressor window."""
+        if self.done:
+            return False
+        gc.collect()
+        for path in self._paths:
+            got = _rewrite_image(path)
+            if got > 0:
+                self.rewritten += 1
+            elif got < 0:
+                self.failed += 1     # said once, at the site that knows why
+            return True
+        self.done = True
+        self._paths = None
+        if self.failed:
+            return False        # still pending: sweep again next session
+        try:
+            _write(images_version_path(self.root), str(int(self.generation)))
+        except OSError:
+            pass                # a read-only store: sweep again next boot
+        return False
+
+
+def migrate_images(root=CARTS_DIR, generation=IMAGES_GEN, skip=None):
+    """Run the whole picture pass to completion. Returns the number rewritten.
+
+    The host's door and the tests'. A CONSOLE does not call this -- it drives
+    `ImageMigration` a file per idle frame instead, because on a board this is
+    seconds per picture and a boot has no frames to spend on it."""
+    job = ImageMigration(root, skip=skip, generation=generation)
+    while job.step():
+        pass
+    return job.rewritten
 
 
 # --- provenance stamps (#108 phase 2): a copy remembers its source ----------
