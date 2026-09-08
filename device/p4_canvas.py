@@ -298,10 +298,12 @@ class P4SystemCanvas(SystemCanvas):
         ppa = self._ppa
         x = int(x)
         y = int(y)
-        if (ppa is None or getattr(self._comp, "rotated", False)
-                or x < 0 or y < 0
-                or x + layer.w > self.w or y + layer.h > self.h):
-            return False              # rotated: the sync CPU stamp, no defer
+        comp = self._comp
+        if (ppa is None or x < 0 or y < 0
+                or x + layer.w > self.w or y + layer.h > self.h
+                or (getattr(comp, "rotated", False)
+                    and not getattr(comp, "_async", False))):
+            return False              # no queue to ride: the sync CPU stamp
         fb = getattr(layer, "flush_batch", None)
         if fb is not None:
             fb()

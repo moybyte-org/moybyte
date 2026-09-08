@@ -599,6 +599,13 @@ def rotated(angle=90):
 GAME = bytearray(4)          # the game canvas double (identity is what matters)
 
 
+def step(comp):
+    """One loop frame: flush, then the present the loop runs before the next
+    paint -- every frame's show is deferred to it now."""
+    comp.flush()
+    comp.present_pending()
+
+
 def game(comp, ox=100, oy=50, quiet=True, direct=True, painted=None):
     """Register a 320x240 game composite at 3x like the canvas does."""
     painted = [] if painted is None else painted
@@ -629,19 +636,26 @@ def test_the_rotated_compositor_is_landscape_over_a_portrait_panel():
         assert comp.size() == (1280, 800)
         assert comp.framebuffer() is comp.back_buffer()
         assert len(comp.framebuffer()) == 1280 * 800 * 2
-        assert comp.rotated is True and comp.retained_frames == 1
+        assert comp.rotated is True and comp.retained_frames == 2
         assert lit == [False], "dark until the first composed frame"
         assert dsi.shown == [0]
 
 
 def test_a_full_frame_rotates_the_whole_paint_buffer_and_ping_pongs():
     with rotated() as (mod, comp, dsi, ppa, lit):
+        p0 = comp.framebuffer()
         comp.flush()
-        assert dsi.shown == [0, 1]
-        assert ppa.rotates == [(dsi.fb(1), 0, 0, comp.framebuffer(), 0, 0, 1280, 800, 90)]
-        comp.flush()
+        assert dsi.shown == [0], "queued, not shown: the show is the present's"
+        assert ppa.rotates == [(dsi.fb(1), 0, 0, p0, 0, 0, 1280, 800, 90)]
+        assert ppa.nbs == [True]
+        assert comp.framebuffer() is not p0, "the next frame paints the other buffer"
+        comp.present_pending()
+        assert ppa.waits == [1] and dsi.shown == [0, 1]
+        p1 = comp.framebuffer()
+        step(comp)
         assert dsi.shown == [0, 1, 0]
-        assert ppa.rotates[-1][0] is dsi.fb(0)
+        assert ppa.rotates[-1][0] is dsi.fb(0) and ppa.rotates[-1][3] is p1
+        assert comp.framebuffer() is p0
         assert comp.overlap_stats()[2] == 2         # two full frames
 
 
@@ -652,9 +666,9 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
     stale rect IS the game rect -- ONE scale+rotate straight from the game
     canvas, and the paint buffer is not touched."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()                                   # full -> fb1
+        step(comp)                                     # full -> fb1
         painted = game(comp)
-        comp.flush()                                   # fb0 missed a full: full again
+        step(comp)                                     # fb0 missed a full: full again
         assert painted == [1]
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         assert comp.overlap_stats()[2] == 2 and comp.overlap_stats()[0] == 0
@@ -673,23 +687,23 @@ def test_a_quiet_game_after_a_change_is_full_once_then_direct():
         assert comp.overlap_stats()[0] == 1 and comp.overlap_stats()[1] == 0
         assert dsi.shown == [0, 1, 0], "the show is deferred to the present"
         comp.present_pending()
-        assert ppa.waits == [1] and dsi.shown == [0, 1, 0, 1]
+        assert ppa.waits[-1] == 1 and dsi.shown == [0, 1, 0, 1]
         painted = game(comp)
         comp.flush()                                   # fb0 likewise
         comp.present_pending()
         assert painted == [] and len(ppa.direct) == 2
         assert comp.overlap_stats()[0] == 2 and comp.overlap_stats()[1] == 0
         assert dsi.shown == [0, 1, 0, 1, 0]
-        assert comp.async_stats()[:3] == (2, 2, 0)
+        assert comp.async_stats()[:3] == (4, 4, 0), "every frame defers its show now"
 
 
 def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()                                   # now converged: direct
+        step(comp)                                     # now converged: direct
         assert len(ppa.direct) == 1
         painted = game(comp, quiet=False)              # the gates moved
         comp.flush()
@@ -700,14 +714,15 @@ def test_a_frame_that_drew_anything_else_paints_and_rotates_whole():
 
 def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp, direct=False)
-        comp.flush()
+        step(comp)
         painted = game(comp, direct=False)
+        src = comp.framebuffer()
         comp.flush()
         assert painted == [1]
         assert ppa.direct == []
-        assert ppa.rotates[-1][3] is comp.framebuffer()
+        assert ppa.rotates[-1][3] is src
         assert ppa.rotates[-1][4:] == (100, 50, 640, 480, 90)
         assert comp.overlap_stats()[0] == 1
 
@@ -715,9 +730,9 @@ def test_crisp_mode_composites_into_the_paint_buffer_then_rotates_the_rect():
 def test_the_chrome_strip_rides_every_quiet_frame():
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.strip_h = 18
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
         comp.flush()                                   # direct + the strip
         strip = [r for r in ppa.rotates if r[4:] == (0, 0, 1280, 18, 90)]
@@ -727,11 +742,11 @@ def test_the_chrome_strip_rides_every_quiet_frame():
 
 def test_a_stale_rect_the_new_frame_does_not_cover_is_copied_from_the_front():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()                                   # full -> fb1
+        step(comp)                                     # full -> fb1
         game(comp)
-        comp.flush()                                   # full -> fb0 (missed one)
+        step(comp)                                     # full -> fb0 (missed one)
         game(comp)
-        comp.flush()                                   # direct -> fb1
+        step(comp)                                     # direct -> fb1
         # The game window MOVED (a windowed drag would be a full frame; a
         # popup-sized change is the shape): fb0 lacks the old rect the last
         # frame put into fb1 -> copied 1:1 from fb1 first.
@@ -751,13 +766,13 @@ def test_a_trail_of_moved_rects_costs_one_copy_a_frame_never_a_full():
     other frame, so it can only ever lack the ONE rect the frame between
     painted."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp, ox=0)
-        comp.flush()
+        step(comp)
         n = comp.STALE_LIMIT + 2
         for i in range(n):
             game(comp, ox=i * 20)
-            comp.flush()
+            step(comp)
             assert all(len(st) <= 1 for st in comp._stale if st is not None)
         assert comp.overlap_stats()[2] == 2
         assert comp.overlap_stats()[0] == n
@@ -766,27 +781,27 @@ def test_a_trail_of_moved_rects_costs_one_copy_a_frame_never_a_full():
 
 def test_set_angle_forces_every_buffer_current_the_other_way_up():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()                                   # direct
+        step(comp)                                     # direct
         comp.set_angle(270)
         game(comp)
-        comp.flush()
+        step(comp)
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 270)
         game(comp)
-        comp.flush()
+        step(comp)
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 270)
         game(comp)
-        comp.flush()
+        step(comp)
         assert ppa.direct[-1][7] == 270
         assert ppa.direct[-1][1:3] == (800 - 50 - 480, 100)
 
 
-def test_present_and_sync_are_inert_on_the_rotated_path():
+def test_present_and_sync_are_inert_once_a_frame_is_shown():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.present_pending()
         comp.sync()
         assert ppa.syncs == 0
@@ -801,12 +816,13 @@ def test_a_described_frame_rotates_its_rects_not_the_whole_buffer():
     that rect (and the bar strip) from the paint buffer instead of 4MB."""
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.strip_h = 18
-        comp.flush()                                   # full -> fb1
+        step(comp)                                     # full -> fb1
         comp.note_damage(200, 100, 700, 500)
-        comp.flush()                                   # fb0 missed a full: full
+        step(comp)                                     # fb0 missed a full: full
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         comp.note_damage(210, 100, 700, 500)
         comp.flush()                                   # fb1: rect frame
+        assert comp._pending == 1 and comp._keep == 2, "two ops may fly: the rect and the strip"
         rot = [r for r in ppa.rotates if r[0] is dsi.fb(1) and r[8] == 90]
         # the sibling owed the first union: the rect GREW 10px to cover it
         assert [r[4:8] for r in rot[-2:]] == [(200, 100, 710, 500), (0, 0, 1280, 18)]
@@ -819,11 +835,11 @@ def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too(
     """A drag beside a running game window: the game's composite reaches the
     paint buffer (never direct), and its rect is one of the frame's rects."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()                                   # converged: direct
+        step(comp)                                     # converged: direct
         assert len(ppa.direct) == 1
         painted = game(comp, quiet=True)               # gates unmoved (blit-only WM)...
         comp.note_damage(900, 300, 300, 200)           # ...but the WM says it drew
@@ -836,9 +852,9 @@ def test_a_described_frame_with_a_game_paints_the_game_and_rotates_its_rect_too(
 
 def test_damage_is_clipped_and_an_empty_rect_is_nothing():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 1, 1)
-        comp.flush()                                   # both buffers current
+        step(comp)                                     # both buffers current
         comp.note_damage(-50, -20, 100, 60)
         comp.note_damage(1250, 780, 100, 100)
         comp.note_damage(10, 10, 0, 40)
@@ -849,9 +865,9 @@ def test_damage_is_clipped_and_an_empty_rect_is_nothing():
 
 def test_too_many_rects_take_their_bounding_box_and_a_covered_one_is_dropped():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 1, 1)
-        comp.flush()                                   # both buffers current
+        step(comp)                                     # both buffers current
         comp.note_damage(0, 0, 100, 100)
         comp.note_damage(10, 10, 20, 20)               # inside the first
         comp.note_damage(300, 300, 50, 50)
@@ -865,9 +881,9 @@ def test_too_many_rects_take_their_bounding_box_and_a_covered_one_is_dropped():
 
 def test_a_description_dearer_than_the_full_rotate_is_declined():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 1, 1)
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 1280, 700)              # > 60% of the frame
         comp.flush()
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
@@ -878,11 +894,11 @@ def test_a_damage_frame_leaves_the_other_buffer_a_stale_rect_it_copies_next():
     """Ping-pong: the buffer that did not get this frame's rect lacks it, and
     the next frame into that buffer copies it 1:1 before its own rects."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()                                   # full -> fb1
+        step(comp)                                     # full -> fb1
         comp.note_damage(100, 100, 200, 200)
-        comp.flush()                                   # fb0 missed a full: full; fb1 owes the rect
+        step(comp)                                     # fb0 missed a full: full; fb1 owes the rect
         comp.note_damage(400, 400, 200, 200)
-        comp.flush()                                   # fb1: copy (100,100) from fb0, rotate (400,400)
+        step(comp)                                     # fb1: copy (100,100) from fb0, rotate (400,400)
         copies = [r for r in ppa.rotates if r[8] == 0]
         assert len(copies) == 1 and copies[0][0] is dsi.fb(1) and copies[0][3] is dsi.fb(0)
         assert copies[0][4:8] == mod.rotate_rect(100, 100, 200, 200, 90, 1280, 800)
@@ -891,17 +907,17 @@ def test_a_damage_frame_leaves_the_other_buffer_a_stale_rect_it_copies_next():
 
 def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(100, 100, 200, 200)
-        comp.flush()
+        step(comp)
         comp.note_damage(100, 100, 200, 200)
-        comp.flush()                                   # -> fb1, a rect frame
+        step(comp)                                     # -> fb1, a rect frame
         assert comp.overlap_stats()[0] == 1
-        comp.flush()                                   # -> fb0, nothing noted: full
+        step(comp)                                     # -> fb0, nothing noted: full
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
         assert comp._stale[1] is None                  # the other missed a full
         comp.note_damage(100, 100, 200, 200)
-        comp.flush()                                   # -> fb1: must be full again
+        step(comp)                                     # -> fb1: must be full again
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
 
 
@@ -911,9 +927,9 @@ def test_an_undescribed_frame_after_damage_frames_is_full_and_resets_the_other()
 def test_a_quiet_frame_queues_strip_then_copy_then_rotate_and_presents_later():
     with rotated() as (mod, comp, dsi, ppa, lit):
         comp.strip_h = 18
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
         n = len(ppa.rotates)
         comp.flush()                                   # the async direct frame
@@ -929,29 +945,30 @@ def test_a_quiet_frame_queues_strip_then_copy_then_rotate_and_presents_later():
 
 def test_a_flush_that_finds_a_deferred_frame_fences_and_shows_it_first():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
         comp.flush()                                   # deferred into fb1
         assert comp._pending == 1
         comp.flush()                                   # a chrome frame, no present between
         assert ppa.syncs == 1
-        assert dsi.shown[-2:] == [1, 0], "the late show, then the full frame into fb0"
-        assert comp.async_stats() == (1, 0, 1, 0)
+        assert dsi.shown[-1] == 1, "the late show; the full frame into fb0 is queued"
+        assert comp._pending == 0
+        assert comp.async_stats()[:3] == (4, 2, 1)
         assert ppa.rotates[-1][5:] == (0, 1280, 800, 90)
 
 
 def test_a_present_whose_rotate_still_flies_leaves_the_show_for_later():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
         comp.flush()
         ppa.done_flag = False
         comp.present_pending()
-        assert ppa.waits == [1] and comp._pending == 1 and dsi.shown[-1] == 0
+        assert ppa.waits[-1] == 1 and comp._pending == 1 and dsi.shown[-1] == 0
         ppa.done_flag = True
         comp.present_pending()
         assert comp._pending is None and dsi.shown[-1] == 1
@@ -959,9 +976,9 @@ def test_a_present_whose_rotate_still_flies_leaves_the_show_for_later():
 
 def test_sync_drains_a_deferred_frame():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         game(comp)
-        comp.flush()
+        step(comp)
         game(comp)
         comp.flush()
         comp.sync()
@@ -983,6 +1000,7 @@ def test_a_ppa_without_wait_keeps_the_blocking_direct_frame():
             comp.flush()
             assert ppa.direct[-1][3] is GAME and ppa.nbs[-1] is False
             assert comp._pending is None and dsi.shown[-1] == 1
+            assert all(nb is False for nb in ppa.nbs), "blocking throughout"
         finally:
             RotatingPpa.wait = lambda self, keep: (self.waits.append(keep), True)[1]
 
@@ -1000,12 +1018,12 @@ def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
     it almost entirely, so growing N+1's rect by a few px to cover N's beats
     a copy the size of the whole window."""
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(200, 100, 700, 500)
-        comp.flush()                                   # fb0: full
+        step(comp)                                     # fb0: full
         for i in range(1, 6):
             comp.note_damage(200 + 6 * i, 100, 700, 500)
-            comp.flush()
+            step(comp)
         copies = [r for r in ppa.rotates if r[8] == 0]
         assert copies == [], "every stale union was swallowed, none copied"
         assert comp.damage_stats()[3] == 5
@@ -1019,12 +1037,140 @@ def test_a_drag_grows_the_union_over_the_stale_one_instead_of_copying_it():
 
 def test_a_far_stale_rect_is_still_copied_not_grown_over():
     with rotated() as (mod, comp, dsi, ppa, lit):
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 200, 200)
-        comp.flush()
+        step(comp)
         comp.note_damage(0, 0, 200, 200)
-        comp.flush()                                   # fb1 rect; fb0 owes it
+        step(comp)                                     # fb1 rect; fb0 owes it
         comp.note_damage(1000, 600, 200, 200)          # far corner
-        comp.flush()                                   # fb0: copy the old, rotate the new
+        step(comp)                                     # fb0: copy the old, rotate the new
         copies = [r for r in ppa.rotates if r[8] == 0]
         assert len(copies) == 1 and comp.damage_stats()[3] == 0
+
+
+# -- the paint ping-pong and the drag stamp (2026-09-08, the desk lever) --------
+
+WIN = bytearray(8)           # a window buffer double
+
+
+def test_a_frame_is_painted_into_the_other_buffer_while_the_last_one_flies():
+    """The pipeline: frame N's ops read paint buffer A; frame N+1 paints B;
+    the present before N+2 fences A's readers (everything older than N+1's
+    ops) and only then does the console re-point at A."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        a = comp.framebuffer()
+        step(comp)                                     # frame 1 from A
+        b = comp.framebuffer()
+        assert b is not a
+        comp.note_damage(10, 10, 100, 100)
+        comp.flush()                                   # frame 2 from B, two ops (rect... no strip: 0)
+        assert comp.framebuffer() is a
+        assert comp._keep == 1, "one op this frame (strip_h is 0 in the fixture)"
+        comp.present_pending()
+        assert ppa.waits[-1] == 1, "wait until at most this frame's ops fly"
+        assert dsi.shown[-1] == 0
+        # frame 3 paints A while frame 2's rect (from B) may still fly
+        comp.note_damage(10, 10, 100, 100)
+        comp.flush()
+        assert ppa.rotates[-1][3] is a
+
+
+def test_the_deferred_window_stamp_is_the_frames_first_op_into_the_paint_buffer():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        comp.strip_h = 18
+        step(comp)
+        comp.note_damage(0, 0, 1, 1)
+        step(comp)                                     # both scan buffers current
+        paint = comp.framebuffer()
+        comp._stamp_pending = (paint, 1280, 800, 300, 200, WIN, 512, 480)
+        comp.note_damage(298, 198, 519, 487)
+        n = len(ppa.rotates)
+        comp.flush()
+        ops = ppa.rotates[n:]
+        assert ops[0][:3] == (paint, 300, 200) and ops[0][3] is WIN
+        assert ops[0][4:] == (0, 0, 512, 480, 0), "a 1:1 copy, queued"
+        assert ppa.nbs[n] is True
+        assert [o[4:8] for o in ops[1:]] == [(298, 198, 519, 487), (0, 0, 1280, 18)]
+        assert all(o[3] is paint for o in ops[1:]), "the rotates read the stamped buffer"
+        assert comp._keep == 3 and comp._stamp_pending is None
+        assert comp.async_stats()[4] == 1
+
+
+def test_a_deferred_stamp_makes_a_quiet_game_frame_a_painted_one():
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)
+        game(comp)
+        step(comp)
+        game(comp)
+        step(comp)                                     # direct
+        assert len(ppa.direct) == 1
+        paint = comp.framebuffer()
+        painted = game(comp, quiet=True)
+        comp._stamp_pending = (paint, 1280, 800, 0, 0, WIN, 64, 64)
+        comp.flush()
+        assert painted == [1] and len(ppa.direct) == 1
+
+
+def test_the_canvas_hands_the_rotated_compositor_its_stamp():
+    """P4SystemCanvas.blit_strip_async registers the stamp on a rotated
+    compositor that can queue (has `wait`), and refuses on one that cannot.
+    Driven on a stand-in with the verb's own inputs -- the class's
+    constructor wants MicroPython's framebuf."""
+    import importlib.util as ilu
+    import types
+
+    class Comp:
+        rotated = True
+        _async = True
+        _stamp_pending = None
+
+    class Layer:
+        w, h = 512, 480
+        _buf = WIN
+
+    spec = ilu.spec_from_file_location("p4_canvas_under_test", DEVICE / "p4_canvas.py")
+    mod = ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    verb = mod.P4SystemCanvas.blit_strip_async
+    buf = bytearray(16)
+    comp = Comp()
+    cv = types.SimpleNamespace(_ppa=object(), _comp=comp, w=1280, h=800,
+                               _buf=buf, flush_batch=lambda: None)
+    assert verb(cv, Layer(), 300, 200) is True
+    assert comp._stamp_pending == (buf, 1280, 800, 300, 200, WIN, 512, 480)
+    comp2 = Comp()
+    comp2._async = False
+    cv2 = types.SimpleNamespace(_ppa=object(), _comp=comp2, w=1280, h=800,
+                                _buf=buf, flush_batch=lambda: None)
+    assert verb(cv2, Layer(), 300, 200) is False
+    assert comp2._stamp_pending is None
+    cv3 = types.SimpleNamespace(_ppa=object(), _comp=Comp(), w=1280, h=800,
+                                _buf=buf, flush_batch=lambda: None)
+    assert verb(cv3, Layer(), 900, 200) is False, "a stamp off the edge stays on the CPU"
+
+
+def test_a_refused_queued_submit_fences_and_retries_blocking():
+    """The driver fails a submit outright on a full queue; the compositor
+    fences and resubmits blocking, and counts it."""
+    with rotated() as (mod, comp, dsi, ppa, lit):
+        step(comp)
+        comp.note_damage(0, 0, 1, 1)
+        step(comp)
+        real = ppa.rotate
+        calls = []
+
+        def refusing(*a):
+            calls.append(a[-1])
+            if a[-1] is True and len(calls) == 1:
+                raise OSError("ppa rotate failed: 1")
+            return real(*a)
+
+        ppa.rotate = refusing
+        try:
+            comp.note_damage(50, 50, 100, 100)
+            comp.flush()
+        finally:
+            ppa.rotate = real
+        assert calls[:2] == [True, False], "queued, refused, then blocking"
+        assert ppa.syncs == 1
+        assert comp.async_stats()[5] == 1

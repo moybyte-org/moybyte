@@ -87,15 +87,18 @@ static mp_obj_t moy_ppa_init(void) {
     }
     ppa_client_config_t cfg = {
         .oper_type = PPA_OPERATION_SRM,
-        // A few pending slots: enough for the composite-overlap lever (double
-        // buffer + slack) and for the rotated compositor's async game frame
-        // (stale copies + strip + game copy + rotate, all queued at once; a
-        // full queue blocks the submitter, which is correct and merely slow).
+        // Pending slots for TWO frames of the rotated compositor's queued ops
+        // (a drag frame is a stamp, up to six stale copies, three rects and
+        // the strip, and the frame before it may still be flying at submit).
+        // A full queue does NOT block: the driver fails the submit outright
+        // (xQueueReceive with no wait, "exceed maximum pending transactions"),
+        // which this module raises and the compositor answers with a fence
+        // and a blocking retry -- correct, and a meter says it happened.
         // Sprite BATCHING via the queue was measured a dead end
         // -- 64x 16x16 queued = 4.57ms vs 0.70ms for the CPU (~10x vs spr_batch);
         // per-op submit overhead dwarfs a tiny blit. The PPA is a SCALE
         // accelerator (the upscale composite), not a sprite compositor.
-        .max_pending_trans_num = 6,
+        .max_pending_trans_num = 24,
     };
     esp_err_t err = ppa_register_client(&cfg, &s_srm);
     if (err != ESP_OK) {
