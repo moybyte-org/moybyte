@@ -383,6 +383,49 @@ def test_the_lua_status_can_be_routed_to_a_boards_own_log():
     assert lines == ["lua runtime ABSENT"]
 
 
+# -- the internal-SRAM census -------------------------------------------------
+
+
+def test_the_sram_census_names_its_four_stages_in_boot_order(monkeypatch):
+    """One census, every board (#66/#67, 2026-09-08).
+
+    It was four hand-placed calls in the T-Deck's `run_desktop` and nowhere
+    else, so the one question a Lua cart's PSRAM fallback raises -- who took
+    the internal SRAM, and at which stage -- could be asked only on the board
+    that happened to have the calls. The deltas between the lines are the
+    whole point: any single line is a number without an owner.
+    """
+    seen = []
+    monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    boot, _, _ = _boot()
+
+    boot.load_carts(FakeStore(), [{"title": "s"}])
+    boot.lua_runtime(FakeWs())
+    boot.start_frames(FakeWs())
+
+    assert seen == ["rd-entry", "carts", "console", "desktop-up"]
+
+
+def test_a_store_that_fails_still_weighs_the_heap_the_scan_fragmented(monkeypatch):
+    """`carts` is the reading the scan is measured BY, so it has to survive the
+    scan failing -- a board that fell back to its embedded carts is exactly the
+    one whose heap someone is about to ask about."""
+    seen = []
+    monkeypatch.setattr(device_boot, "sram_census", seen.append)
+    boot, _, _ = _boot()
+
+    boot.load_carts(FakeStore(raise_on="ensure_dirs"), [{"title": "b"}])
+
+    assert seen == ["rd-entry", "carts"]
+
+
+def test_the_census_is_a_no_op_off_board():
+    """The host has one region and no `device_util` staged, so the fallback has
+    to be callable and silent -- every board method above calls it
+    unconditionally."""
+    assert device_boot.sram_census("anything") is None
+
+
 # -- the OTA verdict + confirm ------------------------------------------------
 
 
@@ -662,8 +705,12 @@ def test_the_spine_imports_no_board_module():
     """
     src = (ROOT / "runtime" / "device_boot.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
+    # `moycore_glue` and `device_util` are device-tier LEAVES, not board
+    # modules: both are staged to every board, neither knows a panel or a pin,
+    # and both are imported behind an ImportError guard with a working
+    # off-board answer. A firmware/ module never belongs here.
     allowed = {"console", "runtime", "chrome", "ticks", "moycore_glue",
-               "perf_line", "time", "gc"}
+               "device_util", "perf_line", "time", "gc"}
     seen = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

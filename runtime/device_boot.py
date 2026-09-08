@@ -21,8 +21,9 @@ beside it. The nineteen steps sort into three kinds --
   IDENTICAL (here)          the boot splash + its progress bar + the "first
                             frame in Nms" report; the cart load/seed/scan with
                             its built-in fallback; the Lua runtime probe; the
-                            OTA boot verdict and the frame-loop rollback
-                            confirm; the frame cadence, its debt and the sleep.
+                            four-stage internal-SRAM census; the OTA boot
+                            verdict and the frame-loop rollback confirm; the
+                            frame cadence, its debt and the sleep.
 
   DIFFERS BY VALUE (here,   the store root and its media word; the splash's
   as a parameter)           serial label; the backlight function; the log sink
@@ -34,8 +35,8 @@ beside it. The nineteen steps sort into three kinds --
                             BLE HID + GT911); the SD/panel bus gate; the
                             presentation tier install (WindowedWM); the P4's
                             serial dev channel, drag/swipe scripts and idle
-                            screen blank; the T-Deck's diag ring, HITCH/LOOP
-                            accounting and SRAM census; the P4's
+                            screen blank; the T-Deck's diag ring and HITCH/LOOP
+                            accounting; the P4's
                             `present_pending` async-PPA overlap; the T-Deck's
                             `comp.sync()` idle-band drain. None of those is a
                             missing feature on the other board -- each is a
@@ -65,6 +66,12 @@ except ImportError:  # pragma: no cover - host package lane
     from runtime.chrome import _ticks_ms, _ticks_diff
     from runtime.ticks import _ticks_us, _sleep_ms
     from runtime.perf_line import FAILED as PERF_FAILED, format_perf
+
+try:
+    from device_util import sram_census
+except ImportError:  # pragma: no cover - host lane: no device tier staged
+    def sram_census(stage):
+        """No second region off-board, so nothing to weigh."""
 
 
 class DeviceBoot:
@@ -187,27 +194,31 @@ class DeviceBoot:
         SESSION, so the only honest question is "did a real session work" --
         which is this call. The boards differ because the buses do.
         """
-        # BEFORE the scan, which is what fragments the heap: the PICO-8
-        # machine's 81KB has to be a contiguous run, and after the store is up
-        # an S3 has none (moycore_glue.reserve_p8_memory carries the numbers).
+        sram_census("rd-entry")
         try:
-            from moycore_glue import reserve_p8_memory
-            if reserve_p8_memory():
-                self.say("p8 machine memory reserved")
-        except ImportError:
-            pass                        # a build with no moycore staged
-        if root is None:
-            root = store.CARTS_DIR
-        carts = self._try_store(store, seed, root, session, media)
-        if carts:
-            return carts, root
-        if fallback_root is not None and fallback_root != root:
-            carts = self._try_store(store, seed, fallback_root, None,
-                                    fallback_media)
+            # BEFORE the scan, which is what fragments the heap: the PICO-8
+            # machine's 81KB has to be a contiguous run, and after the store is
+            # up an S3 has none (moycore_glue.reserve_p8_memory has the numbers).
+            try:
+                from moycore_glue import reserve_p8_memory
+                if reserve_p8_memory():
+                    self.say("p8 machine memory reserved")
+            except ImportError:
+                pass                    # a build with no moycore staged
+            if root is None:
+                root = store.CARTS_DIR
+            carts = self._try_store(store, seed, root, session, media)
             if carts:
-                return carts, fallback_root
-        self.say("using built-in carts")
-        return store.embedded_floor(seed), None
+                return carts, root
+            if fallback_root is not None and fallback_root != root:
+                carts = self._try_store(store, seed, fallback_root, None,
+                                        fallback_media)
+                if carts:
+                    return carts, fallback_root
+            self.say("using built-in carts")
+            return store.embedded_floor(seed), None
+        finally:
+            sram_census("carts")
 
     def _try_store(self, store, seed, root, session, media):
         """One store attempt: seed it, scan it, say what happened. [] on any
@@ -241,6 +252,7 @@ class DeviceBoot:
         `log` defaults to the boot's own serial line; the T-Deck passes its diag
         sink so the answer also lands in the offline ring.
         """
+        sram_census("console")
         rt = None
         try:
             from moycore_glue import make_moycore_runtime
@@ -262,6 +274,7 @@ class DeviceBoot:
         only when the splash's own draw failed, the one case where the logo
         would otherwise go unseen.
         """
+        sram_census("desktop-up")
         self.note("drawing the first frame")
         self._first_at = _ticks_ms()
         if not self.lit:

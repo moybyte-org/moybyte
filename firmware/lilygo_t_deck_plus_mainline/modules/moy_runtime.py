@@ -36,8 +36,7 @@ from device_boot import (DeviceBoot, FrameLoop, FramePump, IdleBlank,
 # Named CARTS because that is what it is to everything downstream -- the
 # compression is a storage detail of this one import.
 from carts_data import CARTS_Z as CARTS
-from device_util import (_ticks_ms, _ticks_diff, _diag_note, _diag_log,
-                         sram_census)
+from device_util import _ticks_ms, _ticks_diff, _diag_note, _diag_log
 from device_wifi import make_wifi, autoconnect_wifi
 from device_input import TrackBall, Touch
 from device_audio import make_audio
@@ -169,7 +168,6 @@ def run_desktop(fps_cap=60):
             _diag_note("input", "poller setup failed: %s" % (exc,))
             poller = None
 
-    sram_census("rd-entry")
     boot.note("loading cartridges")
 
     def _sd_session(fn):
@@ -202,10 +200,8 @@ def run_desktop(fps_cap=60):
     # panel for a bus it is not using and stages its update onto a card that is
     # not there.
     on_sd = carts_root is not None and carts_root.startswith("/sd")
-    sram_census("carts")
     boot.note("building the desktop")
     ws = Workstation(comp, canvas, inp, carts)
-    sram_census("console")
 
     # Per-run cart canvas factory (SPEC.md 1/3.1): a cart declaring a smaller
     # raster plays on its own off-screen canvas and `wm.composite_game` upscales
@@ -357,7 +353,6 @@ def run_desktop(fps_cap=60):
               % (1 if keyboard.available else 0, 1 if ball.available else 0,
                  1 if touch.available else 0, 1 if poller is not None else 0),
               diag)
-    sram_census("desktop-up")
 
     # #66/#67 SRAM diet: everything needing boot-time internal RAM has taken it
     # by here, so the Lua allocator's headroom floor drops 48->24KB. BOTH
