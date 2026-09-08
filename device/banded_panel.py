@@ -254,6 +254,17 @@ class FoldingCompositor(BandedCompositor):
     visible cursor) disarms through `console.py`'s frame walk, and the disarm
     performs the skipped composite into the buffer being drawn -- so those
     frames cost exactly what every frame cost before.
+
+    THE SNAPSHOT IS THE DMA ENGINE'S (2026-09-08). The copy into that scratch
+    was the whole of `cmp` on glass: 5.1 ms a frame for a native 320x240 cart
+    on the Guition (its game canvas is a separate raster; on the T-Deck it IS
+    the glass and nothing is copied), 1.1 ms for a p8 canvas on either board.
+    `snap_scale_fold` hands the C the LIVE canvas and the scratch; the C
+    starts a GDMA copy of the row range and arms over the scratch, and the
+    feeder waits for the copy before its first band. Started at `blit_game`
+    it has landed before the cart's next tick on every frame measured (0.02 ms
+    residual on both boards), and `snap_fence` -- taken by the sys canvas's
+    `sync_back` -- is what makes that a guarantee rather than a measurement.
     """
 
     def __init__(self, lcd, nfbs=2, async_flush=True):
@@ -261,7 +272,7 @@ class FoldingCompositor(BandedCompositor):
         # A module without the verbs (an older C than this Python) degrades to
         # the ordinary root composite rather than raising on the first play
         # frame; `blit_game` getattrs this and takes its own path.
-        self.fold_supported = hasattr(lcd, "arm_fold")
+        self.fold_supported = hasattr(lcd, "arm_fold_snap")
 
     @property
     def fold_count(self):
@@ -279,24 +290,38 @@ class FoldingCompositor(BandedCompositor):
         flush -- so this is not the drain it looks like."""
         self._lcd.fold_fence()
 
-    def arm_scale_fold(self, src_buf, vw, vh, ox, oy, scale):
-        """Hand this frame's composite to the flush, or perform it here.
+    def snap_scale_fold(self, live, live_off, scratch, vw, vh, sx, sstride,
+                        ox, oy, scale):
+        """Snapshot the LIVE game canvas into `scratch` and hand this frame's
+        composite to the flush.
 
-        The C REFUSES geometry its synthesis cannot express (it runs on the
-        feeder with no MP context, so a bad rectangle has to be caught on this
-        side of the handoff). A decline must be invisible one level up, so the
-        fallback is the exact composite `blit_game` skipped."""
-        try:
-            self._lcd.arm_fold(src_buf, vw, vh, ox, oy, scale)
-            return
-        except (ValueError, OSError):
-            pass
-        g = self._gfx
-        if g is None:
-            return
-        fb = self.framebuffer()
-        g.fill(fb, self._w * self._h, 0)
-        g.blit565_scale(fb, self._w, self._h, ox, oy, src_buf, vw, vh, scale)
+        The rectangle is `vw` x `vh` at column `sx` of the rows starting
+        `live_off` bytes into `live`, `sstride` pixels wide; the copy is that
+        whole row range (one contiguous run, the only shape a DMA takes).
+        Returns True when the copy is a DMA in flight -- the caller must
+        `snap_fence` before `live` is written again -- and False when it
+        landed synchronously (the engine declined: alignment, size, a refusal;
+        the C then memcpys, so the caller never sees the difference).
+
+        Raises ValueError on geometry the synthesis cannot express (it runs on
+        the feeder with no MP context, so a bad rectangle has to be caught on
+        this side of the handoff): nothing is copied or latched, and
+        `blit_game` performs the composite it skipped."""
+        return self._lcd.arm_fold_snap(live, live_off, scratch, vw, vh, sx,
+                                       sstride, ox, oy, scale)
+
+    def snap_fence(self):
+        """Block until the snapshot in flight has finished reading the live
+        canvas -- the fence the cart's next canvas write takes. One compare in
+        C once the copy has landed, which it has by the end of the loop head."""
+        self._lcd.fold_snap_fence()
+
+    def snap_stats(self):
+        """(snaps, snaps_sync, timeouts, wait_us): DMA snapshots, memcpy
+        snapshots, copies that never landed (the engine is then retired for
+        the session), and what the last snap fence waited. `snaps` climbing
+        1:1 with `fold_count` is the proof the lever is live."""
+        return self._lcd.snap_stats()
 
     def disarm_scale_fold(self):
         """An overlay is about to paint the root: perform the skipped

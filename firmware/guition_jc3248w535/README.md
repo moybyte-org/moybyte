@@ -42,7 +42,14 @@ T-Deck's exact payload at a quarter of this bus's full-frame time. Proven
 byte-identical to the composite path on the device itself
 (`moy_axs.fold_test`, both passes, 0 mismatched bytes); `fold_stats`'
 windowed counter tracks folded flushes 1:1 minus the bezel-layers. Overlays
-disarm through the shared frame walk and pay the old cost. Measured ladder
+disarm through the shared frame walk and pay the old cost. **The snapshot
+into that scratch is the GDMA engine's since 2026-09-08** (`moy_fold_arm_snap`,
+`moy_fold.h`): the 153,600 B PSRAM-to-PSRAM copy was 5.1 ms of every native
+play frame on this board -- the whole of CHROMEBRK's `cmp`, because here the
+game canvas is a separate raster from the glass -- and started at `blit_game`
+it lands before the cart's next tick (`sync_back` fences it; the feeder waits
+for it before its first band). `snap=` on the PUMP line climbs with `fold=`;
+the before/after is in #66. Measured ladder
 on this glass (Star Catcher / Sakura Lua): 80MHz bring-up 24/21 -> 120MHz
 MSPI 30/27 -> fold 35/30 -> game window 42/34 -> **core-0 feeder 53/43fps**.
 

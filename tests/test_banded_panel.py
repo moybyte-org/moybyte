@@ -403,9 +403,9 @@ def test_the_base_compositor_claims_NO_board_lever():
     and `_diag_pump` both getattr these). The shared body must therefore claim
     none of them, or every board inherits a lever it does not have."""
     _lcd, comp = build()
-    for lever in ("fold_supported", "fold_count", "arm_scale_fold",
-                  "disarm_scale_fold", "fold_fence", "sd_bracket",
-                  "pump_if_pending"):
+    for lever in ("fold_supported", "fold_count", "snap_scale_fold",
+                  "snap_fence", "snap_stats", "disarm_scale_fold",
+                  "fold_fence", "sd_bracket", "pump_if_pending"):
         assert not hasattr(comp, lever), lever
 
 
@@ -445,10 +445,12 @@ class FoldingLcd(FakeLcd):
     between the two (the Guition counts game-windowed flushes; the T-Deck has
     no window to count), which is exactly why the Python only ever reads [0]."""
 
-    def __init__(self, folded=0, stats_len=4, **kw):
+    def __init__(self, folded=0, stats_len=4, snap_async=True, **kw):
         FakeLcd.__init__(self, **kw)
         self.folded = folded
         self._stats_len = stats_len
+        self.snap_async = snap_async
+        self.snaps = (0, 0, 0, 0)
 
     def fold_stats(self):
         # (frames_folded, armed, inflight[, windowed]) -- modmoy_axs.c / modmoy_lcd.c
@@ -457,11 +459,27 @@ class FoldingLcd(FakeLcd):
     def arm_fold(self, src, vw, vh, ox, oy, scale=1):
         self._log("arm_fold", (vw, vh, ox, oy, scale))
 
+    def arm_fold_snap(self, live, live_off, scratch, vw, vh, sx, sstride,
+                      ox, oy, scale):
+        # True = a DMA in flight; False = the C memcpy'd it (both modules)
+        self._log("arm_fold_snap", (live_off, vw, vh, sx, sstride, ox, oy,
+                                    scale))
+        return self.snap_async
+
+    def fold_snap_fence(self):
+        self._log("fold_snap_fence")
+
+    def snap_stats(self):
+        return self.snaps
+
     def disarm_fold(self, i):
         self._log("disarm_fold", i)
 
     def fold_fence(self):
         self._log("fold_fence")
+
+
+_folding_arm_fold_snap = FoldingLcd.arm_fold_snap
 
 
 @pytest.mark.parametrize("board,native,modules,cls,stats_len", [
@@ -499,58 +517,68 @@ def test_the_fold_counter_is_LIVE_and_reads_the_C(board, native, modules, cls,
     ("guition_panel", "moy_axs", GUITION_MODULES, "GuitionCompositor"),
     ("tdeck_panel", "moy_lcd", TDECK_MODULES, "TDeckCompositor"),
 ])
-def test_the_arm_passes_the_scale_through_and_falls_back_when_refused(
+def test_the_snapshot_arm_passes_the_geometry_through_and_says_if_it_is_a_dma(
         board, native, modules, cls):
     """Scale is the fold's argument, not a case it declines: folding scale 1
     alone would drop a 480x320 board running a 128px cart at 2x onto a full CPU
-    composite every frame.
+    composite every frame. The snapshot arm carries the crop geometry too --
+    the row offset, the column and the stride -- because the copy is the row
+    range at the canvas stride and the C reads the rectangle out of it.
 
-    A REFUSAL still has to be invisible one level up, so a module that raises
-    must leave the root holding the composite `blit_game` skipped."""
+    Its answer is whether the copy is a DMA in flight (the caller fences) or
+    landed as a memcpy (nothing to fence); a REFUSAL raises through, because
+    the composite it falls back to belongs to `blit_game`, which has the live
+    canvas in hand."""
     lcd = FoldingLcd()
     with board_panel(board, native, modules, lcd) as mod:
         comp = getattr(mod, cls)()
         lcd.comp = comp
-        src = FB(9)
+        live, scratch = FB(9), FB(3)
 
         lcd.calls.clear()
-        comp.arm_scale_fold(src, 128, 128, 112, 32, 2)
-        assert lcd.calls == [("arm_fold", (128, 128, 112, 32, 2), 0)]
+        assert comp.snap_scale_fold(live, 1024, scratch, 128, 120, 0, 128,
+                                    112, 40, 2) is True
+        assert lcd.calls == [("arm_fold_snap",
+                              (1024, 128, 120, 0, 128, 112, 40, 2), 0)]
+        lcd.snap_async = False
+        assert comp.snap_scale_fold(live, 0, scratch, 320, 240, 0, 320,
+                                    80, 40, 1) is False
+
+        lcd.calls.clear()
+        comp.snap_fence()
+        assert lcd.names() == ["fold_snap_fence"]
+        lcd.snaps = (5763, 2, 0, 17)
+        assert comp.snap_stats() == (5763, 2, 0, 17)
 
         # The C refuses geometry its feeder-side synthesis cannot express.
         def refuse(*_a, **_k):
             raise ValueError("fold geometry")
-        lcd.arm_fold = refuse
-        gfx = _RecordingGfx()
-        comp._gfx = gfx
-        comp.arm_scale_fold(src, 128, 128, 112, 32, 2)
-        assert gfx.calls[0][0] == "fill"
-        assert gfx.calls[1] == ("blit565_scale", (comp._w, comp._h, 112, 32,
-                                                  128, 128, 2))
+        lcd.arm_fold_snap = refuse
+        with pytest.raises(ValueError):
+            comp.snap_scale_fold(live, 0, scratch, 128, 128, 0, 128, 200, 56, 1)
 
 
 def test_a_banded_module_without_the_verbs_degrades():
     """`fold_supported` is probed by `DeviceCanvas.blit_game`; a panel module
     older than this Python must take the ordinary root composite rather than
-    raising on the first play frame."""
+    raising on the first play frame -- and that includes a module with the
+    2026-08 fold verbs but not the snapshot arm, since `blit_game` reaches the
+    lever through `snap_scale_fold` alone now."""
     lcd = FakeLcd()                     # no arm_fold / fold_stats at all
     with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, lcd) as tp:
         comp = tp.TDeckCompositor()
         lcd.comp = comp
         assert comp.fold_supported is False
 
-
-class _RecordingGfx:
-    """The two `moy_gfx` kernels the arm's fallback composite uses."""
-
-    def __init__(self):
-        self.calls = []
-
-    def fill(self, buf, npix, col):
-        self.calls.append(("fill", (npix, col)))
-
-    def blit565_scale(self, dst, dw, dh, dx, dy, src, sw, sh, scale):
-        self.calls.append(("blit565_scale", (dw, dh, dx, dy, sw, sh, scale)))
+    old = FoldingLcd()
+    del FoldingLcd.arm_fold_snap        # the pre-snapshot verb set
+    try:
+        with board_panel("tdeck_panel", "moy_lcd", TDECK_MODULES, old) as tp:
+            comp = tp.TDeckCompositor()
+            old.comp = comp
+            assert comp.fold_supported is False
+    finally:
+        FoldingLcd.arm_fold_snap = _folding_arm_fold_snap
 
 
 # -- the consumers: a meter nobody can read is not a meter ---------------------
@@ -627,6 +655,28 @@ def test_the_PUMP_line_reports_a_LIVE_fold_count():
     diag = FakeDiag()
     dd._diag_pump(diag, comp)
     assert "fold=5767" in diag.line("PUMP")
+
+
+def test_the_PUMP_line_carries_the_snapshot_meters_only_where_they_exist():
+    """snap=dma/memcpy snapto= snapwait= come from `snap_stats`, and a
+    compositor without the verb prints none of them -- absence, never 0,
+    is how a board says it lacks the lever."""
+    lcd = FakeLcd()
+    comp = FoldingComp(lcd, 12)
+    lcd.comp = comp
+    dd = _device_diag()
+    diag = FakeDiag()
+    dd._diag_pump(diag, comp)
+    assert "snap=" not in diag.line("PUMP")
+
+    comp.snap_stats = lambda: (5763, 2, 1, 1400)
+    diag = FakeDiag()
+    dd._diag_pump(diag, comp)
+    line = diag.line("PUMP")
+    assert "fold=12" in line
+    assert "snap=5763/2" in line
+    assert "snapto=1" in line
+    assert "snapwait=1.40" in line
 
 
 def test_a_serialized_board_prints_no_PUMP_line_at_all():

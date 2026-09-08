@@ -602,3 +602,92 @@ void h_harness_init(const char *scenario) {
 }
 
 int h_task_creates(void) { return g_task_creates; }
+
+// ---------------------------------------------------------------------------
+// The snapshot DMA engine (stubs/esp_async_memcpy.h)
+// ---------------------------------------------------------------------------
+
+#include "esp_async_memcpy.h"
+
+struct h_dma_engine { int installed; };
+
+static struct h_dma_engine g_dma_engine;
+static int g_dma_installs, g_dma_submits;
+static bool g_dma_fail_install, g_dma_stall;
+static int g_dma_refuse;
+static int64_t g_dma_fixed_us = 100;
+static int64_t g_dma_us_per_kb = 23;     // 153,600 B -> ~3.5 ms: the measured 3.4
+static int64_t g_dma_busy_until;
+
+typedef struct {
+    void *dst;
+    const void *src;
+    size_t n;
+    async_memcpy_isr_cb_t cb;
+    void *arg;
+} h_dma_copy_t;
+
+// The completion "ISR": the bytes land here and only here, then the driver's
+// callback runs -- the order the real engine has, and the order the fold's
+// `copying` latch relies on.
+static void h_dma_land(void *arg) {
+    h_dma_copy_t *c = arg;
+    memcpy(c->dst, c->src, c->n);
+    if (c->cb != NULL) {
+        async_memcpy_event_t e = { NULL };
+        c->cb(&g_dma_engine, &e, c->arg);
+    }
+    free(c);
+}
+
+void h_dma_fail_install(bool on) { g_dma_fail_install = on; }
+void h_dma_refuse(int err) { g_dma_refuse = err; }
+void h_dma_stall(bool on) { g_dma_stall = on; }
+void h_dma_set_rate(int64_t fixed_us, int64_t us_per_kb) {
+    g_dma_fixed_us = fixed_us;
+    g_dma_us_per_kb = us_per_kb;
+}
+int h_dma_installs(void) { return g_dma_installs; }
+int h_dma_submits(void) { return g_dma_submits; }
+int64_t h_dma_lands_at(void) { return g_dma_busy_until; }
+
+esp_err_t esp_async_memcpy_install(const async_memcpy_config_t *config,
+                                   async_memcpy_handle_t *mcp) {
+    g_dma_installs++;
+    if (config == NULL || mcp == NULL || g_dma_fail_install) {
+        return ESP_FAIL;
+    }
+    g_dma_engine.installed = 1;
+    *mcp = &g_dma_engine;
+    return ESP_OK;
+}
+
+esp_err_t esp_async_memcpy(async_memcpy_handle_t mcp, void *dst, void *src,
+                           size_t n, async_memcpy_isr_cb_t cb_isr,
+                           void *cb_args) {
+    if (mcp != &g_dma_engine || !g_dma_engine.installed) {
+        h_fail("esp_async_memcpy on an engine that was never installed");
+    }
+    g_dma_submits++;
+    if (g_dma_refuse != 0) {
+        return g_dma_refuse;
+    }
+    if ((((uintptr_t)dst | (uintptr_t)src | (uintptr_t)n) & 63u) != 0) {
+        return ESP_ERR_INVALID_ARG;      // the real driver's rule, and it LOGS
+    }
+    if (g_dma_stall) {
+        return ESP_OK;                   // taken, never lands
+    }
+    h_dma_copy_t *c = malloc(sizeof *c);
+    if (c == NULL) { h_fail("the host is out of memory"); }
+    c->dst = dst;
+    c->src = src;
+    c->n = n;
+    c->cb = cb_isr;
+    c->arg = cb_args;
+    int64_t start = h_now() > g_dma_busy_until ? h_now() : g_dma_busy_until;
+    g_dma_busy_until = start + g_dma_fixed_us
+                       + (int64_t)n * g_dma_us_per_kb / 1024;
+    h_at(g_dma_busy_until, h_dma_land, c);
+    return ESP_OK;
+}

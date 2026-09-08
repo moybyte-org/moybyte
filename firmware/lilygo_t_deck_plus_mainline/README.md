@@ -662,7 +662,12 @@ synthesizes each band from that snapshot (black outside the viewport, the game
 rows at integer scale inside) rather than copying the root. Both the 153,600 B
 composite and the 153,600 B band read-back of the root disappear; `fold=` on
 the PUMP line climbs on every quiet play frame, and a `fold=` that stops
-climbing is the symptom of something disarming.
+climbing is the symptom of something disarming. **The snapshot itself rides
+the GDMA engine since 2026-09-08** (`moy_fold_arm_snap`): a p8 canvas's 32 KB
+cost the VM 1.1 ms a frame as a memcpy through the write-allocate cache, and
+a native 320x240 cart copies nothing here (its canvas IS the glass) -- the
+DMA lands before the cart's next tick, `sync_back` fences it, and `snap=` on
+the PUMP line climbs with `fold=`.
 
 The **game window** is the Guition's alone — shipping the game rect by itself
 needs a panel whose GRAM keeps the bezels and a per-frame window arm, and this

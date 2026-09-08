@@ -79,6 +79,9 @@ static struct {
                                       // allowed to arrive at any instruction
     int slots;
     const uint8_t *expect_src;
+    bool fold_synth;                  // queue_band synthesizes a folded
+                                      // band through moy_fold_band, the
+                                      // way both boards do, and captures it
 
     // observation
     int begin_calls, end_calls;
@@ -95,6 +98,8 @@ static struct {
 } B;
 
 static uint8_t g_fb[PANEL_ROWS * BAND_W * 2];
+
+static void fold_capture(const uint8_t *slot, int y, int rows);
 
 static void bd_complete(void *arg) {
     int k = (int)(intptr_t)arg;
@@ -154,7 +159,12 @@ static esp_err_t bd_queue_band(uint8_t *slot, const uint8_t *src, int k, int y,
     r->slot = slot;
     r->done_at = moy_flush.done;
     r->t_in = h_now();
-    memset(slot, 0xA5, (size_t)rows * BAND_W * 2);
+    if (B.fold_synth && moy_fold.inflight) {
+        moy_fold_band(slot, BAND_W, y, rows);
+        fold_capture(slot, y, rows);
+    } else {
+        memset(slot, 0xA5, (size_t)rows * BAND_W * 2);
+    }
     h_advance(B.synth_us);
     r->t_out = h_now();
     if (B.queue_err != ESP_OK && k == B.queue_err_at) { return B.queue_err; }
@@ -1055,7 +1065,11 @@ static void sc_isr_without_a_feeder(void) {
 #define FOLD_PH      480
 #define FOLD_GMAX    (320 * 240)         // the largest game rect any case arms
 
-static uint16_t f_game[FOLD_GMAX];
+// The live rasters and the scratch are 64-aligned like `moy_alloc`'s buffers,
+// so the engine takes them; a scenario that wants a decline misaligns the
+// OFFSET or the LENGTH, which is how a real cart geometry would.
+static uint16_t f_game[FOLD_GMAX] __attribute__((aligned(64)));
+static uint16_t f_scr[FOLD_GMAX] __attribute__((aligned(64)));
 static uint16_t f_ref[FOLD_LW * FOLD_LH];      // the composite, logical space
 static uint16_t f_got[FOLD_LW * FOLD_LH];      // bands, reassembled
 static uint16_t f_rot[FOLD_PW * FOLD_PH];      // the composite, rotated
@@ -1082,6 +1096,42 @@ static void fold_arm_or_fail(int vw, int vh, int ox, int oy, int scale,
     }
 }
 
+// The SNAPSHOT arm: the live raster is `stride` x `gh`, the rectangle `vw` x
+// `vh` at (sx, sy) inside it. Returns what the arm said about the copy --
+// true = a DMA in flight, false = it landed as a memcpy.
+static bool fold_snap_or_fail(int stride, int gh, int sx, int sy, int vw,
+                              int vh, int ox, int oy, int scale, int fb_w,
+                              int fb_h) {
+    fold_fill_game(stride, gh);
+    bool async = false;
+    if (!moy_fold_arm_snap((const uint8_t *)f_game, sizeof f_game,
+                           (size_t)sy * (size_t)stride * 2u,
+                           (uint8_t *)f_scr, sizeof f_scr, vw, vh, sx, stride,
+                           ox, oy, scale, fb_w, fb_h, &async)) {
+        h_fail("snap refused %dx%d @(%d,%d) of a %d-stride raster -> (%d,%d) "
+               "x%d in %dx%d", vw, vh, sx, sy, stride, ox, oy, scale, fb_w,
+               fb_h);
+    }
+    return async;
+}
+
+// The composite written from the LIVE raster and the geometry alone -- the
+// snapshot's oracle. Independent of `moy_fold_composite` on purpose: that
+// reads the scratch, so it would agree with a copy that landed wrong.
+static void ref_composite_raster(uint16_t *fb, int fb_w, int fb_h,
+                                 const uint16_t *raster, int stride, int sx,
+                                 int sy, int vw, int vh, int ox, int oy,
+                                 int scale) {
+    memset(fb, 0, (size_t)fb_w * (size_t)fb_h * 2u);
+    for (int y = 0; y < vh * scale; y++) {
+        for (int x = 0; x < vw * scale; x++) {
+            fb[(size_t)(oy + y) * (size_t)fb_w + (size_t)(ox + x)] =
+                raster[(size_t)(sy + y / scale) * (size_t)stride
+                       + (size_t)(sx + x / scale)];
+        }
+    }
+}
+
 // P[py][px] = L[px][PH-1-py] (rot 0) / L[PW-1-px][py] (rot 1) -- moy_fold.h.
 static void ref_rotate(uint16_t *dst, const uint16_t *lg, int panel_w,
                        int panel_h, int rot) {
@@ -1094,32 +1144,44 @@ static void ref_rotate(uint16_t *dst, const uint16_t *lg, int panel_w,
     }
 }
 
-static void fold_check_linear(int vw, int vh, int ox, int oy, int scale,
-                              int band_rows) {
-    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_W, FOLD_H);
-    moy_fold_composite((uint8_t *)f_ref, FOLD_W, FOLD_H);
+// The engine-fed path (bd_queue_band with B.fold_synth): each synthesized
+// band is copied out of its bounce slot into f_got at the frame's stride.
+static void fold_capture(const uint8_t *slot, int y, int rows) {
+    memcpy(f_got + (size_t)y * BAND_W, slot, (size_t)rows * BAND_W * 2u);
+}
+
+static void fold_gather_linear(int fb_w, int fb_h, int band_rows) {
     memset(f_got, 0xC7, sizeof f_got);          // poison: an unwritten band shows
-    for (int y = 0; y < FOLD_H; y += band_rows) {
-        int rows = (y + band_rows <= FOLD_H) ? band_rows : (FOLD_H - y);
+    for (int y = 0; y < fb_h; y += band_rows) {
+        int rows = (y + band_rows <= fb_h) ? band_rows : (fb_h - y);
         memset(f_slot, 0x3B, sizeof f_slot);
-        moy_fold_band((uint8_t *)f_slot, FOLD_W, y, rows);
-        memcpy(f_got + (size_t)y * FOLD_W, f_slot,
-               (size_t)rows * FOLD_W * 2);
+        moy_fold_band((uint8_t *)f_slot, fb_w, y, rows);
+        memcpy(f_got + (size_t)y * fb_w, f_slot, (size_t)rows * fb_w * 2);
     }
-    for (int i = 0; i < FOLD_W * FOLD_H; i++) {
+}
+
+static void fold_expect(const char *what, int fb_w, int fb_h) {
+    for (int i = 0; i < fb_w * fb_h; i++) {
         if (f_got[i] != f_ref[i]) {
-            h_fail("linear fold %dx%d @(%d,%d) x%d bands=%d: pixel %d "
-                   "(%d,%d) is %04x, the composite has %04x", vw, vh, ox, oy,
-                   scale, band_rows, i, i % FOLD_W, i / FOLD_W, f_got[i],
-                   f_ref[i]);
+            h_fail("%s: pixel %d (%d,%d) is %04x, the composite has %04x",
+                   what, i, i % fb_w, i / fb_w, f_got[i], f_ref[i]);
         }
     }
 }
 
-static void fold_check_rot(int vw, int vh, int ox, int oy, int scale, int rot,
-                           int win_x, int win_y, int win_w, int win_h) {
-    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_LW, FOLD_LH);
-    moy_fold_composite((uint8_t *)f_ref, FOLD_LW, FOLD_LH);
+static void fold_check_linear(int vw, int vh, int ox, int oy, int scale,
+                              int band_rows) {
+    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_W, FOLD_H);
+    moy_fold_composite((uint8_t *)f_ref, FOLD_W, FOLD_H);
+    fold_gather_linear(FOLD_W, FOLD_H, band_rows);
+    char what[96];
+    snprintf(what, sizeof what, "linear fold %dx%d @(%d,%d) x%d bands=%d",
+             vw, vh, ox, oy, scale, band_rows);
+    fold_expect(what, FOLD_W, FOLD_H);
+}
+
+static void fold_gather_rot_and_expect(const char *what, int rot, int win_x,
+                                       int win_y, int win_w, int win_h) {
     ref_rotate(f_rot, f_ref, FOLD_PW, FOLD_PH, rot);
     const moy_fold_rot_t geom = { FOLD_PW, FOLD_PH, rot, win_x, win_y, win_w };
     const int band_rows = 32;
@@ -1133,14 +1195,65 @@ static void fold_check_rot(int vw, int vh, int ox, int oy, int scale, int rot,
                 uint16_t want = f_rot[(size_t)(win_y + y + r) * FOLD_PW
                                       + win_x + c];
                 if (got != want) {
-                    h_fail("rot%d fold %dx%d @(%d,%d) x%d win(%d,%d %dx%d): "
-                           "panel (%d,%d) is %04x, the rotated composite has "
-                           "%04x", rot, vw, vh, ox, oy, scale, win_x, win_y,
+                    h_fail("%s win(%d,%d %dx%d): panel (%d,%d) is %04x, the "
+                           "rotated composite has %04x", what, win_x, win_y,
                            win_w, win_h, win_x + c, win_y + y + r, got, want);
                 }
             }
         }
     }
+}
+
+static void fold_check_rot(int vw, int vh, int ox, int oy, int scale, int rot,
+                           int win_x, int win_y, int win_w, int win_h) {
+    fold_arm_or_fail(vw, vh, ox, oy, scale, FOLD_LW, FOLD_LH);
+    moy_fold_composite((uint8_t *)f_ref, FOLD_LW, FOLD_LH);
+    char what[96];
+    snprintf(what, sizeof what, "rot%d fold %dx%d @(%d,%d) x%d", rot, vw, vh,
+             ox, oy, scale);
+    fold_gather_rot_and_expect(what, rot, win_x, win_y, win_w, win_h);
+}
+
+// The snapshot forms of the two checks: the copy is a DMA in flight when the
+// bands are asked for, so the synthesis has to wait for it -- and the oracle
+// is the RASTER, never the scratch.
+static void fold_check_snap_linear(int stride, int gh, int sx, int sy, int vw,
+                                   int vh, int ox, int oy, int scale,
+                                   int band_rows) {
+    memset(f_scr, 0x11, sizeof f_scr);
+    if (!fold_snap_or_fail(stride, gh, sx, sy, vw, vh, ox, oy, scale, FOLD_W,
+                           FOLD_H)) {
+        h_fail("the engine declined a shape it must take: stride %d rows %d "
+               "at (%d,%d)", stride, vh, sx, sy);
+    }
+    ref_composite_raster(f_ref, FOLD_W, FOLD_H, f_game, stride, sx, sy, vw,
+                         vh, ox, oy, scale);
+    fold_gather_linear(FOLD_W, FOLD_H, band_rows);
+    char what[96];
+    snprintf(what, sizeof what, "snap linear %dx%d @(%d,%d)/%d -> (%d,%d) x%d",
+             vw, vh, sx, sy, stride, ox, oy, scale);
+    fold_expect(what, FOLD_W, FOLD_H);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK(moy_fold_disarm());
+}
+
+static void fold_check_snap_rot(int stride, int gh, int sx, int sy, int vw,
+                                int vh, int ox, int oy, int scale, int rot,
+                                int win_x, int win_y, int win_w, int win_h) {
+    memset(f_scr, 0x11, sizeof f_scr);
+    if (!fold_snap_or_fail(stride, gh, sx, sy, vw, vh, ox, oy, scale, FOLD_LW,
+                           FOLD_LH)) {
+        h_fail("the engine declined a shape it must take: stride %d rows %d "
+               "at (%d,%d)", stride, vh, sx, sy);
+    }
+    ref_composite_raster(f_ref, FOLD_LW, FOLD_LH, f_game, stride, sx, sy, vw,
+                         vh, ox, oy, scale);
+    char what[96];
+    snprintf(what, sizeof what, "snap rot%d %dx%d @(%d,%d)/%d -> (%d,%d) x%d",
+             rot, vw, vh, sx, sy, stride, ox, oy, scale);
+    fold_gather_rot_and_expect(what, rot, win_x, win_y, win_w, win_h);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK(moy_fold_disarm());
 }
 
 static void sc_fold_arm_geometry(void) {
@@ -1288,6 +1401,299 @@ static void sc_fold_reset_keeps_the_meter(void) {
     CHECK(!moy_fold_consume());
 }
 
+// THE SNAPSHOT (moy_fold_arm_snap and the `copying` latch). The two shipped
+// shapes are the Guition's native 320x240 (the 153,600 B copy that was the
+// whole of `cmp`) and the p8 128x128; both S3 boards take the same C.
+
+#define SNAP_NATIVE(as) \
+    fold_snap_or_fail(320, 240, 0, 0, 320, 240, 80, 40, 1, FOLD_LW, FOLD_LH)
+#define SNAP_P8() \
+    fold_snap_or_fail(128, 128, 0, 0, 128, 128, 96, 56, 1, FOLD_W, FOLD_H)
+
+static void sc_fold_snap_arm_geometry(void) {
+    fold_fill_game(320, 240);
+    const uint8_t *g = (const uint8_t *)f_game;
+    uint8_t *s = (uint8_t *)f_scr;
+    bool as = false;
+    // The shipped shapes are taken: the native frame, and celeste's 128x120
+    // view of a 128x128 canvas (four rows in, full width).
+    CHECK(moy_fold_arm_snap(g, sizeof f_game, 0, s, sizeof f_scr, 320, 240, 0,
+                            320, 80, 40, 1, FOLD_LW, FOLD_LH, &as));
+    CHECK(moy_fold_arm_snap(g, sizeof f_game, 4 * 128 * 2, s, sizeof f_scr,
+                            128, 120, 0, 128, 32, 0, 2, FOLD_W, FOLD_H, &as));
+    CHECK(moy_fold_disarm());
+    CHECK_EQ(moy_fold.copying, false);
+    int submits = h_dma_submits();
+    // Refused, and NOTHING latched or copied: no buffers, a rect that does
+    // not fit its rows, rows past the live buffer, a scratch too small, and
+    // the frame geometry moy_fold_arm already refuses.
+    CHECK(!moy_fold_arm_snap(NULL, sizeof f_game, 0, s, sizeof f_scr, 128, 128,
+                             0, 128, 96, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, NULL, sizeof f_scr, 128, 128,
+                             0, 128, 96, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, s, sizeof f_scr, 128, 128,
+                             8, 128, 96, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, s, sizeof f_scr, 128, 128,
+                             -1, 128, 96, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, sizeof f_game, s, sizeof f_scr,
+                             128, 128, 0, 128, 96, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, 100, 0, s, sizeof f_scr, 128, 128, 0, 128, 96,
+                             56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, s, 100, 128, 128, 0, 128, 96,
+                             56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, s, sizeof f_scr, 128, 128,
+                             0, 128, 200, 56, 1, FOLD_W, FOLD_H, &as));
+    CHECK(!moy_fold_arm_snap(g, sizeof f_game, 0, s, sizeof f_scr, 128, 128,
+                             0, 128, 96, 56, 0, FOLD_W, FOLD_H, &as));
+    CHECK_EQ(moy_fold.armed, false);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(as, false);
+    CHECK_EQ(h_dma_submits(), submits);
+    CHECK_EQ(moy_fold.snaps, 2);
+    CHECK_EQ(moy_fold.snaps_sync, 0);
+}
+
+static void sc_fold_snap_lands_by_dma(void) {
+    memset(f_scr, 0x11, sizeof f_scr);
+    int64_t t0 = h_now();
+    bool as = SNAP_NATIVE();
+    CHECK(as);
+    CHECK_EQ(moy_fold.copying, true);
+    CHECK_EQ(moy_fold.armed, true);
+    CHECK(moy_fold.src == (const uint8_t *)f_scr);
+    CHECK_EQ(moy_fold.sstride, 320);
+    CHECK_EQ(moy_fold.snaps, 1);
+    CHECK_EQ(h_dma_installs(), 1);
+    CHECK_EQ(h_dma_submits(), 1);
+    // The bytes are NOT there yet: an arm is a submit, not a copy.
+    CHECK_EQ(f_scr[0], 0x1111);
+    CHECK_EQ(h_now(), t0);
+    // The VM-side fence waits it out with the GIL released, meters the wait,
+    // and is two compares afterwards.
+    moy_fold_snap_fence();
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK(h_now() >= h_dma_lands_at());
+    CHECK(h_gil_exits() > 0);
+    CHECK_EQ(h_gil_depth(), 0);
+    CHECK(moy_fold.snap_wait_us > 0);
+    CHECK((int64_t)moy_fold.snap_wait_us <= h_dma_lands_at() - t0 + 100);
+    CHECK_EQ(f_scr[0], f_game[0]);
+    int exits = h_gil_exits();
+    moy_fold_snap_fence();
+    CHECK_EQ(h_gil_exits(), exits);
+    // ...and what landed composites exactly as the raster says.
+    ref_composite_raster(f_ref, FOLD_LW, FOLD_LH, f_game, 320, 0, 0, 320, 240,
+                         80, 40, 1);
+    moy_fold_composite((uint8_t *)f_got, FOLD_LW, FOLD_LH);
+    CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_LW * FOLD_LH * 2), 0);
+    // The second shape re-uses the installed engine.
+    CHECK(SNAP_P8());
+    CHECK_EQ(h_dma_installs(), 1);
+    CHECK_EQ(moy_fold.snaps, 2);
+    moy_fold_snap_fence();
+}
+
+static void sc_fold_snap_the_feeder_waits(void) {
+    // Through the ENGINE, the way a board runs it: the copy is still in
+    // flight when the feeder reaches band 0. Every band must reassemble into
+    // the NEW frame -- the scratch holds poison until the copy lands, so a
+    // feeder that read early ships it, and the pixel check says so.
+    bd_start(&OPS2);
+    B.synth_us = 0;
+    B.tx_us = 2000;
+    B.fold_synth = true;
+    memset(f_scr, 0x11, sizeof f_scr);
+    CHECK(SNAP_NATIVE());
+    ref_composite_raster(f_ref, FOLD_LW, FOLD_LH, f_game, 320, 0, 0, 320, 240,
+                         80, 40, 1);
+    int64_t lands = h_dma_lands_at();
+    CHECK(moy_fold_consume());
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    CHECK(moy_flush_drain());
+    CHECK_EQ(B.nbands, FULL_BANDS);
+    // The feeder ARRIVED before the copy landed and LEFT after it: the wait
+    // was real, and it was band 0's.
+    CHECK(B.bands[0].t_in < lands);
+    CHECK(B.bands[0].t_out >= lands);
+    CHECK(B.bands[1].t_out - B.bands[1].t_in < 1000);
+    fold_expect("engine-fed snapshot", FOLD_LW, FOLD_LH);
+    CHECK_EQ(moy_fold.inflight, false);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(moy_flush.timeouts, 0);
+}
+
+static void sc_fold_snap_declines_to_a_memcpy(void) {
+    // A row offset the engine cannot take (100-px rows are 200 B, so row 1
+    // starts 200 B in): the copy is a memcpy, synchronous, and the engine is
+    // never asked -- its refusal would be an error log per frame.
+    int64_t t0 = h_now();
+    bool as = fold_snap_or_fail(100, 60, 0, 1, 100, 50, 110, 70, 1, FOLD_W,
+                                FOLD_H);
+    CHECK(!as);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(moy_fold.snaps_sync, 1);
+    CHECK_EQ(moy_fold.snaps, 0);
+    CHECK_EQ(h_dma_submits(), 0);
+    CHECK_EQ(h_now(), t0);
+    ref_composite_raster(f_ref, FOLD_W, FOLD_H, f_game, 100, 0, 1, 100, 50,
+                         110, 70, 1);
+    moy_fold_composite((uint8_t *)f_got, FOLD_W, FOLD_H);
+    CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_W * FOLD_H * 2), 0);
+    // An aligned offset with a length that is not: 80-px rows are 160 B.
+    as = fold_snap_or_fail(80, 4, 0, 0, 80, 1, 0, 0, 1, FOLD_W, FOLD_H);
+    CHECK(!as);
+    CHECK_EQ(moy_fold.snaps_sync, 2);
+    CHECK_EQ(h_dma_submits(), 0);
+    // The engine cannot be installed: asked ONCE, then never again.
+    h_dma_fail_install(true);
+    as = SNAP_NATIVE();
+    CHECK(!as);
+    CHECK_EQ(h_dma_installs(), 1);
+    CHECK_EQ(moy_fold.snaps_sync, 3);
+    h_dma_fail_install(false);
+    as = SNAP_NATIVE();
+    CHECK(!as);
+    CHECK_EQ(h_dma_installs(), 1);
+    CHECK_EQ(h_dma_submits(), 0);
+    CHECK_EQ(moy_fold.snaps, 0);
+}
+
+static void sc_fold_snap_a_full_queue_is_one_memcpy(void) {
+    // A transient refusal (the queue is full) costs this frame a memcpy and
+    // nothing else; an ARGUMENT refusal means the pre-check missed a rule,
+    // and the engine is retired so it stops logging.
+    h_dma_refuse(ESP_FAIL);
+    CHECK(!SNAP_NATIVE());
+    CHECK_EQ(h_dma_submits(), 1);
+    CHECK_EQ(moy_fold.snaps_sync, 1);
+    h_dma_refuse(0);
+    CHECK(SNAP_NATIVE());
+    CHECK_EQ(h_dma_submits(), 2);
+    CHECK_EQ(moy_fold.snaps, 1);
+    moy_fold_snap_fence();
+    h_dma_refuse(ESP_ERR_INVALID_ARG);
+    CHECK(!SNAP_NATIVE());
+    CHECK_EQ(h_dma_submits(), 3);
+    h_dma_refuse(0);
+    CHECK(!SNAP_NATIVE());
+    CHECK_EQ(h_dma_submits(), 3);
+    CHECK_EQ(moy_fold.snaps_sync, 3);
+}
+
+static void sc_fold_snap_disarm_fence_and_reset_wait(void) {
+    // disarm: the overlay's composite must read a LANDED snapshot.
+    memset(f_scr, 0x11, sizeof f_scr);
+    CHECK(SNAP_P8());
+    int64_t lands = h_dma_lands_at();
+    CHECK(moy_fold_disarm());
+    CHECK(h_now() >= lands);
+    CHECK_EQ(moy_fold.copying, false);
+    ref_composite_raster(f_ref, FOLD_W, FOLD_H, f_game, 128, 0, 0, 128, 128,
+                         96, 56, 1);
+    moy_fold_composite((uint8_t *)f_got, FOLD_W, FOLD_H);
+    CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_W * FOLD_H * 2), 0);
+    // A snapshot the flush never consumed (a disarmed frame) is still landing
+    // in the scratch: the next frame's fence waits for it before the scratch
+    // is written again, with no flush in flight at all.
+    CHECK(SNAP_P8());
+    lands = h_dma_lands_at();
+    CHECK_EQ(moy_flush.frame_busy, false);
+    moy_fold_fence();
+    CHECK(h_now() >= lands);
+    CHECK_EQ(moy_fold.copying, false);
+    // reset waits too: the buffers are about to be handed back.
+    CHECK(SNAP_P8());
+    lands = h_dma_lands_at();
+    moy_fold_reset();
+    CHECK(h_now() >= lands);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK(moy_fold.src == NULL);
+    CHECK_EQ(moy_fold.armed, false);
+    CHECK_EQ(moy_fold.snaps, 3);            // the meters survive a reset
+    CHECK_EQ(h_gil_depth(), 0);
+}
+
+static void sc_fold_snap_timeout_retires_the_engine(void) {
+    // A copy that never signals trips the deadline ONCE: counted, the latch
+    // cleared, and every later snapshot a memcpy the engine is never asked
+    // for.
+    h_dma_stall(true);
+    int64_t t0 = h_now();
+    CHECK(SNAP_NATIVE());
+    CHECK_EQ(moy_fold.copying, true);
+    moy_fold_snap_fence();
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(moy_fold.snap_timeouts, 1);
+    CHECK(h_now() - t0 >= MOY_FLUSH_TIMEOUT_US);
+    CHECK(h_now() - t0 < MOY_FLUSH_TIMEOUT_US + 1000);
+    CHECK_EQ(h_gil_depth(), 0);
+    h_dma_stall(false);
+    int submits = h_dma_submits();
+    CHECK(!SNAP_NATIVE());
+    CHECK_EQ(moy_fold.snaps_sync, 1);
+    CHECK_EQ(h_dma_submits(), submits);
+    ref_composite_raster(f_ref, FOLD_LW, FOLD_LH, f_game, 320, 0, 0, 320, 240,
+                         80, 40, 1);
+    moy_fold_composite((uint8_t *)f_got, FOLD_LW, FOLD_LH);
+    CHECK_EQ(memcmp(f_got, f_ref, (size_t)FOLD_LW * FOLD_LH * 2), 0);
+}
+
+static void sc_fold_snap_timeout_on_the_feeder_is_bounded(void) {
+    // The same bug fence from the FEEDER's side: band 0 gives up at the
+    // deadline instead of holding the transport forever, the frame is the
+    // engine's timeout (never a hang), and the frame after it is clean.
+    h_dma_stall(true);
+    bd_start(&OPS2);
+    B.synth_us = 0;
+    B.tx_us = 2000;
+    B.fold_synth = true;
+    CHECK(SNAP_NATIVE());
+    CHECK(moy_fold_consume());
+    B.expect_src = g_fb;
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    CHECK(!moy_flush_drain());
+    CHECK_EQ(moy_flush.timeouts, 1);
+    CHECK_EQ(moy_fold.snap_timeouts, 1);
+    CHECK_EQ(moy_fold.copying, false);
+    CHECK_EQ(moy_fold.inflight, false);
+    h_dma_stall(false);
+    // Let the timed-out frame's bands clear the wire (the boards' frame_begin
+    // recycles them; here the fixture is simply given the time), then the
+    // next frame: a memcpy snapshot, a clean flush.
+    h_advance(20000);
+    B.nbands = 0;
+    memset(B.slot_busy, 0, sizeof B.slot_busy);
+    CHECK(!SNAP_NATIVE());
+    ref_composite_raster(f_ref, FOLD_LW, FOLD_LH, f_game, 320, 0, 0, 320, 240,
+                         80, 40, 1);
+    CHECK(moy_fold_consume());
+    moy_flush_kick(g_fb, PANEL_ROWS);
+    CHECK(moy_flush_drain());
+    CHECK_EQ(moy_flush.timeouts, 1);
+    fold_expect("the frame after a feeder timeout", FOLD_LW, FOLD_LH);
+}
+
+static void sc_fold_snap_crop_bands_match_the_raster(void) {
+    // The snapshot is a ROW RANGE at the raster's stride, and the rectangle
+    // sits at (sx, sy) inside it: a narrow view in a wider raster, celeste's
+    // row crop, the p8 full canvas, the Guition's native frame, and a window.
+    fold_check_snap_linear(128, 128, 16, 14, 96, 100, 64, 20, 2, 32);
+    fold_check_snap_linear(128, 128, 0, 4, 128, 120, 32, 0, 2, 32);
+    fold_check_snap_linear(128, 128, 0, 0, 128, 128, 96, 56, 1, 40);
+    fold_check_snap_linear(320, 240, 0, 0, 320, 240, 0, 0, 1, 36);
+    fold_check_snap_rot(320, 240, 0, 0, 320, 240, 80, 40, 1, 0, 0, 0, FOLD_PW,
+                        FOLD_PH);
+    fold_check_snap_rot(128, 128, 0, 0, 128, 128, 112, 32, 2, 1, 0, 0, FOLD_PW,
+                        FOLD_PH);
+    fold_check_snap_rot(128, 128, 0, 4, 128, 120, 112, 40, 2, 0, 32, 96, 256,
+                        256);
+    fold_check_snap_rot(320, 240, 16, 0, 96, 240, 192, 40, 1, 1, 0, 0, FOLD_PW,
+                        FOLD_PH);
+    CHECK_EQ(moy_fold.snaps, 8);
+    CHECK_EQ(moy_fold.snaps_sync, 0);
+}
+
 // ---------------------------------------------------------------------------
 
 typedef struct {
@@ -1347,6 +1753,20 @@ static const scenario_t SCENARIOS[] = {
       sc_fold_rot_bands_match_the_composite },
     { "fold_fence_waits_for_the_feed", sc_fold_fence_waits_for_the_feed },
     { "fold_reset_keeps_the_meter", sc_fold_reset_keeps_the_meter },
+    { "fold_snap_arm_geometry", sc_fold_snap_arm_geometry },
+    { "fold_snap_lands_by_dma", sc_fold_snap_lands_by_dma },
+    { "fold_snap_the_feeder_waits", sc_fold_snap_the_feeder_waits },
+    { "fold_snap_declines_to_a_memcpy", sc_fold_snap_declines_to_a_memcpy },
+    { "fold_snap_a_full_queue_is_one_memcpy",
+      sc_fold_snap_a_full_queue_is_one_memcpy },
+    { "fold_snap_disarm_fence_and_reset_wait",
+      sc_fold_snap_disarm_fence_and_reset_wait },
+    { "fold_snap_timeout_retires_the_engine",
+      sc_fold_snap_timeout_retires_the_engine },
+    { "fold_snap_timeout_on_the_feeder_is_bounded",
+      sc_fold_snap_timeout_on_the_feeder_is_bounded },
+    { "fold_snap_crop_bands_match_the_raster",
+      sc_fold_snap_crop_bands_match_the_raster },
 };
 
 #define N_SCENARIOS ((int)(sizeof SCENARIOS / sizeof SCENARIOS[0]))

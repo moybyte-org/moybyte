@@ -69,7 +69,18 @@ def test_the_scenarios_cover_the_fold_as_a_whole():
                  "fold_bands_match_the_composite",
                  "fold_rot_bands_match_the_composite",
                  "fold_fence_waits_for_the_feed",
-                 "fold_reset_keeps_the_meter"):
+                 "fold_reset_keeps_the_meter",
+                 # THE SNAPSHOT (2026-09-08): the DMA copy of the live canvas,
+                 # the feeder's wait for it, the VM's fence, the decline to a
+                 # memcpy, the one-shot timeout, and the crop geometry.
+                 "fold_snap_arm_geometry", "fold_snap_lands_by_dma",
+                 "fold_snap_the_feeder_waits",
+                 "fold_snap_declines_to_a_memcpy",
+                 "fold_snap_a_full_queue_is_one_memcpy",
+                 "fold_snap_disarm_fence_and_reset_wait",
+                 "fold_snap_timeout_retires_the_engine",
+                 "fold_snap_timeout_on_the_feeder_is_bounded",
+                 "fold_snap_crop_bands_match_the_raster"):
         assert name in FOLD_SCENARIOS, name
 
 
@@ -78,9 +89,10 @@ def test_the_harness_drives_the_shipped_fold_and_not_a_copy():
     require_harness()
     fold = (ROOT / "native" / "moy_flush" / "moy_fold.c").read_text(
         encoding="utf-8")
-    for symbol in ("moy_fold_arm", "moy_fold_consume", "moy_fold_fence",
+    for symbol in ("moy_fold_arm", "moy_fold_arm_snap", "moy_fold_consume",
+                   "moy_fold_fence", "moy_fold_snap_fence",
                    "moy_fold_composite", "moy_fold_band",
-                   "moy_fold_band_rot"):
+                   "moy_fold_band_rot", "esp_async_memcpy"):
         assert symbol in fold
     harness = ROOT / "tests" / "moy_flush_harness"
     for path in sorted(harness.rglob("*.c")) + sorted(harness.rglob("*.h")):
@@ -102,6 +114,8 @@ def test_both_banded_boards_link_the_shared_fold():
     for src in (axs, lcd):
         assert '#include "moy_fold.h"' in src
         assert "moy_fold_arm(" in src          # the verb refuses geometry here
+        assert "moy_fold_arm_snap(" in src     # ...and the DMA snapshot form
+        assert "moy_fold_snap_fence()" in src  # the cart's next write fences it
         assert "moy_fold_consume()" in src     # the one-shot latch, feeder idle
         assert "moy_fold_end()" in src         # ...released at frame_end
         assert "moy_fold_composite(" in src    # the disarm's deferred composite
@@ -147,11 +161,28 @@ def test_frame_walk_disarms_above_the_game():
 def test_blit_game_fences_before_it_overwrites_the_scratch():
     """The canvas rewrites the flush-private scratch every play frame, and the
     previous frame's bands may still be reading it. The fence is normally two
-    compares in C; being cheap is not the same as being optional."""
+    compares in C; being cheap is not the same as being optional.
+
+    THE SECOND RULE (2026-09-08): the snapshot is a DMA still reading the LIVE
+    canvas after blit_game returns, so the sys canvas must `snap_fence` before
+    the cart's next write -- in `sync_back`, which both boards' present()
+    hooks run before every Player tick, and BEFORE it re-points the draw
+    target. The lever is probed by the snapshot verb's absence, never by a
+    flag a base class could inherit."""
     dc = (DEVICE / "device_canvas.py").read_text(encoding="utf-8")
     body = dc[dc.index("def blit_game"):]
-    assert body.index("fold_fence") < body.index("arm_scale_fold")
-    assert '"fold_supported", False' in body
+    assert body.index("comp.fold_fence()") < body.index("if snap(")
+    assert '"snap_scale_fold", None' in body
+    assert "_snap_live = True" in body
+    sync = dc[dc.index("def sync_back"):dc.index("def _drain_lcopy")]
+    assert sync.index("_snap_live") < sync.index("snap_fence()") \
+        < sync.index("back_buffer()")
+    for path in (GUITION / "modules" / "moy_runtime.py",
+                 TDECK / "modules" / "moy_runtime.py"):
+        src = path.read_text(encoding="utf-8")
+        present = src[src.index("def _present"):]
+        present = present[:present.index("\n\n")]
+        assert "sync_back()" in present, path
 
 
 def test_a_banded_board_without_the_lever_carries_no_fold_attribute():

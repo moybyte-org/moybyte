@@ -740,6 +740,64 @@ static mp_obj_t moy_lcd_fold_fence(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_fold_fence_obj, moy_lcd_fold_fence);
 
+// arm_fold_snap(live, live_off, scratch, vw, vh, sx, sstride, ox, oy, scale)
+// -> True when the snapshot is a DMA in flight (fence with fold_snap_fence()
+// before `live` is written again -- DeviceCanvas.sync_back does), False when
+// it landed here as a memcpy. The rectangle is vw x vh at column sx of the
+// rows starting live_off bytes into `live`, sstride pixels wide; the copy is
+// that whole row range into `scratch`, which becomes the fold's source.
+// Geometry the synthesis cannot express is REFUSED (ValueError) with nothing
+// copied or latched, and blit_game composites itself. moy_fold.h has the why.
+static mp_obj_t moy_lcd_arm_fold_snap(size_t n_args, const mp_obj_t *a) {
+    (void)n_args;
+    moy_lcd_require();
+    mp_buffer_info_t live, scratch;
+    mp_get_buffer_raise(a[0], &live, MP_BUFFER_READ);
+    mp_int_t live_off = mp_obj_get_int(a[1]);
+    mp_get_buffer_raise(a[2], &scratch, MP_BUFFER_WRITE);
+    bool async_copy = false;
+    if (live_off < 0
+            || !moy_fold_arm_snap((const uint8_t *)live.buf, live.len,
+                                  (size_t)live_off, (uint8_t *)scratch.buf,
+                                  scratch.len,
+                                  mp_obj_get_int(a[3]), mp_obj_get_int(a[4]),
+                                  mp_obj_get_int(a[5]), mp_obj_get_int(a[6]),
+                                  mp_obj_get_int(a[7]), mp_obj_get_int(a[8]),
+                                  mp_obj_get_int(a[9]), MOY_LCD_W, MOY_LCD_H,
+                                  &async_copy)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("fold geometry"));
+    }
+    return async_copy ? mp_const_true : mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(moy_lcd_arm_fold_snap_obj, 10, 10,
+                                           moy_lcd_arm_fold_snap);
+
+// fold_snap_fence() -- block until the snapshot in flight has finished reading
+// the live canvas: the fence the sys canvas takes before the cart's next
+// write. One compare when nothing is in flight, which is every frame once the
+// copy has landed -- and it lands before the loop head is over.
+static mp_obj_t moy_lcd_fold_snap_fence(void) {
+    moy_fold_snap_fence();
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_fold_snap_fence_obj, moy_lcd_fold_snap_fence);
+
+// snap_stats() -> (snaps, snaps_sync, timeouts, wait_us): DMA snapshots,
+// memcpy snapshots (the engine declined: alignment, size, a refusal), copies
+// that never landed (the engine is then retired for the session), and what
+// the last VM-side snap fence waited. The PUMP line prints them as
+// snap=a/b snapto= snapwait=; `snaps` climbing 1:1 with fold= is the proof.
+static mp_obj_t moy_lcd_snap_stats(void) {
+    mp_obj_t t[4] = {
+        mp_obj_new_int_from_uint(moy_fold.snaps),
+        mp_obj_new_int_from_uint(moy_fold.snaps_sync),
+        mp_obj_new_int_from_uint(moy_fold.snap_timeouts),
+        mp_obj_new_int_from_uint(moy_fold.snap_wait_us),
+    };
+    return mp_obj_new_tuple(4, t);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(moy_lcd_snap_stats_obj, moy_lcd_snap_stats);
+
 // disarm_fold(back_fb) -- an overlay is about to paint the root: perform the
 // SKIPPED composite into framebuffer `back_fb` so the overlay lands on a
 // current picture, and clear the arm. The frame then flushes as a root copy.
@@ -925,6 +983,9 @@ static const mp_rom_map_elem_t moy_lcd_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_disarm_fold), MP_ROM_PTR(&moy_lcd_disarm_fold_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_stats), MP_ROM_PTR(&moy_lcd_fold_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_fold_test),  MP_ROM_PTR(&moy_lcd_fold_test_obj) },
+    { MP_ROM_QSTR(MP_QSTR_arm_fold_snap), MP_ROM_PTR(&moy_lcd_arm_fold_snap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_fold_snap_fence), MP_ROM_PTR(&moy_lcd_fold_snap_fence_obj) },
+    { MP_ROM_QSTR(MP_QSTR_snap_stats), MP_ROM_PTR(&moy_lcd_snap_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_pending),    MP_ROM_PTR(&moy_lcd_pending_obj) },
     { MP_ROM_QSTR(MP_QSTR_backlight),  MP_ROM_PTR(&moy_lcd_backlight_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_madctl), MP_ROM_PTR(&moy_lcd_set_madctl_obj) },

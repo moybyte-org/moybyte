@@ -28,6 +28,9 @@ THE GAME FOLD is `banded_panel.FoldingCompositor`, shared with the T-Deck since
   bezels around the game never change, and this panel's GRAM keeps them, so a
   steady play frame arms CASET/RASET to the game rect and ships that alone).
   `fold_stats` therefore has a fourth field here that the T-Deck's does not.
+  The snapshot the fold reads is the GDMA engine's (`snap_scale_fold`,
+  2026-09-08): on THIS board it matters most, because the game canvas is a
+  raster of its own and the copy was 5 ms of every native play frame.
 
 WHAT IT DOES NOT HAVE: the T-Deck's `LAYER_COPY_ASYNC` lever (unmeasured here
   -- a recorded A/B, not a default; device_canvas keeps its own False default

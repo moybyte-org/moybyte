@@ -113,6 +113,21 @@ bool h_tuple_is_unsigned(const struct h_mp_obj *t, int i);
 void h_harness_init(const char *scenario);
 int h_task_creates(void);
 
+// -- the snapshot DMA engine (stubs/esp_async_memcpy.h) ---------------------
+//
+// One engine, copies landing in submission order after a fixed cost plus a
+// per-KB rate (defaults sized to the Guition's measured 3.4 ms for a 153,600 B
+// game frame). The bytes land AT completion, which is what lets a scenario
+// prove a reader waited.
+
+void h_dma_fail_install(bool on);   // esp_async_memcpy_install fails
+void h_dma_refuse(int err);         // every submit returns this (0 = none)
+void h_dma_stall(bool on);          // submits are taken but never complete
+void h_dma_set_rate(int64_t fixed_us, int64_t us_per_kb);
+int h_dma_installs(void);
+int h_dma_submits(void);
+int64_t h_dma_lands_at(void);       // when the last submitted copy completes
+
 // -- failure -----------------------------------------------------------------
 
 extern const char *h_scenario;

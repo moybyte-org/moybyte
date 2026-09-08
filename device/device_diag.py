@@ -456,12 +456,23 @@ def _diag_pump(diag, comp):
         # here now means something disarms -- read it against `fold_supported`,
         # which is what a board WITHOUT the lever leaves absent.
         fold = getattr(comp, "fold_count", 0)
+        # The snapshot meters (moy_fold.h): snap=DMA/memcpy snapshots since
+        # boot, snapto= copies that never landed (the engine retires itself
+        # on the first), snapwait= ms the last snap fence waited -- ~0 is the
+        # design, and a number here means the copy outlived the loop head.
+        # Absent on a board whose compositor has no snapshot, never 0.
+        snap = getattr(comp, "snap_stats", None)
+        tail = ""
+        if snap is not None:
+            ss = snap()
+            tail = " snap=%d/%d snapto=%d snapwait=%.2f" % (
+                ss[0], ss[1], ss[2], ss[3] / 1000.0)
         diag.log("PUMP",
                  "pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "
-                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"
+                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d%s"
                  % (st[0] / 1000.0, st[1] / 1000.0, st[2],
                     st[3] / 1000.0, st[5] / 1000.0, st[4], fold,
-                    st[6], st[7], st[8]))
+                    st[6], st[7], st[8], tail))
     except Exception:
         pass
 

@@ -483,6 +483,12 @@ class DeviceCanvas:
         # made layers/view/background core; see blit_game): one pooled
         # _LayerComp reused across frames, allocated on first cropped composite.
         self._view_scratch = None
+        # The fold's snapshot scratch (moy_fold.h): the game canvas's row range
+        # at the canvas stride, so ONE shape serves a native frame and a view
+        # crop. `_snap_live` is a DMA still reading the game canvas; sync_back
+        # fences it before the cart's next write.
+        self._snap_scratch = None
+        self._snap_live = False
         # DMA double-buffer (#40, DEFAULT ON -- moy_compositor.DOUBLE_BUFFER, device-
         # confirmed stable): the compositor's BACK buffer ping-pongs between two
         # physical buffers each flush, so this canvas must re-point its draw target
@@ -684,7 +690,18 @@ class DeviceCanvas:
         cart's _update, so a predicted draw_layer background restore started here
         runs on the GDMA engine WHILE the kid's Python logic executes -- by the
         time _draw calls draw_layer, the ~7ms copy is already done (copy_wait
-        returns immediately). Prediction armed by blit_window_from (below)."""
+        returns immediately). Prediction armed by blit_window_from (below).
+
+        ALSO THE SNAPSHOT FENCE (moy_fold.h): a folded frame's copy of the game
+        canvas rides the GDMA engine, and this canvas -- the one whose
+        blit_game armed it -- is re-pointed here before every Player tick on
+        both banded boards (their present() hooks), so this is where the
+        cart's next write of the LIVE canvas is fenced. One attribute test on
+        every other frame; the C is one compare once the copy has landed,
+        which it has by the end of the loop head."""
+        if self._snap_live:
+            self._snap_live = False
+            self._comp.snap_fence()
         buf = self._comp.back_buffer()
         if buf is not self._buf:
             self._buf = buf
@@ -1376,29 +1393,44 @@ class DeviceCanvas:
         rw = vw * scale
         rh = vh * scale
         # #190 flush-bounce scale fold: on the SRAM-bounce tier, skip this
-        # whole root-fb composite -- snapshot the (cropped) game frame into the
-        # flush-private scratch and let the bounce pump synthesize each band
-        # from it (black + one dest-clipped blit565_scale). Anything that draws
-        # on the root AFTER us (toast/notice/cursor) disarms, and the comp then
+        # whole root-fb composite -- snapshot the game frame's row range into
+        # the flush-private scratch and let the bounce pump synthesize each
+        # band from it (black + the rect at scale). Anything that draws on the
+        # root AFTER us (toast/notice/cursor) disarms, and the comp then
         # performs this composite itself -- so the fold is presentation-
         # invisible, purely a data-path change. The fence blocks (normally a
         # no-op) until the PREVIOUS flush has read the scratch we're about to
         # overwrite -- its bands feed early in the frame we just spent.
+        #
+        # THE SNAPSHOT IS THE DMA ENGINE'S (moy_fold.h, 2026-09-08): the copy
+        # was the whole of `cmp` -- 5.1 ms a frame for a native 320x240 cart
+        # on the Guition, 1.1 ms for a p8 canvas on either S3 -- and started
+        # here it lands before the cart's next tick; `sync_back` takes the
+        # fence. The C memcpys when the engine declines, and REFUSES geometry
+        # the synthesis cannot express, in which case the composite below
+        # runs from the live canvas exactly as it did before the fold.
         comp = self._comp
-        fold = getattr(comp, "fold_supported", False)
+        snap = getattr(comp, "snap_scale_fold", None)
         src_buf = gc._buf
-        if fold:
+        if snap is not None:
             comp.fold_fence()
-        if fold or sx or sy or vw != gw or vh != gh:
+            scr = self._snap_scratch
+            if scr is None or scr.size() != (gw, vh):
+                scr = self._snap_scratch = _LayerComp(gw, vh, g)
+            try:
+                if snap(src_buf, sy * gw * 2, scr.framebuffer(), vw, vh, sx, gw,
+                        ox, oy, scale):
+                    self._snap_live = True
+                return
+            except ValueError:
+                pass
+        if sx or sy or vw != gw or vh != gh:
             scr = self._view_scratch
             if scr is None or scr.size() != (vw, vh):
                 scr = self._view_scratch = _LayerComp(vw, vh, g)
             g.blit565(scr.framebuffer(), vw, vh, -sx, -sy,
                       src_buf, gw, gh, -1)
             src_buf = scr.framebuffer()
-        if fold:
-            comp.arm_scale_fold(src_buf, vw, vh, ox, oy, scale)
-            return
         # Bezel: only the four strips outside the viewport (raw 565 black).
         # Skipped on a WINDOWED tier -- see letterbox_composite above; the
         # composite below writes exactly the game rect either way, so this is

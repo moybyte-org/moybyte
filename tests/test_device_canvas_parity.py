@@ -125,6 +125,7 @@ class _FakeGfx:
     circb = staticmethod(gfx_binding.circb)
     line = staticmethod(gfx_binding.line)
     shape = staticmethod(gfx_binding.shape)
+    blit565_scale = staticmethod(gfx_binding.blit565_scale)
 
     @staticmethod
     def fill(buf, npix, color):
@@ -1870,3 +1871,102 @@ def test_tline_parity():
             c.clip()
             c.tline(tm, sh, 33, 33, 33, 33, 0, 0, F, F)  # single pixel
         _assert_same(host, dev, "tline gfx=%s" % gfx)
+
+
+# -- the game fold's snapshot (native/moy_flush/moy_fold.h) --------------------
+
+
+class _FoldingFakeComp(_FakeComp):
+    """`_FakeComp` plus the fold verbs `FoldingCompositor` exports, logging
+    exactly what `blit_game` hands the C -- the row-range arithmetic is the
+    part of the snapshot that lives in Python, so it is the part pinned here."""
+
+    def __init__(self, w, h):
+        _FakeComp.__init__(self, w, h)
+        self.calls = []
+        self.snap_async = True
+        self.refuse = False
+
+    def back_buffer(self):
+        return self._buf
+
+    def fold_fence(self):
+        self.calls.append(("fold_fence",))
+
+    def snap_scale_fold(self, live, live_off, scratch, vw, vh, sx, sstride,
+                        ox, oy, scale):
+        if self.refuse:
+            raise ValueError("fold geometry")
+        self.calls.append(("snap", live_off, len(scratch), vw, vh, sx, sstride,
+                           ox, oy, scale))
+        return self.snap_async
+
+
+    def snap_fence(self):
+        self.calls.append(("snap_fence",))
+
+
+def test_blit_game_snapshots_the_row_range_and_sync_back_fences_it():
+    """The snapshot is the game canvas's ROW RANGE at the canvas stride (one
+    contiguous run, the only shape a DMA takes), with the rectangle's column
+    and stride passed so the C reads a view out of it; the scratch is shaped
+    to that range. A DMA in flight is fenced by the NEXT sync_back, once; a
+    synchronous snapshot leaves nothing to fence."""
+    m = _load_device_canvas()
+    comp = _FoldingFakeComp(480, 320)
+    sc = m.DeviceCanvas(comp)
+    gc = m.DeviceCanvas(_FakeComp(320, 240))
+    sc.blit_game(gc, 80, 40, 1)
+    assert comp.calls == [("fold_fence",),
+                          ("snap", 0, 320 * 240 * 2, 320, 240, 0, 320,
+                           80, 40, 1)]
+    assert sc._snap_live is True
+    sc.sync_back()
+    assert comp.calls[-1] == ("snap_fence",)
+    assert sc._snap_live is False
+    sc.sync_back()
+    assert comp.calls.count(("snap_fence",)) == 1
+    # A view crop: the rows from sy at the CANVAS stride, the rect at sx
+    # inside them -- celeste's 128x120 of a 128x128, then a narrow one.
+    gc2 = m.DeviceCanvas(_FakeComp(128, 128))
+    comp.calls.clear()
+    sc.blit_game(gc2, 112, 40, 2, src=(0, 4, 128, 120))
+    assert comp.calls == [("fold_fence",),
+                          ("snap", 4 * 128 * 2, 128 * 120 * 2, 128, 120, 0, 128,
+                           112, 40, 2)]
+    comp.calls.clear()
+    sc.blit_game(gc2, 64, 20, 2, src=(16, 14, 96, 100))
+    assert comp.calls[1] == ("snap", 14 * 128 * 2, 128 * 100 * 2, 96, 100,
+                             16, 128, 64, 20, 2)
+    # A synchronous snapshot (the engine declined; the C memcpy'd) has
+    # nothing in flight to fence. (The DMA arm above is still owed its fence
+    # until the next sync_back -- the flag is not per call, it is a debt.)
+    assert sc._snap_live is True
+    sc.sync_back()
+    comp.snap_async = False
+    comp.calls.clear()
+    sc.blit_game(gc, 80, 40, 1)
+    assert sc._snap_live is False
+    sc.sync_back()
+    assert ("snap_fence",) not in comp.calls
+
+
+def test_blit_game_composites_itself_when_the_geometry_is_refused():
+    """A refusal must be invisible one level up: the pixels are those of a
+    system canvas whose compositor has no lever at all, composited from the
+    LIVE canvas through the view crop, bezels included."""
+    m = _load_device_canvas()
+    gc = m.DeviceCanvas(_FakeComp(128, 128))
+    gc.cls(3)
+    gc.rect(10, 10, 40, 30, 8)
+    gc.rect(60, 70, 50, 50, 12)
+    plain = m.DeviceCanvas(_FakeComp(320, 240))
+    plain.blit_game(gc, 32, 0, 2, src=(0, 4, 128, 120))
+    comp = _FoldingFakeComp(320, 240)
+    comp.refuse = True
+    sc = m.DeviceCanvas(comp)
+    sc.blit_game(gc, 32, 0, 2, src=(0, 4, 128, 120))
+    assert bytes(sc._buf) == bytes(plain._buf)
+    assert bytes(sc._buf) != bytes(320 * 240 * 2)
+    assert sc._snap_live is False
+    assert comp.calls == [("fold_fence",)]

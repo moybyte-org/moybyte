@@ -29,7 +29,8 @@ THE GAME FOLD IS HERE, and no moy_gfx kernel or Python-visible bounce slot is
   built straight from the game snapshot, black outside the viewport, the game
   rows at integer scale inside. `fold_supported` is True here,
   `DeviceCanvas.blit_game` arms instead of compositing, and the PUMP line's
-  `fold=` climbs on every quiet play frame.
+  `fold=` climbs on every quiet play frame. The snapshot the arm reads is the
+  GDMA engine's (`snap_scale_fold`, 2026-09-08) and `snap=` climbs with it.
 
   What is the Guition's alone is THE GAME WINDOW: shipping the game rect alone
   needs a panel whose GRAM keeps the bezels and a per-frame window arm, and this

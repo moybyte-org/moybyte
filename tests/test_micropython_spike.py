@@ -2938,8 +2938,12 @@ def test_micropython_offline_diag_wiring():
     compositor = _panel_base_src()   # shared body since 2026-08-21 (#206 item 1)
     assert "def bounce_stats(self):" in compositor
     assert ('"pump=%.2f idle=%.2f gaps=%d feed=%.2f blocked=%.2f "\n'
-            '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d"'
+            '                 "bands=%d fold=%d timeouts=%d errs=%d stopfail=%d%s"'
             in device_diag)
+    # ...and the snapshot meters (moy_fold.h, 2026-09-08) ride the tail ONLY
+    # where the compositor has them -- absence, never 0.
+    assert '" snap=%d/%d snapto=%d snapwait=%.2f"' in device_diag
+    assert 'getattr(comp, "snap_stats", None)' in device_diag
     assert "_diag_pump(diag, comp)" in runtime
     # fold= is the #190 liveness proof, and BOTH banded boards carry it
     # (native/moy_flush/moy_fold). Behaviour is pinned by
